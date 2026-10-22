@@ -119,7 +119,7 @@ describe('Swagger asset options', () => {
       app: fresh,
       services: fresh.services,
       router: fresh.router,
-      lifecycle: { onInit: () => {} },
+      lifecycle: { onInit: () => {}, onBootstrap: () => {} },
     };
     const failure = await Promise.resolve(plugin.register(ctx as never)).catch(
       (error: unknown) => error,

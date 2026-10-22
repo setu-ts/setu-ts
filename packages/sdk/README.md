@@ -466,6 +466,13 @@ publish or format it has nowhere to go.
 
 ### Codegen diagnostics
 
+Declared OpenAPI ids name generated methods just like derived ones: `listUsers` produces
+`listUsers`. Distinct ids may sanitize to one method name: declared `getUsers` beside undeclared
+`GET /users` (derived `get-users`) is valid OpenAPI, but code generation refuses it with
+`Duplicate operation name`. Choose ids that yield distinct TypeScript names. Changing an id also
+changes its generated argument, error and inline-schema type names; regenerate clients and update
+their callers.
+
 `generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
 — rather than emitting a client that misbehaves or does not compile:
 

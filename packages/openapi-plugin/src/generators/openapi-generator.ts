@@ -9,19 +9,11 @@ import { responseMetadataOf, securityMetadataOf, validationMetadataOf } from '@s
 import type { OpenApiSchemaObject } from '../transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../transformers/zod-to-openapi.ts';
 import type { SchemaIo } from '../transformers/zod-to-openapi.ts';
-
-/**
- * Plugin names whose routes are operational rather than part of the API being
- * documented, excluded by default through
- * {@linkcode OpenApiGeneratorOptions.excludeOwners}.
- *
- * Owners rather than paths, because every one of these endpoints is
- * CONFIGURABLE — `HealthPlugin({ endpoints })` and `MetricsPlugin({ endpoint })`
- * both accept a path — so a static path list silently stops working the moment
- * an application renames one. `RouteInfo.owner` (M68) reports the plugin whose
- * `register()` created the route and cannot drift.
- */
-const DEFAULT_EXCLUDED_OWNERS: readonly string[] = ['health-plugin', 'metrics-plugin'];
+import {
+  claimDeclaredOperationIds,
+  DEFAULT_EXCLUDED_OWNERS,
+  isRouteExcluded,
+} from './declared-operation-ids.ts';
 
 /** Prefix of a component reference in the generated document. */
 const COMPONENT_REF_PREFIX = '#/components/schemas/';
@@ -136,6 +128,11 @@ export interface OpenApiOperation {
   readonly operationId: string;
   /** Operation summary. */
   readonly summary?: string;
+  /**
+   * Longer operation description, when declared on the route.
+   * @since 0.10.0
+   */
+  readonly description?: string;
   /** Operation tags. */
   readonly tags?: readonly string[];
   /** Path/query parameters. */
@@ -368,7 +365,7 @@ export class OpenApiGenerator {
   readonly #excluded: ReadonlySet<string>;
   /** Plugin owners whose routes never reach the document. */
   readonly #excludedOwners: ReadonlySet<string>;
-  /** Derived operationIds already claimed in this `generate` call. */
+  /** Declared and derived operationIds already claimed in this `generate` call. */
   readonly #operationIds = new Set<string>();
   /**
    * Component names, per schema identity AND per side.
@@ -581,6 +578,7 @@ export class OpenApiGenerator {
    *
    * @param routes - Array of route information
    * @returns The complete OpenAPI 3.1 document
+   * @throws {OperationIdError} If an included declared id is blank or duplicated
    */
   generate(routes: readonly RouteInfo[]): OpenApiDocument {
     // Pre-registered schemas from `addSchema` must persist, so `#resolveSchema`
@@ -627,6 +625,11 @@ export class OpenApiGenerator {
         this.#createOperation(route, this.#convertPath(route.path));
       }
       this.#pass = 'emit';
+
+      // Declared ids win even when their routes follow a colliding derived route.
+      for (const id of claimDeclaredOperationIds(routes, (route) => this.#isExcluded(route))) {
+        this.#operationIds.add(id);
+      }
 
       const paths: Record<
         string,
@@ -712,8 +715,8 @@ export class OpenApiGenerator {
    * @returns The operation object
    */
   #createOperation(route: RouteInfo, openApiPath: string): OpenApiOperation {
-    // Generate operationId from method and path
-    const operationId = this.#generateOperationId(route.method, openApiPath);
+    const operationId =
+      route.definition.schema?.operationId ?? this.#generateOperationId(route.method, openApiPath);
     // Diagnostics reported while THIS operation's schemas are resolved are
     // attached to it; reset per operation (and per pass — the emit pass is
     // the only one that records).
@@ -762,6 +765,7 @@ export class OpenApiGenerator {
     return {
       operationId,
       ...(schema?.summary ? { summary: schema.summary } : {}),
+      ...(schema?.description !== undefined ? { description: schema.description } : {}),
       ...(schema?.tags && schema.tags.length > 0 ? { tags: schema.tags } : {}),
       ...(parameters.length > 0 ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
@@ -790,8 +794,7 @@ export class OpenApiGenerator {
    * @returns `true` when the route contributes no operation
    */
   #isExcluded(route: RouteInfo): boolean {
-    if (this.#excluded.has(route.path)) return true;
-    return route.owner !== undefined && this.#excludedOwners.has(route.owner);
+    return isRouteExcluded(route, this.#excluded, this.#excludedOwners);
   }
 
   /**

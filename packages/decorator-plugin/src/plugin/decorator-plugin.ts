@@ -604,6 +604,8 @@ function buildRouteSchema(
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
   const summary = route.openapi?.summary;
+  const operationId = route.openapi?.operationId;
+  const description = route.openapi?.description;
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
@@ -615,7 +617,15 @@ function buildRouteSchema(
     route.isPublic === true &&
     !requiresPolicyPrincipal &&
     (!enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined));
-  if (!hasSchema && !hasTags && summary === undefined && response === undefined && !isPublic) {
+  if (
+    !hasSchema &&
+    !hasTags &&
+    summary === undefined &&
+    operationId === undefined &&
+    description === undefined &&
+    response === undefined &&
+    !isPublic
+  ) {
     return undefined;
   }
   return {
@@ -624,6 +634,8 @@ function buildRouteSchema(
     ...(schema?.params !== undefined ? { params: schema.params } : {}),
     ...(hasTags ? { tags } : {}),
     ...(summary !== undefined ? { summary } : {}),
+    ...(operationId !== undefined ? { operationId } : {}),
+    ...(description !== undefined ? { description } : {}),
     ...(response !== undefined ? { response } : {}),
     ...(isPublic ? { security: [] } : {}),
   };

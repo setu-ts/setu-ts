@@ -65,6 +65,27 @@ function genDoc(schema: SdkOpenApiSchema): SdkOpenApiDocument {
   });
 }
 
+describe('declared OpenAPI operation ids', () => {
+  it('names the generated client method from a declared id', () => {
+    const source = generateOpenApiClient(makeDoc({ '/users': { get: makeOp('listUsers') } }));
+    expect(source).toContain('listUsers(');
+    expect(source).not.toContain('getUsers(');
+  });
+
+  it('refuses declared getUsers beside derived get-users after sanitizing', () => {
+    const generate = (): string =>
+      generateOpenApiClient(
+        makeDoc({
+          '/declared': { get: makeOp('getUsers') },
+          '/users': { get: makeOp('get-users') },
+        }),
+      );
+    expect(generate).toThrow(OpenApiCodegenError);
+    expect(generate).toThrow("Duplicate operation name 'getUsers'");
+    expect(generate).toThrow('getUsers (get /declared) and get-users (get /users)');
+  });
+});
+
 describe('per-operation request options and generated local names', () => {
   it('appends options to every interface and factory signature and forwards only defined fields', () => {
     const out = generateOpenApiClient(usersDocument);

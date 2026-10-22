@@ -145,7 +145,11 @@ describe('DecoratorPlugin registration (integration)', () => {
     class C {
       @Post('/')
       @ValidateBody(bodySchema)
-      @ApiOperation({ summary: 'Create' })
+      @ApiOperation({
+        summary: 'Create',
+        operationId: 'createUser',
+        description: 'Creates a user.',
+      })
       @ApiResponse({ status: 201, description: 'Created' })
       @Params(Body())
       create(body: unknown) {
@@ -158,7 +162,30 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(schema?.body).toBe(bodySchema);
     expect(schema?.tags).toEqual(['users']);
     expect(schema?.summary).toBe('Create');
+    expect(schema?.operationId).toBe('createUser');
+    expect(schema?.description).toBe('Creates a user.');
     expect(schema?.response?.[201]).toMatchObject({ description: 'Created' });
+  });
+
+  it('carries schema for operation-id-only and description-only decorators', async () => {
+    @Controller('/operations')
+    class Operations {
+      @Get('/id')
+      @ApiOperation({ operationId: 'listOperations' })
+      list() {
+        return [];
+      }
+
+      @Get('/description')
+      @ApiOperation({ description: 'Only a description.' })
+      describe() {
+        return [];
+      }
+    }
+    const { ctx, routes } = createFakeContext();
+    await DecoratorPlugin({ controllers: [Operations] }).register(ctx);
+    expect(asRouteDef(routes[0].route).schema).toEqual({ operationId: 'listOperations' });
+    expect(asRouteDef(routes[1].route).schema).toEqual({ description: 'Only a description.' });
   });
 
   it('registers services without a container by instantiation', async () => {

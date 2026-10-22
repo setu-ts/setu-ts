@@ -12,6 +12,34 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Declared `@ApiOperation` ids and descriptions (0.10.0)
+
+`@ApiOperation({ operationId, description })` now reaches the document through optional
+`RouteSchema.operationId` and `RouteSchema.description`; programmatic routes can declare both too.
+Previously ignored ids are now used verbatim: `@ApiOperation({ operationId: 'listUsers' })` on
+`GET /users` changes `get-users` to `listUsers`. Regenerate SDK clients and update their callers:
+the method and every id-derived name can change — `<Op>Args`, `<Op>Error`, `is<Op>Error`,
+`<Op>Error<status>Body`, `<Op>Body`, `<Op>Response<status>` and `<Op><Param>Param`. Hoisted
+components follow the id too (`GetUsersBody` → `ListUsersBody`, only where a schema is hoisted), as
+does `x-setu-unrepresentable[].at`; update references to those names.
+
+Declared ids are reserved before derived ones. In a mixed document, an undeclared route's
+`get-users` becomes `get-users-2` when another route declares `get-users`, even if the undeclared
+route was registered first. Check those client names too. Documents without declared ids or
+descriptions remain byte-identical.
+
+Empty or whitespace-only ids and duplicate declared ids among included routes now fail `app.start()`
+with `OperationIdError` from `@setu-ts/openapi-plugin`, carrying `reason: 'blank' | 'duplicate'` and
+a message naming the id and affected `METHOD path` routes. Direct `OpenApiGenerator.generate()`
+calls throw the same error. Remove an id to keep deriving it, or choose a unique nonblank id.
+Excluded paths and owners neither claim nor collide. Startup scans routes without building the
+document; routes registered after bootstrap are checked when the document is first built, so invalid
+late declarations cause a request-time `500`.
+
+Check SDK names as well: declared `getUsers` beside undeclared `GET /users` (derived `get-users`) is
+valid OpenAPI, but `generateOpenApiClient` refuses it with `Duplicate operation name` because both
+sanitize to `getUsers`. Choose ids with distinct sanitized TypeScript names.
+
 ### Environment secrets fall back to config (V9-77, 0.10.0, `@setu-ts/secrets-plugin`)
 
 When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in

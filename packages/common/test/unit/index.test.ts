@@ -174,6 +174,9 @@ describe('@setu-ts/common barrel', () => {
     // `security` is optional on RouteSchema, so an existing schema still
     // type-checks without it…
     const _untouched: RouteSchema = { tags: ['Todos'], summary: 'List todos' };
+    const declared: RouteSchema = { operationId: 'listTodos', description: 'Lists every todo.' };
+    expect(declared.operationId).toBe('listTodos');
+    expect(declared.description).toBe('Lists every todo.');
     // …and an empty array is expressible, which is how a route documents
     // itself as public against a document-level requirement.
     const _public: RouteSchema = { security: [] };

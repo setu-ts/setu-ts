@@ -6618,6 +6618,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `options.configFallback` defaults to true, is validated at construction for the env provider, and
   can disable the fallback. Unit and real-kernel ConfigPlugin tests cover ordering, schema
   stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR #485).
+- **`@ApiOperation` operation ids** (`common` + `decorator-plugin` + `openapi-plugin` — declared
+  OpenAPI metadata reaches the document, 0.10.0): optional `RouteSchema.operationId`/`description`,
+  forwarded from `@ApiOperation`; a declared id is used verbatim and reserved before derived ids by
+  one internal helper shared with an `onBootstrap` route scan, and a blank or duplicate declared id
+  fails `start()` with the new `OperationIdError` — complete (PR pending).
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5

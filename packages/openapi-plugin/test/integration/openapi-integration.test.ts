@@ -8,6 +8,8 @@ import { z } from 'zod-v3';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
+import { OperationIdError } from '../../src/index.ts';
+import type { OpenApiDocument } from '../../src/index.ts';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
 import {
@@ -30,6 +32,196 @@ import {
 } from '@setu-ts/decorator-plugin';
 
 describe('OpenAPI Integration', () => {
+  it('serves declared decorated and programmatic ids and descriptions, including a post-start route', async () => {
+    @Controller('/declared')
+    class DeclaredController {
+      @Get('/decorated')
+      @ApiOperation({ operationId: 'listDecorated', description: 'Lists decorated entries.' })
+      list() {
+        return [];
+      }
+
+      @Get('/id-only')
+      @ApiOperation({ operationId: 'listIds' })
+      ids() {
+        return [];
+      }
+    }
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DecoratorPlugin({ controllers: [DeclaredController] }),
+        OpenApiPlugin({ swagger: false }),
+      ],
+    });
+    app.router.get('/programmatic', {
+      handler: (ctx) => ctx.response.json({}),
+      schema: {
+        operationId: 'listProgrammatic',
+        description: 'Lists programmatic entries.',
+      },
+    });
+    await app.start();
+    try {
+      app.router.get('/late', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: {
+          operationId: 'listLate',
+          description: 'Registered after start.',
+        },
+      });
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      expect(response.statusCode).toBe(200);
+      const spec = response.json() as OpenApiDocument;
+      expect(spec.paths['/declared/decorated']?.get).toEqual({
+        operationId: 'listDecorated',
+        description: 'Lists decorated entries.',
+        responses: { 200: { description: 'Successful response' } },
+      });
+      expect(spec.paths['/declared/id-only']?.get?.operationId).toBe('listIds');
+      expect(spec.paths['/programmatic']?.get?.operationId).toBe('listProgrammatic');
+      expect(spec.paths['/programmatic']?.get?.description).toBe('Lists programmatic entries.');
+      expect(spec.paths['/late']?.get?.operationId).toBe('listLate');
+      expect(spec.paths['/late']?.get?.description).toBe('Registered after start.');
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it.each([
+    { operationId: 'duplicate', reason: 'duplicate' },
+    { operationId: '\t ', reason: 'blank' },
+  ])(
+    'rejects start for $reason declared ids with OperationIdError',
+    async ({ operationId, reason }) => {
+      @Controller('/duplicate')
+      class DuplicateController {
+        @Get('/')
+        @ApiOperation({ operationId })
+        list() {
+          return [];
+        }
+      }
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          DecoratorPlugin({ controllers: [DuplicateController] }),
+          OpenApiPlugin({ swagger: false }),
+        ],
+      });
+      app.router.post('/other', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: { operationId: 'duplicate' },
+      });
+      try {
+        const startup = app.start();
+        await expect(startup).rejects.toBeInstanceOf(OperationIdError);
+        await expect(startup).rejects.toMatchObject({ name: 'OperationIdError', reason });
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it.each([
+    { excludeOwners: undefined, owner: 'health-plugin' },
+    { excludeOwners: undefined, owner: 'metrics-plugin' },
+    { excludeOwners: ['custom-ops'], owner: 'custom-ops' },
+  ])(
+    'ignores excluded declarations at startup and build for owner $owner',
+    async ({ excludeOwners, owner }) => {
+      const owned: IPlugin = {
+        name: owner,
+        version: '1.0.0',
+        register(ctx) {
+          ctx.router.get('/owned', {
+            handler: (ctx) => ctx.response.json({}),
+            schema: { operationId: 'get-users' },
+          });
+          ctx.router.get('/owned-blank', {
+            handler: (ctx) => ctx.response.json({}),
+            schema: { operationId: ' ' },
+          });
+        },
+      };
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          owned,
+          OpenApiPlugin({
+            swagger: false,
+            exclude: ['/hidden', '/hidden-blank'],
+            ...(excludeOwners !== undefined ? { excludeOwners } : {}),
+          }),
+        ],
+      });
+      app.router.get('/users', { handler: (ctx) => ctx.response.json({}) });
+      app.router.get('/declared', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: { operationId: 'listUsers' },
+      });
+      app.router.get('/hidden', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: { operationId: 'listUsers' },
+      });
+      app.router.get('/hidden-blank', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: { operationId: '' },
+      });
+      await app.start();
+      try {
+        const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+        expect(response.statusCode).toBe(200);
+        const spec = response.json() as OpenApiDocument;
+        expect(Object.keys(spec.paths)).toEqual(['/users', '/declared']);
+        expect(spec.paths['/users']?.get?.operationId).toBe('get-users');
+        expect(spec.paths['/declared']?.get?.operationId).toBe('listUsers');
+      } finally {
+        await app.stop();
+      }
+    },
+  );
+
+  it('honors empty owner exclusions when validating declared ids', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'health-plugin',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.router.get('/custom-health', {
+              handler: (ctx) => ctx.response.json({}),
+              schema: { operationId: '' },
+            });
+          },
+        },
+        OpenApiPlugin({ swagger: false, excludeOwners: [] }),
+      ],
+    });
+    await expect(app.start()).rejects.toMatchObject({ name: 'OperationIdError', reason: 'blank' });
+  });
+
+  it('refuses invalid declarations registered after bootstrap on the first document request', async () => {
+    const app = createApplication({
+      plugins: [RuntimePlugin(), OpenApiPlugin({ swagger: false })],
+    });
+    app.router.get('/before', {
+      handler: (ctx) => ctx.response.json({}),
+      schema: { operationId: 'same' },
+    });
+    await app.start();
+    try {
+      app.router.get('/after', {
+        handler: (ctx) => ctx.response.json({}),
+        schema: { operationId: 'same' },
+      });
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/openapi.json' });
+      expect(response.statusCode).toBe(500);
+    } finally {
+      await app.stop();
+    }
+  });
   it('should generate OpenAPI spec for programmatic routes', async () => {
     const app = createApplication({
       plugins: [
