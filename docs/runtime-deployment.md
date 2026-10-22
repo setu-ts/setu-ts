@@ -104,8 +104,9 @@ app.router.get('/events', async (ctx) => {
 
 ### Prerequisites
 
-- Node.js 22.23.4+ or 24.22.1+ (`Promise.withResolvers` is used in five packages and shipped in Node
-  22; those releases carry the Node.js security fixes of 2026-10-20; CI verifies on Node 24)
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (`Promise.withResolvers` is used in five packages and
+  shipped in Node 22; those releases carry the Node.js security fixes of 2026-10-21; CI verifies on
+  Node 24)
 - npm, pnpm, or yarn
 
 ### Setup
@@ -177,7 +178,7 @@ console.log('Server running on http://localhost:3000');
 #### Docker
 
 ```dockerfile
-# Node 22.23.4+ or 24.22.1+ (see Prerequisites); rebuild with --pull to pick up patches.
+# Node 22.23.4+, 24.22.1+ or 26.12.1+ (see Prerequisites); rebuild with --pull to pick up patches.
 FROM node:24-alpine
 
 WORKDIR /app

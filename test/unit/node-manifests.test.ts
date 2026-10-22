@@ -470,7 +470,7 @@ describe('generateWorkspace — rendered files', () => {
       './worker': { types: './dist/worker/index.d.ts', default: './dist/worker/index.js' },
     });
     expect(pkg.type).toBe('module');
-    expect(pkg.engines).toEqual({ node: '^22.23.4 || >=24.22.1' });
+    expect(pkg.engines).toEqual({ node: '^22.23.4 || ^24.22.1 || >=26.12.1' });
     expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md']);
   });
 

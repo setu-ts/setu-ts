@@ -32,9 +32,9 @@ All notable changes to this project are documented here. The format follows
 ### Changed
 
 - **The supported Node floor is a patched release (0.10.0, every package).** Every manifest now
-  declares `engines.node ^22.23.4 || >=24.22.1` (was `>=22`): the first release on each supported
-  line carrying the Node.js security fixes of 2026-10-20. The compatibility workflow pins Node
-  24.22.1. npm warns rather than refuses on a mismatch unless `engine-strict` is set. Rebuild
+  declares `engines.node ^22.23.4 || ^24.22.1 || >=26.12.1` (was `>=22`): the first release on each
+  supported line carrying the Node.js security fixes of 2026-10-21. The compatibility workflow pins
+  Node 24.22.1. npm warns rather than refuses on a mismatch unless `engine-strict` is set. Rebuild
   container images with `--pull` and rebuild every single executable (SEA): a SEA embeds the Node
   binary it was built with. Until patched, any outbound `fetch` to a server an attacker controls
   reaches the Brotli decoder flaw (CVE-2026-111497), because `fetch` decompresses `br` responses

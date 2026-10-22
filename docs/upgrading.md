@@ -12,12 +12,12 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Run a patched Node release (`engines.node ^22.23.4 || >=24.22.1`, 0.10.0)
+### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)
 
-Every package now declares `"node": "^22.23.4 || >=24.22.1"`: the first releases of each supported
-line carrying the Node.js security fixes of 2026-10-20. npm only warns on an `engines` mismatch
-unless `engine-strict` is set, so an older Node keeps installing; the range records the floor, it
-does not enforce it. The fixes are in Node itself, so no Setu-TS code change closes them:
+Every package now declares `"node": "^22.23.4 || ^24.22.1 || >=26.12.1"`: the first releases of each
+supported line carrying the Node.js security fixes of 2026-10-21. npm only warns on an `engines`
+mismatch unless `engine-strict` is set, so an older Node keeps installing; the range records the
+floor, it does not enforce it. The fixes are in Node itself, so no Setu-TS code change closes them:
 
 - **Upgrade Node** on developer machines, CI and servers.
 - **Rebuild container images with `--pull`.** A cached `node:24-alpine` or `node:24-bookworm` layer

@@ -130,10 +130,10 @@ const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli
 
 /**
  * The supported Node range, written into every member manifest and the root. The floor on each
- * line is its first release carrying the 2026-10-20 security fixes (Node 22.23.4 and 24.22.1);
+ * line is its first release carrying the 2026-10-21 security fixes (Node 22.23.4, 24.22.1 and 26.12.1);
  * Node 22 stays supported because five packages need only `Promise.withResolvers`.
  */
-export const NODE_ENGINES_RANGE = '^22.23.4 || >=24.22.1';
+export const NODE_ENGINES_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
 
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
 const DECORATOR_PLUGIN_DIR = 'packages/decorator-plugin';
