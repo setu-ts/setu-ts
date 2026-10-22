@@ -48,6 +48,21 @@ describe('SecretsPlugin configFallback', () => {
     },
   );
 
+  it.each(['aws-kms', 'gcp', 'azure', 'vault'] as const)(
+    'never reads configFallback for %s',
+    (provider) => {
+      let reads = 0;
+      const options = {
+        get configFallback(): boolean {
+          reads += 1;
+          return true;
+        },
+      };
+      SecretsPlugin({ provider, options });
+      expect(reads).toBe(0);
+    },
+  );
+
   it.each([undefined, true])(
     'wires config by default or when explicitly enabled (%j)',
     async (flag) => {

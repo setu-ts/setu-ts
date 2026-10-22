@@ -136,12 +136,10 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
   // everywhere: validating one read and acting on a later one would let a
   // mutated options object bypass the refusal below, or log a value other
   // than the one used. The options object itself is passed through untouched.
-  const configFallbackOption: unknown = providerOptions.configFallback;
-  if (
-    providerType === 'env' &&
-    configFallbackOption !== undefined &&
-    typeof configFallbackOption !== 'boolean'
-  ) {
+  // Other providers ignore the option, so it is not read for them at all.
+  const configFallbackOption: unknown =
+    providerType === 'env' ? providerOptions.configFallback : undefined;
+  if (configFallbackOption !== undefined && typeof configFallbackOption !== 'boolean') {
     throw new TypeError('options.configFallback must be a boolean.');
   }
   const useConfigFallback = providerType === 'env' && configFallbackOption !== false;
