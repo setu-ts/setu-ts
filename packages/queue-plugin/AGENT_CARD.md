@@ -51,12 +51,12 @@ export function createReceiptJobProcessor(
 
 ## Behaviour the types do not show
 
-- `add` resolves to the job ID, before processing completes; `delayMs` is milliseconds.
-- State a route reads back (a list, a counter) can live in a module both files import; the factory
-  gets `services` for capabilities.
+- `add` resolves to the job ID only; the job runs on a later poll (`pollIntervalMs`, default 1000
+  ms), so a test polls its read-back route until the result appears. `delayMs` is milliseconds.
+- Read-back state can live in a module both files import; the factory gets `services`.
 - `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
 - `onFailed` runs once after attempts are exhausted, before dead-lettering, not on retries.
-- Default processor concurrency is 1 per name; default `pollIntervalMs` is 1000 milliseconds.
+- Default processor concurrency is 1 per name.
 - The default memory adapter is process-local. Processor factories resolve at `onInit`, when
   capabilities are registered; shutdown stops polling and disconnects the adapter.
 

@@ -41,6 +41,8 @@ export async function checkMiddleware(middleware: MiddlewareFunction): Promise<v
 
 - `autoStart` defaults to true and starts without binding a socket. The plugins arm must include a
   runtime provider; no plugins are installed implicitly.
+- `createTestApp` returns `IKernelApplication`; `inject` resolves `statusCode`, `headers`, `body`
+  (`string | null`) and `json<T>()`. `stop()` stops plugin workers.
 - Use `autoStart: false` to add global middleware or more plugins before starting.
 - `without` checks every exact plugin name before removing anything; an unknown name throws.
 - `overrideCapability` cannot undo the real provider's registration side effects, and refuses
@@ -53,3 +55,5 @@ export async function checkMiddleware(middleware: MiddlewareFunction): Promise<v
 - `createTestApp({ plugins })` builds an isolated composition instead of adopting `app`.
 - `overrideProvider` replaces a DI provider; `MockServiceRegistry` and `MockResponse` are doubles.
 - `inject` accepts a URL, request options or web request; `collectStream` reads streaming bodies.
+
+<!-- card-allow: json stop -->
