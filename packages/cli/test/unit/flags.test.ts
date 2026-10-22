@@ -359,6 +359,7 @@ describe('help text agrees with the inventory', () => {
     ['generate app', ['generate', 'app', '--help']],
     ['generate library', ['generate', 'library', '--help']],
     ['add', ['add', '--help']],
+    ['agents', ['agents', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
   ];

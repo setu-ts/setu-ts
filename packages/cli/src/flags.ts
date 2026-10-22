@@ -136,6 +136,7 @@ const NEW: ICommandFlagSpec = spec(
     'y',
     'dir',
     'dry-run',
+    'agents',
   ],
   // Read ONLY to be refused with their own guidance: `--di` points at
   // `--template class-based` (M65), `--depends-on` points at `generate app`.
@@ -195,6 +196,13 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * that message with a second way of saying the same thing.
  */
 const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
+
+/** Opt-in agent brief creation and read-only freshness checking. */
+const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
 
 /** `setu adopt`: takes no positionals at all — `--name` and `--port` are flags. */
 const ADOPT: ICommandFlagSpec = spec('adopt', ['name', 'port', 'dir', 'dry-run'], [], {
@@ -281,6 +289,8 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'agents':
+      return AGENTS;
     case 'devtool':
       return DEVTOOL_ENABLE;
     case 'adopt':
@@ -310,6 +320,7 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [GENERATE_APP.label, GENERATE_APP.documented],
   [GENERATE_LIBRARY.label, GENERATE_LIBRARY.documented],
   [ADD.label, ADD.documented],
+  [AGENTS.label, AGENTS.documented],
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],

@@ -20,6 +20,7 @@ import {
 } from './constants.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
+import { runAgentsCommand } from './commands/agents.ts';
 import { runDevtoolCommand } from './commands/devtool.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
@@ -96,6 +97,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
+  log(`  agents                         Write or check this project's AGENTS.md brief`);
   log(`  adopt                          Convert this project into a workspace`);
   log(`  devtool enable [member]        Enable the local diagnostics connector`);
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
@@ -246,6 +248,9 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         });
+
+      case 'agents':
+        return await runAgentsCommand(rest, deps);
 
       case 'devtool':
         return await runDevtoolCommand(rest, {

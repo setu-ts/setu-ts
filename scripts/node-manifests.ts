@@ -447,7 +447,7 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     type: 'module',
     license: 'MIT',
     engines: { node: '>=22' },
-    files: ['dist', 'src', 'README.md', 'LICENSE'],
+    files: ['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md'],
     exports,
     ...(BIN_ENTRIES[member.dir] === undefined ? {} : { bin: BIN_ENTRIES[member.dir] }),
     scripts: { build: 'tsc -b' },

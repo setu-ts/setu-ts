@@ -852,10 +852,10 @@ describe('runAddCommand', () => {
     const code = await runAddCommand(parseArgs(['cloudflare-plugin']), {
       fs: {
         ...fs,
-        readFile: (path: string) =>
+        stat: (path: string) =>
           path === '/app/wrangler.jsonc'
             ? Promise.reject(new Error('EACCES: permission denied'))
-            : fs.readFile(path),
+            : fs.stat(path),
       },
       cwd: '/app',
       log: () => {},

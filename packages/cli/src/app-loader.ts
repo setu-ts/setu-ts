@@ -13,6 +13,7 @@ import type { IApplication } from '@setu-ts/common';
 import { CONFIG_EXPORT, CONFIG_MODULE } from './constants.ts';
 import { joinPath, toFileUrl } from './utils/file-writer.ts';
 import { escapeName } from './utils/names.ts';
+import { memberPath } from './utils/member-path.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, WORKSPACE_MANIFEST } from './workspace/manifest.ts';
 import { importModule, type ModuleLoader } from './schematics/custom.ts';
 import type { IFileSystem } from '@setu-ts/common';
@@ -200,8 +201,7 @@ export function parentDir(path: string): string | undefined {
 export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<string[]> {
   // Compared with one separator: `joinPath` joins with `/` while a native Windows path keeps
   // `\`, so `C:\ws/apps/api` and `C:\ws\apps\api` must read as the same member.
-  const slashes = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '');
-  const project = slashes(dir);
+  const project = memberPath(dir);
   const chain: string[] = [];
   for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
     chain.push(current);
@@ -210,7 +210,7 @@ export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<s
     const listed =
       read.ok &&
       read.manifest.members.some(
-        (member) => slashes(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project,
+        (member) => memberPath(joinPath(current!, joinPath(MEMBERS_DIR, member.name))) === project,
       );
     return listed ? chain : [dir];
   }

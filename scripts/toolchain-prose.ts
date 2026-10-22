@@ -37,6 +37,16 @@ export interface ToolchainProseRules {
 export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
   allowlist: [
     {
+      path: 'packages/cli/test/unit/agents/render-brief.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts commands rendered for supported Deno application projects.',
+    },
+    {
+      path: 'packages/cli/test/unit/agents/workspace-brief.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts commands rendered for supported Deno application workspaces.',
+    },
+    {
       path: 'test/toolchain-prose.test.ts',
       category: 'fixture',
       reason: 'Planted toolchain and JSR reference violations.',

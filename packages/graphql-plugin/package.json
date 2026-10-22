@@ -24,7 +24,8 @@
     "dist",
     "src",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "AGENT_CARD.md"
   ],
   "exports": {
     ".": {

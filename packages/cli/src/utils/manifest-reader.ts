@@ -1,7 +1,7 @@
 /** JSON and JSONC manifest reading shared by CLI project detection. */
 
 import type { IFileSystem } from '@setu-ts/common';
-import { isMissingPath } from './filesystem-errors.ts';
+import { readExistingText } from './file-writer.ts';
 
 /** Result of reading a project manifest. */
 export type ManifestRead =
@@ -105,11 +105,12 @@ export function parseJsonc(source: string): unknown {
 export async function readJsonManifest(fs: IFileSystem, path: string): Promise<ManifestRead> {
   let source: string;
   try {
-    source = new TextDecoder().decode(await fs.readFile(path));
+    const text = await readExistingText(fs, path);
+    if (text === undefined) return { kind: 'missing' };
+    // Match TextDecoder's default BOM handling used by this reader before bounding it.
+    source = text.replace(/^\uFEFF/, '');
   } catch (cause) {
-    return isMissingPath(cause)
-      ? { kind: 'missing' }
-      : { kind: 'unreadable', reason: failureMessage(cause) };
+    return { kind: 'unreadable', reason: failureMessage(cause) };
   }
   try {
     return { kind: 'ok', value: JSON.parse(source), format: 'json' };

@@ -6,6 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **CLI writes (M116, `@setu-ts/cli`):** every Node CLI write (`new`, `generate`, `add`, `agents`,
+  …) snapshots regular files read-only, then writes and restores through a fresh same-directory temp
+  file renamed over the target. Existing inodes are never written through; static leaf symlinks,
+  hard links, special files and prior content over 1 MiB are refused independently of ownership. An
+  existing file's temp is created owner-only (`0o600`), so its contents are never readable by others
+  mid-write; the replacement then keeps the file's owner and group and only its `0o777` permissions,
+  never setuid, setgid or sticky bits. A file the user cannot write, or whose owner or group cannot
+  be kept, is refused unchanged; ACLs and extended attributes are not carried over. Cleanup covers
+  handled failures only: a process killed between temp creation and rename can leave a
+  `.<name>.setu-<hex>.tmp` file. Specific to `setu agents` workspace writes on POSIX, every root and
+  member target's directory chain is checked for ownership and symlinks (git's `safe.directory`
+  rule; permission bits are not checked); untrusted chains are refused with nothing written, whether
+  invoked from the root or a member, and `--check` skips the check. Missing directories are checked
+  from their nearest existing ancestor; a missing member still exits `1` with
+  `<member>: not a project`, writing nothing. The ownership check is skipped where uid/metadata are
+  unavailable, including Windows; standalone projects are unchecked.
+
+- **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
+  and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A
+  POSIX path containing `\` is no longer read as a workspace member path.
+
 ### Changed
 
 - **Declared OpenAPI operation metadata now reaches the document (#487, 0.10.0, `@setu-ts/common`,
@@ -35,6 +58,9 @@ All notable changes to this project are documented here. The format follows
   reads. Non-boolean values are refused at construction for the env provider; other providers ignore
   the option. Schema-stripped keys remain missing, and config-sourced `${NAME}` references are
   expanded unless ConfigPlugin's `expandVariables` is `false`. Environment strings are unchanged.
+- **`agents` is a built-in CLI command (M116, `@setu-ts/cli`).** Built-in verbs are matched before
+  any plugin-registered command and always win, so a plugin command named `agents` is no longer
+  reachable. No in-repo plugin registers one; rename the plugin command if yours does.
 - **Validated body media types (M114, `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`,
   `@setu-ts/common`).** The first-party validation service requires `application/json` or any
   `application/*+json` media type, ignoring case and parameters; `{ forms: true }` also accepts
@@ -454,6 +480,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Agent briefs and per-package cards (M116, `@setu-ts/cli`).** A new built-in `setu agents` writes
+  the project's `AGENTS.md` from its real state — installed `@setu-ts/*` packages, style, runtime,
+  scripts, available schematics — keeping the CLI-owned section between `<!-- setu-agents:begin -->`
+  and `<!-- setu-agents:end -->` and leaving every other byte untouched; a marker arrangement it
+  cannot read is refused instead of guessed at. `--check` reports a missing or stale section and
+  exits nonzero without writing, for CI; `--dry-run` prints the paths; `--dir` selects the project.
+  In a workspace it writes the root `AGENTS.md` and every member's, run from the root or from a
+  member's own directory. `setu new --agents` runs the same writer after scaffolding, and a
+  successful `setu add` prints a reminder when a sectioned brief already exists. Every published
+  library package now ships a hand-written `AGENT_CARD.md` in its npm tarball, so a normal install
+  delivers the card at the `node_modules/@setu-ts/<pkg>/AGENT_CARD.md` path the brief names.
 - **Self-contained feature modules, `--module` and `g schema` (M114, `@setu-ts/cli`).**
   `setu generate module <name>` makes a functional module self-contained: the whole feature lives in
   `src/modules/<name>/` (routes, service, schemas, tests, module index) and registers through
@@ -485,9 +522,10 @@ All notable changes to this project are documented here. The format follows
   `MiddlewareFunction` (so every existing call site type-checks unchanged) with one added member,
   `value(ctx)`. `ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults
   included — for Zod 3 and 4 alike, inferred from the schema, so the handler reads a typed value
-  with `validateBody(S).value(ctx)` and no cast. `value(ctx)` throws a `TypeError` naming the target
-  when that validator did not run on the request or a later validator for the same target overwrote
-  it. The `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
+  from the same instance it registered — `const body = validateBody(S)`, then `body.value(ctx)` —
+  with no cast. `value(ctx)` throws a `TypeError` naming the target when that validator did not run
+  on the request or a later validator for the same target overwrote it. The
+  `ctx.state.get(validatedStateKey(...))` read still works and is unchanged.
 - **Form-body validation (M114, `@setu-ts/validation-plugin`).**
   `validateBody(schema, { forms: true })` and `@ValidateBody(schema, { forms: true })` also validate
   `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same schema they

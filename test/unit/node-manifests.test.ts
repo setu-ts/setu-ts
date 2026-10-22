@@ -471,7 +471,7 @@ describe('generateWorkspace — rendered files', () => {
     });
     expect(pkg.type).toBe('module');
     expect(pkg.engines).toEqual({ node: '>=22' });
-    expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
+    expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md']);
   });
 
   it('marks every peer optional', () => {
@@ -775,7 +775,7 @@ describe('npm publish metadata', () => {
         directory: input.dir,
       });
       expect(pkg.publishConfig).toEqual({ access: 'public' });
-      expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
+      expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md']);
       expect(generated.files.get(`${input.dir}/LICENSE`)).toBe('license bytes');
       expect(pkg.sideEffects).toEqual(
         input === COMMON ? false : ['./dist/metadata/symbol-metadata.js'],

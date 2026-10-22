@@ -85,6 +85,7 @@ describe('packCacheKey', () => {
       expect(await packCacheKey(root, ['packages/alpha'], self)).toBe(base);
       const inputs: readonly (readonly [string, string])[] = [
         ['packages/alpha/README.md', '# alpha, edited\n'],
+        ['packages/alpha/AGENT_CARD.md', '# alpha card\n'],
         ['packages/alpha/LICENSE', 'MIT\n'],
         ['packages/alpha/src/index.ts', 'export const a = 2;\n'],
         ['tsconfig.json', '{}'],

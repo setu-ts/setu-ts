@@ -11,11 +11,12 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
-/** Checks the exact manifest packed for upload; source mode permits workspace:^. */
+/** Checks the upload manifest and archive entries; source mode permits workspace:^. */
 export function packedManifestProblems(
   manifest: unknown,
   expected: string,
   source = false,
+  packedFiles?: readonly string[],
 ): readonly string[] {
   const pkg = record(manifest);
   const problems: string[] = [];
@@ -43,7 +44,22 @@ export function packedManifestProblems(
       problems.push(`files must contain ${file}`);
     }
   }
+  if (pkg.name !== '@setu-ts/cli' && pkg.name !== '@setu-ts/create') {
+    if (!Array.isArray(pkg.files) || !pkg.files.includes('AGENT_CARD.md')) {
+      problems.push('files must contain AGENT_CARD.md');
+    }
+    if (packedFiles !== undefined && !packedFiles.includes('package/AGENT_CARD.md')) {
+      problems.push('packed library tarball is missing AGENT_CARD.md');
+    }
+  }
   return problems;
+}
+
+/** Release verification requires a non-empty card for every library, without exceptions. */
+export function agentCardProblems(member: string, contents: string): readonly string[] {
+  return member !== 'packages/cli' && member !== 'packages/create' && contents.trim() === ''
+    ? [`${member}: AGENT_CARD.md is missing or empty`]
+    : [];
 }
 
 /** Whether the registry explicitly lists this immutable version. */

@@ -63,7 +63,8 @@ export async function runNpmPublish(options: PublishOptions): Promise<void> {
     if (reported === undefined) throw new Error(`${dir}: pack reported no tarball`);
     const tarball = reported.startsWith('/') ? reported : `${packDir}/${reported}`;
     const manifest = JSON.parse(await execute('tar', ['-xzOf', tarball, 'package/package.json']));
-    const problems = packedManifestProblems(manifest, source.version);
+    const packedFiles = (await execute('tar', ['-tzf', tarball])).trim().split('\n');
+    const problems = packedManifestProblems(manifest, source.version, false, packedFiles);
     if (problems.length > 0) {
       throw new Error(`${dir}: packed manifest refused: ${problems.join('; ')}`);
     }

@@ -318,6 +318,11 @@ describe('denoInstallRefusal', () => {
     ]);
   });
 
+  it('R2-3 does not widen install search for a POSIX apps\\x directory', async () => {
+    const fs = createFakeFs({ '/ws/setu.workspace.json': workspace('x') });
+    expect(await installSearchDirs(fs, '/ws/apps\\x')).toEqual(['/ws/apps\\x']);
+  });
+
   it('refuses an uninstalled Deno project, naming deno install', async () => {
     const fs = createFakeFs({
       '/app/deno.jsonc': '{ "imports": { "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.9.0" } }',
