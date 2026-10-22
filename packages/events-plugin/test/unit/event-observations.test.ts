@@ -50,13 +50,11 @@ function collector(
   events: Record<string, string> = { 'user-created': 'users' },
   alias = 'bus',
 ): EventObservationCollector {
-  const policy = compileEventsDiagnosticsPolicy(
-    {
-      enabled: true,
-      alias,
-      events,
-    } satisfies EventsDiagnosticsOptions,
-  );
+  const policy = compileEventsDiagnosticsPolicy({
+    enabled: true,
+    alias,
+    events,
+  } satisfies EventsDiagnosticsOptions);
   return new EventObservationCollector(policy, clockRuntime(clock));
 }
 
@@ -72,16 +70,17 @@ function expectDeeplyFrozen(value: unknown): void {
 
 describe('compileEventsDiagnosticsPolicy (M98j option validation)', () => {
   it('refuses a non-object, a non-literal enabled, and a missing events map', () => {
-    expect(() => compileEventsDiagnosticsPolicy(null as unknown as EventsDiagnosticsOptions))
-      .toThrow(EVENT_COLLECTOR_ERRORS.badOptions);
     expect(() =>
-      compileEventsDiagnosticsPolicy({ enabled: false } as unknown as EventsDiagnosticsOptions)
+      compileEventsDiagnosticsPolicy(null as unknown as EventsDiagnosticsOptions),
+    ).toThrow(EVENT_COLLECTOR_ERRORS.badOptions);
+    expect(() =>
+      compileEventsDiagnosticsPolicy({ enabled: false } as unknown as EventsDiagnosticsOptions),
     ).toThrow(EVENT_COLLECTOR_ERRORS.notEnabled);
     expect(() =>
       compileEventsDiagnosticsPolicy({
         enabled: true,
         alias: 'bus',
-      } as unknown as EventsDiagnosticsOptions)
+      } as unknown as EventsDiagnosticsOptions),
     ).toThrow(EVENT_COLLECTOR_ERRORS.badEvents);
   });
 
@@ -91,21 +90,23 @@ describe('compileEventsDiagnosticsPolicy (M98j option validation)', () => {
         enabled: true,
         alias: 4 as unknown as string,
         events: {},
-      } as unknown as EventsDiagnosticsOptions)
+      } as unknown as EventsDiagnosticsOptions),
     ).toThrow(EVENT_COLLECTOR_ERRORS.badAlias);
     expect(() =>
-      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'a'.repeat(65), events: {} })
+      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'a'.repeat(65), events: {} }),
     ).toThrow(EVENT_COLLECTOR_ERRORS.aliasBytes);
-    expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\u202e', events: {} }))
-      .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
-    expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\n', events: {} }))
-      .toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
+    expect(() =>
+      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\u202e', events: {} }),
+    ).toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
+    expect(() =>
+      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus\n', events: {} }),
+    ).toThrow(EVENT_COLLECTOR_ERRORS.aliasControl);
     expect(() =>
       compileEventsDiagnosticsPolicy({
         enabled: true,
         alias: 'bus',
-        events: { 'a': 'same', 'b': 'same' },
-      })
+        events: { a: 'same', b: 'same' },
+      }),
     ).toThrow(EVENT_COLLECTOR_ERRORS.duplicateAlias);
   });
 
@@ -113,27 +114,26 @@ describe('compileEventsDiagnosticsPolicy (M98j option validation)', () => {
     const sixtyFive = Object.fromEntries(
       Array.from({ length: 65 }, (_, index) => [`t${index}`, `alias${index}`]),
     );
-    expect(() => compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: sixtyFive }))
-      .toThrow(EVENT_COLLECTOR_ERRORS.tooManyEvents);
+    expect(() =>
+      compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: sixtyFive }),
+    ).toThrow(EVENT_COLLECTOR_ERRORS.tooManyEvents);
     expect(() =>
       compileEventsDiagnosticsPolicy({
         enabled: true,
         alias: 'bus',
         events: { t: 3 as unknown as string },
-      } as unknown as EventsDiagnosticsOptions)
+      } as unknown as EventsDiagnosticsOptions),
     ).toThrow(EVENT_COLLECTOR_ERRORS.badEvents);
   });
 
   it('ignores inherited properties of the events map and compiles own entries', () => {
     const events: Record<string, string> = Object.create({ inherited: 'nope' });
     events['user-created'] = 'users';
-    const policy = compileEventsDiagnosticsPolicy(
-      {
-        enabled: true,
-        alias: 'bus',
-        events,
-      } satisfies EventsDiagnosticsOptions,
-    );
+    const policy = compileEventsDiagnosticsPolicy({
+      enabled: true,
+      alias: 'bus',
+      events,
+    } satisfies EventsDiagnosticsOptions);
     expect(policy.aliasByType.get('user-created')).toBe('users');
     expect(policy.aliasByType.has('inherited')).toBe(false);
   });
@@ -417,7 +417,7 @@ describe('InMemoryEventBus with an attached observer (M98j)', () => {
   it('publishBatch counts one publish and N handler observations per constituent event', async () => {
     const clock = new MutableClock();
     const bus = new InMemoryEventBus({ async: false, errorHandler: () => {} });
-    const observer = collector(clock, { 'a': 'a-alias', 'b': 'b-alias' });
+    const observer = collector(clock, { a: 'a-alias', b: 'b-alias' });
     attachEventObserver(bus, observer);
     bus.subscribe('a', () => {});
     bus.subscribe('b', () => {});
@@ -426,11 +426,11 @@ describe('InMemoryEventBus with an attached observer (M98j)', () => {
       { type: 'b', id: 'b-1', occurredOn: new Date(0), data: 'SECRET' },
     ]);
     const records = observer.snapshot().records;
-    const aPublish = records.find((record) =>
-      record.alias === 'a-alias' && record.operation === 'publish'
+    const aPublish = records.find(
+      (record) => record.alias === 'a-alias' && record.operation === 'publish',
     )!;
-    const bPublish = records.find((record) =>
-      record.alias === 'b-alias' && record.operation === 'publish'
+    const bPublish = records.find(
+      (record) => record.alias === 'b-alias' && record.operation === 'publish',
     )!;
     expect(aPublish.count).toBe(1);
     expect(bPublish.count).toBe(1);
@@ -571,7 +571,7 @@ describe('EventsPlugin diagnostics registration (M98j)', () => {
           alias: 'bus',
           events: {},
         } as unknown as EventsDiagnosticsOptions,
-      })
+      }),
     ).toThrow(EVENT_COLLECTOR_ERRORS.notEnabled);
   });
 });
@@ -669,14 +669,12 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
           '--input-type=module',
           '-e',
           `
-        import { InMemoryEventBus, attachEventObserver } from ${
-            JSON.stringify(new URL('../../src/bus/in-memory-event-bus.ts', import.meta.url).href)
-          };
-        import { EventObservationCollector, compileEventsDiagnosticsPolicy } from ${
-            JSON.stringify(
-              new URL('../../src/diagnostics/event-observations.ts', import.meta.url).href,
-            )
-          };
+        import { InMemoryEventBus, attachEventObserver } from ${JSON.stringify(
+          new URL('../../src/bus/in-memory-event-bus.ts', import.meta.url).href,
+        )};
+        import { EventObservationCollector, compileEventsDiagnosticsPolicy } from ${JSON.stringify(
+          new URL('../../src/diagnostics/event-observations.ts', import.meta.url).href,
+        )};
         const bus = new InMemoryEventBus({ async: true, errorHandler: () => { throw new Error('errorHandler threw'); } });
         const observer = new EventObservationCollector(compileEventsDiagnosticsPolicy({ enabled: true, alias: 'bus', events: { 'user-created': 'users' } }), { hrtime: () => 1000 });
         if (${observed}) attachEventObserver(bus, observer);
@@ -701,8 +699,8 @@ describe('Observation never changes dispatch (M98j review fixes)', () => {
     const observedOnly = await outcome(true, false);
     expect(unobservedOnly.unhandled).toBe(1);
     expect(observedOnly.unhandled).toBe(unobservedOnly.unhandled);
-    const publish = observed.snapshot.records.find((r: { operation: string }) =>
-      r.operation === 'publish'
+    const publish = observed.snapshot.records.find(
+      (r: { operation: string }) => r.operation === 'publish',
     );
     expect(publish.failed).toBe(1);
   });

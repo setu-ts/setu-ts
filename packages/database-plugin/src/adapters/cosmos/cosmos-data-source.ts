@@ -14,6 +14,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   CursorPayload,
   EntityKey,
@@ -191,8 +193,11 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       // treats the two as equivalent on the scalar path, so without this the
       // same key was accepted as a scalar and refused as a composite.
       if (
-        value === undefined && shape === 'key' && path.length === 1 &&
-        path[0] === DOCUMENT_ID_FIELD && target.primaryKey !== DOCUMENT_ID_FIELD
+        value === undefined &&
+        shape === 'key' &&
+        path.length === 1 &&
+        path[0] === DOCUMENT_ID_FIELD &&
+        target.primaryKey !== DOCUMENT_ID_FIELD
       ) {
         value = row[target.primaryKey];
       }
@@ -233,9 +238,9 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
     if (read.missing.length > 0) {
       throw new Error(
         `CosmosAdapter.${operation}: ${subject} for '${target.container}' must carry the ` +
-          `partition key ${renderPaths(resolved.paths)}, but ${
-            renderPaths(read.missing)
-          } is absent. A Cosmos request carrying an incomplete partition key answers 404 rather ` +
+          `partition key ${renderPaths(resolved.paths)}, but ${renderPaths(
+            read.missing,
+          )} is absent. A Cosmos request carrying an incomplete partition key answers 404 rather ` +
           'than an error, so it would report "not found" for a row that exists.',
       );
     }
@@ -257,10 +262,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
    * @param operation - The calling member, for messages
    * @returns The resolved address, or `null` when no document has that key
    */
-  const addressOf = async (
-    id: EntityKey,
-    operation: string,
-  ): Promise<DocumentAddress | null> => {
+  const addressOf = async (id: EntityKey, operation: string): Promise<DocumentAddress | null> => {
     const resolved = await partitionKeys.resolve(target);
     if (typeof id === 'object') {
       const record = id as Record<string, string | number>;
@@ -448,6 +450,8 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> => {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
       const address = await addressOf(id, 'update');
       if (address === null) throw missingRow(target, id);
       const resolved = await partitionKeys.resolve(target);
@@ -516,20 +520,22 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       if (existing === null) throw missingRow(target, id);
       const etag = existing[ETAG_PROPERTY];
       const merged = { ...existing, ...payload };
-      const replaced = await item.replace(
-        merged,
-        typeof etag === 'string' ? { accessCondition: { type: 'IfMatch', condition: etag } } : {},
-      ).catch((error: unknown) => {
-        if (statusOf(error) === 412) {
-          throw new CosmosConcurrentModificationError(
-            `CosmosAdapter.update: '${address.id}' in '${target.container}' was modified by ` +
-              'another writer between the read and the write of a payload too wide for a single ' +
-              'patch request. Retry the update.',
-          );
-        }
-        if (statusOf(error) === 404) throw missingRow(target, id);
-        throw error;
-      });
+      const replaced = await item
+        .replace(
+          merged,
+          typeof etag === 'string' ? { accessCondition: { type: 'IfMatch', condition: etag } } : {},
+        )
+        .catch((error: unknown) => {
+          if (statusOf(error) === 412) {
+            throw new CosmosConcurrentModificationError(
+              `CosmosAdapter.update: '${address.id}' in '${target.container}' was modified by ` +
+                'another writer between the read and the write of a payload too wide for a single ' +
+                'patch request. Retry the update.',
+            );
+          }
+          if (statusOf(error) === 404) throw missingRow(target, id);
+          throw error;
+        });
       return fromDocument(replaced.resource ?? merged, target);
     },
 
@@ -559,29 +565,37 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       }
     },
 
-    ...(buffer !== undefined ? {} : {
-      async updateWhere(id, where, data) {
-        const checked = checkWritePrecondition(where, data);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
-        }
-        where = checked.where;
-        data = checked.data;
-        return await guardedWrite(id, where, data);
-      },
-      async deleteWhere(id, where) {
-        const checked = checkWritePrecondition(where);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', 'cosmos', checked.problem);
-        }
-        where = checked.where;
-        return (await guardedWrite(id, where)) !== null;
-      },
-    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
-    count: async (
-      where: Record<string, unknown>,
-      filter?: FilterExpression,
-    ): Promise<number> => {
+    ...(buffer !== undefined
+      ? {}
+      : ({
+          async updateWhere(id, where, data) {
+            const checked = checkWritePrecondition(where, data);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                'cosmos',
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            data = checked.data;
+            assertPrimaryKeyUnchanged(target.container, [target.primaryKey], id, data);
+            return await guardedWrite(id, where, data);
+          },
+          async deleteWhere(id, where) {
+            const checked = checkWritePrecondition(where);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                'cosmos',
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            return (await guardedWrite(id, where)) !== null;
+          },
+        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
+    count: async (where: Record<string, unknown>, filter?: FilterExpression): Promise<number> => {
       const spec = buildCountQuery(where, filter, target);
       const response = await container().items.query(spec).fetchAll();
       const first = response.resources[0];
@@ -601,11 +615,7 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         decoded = decodeCursor(normalized.cursor);
         if (decoded === null) {
           return Promise.reject(
-            new UnsupportedQueryFeatureError(
-              'cursor-pagination',
-              'cosmos',
-              `cursor-pagination: entity '${target.container}': malformed cursor token`,
-            ),
+            new InvalidCursorError(`Entity '${target.container}': malformed cursor token.`),
           );
         }
       }
@@ -613,12 +623,16 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       const fingerprint = sortFingerprint(normalized.orderBy);
       if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
         return Promise.reject(
-          new UnsupportedQueryFeatureError(
-            'cursor-pagination',
-            'cosmos',
-            `cursor-pagination: entity '${target.container}': cursor fingerprint mismatch — ` +
-              `expected '${fingerprint}', got '${decoded.sortFingerprint}'`,
-          ),
+          new InvalidCursorError(`Entity '${target.container}': cursor fingerprint mismatch.`),
+        );
+      }
+      if (
+        decoded !== null &&
+        (decoded.keyValues.length !== [target.primaryKey].length ||
+          decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+      ) {
+        return Promise.reject(
+          new InvalidCursorError(`Entity '${target.container}': cursor key shape mismatch.`),
         );
       }
 
@@ -630,18 +644,22 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
       // order and directions followed by `id ASC`.
       const keyColumns = [target.primaryKey];
       const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
-      const keyset = decoded === null ? undefined : keysetPredicate(
-        decoded.orderedValues,
-        decoded.keyValues,
-        normalized.orderBy,
-        keyColumns,
-      );
+      const keyset =
+        decoded === null
+          ? undefined
+          : keysetPredicate(
+              decoded.orderedValues,
+              decoded.keyValues,
+              normalized.orderBy,
+              keyColumns,
+            );
       const filter = conjoinFilters(normalized.filter, keyset);
       // The projection is widened to the key and ordered columns so the probe
       // can mint a cursor, then narrowed back to what the caller asked for.
-      const internalSelect = normalized.select.length > 0
-        ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
-        : [];
+      const internalSelect =
+        normalized.select.length > 0
+          ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+          : [];
       const rows = await runQuery({
         ...normalized,
         orderBy: keysetSort,
@@ -660,9 +678,12 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         hasMore,
       );
       return {
-        rows: internalSelect.length > 0
-          ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
-          : pageRows,
+        rows:
+          internalSelect.length > 0
+            ? pageRows.map(
+                (row) => projectFields(row, normalized.select) as Record<string, unknown>,
+              )
+            : pageRows,
         nextCursor,
       };
     },
@@ -813,7 +834,10 @@ export async function mapMissing(
 class CosmosTransactionBatchError extends Error {
   override readonly name = 'CosmosTransactionBatchError';
 
-  constructor(readonly code: number, message: string) {
+  constructor(
+    readonly code: number,
+    message: string,
+  ) {
     super(message);
   }
 }
@@ -878,10 +902,9 @@ export class CosmosTransaction implements IAdapterTransaction {
     const containerName = this.#buffer.container() as string;
     const partitionKey = this.#buffer.partitionKey() as CosmosPartitionKeyValue;
     const operations = this.#buffer.operations();
-    const response = await this.#database.container(containerName).items.batch(
-      operations,
-      partitionKey,
-    );
+    const response = await this.#database
+      .container(containerName)
+      .items.batch(operations, partitionKey);
     // Success is exactly 200. A batch whose operations did not all apply answers
     // **207** with per-operation statuses (measured: 424 for the operations the
     // failure aborted, and the real fault's own status beside them), so a
@@ -891,8 +914,8 @@ export class CosmosTransaction implements IAdapterTransaction {
       const operationStatuses = (response.result ?? []).map((entry) => entry.statusCode);
       // A 207 batch lists the actual refusal beside the dependent 424s. Keep
       // that root status rather than losing it to the aggregate response.
-      const failureCode = operationStatuses.find((status) => status >= 300 && status !== 424) ??
-        code;
+      const failureCode =
+        operationStatuses.find((status) => status >= 300 && status !== 424) ?? code;
       const statuses = operationStatuses.join(', ');
       throw new CosmosTransactionBatchError(
         failureCode,

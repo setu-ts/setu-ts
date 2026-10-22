@@ -24,7 +24,7 @@ delta for agents that are not Claude Code.
 5. **`PUBLIC_API.md`** — for `@setu-ts/common` and any package you depend on, so you consume
    existing interfaces instead of inventing new ones.
 6. **The milestone's plan** under `plans/milestone-<N>-<desc>.md`. If none exists, write one from
-   `plans/TEMPLATE.md` and run `deno task check:plan` before implementing.
+   `plans/TEMPLATE.md` and run `pnpm run check:plan` before implementing.
 
 Do NOT add or duplicate project rules in this file — put them in `CLAUDE.md` only.
 
@@ -57,28 +57,27 @@ from `main`) only for a defect in a published release. Never commit to `develop`
 ## Verification gates
 
 ```bash
-deno task fmt:check
-deno task lint
-deno task check
-deno task test
-deno task test:coverage      # read the ANSI-stripped PER-FILE table; the exit code is NOT the check
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test
+pnpm run test:coverage      # read the ANSI-stripped PER-FILE table; the exit code is NOT the check
 ```
 
 A milestone that adds or changes a package also runs, on a **committed** tree:
 
 ```bash
-deno task release:publish --dry-run
-deno task release:verify <version>
+pnpm run release:publish --dry-run
+pnpm run release:verify <version>
 ```
 
-`deno task test:coverage` exits 0 with a file under the bar. Read the per-file table yourself and
-confirm every `src` file is ≥90% on branch, function, AND line.
+`pnpm run test:coverage` enforces per-file Vitest thresholds. Read the ANSI-stripped table and
+confirm every source file reaches 90% branch, function and line coverage. Root tooling uses
+`pnpm run test:tooling:coverage`; retained native Deno proofs use `pnpm run test:deno-lane`.
 
-`deno task test:coverage:pkg [members…]` runs and measures only the named workspace members —
-seconds rather than minutes — and it DOES enforce the bar. It is an edit-loop tool: a targeted PASS
-implies the full run passes for those files; a targeted FAIL does not, because another package's
-tests may cover those lines. It never substitutes for `deno task test:coverage` as milestone
-evidence.
+`pnpm run test:coverage:pkg [members…]` measures the named members and tooling. Each member owns its
+source coverage, so a targeted failure is authoritative. It is an edit-loop check; milestone
+evidence includes the full package, tooling and native-lane reports.
 
 ## Paths are workspace-relative — never absolute
 

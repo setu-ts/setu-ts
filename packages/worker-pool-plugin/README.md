@@ -67,10 +67,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IWorkerPool } from '@setu-ts/common';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    WorkerPoolPlugin({ taskTimeoutMs: 10_000 }),
-  ],
+  plugins: [RuntimePlugin(), WorkerPoolPlugin({ taskTimeoutMs: 10_000 })],
 });
 await app.start();
 
@@ -131,6 +128,7 @@ const thumb = await pool.run<Uint8Array, Uint8Array>(
   `self.close` is `undefined` altogether, so `process.exit()` is the portable way to do this.) Keep
   a task timeout on any Deno pool whose task module can terminate itself; it remains the only
   backstop there.
+
 - **Overload.** When the pending queue is at its bound, `run()` rejects with `WorkerQueueFullError`
   instead of growing memory without limit.
 - **Shutdown.** The plugin's `onClose` hook terminates every worker and rejects pending tasks.
@@ -175,8 +173,16 @@ worker the pool terminates (on a timeout, a startup deadline or a hand-over) lea
 once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
 CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
 `maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
-CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
-resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+CPU. That timed-out CPU-bound-thread measurement was taken on Deno only. Treat a task timeout as a
+correctness bound rather than a resource bound for CPU-bound code that can loop, and have long tasks
+check a deadline and return.
+
+<!-- version:history -->
+
+At a hand-over, the terminated thread and its replacement can briefly be alive together: OS threads
+can exceed `maxWorkers` by 1–2 for 20–60 ms on Node, Bun and Deno. This was measured on 0.9.0 with
+20 ms sampling and `maxWorkers: 3`; some sampled runs showed no overshoot, so it does not happen at
+every hand-over.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.
@@ -228,17 +234,10 @@ where `pools` is one `{ taskModule, workers, busy, queued, completed, failed }` 
 pools' worker slots. It counts slots, not threads: on Deno a timed-out CPU-bound worker can keep
 running after its slot is released (see Sizing).
 
-The status derives from `available`:
-
-| `available` | Status     | Meaning                                                                              |
-| ----------- | ---------- | ------------------------------------------------------------------------------------ |
-| `true`      | `up`       | A worker host is present, so tasks can run.                                          |
-| `false`     | `degraded` | No worker host: every `run()` rejects with `WorkerPoolUnavailableError`. The payload |
-|             |            | adds a `reason` saying so.                                                           |
-
-`degraded` rather than `down` because registering this plugin on Cloudflare Workers is deliberate —
-the runtime has no threads, the capability resolves and refuses, and `degraded` keeps `/ready` at
-200 while still surfacing in the payload. Reporting `down` would 503 every such deployment.
+The status is `up` even when `data.available` is false: registering this plugin on Cloudflare
+Workers is deliberate, and the absence of threads does not stop the app serving requests. Every
+`run()` still rejects with `WorkerPoolUnavailableError` on that runtime, and `data.reason` explains
+why. Alert on `data.available` when workers are required by your application.
 
 The pool counters are DATA, never a threshold. `failed` is cumulative, so any status derived from it
 would need a failure rate this plugin cannot choose on an application's behalf; watch it through the
@@ -292,7 +291,7 @@ The gauges are written from the same snapshot the health indicator reads, on eve
 | `TaskPoolOptions`            | interface |
 | `WorkerPoolPluginOptions`    | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

@@ -99,7 +99,7 @@ describe('NotificationPlugin.register', () => {
   it('fails fast when an email channel is configured without the mail capability', () => {
     const fake = createFakeContext();
     expect(() =>
-      NotificationPlugin({ channels: { email: { provider: 'mail' } } }).register(fake.ctx)
+      NotificationPlugin({ channels: { email: { provider: 'mail' } } }).register(fake.ctx),
     ).toThrow('Notification "email" channel requires the mail capability');
   });
 });
@@ -132,14 +132,17 @@ describe('createProvider', () => {
 
   it('builds an fcm provider from the runtime capability when no tokenSource is given', () => {
     const fake = createFakeContext();
-    const provider = createProvider({
-      provider: 'fcm',
-      options: {
-        projectId: 'p',
-        clientEmail: 'a@b.iam.gserviceaccount.com',
-        privateKey: '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----',
+    const provider = createProvider(
+      {
+        provider: 'fcm',
+        options: {
+          projectId: 'p',
+          clientEmail: 'a@b.iam.gserviceaccount.com',
+          privateKey: '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----',
+        },
       },
-    }, fake.ctx);
+      fake.ctx,
+    );
     expect(provider).toBeInstanceOf(FcmProvider);
   });
 
@@ -154,7 +157,7 @@ describe('createProvider', () => {
           clientEmail: 'a@b.iam.gserviceaccount.com',
           privateKey: 'pem',
         },
-      })
+      }),
     ).toThrow('requires the runtime capability');
   });
 
@@ -175,10 +178,9 @@ describe('createProvider', () => {
   });
 
   it('throws for an unsupported provider type', () => {
-    expect(() => createProvider({ provider: 'carrier-pigeon' } as unknown as ChannelConfig))
-      .toThrow(
-        'Unsupported notification provider: carrier-pigeon',
-      );
+    expect(() =>
+      createProvider({ provider: 'carrier-pigeon' } as unknown as ChannelConfig),
+    ).toThrow('Unsupported notification provider: carrier-pigeon');
   });
 });
 

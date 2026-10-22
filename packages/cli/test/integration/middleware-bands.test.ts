@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
 import { HttpSecurityPlugin } from '@setu-ts/http-security-plugin';
 import { LoggerPlugin } from '@setu-ts/logger-plugin';
 import { MetricsPlugin } from '@setu-ts/metrics-plugin';
@@ -36,8 +37,9 @@ async function registeredPriorities(plugins: readonly IPlugin[]): Promise<number
   const app = createApplication({ plugins: [RuntimePlugin(), ...plugins], diagnostics: {} });
   await app.start();
   try {
-    return app.diagnostics!.snapshot().nodes
-      .filter((node) => node.kind === 'middleware')
+    return app
+      .diagnostics!.snapshot()
+      .nodes.filter((node) => node.kind === 'middleware')
       .map((node) => node.priority!)
       .sort((left, right) => left - right);
   } finally {
@@ -67,7 +69,7 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
   'tenant resolution': () => [MultiTenancyPlugin({ resolver: 'header' })],
   'request logging': () => [LoggerPlugin({ requestLogging: true })],
   // Every optional concern switched on, so the band's ends are both observed.
-  'HTTP security, session and form CSRF': () => [
+  'HTTP security, session, authentication and form CSRF': () => [
     HttpSecurityPlugin({
       cors: { origin: ['https://example.test'] },
       csrf: {},
@@ -75,13 +77,15 @@ const COMPOSITIONS: Readonly<Record<string, () => readonly IPlugin[]>> = {
       ipSecurity: {},
     }),
     SessionPlugin({ secret: 'a-test-secret-that-is-at-least-32-bytes-long', csrf: {} }),
+    AuthPlugin({ jwt: { secret: 'a-test-jwt-secret-that-is-at-least-32-bytes' } }),
   ],
 };
 
 describe('the generated middleware priority comment', () => {
   it('names a composition for every plugin-owned band', () => {
-    const owners = FRAMEWORK_MIDDLEWARE_BANDS.map((entry) => entry.owner)
-      .filter((owner) => owner !== 'error handler');
+    const owners = FRAMEWORK_MIDDLEWARE_BANDS.map((entry) => entry.owner).filter(
+      (owner) => owner !== 'error handler',
+    );
     expect(Object.keys(COMPOSITIONS).sort()).toEqual([...owners].sort());
   });
 
@@ -139,9 +143,10 @@ describe('the generated middleware priority comment', () => {
     app.middleware.add((_ctx, next) => next(), { priority: emitted, name: 'generated' });
     await app.start();
     try {
-      const middleware = app.diagnostics!.snapshot().nodes
-        .filter((node) => node.kind === 'middleware');
-      const last = middleware.reduce((max, node) => node.position! > max.position! ? node : max);
+      const middleware = app
+        .diagnostics!.snapshot()
+        .nodes.filter((node) => node.kind === 'middleware');
+      const last = middleware.reduce((max, node) => (node.position! > max.position! ? node : max));
       expect(last.priority).toBe(emitted);
     } finally {
       await app.stop();

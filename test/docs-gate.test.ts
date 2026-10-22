@@ -11,8 +11,12 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFile, readdir, stat, writeFile, rm, mkdir } from 'node:fs/promises';
+import { readdirSync, statSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { tempDir } from './node-helpers.ts';
 
 import {
   anchorFor,
@@ -26,6 +30,7 @@ import {
   checkReadmeApiLink,
   checkRequiredGuides,
   checkVersionClaims,
+  collectMarkdown,
   findMalformedTableRows,
   findSwallowedHeadings,
   POST_ALPHA_MINOR_LINES,
@@ -118,11 +123,9 @@ describe('documentation gate — malformed table rows', () => {
     // the cell even inside backticks, so the cell splits and GFM drops whatever
     // runs past the header's width.
     expectReasons(
-      [
-        '| Export | Purpose |',
-        '| ------ | ------- |',
-        '| `Foo`  | `P | HandlerResult` |',
-      ].join('\n'),
+      ['| Export | Purpose |', '| ------ | ------- |', '| `Foo`  | `P | HandlerResult` |'].join(
+        '\n',
+      ),
       ['unescaped-pipe'],
     );
   });
@@ -131,25 +134,18 @@ describe('documentation gate — malformed table rows', () => {
     // What the static-plugin README carried: `'/`'` renders a span holding `'/`
     // plus a stray quote and a dangling backtick.
     expectReasons(
-      [
-        '| Option      | Default |',
-        '| ----------- | ------- |',
-        "| `urlPrefix` | `'/`'`  |",
-      ].join('\n'),
+      ['| Option      | Default |', '| ----------- | ------- |', "| `urlPrefix` | `'/`'`  |"].join(
+        '\n',
+      ),
       ['unterminated-span'],
     );
   });
 
   it('reports at most one reason per row, in document order', () => {
-    expectReasons(
-      [
-        '| A | B |',
-        '| - | - |',
-        "| `x` | `'/`'` |",
-        '| `y` | `P | Q` |',
-      ].join('\n'),
-      ['unterminated-span', 'unescaped-pipe'],
-    );
+    expectReasons(['| A | B |', '| - | - |', "| `x` | `'/`'` |", '| `y` | `P | Q` |'].join('\n'), [
+      'unterminated-span',
+      'unescaped-pipe',
+    ]);
   });
 
   it('accepts a pipe that IS escaped, which is the whole remedy', () => {
@@ -190,11 +186,7 @@ describe('documentation gate — malformed table rows', () => {
 
   it('ignores a pipe outside any code span', () => {
     expectReasons(
-      [
-        '| A       | B     |',
-        '| ------- | ----- |',
-        '| a \\| b  | plain |',
-      ].join('\n'),
+      ['| A       | B     |', '| ------- | ----- |', '| a \\| b  | plain |'].join('\n'),
       [],
     );
   });
@@ -219,24 +211,13 @@ describe('documentation gate — malformed table rows', () => {
 
   it('ignores a broken row inside a fenced block', () => {
     expectReasons(
-      [
-        '```markdown',
-        "| `urlPrefix` | `'/`'` |",
-        '| ----------- | ------ |',
-        '```',
-      ].join('\n'),
+      ['```markdown', "| `urlPrefix` | `'/`'` |", '| ----------- | ------ |', '```'].join('\n'),
       [],
     );
   });
 
   it('ignores a pipe-leading run with no delimiter row', () => {
-    expectReasons(
-      [
-        '| not a table `x',
-        '| still not one',
-      ].join('\n'),
-      [],
-    );
+    expectReasons(['| not a table `x', '| still not one'].join('\n'), []);
   });
 
   it('ignores a header whose delimiter does not match it in width', () => {
@@ -266,10 +247,9 @@ describe('documentation gate — malformed table rows', () => {
     // The escape is what makes this header two cells rather than three, so a
     // count that ignored it would mismatch the delimiter and dismiss the whole
     // table — taking the genuine defect on the data row with it.
-    expectReasons(
-      ['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'),
-      ['unescaped-pipe'],
-    );
+    expectReasons(['| A \\| B | C |', '| --- | --- |', '| x | `p|q` |'].join('\n'), [
+      'unescaped-pipe',
+    ]);
   });
 
   it('reports a header whose own span holds a raw pipe', () => {
@@ -277,10 +257,7 @@ describe('documentation gate — malformed table rows', () => {
     // the raw pipe inflates the RENDERED count to 4 against a 3-cell delimiter,
     // so comparing rendered widths would dismiss the block as "not a table".
     // `countCells` reads spans as opaque, giving the intended 3, which matches.
-    expectReasons(
-      ['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'),
-      ['unescaped-pipe'],
-    );
+    expectReasons(['| A | `x|y` | C |', '| --- | --- | --- |'].join('\n'), ['unescaped-pipe']);
   });
 
   it('reports the row through checkDocument, with a remedy in the message', () => {
@@ -299,9 +276,7 @@ describe('documentation gate — malformed table rows', () => {
 
 describe('documentation gate — anchors', () => {
   it('derives a renderer anchor from heading text', () => {
-    expect(anchorFor('API Reference: @setu-ts/common')).toBe(
-      'api-reference-setu-tscommon',
-    );
+    expect(anchorFor('API Reference: @setu-ts/common')).toBe('api-reference-setu-tscommon');
     expect(anchorFor('createApplication()')).toBe('createapplication');
     expect(anchorFor('Feature Flags')).toBe('feature-flags');
   });
@@ -343,25 +318,25 @@ describe('documentation gate — table of contents', () => {
 
 describe('documentation gate — CI wiring', () => {
   it('is registered as a task', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
-    expect(manifest.tasks['check:docs']).toContain('scripts/check-docs.ts');
+    expect(manifest.scripts['check:docs']).toContain('scripts/check-docs.ts');
   });
 
   it('runs on every pull request', async () => {
     // Without this the gate is a script nobody executes, and the class of
     // defect it exists for reaches main exactly as it did before.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
-    expect(workflow).toContain('deno task check:docs');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
+    expect(workflow).toContain('pnpm run check:docs');
   });
 
   it('check:docs runs the aggregate gate (docs + api lint)', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
     // check:docs should include both check-docs.ts and generate-api-docs.ts
-    const checkDocs = manifest.tasks['check:docs'];
+    const checkDocs = manifest.scripts['check:docs'];
     expect(checkDocs).toContain('check-docs.ts');
     expect(checkDocs).toContain('generate-api-docs.ts');
   });
@@ -369,22 +344,23 @@ describe('documentation gate — CI wiring', () => {
   it('check:docs composes the behaviour gate and the @since gate', async () => {
     // Dropping either script from the chain is a failing test rather than a
     // silent loss of coverage (M95d).
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
-    const checkDocs = manifest.tasks['check:docs'] ?? '';
+    const checkDocs = manifest.scripts['check:docs'] ?? '';
     // Assert the ACTUAL invocations in the `&&` chain, not that the path is
     // mentioned somewhere: `echo scripts/check-since-tags.ts` satisfies a
     // substring check while CI runs no gate at all.
-    const invoked = checkDocs.split('&&')
+    const invoked = checkDocs
+      .split('&&')
       .map((step) => step.trim())
-      .filter((step) => step.startsWith('deno run'))
+      .filter((step) => step.startsWith('node '))
       .map((step) => step.split(/\s+/).at(-1));
     expect(invoked).toContain('scripts/check-example-behaviour.ts');
     expect(invoked).toContain('scripts/check-since-tags.ts');
     // And the @since gate stays runnable in isolation, which is how its
     // skip-on-network behaviour is negative-controlled.
-    expect(manifest.tasks['check:since-tags']).toContain('scripts/check-since-tags.ts');
+    expect(manifest.scripts['check:since-tags']).toContain('scripts/check-since-tags.ts');
   });
 });
 
@@ -547,9 +523,10 @@ describe('documentation gate — package catalog', () => {
       const match = pkg.match(/^packages\/([^/]+)(?:\/([^/]+))?/);
       const firstSegment = match?.[1];
       const secondSegment = match?.[2];
-      const name = (firstSegment === 'starters' && secondSegment)
-        ? secondSegment
-        : (match?.[1] ?? pkg.replace('packages/', ''));
+      const name =
+        firstSegment === 'starters' && secondSegment
+          ? secondSegment
+          : (match?.[1] ?? pkg.replace('packages/', ''));
       return `@setu-ts/${name}`;
     }).join(' ');
     const runtimeMd =
@@ -568,13 +545,16 @@ describe('documentation gate — package catalog', () => {
 
   // A helper to build one realistic structural section for a package, so
   // mutations prove the structural validator discriminates.
-  function buildSection(pkg: string, opts: {
-    purpose?: string;
-    readmeLink?: string;
-    apiLink?: string;
-    runtimeCells?: string;
-    caveat?: string;
-  }): string {
+  function buildSection(
+    pkg: string,
+    opts: {
+      purpose?: string;
+      readmeLink?: string;
+      apiLink?: string;
+      runtimeCells?: string;
+      caveat?: string;
+    },
+  ): string {
     const purpose = opts.purpose ?? 'Test package.';
     const readme = opts.readmeLink ?? `../packages/${pkg}/README.md`;
     const api = opts.apiLink ?? `./api/${pkg}/src/index.ts/index.html`;
@@ -632,8 +612,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing runtime compatibility table', () => {
-    const section =
-      `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Purpose:** Test.\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/modules/common_src.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -675,8 +654,7 @@ describe('documentation gate — package catalog', () => {
   });
 
   it('rejects a missing Purpose line', () => {
-    const section =
-      `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/common/src/index.ts/index.html)\n`;
+    const section = `### @setu-ts/common\n\n**Runtime Compatibility:**\n\n| Deno | Node | Bun | Workers |\n|------|------|-----|---------|\n| ✅ | ✅ | ✅ | ✅ |\n\n**Links:**\n\n- [README](../packages/common/README.md)\n- [API Reference](./api/modules/common_src.html)\n`;
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -720,9 +698,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('no source-grounded override') &&
-        f.message.includes('messaging-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('no source-grounded override') &&
+          f.message.includes('messaging-plugin'),
       ),
     ).toBe(true);
   });
@@ -742,9 +721,9 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('no source-grounded override') &&
-        f.message.includes('queue-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('no source-grounded override') && f.message.includes('queue-plugin'),
       ),
     ).toBe(true);
   });
@@ -759,8 +738,8 @@ describe('documentation gate — package catalog', () => {
       caveat: 'Redis queue adapter',
     });
     // Append an Adapters list that includes the forbidden provider.
-    const section = base +
-      '\n**Adapters:**\n\n- Memory\n- Redis\n- RabbitMQ\n- SQS\n- Workers Queues\n';
+    const section =
+      base + '\n**Adapters:**\n\n- Memory\n- Redis\n- RabbitMQ\n- SQS\n- Workers Queues\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -770,9 +749,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "Workers Queues"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('attributes "Workers Queues"') &&
+          f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -794,9 +774,8 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "R2"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) => f.message.includes('attributes "R2"') && f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -809,8 +788,8 @@ describe('documentation gate — package catalog', () => {
       runtimeCells: '| ✅ | ✅ | ✅ | ✅ |',
       caveat: 'redis transport',
     });
-    const section = base +
-      '\n**Transports:**\n\n- Memory\n- Messaging\n- Redis\n- Durable Objects\n';
+    const section =
+      base + '\n**Transports:**\n\n- Memory\n- Messaging\n- Redis\n- Durable Objects\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -820,9 +799,10 @@ describe('documentation gate — package catalog', () => {
       PACKAGE_METADATA,
     );
     expect(
-      findings.some((f) =>
-        f.message.includes('attributes "Durable Objects"') &&
-        f.message.includes('cloudflare-plugin')
+      findings.some(
+        (f) =>
+          f.message.includes('attributes "Durable Objects"') &&
+          f.message.includes('cloudflare-plugin'),
       ),
     ).toBe(true);
   });
@@ -835,8 +815,8 @@ describe('documentation gate — package catalog', () => {
       runtimeCells: '| ✅ | ✅ | ✅ | ❌ |',
       caveat: 'Redis queue adapter',
     });
-    const section = base +
-      '\n> Workers Queues belong to @setu-ts/cloudflare-plugin, not this package.\n';
+    const section =
+      base + '\n> Workers Queues belong to @setu-ts/cloudflare-plugin, not this package.\n';
     const pluginsMd = `# Plugins\n\n${section}`;
     const runtimeMd = '# Runtime\n\nDeno Node Bun Workers\n';
     const findings = checkPackageCatalog(
@@ -845,9 +825,7 @@ describe('documentation gate — package catalog', () => {
       ['packages/queue-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('attributes "Workers Queues"')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('attributes "Workers Queues"'))).toBe(false);
   });
 
   it('accepts an enumerated valid override (storage-plugin Workers R2)', () => {
@@ -866,9 +844,7 @@ describe('documentation gate — package catalog', () => {
       ['packages/storage-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('no source-grounded override')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('no source-grounded override'))).toBe(false);
   });
 
   it('accepts an enumerated valid override (service-discovery Workers HTTP)', () => {
@@ -887,24 +863,22 @@ describe('documentation gate — package catalog', () => {
       ['packages/service-discovery-plugin'],
       PACKAGE_METADATA,
     );
-    expect(
-      findings.some((f) => f.message.includes('no source-grounded override')),
-    ).toBe(false);
+    expect(findings.some((f) => f.message.includes('no source-grounded override'))).toBe(false);
   });
 });
 
 describe('documentation gate — local links and anchors', () => {
   it('rejects a fake generated API link while accepting a real one', async () => {
     const fs = {
-      readTextFile: async (path: string) => await Deno.readTextFile(path),
-      readDir: (path: string) => Deno.readDir(path),
-      stat: (path: string) => Deno.stat(path),
+      readTextFile: async (path: string) => await readFile(path, 'utf8'),
+      readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
+      stat: (path: string) => stat(path),
     };
     const { targets } = await collectApiEntrypoints(fs);
     const generatedApiPages = buildGeneratedApiPages(targets);
 
     // A real catalog API page (common) must resolve.
-    const realLink = '[API](./api/common/src/index.ts/index.html)';
+    const realLink = '[API](./api/modules/common_src.html)';
     const realSource = realLink;
     const realFindings = await checkLocalLinks('docs/test.md', realSource, [], generatedApiPages);
     expect(realFindings.length).toBe(0);
@@ -916,8 +890,7 @@ describe('documentation gate — local links and anchors', () => {
     expect(fakeFindings.length).toBeGreaterThan(0);
     expect(
       fakeFindings.some((f) => f.message.includes('does not resolve to a known generated page')),
-    )
-      .toBe(true);
+    ).toBe(true);
   });
 
   it('includes the top-level generated docs/api/index.html in the page set', async () => {
@@ -925,9 +898,9 @@ describe('documentation gate — local links and anchors', () => {
     // docs/api/index.html. buildGeneratedApiPages must include it so a doc
     // linking to the bare top-level index resolves instead of false-positiving.
     const fs = {
-      readTextFile: async (path: string) => await Deno.readTextFile(path),
-      readDir: (path: string) => Deno.readDir(path),
-      stat: (path: string) => Deno.stat(path),
+      readTextFile: async (path: string) => await readFile(path, 'utf8'),
+      readDir: async (path: string) => await readdir(path, { withFileTypes: true }),
+      stat: (path: string) => stat(path),
     };
     const { targets } = await collectApiEntrypoints(fs);
     const generatedApiPages = buildGeneratedApiPages(targets);
@@ -940,7 +913,7 @@ describe('documentation gate — local links and anchors', () => {
 
   it('skips generated API links when the page set is null', async () => {
     // When output has not been generated, the gate skips rather than falsely rejecting.
-    const link = '[API](./api/common/src/index.ts/index.html)';
+    const link = '[API](./api/modules/common_src.html)';
     const findings = await checkLocalLinks('docs/test.md', link, [], null);
     expect(findings.length).toBe(0);
   });
@@ -948,25 +921,25 @@ describe('documentation gate — local links and anchors', () => {
   it('rejects a cross-file anchor that matches no heading in the target file', async () => {
     // Write a temp target file with one heading, then link to a missing anchor.
     const targetPath = 'test/fixtures/link-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       const source = `[bad](../test/fixtures/link-target.md#missing-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
   it('accepts a cross-file anchor that matches a heading in the target file', async () => {
     const targetPath = 'test/fixtures/link-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       const source = `[good](../test/fixtures/link-target.md#real-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
@@ -978,26 +951,26 @@ describe('documentation gate — local links and anchors', () => {
 
   it('accepts a decoded URI-encoded path and fragment', async () => {
     const targetPath = 'test/fixtures/link target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n\n## Real Heading\n');
+    await writeFile(targetPath, '# Target\n\n## Real Heading\n');
     try {
       // %20 decodes to a space; the path resolves.
       const source = `[good](../test/fixtures/link%20target.md#real-heading)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
   it('strips a query string before resolving', async () => {
     const targetPath = 'test/fixtures/query-target.md';
-    await Deno.writeTextFile(targetPath, '# Target\n');
+    await writeFile(targetPath, '# Target\n');
     try {
       const source = `[good](../test/fixtures/query-target.md?raw=true)`;
       const findings = await checkLocalLinks('docs/test.md', source, [targetPath]);
       expect(findings.length).toBe(0);
     } finally {
-      await Deno.remove(targetPath);
+      await rm(targetPath);
     }
   });
 
@@ -1063,39 +1036,41 @@ describe('documentation gate — local links and anchors', () => {
 
 describe('documentation gate — script subprocess integration', () => {
   it('check-docs.ts main() exits 0 on a single good file', async () => {
-    const cmd = new Deno.Command('deno', {
-      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts', 'README.md'],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const output = await cmd.output();
+    const cmd = runProcess(process.execPath, [
+      '--import',
+      './scripts/lib/source-register.ts',
+      'scripts/check-docs.ts',
+      'README.md',
+    ]);
+    const output = await cmd;
     expect(output.code).toBe(0);
   });
 
   it('check-docs.ts main() default scan exits 0 on the real repository', async () => {
-    const cmd = new Deno.Command('deno', {
-      args: ['run', '--allow-read', '--allow-run', 'scripts/check-docs.ts'],
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const output = await cmd.output();
+    const cmd = runProcess(process.execPath, [
+      '--import',
+      './scripts/lib/source-register.ts',
+      'scripts/check-docs.ts',
+    ]);
+    const output = await cmd;
     expect(output.code).toBe(0);
   });
 
   it('check-docs.ts main() exits 1 on a file with a broken anchor', async () => {
     const tmpPath = '.tmp/broken-anchor.md';
-    await Deno.mkdir('.tmp', { recursive: true });
-    await Deno.writeTextFile(tmpPath, '# T\n\n## A\n\nSee [B](#nope).\n');
+    await mkdir('.tmp', { recursive: true });
+    await writeFile(tmpPath, '# T\n\n## A\n\nSee [B](#nope).\n');
     try {
-      const cmd = new Deno.Command('deno', {
-        args: ['run', '--allow-read', 'scripts/check-docs.ts', tmpPath],
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      const output = await cmd.output();
+      const cmd = runProcess(process.execPath, [
+        '--import',
+        './scripts/lib/source-register.ts',
+        'scripts/check-docs.ts',
+        tmpPath,
+      ]);
+      const output = await cmd;
       expect(output.code).toBe(1);
     } finally {
-      await Deno.remove(tmpPath);
+      await rm(tmpPath);
     }
   });
 });
@@ -1281,13 +1256,12 @@ describe('package exports table', () => {
     const omitted = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n\n## Full API\n';
     expect(diffExportsTable(omitted, groups)[0]).toContain('omits 1: CachePlugin (function)');
 
-    const fabricated = '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n' +
+    const fabricated =
+      '# x\n\n## Exports\n\n| Export | Kind |\n| --- | --- |\n' +
       '| `CachePlugin` | function |\n| `Ghost` | class |\n\n## Full API\n';
     expect(diffExportsTable(fabricated, groups)[0]).toContain('do not exist: Ghost (class)');
 
-    expect(diffExportsTable('# x\n\nNo table.\n', groups)).toEqual([
-      'has no `## Exports` section',
-    ]);
+    expect(diffExportsTable('# x\n\nNo table.\n', groups)).toEqual(['has no `## Exports` section']);
   });
 });
 
@@ -1347,7 +1321,7 @@ describe('package exports table — malformed payload branches', () => {
 describe('documentation gate — generated API tree links', () => {
   /**
    * `docs/api/` is generated and gitignored, so it is ABSENT on every clean
-   * checkout and present on any machine that has run `deno task docs:api`.
+   * checkout and present on any machine that has run `pnpm run docs:api`.
    *
    * The bare site-root link `[Generated API Documentation](./api/)` in
    * `docs/README.md` normalises to `docs/api` — no trailing slash — which the
@@ -1356,10 +1330,7 @@ describe('documentation gate — generated API tree links', () => {
    * tree where the output had not been generated. Locally it always passed;
    * CI failed on the first clean checkout. These cases pin both states.
    */
-  const generatedPages = new Set([
-    'docs/api/index.html',
-    'docs/api/kernel/src/index.ts/index.html',
-  ]);
+  const generatedPages = new Set(['docs/api/index.html', 'docs/api/modules/kernel_src.html']);
 
   it('resolves the bare site root to the generated index, tree absent or not', async () => {
     const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
@@ -1379,7 +1350,7 @@ describe('documentation gate — generated API tree links', () => {
    * The discriminating case, and the only one that can be.
    *
    * `checkLocalLinks` falls back to a disk stat, and `docs/api/` exists on any
-   * machine that has run `deno task docs:api` — so a test asserting the bare
+   * machine that has run `pnpm run docs:api` — so a test asserting the bare
    * root RESOLVES passes with or without the fix locally, for the wrong reason.
    * That is the same warm-state trap the bug itself came from.
    *
@@ -1392,7 +1363,7 @@ describe('documentation gate — generated API tree links', () => {
    */
   it('validates the bare site root against the page set, not the filesystem', async () => {
     const source = '# Docs\n\n- [Generated API Documentation](./api/)\n';
-    const withoutIndex = new Set(['docs/api/kernel/src/index.ts/index.html']);
+    const withoutIndex = new Set(['docs/api/modules/kernel_src.html']);
 
     const findings = await checkLocalLinks(
       'docs/README.md',
@@ -1408,12 +1379,13 @@ describe('documentation gate — generated API tree links', () => {
   it('accepts the site root written without a trailing slash', async () => {
     const source = '# Docs\n\n- [API](./api)\n';
 
-    expect(await checkLocalLinks('docs/README.md', source, ['docs/README.md'], generatedPages))
-      .toEqual([]);
+    expect(
+      await checkLocalLinks('docs/README.md', source, ['docs/README.md'], generatedPages),
+    ).toEqual([]);
   });
 
   it('still rejects a generated page that the manifest cannot produce', async () => {
-    const source = '# Docs\n\n- [Ghost](./api/no-such-package/src/index.ts/index.html)\n';
+    const source = '# Docs\n\n- [Ghost](./api/modules/no-such-package_src.html)\n';
 
     const findings = await checkLocalLinks(
       'docs/README.md',
@@ -1474,8 +1446,8 @@ describe('documentation gate — install-snippet versions', () => {
   });
 
   it('accepts a reference to the shipping version, with or without the caret', () => {
-    const source = 'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.6\n' +
-      'jsr:@setu-ts/common@0.1.0-alpha.6\n';
+    const source =
+      'deno add jsr:@setu-ts/kernel@^0.1.0-alpha.6\n' + 'jsr:@setu-ts/common@0.1.0-alpha.6\n';
     expect(checkInstallVersions(doc('README.md', source), '0.1.0-alpha.6')).toEqual([]);
   });
 
@@ -1629,6 +1601,30 @@ describe('documentation gate — install-snippet versions', () => {
     expect(fenceExtension('jsx')).toBe('tsx');
     expect(fenceExtension('tsx')).toBe('tsx');
     expect(fenceExtension('typescript')).toBe('ts');
+  });
+
+  it('reads the post-alpha 0.10.x line, and still reads 0.9.x as stale beside it', () => {
+    // Stale WITHIN 0.10 — the only case that discriminates. 0.10 is the first
+    // two-digit minor, so it must not be read as the 0.1 line either.
+    const withinLine = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.10.0\n'),
+      '0.10.1',
+    );
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.10.0');
+    expect(withinLine[0]?.message).toContain('0.10.1');
+
+    expect(
+      checkInstallVersions(doc('README.md', 'npm install @setu-ts/kernel@^0.10.0\n'), '0.10.0'),
+    ).toEqual([]);
+
+    const outgoing = checkInstallVersions(
+      doc('README.md', 'npm install @setu-ts/kernel@^0.9.0\n'),
+      '0.10.0',
+    );
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.9.0');
+    expect(outgoing[0]?.message).toContain('0.10.0');
   });
 
   it('reads the post-alpha 0.9.x line, and still reads 0.8.x as stale beside it', () => {
@@ -1823,15 +1819,16 @@ describe('documentation gate — bare version claims', () => {
   });
 
   it('carries a standalone marker across a blockquote break, not only a blank line', () => {
-    const source = '> [!IMPORTANT]\n> **Status: `v0.1.0-alpha.7`**\n>\n' +
+    const source =
+      '> [!IMPORTANT]\n> **Status: `v0.1.0-alpha.7`**\n>\n' +
       '> <!-- version:history -->\n>\n> `v0.1.0-alpha.5` renamed the project\n';
     expect(checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7')).toEqual([]);
   });
 
   // Otherwise one marked paragraph would exempt everything below it.
   it('stops carrying after the block the standalone marker covers', () => {
-    const source = '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed it\n\n' +
-      'ships `v0.1.0-alpha.6`\n';
+    const source =
+      '<!-- version:history -->\n\n`v0.1.0-alpha.5` renamed it\n\n' + 'ships `v0.1.0-alpha.6`\n';
     const findings = checkVersionClaims(doc('README.md', source), '0.1.0-alpha.7');
     expect(findings).toHaveLength(1);
     expect(findings[0]?.line).toBe(5);
@@ -1971,6 +1968,21 @@ describe('documentation gate — bare version claims', () => {
 
   // The bare-claim checker reads its own copy of the alternation, so the 0.6
   // line is unproven here until asserted here.
+  it('reads the post-alpha 0.10.x line in a bare claim', () => {
+    const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.10.0`\n'), '0.10.1');
+    expect(withinLine).toHaveLength(1);
+    expect(withinLine[0]?.message).toContain('0.10.0');
+
+    expect(checkVersionClaims(doc('README.md', 'ships `v0.10.0`\n'), '0.10.0')).toEqual([]);
+
+    const outgoing = checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.10.0');
+    expect(outgoing).toHaveLength(1);
+    expect(outgoing[0]?.message).toContain('0.9.0');
+
+    const tenNoise = 'bound to 127.0.10.1 and 10.0.10.2, requires foo 10.10.1\n';
+    expect(checkVersionClaims(doc('README.md', tenNoise), '0.10.0')).toEqual([]);
+  });
+
   it('reads the post-alpha 0.9.x line in a bare claim', () => {
     const withinLine = checkVersionClaims(doc('README.md', 'ships `v0.9.0`\n'), '0.9.1');
     expect(withinLine).toHaveLength(1);
@@ -2043,8 +2055,9 @@ describe('documentation gate — bare version claims', () => {
   // this project's lines explicitly instead.
   it('matches a prerelease whole, so a correct reference is not reported stale', () => {
     expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.1')).toEqual([]);
-    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'))
-      .toHaveLength(1);
+    expect(
+      checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc.1`\n'), '0.2.1-rc.2'),
+    ).toHaveLength(1);
   });
 
   it('matches a hyphenated prerelease identifier and build metadata in a claim', () => {
@@ -2052,8 +2065,9 @@ describe('documentation gate — bare version claims', () => {
       expect(checkVersionClaims(doc('README.md', `ships \`v${version}\`\n`), version)).toEqual([]);
     }
     // Still discriminates: a DIFFERENT hyphenated prerelease is stale.
-    expect(checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'))
-      .toHaveLength(1);
+    expect(
+      checkVersionClaims(doc('README.md', 'ships `v0.2.1-rc-1`\n'), '0.2.1-rc-2'),
+    ).toHaveLength(1);
   });
 
   // Without a left boundary the `0.2.1` inside an unrelated `10.2.1` reads as a
@@ -2102,17 +2116,15 @@ describe('documentation gate — bare version claims', () => {
 
   it('leaves the documents whose old versions are a record alone', () => {
     for (const file of ['CHANGELOG.md', 'docs/releasing.md', 'plans/milestone-1.md']) {
-      const findings = checkVersionClaims(
-        doc(file, 'shipped `v0.1.0-alpha.1`\n'),
-        '0.1.0-alpha.7',
-      );
+      const findings = checkVersionClaims(doc(file, 'shipped `v0.1.0-alpha.1`\n'), '0.1.0-alpha.7');
       expect(findings).toEqual([]);
     }
   });
 
   it('reads a path written with a leading ./ as the same document', () => {
-    expect(checkVersionClaims(doc('./CLAUDE.md', 'at `0.1.0-alpha.2`\n'), '0.1.0-alpha.7'))
-      .toEqual([]);
+    expect(checkVersionClaims(doc('./CLAUDE.md', 'at `0.1.0-alpha.2`\n'), '0.1.0-alpha.7')).toEqual(
+      [],
+    );
   });
 });
 
@@ -2136,15 +2148,16 @@ describe('documentation gate — which runtimes host a workspace', () => {
   ];
 
   it('is exactly deno, node and bun — Workers is the only target refused', async () => {
-    const { WORKSPACE_RUNTIMES } = await import(
-      '../packages/cli/src/workspace/runtime-profile.ts'
-    );
+    const { WORKSPACE_RUNTIMES } = await import('../packages/cli/src/workspace/runtime-profile.ts');
     const { TARGET_RUNTIMES } = await import('../packages/cli/src/constants.ts');
 
     const refused = TARGET_RUNTIMES.filter((runtime) => !WORKSPACE_RUNTIMES.includes(runtime));
 
-    expect([...WORKSPACE_RUNTIMES], DOCUMENTS_STATING_THE_SET.join('; '))
-      .toEqual(['deno', 'node', 'bun']);
+    expect([...WORKSPACE_RUNTIMES], DOCUMENTS_STATING_THE_SET.join('; ')).toEqual([
+      'deno',
+      'node',
+      'bun',
+    ]);
     expect(refused, DOCUMENTS_STATING_THE_SET.join('; ')).toEqual(['cloudflare-workers']);
   });
 });
@@ -2162,19 +2175,16 @@ describe('documentation gate — which runtimes host a workspace', () => {
  */
 describe('documentation gate — no nonexistent kernel API in package READMEs (M70i §3.10b)', () => {
   const FORBIDDEN = [/\bnew\s+Application\s*\(/, /\bapp\.use\s*\(/];
-  const FILES = [
-    ...readPackageReadmes(),
-    'PUBLIC_API.md',
-  ];
+  const FILES = [...readPackageReadmes(), 'PUBLIC_API.md'];
 
   /** Every package README on disk, discovered rather than enumerated. */
   function readPackageReadmes(): string[] {
     const out: string[] = [];
-    for (const entry of Deno.readDirSync('packages')) {
-      if (!entry.isDirectory) continue;
+    for (const entry of readdirSync('packages', { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const candidate = `packages/${entry.name}/README.md`;
       try {
-        Deno.statSync(candidate);
+        statSync(candidate);
         out.push(candidate);
       } catch {
         // No README in this package — nothing to check.
@@ -2188,24 +2198,22 @@ describe('documentation gate — no nonexistent kernel API in package READMEs (M
     const { TS_ALIASES } = await import('./fixtures/snippets/fence-engine.ts');
     expect(FILES.length).toBeGreaterThanOrEqual(5);
     for (const file of FILES) {
-      const lines = (await Deno.readTextFile(file)).split('\n');
+      const lines = (await readFile(file, 'utf8')).split('\n');
       const { blocks, unclosedAt } = scanFences(lines);
       // An UNCLOSED fence is omitted from `blocks` entirely (measured: a file
       // whose only fence never closes yields 0 blocks), so its contents escape
       // this scan. Fail on the malformed file instead of silently covering
       // less than the file claims.
-      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`)
-        .toBeNull();
+      expect(unclosedAt, `${file} has an unclosed code fence at line ${unclosedAt}`).toBeNull();
       for (const block of blocks) {
         const lang = (block as { info: string }).info;
         // Reuse the fence engine's alias set rather than a hardcoded pair: it
         // includes `tsx`, and a `tsx` fence carrying the nonexistent API used to
         // slip past this gate entirely.
         if (!TS_ALIASES.has(lang)) continue;
-        const code = lines.slice(
-          (block as { bodyStart: number }).bodyStart,
-          (block as { bodyEnd: number }).bodyEnd,
-        ).join('\n');
+        const code = lines
+          .slice((block as { bodyStart: number }).bodyStart, (block as { bodyEnd: number }).bodyEnd)
+          .join('\n');
         for (const pattern of FORBIDDEN) {
           expect(
             pattern.test(code),
@@ -2273,8 +2281,8 @@ describe('docs/upgrading.md release attribution', () => {
   }
 
   it('files every reader action under the release that shipped it', async () => {
-    const guide = await Deno.readTextFile('docs/upgrading.md');
-    const sections = changelogSections(await Deno.readTextFile('CHANGELOG.md'));
+    const guide = await readFile('docs/upgrading.md', 'utf8');
+    const sections = changelogSections(await readFile('CHANGELOG.md', 'utf8'));
 
     let release: string | null = null;
     let checked = 0;
@@ -2365,7 +2373,7 @@ describe('documentation gate — diagnostics field tables match their fences (M1
 
   for (const readme of DIAGNOSTIC_READMES) {
     it(`${readme} lists only fields its ## Diagnostics fence sets`, async () => {
-      const { fields, fence } = diagnosticsSection(await Deno.readTextFile(readme));
+      const { fields, fence } = diagnosticsSection(await readFile(readme, 'utf8'));
       expect(fields.length).toBeGreaterThan(0);
       for (const field of fields) {
         expect(
@@ -2396,5 +2404,31 @@ describe('documentation gate — diagnostics field tables match their fences (M1
     const { fields, fence } = diagnosticsSection(source);
     expect(fields).toEqual(['enabled', 'alias']);
     expect(fields.filter((field) => !setsField(fence, field))).toEqual(['alias']);
+  });
+});
+
+describe('documentation walker', () => {
+  it('skips the generated API reference by exact path', async () => {
+    // TypeDoc copies every linked Markdown file into docs/api/media/ and writes
+    // its own scripts beside them; scanning them reported the copies as stale
+    // prose (M111e3). A sibling sharing the prefix is still scanned.
+    const base = await tempDir({ prefix: 'docs-walker-' });
+    try {
+      for (const file of [
+        'docs/guide.md',
+        'docs/api/media/CHANGELOG.md',
+        'docs/api/assets/main.js',
+        'docs/apiary/notes.md',
+      ]) {
+        await mkdir(`${base}/${file.slice(0, file.lastIndexOf('/'))}`, { recursive: true });
+        await writeFile(`${base}/${file}`, '# x\n');
+      }
+      expect(await collectMarkdown('docs', base)).toEqual([
+        'docs/apiary/notes.md',
+        'docs/guide.md',
+      ]);
+    } finally {
+      await rm(base, { recursive: true });
+    }
   });
 });

@@ -96,17 +96,14 @@ describe('SsePlugin registration', () => {
       },
       config: {
         get: () => {},
-        getOrThrow: () => ({} as never),
+        getOrThrow: () => ({}) as never,
         has: () => false,
       },
       environment: {
         validate: () => {},
       },
       health: {
-        register: (
-          name: string,
-          indicator: () => Promise<{ status: string; data?: unknown }>,
-        ) => {
+        register: (name: string, indicator: () => Promise<{ status: string; data?: unknown }>) => {
           healthIndicatorName = name;
           healthIndicatorFn = indicator;
         },
@@ -270,7 +267,7 @@ describe('SsePlugin duplicate registration', () => {
         group: () => {},
         listRoutes: () => [],
       },
-      config: { get: () => {}, getOrThrow: () => ({} as never), has: () => false },
+      config: { get: () => {}, getOrThrow: () => ({}) as never, has: () => false },
       environment: { validate: () => {} },
       health: { register: () => {} },
       metrics: { register: () => {} },
@@ -329,7 +326,7 @@ describe('SsePlugin duplicate registration', () => {
         group: () => {},
         listRoutes: () => [],
       },
-      config: { get: () => {}, getOrThrow: () => ({} as never), has: () => false },
+      config: { get: () => {}, getOrThrow: () => ({}) as never, has: () => false },
       environment: { validate: () => {} },
       health: { register: () => {} },
       metrics: { register: () => {} },
@@ -402,7 +399,7 @@ describe('SsePlugin with a realtime backplane', () => {
     let onClose: (() => void) | undefined;
     const ctx = {
       runtime: {
-        setInterval: (): TimerHandle => ({} as TimerHandle),
+        setInterval: (): TimerHandle => ({}) as TimerHandle,
         clearInterval: (): void => {},
         uuid: (): string => 'test-uuid',
       },
@@ -439,14 +436,15 @@ describe('SsePlugin with a realtime backplane', () => {
     expect(backplane.handlers.length).toBe(1);
 
     const received: SseMessage[] = [];
-    harness.service().channel('news').add(
-      {
+    harness
+      .service()
+      .channel('news')
+      .add({
         isOpen: true,
         send: (msg: SseMessage): void => {
           received.push(msg);
         },
-      } as never,
-    );
+      } as never);
 
     backplane.handlers[0]?.({
       kind: 'sse-channel',
@@ -482,14 +480,15 @@ describe('SsePlugin with a realtime backplane', () => {
     await (SsePlugin() as IPlugin).register(harness.ctx);
 
     const received: SseMessage[] = [];
-    harness.service().channel('news').add(
-      {
+    harness
+      .service()
+      .channel('news')
+      .add({
         isOpen: true,
         send: (msg: SseMessage): void => {
           received.push(msg);
         },
-      } as never,
-    );
+      } as never);
     // Channels still work; they simply never leave the process.
     harness.service().channel('news').publish({ data: 'local' });
     expect(received).toEqual([{ data: 'local' }]);
@@ -525,7 +524,7 @@ describe('SsePlugin scaling notice', () => {
     };
     const ctx = {
       runtime: {
-        setInterval: (): TimerHandle => ({} as TimerHandle),
+        setInterval: (): TimerHandle => ({}) as TimerHandle,
         clearInterval: (): void => {},
         uuid: (): string => 'test-uuid',
       },

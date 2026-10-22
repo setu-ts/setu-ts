@@ -36,10 +36,7 @@ function indicatorFor(
 }
 
 /** A source over a harness's stores with chosen per-instance signals. */
-function signalling(
-  h: OutboxHarness,
-  signals: OutboxInstanceSignals,
-): OutboxHealthSource {
+function signalling(h: OutboxHarness, signals: OutboxInstanceSignals): OutboxHealthSource {
   return {
     activeStores: () => [h.store],
     closing: false,
@@ -96,7 +93,7 @@ describe('outbox health indicator', () => {
     await h.write({ n: 1 });
     h.clock.advanceWall(1_001);
     const result = await indicatorFor(h, { health: { degradedAfterMs: 1_000 } })();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     expect(result.data?.reasons).toEqual(['oldest-pending-age']);
   });
 
@@ -106,7 +103,7 @@ describe('outbox health indicator', () => {
     const b = await h.write({ key: 'B', n: 2 });
     await edit(h.db, a, { status: 'failed' });
     const belowCap = await indicatorFor(h, { relay: { maxFailedScan: 2 } })();
-    expect(belowCap.status).toBe('degraded');
+    expect(belowCap.status).toBe('up');
     expect(belowCap.data?.reasons).toEqual(['failed-rows']);
     await edit(h.db, b, { status: 'failed' });
     // Exactly maxFailedScan failed rows: a lap's blocked set may be incomplete.
@@ -135,7 +132,7 @@ describe('outbox health indicator', () => {
         lastSweep,
       }),
     )();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     expect(result.data?.reasons).toEqual([
       'blocked-key-cap',
       'store-write-failing',

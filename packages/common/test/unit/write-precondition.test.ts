@@ -4,9 +4,8 @@ import type { WritePrecondition } from '../../src/index.ts';
 
 /** The refusal reason, or `undefined` when the inputs are accepted. */
 function problemOf(...args: [unknown] | [unknown, unknown]): string | undefined {
-  const checked = args.length === 1
-    ? checkWritePrecondition(args[0])
-    : checkWritePrecondition(args[0], args[1]);
+  const checked =
+    args.length === 1 ? checkWritePrecondition(args[0]) : checkWritePrecondition(args[0], args[1]);
   return checked.ok ? undefined : checked.problem;
 }
 

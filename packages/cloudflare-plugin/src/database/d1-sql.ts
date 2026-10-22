@@ -142,8 +142,11 @@ function buildFilter(filter: FilterExpression, params: unknown[]): string {
     );
   }
   if (
-    filter.value instanceof Date && (filter.operator === 'gt' || filter.operator === 'gte' ||
-      filter.operator === 'lt' || filter.operator === 'lte')
+    filter.value instanceof Date &&
+    (filter.operator === 'gt' ||
+      filter.operator === 'gte' ||
+      filter.operator === 'lt' ||
+      filter.operator === 'lte')
   ) {
     throw new CloudflareUnsupportedError(
       `D1: Date values in ordered comparisons are not supported (adapter 'd1'); ` +
@@ -176,13 +179,14 @@ function buildFilter(filter: FilterExpression, params: unknown[]): string {
   }
 
   params.push(filter.value);
-  const operator = filter.operator === 'gt'
-    ? '>'
-    : filter.operator === 'gte'
-    ? '>='
-    : filter.operator === 'lt'
-    ? '<'
-    : '<=';
+  const operator =
+    filter.operator === 'gt'
+      ? '>'
+      : filter.operator === 'gte'
+        ? '>='
+        : filter.operator === 'lt'
+          ? '<'
+          : '<=';
   return `${column} ${operator} ?${params.length}`;
 }
 
@@ -196,8 +200,9 @@ function buildOrderBy(orderBy: Record<string, string>): string {
   const entries = Object.entries(orderBy);
   if (entries.length === 0) return '';
 
-  const clauses = entries.map(([column, direction]) =>
-    `${quoteIdentifier(column, 'order column')} ${direction === 'desc' ? 'DESC' : 'ASC'}`
+  const clauses = entries.map(
+    ([column, direction]) =>
+      `${quoteIdentifier(column, 'order column')} ${direction === 'desc' ? 'DESC' : 'ASC'}`,
   );
   return ` ORDER BY ${clauses.join(', ')}`;
 }
@@ -215,9 +220,10 @@ function buildOrderBy(orderBy: Record<string, string>): string {
  */
 export function buildSelect(target: D1Target, query: NormalizedQuery): D1Statement {
   const params: unknown[] = [];
-  const columns = query.select.length === 0
-    ? '*'
-    : query.select.map((c) => quoteIdentifier(c, 'selected column')).join(', ');
+  const columns =
+    query.select.length === 0
+      ? '*'
+      : query.select.map((c) => quoteIdentifier(c, 'selected column')).join(', ');
 
   let sql = `SELECT ${columns} FROM ${quoteIdentifier(target.table, 'table name')}`;
   sql += buildWhere(query.where, query.filter, params);
@@ -250,11 +256,7 @@ export function buildSelect(target: D1Target, query: NormalizedQuery): D1Stateme
  * @returns The predicate fragment including its leading space
  * @throws {CloudflareUnsupportedError} On an invalid identifier or parameter overflow
  */
-function buildCompositeKeyPredicate(
-  target: D1Target,
-  id: EntityKey,
-  params: unknown[],
-): string {
+function buildCompositeKeyPredicate(target: D1Target, id: EntityKey, params: unknown[]): string {
   const parts: string[] = [];
   let nextIndex = params.length;
   for (const column of target.primaryKey) {
@@ -289,8 +291,10 @@ function buildCompositeKeyPredicate(
  */
 export function buildSelectById(target: D1Target, id: EntityKey): D1Statement {
   const params: unknown[] = [];
-  const sql = `SELECT * FROM ${quoteIdentifier(target.table, 'table name')}` +
-    buildCompositeKeyPredicate(target, id, params) + ' LIMIT 1';
+  const sql =
+    `SELECT * FROM ${quoteIdentifier(target.table, 'table name')}` +
+    buildCompositeKeyPredicate(target, id, params) +
+    ' LIMIT 1';
   return { sql, params };
 }
 
@@ -306,10 +310,7 @@ export function buildSelectById(target: D1Target, id: EntityKey): D1Statement {
  * @throws {CloudflareUnsupportedError} On an invalid identifier, a parameter
  * overflow, or an empty row
  */
-export function buildInsert(
-  target: D1Target,
-  data: Partial<Record<string, unknown>>,
-): D1Statement {
+export function buildInsert(target: D1Target, data: Partial<Record<string, unknown>>): D1Statement {
   const entries = Object.entries(data);
   if (entries.length === 0) {
     throw new CloudflareUnsupportedError(
@@ -323,7 +324,8 @@ export function buildInsert(
 
   assertParamBudget(params, 'insert');
   return {
-    sql: `INSERT INTO ${quoteIdentifier(target.table, 'table name')} (${columns}) ` +
+    sql:
+      `INSERT INTO ${quoteIdentifier(target.table, 'table name')} (${columns}) ` +
       `VALUES (${placeholders}) RETURNING *`,
     params,
   };
@@ -355,13 +357,16 @@ export function buildUpdate(
   }
 
   const params: unknown[] = [];
-  const assignments = entries.map(([column, value]) => {
-    params.push(value);
-    return `${quoteIdentifier(column, 'update column')} = ?${params.length}`;
-  }).join(', ');
+  const assignments = entries
+    .map(([column, value]) => {
+      params.push(value);
+      return `${quoteIdentifier(column, 'update column')} = ?${params.length}`;
+    })
+    .join(', ');
 
   const keyPred = buildCompositeKeyPredicate(target, id, params);
-  const sql = `UPDATE ${quoteIdentifier(target.table, 'table name')} SET ${assignments}` +
+  const sql =
+    `UPDATE ${quoteIdentifier(target.table, 'table name')} SET ${assignments}` +
     `${keyPred} RETURNING *`;
 
   assertParamBudget(params, 'update');
@@ -383,7 +388,8 @@ export function buildDelete(target: D1Target, id: EntityKey): D1Statement {
   const params: unknown[] = [];
   const keyPred = buildCompositeKeyPredicate(target, id, params);
   const returningCols = target.primaryKey.map((c) => quoteIdentifier(c, 'primary key')).join(', ');
-  const sql = `DELETE FROM ${quoteIdentifier(target.table, 'table name')}` +
+  const sql =
+    `DELETE FROM ${quoteIdentifier(target.table, 'table name')}` +
     `${keyPred} RETURNING ${returningCols}`;
   return { sql, params };
 }
@@ -391,16 +397,18 @@ export function buildDelete(target: D1Target, id: EntityKey): D1Statement {
 /** Conjoins a validated predicate without replacing any key condition. */
 function withPrecondition(statement: D1Statement, where: WritePrecondition): D1Statement {
   const params = [...statement.params];
-  const predicate = Object.entries(where).map(([field, value]) => {
-    // Checked before quoting so the refusal names no caller-supplied field.
-    if (!IDENTIFIER.test(field)) {
-      throw new CloudflareUnsupportedError(
-        'D1: a write precondition field is not a valid SQL identifier.',
-      );
-    }
-    params.push(value);
-    return `${quoteIdentifier(field, 'write precondition column')} = ?${params.length}`;
-  }).join(' AND ');
+  const predicate = Object.entries(where)
+    .map(([field, value]) => {
+      // Checked before quoting so the refusal names no caller-supplied field.
+      if (!IDENTIFIER.test(field)) {
+        throw new CloudflareUnsupportedError(
+          'D1: a write precondition field is not a valid SQL identifier.',
+        );
+      }
+      params.push(value);
+      return `${quoteIdentifier(field, 'write precondition column')} = ?${params.length}`;
+    })
+    .join(' AND ');
   assertParamBudget(params, 'conditional write');
   return { sql: statement.sql.replace(' RETURNING ', ` AND ${predicate} RETURNING `), params };
 }
@@ -457,7 +465,8 @@ export function buildCount(
   filter?: FilterExpression,
 ): D1Statement {
   const params: unknown[] = [];
-  let sql = `SELECT COUNT(*) AS "${D1_COUNT_ALIAS}" FROM ` +
+  let sql =
+    `SELECT COUNT(*) AS "${D1_COUNT_ALIAS}" FROM ` +
     `${quoteIdentifier(target.table, 'table name')}`;
   sql += buildWhere(where, filter, params);
 

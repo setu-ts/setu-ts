@@ -20,9 +20,7 @@ export class DrizzleRepository<
   Entity extends Record<string, unknown>,
   Id extends EntityKey = string,
 > extends BaseRepository<Entity, Id> {
-  constructor(
-    protected override readonly _dataSource: DataSource,
-  ) {
+  constructor(protected override readonly _dataSource: DataSource) {
     super(_dataSource);
   }
 }

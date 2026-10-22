@@ -9,6 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { HandlerResult } from '@setu-ts/common';
+import { REQUEST_ORIGIN_STATE_KEY } from '@setu-ts/common';
 import type { PopulateLoadContext, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import { bridgeRequestToRR } from '../../src/handler/request-bridge.ts';
 import { servicesContext, userContext } from '../../src/handler/context-keys.ts';
@@ -18,6 +19,19 @@ import {
 } from '../fixtures/fake-handler.ts';
 
 describe('request-bridge', () => {
+  it('passes the public URL to loaders and keeps the URL without publication', async () => {
+    const { ctx } = buildCtx();
+    let received = '';
+    const handler: SsrRequestHandler = (request) => {
+      received = request.url;
+      return Promise.resolve(new Response('ok'));
+    };
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
+    expect(received).toBe(ctx.request.url);
+    ctx.state.set(REQUEST_ORIGIN_STATE_KEY, { protocol: 'https', host: 'public.example' });
+    await bridgeRequestToRR(ctx, handler, createFakeLoadContextFactory());
+    expect(received).toBe('https://public.example/');
+  });
   // Build a minimal IRequestContext mock capturing response state.
   function buildCtx(overrides?: { method?: string; body?: Uint8Array }): {
     ctx: Parameters<typeof bridgeRequestToRR>[0];
@@ -46,14 +60,7 @@ describe('request-bridge', () => {
       ctx: {
         id: 'r1',
         request: {
-          method: method as
-            | 'GET'
-            | 'POST'
-            | 'PUT'
-            | 'PATCH'
-            | 'DELETE'
-            | 'HEAD'
-            | 'OPTIONS',
+          method: method as 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'HEAD' | 'OPTIONS',
           url: 'http://localhost/',
           path: '/',
           headers: new Headers(),

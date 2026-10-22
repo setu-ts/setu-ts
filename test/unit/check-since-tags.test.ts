@@ -10,8 +10,10 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { run as runProcess } from './../../scripts/lib/run.ts';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   collectSinceTags,
@@ -189,8 +191,9 @@ describe('mayBeSkipped', () => {
 
 describe('lineStandIn', () => {
   it("picks the line's last prerelease, ignoring other lines", () => {
-    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2', '0.1.0-alpha.10', '0.1.0-alpha.9', '0.2.0']))
-      .toBe('0.1.0-alpha.10');
+    expect(
+      lineStandIn('0.1.0', ['0.1.0-alpha.2', '0.1.0-alpha.10', '0.1.0-alpha.9', '0.2.0']),
+    ).toBe('0.1.0-alpha.10');
   });
 
   it('answers null when the line shipped no prerelease', () => {
@@ -198,8 +201,7 @@ describe('lineStandIn', () => {
   });
 
   it('picks the later prerelease when one carries build metadata', () => {
-    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10']))
-      .toBe('0.1.0-alpha.10');
+    expect(lineStandIn('0.1.0', ['0.1.0-alpha.2+ci.1', '0.1.0-alpha.10'])).toBe('0.1.0-alpha.10');
   });
 
   it('answers null for a tag that is itself a prerelease', () => {
@@ -209,8 +211,9 @@ describe('lineStandIn', () => {
 
 describe('registry URLs and package names', () => {
   it('builds the file URL for a version', () => {
-    expect(registryFileUrl('https://jsr.io', '@setu-ts/common', '0.5.0', 'src/form/form-body.ts'))
-      .toBe('https://jsr.io/@setu-ts/common/0.5.0/src/form/form-body.ts');
+    expect(
+      registryFileUrl('https://jsr.io', '@setu-ts/common', '0.5.0', 'src/form/form-body.ts'),
+    ).toBe('https://jsr.io/@setu-ts/common/0.5.0/src/form/form-body.ts');
   });
 
   it('derives the scoped name from a member path, starters included', () => {
@@ -222,10 +225,10 @@ describe('registry URLs and package names', () => {
 describe('defaultListSourceFiles — the real walk', () => {
   it('finds .ts files under <member>/src, recursively and sorted', async () => {
     const root = '.tmp/check-since-tags-fixture/member';
-    await Deno.mkdir(`${root}/src/nested`, { recursive: true });
-    await Deno.writeTextFile(`${root}/src/a.ts`, 'export const a = 1;\n');
-    await Deno.writeTextFile(`${root}/src/nested/b.ts`, 'export const b = 1;\n');
-    await Deno.writeTextFile(`${root}/src/notes.txt`, 'not source\n');
+    await mkdir(`${root}/src/nested`, { recursive: true });
+    await writeFile(`${root}/src/a.ts`, 'export const a = 1;\n');
+    await writeFile(`${root}/src/nested/b.ts`, 'export const b = 1;\n');
+    await writeFile(`${root}/src/notes.txt`, 'not source\n');
     expect(await defaultListSourceFiles(root)).toEqual([
       `${root}/src/a.ts`,
       `${root}/src/nested/b.ts`,
@@ -233,7 +236,7 @@ describe('defaultListSourceFiles — the real walk', () => {
   });
 
   it('tolerates a member without a src directory', async () => {
-    await Deno.mkdir('.tmp/check-since-tags-fixture/bare', { recursive: true });
+    await mkdir('.tmp/check-since-tags-fixture/bare', { recursive: true });
     expect(await defaultListSourceFiles('.tmp/check-since-tags-fixture/bare')).toEqual([]);
   });
 });
@@ -324,7 +327,9 @@ function options(
     listSourceFiles: (member: string) => {
       const prefix = `${member.replace(/^\.\//, '')}/`;
       return Promise.resolve(
-        Object.keys(FILES).filter((f) => f.startsWith(prefix)).sort(),
+        Object.keys(FILES)
+          .filter((f) => f.startsWith(prefix))
+          .sort(),
       );
     },
     fetchImpl: fakeFetch(
@@ -391,7 +396,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
     });
     expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
@@ -412,20 +417,23 @@ describe('run', () => {
     const calls: string[] = [];
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
-      fetchImpl: fakeFetch({
-        'https://jsr.io/@setu-ts/mock/meta.json': {
-          status: 200,
-          body: JSON.stringify({
-            versions: { '0.1.0-alpha.9': {}, '0.1.0-alpha.10': {}, '0.2.0': {} },
-          }),
+      fetchImpl: fakeFetch(
+        {
+          'https://jsr.io/@setu-ts/mock/meta.json': {
+            status: 200,
+            body: JSON.stringify({
+              versions: { '0.1.0-alpha.9': {}, '0.1.0-alpha.10': {}, '0.2.0': {} },
+            }),
+          },
+          'https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts': {
+            status: 200,
+            body: 'export const First = true;\n',
+          },
         },
-        'https://jsr.io/@setu-ts/mock/0.1.0-alpha.10/src/first.ts': {
-          status: 200,
-          body: 'export const First = true;\n',
-        },
-      }, calls),
+        calls,
+      ),
     });
     expect(result.findings).toHaveLength(0);
     expect(result.skipped.find((s) => s.file === file)).toBeUndefined();
@@ -440,7 +448,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -467,7 +475,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -488,7 +496,7 @@ describe('run', () => {
     const base = options();
     const result = await run({
       ...base,
-      readFile: (path: string) => path === file ? Promise.resolve(source) : base.readFile(path),
+      readFile: (path: string) => (path === file ? Promise.resolve(source) : base.readFile(path)),
       listSourceFiles: () => Promise.resolve([file]),
       fetchImpl: fakeFetch({
         'https://jsr.io/@setu-ts/mock/meta.json': {
@@ -507,18 +515,22 @@ describe('run', () => {
     // on a transient fault — and this gate issues roughly 200 requests a run,
     // so 429 is a realistic answer rather than a hypothetical one.
     for (const status of [429, 503]) {
-      const result = await run(options({
-        'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': { status, body: '' },
-      }));
+      const result = await run(
+        options({
+          'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': { status, body: '' },
+        }),
+      );
       expect(result.findings.filter((f) => f.file.endsWith('gadget.ts'))).toEqual([]);
       expect(result.skipped.some((k) => k.file.endsWith('gadget.ts'))).toBe(true);
     }
   });
 
   it('treats a non-404 meta response as unreachable, not as an unpublished package', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/meta.json': { status: 503, body: '' },
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/meta.json': { status: 503, body: '' },
+      }),
+    );
     expect(result.findings).toEqual([]);
     expect(result.skipped.some((k) => k.reason.includes('could not be reached'))).toBe(true);
   });
@@ -538,16 +550,16 @@ describe('run', () => {
     expect(
       calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/0.6.0/src/pair.ts'),
     ).toHaveLength(1);
-    expect(
-      calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/meta.json'),
-    ).toHaveLength(1);
+    expect(calls.filter((url) => url === 'https://jsr.io/@setu-ts/mock/meta.json')).toHaveLength(1);
   });
 
   it('fails the run when a fetch rejects, as a skip the operator can see', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/meta.json': 'throw',
-      'https://registry.npmjs.org/@setu-ts%2fmock': 'throw',
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/meta.json': 'throw',
+        'https://registry.npmjs.org/@setu-ts%2fmock': 'throw',
+      }),
+    );
     expect(result.findings).toEqual([]);
     expect(result.verified).toBe(0);
     expect(result.skipped.length).toBeGreaterThan(0);
@@ -560,9 +572,11 @@ describe('run', () => {
   });
 
   it('skips a tag whose file fetch fails mid-run', async () => {
-    const result = await run(options({
-      'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': 'throw',
-    }));
+    const result = await run(
+      options({
+        'https://jsr.io/@setu-ts/mock/0.6.0/src/gadget.ts': 'throw',
+      }),
+    );
     const skip = result.skipped.find((s) => s.file.endsWith('gadget.ts'));
     expect(skip?.reason).toContain('fetch failed');
     expect(result.verified).toBe(2); // the pair still verified
@@ -678,17 +692,17 @@ describe('the script itself — the literal exit code inside check:docs', () => 
       // only: every fetch throws NotCapable, the whole run skips, and the gate
       // must still exit 0, printing `verified 0` so silence never reads as a
       // pass. (This is the only test here that touches the real tree; it reads.)
-      const command = new Deno.Command('deno', {
-        args: ['run', '--allow-read', '--no-prompt', 'scripts/check-since-tags.ts'],
-        stdout: 'piped',
-        stderr: 'piped',
-      });
-      const output = await command.output();
-      const stdout = new TextDecoder().decode(output.stdout);
-      expect(output.success, stdout).toBe(true);
+      const command = runProcess(process.execPath, [
+        '--import',
+        './test/fixtures/deny-network.ts',
+        'scripts/check-since-tags.ts',
+      ]);
+      const output = await command;
+      const stdout = output.stdout;
+      expect(output.code === 0, stdout).toBe(true);
       expect(output.code).toBe(0);
       expect(stdout).toContain('verified 0 tag(s)');
-      expect(new TextDecoder().decode(output.stderr)).toContain('skipped');
+      expect(output.stderr).toContain('skipped');
     },
   );
 });
@@ -699,6 +713,7 @@ describe('npm source tarballs after the JSR line', () => {
     entries: Uint8Array[],
     versions = ['0.9.0'],
     failure?: '404' | '500' | 'missing-url' | 'missing-body' | 'corrupt',
+    tarball = 'https://registry.npmjs.org/mock.tgz',
   ) {
     const { archive } = await import('../fixtures/tar-fixture.ts');
     const bytes = archive(...entries);
@@ -715,9 +730,7 @@ describe('npm source tarballs after the JSR line', () => {
               versions: Object.fromEntries(
                 versions.map((version) => [
                   version,
-                  failure === 'missing-url'
-                    ? {}
-                    : { dist: { tarball: 'https://registry.npmjs.org/mock.tgz' } },
+                  failure === 'missing-url' ? {} : { dist: { tarball } },
                 ]),
               ),
             }),
@@ -746,6 +759,27 @@ describe('npm source tarballs after the JSR line', () => {
     });
     return { result, calls };
   }
+
+  it('never passes a tarball outside the two registry hosts to the injected fetch', async () => {
+    for (const url of [
+      'https://example.test/mock.tgz',
+      'https://registry.npmjs.org.evil.test/mock.tgz',
+      'http://registry.npmjs.org/mock.tgz',
+      'https://registry.npmjs.org:8443/mock.tgz',
+    ]) {
+      const { result, calls } = await drive(
+        { 'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;' },
+        [],
+        ['0.9.0'],
+        undefined,
+        url,
+      );
+      expect(calls).toEqual(['https://registry.npmjs.org/@setu-ts%2fmock']);
+      expect(result.verified).toBe(0);
+      expect(result.skipped).toHaveLength(1);
+      expect(result.skipped[0]?.reason).toContain('outside the allowed hosts');
+    }
+  });
 
   it('reads present, absent, non-exported and pax long-path source declarations, caching the tarball', async () => {
     const { tarEntry, paxRecord } = await import('../fixtures/tar-fixture.ts');
@@ -815,9 +849,12 @@ describe('npm source tarballs after the JSR line', () => {
   }
 
   it('reports an absent source file in an otherwise valid archive', async () => {
-    const { result } = await drive({
-      'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;',
-    }, []);
+    const { result } = await drive(
+      {
+        'packages/mock/src/a.ts': '/** @since 0.9.0 */\nexport const A = 1;',
+      },
+      [],
+    );
     expect(result.findings[0].kind).toBe('file-absent');
   });
 });

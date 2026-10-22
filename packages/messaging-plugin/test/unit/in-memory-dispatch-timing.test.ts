@@ -46,10 +46,7 @@ class UnhandledRejectionProbe {
 
 describe('InMemoryBroker publish resolves on dispatch hand-off (M89c §3.1)', () => {
   it('resolves before a slow handler completes, and the handler still runs', async () => {
-    const broker: IMessageBroker = new InMemoryBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-    );
+    const broker: IMessageBroker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
     await broker.connect();
 
     let handlerStarted = false;
@@ -98,10 +95,7 @@ describe('InMemoryBroker publish resolves on dispatch hand-off (M89c §3.1)', ()
   });
 
   it('one slow handler no longer delays its siblings — all are invoked for one publish', async () => {
-    const broker: IMessageBroker = new InMemoryBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-    );
+    const broker: IMessageBroker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
     await broker.connect();
 
     const received: string[] = [];
@@ -124,10 +118,7 @@ describe('InMemoryBroker publish resolves on dispatch hand-off (M89c §3.1)', ()
   });
 
   it('resolves when there are no subscribers', async () => {
-    const broker: IMessageBroker = new InMemoryBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-    );
+    const broker: IMessageBroker = new InMemoryBroker(createFakeRuntime(), new JsonSerializer());
     await broker.connect();
     await expect(broker.publish('nobody.listening', { v: 1 })).resolves.toBeUndefined();
     await broker.disconnect();

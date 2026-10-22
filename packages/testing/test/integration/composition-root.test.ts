@@ -149,13 +149,10 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
     await createTestApp({
       app: createRoot(trace, [eagerConsumer(captured)]),
       overrides: [
-        overrideCapability(
-          CAPABILITIES.MAIL,
-          {
-            sent: fakeSent,
-            send: (to: string) => void fakeSent.push(to),
-          } satisfies Mailer,
-        ),
+        overrideCapability(CAPABILITIES.MAIL, {
+          sent: fakeSent,
+          send: (to: string) => void fakeSent.push(to),
+        } satisfies Mailer),
       ],
     });
 
@@ -173,13 +170,10 @@ describe('overrideCapability against an eagerly-capturing consumer', () => {
     const app = await createTestApp({
       app: createRoot(trace),
       overrides: [
-        overrideCapability(
-          CAPABILITIES.MAIL,
-          {
-            sent: [],
-            send: () => {},
-          } satisfies Mailer,
-        ),
+        overrideCapability(CAPABILITIES.MAIL, {
+          sent: [],
+          send: () => {},
+        } satisfies Mailer),
       ],
     });
 
@@ -244,13 +238,10 @@ describe('createTestApp against a real composition root', () => {
     const app = await createTestApp({
       app: createRoot(trace),
       overrides: [
-        overrideCapability(
-          CAPABILITIES.MAIL,
-          {
-            sent: fakeSent,
-            send: (to: string) => void fakeSent.push(to),
-          } satisfies Mailer,
-        ),
+        overrideCapability(CAPABILITIES.MAIL, {
+          sent: fakeSent,
+          send: (to: string) => void fakeSent.push(to),
+        } satisfies Mailer),
       ],
     });
 
@@ -270,13 +261,10 @@ describe('createTestApp against a real composition root', () => {
       app: createRoot(trace),
       without: ['database'],
       overrides: [
-        overrideCapability(
-          CAPABILITIES.MAIL,
-          {
-            sent: fakeSent,
-            send: (to: string) => void fakeSent.push(to),
-          } satisfies Mailer,
-        ),
+        overrideCapability(CAPABILITIES.MAIL, {
+          sent: fakeSent,
+          send: (to: string) => void fakeSent.push(to),
+        } satisfies Mailer),
       ],
     });
 
@@ -302,14 +290,16 @@ describe('createTestApp against a real composition root', () => {
   it('answers the kernel fallback on the plugins arm, which is what the README documents', async () => {
     const runtime = createFakeRuntime();
     const app = await createTestApp({
-      plugins: [{
-        name: 'fake-runtime',
-        version: '1.0.0',
-        provides: [CAPABILITIES.RUNTIME],
-        register(ctx: IPluginContext) {
-          ctx.services.register(CAPABILITIES.RUNTIME, runtime);
+      plugins: [
+        {
+          name: 'fake-runtime',
+          version: '1.0.0',
+          provides: [CAPABILITIES.RUNTIME],
+          register(ctx: IPluginContext) {
+            ctx.services.register(CAPABILITIES.RUNTIME, runtime);
+          },
         },
-      }],
+      ],
     });
     app.router.get('/boom', () => {
       throw new Error('handler exploded');

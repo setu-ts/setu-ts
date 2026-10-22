@@ -43,12 +43,10 @@ describe('conditional fallback helper', () => {
     }
   });
   it('propagates write-precondition and every other rejection without falling back', async () => {
-    for (
-      const error of [
-        new UnsupportedQueryFeatureError('write-precondition', 'database-plugin', 'invalid'),
-        new Error('driver'),
-      ]
-    ) {
+    for (const error of [
+      new UnsupportedQueryFeatureError('write-precondition', 'database-plugin', 'invalid'),
+      new Error('driver'),
+    ]) {
       const repo = new Repo(new MemoryAdapter().createDataSource('User'));
       repo.updateWhere = () => Promise.reject(error);
       repo.deleteWhere = () => Promise.reject(error);

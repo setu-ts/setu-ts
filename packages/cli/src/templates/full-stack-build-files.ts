@@ -12,12 +12,13 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { NPM_TOOLING_DEV_DEPENDENCIES } from './npm-tooling.ts';
 
 /**
  * React Router major the emitted project is written against.
  *
  * Pinned to 8 because that is what the SSR plugin loads: it does
- * `await import('npm:react-router@8')` to get `createRequestHandler`, and hands
+ * `await import('react-router')` to get `createRequestHandler`, and hands
  * it the server build this project's toolchain produced. A project built
  * against 7 would compile, install, and then hand a v7 build to a v8 runtime.
  */
@@ -51,9 +52,7 @@ export default {
  * @returns The `vite.config.ts` contents
  */
 function renderViteConfig(frameworkPackages: readonly string[]): string {
-  const externals = frameworkPackages
-    .map((pkg) => `\n  '@setu-ts/${pkg}',`)
-    .join('');
+  const externals = frameworkPackages.map((pkg) => `\n  '@setu-ts/${pkg}',`).join('');
 
   return `import { readdirSync, readFileSync } from 'node:fs';
 import { reactRouter } from '@react-router/dev/vite';
@@ -236,7 +235,11 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
   'react-dom': '^19.2.0',
   '@types/react': '^19.2.0',
   '@types/react-dom': '^19.2.0',
-  typescript: '^5.9.2',
+  // The tooling's pin, not a second opinion: `npm-tooling.ts` holds the whole
+  // npm toolchain to one TypeScript line, and `~5.9.2` here overrode it on
+  // EVERY npm target, because this list is merged after the tooling's. `@react-
+  // router/dev@8` accepts TypeScript 6 (`^5.1.0 || ^6.0.0 || ^7.0.0`).
+  typescript: NPM_TOOLING_DEV_DEPENDENCIES.typescript,
   vite: '^8.0.0',
 };
 

@@ -67,8 +67,11 @@ describe('the transport registry', () => {
       expect(transportSpec('rabbitmq').messagingArgs?.('CONN')).toBe(
         "{ broker: 'rabbitmq', url: CONN }",
       );
+      // V9-17: the stream subject set is mandatory — the broker has no default
+      // and creates nothing without it — and the fixed `app` scope is what lets
+      // every workspace member share one MESSAGING stream.
       expect(transportSpec('nats').messagingArgs?.('CONN')).toBe(
-        "{ broker: 'nats', url: CONN }",
+        "{\n        broker: 'nats',\n        url: CONN,\n        streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>'],\n      }",
       );
       expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain("broker: 'pubsub'");
       expect(transportSpec('pubsub').messagingArgs?.('CONN')).toContain('projectId: CONN');
@@ -112,14 +115,12 @@ describe('the transport registry', () => {
       );
       // `--transport-url` replaces the FALLBACK, not the variable: an override
       // still has to lose to the environment inside a deployed stack.
-      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
-        .toContain(
-          `Deno.env.get('REDIS_URL')`,
-        );
-      expect(renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'))
-        .toContain(
-          'redis://elsewhere:6379',
-        );
+      expect(
+        renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'),
+      ).toContain(`Deno.env.get('REDIS_URL')`);
+      expect(
+        renderConnection(redis!, workspaceProfile('deno'), 'redis://elsewhere:6379'),
+      ).toContain('redis://elsewhere:6379');
     });
 
     // A GCP project id is a name and a Service Bus connection string carries a
@@ -144,6 +145,11 @@ describe('the transport registry', () => {
       // create topics, and the Service Bus emulator creates no entities at all.
       expect(transportSpec('pubsub').connection?.note).toContain('Topics are NOT');
       expect(transportSpec('service-bus').connection?.note).toContain('NO entities');
+      // The NATS note states the scope every topic must use, the stream the
+      // broker creates, and the one setting outside the set.
+      expect(transportSpec('nats').connection?.note).toContain('must start with `app.`');
+      expect(transportSpec('nats').connection?.note).toContain('MESSAGING');
+      expect(transportSpec('nats').connection?.note).toContain("topic: 'app.realtime'");
     });
   });
 

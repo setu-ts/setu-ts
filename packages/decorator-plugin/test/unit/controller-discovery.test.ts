@@ -96,24 +96,14 @@ describe('discoverControllers', () => {
   it('only includes configured extensions', async () => {
     const fs = createFakeFileSystem({ '/d/a.ts': '', '/d/b.md': '', '/d/c.js': '' });
     const { importer, count } = fakeControllerImporter();
-    await discoverControllers(
-      { path: '/d' },
-      createFakeRuntime({ fs }),
-      metadataStore,
-      importer,
-    );
+    await discoverControllers({ path: '/d' }, createFakeRuntime({ fs }), metadataStore, importer);
     expect(count()).toBe(2); // a.ts and c.js; b.md excluded
   });
 
   it('walks nested directories', async () => {
     const fs = createFakeFileSystem({ '/d/sub/nested.ts': '', '/d/top.ts': '' });
     const { importer, count } = fakeControllerImporter();
-    await discoverControllers(
-      { path: '/d' },
-      createFakeRuntime({ fs }),
-      metadataStore,
-      importer,
-    );
+    await discoverControllers({ path: '/d' }, createFakeRuntime({ fs }), metadataStore, importer);
     expect(count()).toBe(2);
   });
 
@@ -124,12 +114,7 @@ describe('discoverControllers', () => {
       '/d/keep.ts': '',
     });
     const { importer, count } = fakeControllerImporter();
-    await discoverControllers(
-      { path: '/d' },
-      createFakeRuntime({ fs }),
-      metadataStore,
-      importer,
-    );
+    await discoverControllers({ path: '/d' }, createFakeRuntime({ fs }), metadataStore, importer);
     expect(count()).toBe(1);
   });
 
@@ -177,11 +162,7 @@ describe('discoverControllers', () => {
   });
 
   it('returns an error when runtime.fs is absent', async () => {
-    const result = await discoverControllers(
-      { path: '/d' },
-      createFakeRuntime(),
-      metadataStore,
-    );
+    const result = await discoverControllers({ path: '/d' }, createFakeRuntime(), metadataStore);
     expect(result.controllers).toEqual([]);
     expect(result.services).toEqual([]);
     expect(result.errors).toHaveLength(1);

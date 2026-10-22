@@ -36,15 +36,7 @@ import {
   MODULE_SEAM_LOCAL_IMPORT,
   withModuleSeam,
 } from './module-seam.ts';
-import {
-  decoratorSeamExtras,
-  seamFiles,
-  seamLocalImports,
-  seamPluginSpreads,
-  seamSetupCalls,
-  seamsFor,
-  withPluginOptionSeams,
-} from './seam.ts';
+import { decoratorSeamExtras, seamsFor } from './seam.ts';
 
 /** The code style a styleable template can be scaffolded in. */
 export type TemplateStyle = 'functional' | 'class-based';
@@ -73,6 +65,8 @@ export const DECORATOR_WIRING: Wiring = { pkg: DECORATOR_PACKAGE, symbol: 'Decor
 export interface Showcase {
   /** The example source files, project-relative. */
   readonly files: readonly GeneratedFile[];
+  /** The same showcase with the selected runtime's test harness. */
+  readonly filesForRuntime?: (runtime: TargetRuntime) => readonly GeneratedFile[];
   /** Artifact names the host itself emits, by schematic name, seeded into barrels. */
   readonly seeded: SeamArtifacts;
   /** Routes the showcase serves, listed in the generated README. */
@@ -82,9 +76,9 @@ export interface Showcase {
 /**
  * Everything a styleable template needs, before seams are derived.
  *
- * The seams, seam barrels and plugin `args` are DERIVED by {@linkcode composeHost}
- * from this data, so a template cannot acquire a barrel the config does not
- * import, or an import the barrel does not export.
+ * `composeHost` selects the seams; `resolveHost` derives their barrels, imports
+ * and plugin arguments after the runtime swap, so removed plugins leave no seam
+ * contributions behind.
  */
 export interface TemplateRecipe {
   /** The pre-seam plugin list, in registration order. */
@@ -121,24 +115,17 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
     const extras = decoratorSeamExtras(seams);
     const showcase = recipe.showcase?.['class-based'];
     return {
-      plugins: withPluginOptionSeams(
-        withModuleSeam(
-          [...recipe.plugins, DECORATOR_WIRING],
-          extras.controllers,
-          extras.services,
-          extras.ingress,
-        ),
-        seams,
+      plugins: withModuleSeam(
+        [...recipe.plugins, DECORATOR_WIRING],
+        extras.controllers,
+        extras.services,
+        extras.ingress,
       ).concat([DI_WIRING]),
       middleware: recipe.middleware,
-      localImports: [MODULE_SEAM_LOCAL_IMPORT, ...seamLocalImports(seams)],
-      files: [
-        ...(showcase?.files ?? []),
-        ...MODULE_SEAM_FILES,
-        ...seamFiles(seams, showcase?.seeded ?? {}),
-      ],
-      pluginSpreads: seamPluginSpreads(seams),
-      setupCalls: seamSetupCalls(seams),
+      localImports: [MODULE_SEAM_LOCAL_IMPORT],
+      seams,
+      seamArtifacts: showcase?.seeded ?? {},
+      files: [...(showcase?.files ?? []), ...MODULE_SEAM_FILES],
       manifest: { ...CLASS_BASED_MODULE_MANIFEST, envFilePath: '.env' },
       ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
       ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),
@@ -149,12 +136,14 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
   const seams = seamsFor(installed);
   const showcase = recipe.showcase?.functional;
   return {
-    plugins: withPluginOptionSeams(recipe.plugins, seams),
+    plugins: recipe.plugins,
     middleware: recipe.middleware,
-    localImports: seamLocalImports(seams),
-    files: [...(showcase?.files ?? []), ...seamFiles(seams, showcase?.seeded ?? {})],
-    pluginSpreads: seamPluginSpreads(seams),
-    setupCalls: seamSetupCalls(seams),
+    seams,
+    seamArtifacts: showcase?.seeded ?? {},
+    files: showcase?.files ?? [],
+    ...(showcase?.filesForRuntime === undefined
+      ? {}
+      : { filesForRuntime: showcase.filesForRuntime }),
     manifest: { ...recipe.manifest, envFilePath: '.env' },
     ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
     ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),

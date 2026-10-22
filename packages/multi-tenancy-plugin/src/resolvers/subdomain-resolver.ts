@@ -23,10 +23,7 @@ import type { SubdomainResolverOptions } from '../interfaces/index.ts';
  *
  * @internal
  */
-export function extractSubdomainTenant(
-  host: string,
-  baseDomain?: string,
-): string | null {
+export function extractSubdomainTenant(host: string, baseDomain?: string): string | null {
   if (!host) return null;
   // Hosts may carry a port (`acme.example.com:8080`) — it is never part of the
   // domain comparison.

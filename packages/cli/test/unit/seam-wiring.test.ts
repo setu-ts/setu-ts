@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { getTemplate, listTemplates, packagesOf } from '../../src/templates/registry.ts';
-import type { TemplateDefinition } from '../../src/templates/registry.ts';
+import type { TemplateHost } from '../../src/templates/registry.ts';
 import {
   decoratorSeamExtras,
   seamFiles,
@@ -17,6 +17,7 @@ import {
   seamsFor,
   withPluginOptionSeams,
 } from '../../src/templates/seam.ts';
+import { resolveHost } from '../../src/templates/project-files.ts';
 import { listSeamSpecs } from '../../src/seams/registry.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 import { seamSpecFor } from './schematics/_shared.ts';
@@ -30,9 +31,9 @@ const HOSTS = ['rest', 'microservice', 'class-based'] as const;
  * @param template - The template to inspect
  * @returns The `index.ts` paths under `src/`
  */
-function barrels(template: TemplateDefinition): readonly string[] {
-  return (template.files ?? [])
-    .map((f) => f.path)
+function barrels(template: TemplateHost): readonly string[] {
+  return resolveHost(template, 'node')
+    .files.map((f) => f.path)
     .filter((p) => p.endsWith('/index.ts'))
     .sort();
 }
@@ -60,7 +61,9 @@ describe('the no-template host', () => {
 describe('seam selection', () => {
   it('omits a seam whose backing plugin the host does not install', () => {
     // Emitting it would put an unresolvable import in the generated config.
-    const bare = seamsFor(new Set()).map((s) => s.schematic).sort();
+    const bare = seamsFor(new Set())
+      .map((s) => s.schematic)
+      .sort();
     // `controller` is ungated since M70h/E8 and appears here in its functional
     // shape, sharing the `route` barrel rather than adding one.
     expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
@@ -75,28 +78,26 @@ describe('seam selection', () => {
     // one lacks the decorator, and a class-based one routes command/query/event
     // through ingress instead (§3.4).
     const functional = new Set(
-      listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string =>
-        p !== undefined && p !== 'decorator-plugin'
-      ),
+      listSeamSpecs()
+        .map((s) => s.requiresPlugin)
+        .filter((p): p is string => p !== undefined && p !== 'decorator-plugin'),
     );
     const selected = seamsFor(functional).map((s) => s.schematic);
     // The decorator-gated seams are absent.
     expect(selected).not.toContain('ingress');
     expect(selected).not.toContain('service');
     // The functional shapes and the plugin-gated seams are present.
-    for (
-      const schematic of [
-        'controller',
-        'route',
-        'middleware',
-        'plugin',
-        'health-indicator',
-        'metric',
-        'command-handler',
-        'query-handler',
-        'event-handler',
-      ]
-    ) {
+    for (const schematic of [
+      'controller',
+      'route',
+      'middleware',
+      'plugin',
+      'health-indicator',
+      'metric',
+      'command-handler',
+      'query-handler',
+      'event-handler',
+    ]) {
       expect(selected).toContain(schematic);
     }
   });
@@ -107,7 +108,9 @@ describe('seam selection', () => {
     // and scaffolding the functional src/cqrs and src/events barrels would be dead
     // surface that double-registers any handler placed there.
     const classBased = new Set(
-      listSeamSpecs().map((s) => s.requiresPlugin).filter((p): p is string => p !== undefined),
+      listSeamSpecs()
+        .map((s) => s.requiresPlugin)
+        .filter((p): p is string => p !== undefined),
     );
     expect(classBased.has('decorator-plugin')).toBe(true);
     const selected = seamsFor(classBased).map((s) => s.schematic);
@@ -199,16 +202,19 @@ describe('seam selection', () => {
 
 describe('seam hosts', () => {
   for (const name of HOSTS) {
-    const template = getTemplate(name)!;
+    const template = resolveHost(getTemplate(name)!, 'node');
 
     it(`${name} emits an import for every barrel it emits`, () => {
       // The invariant that keeps a barrel from existing without the config import that
       // reads it — the M58 failure mode a pre-seam project has.
-      const emitted = new Set(barrels(template));
+      const emitted = new Set(barrels(getTemplate(name)!));
       const imported = new Set(
         (template.localImports ?? []).map((l) => l.from.replace(/^\.\//, '')),
       );
-      for (const path of emitted) expect(imported.has(path)).toBe(true);
+      for (const path of emitted) {
+        if (/src\/modules\/[^/]+\/index\.ts$/.test(path)) continue;
+        expect(imported.has(path)).toBe(true);
+      }
     });
 
     it(`${name} brings every setupCalls identifier into scope`, () => {
@@ -272,6 +278,7 @@ describe('seam hosts', () => {
     expect(barrels(fullStack)).toEqual([
       'src/controllers/index.ts',
       'src/middleware/index.ts',
+      'src/modules/index.ts',
       'src/plugins/index.ts',
     ]);
     expect(fullStack.setupCalls ?? []).toContain(

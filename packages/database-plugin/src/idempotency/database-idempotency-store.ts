@@ -215,8 +215,11 @@ export class DatabaseIdempotencyStore implements ITransactionalIdempotencyStore 
         // record must survive (R2-1).
         const claim = await transactionalRepo.findById(id as EntityKey);
         if (
-          claim === null || claim.kind !== IDEMPOTENCY_RECORD_KIND || claim.role !== CLAIM_ROLE ||
-          Number(claim.createdAt) !== record.createdAt || !(Number(claim.expiresAt) < before)
+          claim === null ||
+          claim.kind !== IDEMPOTENCY_RECORD_KIND ||
+          claim.role !== CLAIM_ROLE ||
+          Number(claim.createdAt) !== record.createdAt ||
+          !(Number(claim.expiresAt) < before)
         ) {
           return false;
         }
@@ -313,15 +316,14 @@ export function createDatabaseIdempotencyStore(
     throw new TypeError('createDatabaseIdempotencyStore: entity must be a non-empty string');
   }
   const database = options?.database;
-  const token = database === undefined || database === 'default'
-    ? CAPABILITIES.DATABASE
-    : createCapabilityToken(`database.${database}`);
+  const token =
+    database === undefined || database === 'default'
+      ? CAPABILITIES.DATABASE
+      : createCapabilityToken(`database.${database}`);
   return (services: IServiceRegistry): ITransactionalIdempotencyStore => {
     const runtime = services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-    return new DatabaseIdempotencyStore(
-      services.get<IDatabaseService>(token),
-      entity,
-      () => runtime.uuid(),
+    return new DatabaseIdempotencyStore(services.get<IDatabaseService>(token), entity, () =>
+      runtime.uuid(),
     );
   };
 }

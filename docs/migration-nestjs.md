@@ -98,11 +98,7 @@ class AppController {
 }
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    DiPlugin(),
-    DecoratorPlugin({ controllers: [AppController] }),
-  ],
+  plugins: [RuntimePlugin(), DiPlugin(), DecoratorPlugin({ controllers: [AppController] })],
 });
 
 await app.start({ port: 3000 });
@@ -339,10 +335,12 @@ export class AuthGuard implements CanActivate {
 ```typescript
 import { AuthPlugin, requireAuth, requireRole } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: { secret: 'replace-with-a-secret-from-configuration' },
-  rbac: { roles: { admin: { permissions: ['*'] } } },
-}));
+app.register(
+  AuthPlugin({
+    jwt: { secret: 'replace-with-a-secret-from-configuration' },
+    rbac: { roles: { admin: { permissions: ['*'] } } },
+  }),
+);
 
 // Guards attach per route, like @UseGuards. An unauthenticated request answers 401
 // and a principal without the role answers 403, before the handler runs.
@@ -467,13 +465,14 @@ async create(@Body() createDto: CreateCatDto) {
 
 ```typescript
 import { validateBody } from '@setu-ts/validation-plugin';
-import { validatedStateKey } from '@setu-ts/common';
+
+const createBody = validateBody(CreateUserDto);
 
 app.router.post('/users', {
-  middleware: [validateBody(CreateUserDto)],
+  middleware: [createBody],
   handler: async (ctx) => {
-    const dto = ctx.state.get(validatedStateKey('body'));
-    // dto is the value validated and parsed by the middleware
+    const dto = createBody.value(ctx);
+    // dto is the value validated and parsed by the middleware, typed by the schema
     return ctx.response.json({ created: dto });
   },
 });
@@ -513,7 +512,7 @@ export class AppService {
 ```typescript
 import { CAPABILITIES, type IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 const database = defineConfigSection({
   prefix: 'DATABASE_',
@@ -521,14 +520,15 @@ const database = defineConfigSection({
   schema: z.object({ URL: z.string().url() }),
 });
 
-app.register(ConfigPlugin({
-  // Optional: load .env files before reading `runtime.env` (requires a
-  // runtime with filesystem support). Validate with a structural schema
-  // (e.g. Zod) via `validationSchema` — `ConfigPluginOptions` has no `validate`
-  // field.
-  envFilePath: '.env',
-  sections: [database],
-}));
+app.register(
+  ConfigPlugin({
+    // Load.env into the config store; skip a missing file, but an existing
+    // unreadable file still throws. Requires filesystem support.
+    envFilePath: '.env',
+    envFileOptional: true,
+    sections: [database],
+  }),
+);
 
 // Usage
 const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
@@ -580,12 +580,14 @@ import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin'
 // output, e.g. `import { PrismaClient } from './generated/prisma/client.ts';`
 declare const myPrismaClient: unknown;
 
-app.register(DatabasePlugin({
-  type: 'prisma',
-  options: {
-    prismaClient: myPrismaClient,
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'prisma',
+    options: {
+      prismaClient: myPrismaClient,
+    },
+  }),
+);
 
 // Usage — IDatabaseService.getRepository() returns IRepository, not raw CRUD.
 const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
@@ -621,10 +623,12 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 // `store` selects the backend; store-specific config lives under `options`
 // (a `CacheStoreOptions`), not a top-level `redis` field. For Redis, pass the
 // connection URL (or inject an ioredis-compatible `client`).
-app.register(CachePlugin({
-  store: 'redis',
-  options: { url: 'redis://localhost:6379' },
-}));
+app.register(
+  CachePlugin({
+    store: 'redis',
+    options: { url: 'redis://localhost:6379' },
+  }),
+);
 
 // Usage — ICacheStore uses the token 'cache' (CAPABILITIES.CACHE), stores value
 // with numeric TTL seconds (not an options bag), and deletes with delete().
@@ -665,9 +669,11 @@ const CreateUserDto = z.object({
 });
 
 // Usage with validation plugin
-app.register(ValidationPlugin({
-  errorFormat: 'default',
-}));
+app.register(
+  ValidationPlugin({
+    errorFormat: 'default',
+  }),
+);
 
 // Or manual validation
 app.router.post('/users', async (ctx) => {
@@ -679,6 +685,15 @@ app.router.post('/users', async (ctx) => {
   return ctx.response.status(201).json({ created: dto });
 });
 ```
+
+Where the DTOs live follows the same rule the `setu` CLI uses: a `dto/` folder of one class per file
+becomes one `<name>.schemas.ts` per module — a Zod value per shape named by purpose
+(`Create<P>Body`, `Update<P>Body`, `List<P>Query`, `<P>Params`, `<P>Response`, `<P>ListResponse`),
+each paired with its `z.infer` type, and `PartialType` / `PickType` map to Zod's `.partial()` /
+`.pick()` / `.extend()`. Feature-scoped placement is the counterpart of
+`nest g service users/pricing`: `setu generate service pricing --module users` writes the service
+into `src/modules/users/` and regenerates the module's `index.ts` to register it (in a class-based
+project it instead prints the `@Module` line to add, without editing the declaration).
 
 ## Views
 
@@ -721,7 +736,11 @@ import type { IRequestContext } from '@setu-ts/common';
 // JSX, so every interpolation is escaped by the rendering runtime. A plain
 // template literal is a `string`, returned unchanged with nothing escaped.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 @Controller('/pages')
@@ -798,14 +817,16 @@ describe('UsersController', () => {
   beforeEach(async () => {
     const module = await Test.createTestingModule({
       controllers: [UsersController],
-      providers: [{
-        provide: UserService,
-        useValue: {
-          findAll: () => [],
-          findById: (_id: string) => null,
-          create: (_dto: CreateUserDto) => ({}),
+      providers: [
+        {
+          provide: UserService,
+          useValue: {
+            findAll: () => [],
+            findById: (_id: string) => null,
+            create: (_dto: CreateUserDto) => ({}),
+          },
         },
-      }],
+      ],
     }).compile();
 
     controller = module.get<UsersController>(UsersController);
@@ -956,7 +977,7 @@ setu g command-handler place-order
 setu g query-handler get-order
 setu g event-handler order-placed
 setu g job send-receipt
-deno task start
+npm run start
 ```
 
 The generated ingress classes land in `src/ingress/` and are listed in the managed

@@ -787,9 +787,7 @@ describe('createStaticHandler', () => {
     await handler(ctx as never);
 
     expect(ctx.response._status).toBe(200);
-    expect(ctx.response._headers.get('Cache-Control')).toBe(
-      'public, max-age=31536000, immutable',
-    );
+    expect(ctx.response._headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
   });
 
   it('should include Vary: Accept-Encoding on all 200 responses', async () => {

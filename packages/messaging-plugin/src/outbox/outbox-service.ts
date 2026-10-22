@@ -173,8 +173,8 @@ export class OutboxService implements IOutbox {
     return {
       blockedKeyCap,
       storeWriteFailing: this.#lastSweep?.endedBy === 'store-failure',
-      relayOverlap: at !== undefined &&
-        this.#deps.runtime.hrtime() - at <= this.#deps.options.overlapWindowMs,
+      relayOverlap:
+        at !== undefined && this.#deps.runtime.hrtime() - at <= this.#deps.options.overlapWindowMs,
       ...(this.#lastSweep !== undefined ? { lastSweep: this.#lastSweep } : {}),
     };
   }
@@ -270,12 +270,8 @@ export class OutboxService implements IOutbox {
     const budget = new SweepBudget(runtime, options.sweepDeadlineMs);
     let deleted = 0;
     for (const store of this.#list(stores)) {
-      deleted += await boundedCall(
-        runtime,
-        budget,
-        options.sweepDeadlineMs,
-        'purge',
-        () => store.purge(before, options.purgeBatch),
+      deleted += await boundedCall(runtime, budget, options.sweepDeadlineMs, 'purge', () =>
+        store.purge(before, options.purgeBatch),
       );
     }
     return deleted;
@@ -289,8 +285,10 @@ export class OutboxService implements IOutbox {
   ): Promise<void> {
     const stores = this.#stores;
     if (stores === undefined) throw new OutboxNotReadyError();
+    // The operator named the row: a malformed id is the caller's, so it
+    // answers 400 with its own sentence instead of a masked 500.
     if (typeof id !== 'string' || id.length === 0) {
-      throw new TypeError('outbox: release needs the row id');
+      throw new OutboxRowStateError('invalid-id');
     }
     if (action !== 'retry' && action !== 'discard') {
       throw new TypeError("outbox: release action must be 'retry' or 'discard'");

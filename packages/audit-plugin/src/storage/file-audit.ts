@@ -101,15 +101,14 @@ export class FileAuditStorage implements IAuditStorage {
       // File doesn't exist yet; treat as empty.
     }
     const line = JSON.stringify(entry) + '\n';
-    const updated = content.length === 0 || content.endsWith('\n')
-      ? content + line
-      : content + '\n' + line;
+    const updated =
+      content.length === 0 || content.endsWith('\n') ? content + line : content + '\n' + line;
     await this.fs.writeFile(this.path, new TextEncoder().encode(updated));
   }
 
   /** Reads and filters lines via {@linkcode matchAuditQuery}. */
   async query(criteria?: AuditQuery): Promise<StoredAuditEntry[]> {
-    let content = '';
+    let content: string;
     try {
       const buf = await this.fs.readFile(this.path);
       content = new TextDecoder().decode(buf);

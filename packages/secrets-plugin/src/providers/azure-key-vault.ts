@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IAzureSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -20,7 +21,10 @@ type AzureCredential = object;
 
 /** The subset of the Azure SDKs the adapter uses. */
 export interface AzureSdkModule {
-  SecretClient: new (vaultUrl: string, credential: AzureCredential) => {
+  SecretClient: new (
+    vaultUrl: string,
+    credential: AzureCredential,
+  ) => {
     getSecret(name: string): Promise<{ value?: string | undefined }>;
     setSecret(name: string, value: string): Promise<unknown>;
   };
@@ -51,8 +55,11 @@ export function validateAzureClient(client: unknown): client is IAzureSecretsCli
 
 /** Reports whether a caught error is an HTTP 404. */
 export function isAzureNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null &&
-    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { statusCode?: unknown }).statusCode === HTTP_NOT_FOUND
+  );
 }
 
 /**
@@ -98,10 +105,20 @@ export function adaptAzureModule(
  * @throws {Error} If the packages cannot be resolved
  */
 export async function loadAzureModule(): Promise<AzureSdkModule> {
-  const [secretsMod, identityMod] = await Promise.all([
-    import('@azure/keyvault-secrets'),
-    import('@azure/identity'),
-  ]);
+  // Two guards, one per import, so the error names the package that actually
+  // failed rather than sniffing a rejection message (M113d §3.1).
+  let secretsMod: typeof import('@azure/keyvault-secrets');
+  try {
+    secretsMod = await import('@azure/keyvault-secrets');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/keyvault-secrets', { cause: error });
+  }
+  let identityMod: typeof import('@azure/identity');
+  try {
+    identityMod = await import('@azure/identity');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@azure/identity', { cause: error });
+  }
   return {
     SecretClient: secretsMod.SecretClient,
     DefaultAzureCredential: identityMod.DefaultAzureCredential,
@@ -138,9 +155,7 @@ export class AzureKeyVaultProvider implements SecretProvider {
     const injected = this.#options.client;
     if (injected !== undefined) {
       if (!validateAzureClient(injected)) {
-        throw new Error(
-          'Injected Azure client is missing required methods (getSecret, setSecret)',
-        );
+        throw new Error('Injected Azure client is missing required methods (getSecret, setSecret)');
       }
       this.#client = injected;
       this.#attachProbe(injected);

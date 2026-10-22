@@ -188,11 +188,7 @@ describe('Collector — retention seam', () => {
 
   it('reports the inspector state from data freshness: no-data, ready, stale', () => {
     const clock = new MutableRuntime();
-    const collector = collectorFor(
-      options({ staleAfterMs: 1000 }),
-      clock.runtime,
-      makeRunner({}),
-    );
+    const collector = collectorFor(options({ staleAfterMs: 1000 }), clock.runtime, makeRunner({}));
     expect(collector.snapshot(INSTANCE).state).toBe('no-data');
 
     collector.report('db.check', { state: 'reported', status: 'up', latencyMs: 3 }, 'application');
@@ -530,12 +526,15 @@ describe('Collector — bounded scheduler', () => {
         scheduled: scheduled(['a'], { timeoutMs: 5000 }),
       }),
       clock.runtime,
-      makeRunner({
-        a: () =>
-          new Promise<HealthCheckResult>((resolve) => {
-            settle = resolve;
-          }),
-      }, calls),
+      makeRunner(
+        {
+          a: () =>
+            new Promise<HealthCheckResult>((resolve) => {
+              settle = resolve;
+            }),
+        },
+        calls,
+      ),
     );
     collector.startScheduled();
     await flush();

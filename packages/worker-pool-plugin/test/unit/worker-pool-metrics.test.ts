@@ -20,9 +20,11 @@ import { RecordingMetrics, throwOnReport } from '../fixtures/metrics-fakes.ts';
 const SPEC = 'file:///tasks/echo.ts';
 const MODULE_LABELS = { [TASK_MODULE_LABEL]: SPEC };
 
-function makeInstrumentedPool(
-  overrides?: { size?: number; maxQueue?: number; taskTimeoutMs?: number },
-): {
+function makeInstrumentedPool(overrides?: {
+  size?: number;
+  maxQueue?: number;
+  taskTimeoutMs?: number;
+}): {
   pool: TaskPool;
   host: FakeHost;
   timers: FakeTimers;
@@ -86,14 +88,16 @@ describe('WorkerPoolCollector — instrument creation', () => {
     const metrics = new RecordingMetrics();
     new WorkerPoolCollector(metrics, throwOnReport);
 
-    expect([...metrics.metrics.keys()].sort()).toEqual([
-      WORKER_POOL_METRICS.BUSY,
-      WORKER_POOL_METRICS.QUEUED,
-      WORKER_POOL_METRICS.COMPLETED,
-      WORKER_POOL_METRICS.FAILED,
-      WORKER_POOL_METRICS.REJECTED,
-      WORKER_POOL_METRICS.WORKERS,
-    ].sort());
+    expect([...metrics.metrics.keys()].sort()).toEqual(
+      [
+        WORKER_POOL_METRICS.BUSY,
+        WORKER_POOL_METRICS.QUEUED,
+        WORKER_POOL_METRICS.COMPLETED,
+        WORKER_POOL_METRICS.FAILED,
+        WORKER_POOL_METRICS.REJECTED,
+        WORKER_POOL_METRICS.WORKERS,
+      ].sort(),
+    );
   });
 
   it('should declare the documented type and labels for each instrument', () => {
@@ -277,7 +281,8 @@ describe('WorkerPoolCollector — counters', () => {
     await expect(pool.run('late')).rejects.toThrow('shut down');
 
     expect(
-      metrics.require(WORKER_POOL_METRICS.REJECTED)
+      metrics
+        .require(WORKER_POOL_METRICS.REJECTED)
         .valueFor({ ...MODULE_LABELS, [REASON_LABEL]: 'pool_closed' }),
     ).toBe(1);
     expect(metrics.require(WORKER_POOL_METRICS.FAILED).total()).toBe(0);

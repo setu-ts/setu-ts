@@ -37,8 +37,9 @@ describe('relay blocking', () => {
     await h.write({ n: 2 });
     await h.sweep();
     expect(h.broker.sequence()).toEqual([2]);
-    const first = (await h.db.getRepository<Record<string, unknown>>('Outbox').findAll())
-      .find((r) => r.status === 'pending')!;
+    const first = (await h.db.getRepository<Record<string, unknown>>('Outbox').findAll()).find(
+      (r) => r.status === 'pending',
+    )!;
     expect(first.attempts).toBe(1);
     expect(first.availableAt).toBe((first.createdAt as number) + 1000);
   });

@@ -161,7 +161,8 @@ export function compileAuthorizationDiagnosticsOptions(
   let policyRevision: string | null = null;
   if (options.policyRevision !== undefined) {
     if (
-      typeof options.policyRevision !== 'string' || options.policyRevision.length === 0 ||
+      typeof options.policyRevision !== 'string' ||
+      options.policyRevision.length === 0 ||
       utf8ByteLength(options.policyRevision) > MAX_ALIAS_BYTES ||
       hasForbiddenAliasCharacter(options.policyRevision)
     ) {
@@ -198,7 +199,8 @@ interface RetainedDecision {
  * @internal
  */
 export class AuthorizationObservationCollector
-  implements IAuthorizationDiagnosticsSource, AuthorizationObserver {
+  implements IAuthorizationDiagnosticsSource, AuthorizationObserver
+{
   readonly #policy: CompiledAuthorizationPolicy;
   readonly #clock: IRuntimeServices;
   readonly #registry: IServiceRegistry;
@@ -316,9 +318,8 @@ export class AuthorizationObservationCollector
       return;
     }
     const viaRoleAlias = viaRole === null ? null : (this.#policy.roleAlias.get(viaRole) ?? null);
-    const step: AuthorizationDecisionStep = viaRoleAlias === null
-      ? { ruleAlias, reason }
-      : { ruleAlias, reason, viaRoleAlias };
+    const step: AuthorizationDecisionStep =
+      viaRoleAlias === null ? { ruleAlias, reason } : { ruleAlias, reason, viaRoleAlias };
     this.#buffer('role', [ruleAlias], [step], 1, false, result, reason, viaRoleAlias);
   }
 
@@ -341,9 +342,8 @@ export class AuthorizationObservationCollector
       return;
     }
     const viaRoleAlias = viaRole === null ? null : (this.#policy.roleAlias.get(viaRole) ?? null);
-    const step: AuthorizationDecisionStep = viaRoleAlias === null
-      ? { ruleAlias, reason }
-      : { ruleAlias, reason, viaRoleAlias };
+    const step: AuthorizationDecisionStep =
+      viaRoleAlias === null ? { ruleAlias, reason } : { ruleAlias, reason, viaRoleAlias };
     this.#buffer('permission', [ruleAlias], [step], 1, false, result, reason, viaRoleAlias);
   }
 
@@ -383,12 +383,12 @@ export class AuthorizationObservationCollector
         break;
       }
       const ruleAlias = this.#policy.roleAlias.get(step.role)!;
-      const viaRoleAlias = step.viaRole === null
-        ? null
-        : (this.#policy.roleAlias.get(step.viaRole) ?? null);
-      const aliased: AuthorizationDecisionStep = viaRoleAlias === null
-        ? { ruleAlias, reason: step.reason }
-        : { ruleAlias, reason: step.reason, viaRoleAlias };
+      const viaRoleAlias =
+        step.viaRole === null ? null : (this.#policy.roleAlias.get(step.viaRole) ?? null);
+      const aliased: AuthorizationDecisionStep =
+        viaRoleAlias === null
+          ? { ruleAlias, reason: step.reason }
+          : { ruleAlias, reason: step.reason, viaRoleAlias };
       steps.push(aliased);
     }
     const reason: AuthorizationDecisionReason = result
@@ -442,12 +442,12 @@ export class AuthorizationObservationCollector
         break;
       }
       const ruleAlias = this.#policy.permissionAlias.get(step.permission)!;
-      const viaRoleAlias = step.viaRole === null
-        ? null
-        : (this.#policy.roleAlias.get(step.viaRole) ?? null);
-      const aliased: AuthorizationDecisionStep = viaRoleAlias === null
-        ? { ruleAlias, reason: step.reason }
-        : { ruleAlias, reason: step.reason, viaRoleAlias };
+      const viaRoleAlias =
+        step.viaRole === null ? null : (this.#policy.roleAlias.get(step.viaRole) ?? null);
+      const aliased: AuthorizationDecisionStep =
+        viaRoleAlias === null
+          ? { ruleAlias, reason: step.reason }
+          : { ruleAlias, reason: step.reason, viaRoleAlias };
       steps.push(aliased);
     }
     const reason: AuthorizationDecisionReason = result
@@ -487,8 +487,10 @@ export class AuthorizationObservationCollector
       throw new RangeError(COLLECTOR_ERRORS.badCursor);
     }
     if (
-      typeof effectiveLimit !== 'number' || !Number.isInteger(effectiveLimit) ||
-      effectiveLimit < 1 || effectiveLimit > MAX_READ_LIMIT
+      typeof effectiveLimit !== 'number' ||
+      !Number.isInteger(effectiveLimit) ||
+      effectiveLimit < 1 ||
+      effectiveLimit > MAX_READ_LIMIT
     ) {
       throw new RangeError(COLLECTOR_ERRORS.badLimit);
     }
@@ -556,7 +558,7 @@ export class AuthorizationObservationCollector
     const steps: readonly AuthorizationDecisionStep[] = retained.steps.map((step) =>
       step.viaRoleAlias !== undefined
         ? { ruleAlias: step.ruleAlias, reason: step.reason, viaRoleAlias: step.viaRoleAlias }
-        : { ruleAlias: step.ruleAlias, reason: step.reason }
+        : { ruleAlias: step.ruleAlias, reason: step.reason },
     );
     return {
       sequence: retained.sequence,
@@ -607,8 +609,10 @@ export function createDisabledAuthorizationSource(): IAuthorizationDiagnosticsSo
         throw new RangeError(COLLECTOR_ERRORS.badCursor);
       }
       if (
-        typeof effectiveLimit !== 'number' || !Number.isInteger(effectiveLimit) ||
-        effectiveLimit < 1 || effectiveLimit > MAX_READ_LIMIT
+        typeof effectiveLimit !== 'number' ||
+        !Number.isInteger(effectiveLimit) ||
+        effectiveLimit < 1 ||
+        effectiveLimit > MAX_READ_LIMIT
       ) {
         throw new RangeError(COLLECTOR_ERRORS.badLimit);
       }
@@ -646,8 +650,10 @@ export function createUnsupportedAuthorizationSource(
         throw new RangeError(COLLECTOR_ERRORS.badCursor);
       }
       if (
-        typeof effectiveLimit !== 'number' || !Number.isInteger(effectiveLimit) ||
-        effectiveLimit < 1 || effectiveLimit > MAX_READ_LIMIT
+        typeof effectiveLimit !== 'number' ||
+        !Number.isInteger(effectiveLimit) ||
+        effectiveLimit < 1 ||
+        effectiveLimit > MAX_READ_LIMIT
       ) {
         throw new RangeError(COLLECTOR_ERRORS.badLimit);
       }

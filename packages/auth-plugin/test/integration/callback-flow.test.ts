@@ -299,13 +299,15 @@ describe('sign-in callback route', () => {
 
   it('answers in the configured error format when errorHandler is registered', async () => {
     await start({
-      plugins: [{
-        name: 'error-format',
-        version: '0.0.0',
-        register(ctx) {
-          ctx.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 1 });
+      plugins: [
+        {
+          name: 'error-format',
+          version: '0.0.0',
+          register(ctx) {
+            ctx.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 1 });
+          },
         },
-      }],
+      ],
     });
     const response = await callback(harness, jar, { code: 'c', state: 'unknown' });
     expect(response.status).toBe(401);

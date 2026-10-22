@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for {@linkcode createUploadMiddleware} and {@linkcode getUploadedFile}.
  *
@@ -93,8 +93,7 @@ describe('createUploadMiddleware', () => {
     });
     expect(nextCalled).toBe(true);
     const uploads = ctx.state.get('storage-plugin:uploads') as
-      | import('../../src/interfaces/index.ts').UploadedFile[]
-      | undefined;
+      import('../../src/interfaces/index.ts').UploadedFile[] | undefined;
     expect(uploads).toBeUndefined();
   });
   it('stores parsed file in ctx.state', async () => {
@@ -438,8 +437,7 @@ describe('getUploadedFile', () => {
     });
     expect(nextCalled).toBe(true);
     const uploads = ctx.state.get('storage-plugin:uploads') as
-      | import('../../src/interfaces/index.ts').UploadedFile[]
-      | undefined;
+      import('../../src/interfaces/index.ts').UploadedFile[] | undefined;
     expect(uploads?.length).toBe(1);
     expect(uploads?.[0].filename).toBe('');
     expect(uploads?.[0].size).toBe(1);
@@ -470,8 +468,7 @@ describe('getUploadedFile', () => {
     // A parse that yields no file still writes the (empty) uploads list —
     // `getUploadedFile` reads it as "no upload".
     const uploads = ctx.state.get('storage-plugin:uploads') as
-      | import('../../src/interfaces/index.ts').UploadedFile[]
-      | undefined;
+      import('../../src/interfaces/index.ts').UploadedFile[] | undefined;
     expect(uploads?.length).toBe(0);
   });
 
@@ -492,8 +489,7 @@ describe('getUploadedFile', () => {
     const mw = createUploadMiddleware();
     await mw(ctx, (): Promise<void> => Promise.resolve());
     const uploads = ctx.state.get('storage-plugin:uploads') as
-      | import('../../src/interfaces/index.ts').UploadedFile[]
-      | undefined;
+      import('../../src/interfaces/index.ts').UploadedFile[] | undefined;
     expect(uploads?.length).toBe(1);
     expect(uploads?.[0].filename).toBe('a.bin');
     expect(new TextDecoder().decode(uploads?.[0].data ?? new Uint8Array(0))).toBe('DATA');
@@ -549,8 +545,7 @@ describe('createUploadMiddleware — the M95c Content-Disposition name forms', (
     // The old sentinel would have delivered this under `unknown`; dropped, no
     // field exists and the state list is empty.
     const uploads = ctx.state.get('storage-plugin:uploads') as
-      | import('../../src/interfaces/index.ts').UploadedFile[]
-      | undefined;
+      import('../../src/interfaces/index.ts').UploadedFile[] | undefined;
     expect(uploads).toEqual([]);
     expect(getUploadedFile(ctx as unknown as IRequestContext, 'unknown')).toBeUndefined();
   });

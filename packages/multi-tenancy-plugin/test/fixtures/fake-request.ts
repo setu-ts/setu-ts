@@ -19,7 +19,9 @@ export function createFakeRequest(overrides?: {
     get signal(): AbortSignal | undefined {
       return undefined;
     },
-    set signal(_v) {/* no-op */},
+    set signal(_v) {
+      /* no-op */
+    },
     json<T = unknown>(): Promise<T> {
       return Promise.resolve({} as T);
     },

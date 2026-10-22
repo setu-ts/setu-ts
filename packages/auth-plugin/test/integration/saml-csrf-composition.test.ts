@@ -98,7 +98,7 @@ describe('SAML ACS with both CSRF defences', () => {
     harness = await buildSamlApp(key, composed(true));
     const jar = new MultiCookieJar();
     // Same-origin POSTs to the app's own routes need the app's own origin.
-    const { token } = await (await jar.fetch(harness.app, '/_csrf')).json() as { token: string };
+    const { token } = (await (await jar.fetch(harness.app, '/_csrf')).json()) as { token: string };
     const remember = await jar.fetch(harness.app, '/_remember', {
       method: 'POST',
       headers: { origin: 'http://localhost', 'x-csrf-token': token },

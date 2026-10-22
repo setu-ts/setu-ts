@@ -23,9 +23,12 @@ function harness(members: readonly WorkspaceMember[]) {
     }),
     '/ws/deno.json': '{"workspace":["./apps/*"]}',
     ...Object.fromEntries(
-      members.filter((member) => member.devtoolPort !== undefined).map((
-        member,
-      ) => [`/ws/apps/${member.name}/main.dev.ts`, devEntryVariants(member.devtoolPort!)[0]]),
+      members
+        .filter((member) => member.devtoolPort !== undefined)
+        .map((member) => [
+          `/ws/apps/${member.name}/main.dev.ts`,
+          devEntryVariants(member.devtoolPort!)[0],
+        ]),
     ),
     ...Object.fromEntries(members.map((member) => [`/ws/apps/${member.name}/.setu-member`, ''])),
   });
@@ -91,8 +94,7 @@ describe('ports --reallocate', () => {
       '/ws/apps/orders/main.dev.ts': devEntryVariants(4919)[0],
     });
     const occupied = new Set([3000, 3001]);
-    let code = 0;
-    code = await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
+    const code = await runWorkspaceCommand(parseArgs(['ports', '--reallocate']), {
       fs,
       cwd: '/ws',
       log: () => {},

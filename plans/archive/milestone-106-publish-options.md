@@ -93,10 +93,10 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                              | Resolution (picked side)                                                       | Doc deliverable (same PR)                               |
-| -- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------- |
-| C1 | `messaging.ts:1-4` lists five brokers ("RabbitMQ, NATS, Kafka, Redis Streams, in-memory"); seven ship | Source: Pub/Sub and Service Bus ship (M54)                                     | Module JSDoc names all seven                            |
-| C2 | `ROADMAP.md` "Deferred reliability milestone" says ordering belongs to the outbox design              | This milestone owns the publish-side primitive; the outbox owns relay ordering | One sentence in that ROADMAP paragraph pointing at M106 |
+| #   | Conflict                                                                                              | Resolution (picked side)                                                       | Doc deliverable (same PR)                               |
+| --- | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------- |
+| C1  | `messaging.ts:1-4` lists five brokers ("RabbitMQ, NATS, Kafka, Redis Streams, in-memory"); seven ship | Source: Pub/Sub and Service Bus ship (M54)                                     | Module JSDoc names all seven                            |
+| C2  | `ROADMAP.md` "Deferred reliability milestone" says ordering belongs to the outbox design              | This milestone owns the publish-side primitive; the outbox owns relay ordering | One sentence in that ROADMAP paragraph pointing at M106 |
 
 ## 3. Design decisions
 
@@ -104,8 +104,7 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
 
 - **Decision:** `publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void>`.
   `PublishOptions` =
-  `{ readonly orderingKey?: string; readonly deduplicationId?: string; readonly
-  headers?: Readonly<Record<string, string>> }`.
+  `{ readonly orderingKey?: string; readonly deduplicationId?: string; readonly headers?: Readonly<Record<string, string>> }`.
 - **Why:** optional and trailing, so every caller compiles unchanged, and an implementor declaring
   two parameters stays assignable (fewer parameters are assignable in TypeScript). No required
   member is added, which the `0.9.0` versioning policy forbids outside a minor.
@@ -283,21 +282,19 @@ plan's first draft reasoned rather than measured; §3.4 and §3.8 are updated to
     partition until it succeeds) and Pub/Sub on an ordering subscription.
   - **Service Bus — the condition decides, and it is stated every time.** Measured 2026-10-07 both
     ways against the emulator: at the broker's default `maxConcurrentCalls` (1) the abandoned
-    message is redelivered before the next is handled
-    (`first-attempt-1 → first-attempt-2 →
-    second`, order kept by blocking); at
-    `maxConcurrentCalls: 2` the later message IS handled first
+    message is redelivered before the next is handled (`first-attempt-1 → first-attempt-2 → second`,
+    order kept by blocking); at `maxConcurrentCalls: 2` the later message IS handled first
     (`first-attempt-1 → second-attempt-1 → first-attempt-2 → second-attempt-2`, order lost). Never
     write "kept" without the concurrency.
   - **Order lost on retry:** RabbitMQ (retry queues since #421), Redis Streams (reclaim since #419)
     and NATS redelivery — later messages for the key are handled while the failed one waits.
     Measured 2026-10-07 for NATS: the handler order was
-    `first-attempt-1 → second →
-    first-attempt-2`. The RabbitMQ and Kafka cells are pinned by the
+    `first-attempt-1 → second → first-attempt-2`. The RabbitMQ and Kafka cells are pinned by the
     tests below.
 
   Consumers that need order compare the envelope's `aggregateVersion` and drop or defer a stale
   event.
+
 - **Why:** a placement guarantee read as a processing guarantee is the most likely misuse of this
   option. NServiceBus states the same limit outright ("processing failures and recoverability will
   result in out-of-order processing"), as do Watermill (NATS: "with the redelivery feature, order

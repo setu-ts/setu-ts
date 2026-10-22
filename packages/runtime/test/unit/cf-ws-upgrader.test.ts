@@ -270,10 +270,8 @@ describe('CloudflareWorkersHttpAdapter WebSocket upgrade (post-M70a)', () => {
       createUpgradeResponse: () => upgradeResponse(null, { status: 101 }),
     };
     const adapter = new CloudflareWorkersHttpAdapter(failingHost);
-    let frameworkCalls = 0;
 
     adapter.setHandler((request: IRequest): Promise<IResponse> => {
-      frameworkCalls++;
       const intent = { sink };
       (request as unknown as Record<symbol, typeof intent>)[UPGRADE_INTENT] = intent;
       return Promise.resolve({

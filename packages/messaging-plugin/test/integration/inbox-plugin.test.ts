@@ -26,6 +26,7 @@ import type { IDatabaseService, IUnitOfWork } from '@setu-ts/database-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
 import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
 import {
@@ -91,17 +92,22 @@ function writingHandler(calls: string[], fail?: () => boolean) {
 }
 
 function people(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>>('Person').findAll();
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>('Person')
+    .findAll();
 }
 
 function inboxRows(app: IKernelApplication): Promise<Record<string, unknown>[]> {
-  return app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
-    .getRepository<Record<string, unknown>>('Inbox').findAll();
+  return app.services
+    .get<IDatabaseService>(CAPABILITIES.DATABASE)
+    .getRepository<Record<string, unknown>>('Inbox')
+    .findAll();
 }
 
 function publish(app: IKernelApplication, id: string, data?: unknown): Promise<void> {
-  return app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+  return app.services
+    .get<IMessageBroker>(CAPABILITIES.MESSAGING)
     .publish(hired.topic, envelope(id, data));
 }
 
@@ -137,12 +143,20 @@ describe('inbox through a real kernel app', () => {
     const audit: string[] = [];
     const app = buildApp({
       subscriptions: [
-        onIntegrationEvent(hired, (p) => {
-          payroll.push(p.personId);
-        }, { inbox: { consumer: 'payroll' } }),
-        onIntegrationEvent(hired, (p) => {
-          audit.push(p.personId);
-        }, { inbox: { consumer: 'audit' } }),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            payroll.push(p.personId);
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            audit.push(p.personId);
+          },
+          { inbox: { consumer: 'audit' } },
+        ),
       ],
     });
     await app.start();
@@ -161,9 +175,13 @@ describe('inbox through a real kernel app', () => {
     let failures = 1;
     const app = buildApp({
       subscriptions: [
-        onIntegrationEvent(hired, writingHandler(calls, () => failures-- > 0), {
-          inbox: { consumer: 'payroll' },
-        }),
+        onIntegrationEvent(
+          hired,
+          writingHandler(calls, () => failures-- > 0),
+          {
+            inbox: { consumer: 'payroll' },
+          },
+        ),
       ],
     });
     await app.start();
@@ -187,10 +205,15 @@ describe('inbox through a real kernel app', () => {
     const calls: string[] = [];
     const app = buildApp({
       inbox: { maxAttempts: 2 },
+      before: [HealthPlugin({ details: true })],
       subscriptions: [
-        onIntegrationEvent(hired, writingHandler(calls, () => fail), {
-          inbox: { consumer: 'payroll' },
-        }),
+        onIntegrationEvent(
+          hired,
+          writingHandler(calls, () => fail),
+          {
+            inbox: { consumer: 'payroll' },
+          },
+        ),
       ],
     });
     await app.start();
@@ -204,6 +227,13 @@ describe('inbox through a real kernel app', () => {
     const [parked] = await inbox.parked();
     expect(parked).toMatchObject({ consumer: 'payroll', envelopeId: 'e-1', attempts: 2 });
 
+    const ready = await app.inject({ method: 'GET', url: '/ready' });
+    expect(ready.statusCode).toBe(200);
+    expect(ready.json<{ checks: Record<string, unknown> }>().checks.inbox).toMatchObject({
+      status: 'up',
+      data: { parked: 1, reasons: ['parked-rows'] },
+    });
+
     // Parked: a redelivery is skipped.
     await publish(app, 'e-1');
     await settle();
@@ -212,7 +242,8 @@ describe('inbox through a real kernel app', () => {
     fail = false;
     const released = await inbox.release(parked!.rowId, 'retry');
     expect(released).toEqual({ topic: hired.topic, envelope: envelope('e-1') });
-    await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING)
+    await app.services
+      .get<IMessageBroker>(CAPABILITIES.MESSAGING)
       .publish(released.topic, released.envelope);
     await waitFor(() => calls.length === 3, 'retried delivery');
     await settle();
@@ -223,7 +254,8 @@ describe('inbox through a real kernel app', () => {
   it('the scheduled purge removes markers older than retainMs, parked ones included', async () => {
     const app = buildApp({ inbox: { retainMs: 60_000, purge: { intervalMs: 20 } } });
     await app.start();
-    const repo = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+    const repo = app.services
+      .get<IDatabaseService>(CAPABILITIES.DATABASE)
       .getRepository<Record<string, unknown>>('Inbox');
     const row = (id: string, status: string, updatedAt: number) => ({
       id,
@@ -304,9 +336,13 @@ describe('inbox through a real kernel app', () => {
         },
       },
       subscriptions: [
-        onIntegrationEvent(hired, (p) => {
-          calls.push(p.personId);
-        }, { inbox: { consumer: 'payroll' } }),
+        onIntegrationEvent(
+          hired,
+          (p) => {
+            calls.push(p.personId);
+          },
+          { inbox: { consumer: 'payroll' } },
+        ),
       ],
     });
     await app.start();

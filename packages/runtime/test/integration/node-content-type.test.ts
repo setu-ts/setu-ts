@@ -37,9 +37,8 @@ describe('Node adapter content-type parity', () => {
     app.router.get('/stream', (ctx) => ctx.response.stream(stream('s')));
     app.router.get('/bytes', (ctx) => ctx.response.send(bytes('b')));
     app.router.get('/text', (ctx) => ctx.response.text('t'));
-    app.router.get(
-      '/typed-stream',
-      (ctx) => ctx.response.header('content-type', 'application/x-ndjson').stream(stream('{}')),
+    app.router.get('/typed-stream', (ctx) =>
+      ctx.response.header('content-type', 'application/x-ndjson').stream(stream('{}')),
     );
     app.router.get('/json', (ctx) => ctx.response.json({ ok: true }));
     await app.start({ port });

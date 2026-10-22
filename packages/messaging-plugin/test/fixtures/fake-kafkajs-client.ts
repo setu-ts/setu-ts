@@ -1,14 +1,12 @@
+import type { PartitionAssigner } from 'kafkajs';
+import { AssignerProtocol } from 'kafkajs';
 /**
  * Fake Kafka client for testing KafkaBroker.
  *
  * Records all method calls and simulates Kafka behavior.
  */
 /** A header value in any shape kafkajs's `IHeaders` admits. */
-export type KafkaHeaderValue =
-  | string
-  | Uint8Array
-  | readonly (string | Uint8Array)[]
-  | undefined;
+export type KafkaHeaderValue = string | Uint8Array | readonly (string | Uint8Array)[] | undefined;
 
 export interface FakeKafkaOptions {
   /** Pre-seeded messages for eachMessage callbacks. */
@@ -46,9 +44,11 @@ export interface FakeKafkaOptions {
 
 /** Builds the protocol error real kafkajs raises for an unknown topic. */
 export function unknownTopicError(): Error & { type: string; retriable: boolean } {
-  const err = new Error(
-    'This server does not host this topic-partition',
-  ) as Error & { type: string; retriable: boolean; code: number };
+  const err = new Error('This server does not host this topic-partition') as Error & {
+    type: string;
+    retriable: boolean;
+    code: number;
+  };
   err.name = 'KafkaJSProtocolError';
   err.type = 'UNKNOWN_TOPIC_OR_PARTITION';
   err.retriable = true;
@@ -85,9 +85,10 @@ export class FakeKafkaMessage {
     this.#offset = offset;
     this.#timestamp = timestamp;
     this.#headers = Object.fromEntries(
-      Object.entries(headers).map((
-        [k, v],
-      ) => [k, typeof v === 'string' ? new TextEncoder().encode(v) : v]),
+      Object.entries(headers).map(([k, v]) => [
+        k,
+        typeof v === 'string' ? new TextEncoder().encode(v) : v,
+      ]),
     );
     this.#key = key !== null ? new TextEncoder().encode(key) : null;
   }
@@ -117,11 +118,33 @@ export class FakeKafkaMessage {
  * Fake Kafka consumer.
  */
 export class FakeKafkaConsumer {
+  readonly events = { GROUP_JOIN: 'consumer.group_join' } as const;
+  #joinListeners: Array<
+    (event: { payload: { memberAssignment: Record<string, number[]> } }) => Promise<void>
+  > = [];
+  on(
+    event: string,
+    listener: (event: { payload: { memberAssignment: Record<string, number[]> } }) => Promise<void>,
+  ): void {
+    if (event !== this.events.GROUP_JOIN) throw new Error('Invalid consumer event');
+    this.#joinListeners.push(listener);
+  }
+  async join(memberAssignment: Record<string, number[]>): Promise<void> {
+    await Promise.all(
+      this.#joinListeners.map((listener) => listener({ payload: { memberAssignment } })),
+    );
+  }
+  seek(options: { topic: string; partition: number; offset: string }): void {
+    this.#record('seek', [options]);
+  }
+
   #subscribedTopics: string[];
   #runOptions: {
-    eachMessage: (
-      data: { topic: string; partition: number; message: FakeKafkaMessage },
-    ) => Promise<void>;
+    eachMessage: (data: {
+      topic: string;
+      partition: number;
+      message: FakeKafkaMessage;
+    }) => Promise<void>;
   } | null;
   #running: boolean;
   #calls: Array<{ method: string; args: unknown[] }>;
@@ -220,13 +243,13 @@ export class FakeKafkaConsumer {
     return Promise.resolve();
   }
 
-  run(
-    options: {
-      eachMessage: (
-        data: { topic: string; partition: number; message: FakeKafkaMessage },
-      ) => Promise<void>;
-    },
-  ): Promise<void> {
+  run(options: {
+    eachMessage: (data: {
+      topic: string;
+      partition: number;
+      message: FakeKafkaMessage;
+    }) => Promise<void>;
+  }): Promise<void> {
     this.#record('run', [options]);
     if (this.#runRejection !== null) {
       return Promise.reject(this.#runRejection.value);
@@ -340,9 +363,9 @@ export class FakeKafkaProducer {
     const accepted = Object.values(this.events) as readonly string[];
     if (!accepted.includes(event)) {
       throw new Error(
-        `Event name should be one of ${
-          accepted.map((name) => `producer.events.${name}`).join(', ')
-        }`,
+        `Event name should be one of ${accepted
+          .map((name) => `producer.events.${name}`)
+          .join(', ')}`,
       );
     }
     const set = this.#listeners.get(event) ?? new Set();
@@ -363,12 +386,10 @@ export class FakeKafkaProducer {
     return Promise.resolve();
   }
 
-  async send(
-    options: {
-      topic: string;
-      messages: Array<{ value: string; headers?: Record<string, string> }>;
-    },
-  ): Promise<void> {
+  async send(options: {
+    topic: string;
+    messages: Array<{ value: string; headers?: Record<string, string> }>;
+  }): Promise<void> {
     this.#record('send', [options]);
     if (this.#route) {
       for (const message of options.messages) {
@@ -387,11 +408,16 @@ export class FakeKafkaProducer {
  * Fake Kafka factory for testing.
  */
 export class FakeKafkaFactory {
+  readonly admins: FakeKafkaAdmin[] = [];
   #options: FakeKafkaOptions;
   #calls: Array<{ method: string; args: unknown[] }>;
   #producers: FakeKafkaProducer[];
   #consumers: Map<string, FakeKafkaConsumer>; // groupId -> consumer
   #offset = 0;
+  readonly consumerOptions = new Map<
+    string,
+    { groupId: string; partitionAssigners?: PartitionAssigner[] }
+  >();
 
   constructor(options: FakeKafkaOptions = {}) {
     this.#options = options;
@@ -418,12 +444,17 @@ export class FakeKafkaFactory {
     this.#record('producer', []);
     // Return existing producer, or create a new one
     if (this.#producers.length === 0) {
-      const producer = new FakeKafkaProducer(
-        (topic, value) => this.route(topic, value),
-      );
+      const producer = new FakeKafkaProducer((topic, value) => this.route(topic, value));
       this.#producers.push(producer);
     }
     return this.#producers[0];
+  }
+
+  admin(options?: { retry?: { retries: number } }): FakeKafkaAdmin {
+    this.#record('admin', [options]);
+    const admin = new FakeKafkaAdmin();
+    this.admins.push(admin);
+    return admin;
   }
 
   /**
@@ -434,15 +465,10 @@ export class FakeKafkaFactory {
    * to per-instance inbox groups.
    */
   async route(topic: string, value: string): Promise<void> {
-    const message = new FakeKafkaMessage(
-      value,
-      String(this.#offset++),
-      '0',
-      {},
-    );
+    const message = new FakeKafkaMessage(value, String(this.#offset++), '0', {});
     for (const consumer of this.#consumers.values()) {
-      const subscribed = consumer.calls.some((c) =>
-        c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic
+      const subscribed = consumer.calls.some(
+        (c) => c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === topic,
       );
       if (subscribed) {
         await consumer.deliver(topic, message, 0);
@@ -450,7 +476,11 @@ export class FakeKafkaFactory {
     }
   }
 
-  consumer(options: { groupId: string }): FakeKafkaConsumer {
+  consumer(options: {
+    groupId: string;
+    partitionAssigners?: PartitionAssigner[];
+  }): FakeKafkaConsumer {
+    if (options.partitionAssigners) this.consumerOptions.set(options.groupId, options);
     this.#record('consumer', [options]);
     // Return existing consumer for this groupId, or create a new one
     if (!this.#consumers.has(options.groupId)) {
@@ -480,13 +510,57 @@ export class FakeKafkaFactory {
       );
       for (const consumer of this.#consumers.values()) {
         if (
-          consumer.calls.some((c) =>
-            c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === seeded.topic
+          consumer.calls.some(
+            (c) =>
+              c.method === 'subscribe' && (c.args[0] as { topic: string })?.topic === seeded.topic,
           )
         ) {
           await consumer.deliver(seeded.topic, message, seeded.partition);
         }
       }
     }
+  }
+}
+
+/** Real kafkajs return shapes: topic records, partition records, and STRING offsets. */
+export class FakeKafkaAdmin {
+  readonly calls: Array<{ method: string; args: unknown[] }> = [];
+  offsets = [{ topic: 'test.topic', partitions: [{ partition: 0, offset: '-1' }] }];
+  watermarks = [{ partition: 0, offset: '0', high: '0', low: '0' }];
+
+  connect(): Promise<void> {
+    this.calls.push({ method: 'connect', args: [] });
+    return Promise.resolve();
+  }
+  disconnect(): Promise<void> {
+    this.calls.push({ method: 'disconnect', args: [] });
+    return Promise.resolve();
+  }
+  describeCluster(): Promise<{ brokers: unknown[]; controller: number; clusterId: string }> {
+    this.calls.push({ method: 'describeCluster', args: [] });
+    return Promise.resolve({ brokers: [], controller: 0, clusterId: 'fake' });
+  }
+  fetchOffsets(options: { groupId: string; topics: string[] }): Promise<typeof this.offsets> {
+    this.calls.push({ method: 'fetchOffsets', args: [options] });
+    return Promise.resolve(this.offsets.map((entry) => ({ ...entry, topic: options.topics[0]! })));
+  }
+  fetchTopicOffsets(topic: string): Promise<typeof this.watermarks> {
+    this.calls.push({ method: 'fetchTopicOffsets', args: [topic] });
+    return Promise.resolve(this.watermarks);
+  }
+  members = [
+    {
+      memberMetadata: AssignerProtocol.MemberMetadata.encode({
+        version: 0,
+        topics: ['test.topic'],
+        userData: Buffer.from('{}'),
+      }),
+    },
+  ];
+  describeGroups(
+    groups: string[],
+  ): Promise<{ groups: Array<{ members: Array<{ memberMetadata: Uint8Array }> }> }> {
+    this.calls.push({ method: 'describeGroups', args: [groups] });
+    return Promise.resolve({ groups: [{ members: this.members }] });
   }
 }

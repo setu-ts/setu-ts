@@ -40,8 +40,9 @@
  * @module
  */
 
-import { expect } from '@std/expect';
-import { describe, it } from '@std/testing/bdd';
+import { readdir, readFile, mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+
+import { describe, expect, it } from 'vitest';
 
 const WORKFLOW_DIR = '.github/workflows';
 
@@ -99,10 +100,7 @@ export function stripComment(line: string): string {
  * @param workflow - The file name, for reporting
  * @returns Every `actions/checkout` step in the file
  */
-export function workflowCheckoutSteps(
-  text: string,
-  workflow: string,
-): readonly CheckoutStep[] {
+export function workflowCheckoutSteps(text: string, workflow: string): readonly CheckoutStep[] {
   const raw = text.split('\n');
   const steps: CheckoutStep[] = [];
   for (let index = 0; index < raw.length; index += 1) {
@@ -147,14 +145,14 @@ export function dropsCredential(step: CheckoutStep): boolean {
 /** Every `actions/checkout` step across every workflow, in a stable order. */
 async function checkoutSteps(): Promise<readonly CheckoutStep[]> {
   const steps: CheckoutStep[] = [];
-  for await (const entry of Deno.readDir(WORKFLOW_DIR)) {
-    if (!entry.isFile) continue;
+  for await (const entry of await readdir(WORKFLOW_DIR, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
     if (!WORKFLOW_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) continue;
-    const text = await Deno.readTextFile(`${WORKFLOW_DIR}/${entry.name}`);
+    const text = await readFile(`${WORKFLOW_DIR}/${entry.name}`, 'utf8');
     steps.push(...workflowCheckoutSteps(text, entry.name));
   }
   return steps.sort((a, b) =>
-    a.workflow === b.workflow ? a.line - b.line : a.workflow.localeCompare(b.workflow)
+    a.workflow === b.workflow ? a.line - b.line : a.workflow.localeCompare(b.workflow),
   );
 }
 
@@ -192,10 +190,10 @@ describe('workflow checkout credentials', () => {
   it('reads each step in isolation', async () => {
     // The step bound is load-bearing: without it, one job's
     // `persist-credentials: false` would satisfy the assertion for every
-    // checkout after it in the same file. `ci.yml` has eight, including the browser job
-    // and the M111a node-build job.
+    // checkout after it in the same file. `ci.yml` has nine, including the browser job,
+    // the M111a node-build job and the M111e3 Deno runtime lane.
     const steps = (await checkoutSteps()).filter((step) => step.workflow === 'ci.yml');
-    expect(steps.length).toBe(8);
+    expect(steps.length).toBe(9);
     for (const step of steps) {
       const body = step.body.join('\n');
       expect(body.match(/uses:\s*actions\/checkout@/g)?.length).toBe(1);
@@ -223,21 +221,23 @@ describe('workflow checkout credentials', () => {
 
     it('sees a step in a `.yaml` workflow', async () => {
       // The extension list is what this covers; the parser is shared.
-      const directory = await Deno.makeTempDir();
+      const directory = await await mkdir('.tmp', { recursive: true }).then(() =>
+        mkdtemp('.tmp/test-'),
+      );
       try {
-        await Deno.writeTextFile(
+        await writeFile(
           `${directory}/probe.yaml`,
           'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n',
         );
         const names: string[] = [];
-        for await (const entry of Deno.readDir(directory)) {
+        for await (const entry of await readdir(directory, { withFileTypes: true })) {
           if (WORKFLOW_EXTENSIONS.some((extension) => entry.name.endsWith(extension))) {
             names.push(entry.name);
           }
         }
         expect(names).toEqual(['probe.yaml']);
       } finally {
-        await Deno.remove(directory, { recursive: true });
+        await rm(directory, { recursive: true });
       }
     });
 
@@ -269,12 +269,10 @@ describe('workflow checkout credentials', () => {
     it('fails closed on a form it does not recognise', () => {
       // Flow style and a quoted value are both legal YAML and both REFUSED, so
       // an unrecognised spelling is a named failure rather than a silent pass.
-      for (
-        const yaml of [
-          'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with: { persist-credentials: false }\n',
-          "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          persist-credentials: 'false'\n",
-        ]
-      ) {
+      for (const yaml of [
+        'jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with: { persist-credentials: false }\n',
+        "jobs:\n  b:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          persist-credentials: 'false'\n",
+      ]) {
         expect(dropsCredential(stepOf(yaml))).toBe(false);
       }
     });

@@ -155,7 +155,7 @@ export class LocalStorageProvider implements StorageProvider {
     if (this.#fs.realPath) {
       // Resolve real paths (IO that can fail) inside a try/catch block.
       let realRoot: string;
-      let resolvedRealPath: string | null = null;
+      let resolvedRealPath: string;
       try {
         realRoot = await this.#fs!.realPath!(this.#root);
         resolvedRealPath = await this.#fs!.realPath!(joined);
@@ -164,10 +164,7 @@ export class LocalStorageProvider implements StorageProvider {
         return joined;
       }
       // Containment check OUTSIDE the try/catch so traversal throws are not swallowed.
-      if (
-        resolvedRealPath !== realRoot &&
-        !resolvedRealPath.startsWith(realRoot + '/')
-      ) {
+      if (resolvedRealPath !== realRoot && !resolvedRealPath.startsWith(realRoot + '/')) {
         throw new Error(`Path traversal attempt blocked: ${path}`);
       }
       return resolvedRealPath;
@@ -279,7 +276,7 @@ export class LocalStorageProvider implements StorageProvider {
    * @throws {Error} Always, as a rejection — signed URLs unsupported on
    *          LocalStorageProvider
    */
-  // deno-lint-ignore require-await -- the unsupported refusal must REJECT, not throw synchronously
+  // eslint-disable-next-line require-await -- the unsupported refusal must REJECT, not throw synchronously
   async getSignedUrl(_path: string, _options: { expiresIn: number }): Promise<string> {
     throw new Error(
       'LocalStorageProvider does not support signed URLs; use the s3, gcs, or azure provider',

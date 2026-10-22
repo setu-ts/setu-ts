@@ -60,11 +60,7 @@ class PagesController {
 /** Boots the app both plugins need. */
 function boot(): Promise<IKernelApplication> {
   return createTestApp({
-    plugins: [
-      RuntimePlugin(),
-      ViewPlugin(),
-      DecoratorPlugin({ controllers: [PagesController] }),
-    ],
+    plugins: [RuntimePlugin(), ViewPlugin(), DecoratorPlugin({ controllers: [PagesController] })],
   });
 }
 
@@ -72,9 +68,7 @@ describe('@Render composed with response shaping', () => {
   it('answers the declared status with the rendered HTML body', async () => {
     const app = await boot();
     try {
-      const res = await app.fetch(
-        new Request('http://local/pages/users', { method: 'POST' }),
-      );
+      const res = await app.fetch(new Request('http://local/pages/users', { method: 'POST' }));
 
       expect(res.status).toBe(201);
       expect(res.headers.get('content-type')).toBe('text/html; charset=utf-8');
@@ -102,9 +96,7 @@ describe('@Render composed with response shaping', () => {
     // runs — the response carries both the redirect status and the HTML.
     const app = await boot();
     try {
-      const res = await app.fetch(
-        new Request('http://local/pages/moved', { method: 'POST' }),
-      );
+      const res = await app.fetch(new Request('http://local/pages/moved', { method: 'POST' }));
 
       expect(res.status).toBe(303);
       expect(res.headers.get('location')).toBe('/pages/users');

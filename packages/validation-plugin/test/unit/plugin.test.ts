@@ -22,7 +22,7 @@ function createFakePluginContext(): {
   const registeredServices = new Map<string, unknown>();
 
   const ctx: IPluginContext = {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     runtime: {} as any,
     services: {
       register<T>(key: string, service: T): void {
@@ -72,7 +72,7 @@ function createFakePluginContext(): {
     cli: { register: () => {} },
     environment: { validate: () => {} },
     options: {},
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     app: {} as any,
   };
 
@@ -141,7 +141,7 @@ describe('ValidationPlugin — registration', () => {
 
 describe('ValidationPlugin — formatter hoisting', () => {
   it('resolves formatter once at plugin creation time', () => {
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const customFormatter = () => ({ errors: [], custom: true }) as any;
     const plugin = ValidationPlugin({ errorFormat: customFormatter });
     const { ctx, registeredServices } = createFakePluginContext();

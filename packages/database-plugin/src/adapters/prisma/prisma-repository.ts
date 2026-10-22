@@ -16,11 +16,11 @@ import { BaseRepository, type DataSource } from '../../repositories/base-reposit
  * @typeParam Id - Primary key type, constrained to {@linkcode EntityKey}
  * @since 0.1.0
  */
-export class PrismaRepository<Entity extends Record<string, unknown>, Id extends EntityKey = string>
-  extends BaseRepository<Entity, Id> {
-  constructor(
-    protected override readonly _dataSource: DataSource,
-  ) {
+export class PrismaRepository<
+  Entity extends Record<string, unknown>,
+  Id extends EntityKey = string,
+> extends BaseRepository<Entity, Id> {
+  constructor(protected override readonly _dataSource: DataSource) {
     super(_dataSource);
   }
 }

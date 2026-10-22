@@ -4,6 +4,7 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { GraphqlModuleLike, GraphqlRuntime } from '../interfaces/graphql-runtime.ts';
 import { GraphqlRuntimeLoadError } from '../errors/graphql-errors.ts';
 
@@ -22,10 +23,8 @@ export function adaptGraphqlModule(module: GraphqlModuleLike): GraphqlRuntime {
     validateSchema: module.validateSchema as unknown as GraphqlRuntime['validateSchema'],
     getOperationAST: module.getOperationAST as unknown as GraphqlRuntime['getOperationAST'],
     GraphQLError: module.GraphQLError as unknown as GraphqlRuntime['GraphQLError'],
-    NoSchemaIntrospectionCustomRule: module
-      .NoSchemaIntrospectionCustomRule as unknown as GraphqlRuntime[
-        'NoSchemaIntrospectionCustomRule'
-      ],
+    NoSchemaIntrospectionCustomRule:
+      module.NoSchemaIntrospectionCustomRule as unknown as GraphqlRuntime['NoSchemaIntrospectionCustomRule'],
     specifiedRules: module.specifiedRules as unknown as GraphqlRuntime['specifiedRules'],
   };
 }
@@ -34,7 +33,12 @@ export function adaptGraphqlModule(module: GraphqlModuleLike): GraphqlRuntime {
  * Default importer function that performs the actual import.
  */
 const defaultImporter = async (): Promise<GraphqlModuleLike> => {
-  const mod = await import('graphql');
+  let mod: typeof import('graphql');
+  try {
+    mod = await import('graphql');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('graphql', { cause: error });
+  }
   return {
     parse: mod.parse as unknown as GraphqlModuleLike['parse'],
     validate: mod.validate as unknown as GraphqlModuleLike['validate'],
@@ -44,10 +48,8 @@ const defaultImporter = async (): Promise<GraphqlModuleLike> => {
     validateSchema: mod.validateSchema as unknown as GraphqlModuleLike['validateSchema'],
     getOperationAST: mod.getOperationAST as unknown as GraphqlModuleLike['getOperationAST'],
     GraphQLError: mod.GraphQLError as unknown as GraphqlModuleLike['GraphQLError'],
-    NoSchemaIntrospectionCustomRule: mod
-      .NoSchemaIntrospectionCustomRule as unknown as GraphqlModuleLike[
-        'NoSchemaIntrospectionCustomRule'
-      ],
+    NoSchemaIntrospectionCustomRule:
+      mod.NoSchemaIntrospectionCustomRule as unknown as GraphqlModuleLike['NoSchemaIntrospectionCustomRule'],
     specifiedRules: mod.specifiedRules as unknown as GraphqlModuleLike['specifiedRules'],
   };
 };

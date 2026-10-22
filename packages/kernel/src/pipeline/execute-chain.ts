@@ -123,9 +123,7 @@ export async function executeChain(
         // anonymous function — so `??` never fell back and the message read
         // "…in middleware " with a blank name. `||` is the correct operator.
         const label = names?.[position] || fn.name || '<anonymous>';
-        throw new Error(
-          `next() called multiple times in middleware ${label}`,
-        );
+        throw new Error(`next() called multiple times in middleware ${label}`);
       }
       nextCalled = true;
       if (observer !== undefined && responseEnded()) {

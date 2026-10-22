@@ -23,11 +23,7 @@ describe('Barrel exports', () => {
   });
 
   it('should have all expected exports', () => {
-    const expectedExports = [
-      'HealthPlugin',
-      'HealthService',
-      'createHttpIndicator',
-    ];
+    const expectedExports = ['HealthPlugin', 'HealthService', 'createHttpIndicator'];
 
     for (const exportName of expectedExports) {
       expect(healthPlugin, `Should export ${exportName}`).toHaveProperty(exportName);

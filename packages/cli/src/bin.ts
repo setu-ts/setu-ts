@@ -12,5 +12,10 @@
 import process from 'node:process';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { nodeProcess, runMain } from './main.ts';
+import { withRegularFileReads } from './utils/node-regular-file.ts';
 
-process.exitCode = await runMain(createNodeRuntimeServices(), nodeProcess());
+const runtime = createNodeRuntimeServices();
+process.exitCode = await runMain(
+  runtime.fs === undefined ? runtime : { ...runtime, fs: withRegularFileReads(runtime.fs) },
+  nodeProcess(),
+);

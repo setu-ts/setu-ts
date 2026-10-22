@@ -13,10 +13,14 @@ import { resolveParameter } from '../../src/resolvers/parameter-resolver.ts';
  * module, with its own module-level constants — the same situation as two
  * copies of this package resolved into one process.
  */
-const secondCopy = await import('../../src/decorators/security.ts?copy=2');
+const secondCopy = (await import(
+  '../../src/decorators/security.ts?copy=2' as string
+)) as typeof import('../../src/decorators/security.ts');
 const firstCopy = await import('../../src/decorators/security.ts');
 /** The `Ctx()` SOURCE lives in params.ts; a second copy of it must interoperate too. */
-const secondParams = await import('../../src/decorators/params.ts?copy=2');
+const secondParams = (await import(
+  '../../src/decorators/params.ts?copy=2' as string
+)) as typeof import('../../src/decorators/params.ts');
 
 describe('@Ctx marker across package copies', () => {
   it('really is a separate module copy', () => {

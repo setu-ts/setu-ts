@@ -79,12 +79,14 @@ describe('declared processors reach the tracing decorator', () => {
         QueuePlugin({
           adapter: 'memory',
           pollIntervalMs: 5,
-          processors: [{
-            name: 'declared.job',
-            processor: (job) => {
-              seen = job;
+          processors: [
+            {
+              name: 'declared.job',
+              processor: (job) => {
+                seen = job;
+              },
             },
-          }],
+          ],
         }),
       ],
     });
@@ -103,8 +105,7 @@ describe('declared processors reach the tracing decorator', () => {
     expect(consumer?.options?.kind).toBe('consumer');
     // …and it is parented from the header the producer wrote, which is what
     // makes the two halves one trace rather than two.
-    expect(consumer?.options?.parentContext?.traceId)
-      .toBe('0af7651916cd43dd8448eb211c80319c');
+    expect(consumer?.options?.parentContext?.traceId).toBe('0af7651916cd43dd8448eb211c80319c');
     expect(seen?.headers?.traceparent).toBeDefined();
   });
 
@@ -121,12 +122,14 @@ describe('declared processors reach the tracing decorator', () => {
         QueuePlugin({
           adapter: 'memory',
           pollIntervalMs: 5,
-          processors: [() => ({
-            name: 'factory.job',
-            processor: (job) => {
-              seen = job;
-            },
-          })],
+          processors: [
+            () => ({
+              name: 'factory.job',
+              processor: (job) => {
+                seen = job;
+              },
+            }),
+          ],
         }),
       ],
     });
@@ -177,12 +180,14 @@ describe('declared processors reach the tracing decorator', () => {
         QueuePlugin({
           adapter: 'memory',
           pollIntervalMs: 5,
-          processors: [{
-            name: 'plain.job',
-            processor: (job) => {
-              seen = job;
+          processors: [
+            {
+              name: 'plain.job',
+              processor: (job) => {
+                seen = job;
+              },
             },
-          }],
+          ],
         }),
       ],
     });
@@ -206,12 +211,14 @@ describe('declared processors reach the tracing decorator', () => {
         QueuePlugin({
           adapter: 'memory',
           pollIntervalMs: 5,
-          processors: [{
-            name: 'caller.job',
-            processor: (job) => {
-              seen = job;
+          processors: [
+            {
+              name: 'caller.job',
+              processor: (job) => {
+                seen = job;
+              },
             },
-          }],
+          ],
         }),
       ],
     });

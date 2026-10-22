@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { NatsBroker, validateClient } from '../../src/brokers/nats-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -10,6 +10,54 @@ import {
   NatsConsumerNameCollisionError,
   RequestTimeoutError,
 } from '../../src/errors.ts';
+
+describe('M113a NATS reconnect policy', () => {
+  it.each([undefined, {}, { maxAttempts: 3, waitMs: 17 }, { maxAttempts: 0, waitMs: 2147483647 }])(
+    'forwards lazy connect policy %s',
+    async (reconnect) => {
+      const connection = new FakeNatsConnection();
+      const connect = vi.fn(() => Promise.resolve(connection));
+      vi.doMock('nats', () => ({ connect, headers: () => ({}) }));
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        ...(reconnect ? { reconnect } : {}),
+      });
+      try {
+        await broker.connect();
+        expect(connect).toHaveBeenCalledWith({
+          servers: 'nats://localhost:4222',
+          maxReconnectAttempts: reconnect?.maxAttempts ?? -1,
+          reconnectTimeWait: reconnect?.waitMs ?? 2000,
+        });
+      } finally {
+        await broker.disconnect();
+        vi.doUnmock('nats');
+      }
+    },
+  );
+  it.each([-2, 1.5, NaN, Infinity])('refuses maxAttempts %s at construction', (maxAttempts) => {
+    expect(
+      () =>
+        new NatsBroker(createFakeRuntime(), new JsonSerializer(), { reconnect: { maxAttempts } }),
+    ).toThrow('reconnect.maxAttempts');
+  });
+  it.each([0, -1, 0.5, NaN, Infinity, 2147483648])(
+    'refuses waitMs %s at construction',
+    (waitMs) => {
+      expect(
+        () => new NatsBroker(createFakeRuntime(), new JsonSerializer(), { reconnect: { waitMs } }),
+      ).toThrow('reconnect.waitMs');
+    },
+  );
+  it('refuses a reconnect option with an injected client', () => {
+    expect(
+      () =>
+        new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+          client: new FakeNatsConnection(),
+          reconnect: {},
+        }),
+    ).toThrow(TypeError);
+  });
+});
 
 /**
  * NatsBroker unit tests.
@@ -108,8 +156,9 @@ describe('NatsBroker', () => {
         }),
       });
       await broker.connect();
-      await expect(broker.publishWithHeaders('nowhere', { a: 1 }, { traceparent: '00-t' }))
-        .rejects.toThrow('"nowhere"');
+      await expect(
+        broker.publishWithHeaders('nowhere', { a: 1 }, { traceparent: '00-t' }),
+      ).rejects.toThrow('"nowhere"');
       expect(values.get('traceparent')).toBe('00-t');
       await broker.disconnect();
     });
@@ -191,13 +240,15 @@ describe('NatsBroker', () => {
     const values = new Map([['traceparent', '00-parent']]);
     const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
       client: new FakeNatsConnection({
-        seededMessages: [{
-          subject: 'orders',
-          data: '{"id":"1"}',
-          seq: 1,
-          timestampNanos: 1735689600000000000,
-          headers: { keys: () => values.keys(), get: (key) => values.get(key) },
-        }],
+        seededMessages: [
+          {
+            subject: 'orders',
+            data: '{"id":"1"}',
+            seq: 1,
+            timestampNanos: 1735689600000000000,
+            headers: { keys: () => values.keys(), get: (key) => values.get(key) },
+          },
+        ],
       }),
     });
     await broker.connect();
@@ -230,16 +281,21 @@ describe('NatsBroker', () => {
       Reflect.set(assigned, '__proto__', 'v');
       expect(Object.keys(assigned)).toEqual([]);
 
-      const values = new Map([['__proto__', 'proto-value'], ['x-a', '1']]);
+      const values = new Map([
+        ['__proto__', 'proto-value'],
+        ['x-a', '1'],
+      ]);
       const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
         client: new FakeNatsConnection({
-          seededMessages: [{
-            subject: 'orders',
-            data: '{"id":"1"}',
-            seq: 1,
-            timestampNanos: 1735689600000000000,
-            headers: { keys: () => values.keys(), get: (key) => values.get(key) },
-          }],
+          seededMessages: [
+            {
+              subject: 'orders',
+              data: '{"id":"1"}',
+              seq: 1,
+              timestampNanos: 1735689600000000000,
+              headers: { keys: () => values.keys(), get: (key) => values.get(key) },
+            },
+          ],
         }),
       });
       await broker.connect();
@@ -341,9 +397,9 @@ describe('NatsBroker', () => {
     const broker = new NatsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.publish('test', { data: 'test' }),
-    ).rejects.toThrow('NatsBroker is not connected');
+    await expect(broker.publish('test', { data: 'test' })).rejects.toThrow(
+      'NatsBroker is not connected',
+    );
   });
 
   it('subscribe throws when not connected', async () => {
@@ -352,9 +408,9 @@ describe('NatsBroker', () => {
     const broker = new NatsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.subscribe('test', async () => {}),
-    ).rejects.toThrow('NatsBroker is not connected');
+    await expect(broker.subscribe('test', async () => {})).rejects.toThrow(
+      'NatsBroker is not connected',
+    );
   });
 
   it('isReady returns false before connect', () => {
@@ -1140,7 +1196,10 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
   }
 
   async function rejection(promise: Promise<unknown>): Promise<unknown> {
-    return await promise.then(() => null, (e: unknown) => e);
+    return await promise.then(
+      () => null,
+      (e: unknown) => e,
+    );
   }
 
   it('encodes a dotted queue into name AND durable_name, keeping the dotted subject', async () => {
@@ -1148,13 +1207,15 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
     await broker.subscribe('orders.created', () => {}, { queue: 'rr.inbox.abc' });
 
-    expect(adds()).toEqual([{
-      name: 'rr_2einbox_2eabc',
-      durable_name: 'rr_2einbox_2eabc',
-      filter_subject: 'orders.created',
-      ack_policy: 'explicit',
-      metadata: { 'setu.queue': 'rr.inbox.abc' },
-    }]);
+    expect(adds()).toEqual([
+      {
+        name: 'rr_2einbox_2eabc',
+        durable_name: 'rr_2einbox_2eabc',
+        filter_subject: 'orders.created',
+        ack_policy: 'explicit',
+        metadata: { 'setu.queue': 'rr.inbox.abc' },
+      },
+    ]);
     await broker.disconnect();
   });
 
@@ -1187,15 +1248,17 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
   it('refuses a consumer another process created for a different queue', async () => {
     const { broker, jsm, adds } = await connected({
-      existingConsumers: [{
-        stream: 'MESSAGING',
-        config: {
-          name: 'orders_2eeu',
-          durable_name: 'orders_2eeu',
-          filter_subject: 'orders',
-          metadata: { 'setu.queue': 'orders.eu' },
+      existingConsumers: [
+        {
+          stream: 'MESSAGING',
+          config: {
+            name: 'orders_2eeu',
+            durable_name: 'orders_2eeu',
+            filter_subject: 'orders',
+            metadata: { 'setu.queue': 'orders.eu' },
+          },
         },
-      }],
+      ],
     });
 
     const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders_2eeu' }));
@@ -1209,15 +1272,17 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
   it('refuses a queue reused across topics instead of attaching to the first topic', async () => {
     const { broker } = await connected({
-      existingConsumers: [{
-        stream: 'MESSAGING',
-        config: {
-          name: 'workers',
-          durable_name: 'workers',
-          filter_subject: 'orders',
-          metadata: { 'setu.queue': 'workers' },
+      existingConsumers: [
+        {
+          stream: 'MESSAGING',
+          config: {
+            name: 'workers',
+            durable_name: 'workers',
+            filter_subject: 'orders',
+            metadata: { 'setu.queue': 'workers' },
+          },
         },
-      }],
+      ],
     });
 
     const err = await rejection(broker.subscribe('payments', () => {}, { queue: 'workers' }));
@@ -1228,10 +1293,12 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
   it('attaches to a pre-M101b consumer whose durable name IS the raw queue', async () => {
     const { broker, adds } = await connected({
-      existingConsumers: [{
-        stream: 'MESSAGING',
-        config: { name: 'my-consumer', durable_name: 'my-consumer', filter_subject: 'orders' },
-      }],
+      existingConsumers: [
+        {
+          stream: 'MESSAGING',
+          config: { name: 'my-consumer', durable_name: 'my-consumer', filter_subject: 'orders' },
+        },
+      ],
     });
 
     await broker.subscribe('orders', () => {}, { queue: 'my-consumer' });
@@ -1244,10 +1311,12 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
   it('refuses a pre-M101b consumer whose durable name is a DIFFERENT raw queue', async () => {
     const { broker, jsm, adds } = await connected({
-      existingConsumers: [{
-        stream: 'MESSAGING',
-        config: { name: 'orders_2eeu', durable_name: 'orders_2eeu', filter_subject: 'orders' },
-      }],
+      existingConsumers: [
+        {
+          stream: 'MESSAGING',
+          config: { name: 'orders_2eeu', durable_name: 'orders_2eeu', filter_subject: 'orders' },
+        },
+      ],
     });
 
     const err = await rejection(broker.subscribe('orders', () => {}, { queue: 'orders.eu' }));
@@ -1261,15 +1330,17 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
 
   it('recognises "already exists" by message when no api_error code is attached', async () => {
     const { broker, jsm } = await connected({
-      existingConsumers: [{
-        stream: 'MESSAGING',
-        config: {
-          name: 'q',
-          durable_name: 'q',
-          filter_subject: 'orders',
-          metadata: { 'setu.queue': 'other' },
+      existingConsumers: [
+        {
+          stream: 'MESSAGING',
+          config: {
+            name: 'q',
+            durable_name: 'q',
+            filter_subject: 'orders',
+            metadata: { 'setu.queue': 'other' },
+          },
         },
-      }],
+      ],
     });
     for (const message of ['consumer already exists', 'duplicate consumer']) {
       jsm.consumers.add = () => Promise.reject(new Error(message));
@@ -1289,5 +1360,31 @@ describe('NatsBroker JetStream consumer names (M101b, V8-6)', () => {
     jsm.consumers.add = () => Promise.reject(thrown);
     expect(await rejection(broker.subscribe('orders', () => {}, { queue: 'q' }))).toBe(thrown);
     await broker.disconnect();
+  });
+});
+
+describe('NatsBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { NatsBroker } = await import('../../src/brokers/nats-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('nats', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer());
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('nats');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('nats');
+    }
   });
 });

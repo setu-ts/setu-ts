@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runGenerateCommand } from '../../src/commands/generate.ts';
+import { VERSION } from '../../src/version.ts';
 import type { GeneratedFile } from '../../src/utils/file-writer.ts';
 
 const DENO_MANIFEST = (...packages: readonly string[]) =>
@@ -11,13 +12,24 @@ const DENO_MANIFEST = (...packages: readonly string[]) =>
     ),
   });
 
+it('dry-run collision refuses without writing', async () => {
+  const h = harness({ '/app/src/services/widget.service.ts': 'mine' });
+  expect(await h.run(['service', 'widget', '--dry-run'])).toBe(1);
+  expect(h.err.text()).toContain(
+    'WOULD REFUSE: /app/src/services/widget.service.ts already exists',
+  );
+  expect(h.fs.writes).toEqual([]);
+  expect(h.fs.read('/app/src/services/widget.service.ts')).toBe('mine');
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
   readonly err: ReturnType<typeof createRecorder>;
-  run(argv: readonly string[], load?: (url: string) => Promise<Record<string, unknown>>): Promise<
-    number
-  >;
+  run(
+    argv: readonly string[],
+    load?: (url: string) => Promise<Record<string, unknown>>,
+  ): Promise<number>;
 }
 
 function harness(seed: Readonly<Record<string, string>> = {}): Harness {
@@ -65,7 +77,7 @@ describe('runGenerateCommand', () => {
   it('refuses a class-based job without queue before writing and marks help unavailable', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('decorator-plugin') });
     expect(await h.run(['job', 'nightly'])).toBe(1);
-    expect(h.err.text()).toContain('setu add queue');
+    expect(h.err.text()).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} add queue`);
     expect(h.fs.writes).toEqual([]);
     expect(await h.run(['--help'])).toBe(0);
     expect(h.out.text()).toContain('job  (unavailable — run `setu add queue`)');
@@ -103,8 +115,9 @@ describe('runGenerateCommand', () => {
       '/app/src/services/user-profile.service.ts',
       '/app/src/services/index.ts',
     ]);
-    expect(h.fs.read('/app/src/services/user-profile.service.ts'))
-      .toContain('export function describeUserProfile');
+    expect(h.fs.read('/app/src/services/user-profile.service.ts')).toContain(
+      'export function describeUserProfile',
+    );
     expect(h.out.text()).toContain('created /app/src/services/user-profile.service.ts');
   });
 
@@ -212,7 +225,8 @@ describe('runGenerateCommand', () => {
         expect(await blocked.run([schematic, 'thing'])).toBe(1);
         expect(blocked.err.text()).toContain(plugin);
 
-        const allowed = harness({ '/app/deno.json': DENO_MANIFEST(plugin) });
+        // `common` is in every scaffold's base set; `migration` also requires it.
+        const allowed = harness({ '/app/deno.json': DENO_MANIFEST(plugin, 'common') });
         expect(await allowed.run([schematic, 'thing'])).toBe(0);
       });
     }
@@ -265,7 +279,9 @@ describe('runGenerateCommand', () => {
     it('allows a functional module when decorators are absent', async () => {
       const h = harness();
       expect(await h.run(['module', 'widget'])).toBe(0);
-      expect(h.fs.read('/app/src/controllers/widget.routes.ts')).toContain('registerWidgetRoutes');
+      expect(h.fs.read('/app/src/modules/widget/widget.routes.ts')).toContain(
+        'registerWidgetRoutes',
+      );
     });
 
     // A schematic with no honest alternative must print nothing extra —
@@ -468,10 +484,7 @@ describe('runGenerateCommand', () => {
       let seen: string | undefined;
       const load = () =>
         Promise.resolve({
-          schematic: (
-            _names: unknown,
-            options: { runtime: string },
-          ): readonly GeneratedFile[] => {
+          schematic: (_names: unknown, options: { runtime: string }): readonly GeneratedFile[] => {
             seen = options.runtime;
             return [{ path: 'x.txt', contents: 'x' }];
           },
@@ -515,10 +528,8 @@ describe('runGenerateCommand', () => {
     const code = await runGenerateCommand(parseArgs(['service', 'billing']), {
       fs: {
         ...fs,
-        readFile: (path: string) =>
-          path === '/app/bun.lock'
-            ? Promise.reject(new Error('EIO: i/o error'))
-            : fs.readFile(path),
+        stat: (path: string) =>
+          path === '/app/bun.lock' ? Promise.reject(new Error('EIO: i/o error')) : fs.stat(path),
       },
       cwd: '/app',
       now: () => 0,
@@ -617,8 +628,9 @@ describe('runGenerateCommand', () => {
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
-      expect(h.fs.read('/app/src/controllers/class.routes.ts'))
-        .toContain('export function registerClassRoutes');
+      expect(h.fs.read('/app/src/controllers/class.routes.ts')).toContain(
+        'export function registerClassRoutes',
+      );
     });
   });
 
@@ -669,8 +681,15 @@ describe('runGenerateCommand', () => {
     expect(h.err.text()).not.toContain('still holds');
   });
 
-  it('uses the injected clock for the migration filename', async () => {
+  it('refuses migration without common, naming the command that adds it', async () => {
     const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin') });
+    expect(await h.run(['migration', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('common');
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('uses the injected clock for the migration filename', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin', 'common') });
     expect(await h.run(['migration', 'add-orders'])).toBe(0);
     // The runner and its barrel ride along since D5 — the migration used to be
     // an orphan that nothing imported and nothing could run.
@@ -679,6 +698,16 @@ describe('runGenerateCommand', () => {
       '/app/src/migrations/index.ts',
       '/app/src/migrations/run.ts',
     ]);
+    expect(h.out.text()).toContain('readiness: { migrations: MIGRATION_NAMES }');
+    expect(h.out.text()).toContain('./src/migrations/index.ts');
+    expect(h.out.text()).toContain('setu_migrations table: https://');
+  });
+
+  it('prints no migration hint for other schematics or dry runs', async () => {
+    const h = harness({ '/app/deno.json': DENO_MANIFEST('database-plugin', 'common') });
+    expect(await h.run(['service', 'billing'])).toBe(0);
+    expect(await h.run(['migration', 'orders', '--dry-run'])).toBe(0);
+    expect(h.out.text()).not.toContain('readiness:');
   });
 });
 
@@ -854,5 +883,102 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
       'Would adopt src/controllers/admin.routes.ts into src/controllers/index.ts',
     );
     expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
+  });
+});
+
+// L1 audit: a CLI-owned managed file (a schematic's regenerated barrel) that is
+// a committed link or special file used to be read without bound — a link to
+// `/dev/zero` hung `setu g job x --dry-run` and `setu g job x` forever. The
+// fake's `stat` reports the planted path's kind and size instead of touching
+// the special file.
+describe('bounded read of a managed file (L1 audit)', () => {
+  const barrel = '/app/src/jobs/index.ts';
+
+  // A schematic that regenerates the jobs barrel and one job module, the
+  // shape of `setu g job x`.
+  const load = () =>
+    Promise.resolve({
+      schematic: (): readonly GeneratedFile[] => [
+        {
+          path: 'src/jobs/index.ts',
+          contents: 'export const JOB_NAMES = ["nightly"];\n',
+          managed: true,
+        },
+        { path: 'src/jobs/nightly.ts', contents: 'export const nightly = true;\n' },
+      ],
+    });
+
+  /** A project whose planted barrel's `stat` reports the given kind and size. */
+  function plantedHarness(metadata: { readonly isFile: boolean; readonly size: number }): Harness {
+    const fs = createFakeFs({ '/app/deno.json': '{}', [barrel]: 'old' });
+    const out = createRecorder();
+    const err = createRecorder();
+    return {
+      fs,
+      out,
+      err,
+      run: (argv, load) =>
+        runGenerateCommand(parseArgs(argv), {
+          fs: {
+            ...fs,
+            stat: (path) =>
+              path === barrel
+                ? Promise.resolve({
+                    isFile: metadata.isFile,
+                    isDirectory: false,
+                    size: metadata.size,
+                  })
+                : fs.stat(path),
+          },
+          cwd: '/app',
+          now: () => 0,
+          log: out.sink,
+          error: err.sink,
+          ...(load === undefined ? {} : { load }),
+        }),
+    };
+  }
+
+  it('refuses a dry run with exit 1 when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(h.err.text()).toContain('Cannot plan:');
+    expect(h.err.text()).not.toContain('Failed to write');
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a write with exit 1, leaving no partial files, when a managed file is not a regular file', async () => {
+    const h = plantedHarness({ isFile: false, size: 0 });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(h.err.text()).toContain(
+      `${barrel} is not a regular file; the CLI will not read or replace it.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(h.fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a dry run and a write with exit 1 when a managed file exceeds 1 MiB', async () => {
+    const dry = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await dry.run(['custom', 'jobs', 'nightly', '--dry-run'], load)).toBe(1);
+    expect(dry.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(dry.fs.writes).toEqual([]);
+
+    const real = plantedHarness({ isFile: true, size: 2 * 1024 * 1024 });
+    expect(await real.run(['custom', 'jobs', 'nightly'], load)).toBe(1);
+    expect(real.err.text()).toContain('is 2097152 bytes, larger than the 1 MiB');
+    expect(real.fs.writes).toEqual([]);
+    expect(real.fs.has('/app/src/jobs/nightly.ts')).toBe(false);
+    expect(real.fs.read(barrel)).toBe('old');
+  });
+
+  it('still rewrites an ordinary managed file under the cap', async () => {
+    const h = harness({ [barrel]: 'old' });
+    expect(await h.run(['custom', 'jobs', 'nightly'], load)).toBe(0);
+    expect(h.fs.read(barrel)).toBe('export const JOB_NAMES = ["nightly"];\n');
+    expect(h.fs.has('/app/src/jobs/nightly.ts')).toBe(true);
   });
 });

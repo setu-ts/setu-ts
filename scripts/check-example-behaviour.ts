@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable behaviour gate for documented view components.
  *
@@ -22,6 +22,13 @@
  *
  * @module
  */
+
+import { SANDBOX_IMPORTS, sandboxReadFlags } from './lib/sandbox.ts';
+import { transform } from 'esbuild';
+import { run as runProcess } from './lib/run.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile, mkdir, writeFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 import { classify, extractFences, TS_ALIASES } from '../test/fixtures/snippets/fence-engine.ts';
 
 /** The payload rendered into every string-shaped prop. */
@@ -553,10 +560,7 @@ export function collectComponents(file: string, markdown: string): readonly DocC
  * @param markdown - Its contents
  * @returns One entry per unrenderable definition whose data path the probe cannot check
  */
-export function collectUnrenderedBlindSpots(
-  file: string,
-  markdown: string,
-): readonly BlindSpot[] {
+export function collectUnrenderedBlindSpots(file: string, markdown: string): readonly BlindSpot[] {
   const found: BlindSpot[] = [];
   if (!RENDERS_VIEWS.test(markdown)) return found;
 
@@ -594,7 +598,8 @@ export function blindSpotFindings(spots: readonly BlindSpot[]): readonly Finding
     .map((spot) => ({
       file: spot.file,
       line: spot.line,
-      message: `${spot.name} is UNCHECKED: it is not a props component, so the probe never ` +
+      message:
+        `${spot.name} is UNCHECKED: it is not a props component, so the probe never ` +
         `renders it, and its source routes a value through raw() or an element spread — ` +
         `the gate cannot see what reaches the page. Carry an ` +
         `// ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above it, or reshape it into ` +
@@ -621,8 +626,10 @@ export function buildProbe(components: readonly DocComponent[]): string {
   // called `UserList`, and the extracted source is emitted VERBATIM — it is
   // what is under test, so renaming it to dodge the collision would mean
   // checking something the reader will not copy.
-  const body = components.map((c, index) =>
-    `{
+  const body = components
+    .map(
+      (c, index) =>
+        `{
 ${c.dependencies.join('\n')}
 ${c.source}
 try {
@@ -658,12 +665,13 @@ try {
 } catch (error) {
   console.log(JSON.stringify({ index: ${index}, ok: false, error: String(error) }));
 }
-}`
-  ).join('\n\n');
+}`,
+    )
+    .join('\n\n');
 
-  return `/** @jsxImportSource @hono/hono/jsx */
+  return `/** @jsxImportSource hono/jsx */
 import { renderComponent } from '../../packages/view-plugin/src/render/normalize.ts';
-import { html } from '@hono/hono/html';
+import { html } from 'hono/html';
 
 const HOSTILE = ${JSON.stringify(HOSTILE)};
 const ESCAPED_HOSTILE = ${JSON.stringify(escapeHtml(HOSTILE))};
@@ -756,15 +764,15 @@ ${body}
 /** One component's rendered outcome, as reported by the probe. */
 export type ProbeResult =
   | {
-    readonly index: number;
-    readonly ok: true;
-    readonly escaped: boolean;
-    readonly scheme: boolean;
-    /** A payload reached the output under at least one string-delivery mode. */
-    readonly delivered: boolean;
-    /** The unbounded reach proxy got a payload into the output. */
-    readonly reached: boolean;
-  }
+      readonly index: number;
+      readonly ok: true;
+      readonly escaped: boolean;
+      readonly scheme: boolean;
+      /** A payload reached the output under at least one string-delivery mode. */
+      readonly delivered: boolean;
+      /** The unbounded reach proxy got a payload into the output. */
+      readonly reached: boolean;
+    }
   | { readonly index: number; readonly ok: false; readonly error: string };
 
 /**
@@ -878,7 +886,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} is UNCHECKED: its own source routes a value through ` +
+        message:
+          `${component.name} is UNCHECKED: its own source routes a value through ` +
           `${unchecked.join(' and ')}, which the probe stubs out — neither payload provably ` +
           `reached its output, so a clean render here means nothing. Remove the indirection, ` +
           `or carry an // ${UNCHECKED_EXEMPT_MARKERS[0]}: <reason> comment above the component.`,
@@ -895,7 +904,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} is labelled a counter-example by its own comment, but it ` +
+        message:
+          `${component.name} is labelled a counter-example by its own comment, but it ` +
           `ESCAPES its input. The document warns against a shape that is no longer unsafe — ` +
           `update the warning, or drop the entry.`,
       });
@@ -905,7 +915,8 @@ export function compare(
       findings.push({
         file: component.file,
         line: component.line,
-        message: `${component.name} renders ${JSON.stringify(URL_PAYLOAD)} into a URL ` +
+        message:
+          `${component.name} renders ${JSON.stringify(URL_PAYLOAD)} into a URL ` +
           `attribute (href, src or action). Escaping protects HTML structure, not URL ` +
           `schemes — a metacharacter-free payload survives it intact, and clicking the ` +
           `link executes. Validate the scheme of a user-supplied URL before it reaches ` +
@@ -917,9 +928,9 @@ export function compare(
         file: component.file,
         line: component.line,
         message:
-          `${component.name} renders ${
-            JSON.stringify(HOSTILE)
-          } UNESCAPED. A documented component ` +
+          `${component.name} renders ${JSON.stringify(
+            HOSTILE,
+          )} UNESCAPED. A documented component ` +
           `must escape its input: write it with JSX or hono's \`html\` tag, never a plain ` +
           `template literal, which is a \`string\` the engine returns unchanged.`,
       });
@@ -930,7 +941,7 @@ export function compare(
 
 const SCRATCH = '.tmp/example-behaviour';
 const PROBE = `${SCRATCH}/probe.tsx`;
-const CONFIG = 'test/fixtures/snippets/deno.json';
+
 const TIMEOUT_MS = 30_000;
 const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'build', 'dist', '.wrangler']);
 
@@ -943,21 +954,21 @@ const SKIP_DIRS = new Set(['node_modules', '.git', 'coverage', 'build', 'dist', 
 export async function scanDocuments(roots: readonly string[]): Promise<readonly string[]> {
   const found = new Set<string>();
   const walk = async (dir: string, depth: number): Promise<void> => {
-    let entries: Deno.DirEntry[];
+    let entries: Dirent[];
     try {
-      entries = await Array.fromAsync(Deno.readDir(dir));
+      entries = await await readdir(dir, { withFileTypes: true });
     } catch (error) {
       // A missing root is ordinary — a caller may name one that does not
       // exist. Anything else (a permission error, an I/O fault) would
       // silently omit that directory's documents and let the gate pass with
       // incomplete coverage, so it propagates.
-      if (error instanceof Deno.errors.NotFound) return;
+      if (isNotFound(error)) return;
       throw error;
     }
     for (const entry of entries) {
       if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue;
       const path = dir === '.' ? entry.name : `${dir}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         if (depth > 0) await walk(path, depth - 1);
       } else if (entry.name.endsWith('.md')) found.add(path);
     }
@@ -985,7 +996,7 @@ export async function run(
   for (const file of documents) {
     let markdown: string;
     try {
-      markdown = await Deno.readTextFile(file);
+      markdown = await readFile(file, 'utf8');
     } catch {
       return [{ file, line: 1, message: 'could not be read' }];
     }
@@ -1000,63 +1011,75 @@ export async function run(
   const rendered = components;
   if (rendered.length === 0) return blindSpotFindings(blindSpots);
 
-  await Deno.mkdir(SCRATCH, { recursive: true });
-  await Deno.writeTextFile(PROBE, buildProbe(rendered));
+  await mkdir(SCRATCH, { recursive: true });
+  await writeFile(PROBE, buildProbe(rendered));
 
-  const command = new Deno.Command('deno', {
-    args: ['run', '--config', CONFIG, '--allow-read', '--no-prompt', PROBE],
-    stdout: 'piped',
-    stderr: 'piped',
-  });
-  const child = command.spawn();
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const outcome = await Promise.race([
-    child.output(),
-    new Promise<null>((resolve) => {
-      timer = setTimeout(() => {
-        try {
-          child.kill();
-        } catch { /* already gone */ }
-        resolve(null);
-      }, timeoutMs);
-    }),
-  ]);
-  if (timer !== undefined) clearTimeout(timer);
+  let transformed;
+  try {
+    transformed = await transform(buildProbe(rendered), {
+      loader: 'tsx',
+      jsx: 'automatic',
+      jsxImportSource: 'hono/jsx',
+      format: 'esm',
+      target: 'es2024',
+    });
+  } catch (error) {
+    return [
+      { file: PROBE, line: 1, message: `the render probe exited non-zero.\n${String(error)}` },
+    ];
+  }
+  const executable = PROBE.replace(/\.tsx$/, '.mjs');
+  await writeFile(executable, transformed.code);
+  const outcome = await runProcess(
+    process.execPath,
+    [
+      '--permission',
+      ...(await sandboxReadFlags(process.cwd(), [SCRATCH])),
+      ...SANDBOX_IMPORTS,
+      executable,
+    ],
+    { env: {}, timeoutMs },
+  );
 
-  if (outcome === null) {
+  if (outcome.code === 124) {
     return [{ file: PROBE, line: 1, message: 'the render probe timed out' }];
   }
-  const stdout = new TextDecoder().decode(outcome.stdout);
-  if (!outcome.success) {
+  const stdout = outcome.stdout;
+  if (!(outcome.code === 0)) {
     // A component can print its result and then fail the process — an
     // unhandled rejection scheduled during rendering, say. The batch would be
     // complete and the gate would report success.
-    const stderr = new TextDecoder().decode(outcome.stderr).trim();
+    const stderr = outcome.stderr.trim();
     return [{ file: PROBE, line: 1, message: `the render probe exited non-zero.\n${stderr}` }];
   }
   const results = parseProbe(stdout, rendered.length);
   if (results === null) {
-    const stderr = new TextDecoder().decode(outcome.stderr).trim();
-    return [{
-      file: PROBE,
-      line: 1,
-      message: `the render probe did not report ${rendered.length} result(s).\n${stderr}`,
-    }];
+    const stderr = outcome.stderr.trim();
+    return [
+      {
+        file: PROBE,
+        line: 1,
+        message: `the render probe did not report ${rendered.length} result(s).\n${stderr}`,
+      },
+    ];
   }
   return [...compare(rendered, results), ...blindSpotFindings(blindSpots)];
 }
 
 if (import.meta.main) {
-  const findings = await run(Deno.args);
-  if (findings.length > 0) {
-    console.error(`Example behaviour check FAILED: ${findings.length} finding(s).\n`);
-    for (const finding of findings) {
-      console.error(`  ${finding.file}:${finding.line}\n    ${finding.message}\n`);
+  await (async () => {
+    const findings = await run(process.argv.slice(2));
+    if (findings.length > 0) {
+      console.error(`Example behaviour check FAILED: ${findings.length} finding(s).\n`);
+      for (const finding of findings) {
+        console.error(`  ${finding.file}:${finding.line}\n    ${finding.message}\n`);
+      }
+      process.exitCode = 1;
+      return;
     }
-    Deno.exit(1);
-  }
-  console.log(
-    'Example behaviour check passed: every documented view component escapes its input, ' +
-      `carries no ${URL_PAYLOAD} into a URL attribute, and nothing documented is unchecked.`,
-  );
+    console.log(
+      'Example behaviour check passed: every documented view component escapes its input, ' +
+        `carries no ${URL_PAYLOAD} into a URL attribute, and nothing documented is unchecked.`,
+    );
+  })();
 }

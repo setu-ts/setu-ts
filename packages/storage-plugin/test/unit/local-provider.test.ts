@@ -1,4 +1,3 @@
-// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
 /**
 
  * Tests for {@linkcode LocalStorageProvider}.
@@ -298,7 +297,6 @@ describe('LocalStorageProvider', () => {
 
   it('put creates parent directories for nested keys', async () => {
     const { fs } = makeFakeFs();
-    // deno-lint-ignore no-explicit-any
     const mkdirPaths: string[] = [];
     const mkdirFs = {
       ...fs,

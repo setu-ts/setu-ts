@@ -33,15 +33,11 @@ function matchWith(
   for (const pattern of ordered) router.get(pattern, handlerFor(pattern));
 
   const result = router.match('GET', path);
-  return result === null ? null : labels.get(result.definition.handler) ?? null;
+  return result === null ? null : (labels.get(result.definition.handler) ?? null);
 }
 
 /** Asserts the winner is the same whichever route was registered first. */
-function expectWinner(
-  patterns: readonly [string, string],
-  path: string,
-  winner: string,
-): void {
+function expectWinner(patterns: readonly [string, string], path: string, winner: string): void {
   expect(matchWith(patterns, 'as-listed', path)).toBe(winner);
   expect(matchWith(patterns, 'reversed', path)).toBe(winner);
 }

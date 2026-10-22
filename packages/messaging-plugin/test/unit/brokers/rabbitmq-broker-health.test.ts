@@ -17,7 +17,7 @@ const flush = (): Promise<void> =>
 
 /**
  * A controllable clock so the drive-mode backoff is deterministic and can be
- * flushed without real waiting (mirrors reconnect.test.ts).
+ * flushed without real waiting (mirrors reconnect-supervisor.test.ts in @setu-ts/common).
  */
 function makeClock() {
   let now = 0;
@@ -117,11 +117,11 @@ function makeAmqp(opts: { confirm?: boolean } = {}): FakeAmqp {
     },
     ...(opts.confirm
       ? {
-        createConfirmChannel: () => {
-          confirmOpenCalls++;
-          return Promise.resolve(makeChannel());
-        },
-      }
+          createConfirmChannel: () => {
+            confirmOpenCalls++;
+            return Promise.resolve(makeChannel());
+          },
+        }
       : {}),
     close: () => Promise.resolve(),
     on: (event: string, listener: (err?: unknown) => void) => {
@@ -355,37 +355,29 @@ describe('RabbitMqBroker health + drive-mode reconnect (M70c)', () => {
   });
 
   it('rejects an injected client that is not an object', async () => {
-    const broker = new RabbitMqBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-      { client: 'not-an-object' as unknown as IAmqpConnection },
-    );
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: 'not-an-object' as unknown as IAmqpConnection,
+    });
     await expect(broker.connect()).rejects.toThrow(
       'Injected AMQP client does not match the required structural shape',
     );
   });
 
   it('rejects an injected client missing createChannel', async () => {
-    const broker = new RabbitMqBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-      { client: { close: () => Promise.resolve() } as unknown as IAmqpConnection },
-    );
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: { close: () => Promise.resolve() } as unknown as IAmqpConnection,
+    });
     await expect(broker.connect()).rejects.toThrow(
       'Injected AMQP client does not match the required structural shape',
     );
   });
 
   it('rejects an injected client missing close', async () => {
-    const broker = new RabbitMqBroker(
-      createFakeRuntime(),
-      new JsonSerializer(),
-      {
-        client: {
-          createChannel: () => Promise.resolve({ assertExchange: () => Promise.resolve() }),
-        } as unknown as IAmqpConnection,
-      },
-    );
+    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: {
+        createChannel: () => Promise.resolve({ assertExchange: () => Promise.resolve() }),
+      } as unknown as IAmqpConnection,
+    });
     await expect(broker.connect()).rejects.toThrow(
       'Injected AMQP client does not match the required structural shape',
     );

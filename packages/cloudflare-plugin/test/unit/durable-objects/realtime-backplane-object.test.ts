@@ -19,9 +19,7 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 
-import {
-  RealtimeBackplaneObjectCore,
-} from '../../../src/durable-objects/realtime-backplane-object.ts';
+import { RealtimeBackplaneObjectCore } from '../../../src/durable-objects/realtime-backplane-object.ts';
 import { FakeDurableObjectState, linkedPair } from '../../do-fakes.ts';
 
 /** Builds a core whose pairs the test can reach. */

@@ -43,9 +43,8 @@ import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 
 // Fresh per-launch credentials, generated here for the example; in a real
 // launch the trusted native launcher supplies them in memory.
-const sessionId = Array.from(
-  crypto.getRandomValues(new Uint8Array(16)),
-  (b) => b.toString(16).padStart(2, '0'),
+const sessionId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+  b.toString(16).padStart(2, '0'),
 ).join('');
 const sessionKey = crypto.getRandomValues(new Uint8Array(32));
 
@@ -118,9 +117,8 @@ export function createApp(
 export const production: IApplication = createApp();
 
 // main.dev.ts — the ONLY module that imports the connector.
-const sessionId = Array.from(
-  crypto.getRandomValues(new Uint8Array(16)),
-  (b) => b.toString(16).padStart(2, '0'),
+const sessionId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) =>
+  b.toString(16).padStart(2, '0'),
 ).join('');
 const sessionKey = crypto.getRandomValues(new Uint8Array(32));
 
@@ -288,5 +286,5 @@ arrival age at one process, never a global timeline.
 | `IDiagnosticsClient`         | interface |
 | `IDiagnosticsPlugin`         | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

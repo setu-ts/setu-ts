@@ -62,10 +62,7 @@ export class TransactionalStoreUnavailableError extends Error {
    *   missing or unreadable.
    */
   readonly reason:
-    | 'cosmos-unsupported'
-    | 'bigtable-unsupported'
-    | 'mongodb-standalone'
-    | 'entity-unavailable';
+    'cosmos-unsupported' | 'bigtable-unsupported' | 'mongodb-standalone' | 'entity-unavailable';
 
   /**
    * Creates the error.

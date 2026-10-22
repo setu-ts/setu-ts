@@ -28,20 +28,18 @@ describe('legacyFrameworkPackage', () => {
 
 describe('rewriteLegacyPins', () => {
   it('moves every Deno import-map pin onto npm and reports each', () => {
-    const source = `${
-      JSON.stringify(
-        {
-          tasks: { start: 'deno run main.ts' },
-          imports: {
-            '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.8.0',
-            '@setu-ts/runtime': 'npm:@jsr/setu-ts__runtime@^0.8.0',
-            '@std/expect': 'jsr:@std/expect@^1',
-          },
+    const source = `${JSON.stringify(
+      {
+        tasks: { start: 'deno run main.ts' },
+        imports: {
+          '@setu-ts/kernel': 'jsr:@setu-ts/kernel@^0.8.0',
+          '@setu-ts/runtime': 'npm:@jsr/setu-ts__runtime@^0.8.0',
+          '@std/expect': 'jsr:@std/expect@^1',
         },
-        null,
-        2,
-      )
-    }\n`;
+      },
+      null,
+      2,
+    )}\n`;
     const result = rewriteLegacyPins(source, 'deno');
     const parsed = JSON.parse(result.contents!);
     expect(parsed.imports).toEqual({
@@ -103,14 +101,12 @@ describe('rewriteLegacyPins', () => {
   });
 
   it('reports nothing for a manifest already on npm, or with no pin sections', () => {
-    for (
-      const source of [
-        JSON.stringify({ imports: { '@setu-ts/kernel': `npm:@setu-ts/kernel@^${VERSION}` } }),
-        JSON.stringify({ tasks: {} }),
-        JSON.stringify({ imports: ['not', 'a', 'map'] }),
-        JSON.stringify({ imports: { '@setu-ts/kernel': 3 } }),
-      ]
-    ) {
+    for (const source of [
+      JSON.stringify({ imports: { '@setu-ts/kernel': `npm:@setu-ts/kernel@^${VERSION}` } }),
+      JSON.stringify({ tasks: {} }),
+      JSON.stringify({ imports: ['not', 'a', 'map'] }),
+      JSON.stringify({ imports: { '@setu-ts/kernel': 3 } }),
+    ]) {
       expect(rewriteLegacyPins(source, 'deno'), source).toEqual({
         contents: undefined,
         rewrites: [],
@@ -136,8 +132,9 @@ describe('rewriteLegacyPins', () => {
       ].join('\n');
       const out = rewriteLegacyPins(source, 'deno').contents!;
       expect(out.split('\n').slice(0, 3)).toEqual(source.split('\n').slice(0, 3));
-      expect((parseJsonc(out) as { imports: Record<string, string> }).imports['@setu-ts/kernel'])
-        .toBe(TO);
+      expect(
+        (parseJsonc(out) as { imports: Record<string, string> }).imports['@setu-ts/kernel'],
+      ).toBe(TO);
     });
 
     it('leaves the same key in another section alone', () => {
@@ -160,8 +157,9 @@ describe('rewriteLegacyPins', () => {
     it('rewrites a pin spelled with JSON escapes', () => {
       const source = '{ "imports": { "@setu-ts\\/kernel": "jsr:\\/@setu-ts\\/kernel@^0.8.0" } }';
       const result = rewriteLegacyPins(source, 'deno');
-      expect((parseJsonc(result.contents!) as { imports: Record<string, string> }).imports)
-        .toEqual({ '@setu-ts/kernel': TO });
+      expect((parseJsonc(result.contents!) as { imports: Record<string, string> }).imports).toEqual(
+        { '@setu-ts/kernel': TO },
+      );
       expect(result.rewrites).toEqual([
         { name: '@setu-ts/kernel', from: 'jsr:/@setu-ts/kernel@^0.8.0', to: TO },
       ]);

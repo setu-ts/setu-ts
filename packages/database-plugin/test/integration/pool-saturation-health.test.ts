@@ -62,15 +62,14 @@ async function boot(poolStats?: () => DatabasePoolCapacity) {
       DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(
-            database,
-            (instance, work) => instance.transaction(work),
+          drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+            instance.transaction(work),
           ),
           drizzleTables: { Tenant: tenants },
           ...(poolStats !== undefined && { poolStats }),
         },
       }),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
     ],
   });
   await app.start();

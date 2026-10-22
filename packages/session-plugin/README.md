@@ -68,6 +68,17 @@ SessionPlugin({ secret, store: 'cache' }); // over CAPABILITIES.CACHE
 SessionPlugin({ secret, store: myOwnStore }); // any ISessionStore
 ```
 
+**Anonymous sessions stay in the cookie** (M113e). On the store strategy, a session holding only the
+reserved keys — the form-CSRF token and the tenant binding — is sealed into the cookie and writes no
+store row, so a public page rendering a form does not add a row per visitor. The first write of any
+other key (signing in) moves the session into the store, and clearing every other key (signing out)
+deletes the row again, so a copy of the signed-in cookie restores nothing. Promotion to the store
+rotates the session id, so a copied anonymous cookie can never read the signed-in row. The reserved
+keys need no revocation, and the cookie is sealed under the same keys as every other one; under
+`mode: 'sign'` the browser can read its own CSRF token, which the form already shows it. Pending
+sign-in state from `auth-plugin` (state, nonce, PKCE verifier) is not a reserved key and still goes
+to the store.
+
 > **`store: 'cache'` shares a blast radius.** Sessions live in the same cache as your application
 > data, so a `cache.clear()` from anywhere logs everybody out. Keys are namespaced (`session:` by
 > default) so they are identifiable, but a dedicated cache instance is the production
@@ -113,6 +124,14 @@ is deliberate: without the right secret every session is unreadable, and finding
 finding out from production traffic.
 
 ## Expiry
+
+Cookie `secure` defaults to `true`. Set `cookie: { secure: 'auto' }` when the same deployment serves
+local HTTP and proxied HTTPS: it emits `Secure` exactly when `requestOriginOf(ctx).protocol` is
+`https`, including on cookie deletion. Register IP security with `trustProxy: true` and your
+`trustedProxies` so TLS termination is reflected in that origin. Without IP security it follows
+`ctx.request.url`. `false` remains available for local HTTP. `'auto'` with `sameSite: 'none'` throws
+at construction because `SameSite=None` forces `Secure` regardless. See
+[deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
 
 `maxAge` (default `7200` seconds) is enforced from a stamp **inside** the payload, not from the
 cookie's `Max-Age` — that attribute is client-controlled, so a server that trusts it has no expiry
@@ -198,7 +217,8 @@ This is the **synchronizer-token** strategy, and it is a _different mechanism_ f
 
 A progressive-enhancement `<Form>` post cannot set a custom header, which is why the stateless
 middleware's `customHeader` option cannot be driven by one. **Running both together is the intended
-arrangement** — the cheap stateless check at priority 270, the token check at 275.
+arrangement** — the cheap stateless check at priority 270, the token check at 325, after
+authentication (300).
 
 ```typescript
 SessionPlugin({ secret, csrf: {} });
@@ -252,9 +272,30 @@ the header is read FIRST, so a client that sends it triggers no body parse at al
 `multipart/form-data`, whose FIELD carries the token too since M94b, while a token arriving as a
 multipart FILE part is refused (a client chooses freely whether a part carries a `filename`, so a
 non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/`HEAD`/`OPTIONS`),
-and `exclude` (exact paths or regular expressions that skip form CSRF). `exclude` is only for a
-separately-mounted non-browser protocol surface such as Connect/gRPC — never use it for an
-application form route.
+`exclude` (exact paths or regular expressions that skip form CSRF), and `exemptBearer` (default
+`true`). `exclude` is only for a separately-mounted non-browser protocol surface such as
+Connect/gRPC — never use it for an application form route.
+
+**A bearer API beside forms needs no exclusion** (M113e). A request carrying
+`Authorization: Bearer <token>` skips form CSRF when a bearer (header-credential) strategy
+authenticated it AND it restored no session — the session is new — so a JWT- or
+API-token-authenticated JSON route in the same application reaches its guard rather than answering
+`403`. That is safe because a browser never attaches a bearer token by itself, and a page on another
+origin cannot add an `Authorization` header without a CORS preflight your server approves. The
+exemption is decided by the credential that authenticated the request AND the session it restored,
+not by the header's presence: the form check runs at 325, after authentication (300), and reads the
+credential source recorded and the session `session-plugin` parks. A request carrying a valid
+session cookie must present a CSRF token even with a valid bearer token, because the handler would
+otherwise act on that browser's session — an origin CORS lets send credentials can send its own
+valid bearer token beside the victim's cookie, authenticating as the attacker while the session
+middleware restored the victim's session (M113e, L3). A non-browser API client sends no session
+cookie, so its new session keeps the exemption; a junk bearer header beside a session cookie is
+still verified, and an unauthenticated bearer header is verified too (it fails closed when the
+session or the credential source is missing). `Basic` credentials are NOT exempt, because browsers
+re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
+the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser session:
+whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
+so it cannot plant a session in a browser whose cookie no longer restores.
 
 ### What `SameSite` does not separate
 
@@ -330,34 +371,35 @@ object.
 
 ## Middleware priorities
 
-| Priority | Middleware           | Why there                                              |
-| -------- | -------------------- | ------------------------------------------------------ |
-| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)        |
-| 275      | `csrfFormMiddleware` | After the session loads and after stateless CSRF (270) |
+| Priority | Middleware           | Why there                                                                                                                                                                    |
+| -------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 260      | `sessionMiddleware`  | After security headers (250), before auth (300)                                                                                                                              |
+| 325      | `csrfFormMiddleware` | After the session loads (260) and after authentication (300), before authorization (350): the bearer exemption reads the credential source recorded and the session it parks |
 
 Session sits below authentication so an auth strategy can read it. Anything that reads the session
 must run at a priority **above** 260, or `getSession` throws `SessionMiddlewareMissingError`.
 
 ## Options
 
-| Option            | Default          | Notes                                                                        |
-| ----------------- | ---------------- | ---------------------------------------------------------------------------- |
-| `secret`          | resolved         | `string` or rotation list; index 0 seals                                     |
-| `secretName`      | `SESSION_SECRET` | Looked up in the secrets manager and the environment                         |
-| `mode`            | `'encrypt'`      | `'sign'` exposes its payload                                                 |
-| `store`           | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                 |
-| `maxAge`          | `7200`           | Seconds; also the cookie's `Max-Age`                                         |
-| `rolling`         | `false`          | Re-issue on every response                                                   |
-| `idleTimeoutMs`   | —                | No-request expiry; any request refreshes it, so it commits every response    |
-| `maxCookieBytes`  | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                  |
-| `cookie.name`     | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions |
-| `cookie.path`     | `/`              |                                                                              |
-| `cookie.domain`   | —                | Omitted means a host-only cookie                                             |
-| `cookie.sameSite` | `'lax'`          | `'none'` forces `Secure`                                                     |
-| `cookie.secure`   | `true`           | Set `false` only for plain-HTTP local development                            |
-| `cookie.httpOnly` | `true`           |                                                                              |
-| `csrf`            | —                | Presence enables form CSRF                                                   |
-| `tenantBinding`   | `true`           | Seal the tenant on commit and refuse a session presented under another       |
+| Option              | Default          | Notes                                                                                                                                                                                                                        |
+| ------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secret`            | resolved         | `string` or rotation list; index 0 seals                                                                                                                                                                                     |
+| `secretName`        | `SESSION_SECRET` | Looked up in the secrets manager and the environment                                                                                                                                                                         |
+| `mode`              | `'encrypt'`      | `'sign'` exposes its payload                                                                                                                                                                                                 |
+| `store`             | —                | `'memory'`, `'cache'`, or an `ISessionStore`                                                                                                                                                                                 |
+| `maxAge`            | `7200`           | Seconds; also the cookie's `Max-Age`                                                                                                                                                                                         |
+| `rolling`           | `false`          | Re-issue on every response                                                                                                                                                                                                   |
+| `idleTimeoutMs`     | —                | No-request expiry; any request refreshes it, so it commits every response                                                                                                                                                    |
+| `maxCookieBytes`    | `4096`           | Throws `SessionTooLargeError` rather than dropping silently                                                                                                                                                                  |
+| `cookie.name`       | `setu_session`   | Renamed from `hono_session`; pin the old name to preserve in-flight sessions                                                                                                                                                 |
+| `cookie.path`       | `/`              |                                                                                                                                                                                                                              |
+| `cookie.domain`     | —                | Omitted means a host-only cookie                                                                                                                                                                                             |
+| `cookie.sameSite`   | `'lax'`          | `'none'` forces `Secure`                                                                                                                                                                                                     |
+| `cookie.secure`     | `true`           | `boolean \| 'auto'`; auto follows the trusted protocol and conflicts with `sameSite: 'none'`                                                                                                                                 |
+| `cookie.httpOnly`   | `true`           |                                                                                                                                                                                                                              |
+| `csrf`              | —                | Presence enables form CSRF                                                                                                                                                                                                   |
+| `csrf.exemptBearer` | `true`           | Only a bearer request a header-credential strategy authenticated AND that restored no session (a new session) skips form CSRF; a valid session cookie still needs a token even with a valid bearer token; `Basic` never does |
+| `tenantBinding`     | `true`           | Seal the tenant on commit and refuse a session presented under another                                                                                                                                                       |
 
 ## Health
 
@@ -394,7 +436,7 @@ arriving while every session reads as absent.
 | `SessionServiceDeps`            | interface |
 | `SessionMode`                   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Documentation
@@ -405,3 +447,9 @@ drifts.
 ## License
 
 MIT
+
+## Readiness and dependency outages (M113b)
+
+A cache-backed session inherits `CacheStoreUnavailableError` from Redis cache operations. With
+`errorHandler`, an outage answers 503 with value-free cache detail; the original driver failure
+stays in `cause`. Cookie-only sessions are unchanged.

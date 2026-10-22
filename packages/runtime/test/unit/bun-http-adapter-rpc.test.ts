@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any, require-await
+/* eslint-disable @typescript-eslint/no-explicit-any, require-await */
 import { describe, expect, it } from 'vitest';
 import { BunHttpAdapter, BunHttpServerHandle } from '../../src/adapters/bun/bun-http-adapter.ts';
 import type { BunServeHost } from '../../src/adapters/bun/bun-http-adapter.ts';
@@ -194,10 +194,7 @@ describe('bun-http-adapter | serve callback (post-M70a)', () => {
       } as any;
     });
 
-    const result = handle.createServeCallback()(
-      new Request('http://localhost/'),
-      fakeServer,
-    );
+    const result = handle.createServeCallback()(new Request('http://localhost/'), fakeServer);
 
     expect(result).toBeInstanceOf(Response);
     expect((result as Response).status).toBe(200);
@@ -206,10 +203,7 @@ describe('bun-http-adapter | serve callback (post-M70a)', () => {
   it('serve callback still returns a promise when the handler is async', async () => {
     const handle = createHandle();
 
-    const result = handle.createServeCallback()(
-      new Request('http://localhost/'),
-      fakeServer,
-    );
+    const result = handle.createServeCallback()(new Request('http://localhost/'), fakeServer);
 
     expect(result).not.toBeInstanceOf(Response);
     const response = await result;

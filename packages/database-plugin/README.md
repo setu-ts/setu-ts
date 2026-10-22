@@ -3,6 +3,16 @@
 Database access with the repository pattern and Unit of Work. Registers an `IDatabaseService` under
 `CAPABILITIES.DATABASE` (`'database'`).
 
+Driver errors that pass through `IDatabaseService` (repositories, transactions, `query()`) are
+scrubbed before they are classified or logged. Drizzle's `Failed query:` wrapper keeps its SQL with
+placeholders and loses its bound values, from the message, the whole multiline stack header and
+`params`. A SQLSTATE class 22 cause (data exception: invalid text, out of range, bad date, bad enum)
+is rebuilt from its code, because PostgreSQL's message quotes the rejected input. Classification is
+unchanged. Two limits: an error from a query built through `getDrizzleDatabase(...)`, or a raw
+driver call, never passes through the service and is logged as the driver wrote it; and the scrub
+walks at most five causes, so a value nested deeper survives. It is not a general log-redaction
+policy.
+
 Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
 and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
 clients and injects them into the plugin.
@@ -33,14 +43,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from './generated/prisma/client.ts';
 
 const prismaClient = new PrismaClient({
-  adapter: new PrismaPg({ connectionString: Deno.env.get('DATABASE_URL')! }),
+  adapter: new PrismaPg({ connectionString: process.env['DATABASE_URL']! }),
 });
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    DatabasePlugin({ type: 'prisma', options: { prismaClient } }),
-  ],
+  plugins: [RuntimePlugin(), DatabasePlugin({ type: 'prisma', options: { prismaClient } })],
 });
 await app.start({ port: 3000 });
 
@@ -61,14 +68,113 @@ await db.transaction(async (uow) => {
 });
 ```
 
+## The repository surface
+
+`IDatabaseService.getRepository<Entity, Id>(name)` returns `IRepository<Entity, Id>`. This table
+describes the port and `BaseRepository`; see the backend restrictions below rather than assuming
+every backend supports every query.
+
+| Method                                                                  | Promise result / missing record / refusal                                        |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `findById(id: Id)`                                                      | `Entity \| null`                                                                 |
+| `findAll(options?: FindOptions)`                                        | `Entity[]`; no matches gives `[]`                                                |
+| `findOne(options?: FindOptions)`                                        | `Entity \| null`; applies a limit of one                                         |
+| `create(data: Partial<Entity>)`                                         | Persisted `Entity`, including generated fields                                   |
+| `update(id: Id, data: Partial<Entity>)`                                 | Updated `Entity`; missing record rejects                                         |
+| `delete(id: Id)`                                                        | `boolean`; `false` when missing                                                  |
+| `updateWhere?(id: Id, where: WritePrecondition, data: Partial<Entity>)` | `Entity \| null`; `null` when missing or predicate mismatches                    |
+| `deleteWhere?(id: Id, where: WritePrecondition)`                        | `boolean`; `false` when missing or predicate mismatches                          |
+| `exists(id: Id)`                                                        | `boolean`; `false` when missing                                                  |
+| `count(options?: CountOptions)`                                         | `number`; zero when no matches                                                   |
+| `findPage(options: PageOptions)`                                        | `Page<Entity>`; `UnsupportedQueryFeatureError` if the source lacks cursor paging |
+
+The interface's `@since` annotations record introduction history:
+
+<!-- version:history -->
+
+| First release | Methods                                                                |
+| ------------- | ---------------------------------------------------------------------- |
+| 0.1.0         | `findById`, `findAll`, `create`, `update`, `delete`, `exists`, `count` |
+| 0.2.0         | `findOne`, `findPage`                                                  |
+| 0.9.0         | `updateWhere`, `deleteWhere`                                           |
+
+Conditional methods are optional on the port. `BaseRepository` exposes them but rejects with
+`UnsupportedQueryFeatureError` before I/O if the data source lacks them or the precondition/update
+is invalid. `WritePrecondition` is `Readonly<Record<string, string | number>>`: a non-empty equality
+map conjoined with the primary key. See the backend limits for
+[Cosmos](#what-this-adapter-deliberately-cannot-do) and
+[Bigtable](#what-this-adapter-deliberately-cannot-do-1). Precondition field names must be non-empty
+and may not start with `$`, contain a dot, or equal `__proto__`; values must be strings or finite
+numbers.
+
+`FindOptions` fields:
+
+| Field     | Type                             | Meaning                                    |
+| --------- | -------------------------------- | ------------------------------------------ |
+| `where`   | `Record<string, unknown>`        | Equality conditions                        |
+| `filter`  | `FilterExpression`               | Portable expression conjoined with `where` |
+| `orderBy` | `Record<string, OrderDirection>` | Field directions (`'asc'` / `'desc'`)      |
+| `limit`   | `number`                         | Maximum results                            |
+| `offset`  | `number`                         | Results to skip                            |
+| `select`  | `readonly string[]`              | Projected fields                           |
+| `cursor`  | `string`                         | Continuation position for `findPage`       |
+
+`PageOptions` is an alias of `FindOptions`. `findPage` refuses a cursor with a non-zero offset with
+`PageNormalizationError`; `findAll` is the offset/limit path and does not consume a cursor. See the
+[Cosmos](#what-this-adapter-deliberately-cannot-do) and
+[Bigtable](#what-this-adapter-deliberately-cannot-do-1) backend tables for query refusals.
+
+| Other shape    | Fields                                                                   |
+| -------------- | ------------------------------------------------------------------------ |
+| `CountOptions` | Optional `where: Record<string, unknown>` and `filter: FilterExpression` |
+| `Page<Entity>` | `rows: Entity[]`, `nextCursor: string \| null` (`null` ends traversal)   |
+
+Use the same query on each page:
+
+```typescript
+import type { IRepository } from '@setu-ts/database-plugin';
+
+interface Invoice { id: string; status: string; }
+export async function readInvoices(invoices: IRepository<Invoice>): Promise<Invoice[]> {
+  const rows: Invoice[] = [];
+  let cursor: string | null = null;
+  do {
+    const page = await invoices.findPage({
+      limit: 100,
+      orderBy: { id: 'asc' },
+      ...(cursor === null ? {} : { cursor }),
+    });
+    rows.push(...page.rows);
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  return rows;
+}
+```
+
+Check for the optional conditional method, then distinguish a mismatch from a successful write:
+
+```typescript
+import type { IRepository } from '@setu-ts/database-plugin';
+
+interface Invoice { id: string; status: string; }
+export async function payInvoice(invoices: IRepository<Invoice>, id: string): Promise<boolean> {
+  if (!invoices.updateWhere) throw new Error('Conditional writes are required');
+  const updated = await invoices.updateWhere(id, { status: 'pending' }, { status: 'paid' });
+  return updated !== null;
+}
+```
+
 ## Transaction isolation
 
 Pass an isolation level when a read-modify-write needs an explicit concurrency guarantee:
 
 ```typescript
-await db.transaction(async (uow) => {
-  // Read and update through transaction-scoped repositories.
-}, { isolation: 'serializable' });
+await db.transaction(
+  async (uow) => {
+    // Read and update through transaction-scoped repositories.
+  },
+  { isolation: 'serializable' },
+);
 ```
 
 Omitting the option preserves each adapter's current default. A requested level is never silently
@@ -298,6 +404,64 @@ CREATE INDEX setu_inbox_status ON setu_inbox (kind, status, updated_at);
 Map it with `drizzleTables: { Inbox: pgTable('setu_inbox', { … }) }` (JS keys `envelopeId`,
 `updatedAt`, `lastError` over the snake_case columns; `updated_at` in `{ mode: 'number' }`).
 
+### Tier-C idempotency store
+
+`createDatabaseIdempotencyStore()` uses the default entity name `Idempotency`. Create the PostgreSQL
+table before using the store:
+
+```sql
+CREATE TABLE setu_idempotency (
+  id          text   PRIMARY KEY,
+  kind        text   NOT NULL,
+  role        text   NOT NULL,
+  fingerprint text   NOT NULL,
+  created_at  bigint NOT NULL,
+  expires_at  bigint NOT NULL,
+  result      text
+);
+CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expires_at);
+```
+
+For SQLite (including D1), use:
+
+```sql
+CREATE TABLE setu_idempotency (
+  id          TEXT    PRIMARY KEY,
+  kind        TEXT    NOT NULL,
+  role        TEXT    NOT NULL,
+  fingerprint TEXT    NOT NULL,
+  createdAt   INTEGER NOT NULL,
+  expiresAt   INTEGER NOT NULL,
+  result      TEXT
+);
+CREATE INDEX setu_idempotency_expiry ON setu_idempotency (kind, role, expiresAt);
+```
+
+The expiry index serves the purge query over `kind`, `role`, and expiry time. For Drizzle on
+PostgreSQL, register the table under the default entity name:
+
+```typescript
+import { bigint, pgTable, text } from 'drizzle-orm/pg-core';
+
+const tables = {
+  drizzleTables: {
+    Idempotency: pgTable('setu_idempotency', {
+      id: text('id').primaryKey(),
+      kind: text('kind').notNull(),
+      role: text('role').notNull(),
+      fingerprint: text('fingerprint').notNull(),
+      createdAt: bigint('created_at', { mode: 'number' }).notNull(),
+      expiresAt: bigint('expires_at', { mode: 'number' }).notNull(),
+      result: text('result'),
+    }),
+  },
+};
+```
+
+Pass `tables.drizzleTables` as the database plugin's `drizzleTables` option. The JavaScript keys
+`createdAt` and `expiresAt` map to `created_at` and `expires_at`; `{ mode: 'number' }` keeps epoch
+milliseconds numeric for the store.
+
 ## Scoped RBAC sources
 
 `createDatabaseGrantSource({ entity })` and `createDatabaseRoleSource({ entity })` feed AuthPlugin's
@@ -326,13 +490,104 @@ A check's question is one query: the subject's rows that are global or in one of
 More than `limit` matching rows (default 10 001 for grants, 100 000 for role rows) refuse the
 question, so the check denies, rather than answering with an arbitrary subset.
 
+## Migrations and readiness
+
+Opt in on any connection with `DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })`,
+importing `MIGRATION_NAMES` from your generated `./src/migrations/index.ts`. Without `readiness`,
+the indicator's status and data are unchanged. After the existing reachability checks, a separate
+ledger probe caches reads for 5 seconds and bounds each read at 2 seconds:
+
+| Ledger                                        | Indicator                               | Migration data                         |
+| --------------------------------------------- | --------------------------------------- | -------------------------------------- |
+| Expected names missing                        | `degraded`: `/ready` 503, `/health` 200 | `{ state: 'pending', pending: count }` |
+| All expected names present                    | Existing `up` or `degraded` status      | `{ state: 'current', applied: count }` |
+| Read rejected, timed out, or over 10,000 rows | `down`                                  | `{ state: 'unreadable' }`              |
+
+Additional names from a newer build add `unknown: count` to current data and preserve status, so old
+replicas stay ready during rolling deploys. Names never appear in health data. An already-down
+connection skips the ledger. Expected names must be unique non-empty strings, at most 10,000;
+`ledgerEntity`, when supplied, must be non-empty. Invalid options throw `TypeError` at construction
+without echoing values. This checks migration history, not every application table: an intact ledger
+cannot prove that someone has not independently dropped a business table.
+
+`createMigrationLedger(database, { entity? })` returns `IMigrationLedger`: `applied()` reads names,
+`record(name, appliedAt)` inserts caller-supplied ISO-8601 time, and `remove(name)` resolves even if
+absent. `DatabaseReadinessOptions.ledgerEntity` defaults to `MIGRATION_LEDGER_ENTITY`
+(`'setu_migrations'`). A ledger created without `MigrationLedgerOptions.entity` — which is how the
+generated `run.ts` creates it — uses the `ledgerEntity` its connection was registered with, so
+setting it once on `DatabasePlugin` is enough; an explicit `entity` overrides it. `applied()`
+requests only `id`, with a limit of 10,001, and rejects above 10,000 rows with
+`MigrationLedgerError`, whose `reason` is `'oversized'`. The framework reads no clock for ledger
+writes and never creates schema.
+
+Create this PostgreSQL table (also shipped in `test/fixtures/migration-ledger-postgres.sql`):
+
+```sql
+CREATE TABLE setu_migrations (
+  id text PRIMARY KEY,
+  applied_at text NOT NULL
+);
+```
+
+SQLite / D1 (`test/fixtures/migration-ledger-sqlite.sql`):
+
+```sql
+CREATE TABLE setu_migrations (
+  id TEXT PRIMARY KEY NOT NULL,
+  appliedAt TEXT NOT NULL
+);
+```
+
+| Adapter  | Application setup                                                                                                                                    |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Prisma   | Create the SQL table and expose a `setu_migrations` model with `id` and `appliedAt` mapped to `applied_at`.                                          |
+| Drizzle  | Create the SQL table and add `setu_migrations` to `drizzleTables`, with `id: text('id').primaryKey()` and `appliedAt: text('applied_at').notNull()`. |
+| D1       | Create the SQLite table above, whose `appliedAt` column matches the repository field directly.                                                       |
+| MongoDB  | No DDL; the default entity collection is sufficient, or map it through `collections`.                                                                |
+| DynamoDB | Provision a table with partition key `id`; map `entities.setu_migrations` to `{ table: 'your-table', partitionKey: 'id' }`.                          |
+| Cosmos   | Provision a container with partition path `/id`; map `containers.setu_migrations` to `{ container: 'your-container', partitionKey: 'id' }`.          |
+| Bigtable | Provision a table and map `tables.setu_migrations` with its row-key and column-family configuration, as for other entities.                          |
+| Memory   | No DDL. History is process-local; run migrations in the serving process. A separate runner process loses its history at exit.                        |
+
+Measured locally through `createMigrationLedger` and repository read-back (2026-10-19):
+
+| Adapter                   | Duplicate `record` rejection | Preserved driver cause                                                   |
+| ------------------------- | ---------------------------- | ------------------------------------------------------------------------ |
+| Memory                    | `DuplicateKeyError`          | None                                                                     |
+| Drizzle / real PostgreSQL | `DuplicateKeyError`          | Drizzle `Error` → pg `DatabaseError` (`name: 'error'`, SQLSTATE `23505`) |
+| MongoDB replica set       | `DuplicateKeyError`          | `MongoServerError`, code `11000`                                         |
+| DynamoDB Local            | `DuplicateKeyError`          | `ConditionalCheckFailedException`                                        |
+
+Other adapters were not measured for duplicate rejection. The ledger propagates the adapter's create
+rejection unchanged. **Run one migration job**: no portable lock prevents two jobs from applying a
+change concurrently. A duplicate ledger insert makes the race visible after execution. **The ledger
+is only as trustworthy as whoever can write it**: a database principal able to write
+`setu_migrations` can mark a replica ready, or make the runner skip or re-run a migration — the same
+trust it already holds over the schema.
+
+`setu generate migration` maintains `run.ts` and `index.ts` and exports `MIGRATION_NAMES` from the
+barrel. Migrations receive `{ database }`. The runner applies only pending names oldest first;
+`--down` reverses only applied names newest first. It writes/removes the row after each successful
+change, outside any transaction. A crash between a change and its ledger write re-runs that change:
+make migrations idempotent. A failure stops the run and names the migration.
+
+On socket targets, executing `run.ts` dynamically loads `setu.config.ts`, awaits `createApp()`,
+starts the whole app without a port, resolves the default database and stops the app in `finally`.
+Every plugin's start-up effects therefore run for the runner's lifetime — queue processors,
+scheduled jobs and broker subscriptions included. On Deno, run it with the same permission flags as
+your `start` task rather than `-A`. Importing `runMigrations` does not load the application. For a
+named connection, call `runMigrations('up', { database, ledger: createMigrationLedger(database) })`
+from your own module. Workers emit no entry block: call the function from code holding platform
+bindings or use `wrangler d1 migrations`.
+
 ## Options
 
-| Option    | Type                                                                                                 | Default     | Description                              |
-| --------- | ---------------------------------------------------------------------------------------------------- | ----------- | ---------------------------------------- |
-| `type`    | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'bigtable' \| 'custom'` | `'memory'`  | Backend adapter.                         |
-| `name`    | `string`                                                                                             | `'default'` | Named connection for multi-database use. |
-| `options` | per-arm (see `type`)                                                                                 | —           | Adapter-specific configuration.          |
+| Option      | Type                                                                                                 | Default     | Description                                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------- |
+| `type`      | `'memory' \| 'prisma' \| 'drizzle' \| 'mongodb' \| 'dynamodb' \| 'cosmos' \| 'bigtable' \| 'custom'` | `'memory'`  | Backend adapter.                                                                                              |
+| `name`      | `string`                                                                                             | `'default'` | Named connection for multi-database use.                                                                      |
+| `options`   | per-arm (see `type`)                                                                                 | —           | Adapter-specific configuration.                                                                               |
+| `readiness` | `DatabaseReadinessOptions`                                                                           | —           | Opt-in expected migration names and ledger entity; see [Migrations and readiness](#migrations-and-readiness). |
 
 A `name` other than `'default'` registers under `database.<name>` (e.g. `database.primary`). Note
 the **dot**, not a colon — `createCapabilityToken` rejects colons.
@@ -371,8 +626,7 @@ prerequisites are easy to miss, and none of them is this package's to supply:
    with no argument does not compile — install the adapter for your connector (`@prisma/adapter-pg`,
    `@prisma/adapter-mariadb`, …) and pass it as `adapter`.
 2. **`schema.prisma` may no longer carry `url`.** Prisma 7 answers
-   `P1012: The datasource property
-   'url' is no longer supported in schema files`; the connection
+   `P1012: The datasource property 'url' is no longer supported in schema files`; the connection
    string moves to a `prisma.config.ts`.
 3. **A non-`public` PostgreSQL schema must be named on the adapter.** `?schema=…` in the URL is read
    by Prisma Migrate only, so the driver adapter needs
@@ -386,10 +640,7 @@ supplied to repository `where`, `orderBy`, or `select` must be a real column on 
 adapter can return the actual persisted row instead of guessing:
 
 ```typescript
-const drizzleDatabase = createDrizzleDatabase(
-  db,
-  (database, work) => database.transaction(work),
-);
+const drizzleDatabase = createDrizzleDatabase(db, (database, work) => database.transaction(work));
 
 DatabasePlugin({
   type: 'drizzle',
@@ -399,6 +650,16 @@ DatabasePlugin({
   },
 });
 ```
+
+A Drizzle table whose key column is not a column of the table is refused when the repository is
+created — `getRepository` (and the Unit of Work's data source) — naming the table and the missing
+column, instead of surfacing lazily inside `findById`, `update` or `delete`. A `create`, `update` or
+`updateWhere` payload that names a field that is not a column of the table is likewise refused by
+name before any I/O, instead of being dropped by Drizzle and surfacing as the driver's raw
+`Failed query`. That refusal is `UnknownPayloadFieldError`, answered `400 Bad Request` with the
+fixed detail `The request names a field this resource does not have.` — a body passed straight to
+`repo.update(id, body)` carries the client's fields, so an extra one is the caller's error. The
+message names the entity and the field for the log; the served detail names neither.
 
 ### Nested JSON path filters
 
@@ -469,9 +730,8 @@ import {
   getDrizzleTransaction,
 } from '@setu-ts/database-plugin';
 
-const drizzleDatabase = createDrizzleDatabase(
-  drizzleDb,
-  (database, work) => database.transaction(work),
+const drizzleDatabase = createDrizzleDatabase(drizzleDb, (database, work) =>
+  database.transaction(work),
 );
 const outer = getDrizzleDatabase(db, drizzleDatabase);
 const allUsers = await outer.select().from(users);
@@ -498,27 +758,29 @@ invalid-scope error.
 ## The MongoDB backend
 
 `type: 'mongodb'` serves the `database` capability from a document store, over the native
-[`mongodb`](https://www.npmjs.com/package/mongodb) driver (`npm:mongodb@^6.21.0`). It implements all
-six `IDataSource` methods and translates all six `NormalizedQuery` members natively — `where` and
+[`mongodb`](https://www.npmjs.com/package/mongodb) driver (`mongodb`). It implements all six
+`IDataSource` methods and translates all six `NormalizedQuery` members natively — `where` and
 `filter` become a match document, `orderBy`/`offset`/`limit`/`select` become
 `sort`/`skip`/`limit`/`projection`. Nothing is filtered, sorted or paginated in JavaScript.
 
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'mongodb',
-  options: {
-    url: 'mongodb://127.0.0.1:27017/app',
-    collections: { User: { collection: 'users', primaryKey: 'user_id' } },
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'mongodb',
+    options: {
+      url: 'mongodb://127.0.0.1:27017/app',
+      collections: { User: { collection: 'users', primaryKey: 'user_id' } },
+    },
+  }),
+);
 ```
 
 | `options` field | Type                                 | Default            | Read by                                                                                                             |
 | --------------- | ------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------- |
 | `url`           | `string`                             | —                  | The lazy client path. Required unless `client` is supplied; also supplies `database` when that option is absent.    |
-| `client`        | `IMongoClient`                       | —                  | `connect()`. An already-constructed client; when present the lazy `import('npm:mongodb@^6.21.0')` never runs.       |
+| `client`        | `IMongoClient`                       | —                  | `connect()`. An already-constructed client; when present the lazy `import('mongodb')` never runs.                   |
 | `objectIdCtor`  | `IMongoObjectIdCtor`                 | from the lazy load | The `_id` conversion. Supply it alongside an injected `client` whose collections use `ObjectId` keys.               |
 | `database`      | `string`                             | from `url`         | The collection resolver. When neither this nor `url` yields a name, `connect()` fails at startup naming the option. |
 | `collections`   | `Record<string, MongoEntityMapping>` | `{}`               | Per-entity `{ collection?, primaryKey?, idType? }`. An unmapped entity uses its own name and `'id'`.                |
@@ -554,7 +816,7 @@ real driver does not.
 ## The Azure Cosmos DB backend
 
 `type: 'cosmos'` serves the `database` capability from Azure Cosmos DB's **NoSQL (SQL) API**, over
-[`@azure/cosmos`](https://www.npmjs.com/package/@azure/cosmos) (`npm:@azure/cosmos@^4`). Every
+[`@azure/cosmos`](https://www.npmjs.com/package/@azure/cosmos) (`@azure/cosmos`). Every
 `NormalizedQuery` member is translated natively — `where`/`filter` become a bound SQL predicate,
 `orderBy` an `ORDER BY`, `offset`/`limit` an `OFFSET … LIMIT`, and `select` a projection list.
 Nothing is filtered, sorted or paginated in JavaScript.
@@ -563,8 +825,8 @@ Cosmos DB's **MongoDB API** is a different wire protocol and is served by the `'
 pointed at a Cosmos connection string, not by this one. That route is documented rather than tested,
 and the reason is a **version floor rather than a dead image**: the emulator's MongoDB endpoint
 (`AZURE_COSMOS_EMULATOR_ENABLE_MONGODB_ENDPOINT`) tops out at API version **4.0**, which reports
-wire version 7, while the `npm:mongodb@^6` driver this package pins requires wire version 8 (MongoDB
-4.2). Measured: the endpoint completes a handshake and then refuses with
+wire version 7, while the `mongodb` driver this package pins requires wire version 8 (MongoDB 4.2).
+Measured: the endpoint completes a handshake and then refuses with
 `reports maximum wire version 7, but this version of the Node.js Driver requires at least 8`. A live
 Azure Cosmos for MongoDB account offers server versions above that floor, so the route is
 **unverified against a live account** rather than known to fail.
@@ -572,25 +834,27 @@ Azure Cosmos for MongoDB account offers server versions above that floor, so the
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'cosmos',
-  options: {
-    endpoint: 'https://my-account.documents.azure.com:443/',
-    key: cosmosKey,
-    database: 'app',
-    containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
-  },
-}));
+app.register(
+  DatabasePlugin({
+    type: 'cosmos',
+    options: {
+      endpoint: 'https://my-account.documents.azure.com:443/',
+      key: cosmosKey,
+      database: 'app',
+      containers: { Order: { container: 'orders', partitionKey: 'tenantId' } },
+    },
+  }),
+);
 ```
 
-| `options` field | Type                                  | Default | Read by                                                                                                                               |
-| --------------- | ------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
-| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                           |
-| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('npm:@azure/cosmos@^4')` never runs — the route for an Entra ID (managed identity) client. |
-| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to.      |
-| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                             |
-| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                                 |
+| `options` field | Type                                  | Default | Read by                                                                                                                          |
+| --------------- | ------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `endpoint`      | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
+| `key`           | `string`                              | —       | The lazy client path. Required unless `client` is supplied.                                                                      |
+| `client`        | `ICosmosClient`                       | —       | `connect()`. When present the lazy `import('@azure/cosmos')` never runs — the route for an Entra ID (managed identity) client.   |
+| `database`      | `string`                              | —       | **Required on both arms.** A Cosmos endpoint encodes no database name, so unlike a MongoDB URI there is nothing to fall back to. |
+| `containers`    | `Record<string, CosmosEntityMapping>` | `{}`    | Per-entity `{ container?, primaryKey?, partitionKey? }`. An unmapped entity uses its own name and `'id'`.                        |
+| `logQueries`    | `boolean`                             | `false` | The database service, exactly as for every other arm.                                                                            |
 
 **Containers must already exist.** The adapter creates no database and no container: throughput,
 partition-key and indexing choices belong to the application's provisioning. A missing container is
@@ -696,7 +960,7 @@ emulator suites are local-only.
 
 `type: 'bigtable'` serves the `database` capability from Google Cloud Bigtable, over
 [`@google-cloud/bigtable`](https://www.npmjs.com/package/@google-cloud/bigtable)
-(`npm:@google-cloud/bigtable@^6`).
+(`@google-cloud/bigtable`).
 
 **Bigtable inverts the DynamoDB problem.** Its row key is a single lexicographically-sorted string,
 so `findById` fits it natively with no key object at all. What it lacks instead is everything
@@ -706,21 +970,23 @@ a scan, and `orderBy` is row-key order or nothing.
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'bigtable',
-  options: {
-    projectId: 'my-project',
-    instance: 'app-instance',
-    tables: {
-      Order: {
-        table: 'orders',
-        rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
-        columnFamily: 'o',
-        columns: { total: 'metrics:amount' },
+app.register(
+  DatabasePlugin({
+    type: 'bigtable',
+    options: {
+      projectId: 'my-project',
+      instance: 'app-instance',
+      tables: {
+        Order: {
+          table: 'orders',
+          rowKey: { fields: ['tenantId', 'orderId'], separator: '#' },
+          columnFamily: 'o',
+          columns: { total: 'metrics:amount' },
+        },
       },
     },
-  },
-}));
+  }),
+);
 ```
 
 | `options` field  | Type                                    | Default | Read by                                                                                                                             |
@@ -728,7 +994,7 @@ app.register(DatabasePlugin({
 | `projectId`      | `string`                                | —       | The lazy client path. Required unless `client` is supplied.                                                                         |
 | `instance`       | `string`                                | —       | **Required on both arms.** A table is addressed as `project/instance/table`, and neither a client nor a project encodes it.         |
 | `apiEndpoint`    | `string`                                | —       | The lazy client path. The emulator address; an endpoint alone reaches `cbtemulator` with no credentials.                            |
-| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('npm:@google-cloud/bigtable@^6')` never runs.                                            |
+| `client`         | `IBigtableClient`                       | —       | `connect()`. When present the lazy `import('@google-cloud/bigtable')` never runs.                                                   |
 | `tables`         | `Record<string, BigtableEntityMapping>` | `{}`    | Per-entity `{ table?, rowKey?, columnFamily?, columns?, valueEncoding? }`. An unmapped entity uses its own name, `['id']` and `cf`. |
 | `maxPageFetches` | `number`                                | `10`    | `findPage`'s fill loop, bounding the re-fetch when a client-side filter empties a raw batch.                                        |
 | `logQueries`     | `boolean`                               | `false` | The database service, exactly as for every other arm.                                                                               |
@@ -903,15 +1169,27 @@ is **never given a schema**, so what it can and cannot enforce follows from that
 matters most to the people it is aimed at: develop against the default, deploy against Prisma or
 Drizzle, and an unenforced rule becomes a 500 in production.
 
-| Behaviour                           | Memory                                        | Prisma / Drizzle |
-| ----------------------------------- | --------------------------------------------- | ---------------- |
-| Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name  |
-| Unknown `where` / `filter` field    | Matches nothing                               | Refused          |
-| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused          |
-| Changing a primary key by `update`  | **Refused**                                   | Refused (Mongo)  |
-| Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced         |
-| Column types                        | Not enforced — a string into an Int is stored | Enforced         |
-| Foreign keys, checks, defaults      | Not enforced                                  | Enforced         |
+| Behaviour                           | Memory                                        | Prisma / Drizzle                         |
+| ----------------------------------- | --------------------------------------------- | ---------------------------------------- |
+| Unknown `select` / `orderBy` column | **Refused by name**                           | Refused by name                          |
+| Unknown `where` / `filter` field    | Matches nothing                               | Refused                                  |
+| Duplicate primary key               | **Refused** (a caller-supplied key)           | Refused                                  |
+| Changing a primary key by `update`  | **Refused** (`PrimaryKeyChangeError`, `400`)  | Refused (`PrimaryKeyChangeError`, `400`) |
+| Unique constraint                   | Not enforced — a duplicate value is accepted  | Enforced                                 |
+| Column types                        | Not enforced — a string into an Int is stored | Enforced                                 |
+| Foreign keys, checks, defaults      | Not enforced                                  | Enforced                                 |
+
+This refusal is now portable. On **every** adapter — Memory, Drizzle, Prisma, MongoDB, DynamoDB,
+Cosmos DB, Cloud Bigtable and the D1 adapter in `@setu-ts/cloudflare-plugin` — an `update` or
+`updateWhere` payload that carries a key column whose value is not `undefined` and differs from the
+addressed key's value is refused with `PrimaryKeyChangeError` (`400`), before any I/O. An equal
+value is accepted; it is compared as a string for `string`, `number`, `bigint` and `ObjectId`-like
+values, and by time for `Date` values. That is why `update('5', { id: 5 })` is accepted — a route
+parameter is a string, a JSON body carries a number — while `'05'` against `5` is refused. The check
+covers scalar key columns. Through Prisma, a body passed straight to `update` can still change a key
+column that is also a relation's foreign key with a nested relation write such as
+`{ tenant: { connect: … } }`; this case has not been tested against a generated client, so write the
+fields you mean rather than forwarding a body.
 
 The first two rows are things this adapter can decide, and it does. The primary key is the one
 constraint it knows, and every lookup by id addresses the first match, so a `create` whose
@@ -940,14 +1218,15 @@ test.
 
 ## What a driver condition returns to the client
 
-Three driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
+Four driver conditions are classified (`classifyDriverError`, internal) at `DatabaseService` and
 answered as typed errors, so a caller can `instanceof` them instead of matching message text:
 
-| Condition                                                                                                                                                                                                                                           | Thrown as                    | Served status |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
-| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                          | `SerializationConflictError` | `409`         |
-| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, the pg pool timeout, `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
-| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                         | `DuplicateKeyError`          | `409`         |
+| Condition                                                                                                                                                                                                                                                                                                                                                                  | Thrown as                    | Served status |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------- | ------------- |
+| The backend rejected a write because a concurrent transaction changed the same data (SQLSTATE class `40`, Prisma `P2034`, Mongo `TransientTransactionError`, gRPC `ABORTED`, Cosmos `449`)                                                                                                                                                                                 | `SerializationConflictError` | `409`         |
+| The database, its pool, or its network is temporarily unreachable (SQLSTATE class `08`, `57P03`, both node-postgres connect-timeout messages (`timeout exceeded when trying to connect`, `Connection terminated due to connection timeout`), `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, the net errno `ECONNREFUSED` family) | `DatabaseUnavailableError`   | `503`         |
+| node-postgres's `query_timeout` fired on a query (the driver's `Query read timeout` rejection)                                                                                                                                                                                                                                                                             | `DatabaseTimeoutError`       | `504`         |
+| The write would duplicate a primary key or a unique index (SQLSTATE `23505`, Prisma `P2002`, MySQL `ER_DUP_ENTRY`, MongoDB `11000`, Cosmos `409`, SQLite and D1 `UNIQUE constraint failed`)                                                                                                                                                                                | `DuplicateKeyError`          | `409`         |
 
 `DuplicateKeyError` is exported from `@setu-ts/common`, not from this package, because more than one
 package raises or recognises it (the D1 adapter in `@setu-ts/cloudflare-plugin`, and any store that
@@ -958,11 +1237,14 @@ at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWri
 by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
 rejection is still rethrown unchanged, because its outcome can be unknown.
 
-All three carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
+All four carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
 reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
-**No classified answer carries `Retry-After`**: the hint channel has no header, and the framework
-holds no honest horizon for a pool's saturation. Catch-then-throw sites and the typed Drizzle
-builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's row.
+Unlike a `DatabaseUnavailableError`, a `DatabaseTimeoutError` does not say the operation did not
+happen: the timed-out statement may have run, so a write's outcome is unknown and a retry of a write
+must be idempotent. **No classified answer carries `Retry-After`**: the hint channel has no header,
+and the framework holds no honest horizon for a pool's saturation. Catch-then-throw sites and the
+typed Drizzle builder (`getDrizzleDatabase`) bypass the classifier — the operator work is M90j's
+row.
 
 ## What a refused query returns to the client
 
@@ -989,6 +1271,16 @@ asked for. This is the shape you meet when **switching backends**, which is what
 contract is for: an application that works on MongoDB will answer `501` on an ordered endpoint under
 DynamoDB rather than the `500 Internal Server Error` it used to (M89b).
 
+A cursor the backend cannot use is not one of these. A `?cursor=` token that is malformed, that was
+made under a different sort (a sort-fingerprint mismatch), or whose decoded key-value list is the
+wrong shape for the target is refused with `InvalidCursorError` (from `@setu-ts/common`), answered
+**`400 Bad Request`** with the fixed detail `The pagination cursor is not valid for this query.`,
+before any backend call. The error's `message` names the entity and which check failed, and never
+the token or its values. On Drizzle and Prisma, a cursor that decodes cleanly but carries a value of
+the wrong type for its sort column — PostgreSQL refuses it with `22P02`, `22003`, `22007` or
+`22008`, Prisma with its own validation error — is answered the same `400`; a page requested without
+a cursor keeps the driver's error. `501` remains for a backend that cannot page the query at all.
+
 **The error's `message` is never served.** It is the full diagnostic — it names entities, columns
 and sort keys — and it reaches the log alone, where `errorHandler` records it unmasked along with
 the cause chain. The served `detail` is composed from the framework's own identifiers, which is what
@@ -1003,8 +1295,7 @@ by two kinds of refusal: a caller-caused query shape, and a **configuration** re
 former is answered `501`; the latter keeps the masked `500` that is correct for an internal fault.
 Branding the constructor unconditionally made a blank `columnFamily` — a value the developer wrote —
 answer every request
-`501 "Query feature 'mapping' is not supported by the 'bigtable' database
-adapter."`, which is a lie
+`501 "Query feature 'mapping' is not supported by the 'bigtable' database adapter."`, which is a lie
 twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
 `cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
 `mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
@@ -1015,6 +1306,33 @@ The transaction and concurrency errors (`MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`, `BigtableTransactionScopeError`)
 deliberately keep the masked `500`: they may quote backend state, and a concurrency conflict is
 transient rather than permanent. Branch on them with `instanceof` — every one is exported.
+
+## Bounding a call
+
+The plugin adds no call deadline of its own. A JavaScript deadline cannot cancel the statement — the
+connection stays occupied, so a deadline only moves the hang from the caller to pool exhaustion —
+and inside a transaction it rejects while the statement may still commit. The bound is the driver's
+own, enforced by the driver that owns the connection; on node-postgres a query that hits
+`query_timeout` rejects with the driver's `Query read timeout`, and the timed-out client is released
+with the error and removed from the pool, so the bound does not leak a connection. A call that hits
+the bound is answered `504 Gateway Timeout` with `DatabaseTimeoutError`; the statement may have run,
+so a write's outcome is unknown and a retry of a write must be idempotent.
+
+| Adapter                  | The driver's own call bound                                                                                                                  | Status               |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------- |
+| Drizzle on node-postgres | Set `query_timeout` and `connectionTimeoutMillis` on the `Pool` you pass Drizzle                                                             | **verified** (M113g) |
+| Prisma                   | no per-call option; Prisma 7 runs over a driver adapter, so set that driver's bound (for `@prisma/adapter-pg`, the same `pg` `Pool` options) | **unverified**       |
+| MongoDB                  | `MongoClient`'s `timeoutMS` (client-side operation timeout), or a per-operation `maxTimeMS`                                                  | **unverified**       |
+| DynamoDB                 | the AWS SDK v3 `NodeHttpHandler` `requestTimeout`                                                                                            | **unverified**       |
+| Cosmos DB                | `connectionPolicy.requestTimeout` on the `CosmosClient` options                                                                              | **unverified**       |
+| Bigtable                 | the gRPC call deadline (`timeout` in google-gax call options)                                                                                | **unverified**       |
+| D1                       | none the binding exposes; only the platform's own query limits apply                                                                         | **unverified**       |
+
+Inside `service.transaction(...)` the bound applies twice. The timed-out statement rejects after
+`query_timeout`, and the `ROLLBACK` that follows waits behind it on the same connection until its
+own bound expires, so the caller receives `DatabaseTimeoutError` after about twice `query_timeout`
+(measured: about 2.03 s with `query_timeout: 1000` against a paused PostgreSQL 16), still while the
+database is paused. It is a bound on each statement, not a deadline on the transaction.
 
 ## Health reporting
 
@@ -1089,6 +1407,7 @@ imperative begin/commit.
 | `createInjectedDynamoLoader`              | function  |
 | `createLazyBigtableLoader`                | function  |
 | `createLazyDynamoLoader`                  | function  |
+| `createMigrationLedger`                   | function  |
 | `createPrismaDataSource`                  | function  |
 | `DatabasePlugin`                          | function  |
 | `decodeCursor`                            | function  |
@@ -1105,12 +1424,14 @@ imperative begin/commit.
 | `CosmosTransactionScopeError`             | class     |
 | `DatabaseService`                         | class     |
 | `DatabaseTenantDataStore`                 | class     |
+| `DatabaseTimeoutError`                    | class     |
 | `DatabaseUnavailableError`                | class     |
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
 | `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
+| `MigrationLedgerError`                    | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
 | `OutboxStoreUnavailableError`             | class     |
@@ -1120,11 +1441,13 @@ imperative begin/commit.
 | `TenantStoreStrategyUnsupportedError`     | class     |
 | `TransactionalStoreUnavailableError`      | class     |
 | `UnitOfWork`                              | class     |
+| `UnknownPayloadFieldError`                | class     |
 | `UnsupportedFilterOperatorError`          | class     |
 | `UnsupportedIsolationLevelError`          | class     |
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
 | `BigtableCell`                            | interface |
 | `BigtableClientConfiguration`             | interface |
@@ -1163,6 +1486,7 @@ imperative begin/commit.
 | `DatabaseInboxStoreOptions`               | interface |
 | `DatabaseOutboxStoreOptions`              | interface |
 | `DatabasePoolCapacity`                    | interface |
+| `DatabaseReadinessOptions`                | interface |
 | `DatabaseRoleSourceOptions`               | interface |
 | `DrizzleAdapterOptions`                   | interface |
 | `DrizzleCompositeKeyOptions`              | interface |
@@ -1214,6 +1538,7 @@ imperative begin/commit.
 | `IDatabaseService`                        | interface |
 | `IDataSource`                             | interface |
 | `IDynamoClient`                           | interface |
+| `IMigrationLedger`                        | interface |
 | `IMongoClient`                            | interface |
 | `IMongoCollection`                        | interface |
 | `IMongoCollectionFindOneAndUpdateOptions` | interface |
@@ -1225,6 +1550,7 @@ imperative begin/commit.
 | `IRepository`                             | interface |
 | `IUnitOfWork`                             | interface |
 | `MemoryDatabaseOptions`                   | interface |
+| `MigrationLedgerOptions`                  | interface |
 | `MongoAdapterOptionsBase`                 | interface |
 | `MongoDatabaseOptions`                    | interface |
 | `MongoEntityMapping`                      | interface |
@@ -1270,10 +1596,16 @@ imperative begin/commit.
 | `SqlJsonDialect`                          | type      |
 | `TransactionIsolationLevel`               | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#databaseplugin-setu-tsdatabase-plugin).
+
+## Readiness and dependency outages (M113b)
+
+The database driver's existing unavailable-errno classification uses the shared
+`isConnectionFaultCode(code)` predicate from `@setu-ts/common`. The eight-code set is
+module-private; status classification is unchanged.

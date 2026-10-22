@@ -85,6 +85,59 @@ AuditPlugin({ storage: 'file', options: { path: './audit.log' } });
 | `options.table`  | `database` | `'audit_logs'`  | Table for `insert`/`select`.                                          |
 | `options.path`   | `file`     | `'./audit.log'` | Throws at registration when `runtime.fs` is absent (Workers/edge).    |
 
+## Database row shape
+
+The default table is `audit_logs`. Supply an `IAuditDbClient` that preserves this row shape;
+`before`, `after`, and `metadata` are JSON **strings**, not database JSON objects. A `jsonb` column
+decoded to an object is read as `undefined`. `timestamp` is epoch milliseconds:
+
+| Column                        | PostgreSQL type    | Value                                  |
+| ----------------------------- | ------------------ | -------------------------------------- |
+| `id`                          | `text PRIMARY KEY` | Assigned UUID                          |
+| `timestamp`                   | `bigint NOT NULL`  | Epoch milliseconds                     |
+| `action`, `resource`          | `text NOT NULL`    | Entry action and resource              |
+| `resource_id`, `user_id`      | `text`             | Optional identifiers, otherwise `null` |
+| `result`                      | `text NOT NULL`    | `'success'` or `'failure'`             |
+| `before`, `after`, `metadata` | `text`             | JSON-encoded objects, otherwise `null` |
+
+```sql
+CREATE TABLE audit_logs (
+  id text PRIMARY KEY,
+  timestamp bigint NOT NULL,
+  action text NOT NULL,
+  resource text NOT NULL,
+  resource_id text,
+  user_id text,
+  result text NOT NULL CHECK (result IN ('success', 'failure')),
+  before text,
+  after text,
+  metadata text
+);
+```
+
+## Reading the trail
+
+`IAuditLogger` has no read method. An owner constructs the exported storage class over the same
+client and table used by the plugin, then calls `query(criteria)`:
+
+```typescript
+import { AuditPlugin, DatabaseAuditStorage, type IAuditDbClient } from '@setu-ts/audit-plugin';
+
+app.register(
+  AuditPlugin({ storage: 'database', options: { client: myDbClient, table: 'audit_logs' } }),
+);
+
+export function readTrail(client: IAuditDbClient) {
+  const reader = new DatabaseAuditStorage({ client, table: 'audit_logs' });
+  return reader.query({ resource: 'order', result: 'success', limit: 100 });
+}
+```
+
+Only equality fields (`action`, `resource`, `result`, `userId`, `resourceId`) reach `select`.
+`from`/`to` are inclusive filters applied in memory over every matched row; there is no offset or
+paging. `limit` keeps the newest N records, returned in ascending timestamp order. For a large
+trail, query the table directly so the database can bound the scan.
+
 ## Health
 
 Registers an `audit` health indicator reporting `{ storage, reachable }`. It carries BOTH signals:
@@ -154,7 +207,7 @@ MIT
 | `StoredAuditEntry`     | interface |
 | `AuditStorageType`     | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

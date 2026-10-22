@@ -70,18 +70,18 @@ export async function walkScopeChain(
     let parents: readonly unknown[];
     try {
       const answered: unknown = await bounded((signal) =>
-        Promise.resolve(inheritsFrom(scope, signal))
+        Promise.resolve(inheritsFrom(scope, signal)),
       );
       parents = Array.isArray(answered) ? answered : [];
     } catch (error) {
       return error instanceof ScopedDeadlineError
         ? { ok: false, reason: 'resolver-timeout', scopeType: scope.type }
         : {
-          ok: false,
-          reason: 'resolver-failed',
-          scopeType: scope.type,
-          errorName: errorNameOf(error),
-        };
+            ok: false,
+            reason: 'resolver-failed',
+            scopeType: scope.type,
+            errorName: errorNameOf(error),
+          };
     }
     const valid: ScopeRef[] = [];
     for (const parent of parents) {

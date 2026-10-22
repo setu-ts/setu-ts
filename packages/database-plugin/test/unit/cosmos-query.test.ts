@@ -35,8 +35,7 @@ function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
 
 describe('normalizeValue', () => {
   it('converts a Date to the ISO string the SDK stores', () => {
-    expect(normalizeValue(new Date('2026-05-05T00:00:00.000Z')))
-      .toBe('2026-05-05T00:00:00.000Z');
+    expect(normalizeValue(new Date('2026-05-05T00:00:00.000Z'))).toBe('2026-05-05T00:00:00.000Z');
   });
 
   it('passes every other value through', () => {
@@ -67,13 +66,15 @@ describe('buildQuery — projection, ordering and pagination', () => {
   });
 
   it('emits exactly the requested fields, de-duplicated', () => {
-    expect(buildQuery(query({ select: ['id', 'total', 'id'] }), target).query)
-      .toBe('SELECT c["id"], c["total"] FROM c');
+    expect(buildQuery(query({ select: ['id', 'total', 'id'] }), target).query).toBe(
+      'SELECT c["id"], c["total"] FROM c',
+    );
   });
 
   it('orders by every field in declaration order', () => {
-    expect(buildQuery(query({ orderBy: { total: 'asc', name: 'desc' } }), target).query)
-      .toBe('SELECT * FROM c ORDER BY c["total"] ASC, c["name"] DESC');
+    expect(buildQuery(query({ orderBy: { total: 'asc', name: 'desc' } }), target).query).toBe(
+      'SELECT * FROM c ORDER BY c["total"] ASC, c["name"] DESC',
+    );
   });
 
   it('omits the pagination clause when unlimited from the first row', () => {
@@ -184,15 +185,18 @@ describe('buildQuery — filters', () => {
         },
       ],
     };
-    expect(buildQuery(query({ filter }), target).query)
-      .toBe('SELECT * FROM c WHERE (c["a"] = @p0 OR (c["b"] = @p1 AND c["c"] = @p2))');
+    expect(buildQuery(query({ filter }), target).query).toBe(
+      'SELECT * FROM c WHERE (c["a"] = @p0 OR (c["b"] = @p1 AND c["c"] = @p2))',
+    );
   });
 
   it('compiles an empty group to its boolean identity', () => {
-    expect(buildQuery(query({ filter: { type: 'and', filters: [] } }), target).query)
-      .toBe('SELECT * FROM c WHERE true');
-    expect(buildQuery(query({ filter: { type: 'or', filters: [] } }), target).query)
-      .toBe('SELECT * FROM c WHERE false');
+    expect(buildQuery(query({ filter: { type: 'and', filters: [] } }), target).query).toBe(
+      'SELECT * FROM c WHERE true',
+    );
+    expect(buildQuery(query({ filter: { type: 'or', filters: [] } }), target).query).toBe(
+      'SELECT * FROM c WHERE false',
+    );
   });
 
   it('conjoins the equality map with the portable filter', () => {
@@ -235,8 +239,9 @@ describe('buildCountQuery', () => {
       { type: 'comparison', field: 'total', operator: 'lt', value: 9 },
       target,
     );
-    expect(built.query)
-      .toBe('SELECT VALUE COUNT(1) FROM c WHERE c["tenantId"] = @p0 AND c["total"] < @p1');
+    expect(built.query).toBe(
+      'SELECT VALUE COUNT(1) FROM c WHERE c["tenantId"] = @p0 AND c["total"] < @p1',
+    );
   });
 });
 

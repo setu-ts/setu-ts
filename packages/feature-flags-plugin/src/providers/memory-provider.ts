@@ -26,7 +26,7 @@ import { evaluateFlag } from '../evaluation/flag-evaluator.ts';
  * @since 0.1.0
  */
 export class MemoryProvider implements FlagProvider {
-  readonly type: 'memory' = 'memory';
+  readonly type = 'memory' as const;
 
   private readonly _flags: Map<string, FlagDefinition>;
 

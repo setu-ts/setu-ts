@@ -133,9 +133,8 @@ describe('MemoryPasskeyStore', () => {
     }
     // 40 concurrent saves at 15 held: exactly one fits.
     const outcomes = await Promise.all(
-      Array.from(
-        { length: 40 },
-        (_, i) => store.save(credential({ id: `burst-${i}` }), { maxPerPrincipal: 16 }),
+      Array.from({ length: 40 }, (_, i) =>
+        store.save(credential({ id: `burst-${i}` }), { maxPerPrincipal: 16 }),
       ),
     );
     expect(outcomes.filter((outcome) => outcome === 'saved').length).toBe(1);
@@ -143,8 +142,9 @@ describe('MemoryPasskeyStore', () => {
     expect((await store.listByPrincipal('alice')).length).toBe(16);
     // The cap is per principal: another principal is unaffected, and a
     // duplicate id is reported as such even when the principal is full.
-    expect(await store.save(credential({ id: 'b1', principalId: 'bob' }), { maxPerPrincipal: 16 }))
-      .toBe('saved');
+    expect(
+      await store.save(credential({ id: 'b1', principalId: 'bob' }), { maxPerPrincipal: 16 }),
+    ).toBe('saved');
     expect(await store.save(credential({ id: 'seed-0' }), { maxPerPrincipal: 16 })).toBe(
       'duplicate',
     );
@@ -170,18 +170,21 @@ describe('MemoryPasskeyStore', () => {
 
   it('hands back detached copies, so mutating a returned record cannot change the store', async () => {
     const store = new MemoryPasskeyStore();
-    await store.save({
-      id: 'c1',
-      principalId: 'alice',
-      userHandle: 'h',
-      publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
-      algorithm: -7,
-      counter: 4,
-      backedUp: false,
-      transports: ['internal'],
-      attestation: 'unverified',
-      createdAt: 0,
-    }, { maxPerPrincipal: 100 });
+    await store.save(
+      {
+        id: 'c1',
+        principalId: 'alice',
+        userHandle: 'h',
+        publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+        algorithm: -7,
+        counter: 4,
+        backedUp: false,
+        transports: ['internal'],
+        attestation: 'unverified',
+        createdAt: 0,
+      },
+      { maxPerPrincipal: 100 },
+    );
     const read = await store.findById('c1');
     if (read === null) throw new Error('expected the stored credential');
     read.counter = 99;

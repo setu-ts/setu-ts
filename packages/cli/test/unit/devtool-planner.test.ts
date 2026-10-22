@@ -68,38 +68,34 @@ function workspaceHarness(members: readonly WorkspaceMember[], withMemberFiles =
       transport: 'http',
       members,
     }),
-    '/ws/deno.json': `${
-      JSON.stringify(
-        { workspace: ['./apps/*'], tasks: { dev: LEGACY_DENO_RUN_ALL } },
-        null,
-        2,
-      )
-    }\n`,
+    '/ws/deno.json': `${JSON.stringify(
+      { workspace: ['./apps/*'], tasks: { dev: LEGACY_DENO_RUN_ALL } },
+      null,
+      2,
+    )}\n`,
   };
   if (withMemberFiles) {
-    seed['/ws/apps/orders/deno.json'] = `${
-      JSON.stringify(
-        { tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' } },
-        null,
-        2,
-      )
-    }\n`;
+    seed['/ws/apps/orders/deno.json'] = `${JSON.stringify(
+      { tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' } },
+      null,
+      2,
+    )}\n`;
     seed['/ws/apps/orders/setu.config.ts'] = CONFIG;
   }
   return harnessOver(createFakeFs(seed));
 }
 
 function standaloneHarness(): Harness {
-  return harnessOver(createFakeFs({
-    '/ws/shop/deno.json': `${
-      JSON.stringify(
+  return harnessOver(
+    createFakeFs({
+      '/ws/shop/deno.json': `${JSON.stringify(
         { tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' } },
         null,
         2,
-      )
-    }\n`,
-    '/ws/shop/setu.config.ts': CONFIG,
-  }));
+      )}\n`,
+      '/ws/shop/setu.config.ts': CONFIG,
+    }),
+  );
 }
 
 describe('the one devtool planner', () => {
@@ -166,17 +162,18 @@ describe('the one devtool planner', () => {
   // PR #415 review: a configuration the CLI declines to edit gets the binding its
   // manual lines read, before those lines.
   it('prints the sources import and declaration beside a manual line on `enable`', async () => {
-    const h = harnessOver(createFakeFs({
-      '/ws/shop/deno.json': `${
-        JSON.stringify({
+    const h = harnessOver(
+      createFakeFs({
+        '/ws/shop/deno.json': `${JSON.stringify({
           tasks: { start: 'deno run --allow-net --allow-env main.ts', test: 'deno test -A' },
           imports: { '@setu-ts/cache-plugin': `npm:@setu-ts/cache-plugin@^${VERSION}` },
-        })
-      }\n`,
-      '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',
-    }));
-    expect(await h.runDevtool(['enable', '--devtool-port', '4919'], '/ws/shop'), h.err.text())
-      .toBe(0);
+        })}\n`,
+        '/ws/shop/setu.config.ts': CONFIG + 'const banner = `unclassified`;\n',
+      }),
+    );
+    expect(await h.runDevtool(['enable', '--devtool-port', '4919'], '/ws/shop'), h.err.text()).toBe(
+      0,
+    );
     const out = h.out.text();
     expect(out).toContain(
       "In setu.config.ts: Add the import: import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",

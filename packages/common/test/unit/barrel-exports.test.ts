@@ -9,6 +9,40 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
+import type { RequestOrigin } from '../../src/index.ts';
+
+describe('public request origin exports', () => {
+  it('exports the origin accessors, key and return type', () => {
+    const origin: RequestOrigin = {
+      protocol: 'https',
+      host: 'example.com',
+      origin: 'https://example.com',
+    };
+    expect(common.REQUEST_ORIGIN_STATE_KEY).toBe('http-security-plugin:request-origin');
+    expect(typeof common.requestOriginOf).toBe('function');
+    expect(typeof common.publicRequestUrl).toBe('function');
+    expect(origin.protocol).toBe('https');
+  });
+});
+it('exports the portable key and cursor refusals', () => {
+  expect(typeof common.PrimaryKeyChangeError).toBe('function');
+  expect(typeof common.assertPrimaryKeyUnchanged).toBe('function');
+  expect(typeof common.InvalidCursorError).toBe('function');
+});
+import type { ReconnectMode, ReconnectSupervisorOptions } from '../../src/index.ts';
+
+describe('shared reconnect exports', () => {
+  it('exports the supervisor and backoff helper with their option types', () => {
+    const mode: ReconnectMode = 'observe';
+    const options: ReconnectSupervisorOptions = {
+      mode,
+      runtime: {} as common.IRuntimeServices,
+      attachFaultListener: () => () => {},
+    };
+    expect(new common.ReconnectSupervisor(options).faulted).toBe(false);
+    expect(typeof common.fullJitterDelay).toBe('function');
+  });
+});
 import type { WritePrecondition, WritePreconditionCheck } from '../../src/index.ts';
 
 describe('portable write precondition exports', () => {
@@ -181,8 +215,9 @@ describe('@setu-ts/common barrel — M94b form body', () => {
       new TextEncoder().encode('a=1'),
       'application/x-www-form-urlencoded',
     );
-    const encoding: import('../../src/index.ts').FormEncoding | undefined = common
-      .formEncodingOf('application/x-www-form-urlencoded');
+    const encoding: import('../../src/index.ts').FormEncoding | undefined = common.formEncodingOf(
+      'application/x-www-form-urlencoded',
+    );
     const file: import('../../src/index.ts').FormFile = {
       filename: 'a.txt',
       mimeType: 'text/plain',
@@ -210,8 +245,8 @@ describe('@setu-ts/common barrel — M94b form body', () => {
  * (mutually assignable in the identity sense), so the pinned shape below fails
  * on any added, removed, or re-typed member.
  */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 // Compile-time: `SessionView` resolves from the barrel and its shape is pinned
 // (M73). Dropping the re-export or widening the projection stops this file
@@ -292,7 +327,8 @@ describe('@setu-ts/common barrel — M86 ingress contracts', () => {
     // Type-level: both names resolve only from the public barrel. A dropped
     // type-only export is invisible to runtime assertions.
     const decision: WebSocketGuardDecision = { status: 401 };
-    const guard: WebSocketUpgradeGuard = (context) => context.user === undefined ? decision : true;
+    const guard: WebSocketUpgradeGuard = (context) =>
+      context.user === undefined ? decision : true;
 
     // Driven, not merely named: a guard the barrel's types cannot express
     // would fail to compile, and one that never runs proves only that.
@@ -331,8 +367,8 @@ describe('@setu-ts/common barrel — M89c IMultiTenancyService.getRepositoryFor'
       prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
     };
 
-    const repo: import('../../src/index.ts').ITenantRepository<{ id: string }> = service
-      .getRepositoryFor('acme', 'Widget');
+    const repo: import('../../src/index.ts').ITenantRepository<{ id: string }> =
+      service.getRepositoryFor('acme', 'Widget');
     expect(typeof repo.findAll).toBe('function');
     expect(service.prefixCacheKey('acme', 'k')).toBe('acme:k');
   });
@@ -442,6 +478,24 @@ describe('@setu-ts/common barrel — duplicate key', () => {
 });
 
 // ---------------------------------------------------------------------------
+// M113d — the portable optional-dependency error
+// ---------------------------------------------------------------------------
+
+describe('@setu-ts/common barrel — optional dependency unavailable', () => {
+  it('exports OptionalDependencyUnavailableError, naming the dependency and the cause', () => {
+    const cause = new Error('No such module "ioredis"');
+    const error = new common.OptionalDependencyUnavailableError('ioredis', { cause });
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('OptionalDependencyUnavailableError');
+    expect(error.dependency).toBe('ioredis');
+    expect(error.cause).toBe(cause);
+    expect(error.message).toContain("'ioredis'");
+    // A startup/configuration fault, not a request failure: no status hint.
+    expect(common.httpStatusHintOf(error)).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // M92 — the view rendering contract
 // ---------------------------------------------------------------------------
 
@@ -476,10 +530,7 @@ describe('@setu-ts/common barrel — M92 view contract', () => {
 // assertion, so the contract is declared against the barrel. Dropping the
 // re-export, renaming a member, or changing a signature fails `deno check`
 // here (the M56 defect class).
-const authMethodUnionPinned: Equals<
-  common.AuthMethod,
-  'pwd' | 'otp' | 'pop' | 'fed'
-> = true;
+const authMethodUnionPinned: Equals<common.AuthMethod, 'pwd' | 'otp' | 'pop' | 'fed'> = true;
 const signInOutcomePinned: Equals<
   common.SignInOutcome,
   { readonly status: 'signed-in' } | { readonly status: 'second-factor-required' }
@@ -565,17 +616,17 @@ describe('@setu-ts/common barrel — M101c identity composition', () => {
       useIsolation: (s: common.ITenantIsolationStrategy) => {
         expect(s.kind).toBe(strategy.kind);
       },
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       findAll: async () => [],
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       findById: async () => null,
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       find: async () => [],
-      // deno-lint-ignore require-await
-      create: async <E>(): Promise<E> => ({} as unknown as E),
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
+      create: async <E>(): Promise<E> => ({}) as unknown as E,
+      // eslint-disable-next-line require-await
       update: async () => null,
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       delete: async () => false,
     };
     await expect(store.findAll('a', 'User')).resolves.toEqual([]);
@@ -837,4 +888,11 @@ describe('scoped RBAC exports (M110b)', () => {
       'r',
     ]);
   });
+});
+
+it('exports connection fault classification', () => {
+  expect(common.isConnectionFault({ code: 'ECONNREFUSED' })).toBe(true);
+  expect(typeof common.isConnectionFaultCode).toBe('function');
+  expect(common.isConnectionFaultCode('ECONNREFUSED')).toBe(true);
+  expect(common).not.toHaveProperty('CONNECTION_FAULT_CODES');
 });

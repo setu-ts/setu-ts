@@ -8,8 +8,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   type BumpOptions,
@@ -37,7 +38,7 @@ const OPTIONS: BumpOptions = {
 /** A tree carrying one of every site the bump has to touch. */
 function tree(overrides: Record<string, string | undefined> = {}): Map<string, string> {
   const files = new Map<string, string>([
-    ['deno.json', '{"workspace": ["./packages/common", "./packages/sdk"]}'],
+    ['pnpm-workspace.yaml', '{"packages": ["./packages/common", "./packages/sdk"]}'],
     ['packages/common/deno.json', '{\n  "name": "@setu-ts/common",\n  "version": "0.8.0"\n}\n'],
     // M111a §3.5: the generated npm manifest moves with deno.json; the version
     // constant exists only for a member that reads its version (common here,
@@ -58,7 +59,7 @@ function tree(overrides: Record<string, string | undefined> = {}): Map<string, s
       'deno.lock',
       '{\n  "@setu-ts/common@0.8": "jsr:@setu-ts/common@0.8.0",\n  "jsr:@setu-ts/kernel@0.8": {}\n}\n',
     ],
-    ['apps/minimal/deno.lock', '{ "links": { "@setu-ts/common@0.8.0": {} } }\n'],
+    ['test/deno-lane/deno.lock', '{ "links": { "@setu-ts/common@0.8.0": {} } }\n'],
     [
       'README.md',
       [
@@ -137,11 +138,19 @@ describe('isTestPath', () => {
     expect(isTestPath('packages/testing/src/index.ts')).toBe(false);
   });
 
-  // Cutting v0.9.0: a codemod's colocated test carried a `jsr:@setu-ts/…`
-  // input fixture, and the sweep moved it.
-  it('matches a colocated *.test.ts outside a test directory', () => {
-    expect(isTestPath('scripts/codemods/std-to-vitest.test.ts')).toBe(true);
-    expect(isTestPath('scripts/codemods/std-to-vitest.ts')).toBe(false);
+  it('runs the bump and its manifest sync on Node, with git available to the helper', async () => {
+    const config = JSON.parse(
+      await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    );
+    expect(config.scripts['release:bump']).toBe('node scripts/bump-version.ts');
+    const source = await readFile(
+      new URL('../../scripts/bump-version.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain(
+      "runProcess(process.execPath, ['scripts/node-manifests.ts', '--write']",
+    );
+    expect(source).toContain("runProcess('git'");
   });
 });
 
@@ -166,16 +175,19 @@ describe('isArchivedPlan', () => {
 });
 
 describe('the release:bump task', () => {
-  // Cutting v0.9.0: the task granted `--allow-run=git` while `syncManifests`
-  // spawns `Deno.execPath()`, so a real bump rewrote every file and then died
-  // with NotCapable before regenerating the manifests.
-  it('grants run access to the deno binary syncManifests spawns', async () => {
+  it('runs the bump and its manifest sync on Node, with git available to the helper', async () => {
     const config = JSON.parse(
-      await Deno.readTextFile(new URL('../../deno.json', import.meta.url)),
-    ) as { tasks: Record<string, string> };
-    const grant = /--allow-run=(\S+)/.exec(config.tasks['release:bump'] ?? '')?.[1] ?? '';
-    expect(grant.split(',')).toContain('deno');
-    expect(grant.split(',')).toContain('git');
+      await readFile(new URL('../../package.json', import.meta.url), 'utf8'),
+    );
+    expect(config.scripts['release:bump']).toBe('node scripts/bump-version.ts');
+    const source = await readFile(
+      new URL('../../scripts/bump-version.ts', import.meta.url),
+      'utf8',
+    );
+    expect(source).toContain(
+      "runProcess(process.execPath, ['scripts/node-manifests.ts', '--write']",
+    );
+    expect(source).toContain("runProcess('git'");
   });
 });
 
@@ -207,11 +219,13 @@ describe('rewriteReferences', () => {
   it('moves the major.minor shorthand in a lockfile only, and only across a minor change', () => {
     const lock =
       '"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.0": {}, "@setu-ts/common@0.80": {}';
-    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.9.0').content)
-      .toBe('"@setu-ts/common@0.9": {}, "@setu-ts/common@0.9.0": {}, "@setu-ts/common@0.80": {}');
+    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.9.0').content).toBe(
+      '"@setu-ts/common@0.9": {}, "@setu-ts/common@0.9.0": {}, "@setu-ts/common@0.80": {}',
+    );
     // A patch bump leaves the shorthand alone — `0.8` still names 0.8.1.
-    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.8.1').content)
-      .toBe('"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.1": {}, "@setu-ts/common@0.80": {}');
+    expect(rewriteReferences('deno.lock', lock, '0.8.0', '0.8.1').content).toBe(
+      '"@setu-ts/common@0.8": {}, "@setu-ts/common@0.8.1": {}, "@setu-ts/common@0.80": {}',
+    );
     // Outside a lockfile the shorthand is not a reference.
     expect(rewriteReferences('x.md', '@setu-ts/common@0.8', '0.8.0', '0.9.0').replacements).toBe(0);
   });
@@ -258,7 +272,6 @@ describe('planBump', () => {
     expect(paths).toEqual([
       'CHANGELOG.md',
       'README.md',
-      'apps/minimal/deno.lock',
       'deno.lock',
       'docker/Dockerfile',
       'docs/upgrading.md',
@@ -271,6 +284,7 @@ describe('planBump', () => {
       'packages/sdk/package.json',
       'packages/sdk/src/http/observed-fetch.ts',
       'scripts/check-docs.ts',
+      'test/deno-lane/deno.lock',
     ]);
 
     // Manifests: the member version AND both sides of the SDK's pinned mapping.
@@ -294,7 +308,7 @@ describe('planBump', () => {
     expect(content('deno.lock')).toBe(
       '{\n  "@setu-ts/common@0.9": "jsr:@setu-ts/common@0.9.0",\n  "jsr:@setu-ts/kernel@0.9": {}\n}\n',
     );
-    expect(content('apps/minimal/deno.lock')).toContain('@setu-ts/common@0.9.0');
+    expect(content('test/deno-lane/deno.lock')).toContain('@setu-ts/common@0.9.0');
     // README: the install line moves; the worked range's bounds are bare numbers
     // and stay; the history paragraph stays whole.
     expect(content('README.md')).toContain('`deno add jsr:@setu-ts/kernel@^0.9.0`');
@@ -360,7 +374,7 @@ describe('planBump', () => {
     expect(refusals).toEqual([
       'workspace member packages/common/deno.json is not a tracked file.',
       'packages/sdk/deno.json does not carry 0.8.0 where expected (the manifest) — the tree is ' +
-      'not all on 0.8.0.',
+        'not all on 0.8.0.',
     ]);
   });
 
@@ -372,9 +386,9 @@ describe('planBump', () => {
     });
     expect(planBump(files, OPTIONS).refusals).toEqual([
       'packages/common/src/version.ts does not carry 0.8.0 where expected (the version ' +
-      'constant) — the tree is not all on 0.8.0.',
+        'constant) — the tree is not all on 0.8.0.',
       'packages/common/package.json does not carry 0.8.0 where expected (the generated npm ' +
-      'manifest) — the tree is not all on 0.8.0.',
+        'manifest) — the tree is not all on 0.8.0.',
       'workspace member packages/sdk/package.json is not a tracked file.',
     ]);
   });
@@ -385,29 +399,29 @@ describe('planBump', () => {
   });
 
   it('refuses when a named site is absent or does not carry the old version', () => {
-    expect(planBump(tree({ 'k8s/chart/Chart.yaml': "appVersion: '0.7.0'\n" }), OPTIONS).refusals)
-      .toEqual(["k8s/chart/Chart.yaml does not carry appVersion: '0.8.0'."]);
+    expect(
+      planBump(tree({ 'k8s/chart/Chart.yaml': "appVersion: '0.7.0'\n" }), OPTIONS).refusals,
+    ).toEqual(["k8s/chart/Chart.yaml does not carry appVersion: '0.8.0'."]);
     expect(
       planBump(tree({ 'packages/sdk/src/http/observed-fetch.ts': undefined }), OPTIONS).refusals[0],
-    )
-      .toContain('packages/sdk/src/http/observed-fetch.ts is not a tracked file');
+    ).toContain('packages/sdk/src/http/observed-fetch.ts is not a tracked file');
   });
 
   it('refuses a changelog with no Unreleased heading, an empty one, or the version already cut', () => {
-    expect(planBump(tree({ 'CHANGELOG.md': '# Changelog\n\n## [0.8.0]\n- x\n' }), OPTIONS).refusals)
-      .toEqual(["CHANGELOG.md has no '## [Unreleased]' heading to rename."]);
+    expect(
+      planBump(tree({ 'CHANGELOG.md': '# Changelog\n\n## [0.8.0]\n- x\n' }), OPTIONS).refusals,
+    ).toEqual(["CHANGELOG.md has no '## [Unreleased]' heading to rename."]);
     expect(
       planBump(tree({ 'CHANGELOG.md': '## [Unreleased]\n\n## [0.8.0]\n- x\n' }), OPTIONS)
         .refusals[0],
-    )
-      .toContain("'## [Unreleased]' section is empty");
+    ).toContain("'## [Unreleased]' section is empty");
     expect(
       planBump(tree({ 'CHANGELOG.md': '## [Unreleased]\n- y\n\n## [0.9.0]\n- x\n' }), OPTIONS)
         .refusals,
-    )
-      .toEqual(["CHANGELOG.md already carries a '## [0.9.0]' section."]);
-    expect(planBump(tree({ 'CHANGELOG.md': undefined }), OPTIONS).refusals)
-      .toEqual(['CHANGELOG.md is not a tracked file.']);
+    ).toEqual(["CHANGELOG.md already carries a '## [0.9.0]' section."]);
+    expect(planBump(tree({ 'CHANGELOG.md': undefined }), OPTIONS).refusals).toEqual([
+      'CHANGELOG.md is not a tracked file.',
+    ]);
   });
 
   it('leaves an empty upgrading Unreleased heading and says what would belong under it', () => {
@@ -420,7 +434,7 @@ describe('planBump', () => {
     // And a tree without the guide at all is simply not asked about.
     expect(
       edited(tree({ 'docs/upgrading.md': undefined })).plan.residual.some((step) =>
-        step.includes('upgrading')
+        step.includes('upgrading'),
       ),
     ).toBe(false);
   });
@@ -435,9 +449,13 @@ describe('planBump', () => {
   it('always lists the operator steps it cannot take', () => {
     const { plan } = edited(tree());
     const steps = plan.residual.join('\n');
-    for (
-      const needle of ['check:docs', 'deploy:render', 'deno.lock', 'check 9', '>=0.9.0 <0.9.0']
-    ) {
+    for (const needle of [
+      'check:docs',
+      'deploy:render',
+      'pnpm install --lockfile-only',
+      'check 9',
+      '>=0.9.0 <0.9.0',
+    ]) {
       expect(steps).toContain(needle);
     }
   });
@@ -467,8 +485,8 @@ describe('main (the command path, over injected I/O)', () => {
   function realShape(): Map<string, string> {
     const files = tree();
     files.set(
-      'deno.json',
-      '{"workspace": ["./packages/common", "./packages/sdk", "./packages/kernel"]}',
+      'pnpm-workspace.yaml',
+      '{"packages": ["./packages/common", "./packages/sdk", "./packages/kernel"]}',
     );
     files.set('packages/kernel/deno.json', '{\n  "version": "0.8.0"\n}\n');
     files.set('packages/kernel/package.json', '{\n  "version": "0.8.0"\n}\n');
@@ -521,8 +539,9 @@ describe('main (the command path, over injected I/O)', () => {
   it('re-runs the manifest generator after a real bump, never on a dry run (M111a §3.5)', async () => {
     let real = 0;
     const r = harness(realShape());
-    expect(await main(['0.9.0'], { ...r.deps, syncManifests: () => Promise.resolve(void real++) }))
-      .toBe(true);
+    expect(
+      await main(['0.9.0'], { ...r.deps, syncManifests: () => Promise.resolve(void real++) }),
+    ).toBe(true);
     expect(real).toBe(1);
 
     let dry = 0;
@@ -551,8 +570,7 @@ describe('main (the command path, over injected I/O)', () => {
     expect(await main(['0.9.0', '--dry-run'], h.deps)).toBe(false);
     expect(
       h.err.some((line) => line.includes('residual packages/sdk/src/x.ts:3 @setu-ts/common@0.7.0')),
-    )
-      .toBe(true);
+    ).toBe(true);
     expect(h.err.some((line) => line.includes('residual reference(s)'))).toBe(true);
   });
 
@@ -580,12 +598,12 @@ describe('the real seams', () => {
 
   it('reads tracked text files and skips binaries', async () => {
     const files = await readTrackedText();
-    expect(files.has('deno.json')).toBe(true);
+    expect(files.has('pnpm-workspace.yaml')).toBe(true);
     expect(files.has('scripts/verify-release.ts')).toBe(true);
     for (const path of files.keys()) expect(path.endsWith('.png')).toBe(false);
   });
 
   it('reports the working tree state as a boolean', async () => {
-    expect(typeof await workingTreeIsClean()).toBe('boolean');
+    expect(typeof (await workingTreeIsClean())).toBe('boolean');
   });
 });

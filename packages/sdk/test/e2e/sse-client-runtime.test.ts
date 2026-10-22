@@ -3,7 +3,7 @@ import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 
 import { describe, expect, it } from 'vitest';
 import { createSseClient } from '../../src/realtime/sse-client.ts';
-import { createRealtimeClientApp } from '../../../../apps/realtime-clients/src/app.ts';
+import { createApp as createRealtimeClientApp } from '../../../../apps/realtime-clients/setu.config.ts';
 
 function freePort(): Promise<number> {
   return nodeUnusedPort();
@@ -16,7 +16,7 @@ describe('createSseClient (e2e)', () => {
     await app.start({ port });
     const events: Array<{ readonly id?: string }> = [];
     let resolveEvents: (() => void) | undefined;
-    const complete = new Promise<void>((resolve) => resolveEvents = resolve);
+    const complete = new Promise<void>((resolve) => (resolveEvents = resolve));
     const client = createSseClient({
       url: `http://127.0.0.1:${port}/events`,
       headers: { authorization: 'Bearer smoke-token' },
@@ -30,11 +30,11 @@ describe('createSseClient (e2e)', () => {
       await Promise.race([
         complete,
         new Promise<void>((_resolve, reject) =>
-          setTimeout(() => reject(new Error('timed out')), 2_000)
+          setTimeout(() => reject(new Error('timed out')), 2_000),
         ),
       ]);
       client.close();
-      const resume = await (await fetch(`http://127.0.0.1:${port}/resume`)).json() as {
+      const resume = (await (await fetch(`http://127.0.0.1:${port}/resume`)).json()) as {
         readonly resumedWith: string | null;
       };
       expect(events).toHaveLength(2);

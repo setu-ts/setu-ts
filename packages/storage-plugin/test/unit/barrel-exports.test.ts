@@ -98,8 +98,13 @@ describe('storage-plugin barrel — type exports M70k added', () => {
     const legacy: barrelTypes.IAwsS3Client | null = null;
     const backend: barrelTypes.IS3Backend | null = legacy;
 
-    expect([memory.provider, local.provider, s3.provider, gcs.provider, azure.provider])
-      .toEqual(['memory', 'local', 's3', 'gcs', 'azure']);
+    expect([memory.provider, local.provider, s3.provider, gcs.provider, azure.provider]).toEqual([
+      'memory',
+      'local',
+      's3',
+      'gcs',
+      'azure',
+    ]);
     expect(attributes.contentType).toBe('image/png');
     expect(backend).toBeNull();
   });

@@ -12,6 +12,37 @@ import { describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
 
+describe('fetch-mapping socket peers', () => {
+  it('keeps one request shape with and without a peer', () => {
+    const raw = new Request('http://localhost/');
+    const withPeer = mapWebRequestToFrameworkRequest(raw, undefined, '192.0.2.1');
+    const withoutPeer = mapWebRequestToFrameworkRequest(raw);
+    expect(withPeer.ip).toBe('192.0.2.1');
+    expect(withoutPeer.ip).toBeUndefined();
+    expect(Object.getPrototypeOf(withPeer)).toBe(Object.getPrototypeOf(withoutPeer));
+    expect(Object.hasOwn(withPeer, 'ip')).toBe(true);
+    expect(Object.hasOwn(withoutPeer, 'ip')).toBe(true);
+    expect(Object.keys(withPeer)).toEqual(Object.keys(withoutPeer));
+  });
+  it('normalizes only mapped dotted-quad peers', () => {
+    for (const [input, expected] of [
+      ['::ffff:10.1.2.3', '10.1.2.3'],
+      ['::FFFF:10.1.2.3', '10.1.2.3'],
+      ['::ffff:abcd', '::ffff:abcd'],
+      ['2001:db8::1', '2001:db8::1'],
+      ['::ffff:999.1.2.3', '::ffff:999.1.2.3'],
+      ['::ffff:1.2.3', '::ffff:1.2.3'],
+      ['::ffff:255.249.199.99', '255.249.199.99'],
+      ['', undefined],
+      ['127.0.0.1', '127.0.0.1'],
+    ]) {
+      expect(
+        mapWebRequestToFrameworkRequest(new Request('http://localhost/'), undefined, input).ip,
+      ).toBe(expected);
+    }
+  });
+});
+
 /**
  * Reads the form off a served request. `mapWebRequestToFrameworkRequest`
  * ALWAYS provides the accessor; the guard keeps the optional member's type
@@ -131,10 +162,7 @@ describe('fetch-mapping | concurrent body access', () => {
   it('text() and bytes() started concurrently both resolve', async () => {
     const frameworkRequest = mapWebRequestToFrameworkRequest(makeRequest());
 
-    const [text, bytes] = await Promise.all([
-      frameworkRequest.text(),
-      frameworkRequest.bytes(),
-    ]);
+    const [text, bytes] = await Promise.all([frameworkRequest.text(), frameworkRequest.bytes()]);
 
     expect(text).toBe(payload);
     expect(bytes).toEqual(new TextEncoder().encode(payload));
@@ -167,10 +195,7 @@ describe('fetch-mapping | concurrent body access', () => {
   it('concurrent readers share one resolved instance', async () => {
     const frameworkRequest = mapWebRequestToFrameworkRequest(makeRequest());
 
-    const [first, second] = await Promise.all([
-      frameworkRequest.bytes(),
-      frameworkRequest.bytes(),
-    ]);
+    const [first, second] = await Promise.all([frameworkRequest.bytes(), frameworkRequest.bytes()]);
 
     expect(first).toBe(second);
   });
@@ -187,10 +212,7 @@ describe('fetch-mapping | concurrent body access', () => {
     });
 
     const frameworkRequest = mapWebRequestToFrameworkRequest(raw);
-    const [text, bytes] = await Promise.all([
-      frameworkRequest.text(),
-      frameworkRequest.bytes(),
-    ]);
+    const [text, bytes] = await Promise.all([frameworkRequest.text(), frameworkRequest.bytes()]);
 
     expect(nativeReads).toBe(0);
     expect(text).toBe('');
@@ -453,8 +475,7 @@ describe('fetch-mapping | formData (M94b)', () => {
   }
 
   function multipartBody(parts: string[], boundary: string): string {
-    return parts.map((part) => `--${boundary}\r\n${part}\r\n`).join('') +
-      `--${boundary}--\r\n`;
+    return parts.map((part) => `--${boundary}\r\n${part}\r\n`).join('') + `--${boundary}--\r\n`;
   }
 
   it('reads a urlencoded body with web semantics', async () => {
@@ -468,10 +489,13 @@ describe('fetch-mapping | formData (M94b)', () => {
   });
 
   it('reads a multipart body, discriminating file from text on the filename', async () => {
-    const body = multipartBody([
-      'Content-Disposition: form-data; name="file"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nDATA',
-      'Content-Disposition: form-data; name="note"\r\n\r\nhello',
-    ], 'fb');
+    const body = multipartBody(
+      [
+        'Content-Disposition: form-data; name="file"; filename="a.txt"\r\nContent-Type: text/plain\r\n\r\nDATA',
+        'Content-Disposition: form-data; name="note"\r\n\r\nhello',
+      ],
+      'fb',
+    );
     const request = mapWebRequestToFrameworkRequest(
       formRequest('multipart/form-data; boundary=fb', body),
     );
@@ -495,9 +519,7 @@ describe('fetch-mapping | formData (M94b)', () => {
   });
 
   it('a rejection is cached: a non-form body keeps rejecting identically', async () => {
-    const request = mapWebRequestToFrameworkRequest(
-      formRequest('application/json', '{}'),
-    );
+    const request = mapWebRequestToFrameworkRequest(formRequest('application/json', '{}'));
     await expect(readForm(request)).rejects.toThrow(UnsupportedFormEncodingError);
     await expect(readForm(request)).rejects.toThrow(UnsupportedFormEncodingError);
   });
@@ -535,7 +557,7 @@ describe('fetch-mapping | full round-trip', () => {
     const snapshot: ResponseSnapshot = {
       streaming: false,
       status: 201,
-      headers: new Headers({ 'Location': '/echo/1' }),
+      headers: new Headers({ Location: '/echo/1' }),
       body: 'created',
     };
 
@@ -557,7 +579,10 @@ describe('fetch-mapping | formData reads the PUBLIC headers (M94b review)', () =
     request.headers.set('content-type', 'application/x-www-form-urlencoded');
 
     const form = await request.formData!();
-    expect([...form.entries()]).toEqual([['a', '1'], ['b', '2']]);
+    expect([...form.entries()]).toEqual([
+      ['a', '1'],
+      ['b', '2'],
+    ]);
   });
 
   it('honours a middleware rewriting content-type AWAY from a form type', async () => {

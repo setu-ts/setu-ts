@@ -31,6 +31,7 @@ import {
 } from '../utils/names.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
   joinPath,
@@ -89,7 +90,11 @@ function printUsage(log: (message: string) => void): void {
  */
 function resolveScope(dir: string, override?: string): string {
   if (override !== undefined) return override.replace(/^@/, '');
-  const base = dir.split('/').filter((part) => part !== '').at(-1) ?? 'workspace';
+  const base =
+    dir
+      .split('/')
+      .filter((part) => part !== '')
+      .at(-1) ?? 'workspace';
   return deriveNames(base).kebab;
 }
 
@@ -119,9 +124,7 @@ export async function runLibraryCommand(
   if (!isIdentifierSafe(names)) {
     // Quoting the name back as typed, so through `escapeName`: a control
     // character here would forge a standalone line in the rendered message.
-    deps.error(
-      `Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`,
-    );
+    deps.error(`Invalid name "${escapeName(rawName)}": ${IDENTIFIER_NAME_RULE}`);
     return EXIT_USAGE;
   }
 
@@ -130,9 +133,9 @@ export async function runLibraryCommand(
   const read = await readWorkspaceManifest(deps.fs, deps.dir);
   if (!read.ok) {
     deps.error(
-      `No usable ${WORKSPACE_MANIFEST} in ${
-        escapeName(deps.dir)
-      }, so this is not a Setu workspace.`,
+      `No usable ${WORKSPACE_MANIFEST} in ${escapeName(
+        deps.dir,
+      )}, so this is not a Setu workspace.`,
     );
     deps.error(
       `A library is resolved by the workspace, so it needs one: create it with ` +
@@ -199,8 +202,8 @@ export async function runLibraryCommand(
   const planned = files.map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of planned) deps.log(`would create ${escapeName(file.path)}`);
-    return EXIT_OK;
+    const code = await reportDryRunPlan(deps, planned);
+    return code;
   }
 
   const existing = await findExisting(deps.fs, planned);

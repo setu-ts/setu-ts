@@ -70,9 +70,7 @@ function docWith(components: Record<string, SdkOpenApiSchema>): SdkOpenApiDocume
       '/search': {
         get: {
           operationId: 'run-search',
-          parameters: [
-            { name: 'filter', in: 'query', schema: INLINE_SHAPE },
-          ],
+          parameters: [{ name: 'filter', in: 'query', schema: INLINE_SHAPE }],
           responses: { '200': { description: 'ok' } },
         },
       },
@@ -134,9 +132,7 @@ describe('a hoisted alias yields to a claimed name instead of aborting (M99c V7-
             ? 'keeps the preferred alias when nothing claimed it — no rename'
             : `yields to the claimed names, landing on '${spec.ladder[rung]}'`,
           () => {
-            const components = Object.fromEntries(
-              claimed.map((name) => [name, INLINE_SHAPE]),
-            );
+            const components = Object.fromEntries(claimed.map((name) => [name, INLINE_SHAPE]));
             const out = generateOpenApiClient(docWith(components), {});
             // The chosen rung is emitted as a type…
             expect(out).toContain(`export type ${spec.ladder[rung]} = {`);

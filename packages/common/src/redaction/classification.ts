@@ -14,8 +14,7 @@ export const DATA_CLASSIFICATIONS = {
 
 /** A standard classification or an application-defined classification. */
 export type DataClassification =
-  | (typeof DATA_CLASSIFICATIONS)[keyof typeof DATA_CLASSIFICATIONS]
-  | string;
+  (typeof DATA_CLASSIFICATIONS)[keyof typeof DATA_CLASSIFICATIONS] | string;
 
 /** Secret field patterns used by the logger when no explicit `redact` list is supplied. */
 export const DEFAULT_SECRET_FIELD_PATTERNS: readonly string[] = [

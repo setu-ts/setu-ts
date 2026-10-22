@@ -70,8 +70,8 @@ const CLOUDFLARE_USER_AGENT_MARKER = 'cloudflare';
 function isCloudflareWorkers(globals: GlobalScope): boolean {
   const hasCaches = typeof (globals as { caches?: unknown }).caches !== 'undefined';
   const nav = (globals as { navigator?: { userAgent?: string } }).navigator;
-  const isCloudflare = nav?.userAgent?.toLowerCase().includes(CLOUDFLARE_USER_AGENT_MARKER) ??
-    false;
+  const isCloudflare =
+    nav?.userAgent?.toLowerCase().includes(CLOUDFLARE_USER_AGENT_MARKER) ?? false;
   return hasCaches && isCloudflare;
 }
 

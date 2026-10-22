@@ -57,12 +57,17 @@ async function makeService(
 ) {
   const config = resolveSessionConfig({ ...options, mode });
   const ring = await deriveKeyRing(crypto.subtle, [SECRET], mode);
-  const service = new SessionService(config, ring, {
-    subtle: crypto.subtle,
-    randomBytes,
-    now: clock.now,
-    uuid: clock.uuid,
-  }, store);
+  const service = new SessionService(
+    config,
+    ring,
+    {
+      subtle: crypto.subtle,
+      randomBytes,
+      now: clock.now,
+      uuid: clock.uuid,
+    },
+    store,
+  );
   return { service, clock };
 }
 
@@ -123,10 +128,10 @@ describe('SessionService.fromHeaders', () => {
 
     it('returns the reserved tenant key verbatim', async () => {
       const { service } = await makeService();
-      const { cookie } = await committedCookie(
-        service,
-        { [TENANT_BINDING_KEY]: 'acme', userId: 'u-1' },
-      );
+      const { cookie } = await committedCookie(service, {
+        [TENANT_BINDING_KEY]: 'acme',
+        userId: 'u-1',
+      });
 
       const view = await service.fromHeaders(new Headers({ cookie }));
 

@@ -500,10 +500,7 @@ describe('cacheApiMiddleware — hit', () => {
     const ctx = contextFor('https://example.test/multi');
     await cacheApiMiddleware({ cache })(ctx, () => Promise.resolve());
 
-    expect(ctx.response.snapshot().headers.getSetCookie()).toEqual([
-      'a=1; Path=/',
-      'b=2; Path=/',
-    ]);
+    expect(ctx.response.snapshot().headers.getSetCookie()).toEqual(['a=1; Path=/', 'b=2; Path=/']);
   });
 
   it('still overwrites rather than appends for an ordinary repeated header', async () => {
@@ -512,7 +509,12 @@ describe('cacheApiMiddleware — hit', () => {
     const cache = new FakeCacheApi();
     await cache.put(
       'https://example.test/vary',
-      new Response('body', { headers: [['vary', 'Accept'], ['vary', 'Origin']] }),
+      new Response('body', {
+        headers: [
+          ['vary', 'Accept'],
+          ['vary', 'Origin'],
+        ],
+      }),
     );
 
     const ctx = contextFor('https://example.test/vary');
@@ -618,13 +620,11 @@ describe('cacheApiMiddleware — skips', () => {
   it('does not store a response the platform would refuse', async () => {
     const cache = new FakeCacheApi();
 
-    for (
-      const write of [
-        (ctx: IRequestContext) => ctx.response.status(500).json({ error: true }),
-        (ctx: IRequestContext) => ctx.response.header('vary', '*').json({ ok: true }),
-        (ctx: IRequestContext) => ctx.response.header('set-cookie', 'a=1').json({ ok: true }),
-      ]
-    ) {
+    for (const write of [
+      (ctx: IRequestContext) => ctx.response.status(500).json({ error: true }),
+      (ctx: IRequestContext) => ctx.response.header('vary', '*').json({ ok: true }),
+      (ctx: IRequestContext) => ctx.response.header('set-cookie', 'a=1').json({ ok: true }),
+    ]) {
       const ctx = contextFor('https://example.test/x');
       await cacheApiMiddleware({ cache })(ctx, () => {
         write(ctx);
@@ -809,10 +809,34 @@ describe('cacheApiMiddleware — the write path', () => {
     expect(logger.messages()).toEqual([
       'cloudflare-cache-api: edge cache write failed, response served uncached',
     ]);
-    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Response body too large' });
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'Error' });
   });
 
-  it('reports a non-Error rejection as a string', async () => {
+  it('logs the request path, never the key with its query string or tenant (M113d D1)', async () => {
+    const failing: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: () => Promise.reject(new Error('quota')),
+      delete: () => Promise.resolve(false),
+    };
+    const logger = new RecordingLogger();
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.LOGGER, logger);
+    const ctx = contextFor('https://example.test/orders?token=canary-secret', {
+      services,
+      tenant: 'tenant-canary',
+    });
+
+    await cacheApiMiddleware({ cache: failing })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    const meta = logger.records.at(0)?.meta;
+    expect(meta).toEqual({ path: '/orders', error: 'Error' });
+    expect(JSON.stringify(logger.records)).not.toContain('canary');
+  });
+
+  it('reports a non-Error rejection by its type', async () => {
     const failing: ICacheApi = {
       match: () => Promise.resolve(undefined),
       put: () => Promise.reject('a bare string'),
@@ -828,7 +852,7 @@ describe('cacheApiMiddleware — the write path', () => {
       return Promise.resolve();
     });
 
-    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'a bare string' });
+    expect(logger.records.at(0)?.meta).toMatchObject({ error: 'string' });
   });
 
   it('stays silent, and still succeeds, when no logger is registered', async () => {
@@ -860,5 +884,169 @@ describe('cacheApiMiddleware — the write path', () => {
 
     // Already stored by the time the middleware returned — no awaiting a sink.
     expect(cache.puts).toHaveLength(1);
+  });
+});
+
+describe('cacheApiMiddleware — the write path with a hostless registry (M113d §3.6)', () => {
+  /** A real BindingRegistry built the way CloudflarePlugin builds it. */
+  function realRegistry(host: ((promise: Promise<unknown>) => void) | undefined) {
+    // Imported here so the marker helpers stay module-internal to the package.
+    return (async () => {
+      const { BindingRegistry } = await import('../../../src/bindings/binding-registry.ts');
+      const { markHostlessRegistry, resolveWaitUntil } =
+        await import('../../../src/background/wait-until.ts');
+      const registry = new BindingRegistry(
+        {},
+        {},
+        resolveWaitUntil(host, () => undefined),
+      );
+      if (host === undefined) markHostlessRegistry(registry);
+      return registry as unknown as ICloudflareBindings;
+    })();
+  }
+
+  it('awaits the put itself when the registry has no waitUntil host', async () => {
+    const registry = await realRegistry(undefined);
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.CLOUDFLARE, registry);
+
+    // The put settles only after a tick: if store() handed it to the (no-op)
+    // sink and returned, `settled` would still be false when the middleware
+    // resolved — the V9-23 empty-body mechanism.
+    let settled = false;
+    const cache: ICacheApi = {
+      match: () => Promise.resolve(undefined),
+      put: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        settled = true;
+      },
+      delete: () => Promise.resolve(false),
+    };
+    const ctx = contextFor('https://example.test/x', { services });
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(settled).toBe(true);
+  });
+
+  it('hands the put to the host when the registry was built with one', async () => {
+    const sink: Promise<unknown>[] = [];
+    const registry = await realRegistry((promise) => {
+      sink.push(promise);
+    });
+    const services = new MockServiceRegistry();
+    services.register(CAPABILITIES.CLOUDFLARE, registry);
+    const cache = new FakeCacheApi();
+    const ctx = contextFor('https://example.test/x', { services });
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(sink).toHaveLength(1);
+    await Promise.all(sink);
+    expect(cache.puts).toHaveLength(1);
+  });
+
+  it.each([
+    ['no bindings capability', 'none'],
+    ['a hostless registry', 'hostless'],
+    ['a registry with a waitUntil host', 'host'],
+  ] as const)(
+    'never logs a rejection message that quotes the key, with %s (M113d §10 F1)',
+    async (_label, shape) => {
+      // A custom cache whose rejection names the key it was given carries the
+      // query string and tenant back; only the error class may reach a log.
+      const failing: ICacheApi = {
+        match: () => Promise.resolve(undefined),
+        put: (key) => Promise.reject(new Error(`cannot store ${String(key)}`)),
+        delete: () => Promise.resolve(false),
+      };
+      const logger = new RecordingLogger();
+      const services = new MockServiceRegistry();
+      services.register(CAPABILITIES.LOGGER, logger);
+      const sink: Promise<unknown>[] = [];
+      if (shape !== 'none') {
+        const { BindingRegistry } = await import('../../../src/bindings/binding-registry.ts');
+        const { markHostlessRegistry, resolveWaitUntil } =
+          await import('../../../src/background/wait-until.ts');
+        const host =
+          shape === 'host' ? (p: Promise<unknown>): void => void sink.push(p) : undefined;
+        const registry = new BindingRegistry(
+          {},
+          {},
+          resolveWaitUntil(host, () => logger),
+        );
+        if (host === undefined) markHostlessRegistry(registry);
+        services.register(CAPABILITIES.CLOUDFLARE, registry as unknown as ICloudflareBindings);
+      }
+      const ctx = contextFor('https://example.test/orders?token=canary-secret', {
+        services,
+        tenant: 'tenant-canary',
+      });
+
+      await cacheApiMiddleware({ cache: failing })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+      await Promise.all(sink);
+
+      expect(logger.records).toHaveLength(1);
+      expect(logger.records.at(0)?.meta).toEqual({ path: '/orders', error: 'Error' });
+      expect(JSON.stringify(logger.records)).not.toContain('canary');
+    },
+  );
+
+  it.each([
+    ['no bindings capability', false],
+    ['replacement bindings with a waitUntil sink', true],
+  ] as const)(
+    'serves the response and reports once when put throws synchronously, with %s',
+    async (_label, withBindings) => {
+      // A custom cache may throw from `put` rather than reject; the write is
+      // still best-effort, so the 200 stands and nothing is handed to a host.
+      const failing: ICacheApi = {
+        match: () => Promise.resolve(undefined),
+        put: () => {
+          throw new TypeError('put threw');
+        },
+        delete: () => Promise.resolve(false),
+      };
+      const sink: Promise<unknown>[] = [];
+      const services = withBindings ? registryWithBindings(sink) : new MockServiceRegistry();
+      const logger = new RecordingLogger();
+      services.register(CAPABILITIES.LOGGER, logger);
+      const ctx = contextFor('https://example.test/orders', { services });
+
+      await cacheApiMiddleware({ cache: failing })(ctx, () => {
+        ctx.response.json({ ok: true });
+        return Promise.resolve();
+      });
+
+      expect(ctx.response.snapshot().status).toBe(200);
+      expect(ctx.response.snapshot().headers.get('X-Cache-Api')).toBe('MISS');
+      expect(sink).toHaveLength(0);
+      expect(logger.records).toHaveLength(1);
+      expect(logger.records.at(0)?.meta).toEqual({ path: '/orders', error: 'TypeError' });
+    },
+  );
+
+  it('hands the put to replacement bindings that are not in the hostless set', async () => {
+    // The existing `bindingsWithWaitUntil` fake is a replacement provider's
+    // object: never marked, trusted to carry a sink.
+    const sink: Promise<unknown>[] = [];
+    const ctx = contextFor('https://example.test/x', { services: registryWithBindings(sink) });
+    const cache = new FakeCacheApi();
+
+    await cacheApiMiddleware({ cache })(ctx, () => {
+      ctx.response.json({ ok: true });
+      return Promise.resolve();
+    });
+
+    expect(sink).toHaveLength(1);
   });
 });

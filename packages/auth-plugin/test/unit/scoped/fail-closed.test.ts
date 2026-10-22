@@ -107,10 +107,12 @@ const rows: readonly Row[] = [
   {
     name: 'a failing custom-role source',
     options: {
-      sources: [{
-        kind: 'static',
-        grants: [{ subject: USER_CANARY, role: 'custom', scope: SCOPE }],
-      }],
+      sources: [
+        {
+          kind: 'static',
+          grants: [{ subject: USER_CANARY, role: 'custom', scope: SCOPE }],
+        },
+      ],
       customRoles: { name: 'roles', rolesFor: () => Promise.reject(new Error(MESSAGE_CANARY)) },
     },
     target: { scope: SCOPE },
@@ -134,8 +136,8 @@ describe('scoped evaluator — fail closed', () => {
         name: 'invoices:read',
       });
       expect(allowed).toBe(false);
-      const denials = scoped.logger.records.filter((r) =>
-        r.message === 'Scoped authorization denied'
+      const denials = scoped.logger.records.filter(
+        (r) => r.message === 'Scoped authorization denied',
       );
       expect(denials.length).toBe(1);
       expect(denials[0].fields).toMatchObject({ policy: 'scoped-rbac', reason: row.reason });
@@ -145,10 +147,14 @@ describe('scoped evaluator — fail closed', () => {
 
   it('logs client-caused denials at warn and outages at error', async () => {
     const client = scopedHarness({ sources: [okSource] });
-    await client.evaluator.allows(principal(), { context: requestContext() }, {
-      kind: 'role',
-      name: 'viewer',
-    });
+    await client.evaluator.allows(
+      principal(),
+      { context: requestContext() },
+      {
+        kind: 'role',
+        name: 'viewer',
+      },
+    );
     expect(client.logger.records[0].level).toBe('warn');
     const outage = scopedHarness({ sources: [failingSource] });
     await outage.evaluator.allows(principal(), { scope: SCOPE }, { kind: 'role', name: 'viewer' });
@@ -158,10 +164,14 @@ describe('scoped evaluator — fail closed', () => {
   it('allows the same principal and scope once nothing fails — the rows deny for their reason', async () => {
     const scoped = scopedHarness({ sources: [okSource] });
     expect(
-      await scoped.evaluator.allows(principal(USER_CANARY), { scope: SCOPE }, {
-        kind: 'permission',
-        name: 'invoices:read',
-      }),
+      await scoped.evaluator.allows(
+        principal(USER_CANARY),
+        { scope: SCOPE },
+        {
+          kind: 'permission',
+          name: 'invoices:read',
+        },
+      ),
     ).toBe(true);
     expect(scoped.logger.records).toEqual([]);
   });
@@ -173,8 +183,9 @@ describe('scoped evaluator — fail closed', () => {
         throw new RangeError(SCOPE_CANARY);
       },
     };
-    expect(await scoped.evaluator.allows(principal(), hostile, { kind: 'role', name: 'viewer' }))
-      .toBe(false);
+    expect(
+      await scoped.evaluator.allows(principal(), hostile, { kind: 'role', name: 'viewer' }),
+    ).toBe(false);
     expect(scoped.logger.records[0].fields).toMatchObject({
       reason: 'evaluation-failed',
       errorName: 'RangeError',
@@ -184,17 +195,19 @@ describe('scoped evaluator — fail closed', () => {
 
   it('labels a thrown non-identifier name without copying it', async () => {
     const scoped = scopedHarness({
-      sources: [{
-        kind: 'custom',
-        source: {
-          name: 'db',
-          grantsFor: () => {
-            const error = new Error('x');
-            error.name = `Bad Name ${SCOPE_CANARY}`;
-            return Promise.reject(error);
+      sources: [
+        {
+          kind: 'custom',
+          source: {
+            name: 'db',
+            grantsFor: () => {
+              const error = new Error('x');
+              error.name = `Bad Name ${SCOPE_CANARY}`;
+              return Promise.reject(error);
+            },
           },
         },
-      }],
+      ],
     });
     await scoped.evaluator.allows(principal(), { scope: SCOPE }, { kind: 'role', name: 'viewer' });
     expect(scoped.logger.records[0].fields).toMatchObject({ errorName: '[object]' });
@@ -203,10 +216,12 @@ describe('scoped evaluator — fail closed', () => {
 
   it('labels a row-shaped rejection whose name is an identifier, so no id reaches a log', async () => {
     const scoped = scopedHarness({
-      sources: [{
-        kind: 'custom',
-        source: { name: 'db', grantsFor: () => Promise.reject({ name: 'canaryPrincipalZ3k' }) },
-      }],
+      sources: [
+        {
+          kind: 'custom',
+          source: { name: 'db', grantsFor: () => Promise.reject({ name: 'canaryPrincipalZ3k' }) },
+        },
+      ],
     });
     await scoped.evaluator.allows(principal(), { scope: SCOPE }, { kind: 'role', name: 'viewer' });
     expect(scoped.logger.records[0].fields).toMatchObject({ errorName: '[object]' });
@@ -214,32 +229,36 @@ describe('scoped evaluator — fail closed', () => {
   });
 
   it('keeps an error class name, library and platform ones included', async () => {
-    for (
-      const name of [
-        'Error',
-        'TypeError',
-        'AbortError',
-        'PrismaClientKnownRequestError',
-        'MongoServerException',
-      ]
-    ) {
+    for (const name of [
+      'Error',
+      'TypeError',
+      'AbortError',
+      'PrismaClientKnownRequestError',
+      'MongoServerException',
+    ]) {
       const scoped = scopedHarness({
-        sources: [{
-          kind: 'custom',
-          source: {
-            name: 'db',
-            grantsFor: () => {
-              const error = new Error('x');
-              error.name = name;
-              return Promise.reject(error);
+        sources: [
+          {
+            kind: 'custom',
+            source: {
+              name: 'db',
+              grantsFor: () => {
+                const error = new Error('x');
+                error.name = name;
+                return Promise.reject(error);
+              },
             },
           },
-        }],
+        ],
       });
-      await scoped.evaluator.allows(principal(), { scope: SCOPE }, {
-        kind: 'role',
-        name: 'viewer',
-      });
+      await scoped.evaluator.allows(
+        principal(),
+        { scope: SCOPE },
+        {
+          kind: 'role',
+          name: 'viewer',
+        },
+      );
       expect(scoped.logger.records[0].fields).toMatchObject({ errorName: name });
     }
   });
@@ -256,21 +275,28 @@ describe('scoped evaluator — fail closed', () => {
     const scoped = createScopedRbac(config, manualTiming(), () => broken);
     scoped.resolver.bind({} as never);
     expect(
-      await scoped.evaluator.allows(principal(), { scope: SCOPE }, {
-        kind: 'role',
-        name: 'viewer',
-      }),
-    ).toBe(
-      false,
-    );
+      await scoped.evaluator.allows(
+        principal(),
+        { scope: SCOPE },
+        {
+          kind: 'role',
+          name: 'viewer',
+        },
+      ),
+    ).toBe(false);
   });
 
   it('reports the dropped-entry count without the entries', async () => {
     const scoped = scopedHarness({
-      sources: [{
-        kind: 'custom',
-        source: { name: 'db', grantsFor: () => Promise.resolve([{ role: SCOPE_CANARY }] as never) },
-      }],
+      sources: [
+        {
+          kind: 'custom',
+          source: {
+            name: 'db',
+            grantsFor: () => Promise.resolve([{ role: SCOPE_CANARY }] as never),
+          },
+        },
+      ],
     });
     await scoped.evaluator.allows(principal(), { scope: SCOPE }, { kind: 'role', name: 'viewer' });
     expect(scoped.logger.records[0]).toMatchObject({

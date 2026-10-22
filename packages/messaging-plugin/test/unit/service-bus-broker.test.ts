@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { ServiceBusBroker } from '../../src/brokers/service-bus-broker.ts';
 import type {
@@ -12,9 +12,9 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
     platform: () => platform as ReturnType<IRuntimeServices['platform']>,
     uuid: () => 'uuid-1',
     now: () => 1000000,
-    setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+    setTimeout: (_fn: () => void) => 1 as unknown as ReturnType<typeof setTimeout>,
     clearTimeout: () => {},
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -37,10 +37,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       expect(broker.isReady()).toBe(true);
@@ -54,10 +58,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime('cloudflare-workers'), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime('cloudflare-workers'),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await expect(broker.connect()).rejects.toThrow(CloudBrokerUnavailableError);
       expect(broker.isReady()).toBe(false);
@@ -77,10 +85,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.publish('topic', { foo: 'bar' });
@@ -95,8 +107,7 @@ describe('ServiceBusBroker', () => {
     it('delivers messages through handler', async () => {
       const received: unknown[] = [];
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -107,10 +118,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', (msg) => {
@@ -126,8 +141,7 @@ describe('ServiceBusBroker', () => {
     it('acks on handler success', async () => {
       let acked = false;
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -138,10 +152,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -161,8 +179,7 @@ describe('ServiceBusBroker', () => {
     it('nacks on handler throw', async () => {
       let nacked = false;
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -173,10 +190,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {
@@ -200,9 +221,11 @@ describe('ServiceBusBroker', () => {
     it('reply payload is deserialized from serialized text and acked', async () => {
       let ackCount = 0;
       let nackCount = 0;
-      const opens: Array<
-        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
-      > = [];
+      const opens: Array<{
+        topic: string;
+        subscription: string;
+        cb: (...args: unknown[]) => unknown;
+      }> = [];
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (topic, sub, cb) => {
@@ -213,10 +236,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -226,22 +253,20 @@ describe('ServiceBusBroker', () => {
       const inboxOpen = opens.find((o) => o.subscription.startsWith('rr-inbox-'));
       expect(inboxOpen).toBeDefined();
 
-      (inboxOpen!.cb as (msg: { payload: string; ack: () => void; nack: () => void }) => void)(
-        {
-          payload: JSON.stringify({
-            kind: 'rr-reply',
-            correlationId: 'corr-1',
-            ok: true,
-            payload: { status: 'ok' },
-          }),
-          ack: () => {
-            ackCount++;
-          },
-          nack: () => {
-            nackCount++;
-          },
+      (inboxOpen!.cb as (msg: { payload: string; ack: () => void; nack: () => void }) => void)({
+        payload: JSON.stringify({
+          kind: 'rr-reply',
+          correlationId: 'corr-1',
+          ok: true,
+          payload: { status: 'ok' },
+        }),
+        ack: () => {
+          ackCount++;
         },
-      );
+        nack: () => {
+          nackCount++;
+        },
+      });
 
       await new Promise((r) => setTimeout(r, 0));
 
@@ -252,9 +277,11 @@ describe('ServiceBusBroker', () => {
     it('malformed reply is nacked exactly once', async () => {
       let nackCount = 0;
       const logged: string[] = [];
-      const opens: Array<
-        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
-      > = [];
+      const opens: Array<{
+        topic: string;
+        subscription: string;
+        cb: (...args: unknown[]) => unknown;
+      }> = [];
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (topic, sub, cb) => {
@@ -265,13 +292,17 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, {
-        client: transport,
-        logger: { error: (message) => logged.push(message) },
-      });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        {
+          client: transport,
+          logger: { error: (message) => logged.push(message) },
+        },
+      );
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -306,19 +337,25 @@ describe('ServiceBusBroker', () => {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
           // Store the callback for later invocation
-          deliveredCb = cb as (
-            msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> },
-          ) => void;
+          deliveredCb = cb as (msg: {
+            payload: string;
+            ack: () => Promise<void>;
+            nack: () => Promise<void>;
+          }) => void;
           return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
         },
         createSubscription: () => Promise.resolve(),
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       // Start the request and await it
@@ -362,19 +399,25 @@ describe('ServiceBusBroker', () => {
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
-          deliveredCb = cb as (
-            msg: { payload: string; ack: () => Promise<void>; nack: () => Promise<void> },
-          ) => void;
+          deliveredCb = cb as (msg: {
+            payload: string;
+            ack: () => Promise<void>;
+            nack: () => Promise<void>;
+          }) => void;
           return Promise.resolve({ close: () => Promise.resolve() } as IServiceBusSubscription);
         },
         createSubscription: () => Promise.resolve(),
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       const replyPromise = broker.request('topic', 'hello', { timeoutMs: 5000 });
@@ -406,8 +449,8 @@ describe('ServiceBusBroker', () => {
       const [deliveryResult, replyResult] = await Promise.all([
         deliveryPromise,
         replyPromise.then(
-          (v) => ({ ok: true, value: v } as const),
-          (e) => ({ ok: false, error: e } as const),
+          (v) => ({ ok: true, value: v }) as const,
+          (e) => ({ ok: false, error: e }) as const,
         ),
       ]);
 
@@ -443,10 +486,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       const sub1 = await broker.subscribe('topic', () => {});
@@ -483,10 +530,14 @@ describe('ServiceBusBroker', () => {
           await Promise.resolve();
         },
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -512,10 +563,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport, defaultQueue: 'my-queue' });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport, defaultQueue: 'my-queue' },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -536,10 +591,14 @@ describe('ServiceBusBroker', () => {
           return Promise.resolve();
         },
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.disconnect();
@@ -556,10 +615,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.disconnect();
@@ -586,10 +649,14 @@ describe('ServiceBusBroker', () => {
           return Promise.resolve();
         },
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -609,10 +676,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.connect();
@@ -640,10 +711,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await expect(broker.publish('topic', 'msg')).rejects.toThrow('not connected');
     });
@@ -656,10 +731,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await expect(broker.subscribe('topic', () => {})).rejects.toThrow('not connected');
     });
@@ -681,10 +760,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       const sub = await broker.subscribe('topic', () => {});
@@ -699,8 +782,7 @@ describe('ServiceBusBroker', () => {
     it('renders aggregate handler members into the string logger sink', async () => {
       let logged = '';
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IServiceBusTransport = {
         send: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -711,17 +793,21 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, {
-        client: transport,
-        logger: {
-          error: (msg: string) => {
-            logged = msg;
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        {
+          client: transport,
+          logger: {
+            error: (msg: string) => {
+              logged = msg;
+            },
           },
         },
-      });
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {
@@ -749,10 +835,14 @@ describe('ServiceBusBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new ServiceBusBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport, defaultQueue: 'my-queue' });
+      const broker = new ServiceBusBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport, defaultQueue: 'my-queue' },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -771,13 +861,17 @@ describe('ServiceBusBroker — lazy SDK load', () => {
     // A WELL-FORMED dummy connection string: the real ServiceBusClient parses it
     // at construction, so the lazy-load AND adapt paths both run to completion.
     // An empty string only proved that some throw happened.
-    const broker = new ServiceBusBroker(runtime, {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, {
-      connectionString:
-        'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=probe;SharedAccessKey=Cm9wZQ==',
-    });
+    const broker = new ServiceBusBroker(
+      runtime,
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      {
+        connectionString:
+          'Endpoint=sb://example.servicebus.windows.net/;SharedAccessKeyName=probe;SharedAccessKey=Cm9wZQ==',
+      },
+    );
 
     await broker.connect();
     expect(broker.isReady()).toBe(true);
@@ -794,9 +888,8 @@ describe('loadServiceBusModule (exported)', () => {
   });
 
   it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
-    const { loadServiceBusModule, adaptServiceBusModule } = await import(
-      '../../src/brokers/service-bus-broker.ts'
-    );
+    const { loadServiceBusModule, adaptServiceBusModule } =
+      await import('../../src/brokers/service-bus-broker.ts');
 
     // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
     // adapted PORT rather than just reaching the import line is what catches SDK
@@ -885,9 +978,11 @@ describe('adaptServiceBusModule', () => {
   it('creates transport from SDK module', async () => {
     const { adaptServiceBusModule } = await import('../../src/brokers/service-bus-broker.ts');
 
-    let processMessageFn: (
-      msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-    ) => Promise<void> = async () => {};
+    let processMessageFn: (msg: {
+      body: unknown;
+      complete: () => Promise<void>;
+      abandon: () => Promise<void>;
+    }) => Promise<void> = async () => {};
     let processErrorFn: () => void = () => {};
 
     const fakeClient = {
@@ -1065,7 +1160,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
         return 1 as unknown as ReturnType<typeof setTimeout>;
       },
       clearTimeout: () => {},
-      setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+      setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
       clearInterval: () => {},
       randomBytes: () => new Uint8Array(16),
       subtle: undefined,
@@ -1082,30 +1177,28 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
    * Fake SDK that routes produced messages to subscribed processMessage
    * callbacks, enabling request-reply round trips.
    */
-  function createFakeSdkModuleWithRouting():
-    & import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule
-    & {
+  function createFakeSdkModuleWithRouting(): import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule & {
+    sends: Array<{ topic: string; body: string }>;
+    processMessageCbs: Array<{
+      topic: string;
+      subscription: string;
+      processMessage: (msg: {
+        body: unknown;
+        complete: () => Promise<void>;
+        abandon: () => Promise<void>;
+      }) => Promise<void>;
+      processError: (err: unknown) => void | Promise<void>;
+    }>;
+  } {
+    type FakeMod = import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule & {
       sends: Array<{ topic: string; body: string }>;
       processMessageCbs: Array<{
         topic: string;
         subscription: string;
-        processMessage: (
-          msg: { body: unknown; complete: () => Promise<void>; abandon: () => Promise<void> },
-        ) => Promise<void>;
+        processMessage: (msg: unknown) => Promise<void>;
         processError: (err: unknown) => void | Promise<void>;
       }>;
-    } {
-    type FakeMod =
-      & import('../../src/brokers/service-bus-broker.ts').ServiceBusSdkModule
-      & {
-        sends: Array<{ topic: string; body: string }>;
-        processMessageCbs: Array<{
-          topic: string;
-          subscription: string;
-          processMessage: (msg: unknown) => Promise<void>;
-          processError: (err: unknown) => void | Promise<void>;
-        }>;
-      };
+    };
     const mod = {} as FakeMod;
     mod.sends = [];
     mod.processMessageCbs = [];
@@ -1134,11 +1227,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
           },
         };
       }
-      createReceiver(
-        _topicName: string,
-        _subscriptionName: string,
-        _options?: unknown,
-      ) {
+      createReceiver(_topicName: string, _subscriptionName: string, _options?: unknown) {
         return {
           subscribe(
             options: {
@@ -1192,10 +1281,14 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
     });
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -1204,8 +1297,9 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     });
 
     // Trigger via processMessage callback
-    const cb = sdk.processMessageCbs.find((c) => c.subscription === 'messaging-consumers')!
-      .processMessage;
+    const cb = sdk.processMessageCbs.find(
+      (c) => c.subscription === 'messaging-consumers',
+    )!.processMessage;
     await cb({
       body: JSON.stringify({ fail: true }),
       complete: () => Promise.resolve(),
@@ -1225,7 +1319,7 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
     let releaseAbandon: (() => void) | null = null;
     let processMessageFn: ((msg: unknown) => Promise<void>) | null = null;
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sdk = {} as any;
     sdk.sends = [];
     sdk.receivers = [];
@@ -1280,10 +1374,14 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       connectionString: 'Endpoint=sb://test.servicebus.windows.net/',
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
     });
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
     await broker.subscribe('fail-topic', () => {
@@ -1318,30 +1416,32 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
       logger: { error: (message) => logged.push(message) },
     });
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, {
-      client: transport,
-      logger: { error: (message) => logged.push(message) },
-    });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      {
+        client: transport,
+        logger: { error: (message) => logged.push(message) },
+      },
+    );
 
     await broker.connect();
     await broker.subscribe('orders', () => {});
-    const processError =
-      sdk.processMessageCbs.find((entry) => entry.subscription === 'messaging-consumers')!
-        .processError;
+    const processError = sdk.processMessageCbs.find(
+      (entry) => entry.subscription === 'messaging-consumers',
+    )!.processError;
 
     // The real SDK passes a ProcessErrorArgs object with .error field.
-    await processError(
-      {
-        error: new AggregateError([new Error('receiver-link-failed'), new Error('receiver-reset')]),
-        errorSource: 'receive',
-        entityPath: 'orders',
-        fullyQualifiedNamespace: 'test.servicebus.windows.net',
-        identifier: 'receiver-1',
-      } as import('../../src/brokers/service-bus-broker.ts').IServiceBusProcessErrorArgs,
-    );
+    await processError({
+      error: new AggregateError([new Error('receiver-link-failed'), new Error('receiver-reset')]),
+      errorSource: 'receive',
+      entityPath: 'orders',
+      fullyQualifiedNamespace: 'test.servicebus.windows.net',
+      identifier: 'receiver-1',
+    } as import('../../src/brokers/service-bus-broker.ts').IServiceBusProcessErrorArgs);
 
     expect(logged).toHaveLength(1);
     expect(logged[0]).toContain('receiver-link-failed');
@@ -1361,10 +1461,14 @@ describe('ServiceBusBroker with adapted fake SDK module', () => {
       adminConnectionString: 'Endpoint=sb://admin.servicebus.windows.net/',
     });
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -1402,9 +1506,11 @@ describe('ServiceBusBroker — missing credentials', () => {
 // message, so the metadata must carry them — and absence must mean "the
 // transport carried none", never "the adapter did not look".
 describe('ServiceBusBroker — delivered metadata (X28-4)', () => {
-  function brokerWithDelivery(
-    delivery: Record<string, unknown> | null,
-  ): { broker: ServiceBusBroker; seen: unknown[]; deliver: () => void } {
+  function brokerWithDelivery(delivery: Record<string, unknown> | null): {
+    broker: ServiceBusBroker;
+    seen: unknown[];
+    deliver: () => void;
+  } {
     let onMessageCb: ((msg: Record<string, unknown>) => void | Promise<void>) | null = null;
     const transport: IServiceBusTransport = {
       send: () => Promise.resolve(),
@@ -1416,10 +1522,14 @@ describe('ServiceBusBroker — delivered metadata (X28-4)', () => {
       deleteSubscription: (_topic: string, _sub: string) => Promise.resolve(),
       close: () => Promise.resolve(),
     };
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
     const seen: unknown[] = [];
     return { broker, seen, deliver: () => void onMessageCb!(delivery ?? {}) };
   }
@@ -1480,10 +1590,14 @@ it('nacks malformed reply deliveries without a logger and ignores a callback ret
     deleteSubscription: () => Promise.resolve(),
     close: () => Promise.resolve(),
   };
-  const broker = new ServiceBusBroker(createRuntime(), {
-    serialize: JSON.stringify,
-    deserialize: JSON.parse,
-  }, { client: transport });
+  const broker = new ServiceBusBroker(
+    createRuntime(),
+    {
+      serialize: JSON.stringify,
+      deserialize: JSON.parse,
+    },
+    { client: transport },
+  );
   await broker.connect();
   const pending = broker.request('topic', {}).catch((error: unknown) => error);
   for (let i = 0; i < 10 && deliver === undefined; i++) await Promise.resolve();
@@ -1501,4 +1615,32 @@ it('nacks malformed reply deliveries without a logger and ignores a callback ret
   await pending;
   await deliver!(message);
   expect(abandoned).toBe(1);
+});
+
+describe('ServiceBusBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { ServiceBusBroker } = await import('../../src/brokers/service-bus-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('@azure/service-bus', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new ServiceBusBroker(createFakeRuntime(), new JsonSerializer(), {
+        connectionString: 'Endpoint=sb://example/;SharedAccessKeyName=k;SharedAccessKey=v',
+      });
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@azure/service-bus');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@azure/service-bus');
+    }
+  });
 });

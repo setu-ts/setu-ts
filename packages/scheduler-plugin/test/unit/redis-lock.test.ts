@@ -1,7 +1,7 @@
 /**
  * Tests for RedisLock with fake ioredis client.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createRedisLockClient,
   DEFAULT_REDIS_COMMAND_TIMEOUT_MS,
@@ -9,6 +9,7 @@ import {
   validateClient,
 } from '../../src/lock/redis-lock.ts';
 import type { RedisLockClientOptions } from '../../src/lock/redis-lock.ts';
+import type { IRedisLockClient } from '../../src/interfaces/index.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 
 describe('RedisLock', () => {
@@ -100,8 +101,7 @@ describe('RedisLock', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
-      client: badClient as any,
+      client: badClient as unknown as IRedisLockClient,
     });
     try {
       await lock.connect();
@@ -148,14 +148,57 @@ describe('RedisLock', () => {
   });
 });
 
+describe('RedisLock reachability (M113b)', () => {
+  it('does not PING before connect or after disconnect', async () => {
+    let calls = 0;
+    const client = Object.assign(new FakeRedisClient(), {
+      ping: () => {
+        calls++;
+        return Promise.resolve('PONG');
+      },
+    });
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client });
+    expect(await lock.isHealthy()).toBe(false);
+    expect(calls).toBe(0);
+    await lock.connect();
+    expect(await lock.isHealthy()).toBe(true);
+    expect(calls).toBe(1);
+    await lock.disconnect();
+    expect(await lock.isHealthy()).toBe(false);
+    expect(calls).toBe(1);
+  });
+
+  it('contains a PING rejection and reports unreachable', async () => {
+    const client = Object.assign(new FakeRedisClient(), {
+      ping: () => Promise.reject(new Error('Command timed out')),
+    });
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client });
+    await lock.connect();
+    try {
+      expect(await lock.isHealthy()).toBe(false);
+    } finally {
+      await lock.disconnect();
+    }
+  });
+
+  it('accepts a client without PING and reports unknown', async () => {
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: new FakeRedisClient() });
+    await lock.connect();
+    try {
+      expect(await lock.isHealthy()).toBeUndefined();
+    } finally {
+      await lock.disconnect();
+    }
+  });
+});
+
 describe('validateClient', () => {
   it('returns true for valid client', () => {
     expect(validateClient(new FakeRedisClient())).toBe(true);
   });
 
   it('returns false for null', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(validateClient(null as any)).toBe(false);
+    expect(validateClient(null)).toBe(false);
   });
 
   it('returns false for missing method', () => {
@@ -163,32 +206,23 @@ describe('validateClient', () => {
   });
 
   it('returns false for missing del', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing get', () => {
-    expect(
-      validateClient({ set: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing set', () => {
-    expect(
-      validateClient({ get: () => {}, del: () => {}, quit: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ get: () => {}, del: () => {}, quit: () => {} })).toBe(false);
   });
 
   it('returns false for missing quit', () => {
-    expect(
-      validateClient({ set: () => {}, get: () => {}, del: () => {} }),
-    ).toBe(false);
+    expect(validateClient({ set: () => {}, get: () => {}, del: () => {} })).toBe(false);
   });
 
   it('returns false for undefined', () => {
-    // deno-lint-ignore no-explicit-any
-    expect(validateClient(undefined as any)).toBe(false);
+    expect(validateClient(undefined)).toBe(false);
   });
 
   it('returns false for non-object (string)', () => {
@@ -212,6 +246,19 @@ describe('RedisLock C2 - PX flag', () => {
     // Also verify TTL is passed
     expect(setCall!.args).toContain(5000);
 
+    await lock.disconnect();
+  });
+});
+
+describe('RedisLock - integer PX', () => {
+  it('rounds a fractional TTL up to whole milliseconds', async () => {
+    const fake = new FakeRedisClient();
+    const lock = new RedisLock({ url: 'redis://localhost:6379', client: fake });
+    await lock.connect();
+    await lock.acquire('key1', 30_000.25);
+    const setCall = fake.calls.find((c) => c.method === 'set');
+    expect(setCall!.args).toContain(30_001);
+    expect(setCall!.args).not.toContain(30_000.25);
     await lock.disconnect();
   });
 });
@@ -288,8 +335,7 @@ describe('RedisLock N2 - error message', () => {
     const badClient = { notAValidClient: true };
     const lock = new RedisLock({
       url: 'redis://localhost:6379',
-      // deno-lint-ignore no-explicit-any
-      client: badClient as any,
+      client: badClient as unknown as IRedisLockClient,
     });
     try {
       await lock.connect();
@@ -305,9 +351,11 @@ describe('RedisLock N2 - error message', () => {
 describe('RedisLock command bound (M101a V8-24)', () => {
   /** Records the arguments each construction received. */
   function recordingCtor() {
-    const built: Array<
-      { url: string; options: RedisLockClientOptions | undefined; arity: number }
-    > = [];
+    const built: Array<{
+      url: string;
+      options: RedisLockClientOptions | undefined;
+      arity: number;
+    }> = [];
     class Ctor {
       constructor(url: string, options?: RedisLockClientOptions) {
         built.push({ url, options, arity: arguments.length });
@@ -385,5 +433,29 @@ describe('RedisLock command bound (M101a V8-24)', () => {
     await lock.connect();
     await expect(lock.acquire('job', 30_000)).rejects.toThrow('Command timed out');
     await lock.disconnect();
+  });
+});
+
+describe('RedisLock — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisLock } = await import('../../src/lock/redis-lock.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const lock = new RedisLock({ url: 'redis://localhost:6379' });
+      let caught: unknown;
+      try {
+        await lock.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
   });
 });

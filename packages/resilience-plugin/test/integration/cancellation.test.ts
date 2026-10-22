@@ -32,11 +32,15 @@ function createAbortableWork(): {
           completed = true;
           resolve('completed');
         }, 2_000);
-        signal.addEventListener('abort', () => {
-          aborted = true;
-          clearTimeout(timer);
-          reject(signal.reason);
-        }, { once: true });
+        signal.addEventListener(
+          'abort',
+          () => {
+            aborted = true;
+            clearTimeout(timer);
+            reject(signal.reason);
+          },
+          { once: true },
+        );
       }),
     didComplete: () => completed,
     wasAborted: () => aborted,
@@ -125,11 +129,14 @@ describe('ResiliencePlugin cancellation integration', () => {
       dependencies: ['resilience'],
       register(ctx) {
         const resilience = ctx.services.get<IResilienceService>(CAPABILITIES.RESILIENCE);
-        guarded = resilience.wrap(() => {
-          attempts++;
-          controller.abort(new Error('gave up'));
-          return Promise.reject(new Error('transient'));
-        }, { retry: true });
+        guarded = resilience.wrap(
+          () => {
+            attempts++;
+            controller.abort(new Error('gave up'));
+            return Promise.reject(new Error('transient'));
+          },
+          { retry: true },
+        );
       },
     });
 

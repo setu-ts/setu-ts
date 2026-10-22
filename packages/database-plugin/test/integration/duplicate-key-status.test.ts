@@ -70,7 +70,7 @@ function boot(plugin: ReturnType<typeof DatabasePlugin>, format: ErrorFormat = '
   app.router.post('/accounts', {
     handler: async (ctx: IRequestContext): Promise<HandlerResult> => {
       const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-      const body = await ctx.request.json() as Record<string, unknown>;
+      const body = (await ctx.request.json()) as Record<string, unknown>;
       return ctx.response.status(201).json(await db.getRepository('Account').create(body));
     },
   });
@@ -89,10 +89,12 @@ const DETAIL =
 
 describe('a duplicate key answers 409 Conflict', () => {
   it('maps PostgreSQL 23505 to a Problem Details 409, field by field', async () => {
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(drizzleUniqueViolation())),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(drizzleUniqueViolation())),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({
@@ -169,10 +171,12 @@ describe('a duplicate key answers 409 Conflict', () => {
       'D1_ERROR: UNIQUE constraint failed: accounts.id: SQLITE_CONSTRAINT ' +
         '(extended: SQLITE_CONSTRAINT_PRIMARYKEY)',
     );
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(new Error('not reached')), d1Refusal),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(new Error('not reached')), d1Refusal),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit' });
@@ -189,14 +193,60 @@ describe('a duplicate key answers 409 Conflict', () => {
     const serialization = Object.assign(new Error('could not serialize access'), {
       code: '40001',
     });
-    const app = boot(DatabasePlugin({
-      type: 'custom',
-      adapter: stubAdapter(refusingCreate(new Error('not reached')), serialization),
-    }));
+    const app = boot(
+      DatabasePlugin({
+        type: 'custom',
+        adapter: stubAdapter(refusingCreate(new Error('not reached')), serialization),
+      }),
+    );
     await app.start();
     try {
       const response = await app.inject({ method: 'POST', url: 'http://localhost/commit' });
       expect(response.statusCode).toBe(500);
+    } finally {
+      await app.stop();
+    }
+  });
+});
+
+describe('a commit rejection is scrubbed before it is rethrown', () => {
+  /** A Drizzle query error carrying a bound value, as the transaction bridge rejects it. */
+  function drizzleCommitFailure(): Error {
+    return Object.assign(
+      new Error('Failed query: update "accounts" set "email" = $1\nparams: private-email', {
+        cause: Object.assign(new Error('could not serialize access'), { code: '40001' }),
+      }),
+      {
+        query: 'update "accounts" set "email" = $1',
+        params: ['private-email'],
+        stack:
+          'Error: Failed query: update "accounts" set "email" = $1\nparams: private-email\n' +
+          '    at commit (driver.js:1:2)',
+      },
+    );
+  }
+
+  it('drops bound values from an unclassified commit rejection', async () => {
+    const plugin = DatabasePlugin({
+      type: 'custom',
+      adapter: stubAdapter(refusingCreate(new Error('not reached')), drizzleCommitFailure()),
+    });
+    const app = createApplication({ plugins: [RuntimePlugin(), plugin] });
+    await app.start();
+    try {
+      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const error = await db
+        .transaction(async () => {})
+        .then(
+          () => undefined,
+          (rejected: unknown) => rejected,
+        );
+      expect(error).toBeInstanceOf(Error);
+      const scrubbed = error as Error & { query?: unknown; params?: unknown };
+      expect(scrubbed.message).toBe('Failed query: update "accounts" set "email" = $1');
+      expect(scrubbed.query).toBe('update "accounts" set "email" = $1');
+      expect(scrubbed.params).toBeUndefined();
+      expect(JSON.stringify([scrubbed.message, scrubbed.stack])).not.toContain('private-email');
     } finally {
       await app.stop();
     }

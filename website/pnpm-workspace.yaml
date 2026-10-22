@@ -1,0 +1,9 @@
+# The website is a standalone pnpm project, not a member of the repository workspace: this
+# file makes it its own workspace root, so its install never reads the root lockfile.
+#
+# pnpm 12 refuses an install while any dependency's build script is undecided.
+allowBuilds:
+  # Astro and Vite bundle with esbuild; its script installs the platform binary.
+  esbuild: true
+  # sharp ships prebuilt platform packages; its script only builds from source as a fallback.
+  sharp: false

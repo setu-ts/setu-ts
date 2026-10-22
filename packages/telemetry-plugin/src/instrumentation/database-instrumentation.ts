@@ -12,6 +12,8 @@
  * @since 0.2.0
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /** The package specifier the ioredis loader resolves. */
 const IOREDIS_SPECIFIER = '@opentelemetry/instrumentation-ioredis';
 
@@ -25,9 +27,9 @@ export function createIORedisInstrumentation(
   configArg: unknown,
 ): unknown {
   const IORedisInstrumentation = mod.IORedisInstrumentation as unknown;
-  return new (IORedisInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (IORedisInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**
@@ -40,8 +42,15 @@ export function createIORedisInstrumentation(
  */
 export async function loadIORedisInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-ioredis'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-ioredis');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-ioredis', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<{ instance: unknown; specifier: string }> {
   const mod = await importFn();
   const instance = createIORedisInstrumentation(mod, configArg);

@@ -74,10 +74,10 @@ async function buildApp(format: 'default' | 'rfc9457'): Promise<IKernelApplicati
   let priority = 100;
   for (const [path, statusCode] of guards) {
     const guard = createFlagGuard('off-flag', { statusCode });
-    app.middleware.add(
-      (ctx, next) => (ctx.request.path === path ? guard(ctx, next) : next()),
-      { priority: priority++, name: `guard${path}` },
-    );
+    app.middleware.add((ctx, next) => (ctx.request.path === path ? guard(ctx, next) : next()), {
+      priority: priority++,
+      name: `guard${path}`,
+    });
     app.router.get(path, (ctx) => ctx.response.text('handler ran'));
   }
   await app.start();

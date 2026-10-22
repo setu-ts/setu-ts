@@ -161,10 +161,7 @@ describe('CloudflarePlugin queue arm', () => {
 
   it('refuses to start when the queue binding is absent', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        CloudflarePlugin({ env: {}, queue: { binding: 'JOBS' } }),
-      ],
+      plugins: [RuntimePlugin(), CloudflarePlugin({ env: {}, queue: { binding: 'JOBS' } })],
     });
 
     await expect(app.start()).rejects.toBeInstanceOf(CloudflareBindingMissingError);

@@ -5,9 +5,9 @@ how to add the plugins most applications need.
 
 ## Prerequisites
 
-- **Deno 2.x**, **Node.js 22.18+**, or **Bun 1.x** — the framework uses `Promise.withResolvers`,
-  which Node 22 was the first to ship, and Node 22.18 is the first release that runs a `.ts` file
-  directly; CI verifies Node 24
+- **Deno 2.x**, **Node.js 22.23.4+, 24.22.1+ or 26.12.1+**, or **Bun 1.x** — the framework uses
+  `Promise.withResolvers`, which Node 22 was the first to ship, and those are the first releases of
+  each line carrying the Node.js security fixes of 2026-10-21; CI verifies Node 24
 - Basic familiarity with TypeScript
 
 ## Two ways to start
@@ -124,13 +124,77 @@ curl http://localhost:3000/hello
 
 ## Testing Your Application
 
-Add the testing utilities and the standard test library:
+Choose your runtime's runner below. Each example puts the same test in `test/app.test.ts`: create a
+test application, register `/hello`, inject a request, check the response, and stop it.
+`createTestApp` starts without binding a port. The Node and Bun runners match the CLI-generated test
+harness.
+
+### Node
+
+```bash
+npm install -D @setu-ts/testing tsx
+```
+
+```typescript
+import { describe, it } from 'node:test';
+import assert from 'node:assert';
+import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+describe('My Application', () => {
+  it('handles GET /hello', async () => {
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      assert.equal(response.statusCode, 200);
+      assert.deepEqual(response.json(), { message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
+  });
+});
+```
+
+```bash
+npx tsx --test test/app.test.ts
+```
+
+### Bun
+
+```bash
+bun add -d @setu-ts/testing
+```
+
+```typescript
+import { describe, it, expect } from 'bun:test';
+import { createTestApp, inject } from '@setu-ts/testing';
+import { RuntimePlugin } from '@setu-ts/runtime';
+
+describe('My Application', () => {
+  it('handles GET /hello', async () => {
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
+  });
+});
+```
+
+```bash
+bun test
+```
+
+### Deno
 
 ```bash
 deno add npm:@setu-ts/testing jsr:@std/testing jsr:@std/expect
 ```
-
-Create `test/app.test.ts`:
 
 ```typescript
 import { describe, it } from '@std/testing/bdd';
@@ -140,27 +204,18 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 
 describe('My Application', () => {
   it('handles GET /hello', async () => {
-    // createTestApp builds AND starts the application without binding a port,
-    // so requests go straight to the handler through inject().
-    const app = await createTestApp({
-      plugins: [RuntimePlugin()],
-    });
-
-    app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
-
-    const response = await inject(app, {
-      method: 'GET',
-      url: '/hello',
-    });
-
-    expect(response.statusCode).toBe(200);
-    const body = response.json();
-    expect(body).toEqual({ message: 'Hello, World!' });
+    const app = await createTestApp({ plugins: [RuntimePlugin()] });
+    try {
+      app.router.get('/hello', (ctx) => ctx.response.json({ message: 'Hello, World!' }));
+      const response = await inject(app, { method: 'GET', url: '/hello' });
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toEqual({ message: 'Hello, World!' });
+    } finally {
+      await app.stop();
+    }
   });
 });
 ```
-
-Run it:
 
 ```bash
 deno test --allow-env
@@ -190,7 +245,7 @@ app.register(LoggerPlugin());
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 // A typed slice of configuration: DATABASE_URL, validated as a URL.
 const database = defineConfigSection({
@@ -199,12 +254,14 @@ const database = defineConfigSection({
   schema: z.object({ URL: z.string().url() }),
 });
 
-app.register(ConfigPlugin({
-  // Optional: also load a .env file (not available on edge platforms). Without
-  // it, configuration comes from the process environment only.
-  envFilePath: '.env',
-  sections: [database],
-}));
+app.register(
+  ConfigPlugin({
+    // Skip a missing .env; an existing but unreadable file still throws.
+    envFilePath: '.env',
+    envFileOptional: true,
+    sections: [database],
+  }),
+);
 
 await app.start({ port: 3000 });
 
@@ -221,9 +278,11 @@ On Deno, `envFilePath` also needs `--allow-read`.
 ```typescript
 import { DatabasePlugin } from '@setu-ts/database-plugin';
 
-app.register(DatabasePlugin({
-  type: 'memory', // In-memory, for development; swap the arm for a real backend later
-}));
+app.register(
+  DatabasePlugin({
+    type: 'memory', // In-memory, for development; swap the arm for a real backend later
+  }),
+);
 ```
 
 The [database plugin README](../packages/database-plugin/README.md) lists the other backends.
@@ -233,14 +292,16 @@ The [database plugin README](../packages/database-plugin/README.md) lists the ot
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: {
-    // Read this from configuration in a real application — never commit it.
-    secret: 'your-secret-key',
-    // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
-    algorithm: 'HS256',
-  },
-}));
+app.register(
+  AuthPlugin({
+    jwt: {
+      // Read this from configuration in a real application — never commit it.
+      secret: 'your-secret-key',
+      // 'HS256' pairs with `secret`; 'RS256' pairs with `privateKey`/`publicKey`.
+      algorithm: 'HS256',
+    },
+  }),
+);
 ```
 
 Roles and permissions are an optional `rbac` arm; the
@@ -261,7 +322,8 @@ const runtime = createRuntimeServices();
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   // onSignal is absent where there is no signal to catch (Windows, Workers).
   runtime.onSignal?.(signal, () => {
-    void app.stop()
+    void app
+      .stop()
       .then(() => runtime.exit(0))
       .catch(() => runtime.exit(1));
   });
@@ -369,6 +431,8 @@ Deno grants nothing by default. The flags an application commonly needs:
 | `--allow-sys`  | The health plugin's self check, which reads the hostname   |
 
 ### `npm error Unsupported URL Type "jsr:"`
+
+<!-- version:history -->
 
 You ran `npm install jsr:@setu-ts/…`, an instruction from the JSR era. npm has no `jsr:` protocol,
 and from `v0.9.0` you do not need one: install from npm directly with

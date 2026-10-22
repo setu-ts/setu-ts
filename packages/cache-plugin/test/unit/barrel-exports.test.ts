@@ -24,6 +24,7 @@ describe('cache-plugin barrel exports', () => {
     expect(Object.keys(cache).sort()).toEqual([
       'CachePlugin',
       'CacheService',
+      'CacheStoreUnavailableError',
       'MemoryStore',
       'NoopStore',
       'RedisStore',
@@ -32,13 +33,11 @@ describe('cache-plugin barrel exports', () => {
   });
 
   it('keeps the Redis client construction helpers internal', () => {
-    for (
-      const name of [
-        'createLazyRedisClient',
-        'resolveCommandTimeoutMs',
-        'DEFAULT_REDIS_COMMAND_TIMEOUT_MS',
-      ]
-    ) {
+    for (const name of [
+      'createLazyRedisClient',
+      'resolveCommandTimeoutMs',
+      'DEFAULT_REDIS_COMMAND_TIMEOUT_MS',
+    ]) {
       expect(Object.hasOwn(cache, name)).toBe(false);
     }
   });

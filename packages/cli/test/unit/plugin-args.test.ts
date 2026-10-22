@@ -1,9 +1,24 @@
 import { describe, expect, it } from 'vitest';
-import { rewritePluginArgs, wrapPluginArgs } from '../../src/templates/plugin-args.ts';
+import {
+  mergeObjectArgs,
+  rewritePluginArgs,
+  wrapPluginArgs,
+} from '../../src/templates/plugin-args.ts';
 import { type ResolvedHost, resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
 
 describe('wrapPluginArgs', () => {
+  it('merges only single-level CLI object arguments', () => {
+    expect(mergeObjectArgs("{ adapter: 'redis', }", '{ processors: [...QUEUE_PROCESSORS] }')).toBe(
+      "{ adapter: 'redis', processors: [...QUEUE_PROCESSORS] }",
+    );
+    expect(mergeObjectArgs('{}', '{}')).toBe('{}');
+    expect(mergeObjectArgs('{}', '{ processors: [] }')).toBe('{ processors: [] }');
+    for (const input of ['options', 'makeOptions()', '{ nested: {} }', '{ nope']) {
+      expect(() => mergeObjectArgs(input, '{}')).toThrow('single-level object literal');
+      expect(() => mergeObjectArgs('{}', input)).toThrow('single-level object literal');
+    }
+  });
   it('leaves a short literal untouched', () => {
     expect(wrapPluginArgs("{ broker: 'redis-streams' }")).toBe("{ broker: 'redis-streams' }");
   });
@@ -46,13 +61,16 @@ describe('rewritePluginArgs', () => {
   }
 
   it('rewrites only the named package wiring', () => {
-    const host = resolveHost({
-      ...MINIMAL_HOST,
-      plugins: [
-        { pkg: 'messaging-plugin', symbol: 'MessagingPlugin' },
-        { pkg: 'queue-plugin', symbol: 'QueuePlugin' },
-      ],
-    }, 'deno');
+    const host = resolveHost(
+      {
+        ...MINIMAL_HOST,
+        plugins: [
+          { pkg: 'messaging-plugin', symbol: 'MessagingPlugin' },
+          { pkg: 'queue-plugin', symbol: 'QueuePlugin' },
+        ],
+      },
+      'deno',
+    );
     const next = rewritePluginArgs(
       host,
       'queue-plugin',

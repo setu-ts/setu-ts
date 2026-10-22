@@ -25,20 +25,49 @@ return 1
 `;
 
 /**
- * `reserve`: move up to `limit` due ids from ready to processing and return
- * their payloads, in score order.
+ * `reserve`: reclaim expired claims, then lease due jobs. TIME requires Redis 5+
+ * script-effects replication. Payload bytes are returned unchanged, beside the
+ * stall count and new token; Lua never re-encodes job data.
  *
- * KEYS: ready set, processing set, jobs hash. ARGV: nowMs, limit.
+ * Two clocks, each where it is consistent: leases are written and expired on
+ * the server's TIME, while ready-set scores are written by the enqueuing
+ * replica's clock, so due selection compares them against the reserving
+ * replica's `nowMs` (as before M113c) and a reclaimed job is rescored to it.
+ * Server time there would shift every delay by the app's skew (audit L2).
+ *
+ * KEYS: ready, processing, jobs, claims, stalls, claimseq.
+ * ARGV: limit, visibilityTimeoutMs, nowMs (the caller's clock).
  */
 export const RESERVE_SCRIPT = `
-local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, ARGV[2])
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+local expired = redis.call('ZRANGEBYSCORE', KEYS[2], '-inf', now, 'LIMIT', 0, ARGV[1])
+for _, id in ipairs(expired) do
+  redis.call('ZREM', KEYS[2], id)
+  redis.call('HDEL', KEYS[4], id)
+  if redis.call('HEXISTS', KEYS[3], id) == 1 then
+    redis.call('HINCRBY', KEYS[5], id, 1)
+    redis.call('ZADD', KEYS[1], ARGV[3], id)
+  else
+    redis.call('ZREM', KEYS[1], id)
+    redis.call('HDEL', KEYS[5], id)
+  end
+end
+local ids = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[3], 'LIMIT', 0, ARGV[1])
 local out = {}
 for _, id in ipairs(ids) do
   redis.call('ZREM', KEYS[1], id)
-  redis.call('ZADD', KEYS[2], ARGV[1], id)
   local raw = redis.call('HGET', KEYS[3], id)
   if raw then
-    table.insert(out, raw)
+    redis.call('INCR', KEYS[6])
+    local token = redis.call('GET', KEYS[6])
+    redis.call('ZADD', KEYS[2], now + tonumber(ARGV[2]), id)
+    redis.call('HSET', KEYS[4], id, token)
+    table.insert(out, {raw, tonumber(redis.call('HGET', KEYS[5], id) or '0'), token})
+  else
+    redis.call('ZREM', KEYS[2], id)
+    redis.call('HDEL', KEYS[4], id)
+    redis.call('HDEL', KEYS[5], id)
   end
 end
 return out
@@ -47,11 +76,14 @@ return out
 /**
  * `ack`: drop a finished job from processing and delete its payload.
  *
- * KEYS: processing set, jobs hash. ARGV: id.
+ * KEYS: processing, jobs, claims, stalls. ARGV: id, token.
  */
 export const ACK_SCRIPT = `
+if redis.call('HGET', KEYS[3], ARGV[1]) ~= ARGV[2] then return 0 end
 redis.call('ZREM', KEYS[1], ARGV[1])
 redis.call('HDEL', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1])
+redis.call('HDEL', KEYS[4], ARGV[1])
 return 1
 `;
 
@@ -60,12 +92,15 @@ return 1
  * to ready. The payload is computed by the caller from a prior read, so the
  * script never re-encodes job data.
  *
- * KEYS: jobs hash, processing set, ready set. ARGV: id, payload, availableAtMs.
+ * KEYS: jobs, processing, ready, claims, stalls. ARGV: id, payload, availableAtMs, token.
  */
 export const REQUEUE_SCRIPT = `
+if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[4] then return 0 end
 redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
 redis.call('ZREM', KEYS[2], ARGV[1])
 redis.call('ZADD', KEYS[3], ARGV[3], ARGV[1])
+redis.call('HDEL', KEYS[4], ARGV[1])
+redis.call('HDEL', KEYS[5], ARGV[1])
 return 1
 `;
 
@@ -73,11 +108,14 @@ return 1
  * `deadLetter`: move a job from processing into the dead set, first moving
  * its payload into the dead-jobs hash when retention is active (`move` = `1`).
  *
- * KEYS: processing set, dead set, jobs hash, dead-jobs hash.
- * ARGV: id, nowMs, move.
+ * KEYS: processing, dead, jobs, dead-jobs, claims, stalls.
+ * ARGV: id, nowMs, move, token.
  */
 export const DEAD_LETTER_SCRIPT = `
+if redis.call('HGET', KEYS[5], ARGV[1]) ~= ARGV[4] then return 0 end
 redis.call('ZREM', KEYS[1], ARGV[1])
+redis.call('HDEL', KEYS[5], ARGV[1])
+redis.call('HDEL', KEYS[6], ARGV[1])
 if ARGV[3] == '1' then
   local raw = redis.call('HGET', KEYS[3], ARGV[1])
   if raw then
@@ -86,5 +124,17 @@ if ARGV[3] == '1' then
   end
 end
 redis.call('ZADD', KEYS[2], ARGV[2], ARGV[1])
+return 1
+`;
+
+/**
+ * Renew only the current delivery using the Redis server's clock.
+ * KEYS: processing, claims. ARGV: id, token, visibilityTimeoutMs.
+ */
+export const EXTEND_SCRIPT = `
+if redis.call('HGET', KEYS[2], ARGV[1]) ~= ARGV[2] then return 0 end
+local clock = redis.call('TIME')
+local now = tonumber(clock[1]) * 1000 + math.floor(tonumber(clock[2]) / 1000)
+redis.call('ZADD', KEYS[1], now + tonumber(ARGV[3]), ARGV[1])
 return 1
 `;

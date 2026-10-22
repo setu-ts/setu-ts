@@ -72,12 +72,14 @@ describe('detectTargetRuntime', () => {
       const fs = createFakeFs(files);
       return {
         ...fs,
-        readFile: (path: string) =>
+        stat: (path: string) =>
           path === denied
-            ? Promise.reject(Object.assign(new Error('EACCES: permission denied'), {
-              code: 'EACCES',
-            }))
-            : fs.readFile(path),
+            ? Promise.reject(
+                Object.assign(new Error('EACCES: permission denied'), {
+                  code: 'EACCES',
+                }),
+              )
+            : fs.stat(path),
       };
     }
 
@@ -105,10 +107,7 @@ describe('detectTargetRuntime', () => {
 
     it('refuses an unreadable deno.json or bun lockfile', async () => {
       for (const denied of ['/app/deno.json', '/app/bun.lock']) {
-        const fs = denying(
-          { '/app/package.json': '{}', [denied]: '{}' },
-          denied,
-        );
+        const fs = denying({ '/app/package.json': '{}', [denied]: '{}' }, denied);
         await expect(detectTargetRuntime(fs, '/app')).rejects.toBeInstanceOf(
           RuntimeMarkerUnreadableError,
         );
@@ -118,7 +117,7 @@ describe('detectTargetRuntime', () => {
     it('stringifies a non-Error failure', async () => {
       const fs = createFakeFs({ '/app/wrangler.toml': '' });
       const failure = await detectTargetRuntime(
-        { ...fs, readFile: () => Promise.reject('disk gone') },
+        { ...fs, stat: () => Promise.reject('disk gone') },
         '/app',
       ).catch((cause) => cause);
       expect(failure.reason).toBe('disk gone');

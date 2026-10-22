@@ -405,18 +405,20 @@ describe('Realtime observations e2e — M98b refusals for /v1/realtime', () => {
       // DNS rebinding: a valid MAC over the rebound authority, and no Origin.
       const rebound = `rebind.example:${port}`;
       expect(
-        (await rawRequest(
-          port,
-          request(
-            3,
-            instance,
-            await sign(3, instance, target, rebound),
-            '',
-            'GET',
-            target,
-            rebound,
-          ),
-        )).status,
+        (
+          await rawRequest(
+            port,
+            request(
+              3,
+              instance,
+              await sign(3, instance, target, rebound),
+              '',
+              'GET',
+              target,
+              rebound,
+            ),
+          )
+        ).status,
       ).toBe(400);
       expect(
         (await rawRequest(port, request(4, instance, await sign(4, instance), '', 'POST'))).status,
@@ -427,10 +429,12 @@ describe('Realtime observations e2e — M98b refusals for /v1/realtime', () => {
       ).toBe(401);
       const query = '/v1/realtime?after=0';
       expect(
-        (await rawRequest(
-          port,
-          request(7, instance, await sign(7, instance, query), '', 'GET', query),
-        )).status,
+        (
+          await rawRequest(
+            port,
+            request(7, instance, await sign(7, instance, query), '', 'GET', query),
+          )
+        ).status,
       ).toBe(400);
       const honest = request(8, instance, await sign(8, instance));
       const served = await rawRequest(port, honest);

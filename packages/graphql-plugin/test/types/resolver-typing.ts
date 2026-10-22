@@ -1,7 +1,7 @@
 /**
  * Type-level fixture for X6-4 (M70i): the resolver surface is typeable.
  *
- * Asserts, at the type level only (compiled by `deno task check`; not executed
+ * Asserts, at the type level only (compiled by `pnpm run check`; not executed
  * as a test):
  *
  * - a **narrowly annotated** resolver — `FieldResolver<IssueRow,

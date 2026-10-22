@@ -91,11 +91,7 @@ describe('GrpcPluginOptions.interceptors (M70f §3.7)', () => {
     // message, even with an (empty) interceptors option supplied.
     const { logger, errors } = makeCapturingLogger();
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        loggerPlugin(logger),
-        GrpcPlugin({ interceptors: [] }),
-      ],
+      plugins: [RuntimePlugin(), loggerPlugin(logger), GrpcPlugin({ interceptors: [] })],
     });
     await app.start({ port: 0 });
     try {
@@ -173,10 +169,7 @@ describe('GrpcPluginOptions.interceptors (M70f §3.7)', () => {
     // return the request as the response and break the RPC.)
     const marker = (next: (req: unknown) => Promise<unknown>) => (req: unknown) => next(req);
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        GrpcPlugin({ connectModule: spy, interceptors: [marker] }),
-      ],
+      plugins: [RuntimePlugin(), GrpcPlugin({ connectModule: spy, interceptors: [marker] })],
     });
     await app.start({ port: 0 });
     try {

@@ -35,7 +35,7 @@ import { PrismaRepository } from '../../src/adapters/prisma/prisma-repository.ts
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { classifyDriverError } from '../../src/errors/classify.ts';
 import { DatabaseService } from '../../src/services/database-service.ts';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { DuplicateKeyError, PrimaryKeyChangeError } from '@setu-ts/common';
 import type { PrismaAdapterOptions } from '../../src/interfaces/index.ts';
 
 const postgresUrl = process.env['POSTGRES_URL'];
@@ -72,9 +72,10 @@ interface GeneratedPrismaClient {
 
 /** The generated module's export this suite constructs. */
 interface GeneratedClientModule {
-  PrismaClient: new (
-    options: { adapter: unknown; log?: { emit: 'event'; level: 'query' }[] },
-  ) => GeneratedPrismaClient;
+  PrismaClient: new (options: {
+    adapter: unknown;
+    log?: { emit: 'event'; level: 'query' }[];
+  }) => GeneratedPrismaClient;
 }
 
 /** A per-run discriminator keeping rows of one run out of another's asserts. */
@@ -115,6 +116,46 @@ async function connectPrisma(queries?: string[]): Promise<GeneratedPrismaClient>
 
 describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
   it(
+    'M113g refuses a changed key through update and leaves the row unmoved',
+    { skip: skipReal },
+    async () => {
+      const client = await connectPrisma();
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const id = `m113g-old-${suffix}`;
+        const movedId = `m113g-new-${suffix}`;
+        const row = {
+          id,
+          run: suffix,
+          userId: 'before',
+          createdAt: new Date(0),
+          profile: {},
+        };
+        await source.create(row);
+        const outcome: unknown = await source
+          .update(id, { id: movedId, userId: 'after' })
+          .catch((error: unknown) => error);
+        // Read through the real delegate as well as a fresh adapter data source:
+        // even a failed refusal assertion must leave evidence of the backend state.
+        const oldRow = await client.auditEvent.findUnique({ where: { id } });
+        const newRow = await client.auditEvent.findUnique({ where: { id: movedId } });
+        expect({ outcome, oldRow, newRow }).toMatchObject({
+          outcome: expect.any(PrimaryKeyChangeError),
+          oldRow: row,
+          newRow: null,
+        });
+        const fresh = adapter.createDataSource('AuditEvent');
+        expect(await fresh.findById(id)).toEqual(row);
+        expect(await fresh.findById(movedId)).toBeNull();
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
+      }
+    },
+  );
+  it(
     'M105 emits one conjoined UPDATE or DELETE and carries conditionals into interactive transactions',
     { skip: skipReal },
     async () => {
@@ -133,17 +174,20 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
           profile: {},
         });
         queries.length = 0;
-        expect(await source.updateWhere!(id, { userId: 'owner' }, { profile: { changed: true } }))
-          .toMatchObject({ profile: { changed: true } });
+        expect(
+          await source.updateWhere!(id, { userId: 'owner' }, { profile: { changed: true } }),
+        ).toMatchObject({ profile: { changed: true } });
         expect(queries).toHaveLength(1);
         expect(queries[0]).toMatch(/^UPDATE .* WHERE .*"id".* AND .*"userId".* RETURNING /);
         queries.length = 0;
-        expect(await source.updateWhere!(id, { userId: 'other' }, { profile: { bad: true } }))
-          .toBeNull();
+        expect(
+          await source.updateWhere!(id, { userId: 'other' }, { profile: { bad: true } }),
+        ).toBeNull();
         expect(queries).toHaveLength(1);
         expect(await source.findById(id)).toMatchObject({ profile: { changed: true } });
-        await expect(source.updateWhere!(id, { unknownColumn: 1 }, { profile: { bad: true } }))
-          .rejects.toThrow();
+        await expect(
+          source.updateWhere!(id, { unknownColumn: 1 }, { profile: { bad: true } }),
+        ).rejects.toThrow();
         await expect(source.deleteWhere!(id, { unknownColumn: 1 })).rejects.toThrow();
         queries.length = 0;
         expect(await source.deleteWhere!(id, { userId: 'other' })).toBe(false);
@@ -236,80 +280,82 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
     },
   );
 
-  it('refuses the named-@@id model without compositeKeyName and succeeds with it (P2)', {
-    skip: skipReal,
-  }, async () => {
-    const client = await connectPrisma();
-
-    // The schema fact behind the refusal, probed on the raw delegate: the
-    // derived `courseId_personId` field does not exist on the named-@@id
-    // model, so addressing it that way is rejected by Prisma itself.
-    await expect(
-      client.enrollment.findUnique({
-        where: { courseId_personId: { courseId: `c-${suffix}`, personId: 'p1' } },
-      }),
-    ).rejects.toThrow();
-
-    // Without the override the adapter refuses BY NAME — the composite key
-    // has no addressable field on this model.
-    const bare = new PrismaAdapter({ prismaClient: client });
-    await bare.connect();
-    const bareSource = bare.createDataSource('Enrollment');
-    await expect(
-      bareSource.findById({ courseId: `c-${suffix}`, personId: 'p1' }),
-    ).rejects.toThrow(UnsupportedQueryFeatureError);
-    await bare.disconnect();
-
-    // With the override the named key addresses the model — P2's fix.
-    const configuredOptions: PrismaAdapterOptions = {
-      prismaClient: client,
-      entities: {
-        Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
-      },
-    };
-    const configured = new PrismaAdapter(configuredOptions);
-    await configured.connect();
-    try {
-      type EnrollmentId = { courseId: string; personId: string };
-      const repo = new PrismaRepository<
-        { courseId: string; personId: string; grade: string },
-        EnrollmentId
-      >(configured.createDataSource('Enrollment'));
-      const key: EnrollmentId = { courseId: `c-${suffix}`, personId: 'p1' };
-      await repo.create({ courseId: key.courseId, personId: key.personId, grade: 'A' });
-      expect((await repo.findById(key))?.grade).toBe('A');
-      expect(await repo.delete(key)).toBe(true);
-      expect(await repo.findById(key)).toBeNull();
-    } finally {
-      await configured.disconnect();
-      await client.$disconnect();
-    }
-  });
-
   it(
-    'matches a nested-path filter against real JSONB rows (P7)',
-    { skip: skipReal },
+    'refuses the named-@@id model without compositeKeyName and succeeds with it (P2)',
+    {
+      skip: skipReal,
+    },
     async () => {
       const client = await connectPrisma();
-      const adapter = new PrismaAdapter({ prismaClient: client });
-      await adapter.connect();
-      try {
-        const source = adapter.createDataSource('AuditEvent');
-        const run = `jsonb-${suffix}`;
-        const cities = ['Kolkata', 'Kolkata', 'Kolkata', 'Mumbai'];
-        for (const [i, city] of cities.entries()) {
-          await source.create({
-            id: `${run}-${i + 1}`,
-            run,
-            userId: `u${i + 1}`,
-            createdAt: new Date('2026-01-15T10:00:00Z'),
-            profile: { address: { city } },
-          });
-        }
 
-        // P7: the two-segment path under the `profile` JSONB column matches the
-        // three Kolkata rows and nothing else.
-        const found = await source.findAll(query({
+      // The schema fact behind the refusal, probed on the raw delegate: the
+      // derived `courseId_personId` field does not exist on the named-@@id
+      // model, so addressing it that way is rejected by Prisma itself.
+      await expect(
+        client.enrollment.findUnique({
+          where: { courseId_personId: { courseId: `c-${suffix}`, personId: 'p1' } },
+        }),
+      ).rejects.toThrow();
+
+      // Without the override the adapter refuses BY NAME — the composite key
+      // has no addressable field on this model.
+      const bare = new PrismaAdapter({ prismaClient: client });
+      await bare.connect();
+      const bareSource = bare.createDataSource('Enrollment');
+      await expect(
+        bareSource.findById({ courseId: `c-${suffix}`, personId: 'p1' }),
+      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      await bare.disconnect();
+
+      // With the override the named key addresses the model — P2's fix.
+      const configuredOptions: PrismaAdapterOptions = {
+        prismaClient: client,
+        entities: {
+          Enrollment: { compositeKeyName: 'enrollmentKey', keyColumns: ['courseId', 'personId'] },
+        },
+      };
+      const configured = new PrismaAdapter(configuredOptions);
+      await configured.connect();
+      try {
+        type EnrollmentId = { courseId: string; personId: string };
+        const repo = new PrismaRepository<
+          { courseId: string; personId: string; grade: string },
+          EnrollmentId
+        >(configured.createDataSource('Enrollment'));
+        const key: EnrollmentId = { courseId: `c-${suffix}`, personId: 'p1' };
+        await repo.create({ courseId: key.courseId, personId: key.personId, grade: 'A' });
+        expect((await repo.findById(key))?.grade).toBe('A');
+        expect(await repo.delete(key)).toBe(true);
+        expect(await repo.findById(key)).toBeNull();
+      } finally {
+        await configured.disconnect();
+        await client.$disconnect();
+      }
+    },
+  );
+
+  it('matches a nested-path filter against real JSONB rows (P7)', { skip: skipReal }, async () => {
+    const client = await connectPrisma();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    try {
+      const source = adapter.createDataSource('AuditEvent');
+      const run = `jsonb-${suffix}`;
+      const cities = ['Kolkata', 'Kolkata', 'Kolkata', 'Mumbai'];
+      for (const [i, city] of cities.entries()) {
+        await source.create({
+          id: `${run}-${i + 1}`,
+          run,
+          userId: `u${i + 1}`,
+          createdAt: new Date('2026-01-15T10:00:00Z'),
+          profile: { address: { city } },
+        });
+      }
+
+      // P7: the two-segment path under the `profile` JSONB column matches the
+      // three Kolkata rows and nothing else.
+      const found = await source.findAll(
+        query({
           where: { run },
           filter: {
             type: 'comparison',
@@ -317,18 +363,14 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
             operator: 'eq',
             value: 'Kolkata',
           },
-        }));
-        expect(found.map((row) => row.id).sort()).toEqual([
-          `${run}-1`,
-          `${run}-2`,
-          `${run}-3`,
-        ]);
-      } finally {
-        await adapter.disconnect();
-        await client.$disconnect();
-      }
-    },
-  );
+        }),
+      );
+      expect(found.map((row) => row.id).sort()).toEqual([`${run}-1`, `${run}-2`, `${run}-3`]);
+    } finally {
+      await adapter.disconnect();
+      await client.$disconnect();
+    }
+  });
 
   it('filters a Date range over real timestamptz rows (P9)', { skip: skipReal }, async () => {
     const client = await connectPrisma();
@@ -353,27 +395,31 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
       }
 
       // P9: the ordered arm carries a Date natively — `gte` from day two.
-      const from = await source.findAll(query({
-        where: { run },
-        filter: {
-          type: 'comparison',
-          field: 'createdAt',
-          operator: 'gte',
-          value: new Date('2026-03-02T00:00:00Z'),
-        },
-      }));
+      const from = await source.findAll(
+        query({
+          where: { run },
+          filter: {
+            type: 'comparison',
+            field: 'createdAt',
+            operator: 'gte',
+            value: new Date('2026-03-02T00:00:00Z'),
+          },
+        }),
+      );
       expect(from.map((row) => row.id).sort()).toEqual([`${run}-2`, `${run}-3`]);
 
       // …and strictly before day two.
-      const before = await source.findAll(query({
-        where: { run },
-        filter: {
-          type: 'comparison',
-          field: 'createdAt',
-          operator: 'lt',
-          value: new Date('2026-03-02T00:00:00Z'),
-        },
-      }));
+      const before = await source.findAll(
+        query({
+          where: { run },
+          filter: {
+            type: 'comparison',
+            field: 'createdAt',
+            operator: 'lt',
+            value: new Date('2026-03-02T00:00:00Z'),
+          },
+        }),
+      );
       expect(before.map((row) => row.id)).toEqual([`${run}-1`]);
     } finally {
       await adapter.disconnect();
@@ -381,131 +427,145 @@ describe('PrismaAdapter against live PostgreSQL (guarded)', () => {
     }
   });
 
-  it('walks a tied fixture across three pages returning every row exactly once (P10/P11)', {
-    skip: skipReal,
-  }, async () => {
-    const client = await connectPrisma();
-    const adapter = new PrismaAdapter({ prismaClient: client });
-    await adapter.connect();
-    try {
-      const source = adapter.createDataSource('AuditEvent');
-      const run = `walk-${suffix}`;
-      // The P11 fixture shape: six rows over only TWO distinct createdAt
-      // values. The original P10 walk seeded distinct values, so the
-      // tiebreaker branch never executed and the test would have passed
-      // against a builder that omitted it entirely — ties are deliberate.
-      const createdAt = [
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-      ];
-      const ids = createdAt.map((_, i) => `w${i + 1}-${suffix}`);
-      for (const [i, when] of createdAt.entries()) {
-        await source.create({
-          id: ids[i],
-          run,
-          userId: `u${i + 1}`,
-          createdAt: when,
-          profile: {},
-        });
+  it(
+    'walks a tied fixture across three pages returning every row exactly once (P10/P11)',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const client = await connectPrisma();
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const run = `walk-${suffix}`;
+        // The P11 fixture shape: six rows over only TWO distinct createdAt
+        // values. The original P10 walk seeded distinct values, so the
+        // tiebreaker branch never executed and the test would have passed
+        // against a builder that omitted it entirely — ties are deliberate.
+        const createdAt = [
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+        ];
+        const ids = createdAt.map((_, i) => `w${i + 1}-${suffix}`);
+        for (const [i, when] of createdAt.entries()) {
+          await source.create({
+            id: ids[i],
+            run,
+            userId: `u${i + 1}`,
+            createdAt: when,
+            profile: {},
+          });
+        }
+
+        const seen: string[] = [];
+        let cursor: string | null = null;
+        let pages = 0;
+        for (let page = 0; page < 10; page++) {
+          const result = await source.findPage!(
+            query({
+              where: { run },
+              orderBy: { createdAt: 'desc' },
+              limit: 2,
+              ...(cursor === null ? {} : { cursor }),
+            }),
+          );
+          pages += 1;
+          seen.push(...result.rows.map((row) => String(row.id)));
+          if (result.nextCursor === null) break;
+          cursor = result.nextCursor;
+        }
+
+        // Every row exactly once: no duplicates, none skipped — 6 rows at limit
+        // 2 is exactly 3 pages, and the last reports a null cursor.
+        expect([...seen].sort()).toEqual([...ids].sort());
+        expect(new Set(seen).size).toBe(6);
+        expect(pages).toBe(3);
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
       }
+    },
+  );
 
-      const seen: string[] = [];
-      let cursor: string | null = null;
-      let pages = 0;
-      for (let page = 0; page < 10; page++) {
-        const result = await source.findPage!(query({
-          where: { run },
-          orderBy: { createdAt: 'desc' },
-          limit: 2,
-          ...(cursor === null ? {} : { cursor }),
-        }));
-        pages += 1;
-        seen.push(...result.rows.map((row) => String(row.id)));
-        if (result.nextCursor === null) break;
-        cursor = result.nextCursor;
+  it(
+    'LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const client = await connectPrisma();
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      try {
+        const source = adapter.createDataSource('AuditEvent');
+        const run = `naive-${suffix}`;
+        const createdAt = [
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-06-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+          new Date('2026-05-01T00:00:00Z'),
+        ];
+        const ids = createdAt.map((_, i) => `n${i + 1}-${suffix}`);
+        for (const [i, when] of createdAt.entries()) {
+          await source.create({
+            id: ids[i],
+            run,
+            userId: `u${i + 1}`,
+            createdAt: when,
+            profile: {},
+          });
+        }
+
+        // The naive walk a builder WITHOUT the key appendix would produce: one
+        // `createdAt < cursor` comparison per page, no key tiebreaker. P11's
+        // poison is silence — the walk must complete without error AND lose
+        // rows, asserted as a loss so a future change that makes the naive walk
+        // correct by accident fails here.
+        const seen: string[] = [];
+        let cursorDate: Date | null = null;
+        for (let page = 0; page < 10; page++) {
+          const found = await source.findAll(
+            query({
+              where: { run },
+              orderBy: { createdAt: 'desc' },
+              limit: 2,
+              ...(cursorDate === null
+                ? {}
+                : {
+                    filter: {
+                      type: 'comparison',
+                      field: 'createdAt',
+                      operator: 'lt',
+                      value: cursorDate,
+                    } as FilterExpression,
+                  }),
+            }),
+          );
+          if (found.length === 0) break;
+          seen.push(...found.map((row) => String(row.id)));
+          cursorDate = found[found.length - 1].createdAt as Date;
+        }
+
+        // Three late rows share one timestamp: page one takes two of them and
+        // `createdAt < late` then hides the third forever. Page two takes two of
+        // the three early rows, and `createdAt < early` hides the last one. Four
+        // seen, two lost — one from each tie group.
+        expect(seen.length).toBe(4);
+        expect(new Set(seen).size).toBe(4);
+        expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);
+      } finally {
+        await adapter.disconnect();
+        await client.$disconnect();
       }
-
-      // Every row exactly once: no duplicates, none skipped — 6 rows at limit
-      // 2 is exactly 3 pages, and the last reports a null cursor.
-      expect([...seen].sort()).toEqual([...ids].sort());
-      expect(new Set(seen).size).toBe(6);
-      expect(pages).toBe(3);
-    } finally {
-      await adapter.disconnect();
-      await client.$disconnect();
-    }
-  });
-
-  it('LOSES rows on the tied fixture when the key tiebreaker is omitted (P11 negative control)', {
-    skip: skipReal,
-  }, async () => {
-    const client = await connectPrisma();
-    const adapter = new PrismaAdapter({ prismaClient: client });
-    await adapter.connect();
-    try {
-      const source = adapter.createDataSource('AuditEvent');
-      const run = `naive-${suffix}`;
-      const createdAt = [
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-06-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-        new Date('2026-05-01T00:00:00Z'),
-      ];
-      const ids = createdAt.map((_, i) => `n${i + 1}-${suffix}`);
-      for (const [i, when] of createdAt.entries()) {
-        await source.create({
-          id: ids[i],
-          run,
-          userId: `u${i + 1}`,
-          createdAt: when,
-          profile: {},
-        });
-      }
-
-      // The naive walk a builder WITHOUT the key appendix would produce: one
-      // `createdAt < cursor` comparison per page, no key tiebreaker. P11's
-      // poison is silence — the walk must complete without error AND lose
-      // rows, asserted as a loss so a future change that makes the naive walk
-      // correct by accident fails here.
-      const seen: string[] = [];
-      let cursorDate: Date | null = null;
-      for (let page = 0; page < 10; page++) {
-        const found = await source.findAll(query({
-          where: { run },
-          orderBy: { createdAt: 'desc' },
-          limit: 2,
-          ...(cursorDate === null ? {} : {
-            filter: {
-              type: 'comparison',
-              field: 'createdAt',
-              operator: 'lt',
-              value: cursorDate,
-            } as FilterExpression,
-          }),
-        }));
-        if (found.length === 0) break;
-        seen.push(...found.map((row) => String(row.id)));
-        cursorDate = found[found.length - 1].createdAt as Date;
-      }
-
-      // Three late rows share one timestamp: page one takes two of them and
-      // `createdAt < late` then hides the third forever. Page two takes two of
-      // the three early rows, and `createdAt < early` hides the last one. Four
-      // seen, two lost — one from each tie group.
-      expect(seen.length).toBe(4);
-      expect(new Set(seen).size).toBe(4);
-      expect(ids.filter((id) => !seen.includes(id)).length).toBe(2);
-    } finally {
-      await adapter.disconnect();
-      await client.$disconnect();
-    }
-  });
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -535,25 +595,23 @@ interface TransactionalPrismaClient {
 }
 
 describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)', () => {
-  it(
-    'a real SERIALIZABLE write conflict classifies as conflict',
-    { skip: skipReal },
-    async () => {
-      const client = await connectPrisma();
-      const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
-      const key = { tenantId: `t-${suffix}`, userId: 'x38' };
+  it('a real SERIALIZABLE write conflict classifies as conflict', { skip: skipReal }, async () => {
+    const client = await connectPrisma();
+    const transactional = client as unknown as GeneratedPrismaClient & TransactionalPrismaClient;
+    const key = { tenantId: `t-${suffix}`, userId: 'x38' };
 
-      try {
-        // Seeded through the plain delegate the existing cases use.
-        await client.tenantMember.create({
-          data: { tenantId: key.tenantId, userId: key.userId, role: 'baseline' },
-        });
+    try {
+      // Seeded through the plain delegate the existing cases use.
+      await client.tenantMember.create({
+        data: { tenantId: key.tenantId, userId: key.userId, role: 'baseline' },
+      });
 
-        // Both transactions read the row before either writes, so under
-        // SERIALIZABLE the second write must refuse — the canonical
-        // "this did not happen, run it again".
-        const race = (): Promise<unknown> =>
-          transactional.$transaction(async (tx) => {
+      // Both transactions read the row before either writes, so under
+      // SERIALIZABLE the second write must refuse — the canonical
+      // "this did not happen, run it again".
+      const race = (): Promise<unknown> =>
+        transactional.$transaction(
+          async (tx) => {
             // Prisma 7 hands the transaction the CLIENT — delegates hang off it.
             const row = await tx.tenantMember.findUnique({ where: { tenantId_userId: key } });
             await new Promise((resolve) => setTimeout(resolve, 400));
@@ -561,52 +619,57 @@ describe('PrismaAdapter against live PostgreSQL — classified conflict (X38-1)'
               where: { tenantId_userId: key },
               data: { role: `after-${String(row?.role)}` },
             });
-          }, { isolationLevel: 'Serializable' });
+          },
+          { isolationLevel: 'Serializable' },
+        );
 
-        const first = race();
-        await new Promise((resolve) => setTimeout(resolve, 120));
-        const second = race();
-        const results = await Promise.allSettled([first, second]);
+      const first = race();
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const second = race();
+      const results = await Promise.allSettled([first, second]);
 
-        const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
-        expect(rejected.length).toBe(1);
-        const reason = rejected[0].reason as { code?: unknown };
-        expect(reason.code).toBe('P2034');
-        expect(classifyDriverError(reason)).toBe('conflict');
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(rejected.length).toBe(1);
+      const reason = rejected[0].reason as { code?: unknown };
+      expect(reason.code).toBe('P2034');
+      expect(classifyDriverError(reason)).toBe('conflict');
+    } finally {
+      await client.$disconnect();
+    }
+  });
+});
+
+describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
+  it(
+    'a duplicate primary key reaches the caller as DuplicateKeyError (P2002)',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const client = await connectPrisma();
+      const adapter = new PrismaAdapter({ prismaClient: client });
+      await adapter.connect();
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'prisma');
+      try {
+        const repo = service.getRepository('AuditEvent');
+        const row = {
+          id: `dup-${suffix}`,
+          run: `dup-${suffix}`,
+          userId: 'u1',
+          createdAt: new Date('2026-01-15T10:00:00Z'),
+          profile: {},
+        };
+        await repo.create(row);
+
+        const refusal = await repo.create(row).catch((e: unknown) => e);
+        expect(refusal).toBeInstanceOf(DuplicateKeyError);
+        expect((refusal as DuplicateKeyError).entity).toBe('AuditEvent');
+        // Prisma maps SQLSTATE 23505 onto its own P2002 before the app sees it.
+        expect(((refusal as Error).cause as { code?: unknown }).code).toBe('P2002');
       } finally {
+        await adapter.disconnect();
         await client.$disconnect();
       }
     },
   );
-});
-
-describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
-  it('a duplicate primary key reaches the caller as DuplicateKeyError (P2002)', {
-    skip: skipReal,
-  }, async () => {
-    const client = await connectPrisma();
-    const adapter = new PrismaAdapter({ prismaClient: client });
-    await adapter.connect();
-    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'prisma');
-    try {
-      const repo = service.getRepository('AuditEvent');
-      const row = {
-        id: `dup-${suffix}`,
-        run: `dup-${suffix}`,
-        userId: 'u1',
-        createdAt: new Date('2026-01-15T10:00:00Z'),
-        profile: {},
-      };
-      await repo.create(row);
-
-      const refusal = await repo.create(row).catch((e: unknown) => e);
-      expect(refusal).toBeInstanceOf(DuplicateKeyError);
-      expect((refusal as DuplicateKeyError).entity).toBe('AuditEvent');
-      // Prisma maps SQLSTATE 23505 onto its own P2002 before the app sees it.
-      expect(((refusal as Error).cause as { code?: unknown }).code).toBe('P2002');
-    } finally {
-      await adapter.disconnect();
-      await client.$disconnect();
-    }
-  });
 });

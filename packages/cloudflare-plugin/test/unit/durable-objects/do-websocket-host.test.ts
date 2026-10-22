@@ -17,9 +17,7 @@ afterAll(() => {
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import {
-  createDefaultDurableObjectWebSocketHost,
-} from '../../../src/durable-objects/do-websocket-host.ts';
+import { createDefaultDurableObjectWebSocketHost } from '../../../src/durable-objects/do-websocket-host.ts';
 
 /** The global under test, absent on Deno. */
 interface PairGlobal {

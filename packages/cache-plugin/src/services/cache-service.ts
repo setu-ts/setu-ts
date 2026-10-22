@@ -94,11 +94,7 @@ export class CacheService implements ICacheStore {
    * @returns The cached or newly-produced value
    * @since 0.5.0
    */
-  async getOrSet<T>(
-    key: string,
-    factory: () => Promise<T>,
-    ttlSeconds?: number,
-  ): Promise<T> {
+  async getOrSet<T>(key: string, factory: () => Promise<T>, ttlSeconds?: number): Promise<T> {
     const prefixedKey = `${this.#prefix}${key}`;
     const loaded = await cacheCoalescer.run(this.#backend, prefixedKey, async (): Promise<T> => {
       // The lookup belongs INSIDE the coalesced work. If it happened before

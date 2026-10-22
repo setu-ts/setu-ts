@@ -259,11 +259,13 @@ describe('SchedulerPlugin behaviour chain (M86 §3.4/§3.10)', () => {
   it('a short-circuiting behaviour skips the handler; the schedule keeps firing', async () => {
     let handlerRan = false;
     const { scheduler, runtime } = await createHarness({
-      behaviors: [{
-        handle(_ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
-          // Return WITHOUT calling next(): the chain must stop here.
+      behaviors: [
+        {
+          handle(_ctx: IngressContext, _next: () => Promise<void>): void | Promise<void> {
+            // Return WITHOUT calling next(): the chain must stop here.
+          },
         },
-      }],
+      ],
     });
     await scheduler.every('gated', TICK_MS, () => {
       handlerRan = true;

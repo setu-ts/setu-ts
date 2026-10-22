@@ -26,6 +26,8 @@ import type { DenoSrvRecord } from './deno-dns-resolver.ts';
  * Inject this interface to test the adapter without real Deno.
  */
 export interface DenoHost {
+  /** Standard error writer; optional for legacy injected hosts. */
+  stderr?: { writeSync(data: Uint8Array): number };
   /** Current runtime version string. */
   version: { deno: string };
   /** Returns the host name. */
@@ -215,14 +217,24 @@ export function createDenoRuntimeServices(
   // reading `runtime.onSignal?.(…)` degrades instead of crashing at startup.
   // Callers must not read the presence of this key as "signals are supported":
   // read it as "this runtime can register one".
-  const signals = host.build.os === 'windows' ? {} : {
-    onSignal: (signal: RuntimeSignal, handler: () => void): void => {
-      host.addSignalListener(signal, handler);
-    },
-  };
+  const signals =
+    host.build.os === 'windows'
+      ? {}
+      : {
+          onSignal: (signal: RuntimeSignal, handler: () => void): void => {
+            host.addSignalListener(signal, handler);
+          },
+        };
 
   return mergeRuntimeServices({
     platform: () => 'deno',
+    reportError: (record) => {
+      try {
+        host.stderr?.writeSync(new TextEncoder().encode(`${JSON.stringify(record)}\n`));
+      } catch {
+        // Last-resort reporting must never replace the request failure.
+      }
+    },
     version: () => host.version.deno,
     hostname: () => host.hostname(),
     env: host.env.toObject() as Readonly<Record<string, string | undefined>>,

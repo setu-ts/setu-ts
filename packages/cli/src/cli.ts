@@ -20,6 +20,7 @@ import {
 } from './constants.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
+import { runAgentsCommand } from './commands/agents.ts';
 import { runDevtoolCommand } from './commands/devtool.ts';
 import { runAdoptCommand } from './commands/adopt.ts';
 import { runNewCommand } from './commands/new.ts';
@@ -96,6 +97,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
+  log(`  agents                         Write or check this project's AGENTS.md brief`);
   log(`  adopt                          Convert this project into a workspace`);
   log(`  devtool enable [member]        Enable the local diagnostics connector`);
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
@@ -111,7 +113,11 @@ function printHelp(log: (message: string) => void): void {
   log('  --yes, -y           Take every `new` default and ask nothing');
   log('');
   log('Schematics:');
-  log(`  ${listSchematics().map((s) => s.name).join(', ')}, custom`);
+  log(
+    `  ${listSchematics()
+      .map((s) => s.name)
+      .join(', ')}, custom`,
+  );
   log('');
   log(`Run \`${PROGRAM_NAME} generate --help\` inside a project to see which are available.`);
   log(
@@ -130,10 +136,7 @@ function printHelp(log: (message: string) => void): void {
  * @param deps - Filesystem, working directory, clock, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
-export async function runCli(
-  argv: readonly string[],
-  rawDeps: CliDependencies,
-): Promise<number> {
+export async function runCli(argv: readonly string[], rawDeps: CliDependencies): Promise<number> {
   // Every line the CLI writes goes through one escape, so a value reaching
   // output by a path no call site escaped still cannot redraw the terminal or
   // hide text behind a carriage return. Plugin command handlers write their
@@ -170,8 +173,9 @@ export async function runCli(
   // than trusted to every message that might quote the value back.
   const controlFlag = Object.entries(args.flags)
     .flatMap(([flag, value]) =>
-      (typeof value === 'boolean' ? [] : typeof value === 'string' ? [value] : value)
-        .map((each) => [flag, each] as const)
+      (typeof value === 'boolean' ? [] : typeof value === 'string' ? [value] : value).map(
+        (each) => [flag, each] as const,
+      ),
     )
     .find(([, value]) => hasControlCharacter(value));
   if (controlFlag !== undefined) {
@@ -244,6 +248,9 @@ export async function runCli(
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         });
+
+      case 'agents':
+        return await runAgentsCommand(rest, deps);
 
       case 'devtool':
         return await runDevtoolCommand(rest, {

@@ -162,7 +162,7 @@ describe('payloadFingerprint (M109a §3.7)', () => {
       name: 'email.send',
       payload: { id: 'j1', name: 'email.send', data: { to: 'a' }, attempts: 1 },
     };
-    const two: IngressContext = { ...one, payload: { ...one.payload as object, attempts: 3 } };
+    const two: IngressContext = { ...one, payload: { ...(one.payload as object), attempts: 3 } };
     expect(await payloadFingerprint(crypto.subtle, one, 'payload')).toBe(
       await payloadFingerprint(crypto.subtle, two, 'payload'),
     );

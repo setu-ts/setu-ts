@@ -95,10 +95,14 @@ describe('WorkersBroker.publish', () => {
     const producer = new FakeQueueProducer();
     const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
 
-    await broker.publish('orders', { id: 1 }, {
-      orderingKey: 'agg-1',
-      deduplicationId: 'dedup-1',
-    });
+    await broker.publish(
+      'orders',
+      { id: 1 },
+      {
+        orderingKey: 'agg-1',
+        deduplicationId: 'dedup-1',
+      },
+    );
 
     expect(producer.sends[0]?.body).toEqual({
       v: 1,
@@ -132,8 +136,9 @@ describe('WorkersBroker.publish', () => {
     const broker = new WorkersBroker(producer, new FakeBrokerRuntime());
 
     await expect(broker.publish('orders', 1, { headers: { cc: 'x' } })).rejects.toThrow(RangeError);
-    await expect(broker.publish('orders', 1, { headers: { 'x-setu-ordering-key': 'k' } })).rejects
-      .toThrow(RangeError);
+    await expect(
+      broker.publish('orders', 1, { headers: { 'x-setu-ordering-key': 'k' } }),
+    ).rejects.toThrow(RangeError);
     expect(producer.sends).toEqual([]);
   });
 
@@ -144,8 +149,9 @@ describe('WorkersBroker.publish', () => {
     await expect(broker.publish('orders', 1, { headers: { 'bad:name': 'v' } })).rejects.toThrow(
       RangeError,
     );
-    await expect(broker.publish('orders', 1, { headers: { 'x-a': 'v'.repeat(1025) } })).rejects
-      .toThrow(RangeError);
+    await expect(
+      broker.publish('orders', 1, { headers: { 'x-a': 'v'.repeat(1025) } }),
+    ).rejects.toThrow(RangeError);
     expect(producer.sends).toEqual([]);
   });
 
@@ -273,7 +279,7 @@ describe('WorkersBroker message metadata (M106 §3.3)', () => {
     // The dispatch runs synchronously up to its first await, which is where
     // `envelopeHeaders` builds the record — so the accessor must be live for it.
     await withProtoAccessor(() =>
-      broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)]))
+      broker.dispatch(new FakeQueueBatch('q', [new FakeQueueMessage('m1', envelope)])),
     );
     expect(Object.keys(delivered[0]!.headers ?? {})).toEqual(['__proto__']);
   });

@@ -18,7 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, splitWorkerEnv } from '@setu-ts/common';
 
-import { resolveWaitUntil } from '../background/wait-until.ts';
+import { markHostlessRegistry, resolveWaitUntil } from '../background/wait-until.ts';
 import { instanceToken } from '../instance-token.ts';
 import { WorkersBroker } from '../messaging/workers-broker.ts';
 import type { ICloudflareBindings } from '../bindings/binding-registry.ts';
@@ -75,24 +75,35 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
   // Each arm is paired with its token in one value, so a later `undefined`
   // check narrows both at once — carrying them separately would leave a second
   // check that can never fail.
-  const cacheArm = options.cache === undefined
-    ? undefined
-    : { options: options.cache, token: instanceToken(CAPABILITIES.CACHE, options.cache.name) };
-  const storageArm = options.storage === undefined ? undefined : {
-    options: options.storage,
-    token: instanceToken(CAPABILITIES.STORAGE, options.storage.name),
-  };
-  const queueArm = options.queue === undefined
-    ? undefined
-    : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
-  const messagingArm = options.messaging === undefined ? undefined : {
-    options: options.messaging,
-    token: instanceToken(CAPABILITIES.MESSAGING, options.messaging.name),
-  };
-  const durableObjectArm = options.durableObject === undefined ? undefined : {
-    options: options.durableObject,
-    token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
-  };
+  const cacheArm =
+    options.cache === undefined
+      ? undefined
+      : { options: options.cache, token: instanceToken(CAPABILITIES.CACHE, options.cache.name) };
+  const storageArm =
+    options.storage === undefined
+      ? undefined
+      : {
+          options: options.storage,
+          token: instanceToken(CAPABILITIES.STORAGE, options.storage.name),
+        };
+  const queueArm =
+    options.queue === undefined
+      ? undefined
+      : { options: options.queue, token: instanceToken(CAPABILITIES.QUEUE, options.queue.name) };
+  const messagingArm =
+    options.messaging === undefined
+      ? undefined
+      : {
+          options: options.messaging,
+          token: instanceToken(CAPABILITIES.MESSAGING, options.messaging.name),
+        };
+  const durableObjectArm =
+    options.durableObject === undefined
+      ? undefined
+      : {
+          options: options.durableObject,
+          token: instanceToken(CAPABILITIES.REALTIME_BACKPLANE, options.durableObject.name),
+        };
 
   // Computed from the options rather than declared statically, so the kernel's
   // duplicate-provider index sees exactly what this instance registers.
@@ -136,6 +147,23 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
         resolveWaitUntil(options.waitUntil, () => ctx.logger),
       );
       ctx.services.register<ICloudflareBindings>(CAPABILITIES.CLOUDFLARE, registry);
+
+      // M113d §3.6/§3.7. With no host the registry's sink delegates to
+      // nothing, so `store()` must await the edge-cache write itself; and on
+      // Workers an application's own background work still needs a sink, so
+      // one warning names the remedy. Off Workers nothing is logged: running
+      // the promise to completion is correct there (wait-until.ts).
+      if (options.waitUntil === undefined) {
+        markHostlessRegistry(registry);
+        if (ctx.runtime.platform() === 'cloudflare-workers') {
+          ctx.logger?.warn(
+            'cloudflare: CloudflarePlugin received no waitUntil host; work passed to ' +
+              'bindings.waitUntil() may be cut off when the response is sent. Import ' +
+              "{ waitUntil } from 'cloudflare:workers' in the Worker entry and pass it " +
+              'through the application factory.',
+          );
+        }
+      }
 
       if (cacheArm !== undefined) {
         const store = new KvCacheStore(registry.kv(cacheArm.options.binding), ctx.runtime, {
@@ -183,15 +211,17 @@ export function CloudflarePlugin(options: CloudflarePluginOptions): IPlugin {
           {
             // A thunk, matching the waitUntil and queue seams above.
             logger: () => ctx.logger,
-            ...(rpc === undefined ? {} : {
-              replyInbox: {
-                namespace: registry.durableObject(rpc.binding),
-                binding: rpc.binding,
-                ...(rpc.defaultTimeoutMs === undefined
-                  ? {}
-                  : { defaultTimeoutMs: rpc.defaultTimeoutMs }),
-              },
-            }),
+            ...(rpc === undefined
+              ? {}
+              : {
+                  replyInbox: {
+                    namespace: registry.durableObject(rpc.binding),
+                    binding: rpc.binding,
+                    ...(rpc.defaultTimeoutMs === undefined
+                      ? {}
+                      : { defaultTimeoutMs: rpc.defaultTimeoutMs }),
+                  },
+                }),
           },
         );
         ctx.services.register<IMessageBroker>(messagingArm.token, broker);

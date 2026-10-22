@@ -80,37 +80,43 @@ export type FilterOperator = 'eq' | 'contains' | 'gt' | 'gte' | 'lt' | 'lte' | '
  *
  * @since 0.2.0
  */
-export type FilterComparison = {
-  readonly type: 'comparison';
-  readonly field: string | readonly string[];
-  readonly operator: 'eq';
-  readonly value: unknown;
-} | {
-  readonly type: 'comparison';
-  readonly field: string | readonly string[];
-  readonly operator: 'contains';
-  readonly value: string;
-} | {
-  readonly type: 'comparison';
-  readonly field: string | readonly string[];
-  readonly operator: 'gt' | 'gte' | 'lt' | 'lte';
-  readonly value: string | number | Date;
-} | {
-  readonly type: 'comparison';
-  readonly field: string | readonly string[];
-  readonly operator: 'in';
-  readonly value: readonly unknown[];
-};
+export type FilterComparison =
+  | {
+      readonly type: 'comparison';
+      readonly field: string | readonly string[];
+      readonly operator: 'eq';
+      readonly value: unknown;
+    }
+  | {
+      readonly type: 'comparison';
+      readonly field: string | readonly string[];
+      readonly operator: 'contains';
+      readonly value: string;
+    }
+  | {
+      readonly type: 'comparison';
+      readonly field: string | readonly string[];
+      readonly operator: 'gt' | 'gte' | 'lt' | 'lte';
+      readonly value: string | number | Date;
+    }
+  | {
+      readonly type: 'comparison';
+      readonly field: string | readonly string[];
+      readonly operator: 'in';
+      readonly value: readonly unknown[];
+    };
 
 /**
  * A portable filter tree evaluated by every repository backend.
  *
  * @since 0.2.0
  */
-export type FilterExpression = FilterComparison | {
-  readonly type: 'and' | 'or';
-  readonly filters: readonly FilterExpression[];
-};
+export type FilterExpression =
+  | FilterComparison
+  | {
+      readonly type: 'and' | 'or';
+      readonly filters: readonly FilterExpression[];
+    };
 
 /**
  * A primary key value: a scalar `string`, a scalar `number`, or a composite
@@ -240,10 +246,7 @@ export interface IDataSource {
    * @returns The updated row
    * @throws {Error} When no row has that key
    */
-  update(
-    id: EntityKey,
-    data: Partial<Record<string, unknown>>,
-  ): Promise<Record<string, unknown>>;
+  update(id: EntityKey, data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>>;
   /**
    * Delete an entity by primary key.
    *
@@ -338,10 +341,7 @@ export interface IAdapterTransaction extends ITransaction {
  * @since 0.5.0
  */
 export type TransactionIsolationLevel =
-  | 'read-uncommitted'
-  | 'read-committed'
-  | 'repeatable-read'
-  | 'serializable';
+  'read-uncommitted' | 'read-committed' | 'repeatable-read' | 'serializable';
 
 /**
  * Optional controls for opening a transaction.

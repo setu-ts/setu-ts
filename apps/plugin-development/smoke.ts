@@ -1,14 +1,24 @@
-import { createPluginDevelopmentApp } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
 
-const app = createPluginDevelopmentApp();
-await app.start();
-try {
-  const response = await app.inject({ method: 'GET', url: 'http://example.test/greet/Ada' });
-  if (
-    response.statusCode !== 200 || response.json<{ message: string }>().message !== 'Hello, Ada!'
-  ) {
-    throw new Error('The custom plugin route did not resolve its capability.');
-  }
-} finally {
-  await app.stop();
-}
+describe('plugin-development example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
+  });
+
+  after(async () => {
+    await app.stop();
+  });
+
+  it("serves the plugin's route through the capability it registered", async () => {
+    const response = await app.inject({ method: 'GET', url: '/greet/Ada' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { message: 'Hello, Ada!' });
+  });
+});

@@ -78,11 +78,13 @@ function readTarget(target: unknown): ReadTarget {
     return { scope: 'invalid', context: undefined };
   }
   const { scope, context } = target as { readonly scope?: unknown; readonly context?: unknown };
-  const request = typeof context === 'object' && context !== null &&
-      (context as { readonly state?: unknown }).state instanceof Map &&
-      typeof (context as { readonly request?: unknown }).request === 'object'
-    ? context as IRequestContext
-    : undefined;
+  const request =
+    typeof context === 'object' &&
+    context !== null &&
+    (context as { readonly state?: unknown }).state instanceof Map &&
+    typeof (context as { readonly request?: unknown }).request === 'object'
+      ? (context as IRequestContext)
+      : undefined;
   if (scope === undefined) {
     return { scope: 'unresolved', context: request };
   }
@@ -181,7 +183,10 @@ export class ScopedEvaluator {
     if (requirement.kind === 'role') {
       return grants.some((grant) => this.#grantsRole(grant, requirement.name));
     }
-    if (this.#holdsDirectly(principal, requirement.name)) {
+    if (
+      this.#config.principalAuthorityIsGlobal &&
+      this.#holdsDirectly(principal, requirement.name)
+    ) {
       return true;
     }
     if (grants.some((grant) => this.#catalogueGrantsPermission(grant, requirement.name))) {
@@ -207,11 +212,8 @@ export class ScopedEvaluator {
    * asking about one scope share a walk.
    */
   #chainFor(scope: ScopeRef, context: IRequestContext | undefined): Promise<ChainOutcome> {
-    return memoised(
-      context,
-      `chain:${scopeKey(scope)}`,
-      this.#chainsInflight,
-      () => walkScopeChain(scope, this.#config, this.#deps.bounded),
+    return memoised(context, `chain:${scopeKey(scope)}`, this.#chainsInflight, () =>
+      walkScopeChain(scope, this.#config, this.#deps.bounded),
     );
   }
 
@@ -219,7 +221,10 @@ export class ScopedEvaluator {
    * Keeps the grants that apply here: global ones, and those held in a scope
    * of the chain. A source may answer more than it was asked (a static or
    * claims source returns everything); this filter is what scopes them.
-   * The principal's own roles are global grants.
+   * The principal's own roles become global grants only with
+   * `principalAuthorityIsGlobal` (M113e, V9-28): by default a scoped check is
+   * decided by grants alone, so a token role cannot pass in a scope that
+   * granted it nothing.
    */
   #inChain(
     grants: readonly ScopedGrant[],
@@ -228,6 +233,9 @@ export class ScopedEvaluator {
   ): ScopedGrant[] {
     const keys = new Set(chain.map(scopeKey));
     const kept = grants.filter((grant) => grant.scope === null || keys.has(scopeKey(grant.scope)));
+    if (!this.#config.principalAuthorityIsGlobal) {
+      return kept;
+    }
     for (const role of principal.roles ?? []) {
       const name = readName(role);
       if (name !== undefined) {

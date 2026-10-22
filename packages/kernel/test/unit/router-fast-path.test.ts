@@ -17,7 +17,7 @@ import { Router } from '../../src/router/router.ts';
 describe('Router | single-candidate fast path (M87)', () => {
   it('matches a static route and reports no params', () => {
     const router = new Router();
-    router.get('/json', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/json', { handler: () => ({ __handlerResult: true }) as never });
 
     const result = router.match('GET', '/json');
     expect(result).not.toBeNull();
@@ -26,7 +26,7 @@ describe('Router | single-candidate fast path (M87)', () => {
 
   it('decodes a percent-escaped param exactly as the slow path does', () => {
     const router = new Router();
-    router.get('/users/:id', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users/:id', { handler: () => ({ __handlerResult: true }) as never });
 
     expect(router.match('GET', '/users/a%20b')!.params).toEqual({ id: 'a b' });
     expect(router.match('GET', '/users/a%2Fb')!.params).toEqual({ id: 'a/b' });
@@ -34,7 +34,7 @@ describe('Router | single-candidate fast path (M87)', () => {
 
   it('passes a param carrying no percent through unchanged', () => {
     const router = new Router();
-    router.get('/users/:id', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users/:id', { handler: () => ({ __handlerResult: true }) as never });
 
     // The fast path skips decodeURIComponent when there is no '%'; it is an
     // identity function there (it does not decode '+'), so '+' must survive.
@@ -43,15 +43,15 @@ describe('Router | single-candidate fast path (M87)', () => {
 
   it('reports no match for a malformed percent-escape', () => {
     const router = new Router();
-    router.get('/users/:id', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/users/:id', { handler: () => ({ __handlerResult: true }) as never });
 
     expect(router.match('GET', '/users/%zz')).toBeNull();
   });
 
   it('does not hand out a params object a caller can mutate into a shared surprise', () => {
     const router = new Router();
-    router.get('/a', { handler: () => ({ __handlerResult: true } as never) });
-    router.get('/b', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/a', { handler: () => ({ __handlerResult: true }) as never });
+    router.get('/b', { handler: () => ({ __handlerResult: true }) as never });
 
     const first = router.match('GET', '/a')!.params as Record<string, string>;
     expect(() => {
@@ -62,7 +62,7 @@ describe('Router | single-candidate fast path (M87)', () => {
 
   it('ignores inherited properties, so a polluted prototype cannot inject params', () => {
     const router = new Router();
-    router.get('/static', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/static', { handler: () => ({ __handlerResult: true }) as never });
 
     // Hono currently builds its params with a null prototype, so this passes
     // either way today; it pins the property against a change in that
@@ -79,8 +79,8 @@ describe('Router | single-candidate fast path (M87)', () => {
 
   it('still tie-breaks when more than one route matches', () => {
     const router = new Router();
-    router.get('/:wild', { handler: () => ({ __handlerResult: true } as never) });
-    router.get('/exact', { handler: () => ({ __handlerResult: true } as never) });
+    router.get('/:wild', { handler: () => ({ __handlerResult: true }) as never });
+    router.get('/exact', { handler: () => ({ __handlerResult: true }) as never });
 
     // Static beats param regardless of registration order — the multi-candidate
     // path, which the fast path must not have shadowed.

@@ -10,6 +10,7 @@
  */
 
 import type { TargetRuntime, TemplateName } from '../constants.ts';
+import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { FULL_STACK_TEMPLATE } from './full-stack.ts';
 import { MICROSERVICE_TEMPLATE } from './microservice.ts';
@@ -170,6 +171,8 @@ export interface EnvVariable {
 
 /** Inputs a template factory needs while its call is rendered. */
 export interface AppFactoryRenderContext {
+  /** Asset mode supplied by a runtime swap to a starter composition. */
+  readonly swaggerAssets?: 'cdn';
   /** The runtime target selected for the generated project. */
   readonly runtime: TargetRuntime;
   /** Identifier naming the workspace member's generated endpoint map, when any. */
@@ -227,8 +230,11 @@ export interface TemplateManifest {
    * Must already be formatted exactly as `deno fmt` would format it, since the
    * scaffold is gated on passing its own `fmt --check`.
    */
-  readonly readmeSection?: string;
-  /** npm packages the running application needs, merged into `dependencies`. */
+  readonly readmeSection?: string | ((invocation: string) => string);
+  /**
+   * npm packages the running application needs, merged into `dependencies`
+   * on npm targets and into the Deno target's import map.
+   */
   readonly npmDependencies?: Readonly<Record<string, string>>;
   /** npm packages the build or tests need, merged into `devDependencies`. */
   readonly npmDevDependencies?: Readonly<Record<string, string>>;
@@ -272,6 +278,16 @@ export interface TemplateManifest {
      * listed only `coverage/` and the env file.
      */
     readonly outputDir: string;
+    /**
+     * Further generated directories, treated exactly like {@linkcode outputDir}.
+     *
+     * A frontend toolchain may write typegen output beside its build rather than
+     * inside it: React Router's `react-router typegen` writes `.react-router`,
+     * which is generated source the project does not own. Listed here, it is
+     * gitignored and excluded from ESLint, Prettier and Deno's `fmt`/`lint` by
+     * the same rule as the build output.
+     */
+    readonly generatedDirs?: readonly string[];
     /**
      * A development entry emitted on every server target (never Workers), with
      * a `dev` task or script that runs it. Omitted → neither is emitted.
@@ -347,6 +363,10 @@ export interface TemplateManifest {
  * templates that exist and `--template minimal` is still an unknown value.
  */
 export interface TemplateHost {
+  /** Seams resolved after the target runtime removes incompatible plugins. */
+  readonly seams?: readonly SeamSpec[];
+  /** Showcase artifacts seeded into the resolved seam barrels. */
+  readonly seamArtifacts?: SeamArtifacts;
   /**
    * Plugins passed to `createApplication({ plugins: [...] })`, in registration
    * order, starting with the runtime provider.
@@ -405,6 +425,8 @@ export interface TemplateHost {
    * silently winning.
    */
   readonly files?: readonly GeneratedFile[];
+  /** Runtime-specific showcase files, replacing the static showcase file list. */
+  readonly filesForRuntime?: (runtime: TargetRuntime) => readonly GeneratedFile[];
   /**
    * Tasks merged into the generated `deno.json` beyond `start`.
    *
@@ -548,6 +570,8 @@ export interface WorkerExportRoute {
  * @since 0.2.0
  */
 export interface RuntimeSwap {
+  /** Starter inputs this runtime overrides before rendering its factory. */
+  readonly appFactoryContext?: Omit<AppFactoryRenderContext, 'runtime'>;
   /**
    * Bare package names dropped from the plugin list on this runtime.
    *
@@ -591,8 +615,8 @@ export interface TemplateDefinition extends TemplateHost {
    * Its absence is what drives the `--style class-based` refusal on
    * `full-stack` and suppresses the style question in the interactive prompt.
    *
-   * Precomputed rather than derived at resolution time: transforming a finished
-   * host would have to un-derive its already-baked seams and plugin `args`.
+   * Precomputed from the recipe so style selects its own showcase, decorator
+   * wiring and seam shapes before the runtime swap resolves their contributions.
    */
   readonly classBased?: TemplateHost;
   /**

@@ -33,22 +33,27 @@ describe('FcmProvider', () => {
     expect(() => new FcmProvider({ projectId: 'p' } as FcmProviderOptions)).toThrow(
       'FcmProvider requires "clientEmail"',
     );
-    expect(() => new FcmProvider({ projectId: 'p', clientEmail: 'a@b.com' } as FcmProviderOptions))
-      .toThrow('FcmProvider requires "privateKey"');
-    expect(() =>
-      new FcmProvider(
-        { projectId: 'p', clientEmail: 'a@b.com', privateKey: 'pem' } as FcmProviderOptions,
-      )
+    expect(
+      () => new FcmProvider({ projectId: 'p', clientEmail: 'a@b.com' } as FcmProviderOptions),
+    ).toThrow('FcmProvider requires "privateKey"');
+    expect(
+      () =>
+        new FcmProvider({
+          projectId: 'p',
+          clientEmail: 'a@b.com',
+          privateKey: 'pem',
+        } as FcmProviderOptions),
     ).toThrow('FcmProvider requires "runtime"');
 
     // All four present -> constructs.
-    expect(() =>
-      new FcmProvider({
-        projectId: 'p',
-        clientEmail: 'a@b.com',
-        privateKey: 'pem',
-        runtime,
-      })
+    expect(
+      () =>
+        new FcmProvider({
+          projectId: 'p',
+          clientEmail: 'a@b.com',
+          privateKey: 'pem',
+          runtime,
+        }),
     ).not.toThrow();
   });
 

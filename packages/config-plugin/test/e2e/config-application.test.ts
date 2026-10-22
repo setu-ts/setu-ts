@@ -157,10 +157,7 @@ describe('ConfigPlugin E2E — with real application', () => {
 
   it('throws startup error when envFilePath set without fs', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin({ env: {} }),
-        ConfigPlugin({ envFilePath: '.env' }),
-      ],
+      plugins: [createTestRuntimePlugin({ env: {} }), ConfigPlugin({ envFilePath: '.env' })],
     });
 
     await expect(app.start()).rejects.toThrow(/filesystem/);
@@ -168,10 +165,7 @@ describe('ConfigPlugin E2E — with real application', () => {
 
   it('works without envFilePath (env only)', async () => {
     const app = createApplication({
-      plugins: [
-        createTestRuntimePlugin({ env: { KEY: 'VALUE' } }),
-        ConfigPlugin(),
-      ],
+      plugins: [createTestRuntimePlugin({ env: { KEY: 'VALUE' } }), ConfigPlugin()],
     });
 
     await app.start();

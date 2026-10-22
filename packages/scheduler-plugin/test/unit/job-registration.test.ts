@@ -46,9 +46,8 @@ function createHarness(platform: 'deno' | 'cloudflare-workers' = 'deno'): Harnes
   const registered = new Map<string, unknown>();
   const initHooks: (() => void | Promise<void>)[] = [];
   const runtime = new FakeRuntime();
-  const platformRuntime = platform === 'deno'
-    ? runtime
-    : Object.create(runtime, { platform: { value: () => platform } });
+  const platformRuntime =
+    platform === 'deno' ? runtime : Object.create(runtime, { platform: { value: () => platform } });
 
   const ctx = {
     runtime: platformRuntime,
@@ -253,10 +252,7 @@ describe('SchedulerPlugin({ jobs }) registration arms', () => {
   it('rejects onInit naming the DECLARED index when a mixed jobs array has a throwing factory', async () => {
     const delivered: string[] = [];
     const { harness, runtime } = await boot({
-      jobs: [
-        everyDefinition(delivered, 'instance-job'),
-        jobFactoryThatThrows,
-      ],
+      jobs: [everyDefinition(delivered, 'instance-job'), jobFactoryThatThrows],
     });
 
     // Index 0 is an instance and registered before the failure.
@@ -460,11 +456,10 @@ describe('a declared job that cannot be scheduled names the entry (X23-1)', () =
 
   it('names the option, the declared index and the job name', async () => {
     const harness = createHarness();
-    await expect(SchedulerPlugin({ jobs: [badCron] }).register(harness.ctx))
-      .rejects.toThrow(
-        "Failed to schedule SchedulerPlugin({ jobs })[0] (name 'bad-expr'): " +
-          'Invalid cron expression: not a cron',
-      );
+    await expect(SchedulerPlugin({ jobs: [badCron] }).register(harness.ctx)).rejects.toThrow(
+      "Failed to schedule SchedulerPlugin({ jobs })[0] (name 'bad-expr'): " +
+        'Invalid cron expression: not a cron',
+    );
   });
 
   it('names the DECLARED index, not the position among instances', async () => {
@@ -474,8 +469,9 @@ describe('a declared job that cannot be scheduled names the entry (X23-1)', () =
     const factory: RegistryFactory<SchedulerJobDefinition> = () =>
       everyDefinition([], 'from-factory');
 
-    await expect(SchedulerPlugin({ jobs: [factory, badCron] }).register(harness.ctx))
-      .rejects.toThrow('SchedulerPlugin({ jobs })[1]');
+    await expect(
+      SchedulerPlugin({ jobs: [factory, badCron] }).register(harness.ctx),
+    ).rejects.toThrow('SchedulerPlugin({ jobs })[1]');
   });
 
   it('retains the original refusal as the cause', async () => {
@@ -484,7 +480,10 @@ describe('a declared job that cannot be scheduled names the entry (X23-1)', () =
     const harness = createHarness();
     const error = await Promise.resolve(
       SchedulerPlugin({ jobs: [badCron] }).register(harness.ctx),
-    ).then(() => undefined, (e: unknown) => e);
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).cause).toBeInstanceOf(Error);
@@ -512,7 +511,10 @@ describe('a declared job that cannot be scheduled names the entry (X23-1)', () =
     const instanceHarness = createHarness();
     const instanceError = await Promise.resolve(
       SchedulerPlugin({ jobs: [badCron] }).register(instanceHarness.ctx),
-    ).then(() => undefined, (e: unknown) => e);
+    ).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
 
     const factoryHarness = createHarness();
     const factory: RegistryFactory<SchedulerJobDefinition> = () => badCron;

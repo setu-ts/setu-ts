@@ -101,9 +101,10 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
       return;
     }
     try {
-      const data = this.#options.parse === undefined
-        ? JSON.parse(event.data) as TIncoming
-        : this.#options.parse(event.data);
+      const data =
+        this.#options.parse === undefined
+          ? (JSON.parse(event.data) as TIncoming)
+          : this.#options.parse(event.data);
       this.#options.onMessage({ data });
     } catch (error: unknown) {
       this.#options.onError?.(error);
@@ -117,8 +118,7 @@ class RealtimeClient<TIncoming, TOutgoing> implements IRealtimeClient<TOutgoing>
     }
     this.#attempts++;
     const delay = Math.min(
-      (this.#options.reconnect?.delayMs ?? DEFAULT_RECONNECT_DELAY_MS) *
-        (2 ** (this.#attempts - 1)),
+      (this.#options.reconnect?.delayMs ?? DEFAULT_RECONNECT_DELAY_MS) * 2 ** (this.#attempts - 1),
       this.#options.reconnect?.maxDelayMs ?? DEFAULT_MAX_RECONNECT_DELAY_MS,
     );
     this.#setState('connecting');

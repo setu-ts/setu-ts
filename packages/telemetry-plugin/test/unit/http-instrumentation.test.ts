@@ -4,7 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createFetchInstrumentation,
   createHttpInstrumentation,
@@ -102,5 +102,51 @@ describe('http-instrumentation', () => {
   it('loadFetchInstrumentation should reject when importFn rejects', async () => {
     const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadFetchInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
+  });
+});
+
+describe('the guarded default imports (M113d §3.1)', () => {
+  it('loadHttpInstrumentation rejects when the http instrumentation is absent', async () => {
+    const { loadHttpInstrumentation } =
+      await import('../../src/instrumentation/http-instrumentation.ts');
+    vi.doMock('@opentelemetry/instrumentation-http', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadHttpInstrumentation(undefined);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/instrumentation-http');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/instrumentation-http');
+    }
+  });
+
+  it('loadFetchInstrumentation rejects when the undici instrumentation is absent', async () => {
+    const { loadFetchInstrumentation } =
+      await import('../../src/instrumentation/http-instrumentation.ts');
+    vi.doMock('@opentelemetry/instrumentation-undici', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadFetchInstrumentation(undefined);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/instrumentation-undici');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/instrumentation-undici');
+    }
   });
 });

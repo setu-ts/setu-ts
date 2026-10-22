@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- explains the Worker-specific entry point.
+/* eslint-disable no-console -- explains the Worker-specific entry point. */
 console.log(
-  'Run `deno task start` to launch this Cloudflare Worker with Wrangler.',
+  'Run `wrangler dev --local` in apps/cloudflare to launch this Cloudflare Worker with Wrangler.',
 );

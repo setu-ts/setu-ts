@@ -49,7 +49,10 @@ export async function generateTestKey(
   kid: string,
   jwkExtras: Record<string, unknown> = {},
 ): Promise<TestKey> {
-  const pair = await crypto.subtle.generateKey(GEN[alg], true, ['sign', 'verify']) as CryptoKeyPair;
+  const pair = (await crypto.subtle.generateKey(GEN[alg], true, [
+    'sign',
+    'verify',
+  ])) as CryptoKeyPair;
   const exported = await crypto.subtle.exportKey('jwk', pair.publicKey);
   const { key_ops: _ops, ext: _ext, alg: _alg, ...material } = exported;
   return {

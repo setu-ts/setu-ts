@@ -22,7 +22,7 @@ import { servicesContext, userContext } from '../../src/handler/context-keys.ts'
 // is unavailable, rather than reporting a failure for an absent package.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('react-router') as unknown as Record<string, unknown>;
+  rrModule = (await import('react-router')) as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }
@@ -31,7 +31,7 @@ try {
  * Minimal-but-real `ServerBuild`: enough shape for `createRequestHandler` to
  * route a GET `/` to a single root route whose loader reads the context.
  */
-// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function buildServerBuild(onLoaderContext: (context: any) => void): unknown {
   return {
     ssr: true,
@@ -57,7 +57,7 @@ function buildServerBuild(onLoaderContext: (context: any) => void): unknown {
         path: '',
         module: {
           default: () => null,
-          // deno-lint-ignore no-explicit-any
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           loader: ({ context }: any) => {
             onLoaderContext(context);
             return { ok: true };
@@ -155,7 +155,7 @@ describe('real createRequestHandler — loadContext contract', { skip: rrModule 
     const rr = rrModule!;
     const registry = { get: () => undefined } as unknown as IServiceRegistry;
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let loaderContext: any = null;
     const createRequestHandler = rr.createRequestHandler as (
       build: unknown,
@@ -198,10 +198,7 @@ describe('real createRequestHandler — loadContext contract', { skip: rrModule 
     );
 
     // This is what the plugin passed before the fix: `{ services, user }`.
-    const response = await handler(
-      new Request('http://localhost/'),
-      { services: {} } as unknown,
-    );
+    const response = await handler(new Request('http://localhost/'), { services: {} } as unknown);
 
     expect(response.status).toBe(500);
   });

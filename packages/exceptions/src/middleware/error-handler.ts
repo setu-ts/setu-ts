@@ -20,7 +20,13 @@
  *
  * @module
  */
-import type { HandlerResult, ILogger, IRequestContext, MiddlewareFunction } from '@setu-ts/common';
+import type {
+  HandlerResult,
+  ILogger,
+  IRequestContext,
+  IRuntimeServices,
+  MiddlewareFunction,
+} from '@setu-ts/common';
 import {
   brandErrorResponder,
   CAPABILITIES,
@@ -32,7 +38,11 @@ import {
 
 import { HttpError } from '../errors/http-error.ts';
 import { internalServerError, statusTitle } from '../errors/exceptions.ts';
-import { buildErrorFromInit, createErrorResponder } from './error-responder-impl.ts';
+import {
+  buildErrorFromInit,
+  createErrorResponder,
+  thrownErrorStatus,
+} from './error-responder-impl.ts';
 import {
   type ErrorFormat,
   type ErrorHandlerFormatter,
@@ -85,9 +95,8 @@ export interface ErrorHandlerOptions {
    */
   readonly maskInternalErrors?: boolean;
   /**
-   * When `true` (the default), caught errors are logged at `error` level via
-   * the `ILogger` resolved from `ctx.services` — but only if a logger is
-   * registered. When no logger is present, logging is silently skipped.
+   * When `true` (the default), logs once at `warn` below 500 and `error`
+   * otherwise. Without a logger, only 5xx reaches runtime.reportError.
    */
   readonly logErrors?: boolean;
   /**
@@ -178,10 +187,12 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
     } catch (rawError) {
       // Normalize: HttpError passes through, anything else becomes a 500.
       const isHttpError = rawError instanceof HttpError;
-      const error: HttpError = isHttpError ? rawError : internalServerError(
-        rawError instanceof Error ? rawError.message : 'Internal Server Error',
-        rawError instanceof Error ? rawError : undefined,
-      );
+      const error: HttpError = isHttpError
+        ? rawError
+        : internalServerError(
+            rawError instanceof Error ? rawError.message : 'Internal Server Error',
+            rawError instanceof Error ? rawError : undefined,
+          );
 
       // A thrower that cannot import this package states the status its own
       // error means by branding it with an `HttpStatusHint` (M89b) — the seam
@@ -234,7 +245,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
       // the write also makes `responseError === error` false, which suppresses
       // the stack — correct by that check's own stated invariant, since the
       // error being SERVED is no longer the error that was LOGGED.
-      const servedStatus = resolveResponseStatus(responseError.statusCode, ctx);
+      const servedStatus = resolveResponseStatus(thrownErrorStatus(rawError).requested, ctx);
       if (servedStatus !== responseError.statusCode) {
         responseError = new HttpError(
           servedStatus,
@@ -268,8 +279,7 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
         return result;
       }
 
-      // Log the UNMASKED error, so the log keeps the SQL, the bound parameters
-      // and the cause chain regardless of masking — and report the status the
+      // Log the unmasked diagnostic and cause chain, with the status the
       // formatter below will actually serve. A hint may change a normalized
       // `500` to `501`, so logging the pre-hint status would mislead operators.
       if (logErrors) {
@@ -315,8 +325,8 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
 }
 
 /**
- * Logs an error via the registered `ILogger`, if one is available. Silently
- * does nothing when no logger capability is registered.
+ * Logs once through the registered logger, or the runtime sink for 5xx when
+ * no logger is registered. Handled 4xx without a logger stays silent.
  *
  * @param ctx - The request context
  * @param error - The error to log, carrying the unmasked message and cause
@@ -324,12 +334,22 @@ export function errorHandler(options?: ErrorHandlerOptions): MiddlewareFunction 
  */
 function logError(ctx: IRequestContext, error: HttpError, statusCode: number): void {
   if (!ctx.services.has(CAPABILITIES.LOGGER)) {
+    if (statusCode >= 500 && ctx.services.has(CAPABILITIES.RUNTIME)) {
+      ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
+        level: 'error',
+        ...serializeError(error),
+        statusCode,
+        requestId: ctx.id,
+        method: ctx.request.method,
+        path: ctx.request.path,
+      });
+    }
     return;
   }
   const logger = ctx.services.get<ILogger>(CAPABILITIES.LOGGER);
   // Serialize the cause (X2-5): a raw `Error` in log metadata renders as `{}`
   // under `JSON.stringify` because `message`/`stack` are non-enumerable.
-  logger.error(error.message, {
+  logger[statusCode < 500 ? 'warn' : 'error'](error.message, {
     statusCode,
     requestId: ctx.id,
     ...(error.cause !== undefined && { cause: serializeError(error.cause) }),

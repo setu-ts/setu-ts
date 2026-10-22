@@ -88,32 +88,32 @@ export interface AssertionFields {
 
 /** Builds an unsigned assertion element. */
 export function assertionXml(fields: AssertionFields): string {
-  const attributes = Object.entries(fields.attributes).map(([name, value]) =>
-    `<saml:Attribute Name="${name}">${
-      (Array.isArray(value) ? value : [value]).map((v) =>
-        `<saml:AttributeValue>${v}</saml:AttributeValue>`
-      )
-        .join('')
-    }</saml:Attribute>`
-  ).join('');
+  const attributes = Object.entries(fields.attributes)
+    .map(
+      ([name, value]) =>
+        `<saml:Attribute Name="${name}">${(Array.isArray(value) ? value : [value])
+          .map((v) => `<saml:AttributeValue>${v}</saml:AttributeValue>`)
+          .join('')}</saml:Attribute>`,
+    )
+    .join('');
   const recipient = fields.recipient === null ? '' : ` Recipient="${fields.recipient}"`;
-  return `<saml:Assertion xmlns:saml="${SAML_NS}" ID="${fields.id}" Version="2.0" IssueInstant="${
-    iso(fields.notBefore)
-  }"><saml:Issuer>${fields.issuer}</saml:Issuer><saml:Subject>${
+  return `<saml:Assertion xmlns:saml="${SAML_NS}" ID="${fields.id}" Version="2.0" IssueInstant="${iso(
+    fields.notBefore,
+  )}"><saml:Issuer>${fields.issuer}</saml:Issuer><saml:Subject>${
     fields.nameID === null
       ? ''
       : `<saml:NameID Format="urn:oasis:names:tc:SAML:1.1:nameid-format:unspecified">${fields.nameID}</saml:NameID>`
   }<saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData${
     fields.inResponseTo === null ? '' : ` InResponseTo="${fields.inResponseTo}"`
-  } NotOnOrAfter="${
-    iso(fields.notOnOrAfter)
-  }"${recipient}/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${
-    iso(fields.notBefore)
-  }" NotOnOrAfter="${
-    iso(fields.notOnOrAfter)
-  }"><saml:AudienceRestriction><saml:Audience>${fields.audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="${
-    iso(fields.notBefore)
-  }" SessionIndex="session-1"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement>${attributes}</saml:AttributeStatement></saml:Assertion>`;
+  } NotOnOrAfter="${iso(
+    fields.notOnOrAfter,
+  )}"${recipient}/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${iso(
+    fields.notBefore,
+  )}" NotOnOrAfter="${iso(
+    fields.notOnOrAfter,
+  )}"><saml:AudienceRestriction><saml:Audience>${fields.audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="${iso(
+    fields.notBefore,
+  )}" SessionIndex="session-1"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:Password</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement><saml:AttributeStatement>${attributes}</saml:AttributeStatement></saml:Assertion>`;
 }
 
 /** Signs the element whose `ID` is `id`, placing the signature after its Issuer. */
@@ -144,9 +144,9 @@ export function responseXml(
   issuer = IDP_ENTITY,
 ): string {
   const irt = inResponseTo === null ? '' : ` InResponseTo="${inResponseTo}"`;
-  return `<samlp:Response xmlns:samlp="${SAMLP_NS}" ID="_resp-${crypto.randomUUID()}" Version="2.0" IssueInstant="${
-    iso(Date.now())
-  }" Destination="${ACS_URL}"${irt}><saml:Issuer xmlns:saml="${SAML_NS}">${issuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>${assertions}</samlp:Response>`;
+  return `<samlp:Response xmlns:samlp="${SAMLP_NS}" ID="_resp-${crypto.randomUUID()}" Version="2.0" IssueInstant="${iso(
+    Date.now(),
+  )}" Destination="${ACS_URL}"${irt}><saml:Issuer xmlns:saml="${SAML_NS}">${issuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status>${assertions}</samlp:Response>`;
 }
 
 /** Base64 for a SAMLResponse form field. */
@@ -269,9 +269,8 @@ export async function buildSamlApp(
     return ctx.response.json({ ok: true });
   });
   app.router.get('/_csrf', async (ctx) => ctx.response.json({ token: await getCsrfToken(ctx) }));
-  app.router.get(
-    '/_remembered',
-    (ctx) => ctx.response.json({ value: getSession(ctx).get('remembered') ?? null }),
+  app.router.get('/_remembered', (ctx) =>
+    ctx.response.json({ value: getSession(ctx).get('remembered') ?? null }),
   );
   await app.start();
   return { app, key };

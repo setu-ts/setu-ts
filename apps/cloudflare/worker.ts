@@ -11,13 +11,11 @@ import type {
   IQueueMessageBatch,
   IScheduledController,
 } from '@setu-ts/cloudflare-plugin';
-import { createCloudflareApp } from './src/app.ts';
 import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
 
 interface WorkerEnvironment extends CloudflareWorkerEnv {
-  readonly EXAMPLE_KV: {
-    put(key: string, value: string): Promise<void>;
-  };
+  readonly EXAMPLE_KV: { put(key: string, value: string): Promise<void> };
 }
 
 let scheduledRuns = 0;
@@ -26,63 +24,58 @@ const cron = new WorkersCron().on('*/5 * * * *', () => {
   return Promise.resolve();
 });
 
+/** The Worker's `fetch` path, plus the started application its other exports reuse. */
 export interface WorkerHandler {
   fetch(request: Request, env: WorkerEnvironment): Promise<Response>;
   /**
-   * The booted application, shared with the `queue` export.
+   * The application `fetch` started.
    *
-   * Exposed because Cloudflare invokes a queue consumer as a separate
-   * module-level export, and it must dispatch into the SAME application the
-   * `fetch` path booted: a second one would carry its own broker with its own
-   * dispatch table, and the subscriptions registered on one would be invisible
-   * to the other.
+   * The `queue` export must dispatch into this same application: a second one
+   * would hold its own broker, and the subscriptions registered on one would be
+   * invisible to the other.
    */
   application(env: WorkerEnvironment): Promise<IKernelApplication>;
 }
 
+/**
+ * Starts the application once per isolate and shares it between invocations.
+ *
+ * Concurrent callers share one start. A failed start is forgotten, so the next
+ * request retries it instead of the isolate failing for its whole life.
+ */
 export function createWorkerHandler(
-  createApp: (env: WorkerEnvironment) => IKernelApplication = createCloudflareApp,
+  build: (env: WorkerEnvironment) => IKernelApplication = createApp,
 ): WorkerHandler {
-  let application: Promise<IKernelApplication> | undefined;
-  const app = (env: WorkerEnvironment): Promise<IKernelApplication> => {
-    if (application === undefined) {
-      // Concurrent callers share one start, and no request reaches fetch on an
-      // application whose start failed. A FAILED start is forgotten, though, so
-      // the next request retries it: one isolate serves many invocations, so a
-      // cached rejection would outlive the request that hit it and leave the
-      // isolate answering errors for its whole life (M70l X9-8). The generated
-      // Workers entry follows the same rule.
-      const attempt: Promise<IKernelApplication> = (async () => {
-        const created = createApp(env);
-        await created.start();
-        return created;
+  let started: Promise<IKernelApplication> | undefined;
+
+  const application = (env: WorkerEnvironment): Promise<IKernelApplication> => {
+    if (started === undefined) {
+      const attempt = (async () => {
+        const app = build(env);
+        await app.start();
+        return app;
       })();
-      application = attempt;
+      started = attempt;
       attempt.catch(() => {
-        application = undefined;
+        started = undefined;
       });
     }
-    return application;
+    return started;
   };
 
   return {
-    fetch(request: Request, env: WorkerEnvironment): Promise<Response> {
-      return app(env).then((created) => created.fetch(request));
-    },
-    application: app,
+    fetch: (request, env) => application(env).then((app) => app.fetch(request)),
+    application,
   };
 }
 
 const workerHandler = createWorkerHandler();
 
 /**
- * The Durable Object serving RPC reply inboxes.
+ * The Durable Object that holds request/reply inboxes.
  *
- * Deliberately NOT `extends DurableObject`: that base class lives in
- * `cloudflare:workers`, which Deno cannot resolve, so importing it would break
- * `deno check` on this example. workerd accepts a plain class taking
- * `(ctx, env)` — established against real workerd in M52d, and the reason this
- * example can be both type-checked here and deployed there.
+ * Not `extends DurableObject`: that class lives in `cloudflare:workers`, which
+ * only a Worker toolchain resolves. workerd accepts a plain `(ctx, env)` class.
  */
 export class ReplyInboxObject {
   readonly #core: ReplyInboxObjectCore;
@@ -95,11 +88,7 @@ export class ReplyInboxObject {
     return this.#core.fetch(request);
   }
 
-  webSocketClose(
-    ws: IDurableObjectWebSocket,
-    code: number,
-    reason: string,
-  ): void {
+  webSocketClose(ws: IDurableObjectWebSocket, code: number, reason: string): void {
     this.#core.webSocketClose(ws, code, reason);
   }
 
@@ -112,21 +101,13 @@ export default {
   fetch(request: Request, env: WorkerEnvironment): Promise<Response> {
     return workerHandler.fetch(request, env);
   },
-  /**
-   * The consumer half, which Cloudflare invokes as a MODULE EXPORT rather than
-   * through `fetch` — a separate invocation from the one that published.
-   */
-  async queue(
-    batch: IQueueMessageBatch,
-    env: WorkerEnvironment,
-  ): Promise<void> {
-    const app = await workerHandler.application(env);
-    await createMessagingHandler(app)(batch);
+
+  /** Cloudflare delivers queue messages here, in a separate invocation from the publish. */
+  async queue(batch: IQueueMessageBatch, env: WorkerEnvironment): Promise<void> {
+    await createMessagingHandler(await workerHandler.application(env))(batch);
   },
-  async scheduled(
-    controller: IScheduledController,
-    env: WorkerEnvironment,
-  ): Promise<void> {
+
+  async scheduled(controller: IScheduledController, env: WorkerEnvironment): Promise<void> {
     await createScheduledHandler(cron)(controller);
     await env.EXAMPLE_KV.put('scheduled-runs', String(scheduledRuns));
   },

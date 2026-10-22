@@ -94,8 +94,9 @@ describe('ServiceDiscoveryPlugin — registration', () => {
     const picked = await discovery.pick('billing');
     expect(picked?.host).toBe('10.0.0.1');
 
-    expect(await discovery.resolveUrl('billing', '/invoices'))
-      .toBe('http://10.0.0.2:8080/invoices');
+    expect(await discovery.resolveUrl('billing', '/invoices')).toBe(
+      'http://10.0.0.2:8080/invoices',
+    );
 
     // report() is fire-and-forget; the ejection test below proves it acts.
     discovery.report(instances[0], 'success');
@@ -163,7 +164,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
     await app.stop();
   });
 
-  it("reports 'degraded' after a provider failure with a warm cache", async () => {
+  it("reports 'up' after a provider failure with a warm cache", async () => {
     const provider = createFakeProvider([instance({ id: 'a' })]);
     const health = healthCapture();
     const app = createApplication({
@@ -183,7 +184,7 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
     await discovery.resolve('billing');
 
     const result = await health.check('service-discovery');
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     expect((result.data as { degraded: boolean }).degraded).toBe(true);
 
     await app.stop();

@@ -111,6 +111,10 @@ rather than an inert one.
 |                  | ResiliencePlugin   | Circuit breaker & retries |
 |                  | TelemetryPlugin    | Tracing & observability   |
 
+OpenApiPlugin self-hosts Swagger UI by default, so install `swagger-ui-dist` (`^5`) in the consuming
+application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, startup fails with
+`OptionalDependencyUnavailableError`.
+
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
 `apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
 globally at priority 300 unless `auth.middleware` disables or moves it.
@@ -229,5 +233,5 @@ Two consequences follow from the list being positional:
 | `MicroserviceStarterOptions` | interface |
 | `RealtimeArm`                | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -1,4 +1,5 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+import { readdir, readFile } from 'node:fs/promises';
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Milestone-plan linter — enforces the plan structure CLAUDE.md mandates,
  * mechanically, so a plan (human- or model-authored) cannot silently omit a
@@ -20,8 +21,8 @@
  *     prompts committed beside the one canonical plan (M10 shipped four).
  *
  * Usage:
- *   deno run --allow-read scripts/plan-lint.ts                  # all plans/*.md at root
- *   deno run --allow-read scripts/plan-lint.ts plans/x.md ...   # specific files
+ *   node scripts/plan-lint.ts                  # all plans/*.md at root
+ *   node scripts/plan-lint.ts plans/x.md ...   # specific files
  *
  * Exits 1 on any ERROR. Warnings print but do not fail the run.
  */
@@ -46,7 +47,18 @@ const NON_PLAN = /^(?:TEMPLATE|README)\.md$/;
  * digits-only pattern rejected every one of them, so no sub-milestone plan
  * could ever lint clean.
  */
-const CANONICAL_ROOT = /^(?:milestone-\d+[a-z]?-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
+const CANONICAL_ROOT = /^(?:milestone-\d+(?:[a-z]\d?)?-[a-z0-9.-]+|TEMPLATE|README)\.md$/;
+
+/**
+ * Reports whether a file name may sit at `plans/` root. A milestone number takes an optional
+ * letter and, for a lettered milestone split into numbered parts (M111e1), one digit after it.
+ *
+ * @param name - The file's base name.
+ * @returns `true` for a canonical plan, `TEMPLATE.md` or `README.md`.
+ */
+export function isCanonicalPlanName(name: string): boolean {
+  return CANONICAL_ROOT.test(name);
+}
 
 /** Every plan must contain a heading matching each of these. */
 const REQUIRED_SECTIONS: readonly { readonly label: string; readonly match: RegExp }[] = [
@@ -156,12 +168,14 @@ export function lintText(file: string, text: string): { errors: Finding[]; warni
         'minor <X.Y.0>` — the release that carries a break is chosen when the break is designed.',
     });
   } else if (
-    !/^none\b/i.test(breakingStatement.value) && !TARGET_MINOR.test(breakingStatement.value)
+    !/^none\b/i.test(breakingStatement.value) &&
+    !TARGET_MINOR.test(breakingStatement.value)
   ) {
     errors.push({
       file,
       line: breakingStatement.line,
-      message: 'the compatibility statement names a break but no minor release to carry it — add ' +
+      message:
+        'the compatibility statement names a break but no minor release to carry it — add ' +
         '"ships in minor <X.Y.0>" (a patch may not carry a BREAKING entry; verify-release check 10 ' +
         'refuses one).',
     });
@@ -173,13 +187,14 @@ export function lintText(file: string, text: string): { errors: Finding[]; warni
 /** Repo-hygiene: only canonical plan files may sit at plans/ root. */
 async function rootHygiene(): Promise<Finding[]> {
   const findings: Finding[] = [];
-  for await (const entry of Deno.readDir(PLANS_DIR)) {
-    if (!entry.isFile || !entry.name.endsWith('.md')) continue;
-    if (!CANONICAL_ROOT.test(entry.name)) {
+  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
+    if (!isCanonicalPlanName(entry.name)) {
       findings.push({
         file: `${PLANS_DIR}/${entry.name}`,
         line: null,
-        message: 'non-canonical file at plans/ root — only milestone-<N>-<desc>.md, ' +
+        message:
+          'non-canonical file at plans/ root — only milestone-<N>-<desc>.md, ' +
           'TEMPLATE.md, README.md are permitted. Scratch (continuation / fix-round / ' +
           'hand-off / review) belongs in the session scratchpad, never committed here.',
       });
@@ -190,8 +205,8 @@ async function rootHygiene(): Promise<Finding[]> {
 
 async function defaultTargets(): Promise<string[]> {
   const targets: string[] = [];
-  for await (const entry of Deno.readDir(PLANS_DIR)) {
-    if (entry.isFile && entry.name.endsWith('.md')) targets.push(`${PLANS_DIR}/${entry.name}`);
+  for await (const entry of await readdir(PLANS_DIR, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.md')) targets.push(`${PLANS_DIR}/${entry.name}`);
   }
   return targets.sort();
 }
@@ -201,7 +216,7 @@ function format(f: Finding): string {
   return `  ${loc}  ${f.message}`;
 }
 
-if (import.meta.main) await main(Deno.args);
+if (import.meta.main) await main(process.argv.slice(2));
 
 /** The command: lint the given files, or every plan at `plans/` root. */
 async function main(args: readonly string[]): Promise<void> {
@@ -212,7 +227,7 @@ async function main(args: readonly string[]): Promise<void> {
   const warnings: Finding[] = [];
 
   // Directory-level invariant: run only when scanning the default root set.
-  if (scanningDefault) errors.push(...await rootHygiene());
+  if (scanningDefault) errors.push(...(await rootHygiene()));
 
   let planCount = 0;
   for (const file of targets) {
@@ -221,7 +236,7 @@ async function main(args: readonly string[]): Promise<void> {
     planCount++;
     let content: string;
     try {
-      content = await Deno.readTextFile(file);
+      content = await readFile(file, 'utf8');
     } catch (err) {
       errors.push({
         file,
@@ -244,7 +259,8 @@ async function main(args: readonly string[]): Promise<void> {
     console.error(`\n✖  ${errors.length} error(s):`);
     for (const e of errors) console.error(format(e));
     console.error('\nplan-lint failed. Fix the errors above before implementing.');
-    Deno.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const suffix = warnings.length > 0 ? ` (${warnings.length} warning(s))` : '';

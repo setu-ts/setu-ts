@@ -41,6 +41,15 @@ export interface IDistributedLock {
    * @param token - The token returned by `acquire`
    */
   release(key: string, token: string): Promise<void>;
+
+  /**
+   * Probe the lock backend without acquiring a lock.
+   *
+   * @returns `true` if reachable, `false` if unreachable, or `undefined`
+   *   when reachability cannot be determined
+   * @since 0.10.0
+   */
+  isHealthy?(): Promise<boolean | undefined>;
 }
 
 /**
@@ -186,46 +195,49 @@ export interface SchedulerDiagnosticsOptions {
  *
  * @since 0.3.0
  */
-export type SchedulerJobDefinition = {
-  /** Discriminator: this job fires on a 5-field cron expression (UTC). */
-  readonly trigger: 'cron';
-  /** Unique job name (the `cron()` name argument). */
-  readonly name: string;
-  /** 5-field cron expression (UTC). Required on the `cron` arm. */
-  readonly expression: string;
-  /** Invoked on each fire, exactly as the imperative `cron()` accepts. */
-  readonly handler: SchedulerJobHandler;
-  /** Optional payload handed to the handler. */
-  readonly data?: unknown;
-  /** Optional retry configuration, exactly as the imperative `cron()` accepts. */
-  readonly retry?: RetryOptions;
-} | {
-  /** Discriminator: this job fires on a fixed interval. */
-  readonly trigger: 'every';
-  /** Unique job name (the `every()` name argument). */
-  readonly name: string;
-  /** Interval in milliseconds. Required on the `every` arm. */
-  readonly intervalMs: number;
-  /** Invoked on each fire, exactly as the imperative `every()` accepts. */
-  readonly handler: SchedulerJobHandler;
-  /** Optional payload handed to the handler. */
-  readonly data?: unknown;
-  /** Optional retry configuration, exactly as the imperative `every()` accepts. */
-  readonly retry?: RetryOptions;
-} | {
-  /** Discriminator: this job fires once, after a delay. */
-  readonly trigger: 'delay';
-  /** Unique job name (the `delay()` name argument). */
-  readonly name: string;
-  /** Delay in milliseconds. Required on the `delay` arm. */
-  readonly delayMs: number;
-  /** Invoked when the delay expires, exactly as the imperative `delay()` accepts. */
-  readonly handler: SchedulerJobHandler;
-  /** Optional payload handed to the handler. */
-  readonly data?: unknown;
-  /** Optional retry configuration, exactly as the imperative `delay()` accepts. */
-  readonly retry?: RetryOptions;
-};
+export type SchedulerJobDefinition =
+  | {
+      /** Discriminator: this job fires on a 5-field cron expression (UTC). */
+      readonly trigger: 'cron';
+      /** Unique job name (the `cron()` name argument). */
+      readonly name: string;
+      /** 5-field cron expression (UTC). Required on the `cron` arm. */
+      readonly expression: string;
+      /** Invoked on each fire, exactly as the imperative `cron()` accepts. */
+      readonly handler: SchedulerJobHandler;
+      /** Optional payload handed to the handler. */
+      readonly data?: unknown;
+      /** Optional retry configuration, exactly as the imperative `cron()` accepts. */
+      readonly retry?: RetryOptions;
+    }
+  | {
+      /** Discriminator: this job fires on a fixed interval. */
+      readonly trigger: 'every';
+      /** Unique job name (the `every()` name argument). */
+      readonly name: string;
+      /** Interval in milliseconds. Required on the `every` arm. */
+      readonly intervalMs: number;
+      /** Invoked on each fire, exactly as the imperative `every()` accepts. */
+      readonly handler: SchedulerJobHandler;
+      /** Optional payload handed to the handler. */
+      readonly data?: unknown;
+      /** Optional retry configuration, exactly as the imperative `every()` accepts. */
+      readonly retry?: RetryOptions;
+    }
+  | {
+      /** Discriminator: this job fires once, after a delay. */
+      readonly trigger: 'delay';
+      /** Unique job name (the `delay()` name argument). */
+      readonly name: string;
+      /** Delay in milliseconds. Required on the `delay` arm. */
+      readonly delayMs: number;
+      /** Invoked when the delay expires, exactly as the imperative `delay()` accepts. */
+      readonly handler: SchedulerJobHandler;
+      /** Optional payload handed to the handler. */
+      readonly data?: unknown;
+      /** Optional retry configuration, exactly as the imperative `delay()` accepts. */
+      readonly retry?: RetryOptions;
+    };
 
 /**
  * One entry of {@linkcode SchedulerPluginOptions.jobs}: a job definition, or
@@ -234,9 +246,7 @@ export type SchedulerJobDefinition = {
  *
  * @since 0.3.0
  */
-export type SchedulerJobEntry =
-  | SchedulerJobDefinition
-  | RegistryFactory<SchedulerJobDefinition>;
+export type SchedulerJobEntry = SchedulerJobDefinition | RegistryFactory<SchedulerJobDefinition>;
 
 /**
  * Options for distributed locking.
@@ -393,14 +403,14 @@ export interface DelayRegistryEntry<T = unknown> extends RegistryEntryBase<T> {
  * and TypeScript enforces exhaustiveness.
  */
 export type RegistryEntry<T = unknown> =
-  | CronRegistryEntry<T>
-  | EveryRegistryEntry<T>
-  | DelayRegistryEntry<T>;
+  CronRegistryEntry<T> | EveryRegistryEntry<T> | DelayRegistryEntry<T>;
 
 /**
  * Minimal ioredis client shape required by RedisLock.
  */
 export interface IRedisLockClient {
+  /** Optional reachability probe; a resolved PING means reachable. @since 0.10.0 */
+  ping?(): Promise<unknown>;
   /** SET key value [NX] [PX ttl] - PX is the milliseconds flag */
   set(key: string, value: string, option: string, px: 'PX', ttl: number): Promise<string | null>;
   /** Quit the connection */

@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISmtpTransport, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -71,7 +72,11 @@ export function adaptNodemailerModule(
  * @throws {Error} If `nodemailer` cannot be resolved
  */
 export async function loadNodemailerModule(): Promise<NodemailerModule> {
-  return await import('nodemailer') as unknown as NodemailerModule;
+  try {
+    return (await import('nodemailer')) as unknown as NodemailerModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('nodemailer', { cause: error });
+  }
 }
 
 /** Builds a transport config without assigning `undefined` to optional fields. */
@@ -115,7 +120,7 @@ export function toNodemailerMessage(
 
 /** Joins one-or-many addresses into a comma-separated header value. */
 function joinAddresses(to: string | readonly string[]): string {
-  return Array.isArray(to) ? to.join(', ') : to as string;
+  return Array.isArray(to) ? to.join(', ') : (to as string);
 }
 
 /**

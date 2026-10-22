@@ -29,6 +29,7 @@ export type { ValidationPluginOptions } from './plugin/validation-plugin.ts';
 export { ValidationService } from './services/validation-service.ts';
 
 // Middleware helpers
+export type { ValidatedOutput, ValidatorMiddleware } from './middleware/validator-reader.ts';
 export {
   createValidationMiddleware,
   validateBody,

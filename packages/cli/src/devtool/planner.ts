@@ -82,9 +82,9 @@ export function devtoolRunnerRefusal(
   if (existing === undefined) return undefined;
   if (DEVTOOL_ENV_NAMES.every((name) => existing.includes(name))) return undefined;
   return (
-    `${
-      escapeName(path)
-    } predates the devtool: it starts every member with that member's \`start\`` +
+    `${escapeName(
+      path,
+    )} predates the devtool: it starts every member with that member's \`start\`` +
     ` task and passes no per-child environment, so the development entry would never run` +
     ` and the launcher would meet a closed port. It also hands every member the runner's` +
     ` whole environment, which is how a sibling would come to hold this session's` +
@@ -127,7 +127,8 @@ const LEGACY_FACTORY_SHAPES: readonly string[] = [
 ];
 
 /** The exact factory signature the refusal tells a developer to write. */
-const EXPECTED_SIGNATURE = `export function createApp(\n` +
+const EXPECTED_SIGNATURE =
+  `export function createApp(\n` +
   `  _env?: Readonly<Record<string, unknown>>,\n` +
   `  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n` +
   `): IKernelApplication {`;
@@ -248,15 +249,21 @@ export function withDevtool(
  * point, before anything is written.
  *
  * @param runtime - The target runtime
+ * @param context - Whether scaffolding or enabling an existing project was requested
  * @returns The refusal message, or `undefined` for Deno
  */
-export function devtoolRuntimeRefusal(runtime: TargetRuntime): string | undefined {
+export function devtoolRuntimeRefusal(
+  runtime: TargetRuntime,
+  context: 'scaffold' | 'enable',
+): string | undefined {
   if (runtime === 'deno') return undefined;
   return (
     `The devtool requires the Deno runtime: the diagnostics listener refuses every` +
     ` non-Deno \`listen\` before it binds, so a ${runtime} project could never start` +
-    ` the connector it was scaffolded with. Scaffold without --devtool, or create` +
-    ` the project with --runtime deno.`
+    ` its diagnostics connector. ` +
+    (context === 'scaffold'
+      ? 'Scaffold without --devtool, or create the project with --runtime deno.'
+      : `This project targets ${runtime}; the devtool can only be enabled on a Deno project.`)
   );
 }
 
@@ -319,7 +326,7 @@ export async function standaloneDevtoolPort(
   probe?: (port: number) => Promise<boolean>,
 ): Promise<number | undefined> {
   for (let port = DEFAULT_DEVTOOL_PORT; port <= DEFAULT_DEVTOOL_PORT + 100; port++) {
-    if (probe === undefined || await probe(port)) return port;
+    if (probe === undefined || (await probe(port))) return port;
   }
   return undefined;
 }

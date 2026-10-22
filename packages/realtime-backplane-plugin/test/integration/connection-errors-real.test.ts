@@ -23,54 +23,62 @@ import {
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
 
 describe('REAL Redis backplane transport: connection errors', () => {
-  it('route to the logger, de-duplicated, and never to the console', {
-    skip: REDIS_URL === undefined,
-  }, async () => {
-    const logger = new RecordingLogger();
-    let app: IKernelApplication | undefined;
-    await expectOutageRoutedToLogger({
-      logger,
-      source: 'realtime-backplane-plugin: redis transport',
-      start: async () => {
-        app = createApplication({
-          plugins: [
-            RuntimePlugin(),
-            loggerPlugin(logger),
-            RealtimeBackplanePlugin({ transport: 'redis', url: redisUrl() }),
-          ],
-        });
-        await app.start();
-      },
-      stop: async () => {
-        await app?.stop();
-      },
-    });
-  });
+  it(
+    'route to the logger, de-duplicated, and never to the console',
+    {
+      skip: REDIS_URL === undefined,
+    },
+    async () => {
+      const logger = new RecordingLogger();
+      let app: IKernelApplication | undefined;
+      await expectOutageRoutedToLogger({
+        logger,
+        source: 'realtime-backplane-plugin: redis transport',
+        start: async () => {
+          app = createApplication({
+            plugins: [
+              RuntimePlugin(),
+              loggerPlugin(logger),
+              RealtimeBackplanePlugin({ transport: 'redis', url: redisUrl() }),
+            ],
+          });
+          await app.start();
+        },
+        stop: async () => {
+          await app?.stop();
+        },
+      });
+    },
+  );
 
-  it('attaches no listener to an injected client', {
-    skip: REDIS_URL === undefined,
-  }, async () => {
-    const client = new Redis(redisUrl(), { lazyConnect: true });
-    const injected = client as unknown as IRedisBackplaneClient;
-    const subscriberClient = new Redis(redisUrl(), { lazyConnect: true });
-    const subscriber = subscriberClient as unknown as IRedisBackplaneClient;
-    const before = client.listenerCount('error');
-    const subscriberBefore = subscriberClient.listenerCount('error');
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        loggerPlugin(new RecordingLogger()),
-        RealtimeBackplanePlugin({ transport: 'redis', client: injected, subscriber }),
-      ],
-    });
-    try {
-      await app.start();
-      expect(client.listenerCount('error')).toBe(before);
-      expect(subscriberClient.listenerCount('error')).toBe(subscriberBefore);
-    } finally {
-      await app.stop();
-      client.disconnect();
-      subscriberClient.disconnect();
-    }
-  });
+  it(
+    'attaches no listener to an injected client',
+    {
+      skip: REDIS_URL === undefined,
+    },
+    async () => {
+      const client = new Redis(redisUrl(), { lazyConnect: true });
+      const injected = client as unknown as IRedisBackplaneClient;
+      const subscriberClient = new Redis(redisUrl(), { lazyConnect: true });
+      const subscriber = subscriberClient as unknown as IRedisBackplaneClient;
+      const before = client.listenerCount('error');
+      const subscriberBefore = subscriberClient.listenerCount('error');
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          loggerPlugin(new RecordingLogger()),
+          RealtimeBackplanePlugin({ transport: 'redis', client: injected, subscriber }),
+        ],
+      });
+      try {
+        await app.start();
+        expect(client.listenerCount('error')).toBe(before);
+        expect(subscriberClient.listenerCount('error')).toBe(subscriberBefore);
+      } finally {
+        await app.stop();
+        client.disconnect();
+        subscriberClient.disconnect();
+      }
+    },
+  );
 });

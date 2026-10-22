@@ -37,9 +37,7 @@ export type ResolverMap = Record<string, TypeResolverMap | GraphqlScalarResolver
  */
 export type TypeResolverMap = Record<
   string,
-  | AnyFieldResolver
-  | AnySubscriptionResolver
-  | (() => unknown) // __resolveType for interfaces
+  AnyFieldResolver | AnySubscriptionResolver | (() => unknown) // __resolveType for interfaces
 >;
 
 /**
@@ -119,12 +117,7 @@ export type FieldResolver<
   TSource = unknown,
   TContext = unknown,
   TArgs = Record<string, unknown>,
-> = (
-  source: TSource,
-  args: TArgs,
-  context: TContext,
-  info: unknown,
-) => unknown;
+> = (source: TSource, args: TArgs, context: TContext, info: unknown) => unknown;
 
 /**
  * A subscription field's resolver pair.
@@ -220,9 +213,7 @@ export interface GraphqlWsTransportOptions {
    * the socket with `4403: Forbidden`. May write to `conn.data` to establish
    * identity for the default resolver context.
    */
-  onConnect?: (
-    info: GraphqlConnectionInfo,
-  ) => false | void | Promise<false | void>;
+  onConnect?: (info: GraphqlConnectionInfo) => false | void | Promise<false | void>;
 }
 
 /**
@@ -330,111 +321,104 @@ export interface GraphqlCodeFirstOptions {
  *
  * Supplying both arms results in a compile error due to the `?: never` fields.
  */
-export type GraphqlPluginOptions =
-  & (
-    | GraphqlSchemaFirstOptions
-    | GraphqlCodeFirstOptions
-  )
-  & {
-    /**
-     * Path for the GraphQL endpoint. Defaults to '/graphql'.
-     */
-    path?: string;
+export type GraphqlPluginOptions = (GraphqlSchemaFirstOptions | GraphqlCodeFirstOptions) & {
+  /**
+   * Path for the GraphQL endpoint. Defaults to '/graphql'.
+   */
+  path?: string;
 
-    /**
-     * Enable GraphiQL UI. Defaults to true.
-     */
-    graphiql?: boolean;
+  /**
+   * Enable GraphiQL UI. Defaults to true.
+   */
+  graphiql?: boolean;
 
-    /**
-     * Enable schema introspection. Defaults to true.
-     */
-    introspection?: boolean;
+  /**
+   * Enable schema introspection. Defaults to true.
+   */
+  introspection?: boolean;
 
-    /**
-     * Maximum query depth. Defaults to 10. Set to 0 to disable.
-     *
-     * Bounds NESTING only. A document can be two levels deep and still ask for
-     * a hundred thousand fields, because every alias is a separate field — see
-     * {@linkcode GraphqlPluginOptions.maxNodes}, which bounds that dimension.
-     */
-    maxDepth?: number;
+  /**
+   * Maximum query depth. Defaults to 10. Set to 0 to disable.
+   *
+   * Bounds NESTING only. A document can be two levels deep and still ask for
+   * a hundred thousand fields, because every alias is a separate field — see
+   * {@linkcode GraphqlPluginOptions.maxNodes}, which bounds that dimension.
+   */
+  maxDepth?: number;
 
-    /**
-     * Maximum number of fields a document may resolve, counting every alias
-     * separately and expanding each fragment spread at its spread site.
-     *
-     * Omitted or `0`, unbounded — the released behaviour. The only limit then
-     * standing between an alias bomb and the process is the request-body size,
-     * which one HTTP request can exhaust: 100,000 aliases at depth 2 is a
-     * ~2 MB document.
-     *
-     * Left off by default because a legitimate large document in an existing
-     * application would otherwise start being refused. Pick a budget from the
-     * largest query your own clients issue and set it.
-     *
-     * @since 0.5.0
-     */
-    maxNodes?: number;
+  /**
+   * Maximum number of fields a document may resolve, counting every alias
+   * separately and expanding each fragment spread at its spread site.
+   *
+   * Omitted or `0`, unbounded — the released behaviour. The only limit then
+   * standing between an alias bomb and the process is the request-body size,
+   * which one HTTP request can exhaust: 100,000 aliases at depth 2 is a
+   * ~2 MB document.
+   *
+   * Left off by default because a legitimate large document in an existing
+   * application would otherwise start being refused. Pick a budget from the
+   * largest query your own clients issue and set it.
+   *
+   * @since 0.5.0
+   */
+  maxNodes?: number;
 
-    /**
-     * Additional validation rules to append.
-     */
-    validationRules?: unknown[];
+  /**
+   * Additional validation rules to append.
+   */
+  validationRules?: unknown[];
 
-    /**
-     * Mask internal errors. Defaults to true.
-     */
-    maskInternalErrors?: boolean;
+  /**
+   * Mask internal errors. Defaults to true.
+   */
+  maskInternalErrors?: boolean;
 
-    /**
-     * Custom error formatter applied after masking.
-     */
-    formatError?: (error: unknown) => unknown;
+  /**
+   * Custom error formatter applied after masking.
+   */
+  formatError?: (error: unknown) => unknown;
 
-    /**
-     * Maximum number of documents to cache. Defaults to 1000. Set to 0 to disable.
-     */
-    documentCacheSize?: number;
+  /**
+   * Maximum number of documents to cache. Defaults to 1000. Set to 0 to disable.
+   */
+  documentCacheSize?: number;
 
-    /**
-     * Custom context builder. Receives services and request, returns context value.
-     */
-    buildContext?: (
-      input: GraphqlContextInput,
-    ) => unknown | Promise<unknown>;
+  /**
+   * Custom context builder. Receives services and request, returns context value.
+   */
+  buildContext?: (input: GraphqlContextInput) => unknown | Promise<unknown>;
 
-    /**
-     * Root value passed to execute.
-     */
-    rootValue?: unknown;
+  /**
+   * Root value passed to execute.
+   */
+  rootValue?: unknown;
 
-    /**
-     * Injected graphql module to use instead of lazy loading.
-     * Required when the application uses its own graphql copy.
-     */
-    graphqlModule?: GraphqlModuleLike;
+  /**
+   * Injected graphql module to use instead of lazy loading.
+   * Required when the application uses its own graphql copy.
+   */
+  graphqlModule?: GraphqlModuleLike;
 
-    /**
-     * Subscription transport configuration. Absent → no transport routes are
-     * registered (byte-identical to M51 behavior).
-     *
-     * @since 0.3.0
-     */
-    subscriptions?: GraphqlSubscriptionsOptions;
+  /**
+   * Subscription transport configuration. Absent → no transport routes are
+   * registered (byte-identical to M51 behavior).
+   *
+   * @since 0.3.0
+   */
+  subscriptions?: GraphqlSubscriptionsOptions;
 
-    /**
-     * APQ (Automatic Persisted Queries) configuration. Absent → APQ disabled.
-     *
-     * @since 0.3.0
-     */
-    apq?: GraphqlApqOptions;
+  /**
+   * APQ (Automatic Persisted Queries) configuration. Absent → APQ disabled.
+   *
+   * @since 0.3.0
+   */
+  apq?: GraphqlApqOptions;
 
-    /**
-     * Maximum number of requests in a batch. `0` (default) disables batching;
-     * an array body is still refused with `400`. Set above `0` to enable.
-     *
-     * @since 0.3.0
-     */
-    maxBatchSize?: number;
-  };
+  /**
+   * Maximum number of requests in a batch. `0` (default) disables batching;
+   * an array body is still refused with `400`. Set above `0` to enable.
+   *
+   * @since 0.3.0
+   */
+  maxBatchSize?: number;
+};

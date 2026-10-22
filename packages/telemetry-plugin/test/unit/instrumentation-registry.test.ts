@@ -106,11 +106,7 @@ describe('buildInstrumentationRegistry', () => {
     const fakeResult = { recordedSets: [] as unknown[], instance: {} };
     const provider = fakeResult.instance;
 
-    const handle = await buildInstrumentationRegistry(
-      { http: true },
-      runtime,
-      provider,
-    );
+    const handle = await buildInstrumentationRegistry({ http: true }, runtime, provider);
 
     // Platform gate happens inside enableLazy — already awaited by buildInstrumentationRegistry.
     const httpOutcome = handle.outcomes.find((o) => o.kind === 'http');
@@ -549,9 +545,7 @@ describe('buildInstrumentationRegistry', () => {
 
     // All three configured kinds must appear in outcomes immediately —
     // none are pending or missing.
-    expect(handle.outcomes.map((o) => o.kind).sort()).toEqual(
-      ['fetch', 'http', 'ioredis'].sort(),
-    );
+    expect(handle.outcomes.map((o) => o.kind).sort()).toEqual(['fetch', 'http', 'ioredis'].sort());
   });
 
   // --- Reporter (M70e §3.6) ---

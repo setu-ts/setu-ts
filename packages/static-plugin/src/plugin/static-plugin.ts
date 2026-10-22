@@ -27,9 +27,8 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
       const { root, urlPrefix = '/' } = options;
 
       // Normalize prefix: ensure it starts with / and has no trailing /
-      const normalizedPrefix = urlPrefix === '/'
-        ? '/'
-        : `/${urlPrefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
+      const normalizedPrefix =
+        urlPrefix === '/' ? '/' : `/${urlPrefix.replace(/^\/+/, '').replace(/\/+$/, '')}`;
 
       // Create the service with the real filesystem
       const serviceOptions: StaticPluginOptions = {
@@ -51,11 +50,12 @@ export function StaticPlugin(options: StaticPluginOptions): IPlugin {
 
       // Check if filesystem is available
       if (!ctx.runtime.fs) {
-        // Workers degradation: register degraded indicator but no route
-        // deno-lint-ignore require-await
+        // No fs on Workers: keep the condition in data and register no route.
+        // determineStatusCode withdraws every non-up replica from /ready.
+        // eslint-disable-next-line require-await
         ctx.health.register('static-files', async () => ({
-          status: 'degraded' as const,
-          detail: 'no file system on this runtime',
+          status: 'up' as const,
+          data: { fs: false, detail: 'no file system on this runtime' },
         }));
         return;
       }

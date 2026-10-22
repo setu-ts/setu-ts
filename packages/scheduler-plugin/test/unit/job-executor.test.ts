@@ -7,13 +7,56 @@ import { run } from '../../src/jobs/job-executor.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('JobExecutor.run', () => {
+  it('an already aborted run settles without invoking the handler', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    controller.abort();
+    let calls = 0;
+    const outcome = await run(
+      'id1',
+      'cancelled',
+      () => {
+        calls++;
+      },
+      undefined,
+      undefined,
+      {
+        runtime,
+        signal: controller.signal,
+      },
+    );
+    expect(outcome).toBe('cancelled');
+    expect(calls).toBe(0);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+
+  it('aborting during a failing handler settles without arming backoff', async () => {
+    const runtime = new FakeRuntime();
+    const controller = new AbortController();
+    const pending = run(
+      'id1',
+      'cancelled',
+      () => {
+        controller.abort();
+        throw new Error('failed after cancellation');
+      },
+      undefined,
+      { limit: 3, delay: 1000, backoff: 'fixed' },
+      { runtime, signal: controller.signal },
+    );
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await expect(pending).resolves.toBe('cancelled');
+  });
+
   it('runs handler successfully', async () => {
     const runtime = new FakeRuntime();
     let called = false;
     const handler: SchedulerJobHandler = () => {
       called = true;
     };
-    await run('id1', 'job1', handler, undefined, undefined, { runtime });
+    await expect(run('id1', 'job1', handler, undefined, undefined, { runtime })).resolves.toBe(
+      'succeeded',
+    );
     expect(called).toBe(true);
   });
 
@@ -84,7 +127,6 @@ describe('JobExecutor.run', () => {
 
   it('warns on retry attempt failure', async () => {
     const runtime = new FakeRuntime();
-    let attempts = 0;
     const logWarns: string[] = [];
     const logger: ILogger = {
       level: 'error' as const,
@@ -99,7 +141,6 @@ describe('JobExecutor.run', () => {
       child: () => logger,
     };
     const handler: SchedulerJobHandler = () => {
-      attempts++;
       throw new Error('fail');
     };
     const retry: RetryOptions = { limit: 2, delay: 100, backoff: 'fixed' };

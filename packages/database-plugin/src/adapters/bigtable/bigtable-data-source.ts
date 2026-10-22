@@ -15,6 +15,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   EntityKey,
   FilterExpression,
@@ -170,9 +172,7 @@ function buildCells(
  * @param data - The update payload
  * @returns The fields carrying a value
  */
-function writtenFields(
-  data: Readonly<Record<string, unknown>>,
-): Record<string, unknown> {
+function writtenFields(data: Readonly<Record<string, unknown>>): Record<string, unknown> {
   const written: Record<string, unknown> = {};
   for (const [field, value] of Object.entries(data)) {
     if (value !== undefined) written[field] = value;
@@ -192,40 +192,6 @@ function keyFieldsOf(target: BigtableTarget, id: EntityKey): Record<string, unkn
     return target.keyFields.length === 1 ? { [target.keyFields[0]]: id } : {};
   }
   return { ...id };
-}
-
-/**
- * Refuses an update whose payload would move the row to a different key.
- *
- * Bigtable has no rename: writing a new key would create a SECOND row and
- * leave the original behind, so an update that appears to move a row would
- * silently duplicate it.
- *
- * @param target - The resolved entity target
- * @param id - The key being updated
- * @param data - The update payload
- * @throws {UnsupportedQueryFeatureError} When the payload disagrees with the key
- */
-function assertKeyUnchanged(
-  target: BigtableTarget,
-  id: EntityKey,
-  data: Readonly<Record<string, unknown>>,
-): void {
-  const current = keyFieldsOf(target, id);
-  for (const field of target.keyFields) {
-    if (!(field in data)) continue;
-    const supplied = data[field];
-    if (supplied === undefined) continue;
-    if (String(supplied) === String(current[field])) continue;
-    throw new UnsupportedQueryFeatureError(
-      'row-key',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' cannot move a row: update() was given ` +
-        `'${field}' = '${String(supplied)}' for the row keyed ` +
-        `'${String(current[field])}'. Bigtable has no rename — writing the new key would ` +
-        `create a second row and leave this one behind. Delete and re-create instead.`,
-    );
-  }
 }
 
 /** Everything one data source needs beyond the table handle. */
@@ -270,9 +236,7 @@ export function createBigtableDataSource(
     return filter === undefined || matchesFilter(row, filter);
   };
 
-  const readEntities = async (
-    read: BigtableReadOptions,
-  ): Promise<Record<string, unknown>[]> => {
+  const readEntities = async (read: BigtableReadOptions): Promise<Record<string, unknown>[]> => {
     const rows = await table.readRows(read);
     return rows.map((row) => decodeRow(target, index, row));
   };
@@ -286,13 +250,13 @@ export function createBigtableDataSource(
     async findAll(query: NormalizedQuery): Promise<Record<string, unknown>[]> {
       const plan = planBigtableScan(target, query);
       if (plan.empty) return [];
-      const entities = (await readEntities(plan.read))
-        .filter((row) => matches(row, query.where, query.filter));
+      const entities = (await readEntities(plan.read)).filter((row) =>
+        matches(row, query.where, query.filter),
+      );
       // Rows arrive in row-key order, which IS the only order this adapter
       // serves, so no client-side sort exists to drift from the scan.
-      const limited = !plan.serverLimited && query.limit > 0
-        ? entities.slice(0, query.limit)
-        : entities;
+      const limited =
+        !plan.serverLimited && query.limit > 0 ? entities.slice(0, query.limit) : entities;
       return limited.map((row) => projectFields(row, query.select) as Record<string, unknown>);
     },
 
@@ -300,9 +264,7 @@ export function createBigtableDataSource(
       return await readOne(composeRowKey(target, id, 'findById'));
     },
 
-    async create(
-      data: Partial<Record<string, unknown>>,
-    ): Promise<Record<string, unknown>> {
+    async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
       const rowKey = composeRowKeyFromFields(target, data, 'create');
       const cells = buildCells(target, index, data, 'create');
       const persisted = { ...data } as Record<string, unknown>;
@@ -329,7 +291,8 @@ export function createBigtableDataSource(
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
       const rowKey = composeRowKey(target, id, 'update');
-      assertKeyUnchanged(target, id, data);
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
       const cells = buildCells(target, index, data, 'update');
       const hasCells = Object.keys(cells).length > 0;
 
@@ -370,8 +333,10 @@ export function createBigtableDataSource(
         );
       }
       const updated = await readOne(rowKey);
-      return updated ??
-        ({ ...keyFieldsOf(target, id), ...writtenFields(data) } as Record<string, unknown>);
+      return (
+        updated ??
+        ({ ...keyFieldsOf(target, id), ...writtenFields(data) } as Record<string, unknown>)
+      );
     },
 
     async delete(id: EntityKey): Promise<boolean> {
@@ -387,41 +352,50 @@ export function createBigtableDataSource(
       });
     },
 
-    ...(buffer !== undefined ? {} : {
-      async updateWhere(id, where, data) {
-        const checked = checkWritePrecondition(where, data);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        data = checked.data;
-        const rowKey = composeRowKey(target, id, 'updateWhere');
-        const test = preconditionTest(target, where);
-        if (test === null) return null;
-        assertKeyUnchanged(target, id, data);
-        const cells = buildCells(target, index, data, 'update');
-        const matched = await table.row(rowKey).conditionalMutate(test, {
-          onMatch: [{ method: 'insert', data: cells }],
-        });
-        return matched ? await readOne(rowKey) : null;
-      },
-      async deleteWhere(id, where) {
-        const checked = checkWritePrecondition(where);
-        if (!checked.ok) {
-          throw new UnsupportedQueryFeatureError('write-precondition', ADAPTER, checked.problem);
-        }
-        where = checked.where;
-        const rowKey = composeRowKey(target, id, 'deleteWhere');
-        const test = preconditionTest(target, where);
-        if (test === null) return false;
-        return await table.row(rowKey).conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
-      },
-    } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>),
+    ...(buffer !== undefined
+      ? {}
+      : ({
+          async updateWhere(id, where, data) {
+            const checked = checkWritePrecondition(where, data);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            data = checked.data;
+            assertPrimaryKeyUnchanged(target.entity, target.keyFields, id, data);
+            const rowKey = composeRowKey(target, id, 'updateWhere');
+            const test = preconditionTest(target, where);
+            if (test === null) return null;
+            const cells = buildCells(target, index, data, 'update');
+            const matched = await table.row(rowKey).conditionalMutate(test, {
+              onMatch: [{ method: 'insert', data: cells }],
+            });
+            return matched ? await readOne(rowKey) : null;
+          },
+          async deleteWhere(id, where) {
+            const checked = checkWritePrecondition(where);
+            if (!checked.ok) {
+              throw new UnsupportedQueryFeatureError(
+                'write-precondition',
+                ADAPTER,
+                checked.problem,
+              );
+            }
+            where = checked.where;
+            const rowKey = composeRowKey(target, id, 'deleteWhere');
+            const test = preconditionTest(target, where);
+            if (test === null) return false;
+            return await table
+              .row(rowKey)
+              .conditionalMutate(test, { onMatch: [{ method: 'delete' }] });
+          },
+        } satisfies Pick<IDataSource, 'updateWhere' | 'deleteWhere'>)),
 
-    async count(
-      where: Record<string, unknown>,
-      filter?: FilterExpression,
-    ): Promise<number> {
+    async count(where: Record<string, unknown>, filter?: FilterExpression): Promise<number> {
       const needsValues = Object.keys(where).length > 0 || filter !== undefined;
       const query: NormalizedQuery = {
         where,
@@ -463,8 +437,8 @@ export function createBigtableDataSource(
         const rows = plan.empty
           ? []
           : (await readEntities(plan.read)).filter((row) =>
-            matches(row, query.where, query.filter)
-          );
+              matches(row, query.where, query.filter),
+            );
         return { rows: rows.map(project), nextCursor: null };
       }
 
@@ -554,7 +528,7 @@ export function createBigtableDataSource(
  * @param query - The page query
  * @param fingerprint - The sort fingerprint the query resolves to
  * @returns The start key, or `null` when the walk starts at the beginning
- * @throws {UnsupportedQueryFeatureError} When the token is malformed or was
+ * @throws {InvalidCursorError} When the token is malformed or was
  *   minted under a different sort
  */
 function decodeStartKey(
@@ -565,27 +539,20 @@ function decodeStartKey(
   if (query.cursor === undefined) return null;
   const decoded = decodeCursor(query.cursor);
   if (decoded === null) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a malformed cursor token.`,
-    );
+    throw new InvalidCursorError(`Entity '${target.entity}': malformed cursor token.`);
   }
   if (decoded.sortFingerprint !== fingerprint) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a cursor minted under sort ` +
-        `'${decoded.sortFingerprint}' but was asked for '${fingerprint}'.`,
-    );
+    throw new InvalidCursorError(`Entity '${target.entity}': cursor fingerprint mismatch.`);
   }
-  if (decoded.keyValues.length !== target.keyFields.length) {
-    throw new UnsupportedQueryFeatureError(
-      'cursor-pagination',
-      ADAPTER,
-      `Bigtable entity '${target.entity}' received a cursor carrying ` +
-        `${decoded.keyValues.length} key values for a ${target.keyFields.length}-field row key.`,
-    );
+  if (
+    decoded.keyValues.length !== target.keyFields.length ||
+    decoded.keyValues.some(
+      (value) =>
+        (typeof value !== 'string' && typeof value !== 'number') ||
+        (target.keyFields.length > 1 && String(value).includes(target.separator)),
+    )
+  ) {
+    throw new InvalidCursorError(`Entity '${target.entity}': cursor key shape mismatch.`);
   }
   const fields: Record<string, unknown> = {};
   target.keyFields.forEach((field, position) => {

@@ -34,18 +34,20 @@ async function buildApp(available: () => boolean) {
   const app: IKernelApplication = createApplication({
     plugins: [
       RuntimePlugin(),
-      HealthPlugin(),
+      HealthPlugin({ details: true }),
       AuthPlugin({
         http,
         jwt: { secret: 'self-issued-secret-at-least-32-characters' },
-        issuers: [{
-          name: 'idp',
-          issuer: ISS,
-          audience: 'api',
-          keys: { jwksUri: JWKS },
-          keySet: { ttlMs: 60_000, minRefreshIntervalMs: 1 },
-          toPrincipal: (claims) => ({ id: String(claims.sub), roles: ['from-idp'] }),
-        }],
+        issuers: [
+          {
+            name: 'idp',
+            issuer: ISS,
+            audience: 'api',
+            keys: { jwksUri: JWKS },
+            keySet: { ttlMs: 60_000, minRefreshIntervalMs: 1 },
+            toPrincipal: (claims) => ({ id: String(claims.sub), roles: ['from-idp'] }),
+          },
+        ],
       }),
     ],
   });
@@ -76,8 +78,8 @@ describe('outside issuers through a real app', () => {
       expect(before.status).toBe(200);
       const checks = before.body.checks as Record<string, { status: string; data: unknown }>;
       expect(checks.auth).toEqual({
-        status: 'degraded',
-        data: { issuers: { idp: 'unfetched' } },
+        status: 'up',
+        data: { issuers: { idp: 'unfetched' }, current: false },
         latencyMs: expect.any(Number),
       });
       expect(calls).toEqual([]);
@@ -111,7 +113,13 @@ describe('outside issuers through a real app', () => {
       const report = await health(app);
       expect(report.status).toBe(200);
       const checks = report.body.checks as Record<string, { status: string }>;
-      expect(checks.auth.status).toBe('degraded');
+      expect(checks.auth.status).toBe('up');
+      const ready = await app.inject({ method: 'GET', url: '/ready' });
+      expect(ready.statusCode).toBe(200);
+      expect(ready.json<{ checks: Record<string, { data: unknown }> }>().checks.auth.data).toEqual({
+        issuers: { idp: 'unfetched' },
+        current: false,
+      });
     } finally {
       await app.stop();
     }

@@ -145,7 +145,11 @@ describe('DecoratorPlugin registration (integration)', () => {
     class C {
       @Post('/')
       @ValidateBody(bodySchema)
-      @ApiOperation({ summary: 'Create' })
+      @ApiOperation({
+        summary: 'Create',
+        operationId: 'createUser',
+        description: 'Creates a user.',
+      })
       @ApiResponse({ status: 201, description: 'Created' })
       @Params(Body())
       create(body: unknown) {
@@ -158,7 +162,30 @@ describe('DecoratorPlugin registration (integration)', () => {
     expect(schema?.body).toBe(bodySchema);
     expect(schema?.tags).toEqual(['users']);
     expect(schema?.summary).toBe('Create');
+    expect(schema?.operationId).toBe('createUser');
+    expect(schema?.description).toBe('Creates a user.');
     expect(schema?.response?.[201]).toMatchObject({ description: 'Created' });
+  });
+
+  it('carries schema for operation-id-only and description-only decorators', async () => {
+    @Controller('/operations')
+    class Operations {
+      @Get('/id')
+      @ApiOperation({ operationId: 'listOperations' })
+      list() {
+        return [];
+      }
+
+      @Get('/description')
+      @ApiOperation({ description: 'Only a description.' })
+      describe() {
+        return [];
+      }
+    }
+    const { ctx, routes } = createFakeContext();
+    await DecoratorPlugin({ controllers: [Operations] }).register(ctx);
+    expect(asRouteDef(routes[0].route).schema).toEqual({ operationId: 'listOperations' });
+    expect(asRouteDef(routes[1].route).schema).toEqual({ description: 'Only a description.' });
   });
 
   it('registers services without a container by instantiation', async () => {
@@ -260,7 +287,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ token: 'repo' })
     @Inject('database', 'logger')
     class Repository {
-      constructor(readonly db: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     const { ctx, services } = createFakeContext();
     ctx.services.register('database', { kind: 'db' });
@@ -276,7 +306,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ scope: 'transient', token: 'repo' })
     @Inject('database', 'logger')
     class Repository {
-      constructor(readonly db: unknown, readonly logger: unknown) {}
+      constructor(
+        readonly db: unknown,
+        readonly logger: unknown,
+      ) {}
     }
     const { container, registered } = recordingContainer();
     const { ctx } = createFakeContext({ container });
@@ -310,7 +343,10 @@ describe('DecoratorPlugin registration (integration)', () => {
     @Injectable({ token: 'partial' })
     @Inject('logger')
     class PartialService {
-      constructor(readonly logger: unknown, readonly extra?: unknown) {}
+      constructor(
+        readonly logger: unknown,
+        readonly extra?: unknown,
+      ) {}
     }
     expect(metadataStore.getService(PartialService)?.inject).toEqual(['logger']);
   });
@@ -386,20 +422,17 @@ describe('DecoratorPlugin registration (integration)', () => {
 
   // Node always grants a real `import()` of a `file://` URL, so the default
   // discovery importer runs here unguarded (M111b; it was Deno-permission gated).
-  it(
-    'consumes autoDiscover + controllersPath (real import path)',
-    async () => {
-      const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
-        /\/$/,
-        '',
-      );
-      const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
-      const runtime = createFakeRuntime({ fs });
-      const { ctx, routes } = createFakeContext({ runtime });
-      await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
-      expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
-    },
-  );
+  it('consumes autoDiscover + controllersPath (real import path)', async () => {
+    const sampleDir = new URL('../fixtures/discovery-sample/', import.meta.url).pathname.replace(
+      /\/$/,
+      '',
+    );
+    const fs = createFakeFileSystem({ [`${sampleDir}/user-controller.ts`]: '' });
+    const runtime = createFakeRuntime({ fs });
+    const { ctx, routes } = createFakeContext({ runtime });
+    await DecoratorPlugin({ autoDiscover: true, controllersPath: sampleDir }).register(ctx);
+    expect(routes.some((r) => r.method === 'GET' && r.path === '/discovered')).toBe(true);
+  });
 
   it('skips a non-controller class passed in the controllers list', async () => {
     class NotAController {

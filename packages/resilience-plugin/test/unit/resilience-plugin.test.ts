@@ -41,10 +41,13 @@ describe('ResiliencePlugin', () => {
 
     const service = registeredServices.get('resilience') as IResilienceService;
     let calls = 0;
-    const guarded = service.wrap(() => {
-      calls++;
-      return calls < 2 ? Promise.reject(new Error('boom')) : Promise.resolve('ok');
-    }, { retry: true });
+    const guarded = service.wrap(
+      () => {
+        calls++;
+        return calls < 2 ? Promise.reject(new Error('boom')) : Promise.resolve('ok');
+      },
+      { retry: true },
+    );
     expect(await guarded()).toBe('ok');
     expect(calls).toBe(2);
   });

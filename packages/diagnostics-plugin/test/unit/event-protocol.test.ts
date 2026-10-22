@@ -30,17 +30,19 @@ function validSnapshot(
     state: 'ready',
     alias: 'bus',
     coverage: 'owned-instance',
-    records: [{
-      alias: 'users',
-      operation: 'publish',
-      count: 1,
-      started: 1,
-      succeeded: 1,
-      failed: 0,
-      noSubscribers: 0,
-      lastDurationMs: 2,
-      ageMs: 1,
-    }],
+    records: [
+      {
+        alias: 'users',
+        operation: 'publish',
+        count: 1,
+        started: 1,
+        succeeded: 1,
+        failed: 0,
+        noSubscribers: 0,
+        lastDurationMs: 2,
+        ageMs: 1,
+      },
+    ],
     dropped: 0,
     ...overrides,
   };
@@ -85,9 +87,7 @@ describe('readEventSourceSnapshot (M98j source validation)', () => {
   });
 
   it('refuses a disabled or collection-failed snapshot carrying records', () => {
-    expect(
-      readEventSourceSnapshot(validSnapshot({ state: 'disabled', alias: null })),
-    ).toBeNull();
+    expect(readEventSourceSnapshot(validSnapshot({ state: 'disabled', alias: null }))).toBeNull();
     expect(readEventSourceSnapshot(validSnapshot({ state: 'collection-failed' }))).toBeNull();
     // The enabled-alias rule: a disabled source answers null, never a name.
     const disabled = { ...validSnapshot(), state: 'disabled' as const, alias: null };
@@ -111,9 +111,11 @@ describe('readEventSourceSnapshot (M98j source validation)', () => {
       readEventSourceSnapshot(validSnapshot({ records: [{ ...record, lastDurationMs: -2 }] })),
     ).toBeNull();
     expect(
-      readEventSourceSnapshot(validSnapshot({
-        records: [{ ...record, extra: 1 } as unknown as EventDiagnosticsRecord],
-      })),
+      readEventSourceSnapshot(
+        validSnapshot({
+          records: [{ ...record, extra: 1 } as unknown as EventDiagnosticsRecord],
+        }),
+      ),
     ).toBeNull();
   });
 
@@ -160,14 +162,18 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
     expect(isEventResponseProjection({ ...base, version: 2 })).toBe(false);
     expect(isEventResponseProjection({ ...base, state: 'nope' })).toBe(false);
     expect(isEventResponseProjection({ ...base, instanceId: '' })).toBe(false);
-    expect(isEventResponseProjection({
-      ...base,
-      sources: [projectEventSource('q1', validSnapshot())],
-    })).toBe(false);
-    expect(isEventResponseProjection({
-      ...base,
-      sources: [projectEventSource('e99999999999999999', validSnapshot())],
-    })).toBe(false);
+    expect(
+      isEventResponseProjection({
+        ...base,
+        sources: [projectEventSource('q1', validSnapshot())],
+      }),
+    ).toBe(false);
+    expect(
+      isEventResponseProjection({
+        ...base,
+        sources: [projectEventSource('e99999999999999999', validSnapshot())],
+      }),
+    ).toBe(false);
     expect(isEventResponseProjection(null)).toBe(false);
   });
 
@@ -177,9 +183,8 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
       instanceId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
       state: 'ready',
     };
-    const sources = Array.from(
-      { length: 17 },
-      (_, index) => projectEventSource(`s${index + 1}`, validSnapshot()),
+    const sources = Array.from({ length: 17 }, (_, index) =>
+      projectEventSource(`s${index + 1}`, validSnapshot()),
     );
     // Every entry is individually valid, so only the 17-source bound refuses.
     expect(isEventResponseProjection({ ...base, sources: sources.slice(0, 16) })).toBe(true);
@@ -192,12 +197,14 @@ describe('projectEventSource and isEventResponseProjection (M98j wire validation
   });
 
   it('accepts the empty unsupported response the no-source connector answers', () => {
-    expect(isEventResponseProjection({
-      version: 1,
-      instanceId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
-      state: 'unsupported',
-      sources: [],
-    })).toBe(true);
+    expect(
+      isEventResponseProjection({
+        version: 1,
+        instanceId: '3f2504e0-4f89-41d3-9a0c-0305e82c3301',
+        state: 'unsupported',
+        sources: [],
+      }),
+    ).toBe(true);
   });
 });
 

@@ -89,6 +89,26 @@ async function boot(options?: QueuePluginOptions): Promise<Boot> {
   return { harness, queue: service as IQueue, runtime: harness.runtime };
 }
 
+it('preserves the processor definition receiver for instances and factories', async () => {
+  for (const factory of [false, true]) {
+    let calls = 0;
+    const definition: QueueProcessorDefinition = {
+      name: 'receiver',
+      processor() {
+        expect(this).toBe(definition);
+        calls++;
+      },
+    };
+    const { harness, queue, runtime } = await boot({
+      processors: [factory ? () => definition : definition],
+    });
+    await runInitHooks(harness);
+    await queue.add('receiver', {});
+    await runtime.advanceMs(200);
+    expect(calls).toBe(1);
+  }
+});
+
 /** Runs the plugin's `onInit` hooks, as the kernel does during `start()`. */
 async function runInitHooks(harness: Harness): Promise<void> {
   for (const hook of harness.initHooks) {

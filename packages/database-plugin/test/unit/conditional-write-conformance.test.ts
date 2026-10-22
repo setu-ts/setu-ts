@@ -1,3 +1,4 @@
+import { PrimaryKeyChangeError } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import type { WritePrecondition } from '@setu-ts/common';
 import { sources } from '../fixtures/conditional-sources.ts';
@@ -25,8 +26,9 @@ describe('conditional adapter native error paths', () => {
   it('DynamoDB preserves non-condition errors and refuses missing ALL_NEW attributes', async () => {
     const fixture = dynamoFixture();
     await fixture.source.create({ id: 'a', role: 'owner', name: 'old' });
-    await expect(fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'b' })).rejects
-      .toMatchObject({ feature: 'update' });
+    await expect(
+      fixture.source.updateWhere!('a', { role: 'owner' }, { id: 'b' }),
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
     expect(fixture.calls).toEqual([]);
     const error = new Error('driver fault');
     fixture.fail(error);
@@ -37,16 +39,20 @@ describe('conditional adapter native error paths', () => {
     const missing = dynamoFixture();
     await missing.source.create({ id: 'a', role: 'owner' });
     missing.omitAttributes();
-    await expect(missing.source.updateWhere!('a', { role: 'owner' }, { name: 'new' })).rejects
-      .toThrow(/returned no row/);
+    await expect(
+      missing.source.updateWhere!('a', { role: 'owner' }, { name: 'new' }),
+    ).rejects.toThrow(/returned no row/);
   });
   it('MongoDB key-only payload still checks the conjoined predicate', async () => {
     const source = sources.find((entry) => entry.name === 'mongodb')!.make();
     await source.create({ id: 'a', role: 'owner' });
-    expect(await source.updateWhere!('a', { role: 'owner' }, { id: 'ignored' })).toMatchObject({
+    await expect(
+      source.updateWhere!('a', { role: 'owner' }, { id: 'ignored' }),
+    ).rejects.toBeInstanceOf(PrimaryKeyChangeError);
+    expect(await source.updateWhere!('a', { role: 'owner' }, { id: 'a' })).toMatchObject({
       id: 'a',
     });
-    expect(await source.updateWhere!('a', { role: 'other' }, { id: 'ignored' })).toBeNull();
+    expect(await source.updateWhere!('a', { role: 'other' }, { id: 'a' })).toBeNull();
     expect(await source.findById('ignored')).toBeNull();
   });
   it('memory validates before mutation and preserves key immutability', async () => {
@@ -73,8 +79,8 @@ describe('deferred transaction refuses conditional writes', () => {
       make: () =>
         new CosmosAdapter({
           database: 'db',
-          client:
-            createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } }).client,
+          client: createFakeCosmosClient({ containers: { User: { partitionKeyPaths: ['/id'] } } })
+            .client,
         }),
     },
     {
@@ -128,18 +134,24 @@ describe('conditional writes conjoin key and predicate at every public data sour
       const ds = make();
       await ds.create({ id: 'a', role: 'owner', name: 'old' });
       await ds.create({ id: 'b', role: 'other', name: 'untouched' });
-      for (
-        const [id, where] of [['a', { role: 'other' }], ['missing', { role: 'owner' }], ['a', {
-          id: 'b',
-        }]] as const
-      ) {
+      for (const [id, where] of [
+        ['a', { role: 'other' }],
+        ['missing', { role: 'owner' }],
+        [
+          'a',
+          {
+            id: 'b',
+          },
+        ],
+      ] as const) {
         expect(await ds.updateWhere!(id, where, { name: 'bad' })).toBeNull();
         expect(await ds.deleteWhere!(id, where)).toBe(false);
       }
       expect(await ds.findById('a')).toMatchObject({ name: 'old' });
       expect(await ds.findById('b')).toMatchObject({ name: 'untouched' });
-      expect(await ds.updateWhere!('a', { role: 'owner', name: 'old' }, { name: 'new' }))
-        .toMatchObject({ id: 'a', name: 'new' });
+      expect(
+        await ds.updateWhere!('a', { role: 'owner', name: 'old' }, { name: 'new' }),
+      ).toMatchObject({ id: 'a', name: 'new' });
       expect(await ds.findById('a')).toMatchObject({ name: 'new' });
       expect(await ds.deleteWhere!('a', { role: 'owner', name: 'new' })).toBe(true);
       expect(await ds.findById('a')).toBeNull();
@@ -185,13 +197,14 @@ describe('conditional writes conjoin key and predicate at every public data sour
         await ds.create({ id: 'a', role: 'owner', name: 'old' });
         const where = { [field]: 'canary-value' };
         if (unknown === 'throws') {
-          for (
-            const attempt of [
-              () => ds.updateWhere!('a', where, { name: 'canary-payload' }),
-              () => ds.deleteWhere!('a', where),
-            ]
-          ) {
-            const error = await attempt().then(() => undefined, (caught: unknown) => caught);
+          for (const attempt of [
+            () => ds.updateWhere!('a', where, { name: 'canary-payload' }),
+            () => ds.deleteWhere!('a', where),
+          ]) {
+            const error = await attempt().then(
+              () => undefined,
+              (caught: unknown) => caught,
+            );
             expect(error).toBeInstanceOf(Error);
             const message = (error as Error).message;
             expect(message).not.toContain('canary-value');

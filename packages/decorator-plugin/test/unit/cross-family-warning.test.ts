@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- the real ConsoleLogger's sink under test IS `console.log`.
+/* eslint-disable no-console -- the real ConsoleLogger's sink under test IS `console.log`. */
 /**
  * Cross-family misregistration diagnostic (M99d §3.1/§3.3).
  *

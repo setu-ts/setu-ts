@@ -93,10 +93,12 @@ describe('SpanObservationCollector — retention and projection', () => {
 
   it('carries a parent span id exactly when the visibility is meaningful', () => {
     const collector = collectorFor(fakeClock());
-    collector.retain(candidate({
-      parentSpanId: PARENT,
-      parentVisibility: 'remote-or-unobserved',
-    }));
+    collector.retain(
+      candidate({
+        parentSpanId: PARENT,
+        parentVisibility: 'remote-or-unobserved',
+      }),
+    );
     const record = collector.read('i', 0).records[0]!;
     expect(record.parentSpanId).toBe(PARENT);
     expect(record.parentVisibility).toBe('remote-or-unobserved');

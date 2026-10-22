@@ -8,7 +8,11 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
-import { createCachedProbe, deadlineRangeError, withDeadline } from '@setu-ts/common';
+import {
+  createCachedProbe,
+  OptionalDependencyUnavailableError,
+  withDeadline,
+} from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
@@ -17,7 +21,8 @@ import { normalizeTransportHeaders, type TransportHeaderValue } from './header-n
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
-import { ReconnectSupervisor } from './reconnect.ts';
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
+import { ReconnectSupervisor } from '@setu-ts/common';
 import type { IAmqpConnection, RabbitMqOptions } from '../interfaces/index.ts';
 // amqplib's frame codec requires a Node Buffer for message content (it throws
 // `TypeError('content is not a buffer')` for a string or a Uint8Array). This is
@@ -32,8 +37,11 @@ import { Buffer } from 'node:buffer';
  * @throws {Error} If the amqplib package cannot be resolved
  */
 async function loadAmqplib(): Promise<typeof import('amqplib')> {
-  const mod = await import('amqplib');
-  return mod;
+  try {
+    return await import('amqplib');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+  }
 }
 
 /**
@@ -53,27 +61,6 @@ export function validateClient(client: unknown): client is IAmqpConnection {
     }
   }
   return true;
-}
-
-/** Default bound on one publish, including its confirm, in ms. */
-export const DEFAULT_PUBLISH_TIMEOUT_MS = 15_000;
-
-/**
- * Resolves and validates `publishTimeoutMs`. Shared by
- * `MessagingPlugin(...)` (which refuses a bad value at construction) and the
- * broker constructor, so both read one rule.
- *
- * @param value - The configured bound, or `undefined` for the default
- * @returns The bound in milliseconds (`0` = unbounded)
- * @throws {RangeError} When the value is outside `0`–`2147483647` or not finite
- */
-export function resolvePublishTimeoutMs(value: number | undefined): number {
-  const resolved = value ?? DEFAULT_PUBLISH_TIMEOUT_MS;
-  const refusal = deadlineRangeError('messaging-plugin: publishTimeoutMs', resolved);
-  if (refusal !== null) {
-    throw refusal;
-  }
-  return resolved;
 }
 
 /** Resolved immutable consumer configuration shared by plugin and broker construction. */
@@ -250,9 +237,12 @@ interface CloseObservable {
  * @returns `true` when both members are functions
  */
 function isCloseObservable(channel: unknown): channel is CloseObservable {
-  return typeof channel === 'object' && channel !== null &&
+  return (
+    typeof channel === 'object' &&
+    channel !== null &&
     typeof (channel as { on?: unknown }).on === 'function' &&
-    typeof (channel as { off?: unknown }).off === 'function';
+    typeof (channel as { off?: unknown }).off === 'function'
+  );
 }
 
 /**
@@ -320,7 +310,8 @@ function publishConfirmed(
         const returned = message as { properties?: { headers?: Record<string, unknown> } } | null;
         const headers = returned?.properties?.headers;
         if (
-          headers && Object.hasOwn(headers, DISPOSITION_ID) &&
+          headers &&
+          Object.hasOwn(headers, DISPOSITION_ID) &&
           headers[DISPOSITION_ID] === dispositionId
         ) {
           settle(new Error('mandatory disposition publish was returned as unroutable'));
@@ -361,8 +352,11 @@ const PROBE_TIMEOUT_MS = 2000;
  * without it is skipped rather than forced.
  */
 function isCloseableChannel(value: unknown): value is { close(): Promise<void> } {
-  return typeof value === 'object' && value !== null &&
-    typeof (value as { close?: unknown }).close === 'function';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { close?: unknown }).close === 'function'
+  );
 }
 
 /**
@@ -421,8 +415,7 @@ interface ActiveConsumer {
  * so the shape is computed once at subscribe time and reused verbatim.
  */
 type QueueDeclareOptions =
-  | { readonly durable: true }
-  | { readonly exclusive: true; readonly autoDelete: true };
+  { readonly durable: true } | { readonly exclusive: true; readonly autoDelete: true };
 
 /**
  * RabbitMQ message broker implementation using AMQP 0-9-1 topic exchange.
@@ -476,8 +469,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * real AMQP round trip it meant one channel open per health poll, and a
    * HUNG broker — the `docker pause` condition X51-2 exists for — left that
    * indicator to hit `HealthPlugin`'s `indicatorTimeoutMs` and report `down`,
-   * taking `/ready` to 503 for a fan-out failure its own contract says is
-   * `degraded` at worst. Caching in the broker is what makes the backplane's
+   * taking `/ready` to 503 for a fan-out failure its own contract kept at
+   * `degraded` at worst (and, since M113b, reports `up` with
+   * `data.reachable: false`). Caching in the broker is what makes the backplane's
    * documented assumption true again, for every caller at once.
    */
   #probe: (() => Promise<boolean | undefined>) | null = null;
@@ -489,11 +483,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @param serializer - Serializer for message payloads
    * @param options - RabbitMQ connection and configuration options
    */
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: RabbitMqOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: RabbitMqOptions) {
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'amqp://localhost:5672';
@@ -512,9 +502,7 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       );
     }
     this.#persistentMessages = options?.persistentMessages ?? true;
-    this.#publishTimeoutMs = resolvePublishTimeoutMs(
-      options?.publishTimeoutMs,
-    );
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#consumerOptions = resolveConsumerOptions(options);
     if (options?.logger) {
       this.#logger = options.logger;
@@ -804,14 +792,17 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       );
     }
     const dispositionId = requireRoute ? this.#runtime.uuid() : undefined;
-    const outgoing = dispositionId === undefined ? properties : {
-      ...properties,
-      mandatory: true,
-      headers: Object.fromEntries([
-        ...Object.entries(properties.headers as Record<string, unknown>),
-        [DISPOSITION_ID, dispositionId],
-      ]),
-    };
+    const outgoing =
+      dispositionId === undefined
+        ? properties
+        : {
+            ...properties,
+            mandatory: true,
+            headers: Object.fromEntries([
+              ...Object.entries(properties.headers as Record<string, unknown>),
+              [DISPOSITION_ID, dispositionId],
+            ]),
+          };
     const timeoutMs = this.#publishTimeoutMs;
     await withDeadline(
       async (signal) => {
@@ -907,19 +898,20 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     // The marker is package-internal (F3): it travels on the broker's own
     // `createTopicInbox` closure call and is never on the public surface, so
     // the public `SubscribeOptions` is narrowed here to read it.
-    const declareOptions: QueueDeclareOptions = isExclusive ||
-        (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true
-      ? { exclusive: true, autoDelete: true }
-      : { durable: true };
+    const declareOptions: QueueDeclareOptions =
+      isExclusive ||
+      (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true
+        ? { exclusive: true, autoDelete: true }
+        : { durable: true };
 
     // Without confirms and return listeners no failure can be disposed of, so
     // each stays unacked and the consumer stalls once `prefetch` is reached.
     // Without close() a failed disposition cannot release its channel, so the
     // replacement channel recovery opens would leave the originals stranded.
     if (
-      this.#consumerOptions.retry && 'durable' in declareOptions &&
-      (!this.#confirmed || !isCloseObservable(this.#channel) ||
-        !isCloseableChannel(this.#channel))
+      this.#consumerOptions.retry &&
+      'durable' in declareOptions &&
+      (!this.#confirmed || !isCloseObservable(this.#channel) || !isCloseableChannel(this.#channel))
     ) {
       throw new Error(
         'RabbitMQ consumer retries need a confirm channel with on/off return listeners and ' +
@@ -1051,7 +1043,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
     await this.#applyPrefetch(channel);
     if (!this.#warnedUnconfirmed) {
       this.#warnedUnconfirmed = true;
-      const message = 'RabbitMqBroker: the injected AMQP connection has no ' +
+      const message =
+        'RabbitMqBroker: the injected AMQP connection has no ' +
         'createConfirmChannel(), so publishes are NOT confirmed: publish() resolves ' +
         'before RabbitMQ has stored the message, and a broker failure can lose it';
       // Called as a method, never detached: a logger may keep its state in
@@ -1172,8 +1165,8 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           try {
             const metadata: MessageMetadata = {
               topic,
-              messageId: properties.messageId as string ?? this.#runtime.uuid(),
-              timestamp: properties.timestamp as Date ?? new Date(this.#runtime.now()),
+              messageId: (properties.messageId as string) ?? this.#runtime.uuid(),
+              timestamp: (properties.timestamp as Date) ?? new Date(this.#runtime.now()),
               headers: normalizeTransportHeaders(
                 properties.headers as Readonly<Record<string, TransportHeaderValue>> | undefined,
               ),
@@ -1200,9 +1193,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           }
           const incoming = properties.headers as Record<string, unknown> | undefined;
           const attemptHeader = incoming?.['x-setu-attempt'];
-          const validAttempt = attemptHeader === undefined ||
+          const validAttempt =
+            attemptHeader === undefined ||
             (Number.isSafeInteger(attemptHeader) && (attemptHeader as number) >= 1);
-          const attempt = validAttempt && attemptHeader !== undefined ? attemptHeader as number : 1;
+          const attempt =
+            validAttempt && attemptHeader !== undefined ? (attemptHeader as number) : 1;
           let retryable = !deterministic && validAttempt;
           if (retryable && policy.isRetryable !== undefined) {
             try {
@@ -1221,10 +1216,10 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
             ...Object.entries(incoming ?? {}).filter(([key]) => key !== 'CC' && key !== 'BCC'),
             ...(dead
               ? [
-                ['x-setu-attempts', attempt],
-                ['x-setu-topic', topic],
-                ['x-setu-error', deadLetterError(failure)],
-              ]
+                  ['x-setu-attempts', attempt],
+                  ['x-setu-topic', topic],
+                  ['x-setu-error', deadLetterError(failure)],
+                ]
               : [['x-setu-attempt', attempt + 1]]),
           ]);
           // RabbitMQ validates user_id against the publishing connection, so
@@ -1247,9 +1242,9 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
           if (dead) {
             this.#logger?.error(
               describeLogText(
-                `RabbitMQ dead-lettered to "${target}", topic "${topic}", attempts ${attempt}: ${
-                  deadLetterError(failure)
-                }`,
+                `RabbitMQ dead-lettered to "${target}", topic "${topic}", attempts ${attempt}: ${deadLetterError(
+                  failure,
+                )}`,
               ),
             );
           }

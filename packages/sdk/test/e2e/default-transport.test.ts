@@ -26,11 +26,14 @@ async function handler(request: Request): Promise<Response> {
     return Response.json({ error: 'boom' }, { status: 500 });
   }
   if (url.pathname === '/echo') {
-    const body = request.method === 'GET' ? undefined : (await request.json());
-    return Response.json({ method: request.method, body }, {
-      status: 200,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    const body = request.method === 'GET' ? undefined : await request.json();
+    return Response.json(
+      { method: request.method, body },
+      {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      },
+    );
   }
   return Response.json({ hello: 'world' }, { status: 200 });
 }

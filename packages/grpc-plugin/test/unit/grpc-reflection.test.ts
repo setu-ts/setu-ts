@@ -175,22 +175,25 @@ describe('answerReflectionRequest', () => {
       fakeRegistry(),
       request('fileByFilename', undefined),
     );
-    expect((byFilename.messageResponse.value as { errorMessage: string }).errorMessage)
-      .toBe('file not found: ');
+    expect((byFilename.messageResponse.value as { errorMessage: string }).errorMessage).toBe(
+      'file not found: ',
+    );
 
     const bySymbol = answerReflectionRequest(
       fakeRegistry(),
       request('fileContainingSymbol', undefined),
     );
-    expect((bySymbol.messageResponse.value as { errorMessage: string }).errorMessage)
-      .toBe('symbol not found: ');
+    expect((bySymbol.messageResponse.value as { errorMessage: string }).errorMessage).toBe(
+      'symbol not found: ',
+    );
 
     const byType = answerReflectionRequest(
       fakeRegistry(),
       request('allExtensionNumbersOfType', undefined),
     );
-    expect((byType.messageResponse.value as { errorMessage: string }).errorMessage)
-      .toBe('type not found: ');
+    expect((byType.messageResponse.value as { errorMessage: string }).errorMessage).toBe(
+      'type not found: ',
+    );
   });
 });
 
@@ -213,11 +216,7 @@ describe('createReflectionService', () => {
     }
 
     // One response per request, in order — the bidi contract.
-    expect(cases).toEqual([
-      'listServicesResponse',
-      'fileDescriptorResponse',
-      'errorResponse',
-    ]);
+    expect(cases).toEqual(['listServicesResponse', 'fileDescriptorResponse', 'errorResponse']);
   });
 
   it('yields nothing for an empty request stream', async () => {

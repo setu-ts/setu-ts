@@ -9,6 +9,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   DatabaseAdapterOptions,
   PrismaAdapterOptions,
@@ -34,6 +36,7 @@ import {
   resolveKeysetSort,
   sortFingerprint,
 } from '@setu-ts/common';
+import { isValueTypeRefusal } from '../../errors/classify.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
   UnsupportedFilterOperatorError,
@@ -644,13 +647,7 @@ async function findPrismaPage(
   if (normalized.cursor !== undefined) {
     decoded = decodeCursor(normalized.cursor);
     if (decoded === null) {
-      return Promise.reject(
-        new UnsupportedQueryFeatureError(
-          'cursor-pagination',
-          'prisma',
-          `cursor-pagination: entity '${entity}': malformed cursor token`,
-        ),
-      );
+      return Promise.reject(new InvalidCursorError(`Entity '${entity}': malformed cursor token.`));
     }
   }
 
@@ -659,13 +656,15 @@ async function findPrismaPage(
   const fingerprint = sortFingerprint(normalized.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new UnsupportedQueryFeatureError(
-        'cursor-pagination',
-        'prisma',
-        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),
     );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== keyColumns.length ||
+      decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+  ) {
+    return Promise.reject(new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`));
   }
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,
@@ -675,47 +674,58 @@ async function findPrismaPage(
   // ordering by the caller's fields alone leaves tied rows in an order the
   // database picks freely, and the predicate then skips or repeats them.
   const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
-  const keyset = decoded === null
-    ? undefined
-    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+  const keyset =
+    decoded === null
+      ? undefined
+      : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
 
   // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
   //    position replaces offset (and §3.10 refused the two together).
   const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
-  const internalSelect = normalized.select.length > 0
-    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
-    : [];
-  const found = await delegate.findMany(
-    buildFindManyArgs(
-      prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
-      keysetSort,
-      probeLimit,
-      // A cursor replaces the offset outright (§3.10 refuses the two
-      // together), but a cursor-LESS page must still honour it — passing a
-      // literal 0 silently served page one for `findPage({ offset: 20 })`.
-      decoded === null ? normalized.offset : 0,
-      internalSelect,
-    ),
-  );
+  const internalSelect =
+    normalized.select.length > 0
+      ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+      : [];
+  let found: Record<string, unknown>[];
+  try {
+    found = await delegate.findMany(
+      buildFindManyArgs(
+        prismaWhere(normalized.where, conjoinFilters(normalized.filter, keyset), provider),
+        keysetSort,
+        probeLimit,
+        // A cursor replaces the offset outright (§3.10 refuses the two
+        // together), but a cursor-LESS page must still honour it — passing a
+        // literal 0 silently served page one for `findPage({ offset: 20 })`.
+        decoded === null ? normalized.offset : 0,
+        internalSelect,
+      ),
+    );
+  } catch (error) {
+    // A well-formed cursor carrying a value of the wrong type for its sort
+    // column: Prisma refuses it before any SQL (PrismaClientValidationError)
+    // and PostgreSQL with a class 22 code. Either way it is the client's
+    // cursor, answered 400 (M113g, plan §3.5a). No cause is kept: Prisma's
+    // validation message renders the whole query, values included.
+    // drops-cause: Prisma's validation message renders the query's values.
+    if (decoded !== null && isValueTypeRefusal(error)) {
+      throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`);
+    }
+    throw error;
+  }
 
   // 6. Probe outcome: more than `limit` rows means a next page exists and the
   //    LAST returned row mints the cursor; otherwise the page is terminal.
   const hasMore = normalized.limit > 0 && found.length > normalized.limit;
   const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
-  const nextCursor = mintNextCursor(
-    pageRows,
-    normalized.orderBy,
-    keyColumns,
-    fingerprint,
-    hasMore,
-  );
+  const nextCursor = mintNextCursor(pageRows, normalized.orderBy, keyColumns, fingerprint, hasMore);
 
   // 7. The caller's projection is what comes back — the key columns and the
   //    ordered fields joined the internal select only for the probe and the
   //    cursor minting, and are stripped here.
-  const rows = internalSelect.length > 0
-    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
-    : pageRows;
+  const rows =
+    internalSelect.length > 0
+      ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+      : pageRows;
   return { rows, nextCursor };
 }
 
@@ -787,17 +797,32 @@ function createPrismaDataSourceInner(
   const valueFreePrismaRefusal = (error: unknown): unknown =>
     (error as { name?: unknown } | null)?.name === 'PrismaClientValidationError'
       ? new UnsupportedQueryFeatureError(
-        'write-precondition',
-        'prisma',
-        'Prisma refused the conditional write: the predicate or payload names a field or ' +
-          'value this model does not accept.',
-      )
+          'write-precondition',
+          'prisma',
+          'Prisma refused the conditional write: the predicate or payload names a field or ' +
+            'value this model does not accept.',
+        )
       : error;
+
+  // An accepted key column (equal to the addressed key, compared as a string)
+  // is removed after the check: it changes nothing, and Prisma type-checks
+  // `data` against the model, so `{ id: 5 }` on a `String @id` would be
+  // refused even though the key is unchanged.
+  const withoutKeyColumns = (
+    id: EntityKey,
+    data: Partial<Record<string, unknown>>,
+  ): Partial<Record<string, unknown>> => {
+    const payload = { ...data };
+    assertPrimaryKeyUnchanged(entity, keyColumns, id, payload);
+    for (const column of keyColumns) delete payload[column];
+    return payload;
+  };
 
   const assertPreconditionFields = (where: Readonly<Record<string, string | number>>): void => {
     if (
-      Object.keys(where).some((field) =>
-        field === 'AND' || field === 'OR' || field === 'NOT' || field === compoundKeyField
+      Object.keys(where).some(
+        (field) =>
+          field === 'AND' || field === 'OR' || field === 'NOT' || field === compoundKeyField,
       )
     ) {
       throw new UnsupportedQueryFeatureError(
@@ -840,6 +865,7 @@ function createPrismaDataSourceInner(
     create: (data) => delegate.create({ data }),
 
     async update(id, data) {
+      data = withoutKeyColumns(id, data);
       if (typeof id === 'object' && compoundKeyField === undefined) {
         throw new UnsupportedQueryFeatureError(
           'composite-key',
@@ -848,16 +874,18 @@ function createPrismaDataSourceInner(
             `Pass entities.\`${entity}\`.compositeKeyName and entities.\`${entity}\`.keyColumns via PrismaAdapterOptions to enable.`,
         );
       }
-      return await delegate.update({
-        where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'update'),
-        data,
-      }).catch((err: unknown) => {
-        const code = (err as { code?: string }).code;
-        if (code === 'P2025') {
-          throw new Error(`Entity '${entity}' with id '${String(id)}' not found`);
-        }
-        throw err;
-      });
+      return await delegate
+        .update({
+          where: buildKeyWhere(id, entity, keyColumns, compoundKeyField, 'update'),
+          data,
+        })
+        .catch((err: unknown) => {
+          const code = (err as { code?: string }).code;
+          if (code === 'P2025') {
+            throw new Error(`Entity '${entity}' with id '${String(id)}' not found`);
+          }
+          throw err;
+        });
     },
 
     async delete(id) {
@@ -889,7 +917,7 @@ function createPrismaDataSourceInner(
         throw new UnsupportedQueryFeatureError('write-precondition', 'prisma', checked.problem);
       }
       where = checked.where;
-      data = checked.data;
+      data = withoutKeyColumns(id, checked.data);
       assertPreconditionFields(where);
       try {
         return await delegate.update({
@@ -1035,11 +1063,11 @@ function prismaFilter(
       return field.length === 1
         ? { [field[0]]: { contains: prismaContainsValue(filter.value, provider) } }
         : pathOperator(
-          field,
-          'string_contains',
-          prismaContainsValue(filter.value, provider),
-          provider,
-        );
+            field,
+            'string_contains',
+            prismaContainsValue(filter.value, provider),
+            provider,
+          );
     case 'gt':
       return field.length === 1
         ? { [field[0]]: { gt: filter.value } }
@@ -1066,10 +1094,7 @@ function prismaFilter(
           return { [field[0]]: null };
         }
         return {
-          OR: [
-            { [field[0]]: null },
-            { [field[0]]: { in: nonNullValues } },
-          ],
+          OR: [{ [field[0]]: null }, { [field[0]]: { in: nonNullValues } }],
         };
       }
       // Multi-segment path: build the OR-based null/in predicate under the path object.
@@ -1081,10 +1106,7 @@ function prismaFilter(
         return pathEq;
       }
       return {
-        OR: [
-          pathEq,
-          pathOperator(field, 'in', nonNullValues, provider),
-        ],
+        OR: [pathEq, pathOperator(field, 'in', nonNullValues, provider)],
       };
     }
   }
@@ -1116,10 +1138,7 @@ function prismaFilter(
  * @throws {UnsupportedFilterOperatorError} When the connector is `sqlite` or
  *   could not be determined
  */
-function prismaContainsValue(
-  value: string,
-  provider: PrismaSqlProvider | undefined,
-): string {
+function prismaContainsValue(value: string, provider: PrismaSqlProvider | undefined): string {
   if (provider === 'sqlite') {
     throw new UnsupportedFilterOperatorError(
       'contains',

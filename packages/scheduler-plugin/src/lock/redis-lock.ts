@@ -8,6 +8,7 @@
  * @module
  */
 import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { IDistributedLock, IRedisLockClient, RedisLockOptions } from '../interfaces/index.ts';
 
@@ -36,7 +37,9 @@ export const MAX_LOCK_TIMEOUT_MS = 2_147_483_647;
  */
 export function checkLockTimeout(name: string, value: number): number {
   if (
-    typeof value !== 'number' || !Number.isFinite(value) || value < 0 ||
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < 0 ||
     value > MAX_LOCK_TIMEOUT_MS
   ) {
     throw new RangeError(
@@ -88,8 +91,12 @@ export function createRedisLockClient(
  * @throws {Error} If the ioredis package cannot be resolved
  */
 async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
-  const mod = await import('ioredis');
-  return mod.Redis;
+  try {
+    const mod = await import('ioredis');
+    return mod.Redis;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /**
@@ -146,12 +153,10 @@ async function resolveClient(
   );
   // Attached synchronously after construction: this client connects eagerly,
   // but a connect failure is emitted asynchronously, so none is missed.
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(
-      client as Parameters<typeof attachConnectionErrorReporter>[0],
-      reporter,
-    );
-  }
+  attachConnectionErrorReporter(
+    client as Parameters<typeof attachConnectionErrorReporter>[0],
+    reporter,
+  );
   return client as unknown as IRedisLockClient;
 }
 
@@ -212,6 +217,26 @@ export class RedisLock implements IDistributedLock {
   }
 
   /**
+   * Probe Redis while connected, containing PING failures.
+   *
+   * A built client's PING is bounded by its `commandTimeout`.
+   *
+   * @returns `false` before connect or after disconnect, `undefined` for a
+   *   client without PING, otherwise whether PING resolves
+   * @since 0.10.0
+   */
+  async isHealthy(): Promise<boolean | undefined> {
+    if (this.#client === null) return false;
+    if (this.#client.ping === undefined) return undefined;
+    try {
+      await this.#client.ping();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
    * Attempt to acquire the lock.
    *
    * Uses `SET key token NX PX ttl` — returns the token if acquired,
@@ -240,8 +265,10 @@ export class RedisLock implements IDistributedLock {
     const token = crypto.randomUUID();
     let result: string | null;
     try {
-      // C2 FIX: Use 'NX', 'PX', ttlMs format that real ioredis expects
-      result = await client.set(key, token, 'NX', 'PX', ttlMs);
+      // C2 FIX: Use 'NX', 'PX', ttlMs format that real ioredis expects.
+      // Redis refuses a non-integer PX, and a fractional delayMs makes the
+      // one-shot slot TTL fractional, so round up (never shorten the lease).
+      result = await client.set(key, token, 'NX', 'PX', Math.ceil(ttlMs));
     } catch (error) {
       try {
         await client.eval(RELEASE_SCRIPT, 1, key, token);

@@ -155,19 +155,21 @@ async function request(
 ): Promise<IResponse> {
   const sequence = parts.sequence ?? 1;
   const instance = parts.instance ?? TEST_INSTANCE_ID;
-  const mac = parts.mac ??
-    await signRequest(crypto.subtle, key, '/v1/scheduler', sequence, instance);
-  return await handler(fakeRequest({
-    ...(parts.method !== undefined ? { method: parts.method } : {}),
-    url: `http://${HOST}/v1/scheduler`,
-    headers: {
-      host: HOST,
-      'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
-      'x-setu-sequence': String(sequence),
-      'x-setu-instance': instance,
-      'x-setu-mac': mac,
-    },
-  }));
+  const mac =
+    parts.mac ?? (await signRequest(crypto.subtle, key, '/v1/scheduler', sequence, instance));
+  return await handler(
+    fakeRequest({
+      ...(parts.method !== undefined ? { method: parts.method } : {}),
+      url: `http://${HOST}/v1/scheduler`,
+      headers: {
+        host: HOST,
+        'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
+        'x-setu-sequence': String(sequence),
+        'x-setu-instance': instance,
+        'x-setu-mac': mac,
+      },
+    }),
+  );
 }
 
 describe('scheduler protocol — target and manifest', () => {
@@ -244,13 +246,15 @@ describe('scheduler protocol — source reading', () => {
       records: [],
       dropped: 0,
     });
-    expect(only({
-      state: 'collection-failed',
-      alias: 'cron',
-      coverage: 'owned-instance',
-      records: [],
-      dropped: 0,
-    })).toEqual({
+    expect(
+      only({
+        state: 'collection-failed',
+        alias: 'cron',
+        coverage: 'owned-instance',
+        records: [],
+        dropped: 0,
+      }),
+    ).toEqual({
       state: 'collection-failed',
       alias: 'cron',
       coverage: 'owned-instance',
@@ -279,13 +283,18 @@ describe('scheduler protocol — exact validator', () => {
     [['control alias'], { ...ready(), alias: 'a\u0000b' }],
     [['oversized alias'], { ...ready(), alias: 'x'.repeat(65) }],
     [['record extra key'], { ...ready(), records: [{ ...record(), missed: 1 }] }],
-    [['record missing key'], {
-      ...ready(),
-      records: [(() => {
-        const { lockFailed: _omitted, ...rest } = record();
-        return rest;
-      })()],
-    }],
+    [
+      ['record missing key'],
+      {
+        ...ready(),
+        records: [
+          (() => {
+            const { lockFailed: _omitted, ...rest } = record();
+            return rest;
+          })(),
+        ],
+      },
+    ],
     [['record bad operation'], { ...ready(), records: [record('tick-alias', 'missed')] }],
     [['record negative counter'], { ...ready(), records: [{ ...record(), count: -1 }] }],
     [['record float counter'], { ...ready(), records: [{ ...record(), count: 1.5 }] }],
@@ -293,10 +302,13 @@ describe('scheduler protocol — exact validator', () => {
     [['record bad duration'], { ...ready(), records: [{ ...record(), lastDurationMs: 1.5 }] }],
     [['record control alias'], { ...ready(), records: [record('a\u001bb')] }],
     [['duplicate tuples'], { ...ready(), records: [record(), record()] }],
-    [['66 records'], {
-      ...ready(),
-      records: Array.from({ length: 66 }, (_, i) => record(`job-${i}`)),
-    }],
+    [
+      ['66 records'],
+      {
+        ...ready(),
+        records: Array.from({ length: 66 }, (_, i) => record(`job-${i}`)),
+      },
+    ],
   ];
   for (const [name, value] of invalidSnapshots) {
     it(`refuses ${name.join(' ')}`, () => {
@@ -305,9 +317,8 @@ describe('scheduler protocol — exact validator', () => {
   }
 
   it('refuses a response over the source bound or with duplicate source aliases', () => {
-    const many = Array.from(
-      { length: MAX_SCHEDULER_SOURCES + 1 },
-      (_, i) => source(ready(`cron-${i}`, [])),
+    const many = Array.from({ length: MAX_SCHEDULER_SOURCES + 1 }, (_, i) =>
+      source(ready(`cron-${i}`, [])),
     );
     const over = buildSchedulerResponse(TEST_INSTANCE_ID, many);
     expect(isSchedulerResponseProjection(over)).toBe(false);
@@ -330,12 +341,14 @@ describe('scheduler protocol — exact validator', () => {
   });
 
   it('accepts a collapsed collection-failed response with no sources', () => {
-    expect(isSchedulerResponseProjection({
-      version: 1,
-      instanceId: TEST_INSTANCE_ID,
-      state: 'collection-failed',
-      sources: [],
-    })).toBe(true);
+    expect(
+      isSchedulerResponseProjection({
+        version: 1,
+        instanceId: TEST_INSTANCE_ID,
+        state: 'collection-failed',
+        sources: [],
+      }),
+    ).toBe(true);
   });
 });
 
@@ -376,9 +389,7 @@ describe('connector — GET /v1/scheduler', () => {
   });
 
   it('keeps a throwing source value-free on the wire', async () => {
-    const { handler, key } = await harness([
-      source(new Error('canary-throw-SYNTHETIC')),
-    ]);
+    const { handler, key } = await harness([source(new Error('canary-throw-SYNTHETIC'))]);
     const view = inspect(await request(handler, key));
     expect(view.status).toBe(200);
     expect(view.body.state).toBe('collection-failed');
@@ -399,9 +410,9 @@ describe('DiagnosticsClient — scheduler()', () => {
     });
     const bodyBytes = new TextEncoder().encode(legacyBody);
     const digest = await crypto.subtle.digest('SHA-256', bodyBytes);
-    const bodyHex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join(
-      '',
-    );
+    const bodyHex = [...new Uint8Array(digest)]
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
     const responseFields = [
       'setu-diagnostics-v1',
       'response',

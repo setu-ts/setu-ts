@@ -50,7 +50,55 @@ function harness(seed: Readonly<Record<string, string>> = CLASS_BASED): Harness 
 }
 
 describe('setu generate module', () => {
-  it('writes six files and reads the generated module declaration back', async () => {
+  it('never imports a quoted artifact name into a flat or module barrel', async () => {
+    const h = harness({ '/app/deno.json': manifest('logger-plugin') });
+    expect(await h.run(['module', 'orders'])).toBe(0);
+    for (const dir of ['src/controllers', 'src/modules/orders']) {
+      await h.fs.writeFile(
+        `/app/${dir}/q'y.routes.ts`,
+        new TextEncoder().encode("export function registerQ'yRoutes() {}"),
+      );
+    }
+    expect(await h.run(['route', 'summary', '--module', 'orders'])).toBe(0);
+    expect(await h.run(['route', 'health'])).toBe(0);
+    expect(h.fs.read('/app/src/modules/orders/index.ts')).not.toContain("q'y");
+    expect(h.fs.read('/app/src/controllers/index.ts')).not.toContain("q'y");
+  });
+  it('reports hostile artifact names escaped and never lists them in either barrel', async () => {
+    const h = harness({ '/app/deno.json': manifest('logger-plugin') });
+    expect(await h.run(['module', 'orders'])).toBe(0);
+    const hostile = "q'y\n\u001b[31m";
+    for (const dir of ['src/controllers', 'src/modules/orders']) {
+      await h.fs.writeFile(
+        `/app/${dir}/${hostile}.routes.ts`,
+        new TextEncoder().encode(`export function registerQ'yRoutes() {}`),
+      );
+    }
+    expect(await h.run(['route', 'summary', '--module', 'orders'])).toBe(0);
+    expect(await h.run(['route', 'health'])).toBe(0);
+    expect(h.fs.read('/app/src/modules/orders/index.ts')).not.toContain("q'y");
+    expect(h.fs.read('/app/src/controllers/index.ts')).not.toContain("q'y");
+    expect(h.err.text()).toContain(
+      'not a kebab-case identifier, so it cannot be listed in the barrel. Rename the file.',
+    );
+    expect(h.err.lines.some((line) => line.includes(hostile))).toBe(false);
+    expect(h.err.text()).not.toContain('\u001b');
+  });
+  it('excludes a class-based module with a missing export instead of importing it as legacy', async () => {
+    const h = harness({
+      ...CLASS_BASED,
+      '/app/src/modules/broken/broken.controller.ts': 'export class RenamedController {}',
+      '/app/src/modules/broken/broken.service.ts': 'export class BrokenService {}',
+      '/app/src/modules/broken/broken.module.ts': 'export class BrokenModule {}',
+    });
+    expect(await h.run(['module', 'orders'])).toBe(0);
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    expect(barrel).toContain('OrdersModule');
+    expect(barrel).not.toContain('Broken');
+    expect(h.err.text()).toContain('BrokenController');
+    expect(h.err.text()).toContain('as an export');
+  });
+  it('writes eight files and reads the generated module declaration back', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user'])).toBe(0);
@@ -59,12 +107,15 @@ describe('setu generate module', () => {
       '/app/src/modules/user/user.service.ts',
       '/app/src/modules/user/user.controller.ts',
       '/app/src/modules/user/user.module.ts',
-      '/app/src/modules/user/user.service.test.ts',
       '/app/src/modules/user/index.ts',
       '/app/src/modules/index.ts',
+      '/app/src/modules/user/user.test.ts',
+      '/app/src/modules/user/user.e2e.test.ts',
+      '/app/test/support/server.ts',
     ]);
-    expect(h.fs.read('/app/src/modules/user/user.controller.ts'))
-      .toContain('export class UserController');
+    expect(h.fs.read('/app/src/modules/user/user.controller.ts')).toContain(
+      'export class UserController',
+    );
     expect(h.fs.read('/app/src/modules/user/user.module.ts')).toContain('@Module({');
     expect(h.fs.read('/app/src/modules/index.ts')).toContain('UserModule');
   });
@@ -74,8 +125,8 @@ describe('setu generate module', () => {
 
     expect(await h.run(['module', 'user'])).toBe(0);
 
-    expect(h.fs.writes).toContain('/app/src/controllers/user.routes.ts');
-    expect(h.fs.read('/app/src/controllers/user.routes.ts')).toContain('status(201)');
+    expect(h.fs.writes).toContain('/app/src/modules/user/user.routes.ts');
+    expect(h.fs.read('/app/src/modules/user/user.routes.ts')).toContain('status(201)');
   });
 
   it('lists a previously generated module alongside the new one', async () => {
@@ -109,7 +160,27 @@ describe('setu generate module', () => {
     expect(barrel).toContain('UsersService');
     expect(barrel).toContain('OrdersController');
     expect(barrel).toContain('OrdersService');
-    expect(h.err.text()).toContain('MODULES activation barrel used by migrated configs');
+    expect(h.err.text()).toContain('MODULES activation barrel');
+  });
+
+  it('reports a module directory whose name cannot enter the barrel, escaped', async () => {
+    const hostile = 'Bad\u001b[31m';
+    const h = harness({
+      ...CLASS_BASED,
+      [`/app/src/modules/${hostile}/${hostile}.controller.ts`]: 'export class X {}',
+      [`/app/src/modules/${hostile}/${hostile}.service.ts`]: 'export class Y {}',
+    });
+
+    expect(await h.run(['module', 'orders'])).toBe(0);
+
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    expect(barrel).toContain('OrdersModule');
+    expect(barrel).not.toContain('Bad');
+    const report = h.err.text();
+    expect(report).toContain('its name is not a kebab-case identifier');
+    // The control character is escaped, never written to the terminal raw.
+    expect(report).not.toContain('\u001b');
+    expect(report).toContain('src/modules/Bad');
   });
 
   it('refuses to regenerate a module over its own files', async () => {
@@ -128,7 +199,7 @@ describe('setu generate module', () => {
     expect(h.err.text()).not.toContain('/app/src/modules/index.ts');
   });
 
-  it('prints all six planned paths under --dry-run and writes nothing', async () => {
+  it('prints all eight planned paths under --dry-run and writes nothing', async () => {
     const h = harness();
 
     expect(await h.run(['module', 'user', '--dry-run'])).toBe(0);
@@ -136,7 +207,7 @@ describe('setu generate module', () => {
     expect(h.fs.writes).toEqual([]);
     expect(h.fs.mkdirs).toEqual([]);
     const printed = h.out.lines.filter((l) => l.startsWith('would create'));
-    expect(printed.length).toBe(6);
+    expect(printed.length).toBe(8);
     expect(h.out.text()).toContain('would create /app/src/modules/index.ts');
   });
 

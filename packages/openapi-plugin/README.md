@@ -7,7 +7,7 @@ OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IO
 
 Both **zod v3 and zod v4** are supported: `>=3.24.0 <4` and `>=4.4.0 <5`. The plugin imports
 neither: each schema is recognized by duck typing (`toJSONSchema` marks a zod v4 schema), so an
-application may use either major — or both in one process. `deno task check:compat` exercises each
+application may use either major — or both in one process. `pnpm run check:compat` exercises each
 declared major independently.
 
 - **Zod v3** is converted by the historical `_def.typeName` recursion.
@@ -80,9 +80,38 @@ await app.start({ port: 3000 });
 
 ## Options
 
+Swagger defaults to self-hosting. Install `swagger-ui-dist` (supported range `^5`) in the
+application and grant filesystem read access on Deno. Registration awaits the tiny
+`swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files once.
+The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+`/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
+and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
+routes are excluded from the generated spec; in the external modes no asset route exists, so only
+the page endpoint is.
+
+`SwaggerOptions` is `{ readonly assets?: 'self' | 'cdn' | { readonly baseUrl: string } }`. `true`
+and `{}` select `'self'`; `false` disables the UI. Missing `swagger-ui-dist` fails startup with
+`OptionalDependencyUnavailableError`: install it or set `swagger: { assets: 'cdn' }`. Runtimes
+without `runtime.fs`, including Workers, must choose `'cdn'` or `{ baseUrl }`.
+
+`swagger-ui-dist` depends on `@scarf/scarf`, whose npm `postinstall` sends install analytics
+(platform, Node version, dependency data) unless the root `package.json` sets
+`"scarfSettings": { "enabled": false }`. Scarf reads only the package.json npm was run from, so in a
+workspace the setting belongs at the root; `setu new` sets it on a standalone project and on an npm
+workspace root.
+
+CDN mode uses `https://unpkg.com/swagger-ui-dist@5.33.3` with SHA-384 integrity and
+`crossorigin="anonymous"` on all three tags. A custom base must be printable ASCII with no
+backslash, `?` or `#` (the file names are appended to it), and either an absolute HTTP(S) URL
+already in its serialized form or a path starting with a single `/`. The base is written into the
+page as given, so a URL carrying credentials (`https://user:password@host`) is refused. It must
+serve the unmodified **5.33.3** files, since it uses the same hashes. Invalid modes and base URLs
+throw `TypeError` at construction. `SwaggerUiOptions.assets` selects the same mode for
+`swaggerUiHtml`; its `endpoint` supplies the local prefix (default `/docs`).
+
 | Option                 | Type                             | Default                               | Description                                                  |
 | ---------------------- | -------------------------------- | ------------------------------------- | ------------------------------------------------------------ |
-| `swagger`              | `boolean`                        | `true`                                | Serve the Swagger UI HTML page.                              |
+| `swagger`              | `boolean \| SwaggerOptions`      | `true`                                | Serve Swagger UI, self-hosted by default.                    |
 | `endpoint`             | `string`                         | `'/docs'`                             | Path for the Swagger UI page.                                |
 | `specEndpoint`         | `string`                         | `'/openapi.json'`                     | Path for the JSON spec.                                      |
 | `security`             | `readonly SecurityRequirement[]` | —                                     | Document-level requirement inherited by every operation.     |
@@ -98,6 +127,11 @@ The remaining options come from `OpenApiGeneratorOptions` (title, version, serve
 `/todos/{id}`) and including any `router.group()` prefix, so a route registered as `get('/metrics')`
 inside `group('/internal', …)` is matched only by `'/internal/metrics'`. An entry matching no route
 is silently ignored.
+
+The match is exact: there is no prefix or glob form. The exclusion set is read once when the plugin
+is constructed; mutating the input array later has no effect. To omit an ordinary `router.group()`,
+list each of its resolved paths in `exclude`. `excludeOwners` does not match a group prefix: it
+matches `RouteInfo.owner`, so it only omits routes a plugin registered.
 
 A `security` requirement naming a scheme absent from `securitySchemes` is refused at `register()`,
 because emitting it produces a document that is invalid per the specification and nothing downstream
@@ -150,9 +184,32 @@ Rules and limits:
 
 ## Operation ids
 
-An id is derived from the method and the path with placeholders unwrapped: `GET /orders/{id}`
-becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset flags them — and
-tools that put an `operationId` in an anchor, a filename or a URL are entitled to break on them.
+When no id is declared, an id is derived from the method and the path with placeholders unwrapped:
+`GET /orders/{id}` becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset
+flags them — and tools that put an `operationId` in an anchor, a filename or a URL are entitled to
+break on them.
+
+For example, `GET /api/v1/invoices` produces `get-api-v1-invoices`; the SDK generator names its
+method `getApiV1Invoices` when no id is declared. Declare
+`schema: { operationId: 'listInvoices', description: 'Lists invoices.' }` on a programmatic route,
+or use `@ApiOperation({ operationId: 'listInvoices', description: 'Lists invoices.' })`. A declared
+id is used verbatim and `description` is emitted on the operation alongside `summary` and `tags`.
+
+Declared ids are reserved before derived ones, regardless of registration order. A derived
+`get-users` becomes `get-users-2` if another included route declares `get-users`. A blank id (empty
+or whitespace-only) or duplicate declared id throws exported `OperationIdError` with
+`reason: 'blank' | 'duplicate'` at `app.start()`; direct `OpenApiGenerator.generate()` calls throw
+the same error. Its message names the id and routes as `METHOD path`. Excluded paths and owners
+neither claim nor collide. A route added after bootstrap is validated when the document is first
+built; invalid declarations then produce a request-time `500`. The startup scan does not build or
+cache the document.
+
+Distinct ids can still sanitize to the same SDK method: declared `getUsers` beside undeclared
+`GET /users` (derived `get-users`) is valid OpenAPI, but `@setu-ts/sdk` refuses it with
+`Duplicate operation name`. Choose ids that also yield distinct TypeScript names when generating
+clients. See
+[the upgrade guide](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md#unreleased) for
+generated-name changes.
 
 ## Documenting authentication
 
@@ -204,7 +261,9 @@ available without writing a schema:
 class AuthController {
   @Public()
   @Post('/login')
-  login() {/* ... */}
+  login() {
+    /* ... */
+  }
 }
 ```
 
@@ -227,6 +286,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `zodToOpenApi`            | function  |
 | `OpenApiGenerator`        | class     |
 | `OpenApiService`          | class     |
+| `OperationIdError`        | class     |
 | `ZodToOpenApi`            | class     |
 | `IOpenApiService`         | interface |
 | `OpenApiDocument`         | interface |
@@ -241,8 +301,9 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `SwaggerUiOptions`        | interface |
 | `SchemaIo`                | type      |
 | `SchemaNodeHook`          | type      |
+| `SwaggerOptions`          | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

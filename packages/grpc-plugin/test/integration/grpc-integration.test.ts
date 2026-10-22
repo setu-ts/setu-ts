@@ -28,17 +28,14 @@ async function withApp(
 
 describe('GrpcPlugin integration', () => {
   it('registers the service under CAPABILITIES.GRPC with a real adapter', async () => {
-    await withApp(
-      createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }),
-      (app) => {
-        const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-        expect(grpc).toBeDefined();
-        expect(typeof grpc.addService).toBe('function');
-        // The real runtime adapters implement setRpcHandler.
-        expect(grpc.available).toBe(true);
-        return Promise.resolve();
-      },
-    );
+    await withApp(createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }), (app) => {
+      const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+      expect(grpc).toBeDefined();
+      expect(typeof grpc.addService).toBe('function');
+      // The real runtime adapters implement setRpcHandler.
+      expect(grpc.available).toBe(true);
+      return Promise.resolve();
+    });
   });
 
   it('refuses duplicate registration at startup', async () => {
@@ -183,49 +180,43 @@ describe('GrpcPlugin integration', () => {
     // kernel terminal handler. Since inject() calls #handleRequest directly,
     // it now reaches the gRPC dispatch — the adapter bypass no longer applies.
     // Both fetch() and inject() exercise the same kernel code path for gRPC.
-    await withApp(
-      createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }),
-      async (app) => {
-        const viaFetch = await app.fetch(
-          new Request('http://localhost/grpc.health.v1.Health/Check', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ service: '' }),
-          }),
-        );
-        expect(viaFetch.status).toBe(200);
-        expect(await viaFetch.json()).toEqual({ status: 'SERVING' });
-
-        // After M70a: inject() reaches the kernel terminal handler, which
-        // dispatches gRPC via #tryGrpc. Both paths return the same result.
-        const viaInject = await app.inject({
+    await withApp(createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }), async (app) => {
+      const viaFetch = await app.fetch(
+        new Request('http://localhost/grpc.health.v1.Health/Check', {
           method: 'POST',
-          url: '/grpc.health.v1.Health/Check',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ service: '' }),
-        });
-        expect(viaInject.statusCode).toBe(200);
-        expect(viaInject.json()).toEqual({ status: 'SERVING' });
-      },
-    );
+        }),
+      );
+      expect(viaFetch.status).toBe(200);
+      expect(await viaFetch.json()).toEqual({ status: 'SERVING' });
+
+      // After M70a: inject() reaches the kernel terminal handler, which
+      // dispatches gRPC via #tryGrpc. Both paths return the same result.
+      const viaInject = await app.inject({
+        method: 'POST',
+        url: '/grpc.health.v1.Health/Check',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ service: '' }),
+      });
+      expect(viaInject.statusCode).toBe(200);
+      expect(viaInject.json()).toEqual({ status: 'SERVING' });
+    });
   });
 
   it('registers a grpc health indicator reporting availability', async () => {
-    await withApp(
-      createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }),
-      async (app) => {
-        const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
-        expect(grpc.available).toBe(true);
-        // The service is usable through the capability, end to end.
-        const response = await app.fetch(
-          new Request('http://localhost/grpc.health.v1.Health/Check', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ service: 'grpc.health.v1.Health' }),
-          }),
-        );
-        expect(await response.json()).toEqual({ status: 'SERVING' });
-      },
-    );
+    await withApp(createApplication({ plugins: [RuntimePlugin(), GrpcPlugin()] }), async (app) => {
+      const grpc = app.services.get<IGrpcService>(CAPABILITIES.GRPC);
+      expect(grpc.available).toBe(true);
+      // The service is usable through the capability, end to end.
+      const response = await app.fetch(
+        new Request('http://localhost/grpc.health.v1.Health/Check', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ service: 'grpc.health.v1.Health' }),
+        }),
+      );
+      expect(await response.json()).toEqual({ status: 'SERVING' });
+    });
   });
 });

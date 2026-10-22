@@ -70,10 +70,10 @@ export function legacyLayoutNotice(files: readonly string[]): readonly string[] 
   return [
     `${LEGACY_HTTP_DIR}/ still holds ${files.length} file(s): ${escapeName(files.join(', '))}.`,
     `  That directory was merged into ${HTTP_SEAM_DIR}/. Until you move them, ` +
-    `${HTTP_SEAM_BARREL} is`,
+      `${HTTP_SEAM_BARREL} is`,
     `  imported by nothing and everything generated into it is unreachable.`,
     `  Move them, delete ${LEGACY_HTTP_DIR}/, and point setu.config.ts at ` +
-    `./${HTTP_SEAM_BARREL}.`,
+      `./${HTTP_SEAM_BARREL}.`,
   ];
 }
 

@@ -34,10 +34,7 @@ function setup(excludedPaths?: readonly PathPattern[]) {
 }
 
 /** Drives one request through the middleware; `next` records nothing. */
-async function passThrough(
-  collector: HttpCollector,
-  path: string,
-): Promise<void> {
+async function passThrough(collector: HttpCollector, path: string): Promise<void> {
   await collector.middleware(createFakeContext({ method: 'GET', path }), () => Promise.resolve());
 }
 

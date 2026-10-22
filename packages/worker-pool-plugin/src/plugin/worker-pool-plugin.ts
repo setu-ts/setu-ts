@@ -63,16 +63,16 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
     register(ctx: IPluginContext): void {
       const collector = ctx.services.has(CAPABILITIES.METRICS)
         ? new WorkerPoolCollector(
-          ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
-          // Read through `ctx` at CALL time, never captured here: a logger
-          // registered after this plugin would otherwise be missed for the
-          // life of the application (the M52b `waitUntil` lesson).
-          (error: Error): void => {
-            ctx.logger?.warn('worker-pool metrics write failed', {
-              error: error.message,
-            });
-          },
-        )
+            ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+            // Read through `ctx` at CALL time, never captured here: a logger
+            // registered after this plugin would otherwise be missed for the
+            // life of the application (the M52b `waitUntil` lesson).
+            (error: Error): void => {
+              ctx.logger?.warn('worker-pool metrics write failed', {
+                error: error.message,
+              });
+            },
+          )
         : undefined;
       const service = new WorkerPoolService(options, ctx.runtime, collector);
       // A worker error that settles no task (an idle worker crashing) rejects
@@ -97,43 +97,31 @@ export function WorkerPoolPlugin(options?: WorkerPoolPluginOptions): IPlugin {
       warnIfDeathUndetectable(ctx, options, exitDetection, available);
       warnIfUntimedTasksCanHoldBudget(ctx, options, budgetLimitOf(service), available);
 
-      // H-70c-5: this hardcoded `status: 'up'` beside a live `available`
-      // field that could read `false` — a pool with no `IWorkerHost` throws
-      // `WorkerPoolUnavailableError` from every `run()`, so the indicator
-      // reported healthy for a capability that could not execute one task.
-      //
-      // `degraded` rather than `down`, and the distinction is deliberate.
-      // M45 registers this plugin on Cloudflare Workers ON PURPOSE — the
-      // runtime has no threads, so the capability resolves and refuses — and
-      // `degraded` keeps `/ready` at 200 (`health-plugin.ts:218`) while still
-      // surfacing in the payload. Reporting `down` would 503 every Workers
-      // deployment that registers the plugin, turning an observability fix
-      // into an outage.
+      // Workers deliberately has no thread host. Keep availability in data:
+      // determineStatusCode withdraws every non-up replica from /ready.
+      // This optional capability must not withdraw a serving Workers app.
       //
       // The pool counters stay DATA, not policy: `TaskPoolStats.failed` is
       // cumulative, so any status derived from it would need a threshold this
       // plugin cannot choose for an application (the M45b/M90b rule that
       // saturation is published, never judged).
-      ctx.health.register(
-        'worker-pool',
-        (): Promise<HealthCheckResult> => {
-          const pools = service.stats();
-          const limit = budgetLimitOf(service);
-          return Promise.resolve({
-            status: available ? 'up' : 'degraded',
-            data: {
-              available,
-              exitDetection,
-              pools,
-              budget: {
-                maxWorkers: limit === Infinity ? null : limit,
-                workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
-              },
-              ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
+      ctx.health.register('worker-pool', (): Promise<HealthCheckResult> => {
+        const pools = service.stats();
+        const limit = budgetLimitOf(service);
+        return Promise.resolve({
+          status: 'up',
+          data: {
+            available,
+            exitDetection,
+            pools,
+            budget: {
+              maxWorkers: limit === Infinity ? null : limit,
+              workers: pools.reduce((sum, pool) => sum + pool.workers, 0),
             },
-          });
-        },
-      );
+            ...(available ? {} : { reason: WORKERS_UNSUPPORTED_REASON }),
+          },
+        });
+      });
 
       ctx.lifecycle.onClose(async () => {
         await service.shutdown();

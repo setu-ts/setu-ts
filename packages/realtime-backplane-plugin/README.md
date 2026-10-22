@@ -54,7 +54,7 @@ reach clients on every replica.
 | ------------- | ----------------- | ------------------------------ | ----------------------------------------------------------------------------- |
 | `'memory'`    | No                | None                           | The default. A real single-process bus, not a no-op — useful in tests and dev |
 | `'messaging'` | Yes               | A plugin providing `messaging` | Reuses every broker the messaging plugin ships; adds no dependency            |
-| `'redis'`     | Yes               | `npm:ioredis@5.x` (lazy)       | Redis pub/sub. Opens **two** connections (see below)                          |
+| `'redis'`     | Yes               | `ioredis@5.x` (lazy)           | Redis pub/sub. Opens **two** connections (see below)                          |
 | `'custom'`    | Depends           | None                           | Any `IRealtimeBackplane` you supply                                           |
 
 ### `'messaging'`
@@ -178,14 +178,9 @@ MIT
 
 ## Health indicator
 
-Registered as `realtime-backplane`. Since M70c it probes the transport's reachability
-(`isHealthy()`). A fan-out failure is `degraded` — local delivery still works, so `/ready` keeps
-serving — never `down`. A transport that cannot probe reports `up` with `reachable: 'unknown'`.
-
-| Status     | Meaning                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------- |
-| `up`       | The transport is reachable, or cannot be probed (`reachable` is `'unknown'`).           |
-| `degraded` | The transport is unreachable — a fan-out to a peer failed (local delivery still works). |
+The `realtime-backplane` indicator reports `up`, including fan-out outages. Local request delivery
+still works. `data.reachable: false` exposes an unreachable backend; a transport without a probe
+reports `'unknown'`. `/ready` therefore remains 200 for this shared dependency condition.
 
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.
@@ -223,5 +218,5 @@ serving — never `down`. A transport that cannot probe reports `up` with `reach
 | `RealtimeFrameHandler`             | type      |
 | `RealtimeFrameKind`                | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

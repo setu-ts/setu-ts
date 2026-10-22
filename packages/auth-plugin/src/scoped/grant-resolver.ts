@@ -62,8 +62,7 @@ export type CustomRoleIndex = ReadonlyMap<string, ReadonlyMap<string, ReadonlySe
 
 /** Resolved custom roles, or why they could not be resolved. */
 export type CustomRolesOutcome =
-  | { readonly ok: true; readonly roles: CustomRoleIndex; readonly dropped: number }
-  | Failure;
+  { readonly ok: true; readonly roles: CustomRoleIndex; readonly dropped: number } | Failure;
 
 /** A bound grant source: a name for logs, and the call. */
 interface BoundSource {
@@ -286,7 +285,7 @@ export class GrantResolver {
   ): Promise<GrantsOutcome> {
     const timing = this.#config.timing;
     if (timing.kind === 'sign-in') {
-      const stored = context === undefined ? null : this.#stored?.(context, principal) ?? null;
+      const stored = context === undefined ? null : (this.#stored?.(context, principal) ?? null);
       return Promise.resolve({ ok: true, grants: stored ?? [], dropped: 0 });
     }
     // `iss` is read ONCE, here: the key and what a custom source sees are both
@@ -297,8 +296,9 @@ export class GrantResolver {
     if (claims === undefined || claims.length === 0) {
       return shared;
     }
-    return Promise.all([shared, this.#collect(principal, query, claims)])
-      .then(([fromShared, fromClaims]) => this.#union(fromShared, fromClaims));
+    return Promise.all([shared, this.#collect(principal, query, claims)]).then(
+      ([fromShared, fromClaims]) => this.#union(fromShared, fromClaims),
+    );
   }
 
   /**
@@ -325,9 +325,10 @@ export class GrantResolver {
           }
         }
       }
-      const outcome = this.#sharedSources === undefined
-        ? unbound()
-        : await this.#collect(keyed, query, this.#sharedSources);
+      const outcome =
+        this.#sharedSources === undefined
+          ? unbound()
+          : await this.#collect(keyed, query, this.#sharedSources);
       if (outcome.ok && timing.kind === 'cache') {
         this.#cache.set(key, {
           expiresAt: this.#deps.hrtime() + timing.ttlMs,
@@ -377,13 +378,15 @@ export class GrantResolver {
     query: GrantQuery,
     sources: readonly BoundSource[],
   ): Promise<GrantsOutcome> {
-    const answers = await Promise.all(sources.map(async (source) => {
-      try {
-        return { source, value: await source.fetch(principal, query, this.#deps.bounded) };
-      } catch (error) {
-        return { source, error };
-      }
-    }));
+    const answers = await Promise.all(
+      sources.map(async (source) => {
+        try {
+          return { source, value: await source.fetch(principal, query, this.#deps.bounded) };
+        } catch (error) {
+          return { source, error };
+        }
+      }),
+    );
     const grants: ScopedGrant[] = [];
     let dropped = 0;
     for (const answer of answers) {
@@ -391,11 +394,11 @@ export class GrantResolver {
         return answer.error instanceof ScopedDeadlineError
           ? { ok: false, reason: 'source-timeout', source: answer.source.name }
           : {
-            ok: false,
-            reason: 'source-failed',
-            source: answer.source.name,
-            errorName: errorNameOf(answer.error),
-          };
+              ok: false,
+              reason: 'source-failed',
+              source: answer.source.name,
+              errorName: errorNameOf(answer.error),
+            };
       }
       if (!Array.isArray(answer.value)) {
         return { ok: false, reason: 'source-failed', source: answer.source.name };
@@ -433,11 +436,8 @@ export class GrantResolver {
       return Promise.resolve({ ok: true, roles: new Map(), dropped: 0 });
     }
     const key = `roles:${JSON.stringify(scopes.map(scopeKey))}`;
-    return memoised(
-      context,
-      key,
-      this.#rolesInflight,
-      () => this.#fetchCustomRoles(source, scopes),
+    return memoised(context, key, this.#rolesInflight, () =>
+      this.#fetchCustomRoles(source, scopes),
     );
   }
 
@@ -465,7 +465,8 @@ export class GrantResolver {
       // Dropped: malformed, a scope nobody asked about (a source may not widen
       // the question), or a name that would shadow a catalogue role.
       if (
-        entry === undefined || !asked.has(scopeKey(entry.scope)) ||
+        entry === undefined ||
+        !asked.has(scopeKey(entry.scope)) ||
         this.#config.roles.has(entry.role)
       ) {
         dropped += 1;

@@ -63,8 +63,9 @@ describe('compilePasskeys', () => {
   });
 
   it('refuses an rpId that is not the origin host or a suffix of it', () => {
-    expect(() => compilePasskeys(valid({ rpId: 'other.com', origins: ['https://example.com'] })))
-      .toThrow(AuthPluginConfigurationError);
+    expect(() =>
+      compilePasskeys(valid({ rpId: 'other.com', origins: ['https://example.com'] })),
+    ).toThrow(AuthPluginConfigurationError);
   });
 
   it('refuses an empty origin list', () => {
@@ -72,13 +73,14 @@ describe('compilePasskeys', () => {
   });
 
   it('refuses a non-https origin off loopback', () => {
-    expect(() => compilePasskeys(valid({ rpId: 'example.com', origins: ['http://example.com'] })))
-      .toThrow(AuthPluginConfigurationError);
+    expect(() =>
+      compilePasskeys(valid({ rpId: 'example.com', origins: ['http://example.com'] })),
+    ).toThrow(AuthPluginConfigurationError);
   });
 
   it('refuses an origin carrying a path', () => {
     expect(() =>
-      compilePasskeys(valid({ rpId: 'example.com', origins: ['https://example.com/app'] }))
+      compilePasskeys(valid({ rpId: 'example.com', origins: ['https://example.com/app'] })),
     ).toThrow(AuthPluginConfigurationError);
   });
 
@@ -92,15 +94,13 @@ describe('compilePasskeys', () => {
     expect(() =>
       compilePasskeys(
         valid({ resolvePrincipal: undefined as unknown as PasskeyOptions['resolvePrincipal'] }),
-      )
+      ),
     ).toThrow(AuthPluginConfigurationError);
   });
 
   it('refuses a userVerification outside the three defined values', () => {
     expect(() =>
-      compilePasskeys(
-        valid({ userVerification: 'sometimes' as unknown as 'required' }),
-      )
+      compilePasskeys(valid({ userVerification: 'sometimes' as unknown as 'required' })),
     ).toThrow(AuthPluginConfigurationError);
   });
 
@@ -118,22 +118,22 @@ describe('compilePasskeys', () => {
             resolvePrincipal: () => null,
           },
         },
-      })
+      }),
     ).toThrow(AuthPluginConfigurationError);
   });
 
   it('refuses a mayRegister that is not a function', () => {
     expect(() =>
       compilePasskeys({
-        ...({
+        ...{
           rpId: 'localhost',
           rpName: 'Test',
           origins: ['http://localhost'],
           store: new MemoryPasskeyStore(),
           resolvePrincipal: () => null,
-        }),
+        },
         mayRegister: 'yes',
-      } as unknown as PasskeyOptions)
+      } as unknown as PasskeyOptions),
     ).toThrow(AuthPluginConfigurationError);
   });
 });

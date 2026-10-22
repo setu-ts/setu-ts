@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 describe('graphql real import', () => {
   it('successfully imports and uses graphql module', async () => {
     // Guarded real import - this is the actual npm:graphql package
-    let graphql: typeof import('graphql') | null = null;
+    let graphql: typeof import('graphql') | null;
 
     try {
       graphql = await import('graphql');
@@ -45,7 +45,7 @@ describe('graphql real import', () => {
   });
 
   it('executes a simple query', async () => {
-    let graphql: typeof import('graphql') | null = null;
+    let graphql: typeof import('graphql') | null;
 
     try {
       graphql = await import('graphql');

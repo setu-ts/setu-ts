@@ -36,7 +36,7 @@ describe('barrel exports', () => {
   // by the options interface. Without the export a consumer could pass an inline literal
   // but could not declare its own array in a variable — which is exactly what
   // `setu generate command-handler`'s barrel does. Asserted by DECLARING one: this
-  // compiles only while both types are exported, and `deno task check` covers `test/`.
+  // compiles only while both types are exported, and `pnpm run check` covers `test/`.
   it('exports the registration types a consumer needs to declare its own array', () => {
     const commands: readonly CommandHandlerRegistration[] = [
       { type: 'CreateUser', handler: { handle: () => ({ id: '1' }) } },

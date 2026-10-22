@@ -312,19 +312,17 @@ describe('every documented flag is accepted', () => {
   });
 
   it('accepts the global flags, bare and with a command', async () => {
-    for (
-      const argv of [
-        ['--version'],
-        ['-v'],
-        ['--help'],
-        ['-h'],
-        ['help'],
-        ['new', 'app', '--version'],
-        ['new', '--help'],
-        ['g', 'service', 'x', '-h'],
-        ['workspace', '--help'],
-      ]
-    ) {
+    for (const argv of [
+      ['--version'],
+      ['-v'],
+      ['--help'],
+      ['-h'],
+      ['help'],
+      ['new', 'app', '--version'],
+      ['new', '--help'],
+      ['g', 'service', 'x', '-h'],
+      ['workspace', '--help'],
+    ]) {
       const h = harness();
       expect(await h.run(argv), argv.join(' ')).toBe(0);
     }
@@ -361,6 +359,7 @@ describe('help text agrees with the inventory', () => {
     ['generate app', ['generate', 'app', '--help']],
     ['generate library', ['generate', 'library', '--help']],
     ['add', ['add', '--help']],
+    ['agents', ['agents', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
   ];
@@ -496,12 +495,14 @@ describe('plugin commands', () => {
 
   it('refuses a flag the dispatcher does not consume, before the app boots and the handler runs', async () => {
     let ran = false;
-    const h = withApp([{
-      name: 'db:migrate',
-      handler: () => {
-        ran = true;
+    const h = withApp([
+      {
+        name: 'db:migrate',
+        handler: () => {
+          ran = true;
+        },
       },
-    }]);
+    ]);
     expect(await h.run(['db:migrate', '--verbose'])).toBe(2);
     expect(h.err.text()).toContain('Unknown option `--verbose` for `setu db:migrate`.');
     // The refusal sits ABOVE the boot in `dispatchPluginCommand`: the loader is
@@ -512,12 +513,14 @@ describe('plugin commands', () => {
 
   it('accepts dir and config, the flags its dispatcher consumes', async () => {
     let ran = false;
-    const h = withApp([{
-      name: 'db:migrate',
-      handler: () => {
-        ran = true;
+    const h = withApp([
+      {
+        name: 'db:migrate',
+        handler: () => {
+          ran = true;
+        },
       },
-    }]);
+    ]);
     expect(await h.run(['db:migrate', '--dir', '/work', '--config', 'setu.config.ts'])).toBe(0);
     // A valid plugin command still boots and dispatches.
     expect(h.wasBooted()).toBe(true);

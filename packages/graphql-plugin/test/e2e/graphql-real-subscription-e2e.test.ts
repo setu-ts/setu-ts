@@ -92,7 +92,7 @@ async function drain(body: ReadableStream<Uint8Array>): Promise<string> {
     const read = await Promise.race([
       reader.read(),
       new Promise<{ done: true; value: undefined }>((r) =>
-        setTimeout(() => r({ done: true, value: undefined }), 5000)
+        setTimeout(() => r({ done: true, value: undefined }), 5000),
       ),
     ]);
     if (read.done) break;
@@ -100,7 +100,9 @@ async function drain(body: ReadableStream<Uint8Array>): Promise<string> {
   }
   try {
     await reader.cancel();
-  } catch { /* already closed */ }
+  } catch {
+    /* already closed */
+  }
   return out;
 }
 
@@ -200,11 +202,13 @@ describe('GraphQL real subscriptions (schema-first)', () => {
       });
 
       client.send(encodeFrame({ type: GQL_CONNECTION_INIT }));
-      client.send(encodeFrame({
-        type: GQL_SUBSCRIBE,
-        id: 'sub-1',
-        payload: { query: 'subscription { tick }' },
-      }));
+      client.send(
+        encodeFrame({
+          type: GQL_SUBSCRIBE,
+          id: 'sub-1',
+          payload: { query: 'subscription { tick }' },
+        }),
+      );
 
       await Promise.race([
         done.promise,

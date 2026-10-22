@@ -116,15 +116,17 @@ describe('metadata shape vs the legacy baseline', () => {
   });
 
   it('records the controller exactly as the legacy implementation did', () => {
-    expect(serialize(metadataStore.getController(WidgetController as unknown as Constructor)))
-      .toEqual(entry('controllers', 'WidgetController'));
+    expect(
+      serialize(metadataStore.getController(WidgetController as unknown as Constructor)),
+    ).toEqual(entry('controllers', 'WidgetController'));
   });
 
   it('records a class-position @Inject service exactly as the legacy implementation did', () => {
     // WidgetService already used the class-position list, which this milestone
     // keeps, so its record must be byte-identical.
-    expect(serialize(metadataStore.getService(WidgetService as unknown as Constructor)))
-      .toEqual(entry('services', 'WidgetService'));
+    expect(serialize(metadataStore.getService(WidgetService as unknown as Constructor))).toEqual(
+      entry('services', 'WidgetService'),
+    );
   });
 
   it('migrates a parameter-position @Inject list intact into the service record', () => {
@@ -139,10 +141,12 @@ describe('metadata shape vs the legacy baseline', () => {
   });
 
   it('records the same optional constructor arguments', () => {
-    expect([...metadataStore.ctorOptional(OtherService as unknown as Constructor)])
-      .toEqual(entry('ctorOptional', 'OtherService'));
-    expect([...metadataStore.ctorOptional(WidgetService as unknown as Constructor)])
-      .toEqual(entry('ctorOptional', 'WidgetService'));
+    expect([...metadataStore.ctorOptional(OtherService as unknown as Constructor)]).toEqual(
+      entry('ctorOptional', 'OtherService'),
+    );
+    expect([...metadataStore.ctorOptional(WidgetService as unknown as Constructor)]).toEqual(
+      entry('ctorOptional', 'WidgetService'),
+    );
   });
 
   it('records the same routes, in the same order, with the same non-parameter fields', () => {

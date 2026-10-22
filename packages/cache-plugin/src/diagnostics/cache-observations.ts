@@ -126,14 +126,7 @@ export function compileCacheDiagnosticsAlias(options: CacheDiagnosticsOptions): 
  * @internal
  */
 export type CacheCallOutcome =
-  | 'failed'
-  | 'succeeded'
-  | 'hit'
-  | 'miss'
-  | 'present'
-  | 'absent'
-  | 'removed'
-  | 'not-removed';
+  'failed' | 'succeeded' | 'hit' | 'miss' | 'present' | 'absent' | 'removed' | 'not-removed';
 
 /** The mutable counters behind one record. */
 interface MutableRecord {
@@ -335,21 +328,23 @@ export class CacheObservationCollector {
         continue;
       }
       freshest = Math.min(freshest, age);
-      records.push(Object.freeze({
-        alias: this.#alias,
-        operation,
-        count: record.count,
-        lastDurationMs: record.lastDurationMs,
-        ageMs: Math.round(age),
-        succeeded: record.succeeded,
-        failed: record.failed,
-        hits: record.hits,
-        misses: record.misses,
-        present: record.present,
-        absent: record.absent,
-        removed: record.removed,
-        notRemoved: record.notRemoved,
-      }));
+      records.push(
+        Object.freeze({
+          alias: this.#alias,
+          operation,
+          count: record.count,
+          lastDurationMs: record.lastDurationMs,
+          ageMs: Math.round(age),
+          succeeded: record.succeeded,
+          failed: record.failed,
+          hits: record.hits,
+          misses: record.misses,
+          present: record.present,
+          absent: record.absent,
+          removed: record.removed,
+          notRemoved: record.notRemoved,
+        }),
+      );
     }
     let state: DiagnosticsInspectorState = 'no-data';
     if (records.length > 0) {

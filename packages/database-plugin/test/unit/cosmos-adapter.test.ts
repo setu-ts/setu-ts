@@ -22,29 +22,29 @@ function fakeClient(databaseReadStatus?: number) {
 
 describe('CosmosAdapter constructor', () => {
   it('refuses a configuration carrying neither a client nor an endpoint pair', () => {
-    expect(() =>
-      new CosmosAdapter(
-        { database: 'db' } as unknown as ConstructorParameters<
+    expect(
+      () =>
+        new CosmosAdapter({ database: 'db' } as unknown as ConstructorParameters<
           typeof CosmosAdapter
-        >[0],
-      )
+        >[0]),
     ).toThrow(/either options.client or options.endpoint \+ options.key/);
   });
 
   it('refuses a configuration with an endpoint but no key', () => {
-    expect(() =>
-      new CosmosAdapter(
-        { endpoint: 'https://x/', database: 'db' } as unknown as ConstructorParameters<
-          typeof CosmosAdapter
-        >[0],
-      )
+    expect(
+      () =>
+        new CosmosAdapter({
+          endpoint: 'https://x/',
+          database: 'db',
+        } as unknown as ConstructorParameters<typeof CosmosAdapter>[0]),
     ).toThrow(/options.endpoint \+ options.key/);
   });
 
   it('refuses a configuration with no database, naming why there is no fallback', () => {
     const { client } = fakeClient();
-    expect(() =>
-      new CosmosAdapter({ client } as unknown as ConstructorParameters<typeof CosmosAdapter>[0])
+    expect(
+      () =>
+        new CosmosAdapter({ client } as unknown as ConstructorParameters<typeof CosmosAdapter>[0]),
     ).toThrow(/requires options.database.*encodes no database name/s);
   });
 
@@ -196,8 +196,9 @@ describe('CosmosAdapter.rawQuery', () => {
     const pending = adapter.rawQuery('SELECT 1');
     expect(pending).toBeInstanceOf(Promise);
     await expect(pending).rejects.toThrow(UnsupportedRawQueryError);
-    await expect(adapter.rawQuery('SELECT 1'))
-      .rejects.toThrow(/scoped to one container and this signature names none/);
+    await expect(adapter.rawQuery('SELECT 1')).rejects.toThrow(
+      /scoped to one container and this signature names none/,
+    );
   });
 });
 

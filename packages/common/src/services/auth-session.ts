@@ -53,8 +53,7 @@ export interface SignInOptions {
  * @since 0.8.0
  */
 export type SignInOutcome =
-  | { readonly status: 'signed-in' }
-  | { readonly status: 'second-factor-required' };
+  { readonly status: 'signed-in' } | { readonly status: 'second-factor-required' };
 
 /**
  * A sign-in that is awaiting its second factor.

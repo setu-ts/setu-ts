@@ -145,22 +145,24 @@ const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby',
 
 describe('RedisBackplane construction', () => {
   it('rejects a client injected without a subscriber', () => {
-    expect(() =>
-      new RedisBackplane(
-        { transport: 'redis', client: new FakeRedisClient() },
-        'node-a',
-        'realtime',
-      )
+    expect(
+      () =>
+        new RedisBackplane(
+          { transport: 'redis', client: new FakeRedisClient() },
+          'node-a',
+          'realtime',
+        ),
     ).toThrow(/BOTH options.client and options.subscriber/);
   });
 
   it('rejects a subscriber injected without a client', () => {
-    expect(() =>
-      new RedisBackplane(
-        { transport: 'redis', subscriber: new FakeRedisClient() },
-        'node-a',
-        'realtime',
-      )
+    expect(
+      () =>
+        new RedisBackplane(
+          { transport: 'redis', subscriber: new FakeRedisClient() },
+          'node-a',
+          'realtime',
+        ),
     ).toThrow(/BOTH options.client and options.subscriber/);
   });
 
@@ -171,8 +173,9 @@ describe('RedisBackplane construction', () => {
   });
 
   it('rejects an empty url', () => {
-    expect(() => new RedisBackplane({ transport: 'redis', url: '' }, 'node-a', 'realtime'))
-      .toThrow(/requires options.url/);
+    expect(() => new RedisBackplane({ transport: 'redis', url: '' }, 'node-a', 'realtime')).toThrow(
+      /requires options.url/,
+    );
   });
 });
 
@@ -192,9 +195,7 @@ describe('RedisBackplane', () => {
     // The publish must land on the publisher; routing it to the subscriber
     // would have rejected, since that connection is in subscriber mode.
     expect(subscriber.subscribed).toEqual(['realtime']);
-    expect(client.published).toEqual([
-      { channel: 'realtime', message: JSON.stringify(FRAME) },
-    ]);
+    expect(client.published).toEqual([{ channel: 'realtime', message: JSON.stringify(FRAME) }]);
     expect(subscriber.published).toEqual([]);
     await backplane.close();
   });
@@ -283,7 +284,10 @@ describe('RedisBackplane', () => {
   });
 
   it('forwards a configured command timeout, and 0 leaves the clients unbounded', async () => {
-    for (const [commandTimeoutMs, expected] of [[250, { commandTimeout: 250 }], [0, {}]] as const) {
+    for (const [commandTimeoutMs, expected] of [
+      [250, { commandTimeout: 250 }],
+      [0, {}],
+    ] as const) {
       const options: Array<{ readonly commandTimeout?: number } | undefined> = [];
       const module: IRedisModule = {
         create: (_url, clientOptions): IRedisBackplaneClient => {
@@ -303,34 +307,34 @@ describe('RedisBackplane', () => {
   });
 
   it('accepts the largest timer delay as a command timeout', () => {
-    expect(() =>
-      new RedisBackplane(
-        { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs: 2_147_483_647 },
-        'node-a',
-        'realtime',
-      )
+    expect(
+      () =>
+        new RedisBackplane(
+          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs: 2_147_483_647 },
+          'node-a',
+          'realtime',
+        ),
     ).not.toThrow();
   });
 
   it('refuses a command timeout outside 0 to 2147483647', () => {
     // 2^31 overflows the runtime timer, which then fires after 1 ms: measured
     // against a real Redis, every publish failed with `Command timed out`.
-    for (
-      const commandTimeoutMs of [
-        Number.NaN,
-        -1,
-        Number.POSITIVE_INFINITY,
-        2_147_483_648,
-        3_000_000_000,
-        '5' as never,
-      ]
-    ) {
-      expect(() =>
-        new RedisBackplane(
-          { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
-          'node-a',
-          'realtime',
-        )
+    for (const commandTimeoutMs of [
+      Number.NaN,
+      -1,
+      Number.POSITIVE_INFINITY,
+      2_147_483_648,
+      3_000_000_000,
+      '5' as never,
+    ]) {
+      expect(
+        () =>
+          new RedisBackplane(
+            { transport: 'redis', url: 'redis://localhost:6379', commandTimeoutMs },
+            'node-a',
+            'realtime',
+          ),
       ).toThrow(RangeError);
     }
   });
@@ -926,7 +930,10 @@ describe('RedisBackplane rollback of a failed open', () => {
 
     // The open's own failure is what the caller sees, not the rollback's.
     await expect(backplane.connect()).rejects.toBe(subscribeFailure);
-    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
   });
 
   it('force-disconnects the connections when close lands mid-open and their QUIT fails', async () => {
@@ -955,7 +962,10 @@ describe('RedisBackplane rollback of a failed open', () => {
     release?.();
     await connecting;
 
-    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([[1, 1], [1, 1]]);
+    expect(clients.map((c) => [c.quitCount, c.disconnectCount])).toEqual([
+      [1, 1],
+      [1, 1],
+    ]);
   });
 });
 
@@ -1010,7 +1020,7 @@ describe('RedisBackplane connection-error reporting', () => {
     await backplane.close();
   });
 
-  it('attaches nothing to built connections when no reporter is configured', async () => {
+  it('attaches dropping listeners to built connections when no reporter is configured', async () => {
     const { module, clients } = builtPair();
     const backplane = new RedisBackplane(
       { transport: 'redis', url: 'redis://localhost:6379', module },
@@ -1020,8 +1030,10 @@ describe('RedisBackplane connection-error reporting', () => {
 
     await backplane.connect();
 
+    // A listener must exist, or ioredis writes every error to the console.
     for (const client of clients) {
-      expect(client.eventListeners.has('error')).toBe(false);
+      expect(client.eventListeners.get('error')?.length).toBe(1);
+      expect(() => client.emitEvent('error', new Error('refused'))).not.toThrow();
     }
     await backplane.close();
   });

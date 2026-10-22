@@ -50,11 +50,8 @@ describe('instrumentation loaders — literal package specifiers', () => {
     it(`keeps '${name}' as a literal import() argument in its default importer`, () => {
       // The default importer is a default PARAMETER, so it is part of the
       // function's own source text.
-      const file = name === 'http' || name === 'fetch'
-        ? 'http'
-        : name === 'ioredis'
-        ? 'database'
-        : 'queue';
+      const file =
+        name === 'http' || name === 'fetch' ? 'http' : name === 'ioredis' ? 'database' : 'queue';
       const source = readFileSync(
         new URL(`../../src/instrumentation/${file}-instrumentation.ts`, import.meta.url),
         'utf8',
@@ -80,7 +77,8 @@ describe('instrumentation loaders — literal package specifiers', () => {
             IORedisInstrumentation: class {},
             AmqplibInstrumentation: class {},
             KafkaJsInstrumentation: class {},
-          }));
+          }),
+        );
         return [result.specifier, specifier];
       }),
     );

@@ -42,6 +42,13 @@ describe('the generated config module factory signature', () => {
     expect(source).not.toContain('devtool?.diagnostics');
   });
 
+  it('opts a starter-composed project into request logging, probe paths excluded (M113h §3.9)', () => {
+    const source = config('deno', FULL_STACK_TEMPLATE);
+    expect(source).toContain(
+      "logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },",
+    );
+  });
+
   it('keeps the starter factory async with the parameter accepted and unread', () => {
     const source = config('deno', FULL_STACK_TEMPLATE);
     expect(source).toContain('export async function createApp(');

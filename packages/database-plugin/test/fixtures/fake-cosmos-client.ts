@@ -124,14 +124,18 @@ function partitionKeyFromBody(
   spec: FakeContainerSpec,
 ): CosmosPartitionKeyValue {
   const paths = spec.partitionKeyPaths ?? ['/id'];
-  const values = paths.map((path) =>
-    path.slice(1).split('/').reduce<unknown>(
-      (node, segment) =>
-        node === null || typeof node !== 'object'
-          ? undefined
-          : (node as Record<string, unknown>)[segment],
-      body,
-    ) as string | number | boolean | null
+  const values = paths.map(
+    (path) =>
+      path
+        .slice(1)
+        .split('/')
+        .reduce<unknown>(
+          (node, segment) =>
+            node === null || typeof node !== 'object'
+              ? undefined
+              : (node as Record<string, unknown>)[segment],
+          body,
+        ) as string | number | boolean | null,
   );
   return values.length === 1 ? (values[0] as CosmosPartitionKeyValue) : values;
 }
@@ -180,15 +184,18 @@ export function createFakeCosmosClient(options: FakeCosmosOptions): FakeCosmos {
       // A hierarchical key is written as a JSON array literal, an explicit null
       // as `null` and an ABSENT one as `undefined`; anything else is taken as
       // the string it looks like.
-      const partitionKey = rawKey === 'undefined'
-        ? undefined
-        : rawKey.startsWith('[') || rawKey === 'null'
-        ? JSON.parse(rawKey) as CosmosPartitionKeyValue
-        : rawKey;
-      documents.set(
-        documentKey(container, partitionKey, id),
-        { ...document, _etag: `etag-${++etagCounter}`, _rid: 'rid', _ts: 1 },
-      );
+      const partitionKey =
+        rawKey === 'undefined'
+          ? undefined
+          : rawKey.startsWith('[') || rawKey === 'null'
+            ? (JSON.parse(rawKey) as CosmosPartitionKeyValue)
+            : rawKey;
+      documents.set(documentKey(container, partitionKey, id), {
+        ...document,
+        _etag: `etag-${++etagCounter}`,
+        _rid: 'rid',
+        _ts: 1,
+      });
     }
   }
 

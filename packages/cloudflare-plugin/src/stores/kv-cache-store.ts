@@ -90,7 +90,7 @@ export class KvCacheStore implements ICacheStore {
     // A stored `null` is a hit, but `ICacheStore.get` has no way to express it
     // apart from absence, so both answer null. The distinction survives on
     // `has` and `delete`, and — the point — neither path deletes the entry.
-    return read.kind === 'hit' ? read.value ?? null : null;
+    return read.kind === 'hit' ? (read.value ?? null) : null;
   }
 
   async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {

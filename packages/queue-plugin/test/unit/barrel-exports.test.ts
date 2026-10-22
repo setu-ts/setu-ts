@@ -2,6 +2,10 @@ import { describe, expect, it } from 'vitest';
 import * as exports from '../../src/index.ts';
 import type { QueueDepthDiagnosticsOptions, QueueDiagnosticsOptions } from '../../src/index.ts';
 
+it('keeps Redis option resolution internal', () => {
+  expect('resolveKeyPrefix' in exports).toBe(false);
+});
+
 describe('barrel exports', () => {
   it('exports QueuePlugin', () => {
     expect(exports.QueuePlugin).toBeDefined();
@@ -45,13 +49,12 @@ describe('barrel exports', () => {
       depths,
     };
     expect(options.depths).toBe(depths);
-    for (
-      const internal of [
-        'QueueObservationCollector',
-        'compileQueueDiagnosticsPolicy',
-        'createDisabledQueueSource',
-      ]
-    ) {
+    for (const internal of [
+      'QueueObservationCollector',
+      'compileQueueDiagnosticsPolicy',
+      'createDisabledQueueSource',
+      'StaleClaimError',
+    ]) {
       expect(internal in exports).toBe(false);
     }
   });

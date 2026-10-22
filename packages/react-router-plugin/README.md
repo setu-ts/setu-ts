@@ -1,5 +1,13 @@
 # @setu-ts/react-router-plugin
 
+Behind a reverse proxy, the request bridge uses `publicRequestUrl(ctx)` from `@setu-ts/common` so
+loaders and actions see the public protocol and host when IP security has resolved them. Register
+`HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: [...] } })` with the addresses
+of your proxies; choose `forwardedHeader: 'forwarded'` if they write RFC 7239 instead of
+`X-Forwarded-*`. With no IP security middleware, the bridge uses the original request URL. Use a
+configured base URL for security-sensitive links such as password resets. See
+[deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
+
 React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a
 kernel catch-all handler. Registers an `SsrService` under `CAPABILITIES.SSR` (`'ssr'`).
 
@@ -35,17 +43,20 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option               | Type       | Default      | Description                                                                                                                                                                                                                  |
-| -------------------- | ---------- | ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Required.                                                                                                                                                                                |
-| `basename`           | `string`   | `'/'`        | Mount point for the SSR catch-all.                                                                                                                                                                                           |
-| `assetsDir`          | `string`   | —            | Directory served as static assets. Omitted → no asset route is registered at all.                                                                                                                                            |
-| `assetUrlPrefix`     | `string`   | `'/assets/'` | URL prefix the asset route claims. Read only when `assetsDir` is set.                                                                                                                                                        |
-| `publicFiles`        | `boolean`  | `true`       | Also serve files from the client build ROOT (Vite copies `public/` there — `robots.txt`, `favicon.ico`) with `must-revalidate`, not `immutable`: those files are not content-hashed. `false` restores prefix-only behaviour. |
-| `loadRequestHandler` | `function` | lazy import  | Injectable seam; defaults to importing `npm:react-router` plus the build.                                                                                                                                                    |
+| Option               | Type       | Default      | Description                                                                                                                                                                                                                                                               |
+| -------------------- | ---------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Exactly one of `serverBuildPath`/`serverBuild` is supplied (a union `type` since 0.10.0). Correct for the socket targets; on Cloudflare Workers supply `serverBuild` — a bundled Worker cannot resolve `new URL(…, import.meta.url)`. |
+| `serverBuild`        | `unknown`  | —            | The namespace of the compiled `ServerBuild`, supplied as a module (0.10.0) — the form a bundled Cloudflare Worker uses; the generated full-stack entry imports `../build/server/index.js` and passes it.                                                                  |
+| `basename`           | `string`   | `'/'`        | Mount point for the SSR catch-all.                                                                                                                                                                                                                                        |
+| `assetsDir`          | `string`   | —            | Directory served as static assets. Omitted → no asset route is registered at all.                                                                                                                                                                                         |
+| `assetUrlPrefix`     | `string`   | `'/assets/'` | URL prefix the asset route claims. Read only when `assetsDir` is set.                                                                                                                                                                                                     |
+| `publicFiles`        | `boolean`  | `true`       | Also serve files from the client build ROOT (Vite copies `public/` there — `robots.txt`, `favicon.ico`) with `must-revalidate`, not `immutable`: those files are not content-hashed. `false` restores prefix-only behaviour.                                              |
+| `loadRequestHandler` | `function` | lazy import  | Injectable seam; defaults to importing `react-router` plus the build.                                                                                                                                                                                                     |
 
 On Cloudflare Workers leave `assetsDir` unset — there is no `runtime.fs`, so the asset handler has
-nothing to read, and omitting it registers no route rather than throwing.
+nothing to read, and omitting it registers no route rather than throwing. The server build arrives
+as a module: supply `serverBuild` (the generated full-stack Workers entry does this) rather than
+`serverBuildPath`, whose `new URL(…, import.meta.url)` form cannot resolve in a bundled Worker.
 
 ## Toolchain note
 
@@ -142,7 +153,6 @@ stateless.
 | `IFileSystem`              | interface |
 | `IRequestContext`          | interface |
 | `ISsrService`              | interface |
-| `ReactRouterPluginOptions` | interface |
 | `RouterContextKey`         | interface |
 | `RouterLoadContext`        | interface |
 | `SsrRuntime`               | interface |
@@ -152,10 +162,11 @@ stateless.
 | `ViteHookContext`          | interface |
 | `ViteResolvedEnvironments` | interface |
 | `PopulateLoadContext`      | type      |
+| `ReactRouterPluginOptions` | type      |
 | `RouteHandler`             | type      |
 | `SsrRequestHandler`        | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

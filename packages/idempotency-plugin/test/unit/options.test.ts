@@ -54,15 +54,15 @@ describe('validateRouteOptionShape (M109a §3.13)', () => {
   });
 
   it('refuses bad scalar fields by name', () => {
-    expect(optionOf(() => validateRouteOptionShape({ required: 'yes' as unknown as boolean })))
-      .toBe('required');
+    expect(
+      optionOf(() => validateRouteOptionShape({ required: 'yes' as unknown as boolean })),
+    ).toBe('required');
     expect(
       optionOf(() => validateRouteOptionShape({ principal: 'sometimes' as unknown as 'required' })),
-    ).toBe(
-      'principal',
-    );
-    expect(optionOf(() => validateRouteOptionShape({ response: 'body' as unknown as 'full' })))
-      .toBe('response');
+    ).toBe('principal');
+    expect(
+      optionOf(() => validateRouteOptionShape({ response: 'body' as unknown as 'full' })),
+    ).toBe('response');
     expect(optionOf(() => validateRouteOptionShape({ namespace: '' }))).toBe('namespace');
     expect(optionOf(() => validateRouteOptionShape({ namespace: 'a\u0000b' }))).toBe('namespace');
   });
@@ -72,8 +72,9 @@ describe('validateRouteOptionShape (M109a §3.13)', () => {
     expect(optionOf(() => validateRouteOptionShape({ key: { bodyField: '' } }))).toBe(
       'key.bodyField',
     );
-    expect(optionOf(() => validateRouteOptionShape({ key: {} as unknown as { header: string } })))
-      .toBe('key');
+    expect(
+      optionOf(() => validateRouteOptionShape({ key: {} as unknown as { header: string } })),
+    ).toBe('key');
   });
 
   it('refuses a DENY-listed replay header, including content-language', () => {
@@ -139,21 +140,18 @@ describe('ingress options (M109a §3.7, §3.13)', () => {
     );
     expect(
       optionOf(() =>
-        validateIngressOptionShape({ topics: Array.from({ length: 1_001 }, () => 't') })
+        validateIngressOptionShape({ topics: Array.from({ length: 1_001 }, () => 't') }),
       ),
-    ).toBe(
-      'topics',
-    );
+    ).toBe('topics');
   });
 
   it('refuses a bad key/fingerprint/scope', () => {
-    expect(optionOf(() => validateIngressOptionShape({ topics: ['t'], key: 'bogus' as never })))
-      .toBe('key');
+    expect(
+      optionOf(() => validateIngressOptionShape({ topics: ['t'], key: 'bogus' as never })),
+    ).toBe('key');
     expect(
       optionOf(() => validateIngressOptionShape({ topics: ['t'], fingerprint: 'raw' as never })),
-    ).toBe(
-      'fingerprint',
-    );
+    ).toBe('fingerprint');
     expect(optionOf(() => validateIngressOptionShape({ topics: ['t'], scope: 'x' as never }))).toBe(
       'scope',
     );
@@ -171,11 +169,9 @@ describe('ingress options (M109a §3.7, §3.13)', () => {
   it('checks the ingress ttlMs >= leaseMs cross-field rule', () => {
     expect(
       optionOf(() =>
-        resolveIngressOptions({ jobNames: ['j'], leaseMs: 1_000, ttlMs: 10 }, defaults)
+        resolveIngressOptions({ jobNames: ['j'], leaseMs: 1_000, ttlMs: 10 }, defaults),
       ),
-    ).toBe(
-      'ttlMs',
-    );
+    ).toBe('ttlMs');
   });
 });
 
@@ -184,11 +180,11 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
     expect(() => validatePluginOptionShape({})).not.toThrow();
     expect(() => validatePluginOptionShape({ store: { type: 'memory' } })).not.toThrow();
     expect(() =>
-      validatePluginOptionShape({ store: { type: 'redis', namespace: 'shop', url: 'redis://x' } })
-    )
-      .not.toThrow();
-    expect(() => validatePluginOptionShape({ store: { type: 'custom', store: storeStub() } })).not
-      .toThrow();
+      validatePluginOptionShape({ store: { type: 'redis', namespace: 'shop', url: 'redis://x' } }),
+    ).not.toThrow();
+    expect(() =>
+      validatePluginOptionShape({ store: { type: 'custom', store: storeStub() } }),
+    ).not.toThrow();
   });
 
   it('refuses bad plugin scalars and an over-range default', () => {
@@ -202,19 +198,17 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
   });
 
   it('refuses memory bounds and the per-scope > maxEntries rule', () => {
-    expect(optionOf(() => validatePluginOptionShape({ store: { type: 'memory', maxEntries: 0 } })))
-      .toBe(
-        'store.maxEntries',
-      );
-    expect(optionOf(() => validatePluginOptionShape({ store: { type: 'memory', maxBytes: 10 } })))
-      .toBe(
-        'store.maxBytes',
-      );
+    expect(
+      optionOf(() => validatePluginOptionShape({ store: { type: 'memory', maxEntries: 0 } })),
+    ).toBe('store.maxEntries');
+    expect(
+      optionOf(() => validatePluginOptionShape({ store: { type: 'memory', maxBytes: 10 } })),
+    ).toBe('store.maxBytes');
     expect(
       optionOf(() =>
         validatePluginOptionShape({
           store: { type: 'memory', maxEntries: 5, maxEntriesPerScope: 6 },
-        })
+        }),
       ),
     ).toBe('store.maxEntriesPerScope');
   });
@@ -222,28 +216,26 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
   it('refuses a bad redis namespace, url, prefix and timeout', () => {
     expect(
       optionOf(() =>
-        validatePluginOptionShape({ store: { type: 'redis', namespace: 'Bad', url: 'x' } })
+        validatePluginOptionShape({ store: { type: 'redis', namespace: 'Bad', url: 'x' } }),
       ),
-    ).toBe(
-      'store.namespace',
-    );
+    ).toBe('store.namespace');
     expect(
       optionOf(() =>
-        validatePluginOptionShape({ store: { type: 'redis', namespace: 'ok', url: '' } })
+        validatePluginOptionShape({ store: { type: 'redis', namespace: 'ok', url: '' } }),
       ),
     ).toBe('store.url');
     expect(
       optionOf(() =>
         validatePluginOptionShape({
           store: { type: 'redis', namespace: 'ok', url: 'x', keyPrefix: '' },
-        })
+        }),
       ),
     ).toBe('store.keyPrefix');
     expect(
       optionOf(() =>
         validatePluginOptionShape({
           store: { type: 'redis', namespace: 'ok', url: 'x', commandTimeoutMs: -1 },
-        })
+        }),
       ),
     ).toBe('store.commandTimeoutMs');
   });
@@ -257,7 +249,7 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
             namespace: 'ok',
             client: { eval: () => {}, ping: () => {}, quit: () => {} } as never,
           },
-        })
+        }),
       ),
     ).toBe('store.client');
   });
@@ -265,9 +257,7 @@ describe('plugin options (M109a §3.13, §4.1)', () => {
   it('refuses a custom store missing a member', () => {
     expect(
       optionOf(() => validatePluginOptionShape({ store: { type: 'custom', store: {} as never } })),
-    ).toBe(
-      'store.store',
-    );
+    ).toBe('store.store');
   });
 
   it('resolveDefaults refuses ttlMs below a lease', () => {
@@ -291,27 +281,33 @@ function withTransactional(transactional: unknown): IdempotencyPluginOptions {
 
 describe('validatePluginOptionShape transactional (M109b §3.5, §3.13)', () => {
   it('accepts a store instance, a factory, and the range endpoints', () => {
-    expect(() => validatePluginOptionShape(withTransactional({ store: TRANSACTIONAL_STORE })))
-      .not.toThrow();
-    expect(() => validatePluginOptionShape(withTransactional({ store: () => TRANSACTIONAL_STORE })))
-      .not.toThrow();
     expect(() =>
-      validatePluginOptionShape(withTransactional({
-        store: TRANSACTIONAL_STORE,
-        ttlMs: 60_000,
-        storeTimeoutMs: 1,
-        maxResultBytes: 2,
-        purge: { schedule: true, intervalMs: 1, batch: 1 },
-      }))
+      validatePluginOptionShape(withTransactional({ store: TRANSACTIONAL_STORE })),
     ).not.toThrow();
     expect(() =>
-      validatePluginOptionShape(withTransactional({
-        store: TRANSACTIONAL_STORE,
-        ttlMs: 2_592_000_000,
-        storeTimeoutMs: 2_147_483_647,
-        maxResultBytes: 262_144,
-        purge: { batch: 100_000 },
-      }))
+      validatePluginOptionShape(withTransactional({ store: () => TRANSACTIONAL_STORE })),
+    ).not.toThrow();
+    expect(() =>
+      validatePluginOptionShape(
+        withTransactional({
+          store: TRANSACTIONAL_STORE,
+          ttlMs: 60_000,
+          storeTimeoutMs: 1,
+          maxResultBytes: 2,
+          purge: { schedule: true, intervalMs: 1, batch: 1 },
+        }),
+      ),
+    ).not.toThrow();
+    expect(() =>
+      validatePluginOptionShape(
+        withTransactional({
+          store: TRANSACTIONAL_STORE,
+          ttlMs: 2_592_000_000,
+          storeTimeoutMs: 2_147_483_647,
+          maxResultBytes: 262_144,
+          purge: { batch: 100_000 },
+        }),
+      ),
     ).not.toThrow();
   });
 
@@ -325,9 +321,11 @@ describe('validatePluginOptionShape transactional (M109b §3.5, §3.13)', () => 
     );
     expect(
       optionOf(() =>
-        validatePluginOptionShape(withTransactional({
-          store: { find: () => Promise.resolve(), run: () => Promise.resolve() },
-        }))
+        validatePluginOptionShape(
+          withTransactional({
+            store: { find: () => Promise.resolve(), run: () => Promise.resolve() },
+          }),
+        ),
       ),
     ).toBe('transactional.store');
   });
@@ -347,7 +345,7 @@ describe('validatePluginOptionShape transactional (M109b §3.5, §3.13)', () => 
         optionOf(() =>
           validatePluginOptionShape(
             withTransactional({ store: TRANSACTIONAL_STORE, [field]: value }),
-          )
+          ),
         ),
       ).toBe(option);
     }

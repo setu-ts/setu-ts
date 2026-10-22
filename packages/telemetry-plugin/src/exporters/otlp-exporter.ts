@@ -5,6 +5,8 @@
  * @since 0.2.0
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /**
  * Loads the OTLP trace exporter via dynamic import.
  *
@@ -28,8 +30,12 @@ export async function loadOtlpExporter(
     throw new Error('OTLP exporter requires a `url` option');
   }
 
-  const mod = await import(
-    '@opentelemetry/exporter-trace-otlp-http'
-  );
-  return mod.OTLPTraceExporter;
+  try {
+    const mod = await import('@opentelemetry/exporter-trace-otlp-http');
+    return mod.OTLPTraceExporter;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@opentelemetry/exporter-trace-otlp-http', {
+      cause: error,
+    });
+  }
 }

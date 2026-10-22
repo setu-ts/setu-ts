@@ -98,39 +98,42 @@ describe('claimStateOf', () => {
   it('accepts the exact version and global horizon boundaries', () => {
     expect(claimStateOf(valid, 42)).toEqual({ claimVersion: 0, leaseUntil: 0 });
     expect(
-      claimStateOf({
-        ...valid,
-        claimVersion: Number.MAX_SAFE_INTEGER - 1,
-        leaseUntil: 42 + MAX_CLAIM_HORIZON_MS,
-      }, 42),
+      claimStateOf(
+        {
+          ...valid,
+          claimVersion: Number.MAX_SAFE_INTEGER - 1,
+          leaseUntil: 42 + MAX_CLAIM_HORIZON_MS,
+        },
+        42,
+      ),
     ).toEqual({
       claimVersion: Number.MAX_SAFE_INTEGER - 1,
       leaseUntil: 42 + MAX_CLAIM_HORIZON_MS,
     });
   });
   for (const field of ['claimVersion', 'leaseUntil'] as const) {
-    for (
-      const value of [
-        undefined,
-        null,
-        'x',
-        -1,
-        1.5,
-        Number.NaN,
-        Infinity,
-        Number.MAX_SAFE_INTEGER + 1,
-      ]
-    ) {
+    for (const value of [
+      undefined,
+      null,
+      'x',
+      -1,
+      1.5,
+      Number.NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
       it(`refuses ${field}=${String(value)}`, () => {
-        expect(claimStateOf({ ...valid, [field]: value } as unknown as OutboxRecord, 42))
-          .toBeUndefined();
+        expect(
+          claimStateOf({ ...valid, [field]: value } as unknown as OutboxRecord, 42),
+        ).toBeUndefined();
       });
     }
   }
   it('refuses exhausted versions and leases beyond the horizon', () => {
     expect(claimStateOf({ ...valid, claimVersion: Number.MAX_SAFE_INTEGER }, 42)).toBeUndefined();
-    expect(claimStateOf({ ...valid, leaseUntil: 42 + MAX_CLAIM_HORIZON_MS + 1 }, 42))
-      .toBeUndefined();
+    expect(
+      claimStateOf({ ...valid, leaseUntil: 42 + MAX_CLAIM_HORIZON_MS + 1 }, 42),
+    ).toBeUndefined();
   });
 });
 

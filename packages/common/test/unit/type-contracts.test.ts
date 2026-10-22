@@ -1,9 +1,9 @@
 /**
  * Compile-time contract tests for `common` type widenings.
  *
- * These assertions are decided by `deno task check` — if a widening is ever
+ * These assertions are decided by `pnpm run check` — if a widening is ever
  * narrowed again, this file stops compiling. Runtime expectations are asserted
- * alongside so the file also fails loudly under `deno task test`.
+ * alongside so the file also fails loudly under `pnpm run test`.
  *
  * M70n / X3-6: `SseMessage.data` accepts every value the frame encoder already
  * documents ("a string is written literally; any non-string is
@@ -65,7 +65,8 @@ const withString: SseMessage = { data: 'hello' };
 // committed signature `(body: string) => HandlerResult`.
 type HasRequiredHtml = IResponse extends {
   html(body: string): HandlerResult;
-} ? true
+}
+  ? true
   : false;
 const htmlIsRequiredMember: HasRequiredHtml = true;
 
@@ -128,11 +129,13 @@ const withNestedNonFinite: SseMessage = { data: { ratio: NaN, cap: Infinity } };
 // --- M74 / X3-8: peek is a REQUIRED member with the committed signature ---
 type HasRequiredRoomPeek = IWebSocketService extends {
   peek(name: string): WebSocketRoom | undefined;
-} ? true
+}
+  ? true
   : false;
 type HasRequiredChannelPeek = ISseService extends {
   peek(name: string): SseChannel | undefined;
-} ? true
+}
+  ? true
   : false;
 const roomPeekIsRequired: HasRequiredRoomPeek = true;
 const channelPeekIsRequired: HasRequiredChannelPeek = true;
@@ -140,8 +143,8 @@ const channelPeekIsRequired: HasRequiredChannelPeek = true;
 describe('SseMessage.data narrowed to JsonValue (M74 / X3-8)', () => {
   it('rejects every value JSON.stringify cannot represent', () => {
     // Decided at compile time by the @ts-expect-error directives above; the
-    // runtime assertions keep the file failing loudly under `deno task test`
-    // as well as under `deno task check`.
+    // runtime assertions keep the file failing loudly under `pnpm run test`
+    // as well as under `pnpm run check`.
     expect(rejectsBigint).toBeDefined();
     expect(rejectsBigintInArray).toBeDefined();
     expect(rejectsFunction).toBeDefined();

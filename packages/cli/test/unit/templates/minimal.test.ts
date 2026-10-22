@@ -26,8 +26,12 @@ describe('MINIMAL_SEAMS', () => {
     // `controller` joined this list in M70h/E8, in its functional shape: it is
     // no longer gated, so a bare project can generate one. It shares the
     // `route` barrel rather than adding a fourth.
-    expect(MINIMAL_SEAMS.map((spec) => spec.schematic).sort())
-      .toEqual(['controller', 'middleware', 'plugin', 'route']);
+    expect(MINIMAL_SEAMS.map((spec) => spec.schematic).sort()).toEqual([
+      'controller',
+      'middleware',
+      'plugin',
+      'route',
+    ]);
   });
 
   it('selects the FUNCTIONAL HTTP shapes, never the decorated ones', () => {
@@ -90,8 +94,9 @@ describe('MINIMAL_HOST', () => {
   });
 
   it('registers the middleware seam through the priority-preserving loop', () => {
-    expect((MINIMAL_HOST.setupCalls ?? []).join('\n'))
-      .toContain(`for (const generated of ${GENERATED_MIDDLEWARE_EXPORT}) {`);
+    expect((MINIMAL_HOST.setupCalls ?? []).join('\n')).toContain(
+      `for (const generated of ${GENERATED_MIDDLEWARE_EXPORT}) {`,
+    );
   });
 
   it('spreads the generated plugins into the plugin array', () => {
@@ -100,15 +105,13 @@ describe('MINIMAL_HOST', () => {
 
   it('carries no barrel for a gated family', () => {
     const paths = (MINIMAL_HOST.files ?? []).map((f) => f.path);
-    for (
-      const gated of [
-        'src/services/index.ts',
-        'src/cqrs/index.ts',
-        'src/events/index.ts',
-        'src/health/index.ts',
-        'src/metrics/index.ts',
-      ]
-    ) {
+    for (const gated of [
+      'src/services/index.ts',
+      'src/cqrs/index.ts',
+      'src/events/index.ts',
+      'src/health/index.ts',
+      'src/metrics/index.ts',
+    ]) {
       expect(paths).not.toContain(gated);
     }
   });

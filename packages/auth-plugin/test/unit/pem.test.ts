@@ -54,12 +54,14 @@ describe('pemToDer', () => {
 
   it('handles trailing whitespace in armor lines', () => {
     const lines = publicKeyPem.split('\n');
-    const padded = lines.map((line, index) => {
-      if (index === 0 || index === lines.length - 1) {
-        return line + '   ';
-      }
-      return line;
-    }).join('\n');
+    const padded = lines
+      .map((line, index) => {
+        if (index === 0 || index === lines.length - 1) {
+          return line + '   ';
+        }
+        return line;
+      })
+      .join('\n');
     const decoded = pemToDer(padded, 'PUBLIC KEY');
     expect(decoded).toEqual(publicKeyDer);
   });

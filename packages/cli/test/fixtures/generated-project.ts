@@ -5,7 +5,9 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { workspaceMembers } from '../../../../scripts/lib/workspace.ts';
 /**
  * Helpers for type-checking a project the CLI just scaffolded.
  *
@@ -65,6 +67,41 @@ export function workspaceEntrypoint(pkg: string): string {
 }
 
 /**
+ * The mappings the framework's own sources resolve through.
+ *
+ * A repointed `@setu-ts/*` source imports more than the project declares: other
+ * framework packages it depends on (a starter imports `@setu-ts/static-plugin`)
+ * and the bare npm names its members map (`hono`, `zod`, …). A check run with
+ * `--config <project>/deno.json` applies only the project's map, so those would
+ * fall back to `package.json` resolution. The root `deno.json` workspace
+ * supplied them until M111e3 removed it; now every framework entry point comes
+ * from the Deno lane's generated config (one source for both) and every npm
+ * mapping from the members' own `deno.json`.
+ */
+async function frameworkImports(): Promise<Record<string, string>> {
+  const imports: Record<string, string> = {};
+  const lane = JSON.parse(
+    await nodeFs.readFile(`${REPO_ROOT}/test/deno-lane/lane.config.json`, 'utf8'),
+  ) as { imports: Record<string, string> };
+  for (const [specifier, target] of Object.entries(lane.imports)) {
+    if (specifier.startsWith('@setu-ts/')) {
+      imports[specifier] = resolve(`${REPO_ROOT}/test/deno-lane`, target);
+    }
+  }
+  for (const member of await workspaceMembers(REPO_ROOT)) {
+    const manifest = JSON.parse(
+      await nodeFs.readFile(`${REPO_ROOT}/${member}/deno.json`, 'utf8'),
+    ) as { imports?: Record<string, string> };
+    for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
+      if (!specifier.startsWith('@setu-ts/') && !(specifier in imports)) {
+        imports[specifier] = target;
+      }
+    }
+  }
+  return imports;
+}
+
+/**
  * Repoints a scaffolded project's `@setu-ts/*` imports at this workspace, so a
  * check measures drift against HEAD rather than against a published snapshot.
  *
@@ -82,7 +119,8 @@ export async function useWorkspacePackages(root: string): Promise<void> {
     imports?: Record<string, string>;
     compilerOptions?: Record<string, unknown>;
   };
-  const imports: Record<string, string> = {};
+  // The project's own entries win: they are what the CLI emitted.
+  const imports: Record<string, string> = await frameworkImports();
   for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
     // Only framework specifiers are repointed. A template may also declare a
     // project-local alias (`~/` → `./app/`), and rewriting that to a package
@@ -146,10 +184,7 @@ export interface CheckResult {
  * @param files - Files to check
  * @returns The process result
  */
-export async function denoCheck(
-  root: string,
-  files: readonly string[],
-): Promise<CheckResult> {
+export async function denoCheck(root: string, files: readonly string[]): Promise<CheckResult> {
   const command = () =>
     runProcess(denoBinary(), {
       // `--node-modules-dir=none` because a template that also emits a
@@ -314,6 +349,23 @@ export async function bootAndProbe(
   probe: string,
 ): Promise<Record<string, unknown>> {
   await nodeFs.writeFile(`${project}/run-probe.ts`, probe);
+  // M113d §3.8: the generated Workers entry imports `cloudflare:workers` on
+  // EVERY Workers project, and Deno cannot resolve that scheme. The probe maps
+  // it to a local no-op stub — what the probe exercises is the boot semantics,
+  // not the sink, and the import line itself is pinned by the template tests.
+  const manifestPath = `${project}/deno.json`;
+  const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
+    imports?: Record<string, string>;
+  };
+  await nodeFs.writeFile(
+    `${project}/cloudflare-workers-stub.mjs`,
+    'export function waitUntil() {}\n',
+  );
+  manifest.imports = {
+    ...(manifest.imports ?? {}),
+    'cloudflare:workers': './cloudflare-workers-stub.mjs',
+  };
+  await nodeFs.writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const command = () =>
     runProcess(denoBinary(), {
       args: [
@@ -380,7 +432,10 @@ export async function withGeneratedServer<T>(
   if (start === undefined) throw new Error(`No start task in ${project}/deno.json.`);
 
   // Everything between `deno run` and the entry module is the permission set.
-  const flags = start.replace(/^deno run\s+/, '').replace(/\s+\S+\.ts$/, '').split(/\s+/)
+  const flags = start
+    .replace(/^deno run\s+/, '')
+    .replace(/\s+\S+\.ts$/, '')
+    .split(/\s+/)
     .filter((flag) => flag.startsWith('--'));
 
   // The port arrives through the environment, exactly as the generated project
@@ -388,18 +443,11 @@ export async function withGeneratedServer<T>(
   // boots a file the CLI never emitted. It also proves `--allow-env` is in the
   // generated permission set: without it this boot fails with NotCapable
   // rather than silently binding a default.
-  const port = workspacePort ?? await unusedPort();
+  const port = workspacePort ?? (await unusedPort());
   const entry = `${project}/main.ts`;
 
   const child = spawnProcess(denoBinary(), {
-    args: [
-      'run',
-      ...flags,
-      '--node-modules-dir=none',
-      '--config',
-      `${project}/deno.json`,
-      entry,
-    ],
+    args: ['run', ...flags, '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
     cwd: project,
     env: { PORT: String(port) },
     stdout: 'piped',
@@ -437,8 +485,9 @@ export async function withGeneratedServer<T>(
   }
 
   const status = await child.status;
-  const output = `${await new Response(child.stdout).text()}${await new Response(child.stderr)
-    .text()}`;
+  const output = `${await new Response(child.stdout).text()}${await new Response(
+    child.stderr,
+  ).text()}`;
   if (!served) {
     throw new Error(`The project never served a request (exit ${status.code}):\n${output}`);
   }

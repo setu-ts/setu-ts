@@ -317,11 +317,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
  * @param key - The projected field name
  * @param value - The source value
  */
-function copyOptional(
-  target: Record<string, unknown>,
-  key: string,
-  value: unknown,
-): void {
+function copyOptional(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value !== undefined) {
     target[key] = value;
   }
@@ -448,10 +444,7 @@ export function renewBody(
  * @returns The legacy status record
  * @internal
  */
-export function legacyStatusBody(
-  instanceId: string,
-  expiresInMs: number,
-): Record<string, unknown> {
+export function legacyStatusBody(instanceId: string, expiresInMs: number): Record<string, unknown> {
   return { version: 1, instanceId, expiresInMs };
 }
 
@@ -665,7 +658,9 @@ export function parseStatusBody(value: unknown): ParsedStatusBody | null {
     return null;
   }
   const inspectors = hasInspectors
-    ? isInspectorsManifest(value.inspectors) ? value.inspectors : null
+    ? isInspectorsManifest(value.inspectors)
+      ? value.inspectors
+      : null
     : allFalseInspectors();
   if (inspectors === null) {
     return null;
@@ -673,7 +668,8 @@ export function parseStatusBody(value: unknown): ParsedStatusBody | null {
   let renewal: Readonly<{ readonly maxRemainingMs: number }> | null = null;
   if (hasRenewal) {
     if (
-      !hasInspectors || !isRecord(value.renewal) ||
+      !hasInspectors ||
+      !isRecord(value.renewal) ||
       Object.keys(value.renewal).length !== 1 ||
       !('maxRemainingMs' in value.renewal) ||
       !isNonNegativeSafeInteger(value.expiresInMs) ||
@@ -750,12 +746,12 @@ function vocabulary<T extends string>(members: Readonly<Record<T, true>>): Reado
 
 /** The fixed snapshot-state vocabulary (`DiagnosticsSnapshotState`). */
 const SNAPSHOT_STATES: ReadonlySet<string> = vocabulary<DiagnosticsSnapshotState>({
-  'created': true,
-  'starting': true,
-  'running': true,
-  'failed': true,
-  'stopping': true,
-  'closed': true,
+  created: true,
+  starting: true,
+  running: true,
+  failed: true,
+  stopping: true,
+  closed: true,
 });
 
 /** The fixed failure-code vocabulary (`DiagnosticsFailureCode`). */
@@ -766,60 +762,60 @@ const FAILURE_CODES: ReadonlySet<string> = vocabulary<DiagnosticsFailureCode>({
 
 /** The fixed edge-kind vocabulary (`DiagnosticsEdgeKind`). */
 const EDGE_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEdgeKind>({
-  'provides': true,
-  'requires': true,
-  'optional': true,
-  'consumes': true,
-  'owns': true,
+  provides: true,
+  requires: true,
+  optional: true,
+  consumes: true,
+  owns: true,
 });
 
 /** The fixed event-kind vocabulary (`DiagnosticsEventKind`). */
 const EVENT_KINDS: ReadonlySet<string> = vocabulary<DiagnosticsEventKind>({
-  'lifecycle': true,
-  'request': true,
-  'middleware': true,
-  'handler': true,
+  lifecycle: true,
+  request: true,
+  middleware: true,
+  handler: true,
 });
 
 /** The fixed event-stage vocabulary (`DiagnosticsEventStage`). */
 const EVENT_STAGES: ReadonlySet<string> = vocabulary<DiagnosticsEventStage>({
-  'resolve': true,
-  'register': true,
+  resolve: true,
+  register: true,
   'register-hook': true,
-  'init': true,
-  'bootstrap': true,
-  'listen': true,
-  'stopping': true,
-  'shutdown': true,
-  'close': true,
-  'request': true,
+  init: true,
+  bootstrap: true,
+  listen: true,
+  stopping: true,
+  shutdown: true,
+  close: true,
+  request: true,
   'request-hook': true,
   'response-hook': true,
   'error-hook': true,
-  'global': true,
-  'route': true,
-  'handler': true,
+  global: true,
+  route: true,
+  handler: true,
   'websocket-upgrade': true,
   'grpc-dispatch': true,
 });
 
 /** The fixed event-outcome vocabulary (`DiagnosticsEventOutcome`). */
 const EVENT_OUTCOMES: ReadonlySet<string> = vocabulary<DiagnosticsEventOutcome>({
-  'ok': true,
-  'error': true,
+  ok: true,
+  error: true,
   'short-circuit': true,
   'downstream-skipped': true,
 });
 
 /** The route-method vocabulary the kernel projects onto (`HttpMethod`). */
 const NODE_METHODS: ReadonlySet<string> = vocabulary<HttpMethod>({
-  'GET': true,
-  'HEAD': true,
-  'POST': true,
-  'PUT': true,
-  'PATCH': true,
-  'DELETE': true,
-  'OPTIONS': true,
+  GET: true,
+  HEAD: true,
+  POST: true,
+  PUT: true,
+  PATCH: true,
+  DELETE: true,
+  OPTIONS: true,
 });
 
 /** The kernel's fixed v1 topology limits and label bound. */
@@ -874,9 +870,11 @@ function isInstanceField(value: unknown): boolean {
 
 /** An approved label: at most 160 UTF-8 bytes, with no control character. */
 function isNodeLabel(value: unknown): boolean {
-  return typeof value === 'string' &&
+  return (
+    typeof value === 'string' &&
     ALIAS_ENCODER.encode(value).length <= MAX_LABEL_BYTES &&
-    !hasForbiddenAliasCharacter(value);
+    !hasForbiddenAliasCharacter(value)
+  );
 }
 
 /**
@@ -916,16 +914,18 @@ function isNodeProjection(value: unknown): value is DiagnosticsNode {
   if (!NODE_ID.test(value.id) || value.id[0] !== NODE_ID_PREFIX[value.kind]) {
     return false;
   }
-  return (!Object.hasOwn(value, 'label') || isNodeLabel(value.label)) &&
+  return (
+    (!Object.hasOwn(value, 'label') || isNodeLabel(value.label)) &&
     (!Object.hasOwn(value, 'version') ||
-      (typeof value.version === 'string' && value.version.length <= 64 &&
+      (typeof value.version === 'string' &&
+        value.version.length <= 64 &&
         PLUGIN_VERSION.test(value.version))) &&
     (!Object.hasOwn(value, 'method') ||
       (typeof value.method === 'string' && NODE_METHODS.has(value.method))) &&
     (!Object.hasOwn(value, 'priority') || isRecordedNumber(value.priority)) &&
-    (!Object.hasOwn(value, 'position') ||
-      (isCount(value.position) && value.position >= 1)) &&
-    (!Object.hasOwn(value, 'registered') || typeof value.registered === 'boolean');
+    (!Object.hasOwn(value, 'position') || (isCount(value.position) && value.position >= 1)) &&
+    (!Object.hasOwn(value, 'registered') || typeof value.registered === 'boolean')
+  );
 }
 
 /**
@@ -936,10 +936,16 @@ function isNodeProjection(value: unknown): value is DiagnosticsNode {
  * @returns `true` for a well-formed edge
  */
 function isEdgeProjection(value: unknown): value is DiagnosticsEdge {
-  return isRecord(value) && hasExactKeys(value, ['from', 'to', 'kind']) &&
-    typeof value.from === 'string' && NODE_ID.test(value.from) &&
-    typeof value.to === 'string' && NODE_ID.test(value.to) &&
-    typeof value.kind === 'string' && EDGE_KINDS.has(value.kind);
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ['from', 'to', 'kind']) &&
+    typeof value.from === 'string' &&
+    NODE_ID.test(value.from) &&
+    typeof value.to === 'string' &&
+    NODE_ID.test(value.to) &&
+    typeof value.kind === 'string' &&
+    EDGE_KINDS.has(value.kind)
+  );
 }
 
 /**
@@ -967,13 +973,16 @@ export function isSnapshotProjection(value: unknown): value is DiagnosticsSnapsh
   if (
     value.version !== 1 ||
     !isInstanceField(value.instanceId) ||
-    typeof value.state !== 'string' || !SNAPSHOT_STATES.has(value.state) ||
+    typeof value.state !== 'string' ||
+    !SNAPSHOT_STATES.has(value.state) ||
     (value.failureCode !== null &&
       (typeof value.failureCode !== 'string' || !FAILURE_CODES.has(value.failureCode))) ||
     typeof value.truncated !== 'boolean' ||
     !isCount(value.droppedEvents) ||
-    !Array.isArray(nodes) || nodes.length > MAX_SNAPSHOT_NODES ||
-    !Array.isArray(edges) || edges.length > MAX_SNAPSHOT_EDGES
+    !Array.isArray(nodes) ||
+    nodes.length > MAX_SNAPSHOT_NODES ||
+    !Array.isArray(edges) ||
+    edges.length > MAX_SNAPSHOT_EDGES
   ) {
     return false;
   }
@@ -1011,24 +1020,33 @@ function isEventProjection(value: unknown): value is DiagnosticsEvent {
   if (!isRecord(value) || !hasAllowedKeys(value, EVENT_REQUIRED_KEYS, EVENT_OPTIONAL_KEYS)) {
     return false;
   }
-  return isCount(value.sequence) && value.sequence >= 1 &&
-    typeof value.operationId === 'string' && OPERATION_ID.test(value.operationId) &&
+  return (
+    isCount(value.sequence) &&
+    value.sequence >= 1 &&
+    typeof value.operationId === 'string' &&
+    OPERATION_ID.test(value.operationId) &&
     (value.parentOperationId === null ||
       (typeof value.parentOperationId === 'string' &&
         OPERATION_ID.test(value.parentOperationId))) &&
-    typeof value.kind === 'string' && EVENT_KINDS.has(value.kind) &&
-    typeof value.stage === 'string' && EVENT_STAGES.has(value.stage) &&
+    typeof value.kind === 'string' &&
+    EVENT_KINDS.has(value.kind) &&
+    typeof value.stage === 'string' &&
+    EVENT_STAGES.has(value.stage) &&
     (value.nodeId === null || (typeof value.nodeId === 'string' && NODE_ID.test(value.nodeId))) &&
-    typeof value.outcome === 'string' && EVENT_OUTCOMES.has(value.outcome) &&
+    typeof value.outcome === 'string' &&
+    EVENT_OUTCOMES.has(value.outcome) &&
     isTiming(value.atMs) &&
     isTiming(value.durationMs) &&
     (!Object.hasOwn(value, 'statusCode') || isRecordedNumber(value.statusCode)) &&
     (!Object.hasOwn(value, 'traceId') ||
-      (typeof value.traceId === 'string' && TRACE_ID.test(value.traceId) &&
+      (typeof value.traceId === 'string' &&
+        TRACE_ID.test(value.traceId) &&
         NON_ZERO_HEX.test(value.traceId))) &&
     (!Object.hasOwn(value, 'spanId') ||
-      (typeof value.spanId === 'string' && SPAN_ID.test(value.spanId) &&
-        NON_ZERO_HEX.test(value.spanId)));
+      (typeof value.spanId === 'string' &&
+        SPAN_ID.test(value.spanId) &&
+        NON_ZERO_HEX.test(value.spanId)))
+  );
 }
 
 /**
@@ -1055,7 +1073,8 @@ export function isBatchProjection(value: unknown): value is DiagnosticsBatch {
   if (
     value.version !== 1 ||
     !isInstanceField(value.instanceId) ||
-    !Array.isArray(events) || events.length > CONNECTOR_MAX_EVENT_LIMIT ||
+    !Array.isArray(events) ||
+    events.length > CONNECTOR_MAX_EVENT_LIMIT ||
     !isCount(value.next) ||
     !isCount(value.lost) ||
     typeof value.closed !== 'boolean'
@@ -1128,11 +1147,7 @@ const ORIGINS: ReadonlySet<string> = new Set(['application', 'scheduled']);
  * @throws {TypeError} When `value` is not an array — the caller answers `collection-failed`
  * @internal
  */
-function copyList<T, R>(
-  value: readonly T[],
-  max: number,
-  project: (item: T) => R,
-): R[] {
+function copyList<T, R>(value: readonly T[], max: number, project: (item: T) => R): R[] {
   if (!Array.isArray(value)) {
     throw new TypeError('Diagnostics projection: expected an array.');
   }
@@ -1366,12 +1381,16 @@ function isHealthObservationProjection(value: unknown): boolean {
   if (!hasExactKeys(value, keys)) {
     return false;
   }
-  return isDisplayAlias(value.indicatorAlias) &&
-    typeof value.state === 'string' && OBSERVATION_STATES.has(value.state) &&
+  return (
+    isDisplayAlias(value.indicatorAlias) &&
+    typeof value.state === 'string' &&
+    OBSERVATION_STATES.has(value.state) &&
     (!reported || (typeof value.status === 'string' && HEALTH_STATUSES.has(value.status))) &&
     isMeasurement(value.latencyMs) &&
     isMeasurement(value.ageMs) &&
-    typeof value.origin === 'string' && ORIGINS.has(value.origin);
+    typeof value.origin === 'string' &&
+    ORIGINS.has(value.origin)
+  );
 }
 
 /**
@@ -1396,7 +1415,8 @@ export function isHealthSnapshotProjection(value: unknown): value is HealthDiagn
   if (!isRecord(value) || !hasExactKeys(value, HEALTH_SNAPSHOT_KEYS)) {
     return false;
   }
-  return value.version === 1 &&
+  return (
+    value.version === 1 &&
     typeof value.instanceId === 'string' &&
     value.instanceId.length > 0 &&
     typeof value.state === 'string' &&
@@ -1407,7 +1427,8 @@ export function isHealthSnapshotProjection(value: unknown): value is HealthDiagn
     typeof value.droppedObservations === 'number' &&
     Number.isSafeInteger(value.droppedObservations) &&
     value.droppedObservations >= 0 &&
-    value.observations.every(isHealthObservationProjection);
+    value.observations.every(isHealthObservationProjection)
+  );
 }
 
 /**
@@ -1515,7 +1536,9 @@ function isConfigEntryProjection(value: unknown): boolean {
   if (!isRecord(value)) {
     return false;
   }
-  const carriesAlias = typeof value.origin === 'string' && value.origin === 'file' &&
+  const carriesAlias =
+    typeof value.origin === 'string' &&
+    value.origin === 'file' &&
     Object.hasOwn(value, 'sourceAlias');
   const keys = carriesAlias ? [...CONFIG_ENTRY_KEYS, 'sourceAlias'] : CONFIG_ENTRY_KEYS;
   if (!hasExactKeys(value, keys)) {
@@ -1524,16 +1547,21 @@ function isConfigEntryProjection(value: unknown): boolean {
   // `sourceAlias` may ride only a `file` origin — an environment or unknown
   // origin carries no source alias at all, and a `file` origin may omit one
   // when its path was not approved.
-  const sourceAliasOk = typeof value.origin !== 'string' || value.origin !== 'file'
-    ? !Object.hasOwn(value, 'sourceAlias')
-    : !Object.hasOwn(value, 'sourceAlias') || isDisplayAlias(value.sourceAlias);
-  return isDisplayAlias(value.keyAlias) &&
-    typeof value.origin === 'string' && CONFIG_ORIGINS.has(value.origin) &&
+  const sourceAliasOk =
+    typeof value.origin !== 'string' || value.origin !== 'file'
+      ? !Object.hasOwn(value, 'sourceAlias')
+      : !Object.hasOwn(value, 'sourceAlias') || isDisplayAlias(value.sourceAlias);
+  return (
+    isDisplayAlias(value.keyAlias) &&
+    typeof value.origin === 'string' &&
+    CONFIG_ORIGINS.has(value.origin) &&
     sourceAliasOk &&
     isBoundedAliasArray(value.overriddenSourceAliases, MAX_CONFIG_OVERRIDDEN) &&
     typeof value.expanded === 'boolean' &&
     isBoundedAliasArray(value.referenceAliases, MAX_CONFIG_REFERENCES) &&
-    typeof value.schemaEffect === 'string' && CONFIG_SCHEMA_EFFECTS.has(value.schemaEffect);
+    typeof value.schemaEffect === 'string' &&
+    CONFIG_SCHEMA_EFFECTS.has(value.schemaEffect)
+  );
 }
 
 /**
@@ -1558,7 +1586,8 @@ export function isConfigSnapshotProjection(value: unknown): value is ConfigDiagn
   if (!isRecord(value) || !hasExactKeys(value, CONFIG_SNAPSHOT_KEYS)) {
     return false;
   }
-  return value.version === 1 &&
+  return (
+    value.version === 1 &&
     typeof value.instanceId === 'string' &&
     value.instanceId.length > 0 &&
     typeof value.state === 'string' &&
@@ -1569,5 +1598,6 @@ export function isConfigSnapshotProjection(value: unknown): value is ConfigDiagn
     typeof value.droppedEntries === 'number' &&
     Number.isSafeInteger(value.droppedEntries) &&
     value.droppedEntries >= 0 &&
-    value.entries.every(isConfigEntryProjection);
+    value.entries.every(isConfigEntryProjection)
+  );
 }

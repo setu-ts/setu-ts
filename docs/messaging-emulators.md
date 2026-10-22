@@ -3,15 +3,10 @@
 The GCP Pub/Sub and Azure Service Bus backends ship guarded end-to-end suites that run against the
 vendors' own local emulators. Neither needs a cloud account, a credential, or a billing profile.
 
-Both suites are `ignore`d when their environment variable is absent, so an ordinary `deno task test`
-is unaffected — and the ignored count is what proves they ran when it is set. They are **not** wired
-into CI — see "Why not CI" below.
-
-Their endpoints ARE in `packages/messaging-plugin/deno.json`'s scoped `test.permissions.net`
-allowlist, so both run under `deno task test` and not only under a standalone `--allow-all`. That
-grant is endpoint-scoped rather than loopback-wide, for the reason M53 recorded: a wide grant lets a
-retrying client (ioredis) spin against `ECONNREFUSED` until the runner is killed. Adding an emulator
-on a new port therefore means adding that port here **and** to the allowlist.
+Both suites skip when their environment variable is absent, so an ordinary `pnpm run test` leaves
+them unexercised. Set the endpoint variables before selecting the messaging member. They are not
+wired into CI — see "Why not CI" below. The Node runner does not use Deno permission grants; use
+disposable local emulators and pass only the environment required.
 
 ## GCP Pub/Sub
 
@@ -24,17 +19,13 @@ docker run -d --name he-pubsub -p 8085:8085 \
   gcloud beta emulators pubsub start --project=he-test --host-port=0.0.0.0:8085
 
 PUBSUB_EMULATOR_HOST=127.0.0.1:8085 PUBSUB_PROJECT_ID=he-test \
-  deno test --allow-all packages/messaging-plugin/test/e2e/pubsub-emulator.test.ts
+  pnpm run test packages/messaging-plugin
 
 docker rm -f he-pubsub
 ```
 
-**Address the emulator by IP, not by `localhost`.** Under the package's own scoped `net` grant
-(`deno task test`, which passes `-P`), `grpc-js` resolves a hostname through DNS, and a `host:port`
-permission does not authorize that lookup — the suite fails with
-`14 UNAVAILABLE: Name resolution failed for target dns:localhost:8085`. An IP literal skips
-resolution entirely, so `127.0.0.1:8085` needs no permission beyond the endpoint itself. This is
-invisible with `--allow-all`, which is why the standalone command above works either way.
+Use `127.0.0.1:8085` for the local emulator. The Node suite runs through Vitest, so the former Deno
+DNS permission restriction does not apply.
 
 **Repeated runs share one emulator instance.** The suite suffixes its own topics per run, and since
 M101b a subscription with no `queue` is named per topic (`messaging-consumers.<topic>`), so a second
@@ -76,30 +67,26 @@ docker run -d --name he-sb --network he-sbnet -p 5673:5672 \
 until docker logs he-sb 2>&1 | grep -q 'Application started'; do sleep 2; done
 
 SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
-  deno test --allow-all packages/messaging-plugin/test/e2e/service-bus-emulator.test.ts
-
-SERVICEBUS_CONNECTION_STRING='Endpoint=sb://localhost:5673;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=SAS_KEY_VALUE;UseDevelopmentEmulator=true;' \
-  deno test --allow-all packages/messaging-plugin/test/integration/service-bus-outage-real.test.ts
+  pnpm run test packages/messaging-plugin
 
 docker rm -f he-sb he-sqledge && docker network rm he-sbnet
 ```
 
 <!-- version:history -->
 
-The **outage suite** (M95b §3.3) drives the broker through a real `docker
-stop`/`start` and asserts
-the 2×2 the `v0.6.0` health claim turned on: `up` while running, `down` while stopped, `up` again
-after restart — and that the two states get DIFFERENT answers. Its publishes are load-bearing, not
-setup: against this emulator the management probe resolves `unknown` in both states, so the
-data-plane evidence window is the only signal, and each health answer is preceded by the publish
-that populates it. Unlike the e2e suite, this one restarts `he-sb` itself and leaves it running, so
-**it is repeatable** — measured, two consecutive runs against a 21-minute-old container both pass
-with no restart between them. That is the difference from the e2e suite below, whose RPC step is
-what fails on a second run against a persistent emulator. This suite is deliberately **local-only**
-for the two reasons that do apply: the image is large, and the emulator has no administration
-endpoint, so the management probe can never succeed there (see the health-indicator note below) —
-and `test/apps-gate.test.ts` asserts that absence so it reads as a recorded decision rather than a
-gap.
+The **outage suite** (`packages/messaging-plugin/test/integration/service-bus-outage-real.test.ts`,
+M95b §3.3) drives the broker through a real `docker stop`/`start` and asserts the 2×2 the `v0.6.0`
+health claim turned on: `up` while running, `down` while stopped, `up` again after restart — and
+that the two states get DIFFERENT answers. Its publishes are load-bearing, not setup: against this
+emulator the management probe resolves `unknown` in both states, so the data-plane evidence window
+is the only signal, and each health answer is preceded by the publish that populates it. Unlike the
+e2e suite, this one restarts `he-sb` itself and leaves it running, so **it is repeatable** —
+measured, two consecutive runs against a 21-minute-old container both pass with no restart between
+them. That is the difference from the e2e suite below, whose RPC step is what fails on a second run
+against a persistent emulator. This suite is deliberately **local-only** for the two reasons that do
+apply: the image is large, and the emulator has no administration endpoint, so the management probe
+can never succeed there (see the health-indicator note below) — and `test/apps-gate.test.ts` asserts
+that absence so it reads as a recorded decision rather than a gap.
 
 **What it proves that a fake cannot:** that `createReceiver(topicName, subscriptionName)` with
 `autoCompleteMessages: false` really hands settlement to the receiver, that `completeMessage` and
@@ -158,7 +145,7 @@ CI. See `.github/workflows/ci.yml`.
 
 ```bash
 docker run -d --name he-elasticmq -p 9324:9324 softwaremill/elasticmq-native:1.7.1
-SQS_ENDPOINT_URL=http://localhost:9324 deno task test
+SQS_ENDPOINT_URL=http://localhost:9324 pnpm run test packages/queue-plugin
 docker rm -f he-elasticmq
 ```
 

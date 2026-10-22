@@ -30,11 +30,7 @@ const JSON_CONTENT_TYPE = /^application\/(?:[\w.+-]+\+)?json\b/i;
 
 /** Why a response was recorded without its body/headers. */
 export type RecordOmissionReason =
-  | 'response-mode'
-  | 'stream'
-  | 'size'
-  | 'store-limit'
-  | 'redaction';
+  'response-mode' | 'stream' | 'size' | 'store-limit' | 'redaction';
 
 /** The result of {@linkcode encodeHttpRecord}. */
 export interface EncodedHttpRecord {
@@ -115,9 +111,8 @@ export function encodeHttpRecord(
   }
 
   const raw = snapshot.body as Uint8Array | string | null;
-  let bytes: Uint8Array | null = raw === null
-    ? null
-    : (typeof raw === 'string' ? encoder.encode(raw) : raw);
+  let bytes: Uint8Array | null =
+    raw === null ? null : typeof raw === 'string' ? encoder.encode(raw) : raw;
   if ((bytes?.byteLength ?? 0) > resolved.maxResponseBytes) {
     return { record: statusOnly(snapshot.status), omitted: 'size' };
   }
@@ -192,7 +187,9 @@ export function decodeHttpRecord(
 
   const status = value.s;
   if (
-    typeof status !== 'number' || !Number.isInteger(status) || status < RECORDABLE_STATUS_MIN ||
+    typeof status !== 'number' ||
+    !Number.isInteger(status) ||
+    status < RECORDABLE_STATUS_MIN ||
     status > RECORDABLE_STATUS_MAX
   ) {
     return new IdempotencyRecordError('stored status is not an integer in 200-499');
@@ -245,9 +242,8 @@ export function decodeHttpRecord(
   if (body.binary !== undefined && typeof body.binary !== 'boolean') {
     return new IdempotencyRecordError('stored body binary flag is not a boolean');
   }
-  const encodedBody: EncodedPayload = body.binary === true
-    ? { data: body.data, binary: true }
-    : { data: body.data };
+  const encodedBody: EncodedPayload =
+    body.binary === true ? { data: body.data, binary: true } : { data: body.data };
   // `decodeFrameData` throws on malformed base64 (`atob`'s
   // InvalidCharacterError). A tampered record must come back as an
   // IdempotencyRecordError, the 503 this function promises, not a thrown 500

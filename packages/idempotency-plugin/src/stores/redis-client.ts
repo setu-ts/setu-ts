@@ -8,7 +8,7 @@
  * @module
  */
 import type { ConnectionErrorReporter } from '@setu-ts/common';
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { IdempotencyConfigurationError } from '../errors.ts';
 import type { IBuiltRedisIdempotencyClient, IRedisIdempotencyClient } from '../interfaces/index.ts';
 
@@ -29,10 +29,14 @@ export type RedisCtor = new (
  * @since 0.9.0
  */
 export async function loadIoredis(): Promise<RedisCtor> {
-  const module = await import('ioredis');
-  // Interop boundary: the module namespace is narrowed once, here, so no `any`
-  // escapes into the store (AI_GUIDELINES §5.2 external-interop exception).
-  return module.Redis as unknown as RedisCtor;
+  try {
+    const module = await import('ioredis');
+    // Interop boundary: the module namespace is narrowed once, here, so no `any`
+    // escapes into the store (AI_GUIDELINES §5.2 external-interop exception).
+    return module.Redis as unknown as RedisCtor;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+  }
 }
 
 /**
@@ -57,12 +61,11 @@ export function createRedisIdempotencyClient(
   commandTimeoutMs: number,
   reporter?: ConnectionErrorReporter,
 ): IBuiltRedisIdempotencyClient {
-  const client = commandTimeoutMs === 0
-    ? new RedisCtor(url, { lazyConnect: true })
-    : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
-  if (reporter !== undefined) {
-    attachConnectionErrorReporter(client, reporter);
-  }
+  const client =
+    commandTimeoutMs === 0
+      ? new RedisCtor(url, { lazyConnect: true })
+      : new RedisCtor(url, { lazyConnect: true, commandTimeout: commandTimeoutMs });
+  attachConnectionErrorReporter(client, reporter);
   return client;
 }
 
@@ -75,7 +78,9 @@ export function createRedisIdempotencyClient(
  */
 export function validateInjectedClient(client: unknown): asserts client is IRedisIdempotencyClient {
   const candidate = client as Partial<Record<'eval' | 'ping' | 'quit' | 'call', unknown>> | null;
-  const ok = typeof client === 'object' && client !== null &&
+  const ok =
+    typeof client === 'object' &&
+    client !== null &&
     typeof candidate?.eval === 'function' &&
     typeof candidate?.ping === 'function' &&
     typeof candidate?.quit === 'function' &&

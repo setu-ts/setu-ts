@@ -12,6 +12,7 @@
  */
 
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { QueueAdapter } from './queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
 import {
@@ -110,8 +111,11 @@ export interface SqsQueueOptions {
  * Lazy-load the AWS SQS SDK v3.
  */
 export async function loadSqsModule(): Promise<SqsSdkModule> {
-  const mod = await import('@aws-sdk/client-sqs');
-  return mod as unknown as SqsSdkModule;
+  try {
+    return (await import('@aws-sdk/client-sqs')) as unknown as SqsSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sqs', { cause: error });
+  }
 }
 
 /**
@@ -352,21 +356,13 @@ export class SqsQueue implements QueueAdapter {
     await this.#transport.send(queueUrl, body, delaySeconds);
   }
 
-  async reserve<T>(
-    name: string,
-    limit: number,
-    nowMs: number,
-  ): Promise<readonly StoredJob<T>[]> {
+  async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
     if (!this.#transport) throw new Error('SqsQueue is not connected');
 
     const queueUrl = this.#getQueueUrl(name);
     const max = Math.min(limit, SQS_MAX_RECEIVE);
 
-    const messages = await this.#transport.receive(
-      queueUrl,
-      max,
-      this.#visibilityTimeoutSeconds,
-    );
+    const messages = await this.#transport.receive(queueUrl, max, this.#visibilityTimeoutSeconds);
 
     const jobs: StoredJob<T>[] = [];
     for (const msg of messages) {

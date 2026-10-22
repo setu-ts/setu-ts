@@ -110,9 +110,7 @@ export function encodeJobEnvelope<T>(
  * @returns `true` when the body carries a readable envelope
  * @internal
  */
-export function readEnvelopeHeaders(
-  value: unknown,
-): Readonly<Record<string, string>> | undefined {
+export function readEnvelopeHeaders(value: unknown): Readonly<Record<string, string>> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return undefined;
   }

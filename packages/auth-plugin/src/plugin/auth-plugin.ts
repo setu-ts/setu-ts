@@ -103,8 +103,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
     );
   }
   if (
-    options.middleware !== undefined && options.middleware !== false &&
-    options.middleware.priority !== undefined && !Number.isInteger(options.middleware.priority)
+    options.middleware !== undefined &&
+    options.middleware !== false &&
+    options.middleware.priority !== undefined &&
+    !Number.isInteger(options.middleware.priority)
   ) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: middleware.priority must be a finite integer',
@@ -115,9 +117,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // at construction, whether or not RBAC is configured — a malformed option
   // refuses before any application exists rather than at `start()`, and is
   // never silently accepted by a JWT-only registration.
-  const authorizationPolicy = options.authorizationDiagnostics === undefined
-    ? null
-    : compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
+  const authorizationPolicy =
+    options.authorizationDiagnostics === undefined
+      ? null
+      : compileAuthorizationDiagnosticsOptions(options.authorizationDiagnostics);
 
   // Outside issuers (M100b): validated here, at construction, because every
   // refusal is a configuration that would silently weaken verification.
@@ -125,9 +128,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   // Sign-in (M100c): validated HERE too, at construction, because every refusal
   // is a configuration that would otherwise fail at the provider — with an error
   // that names neither the option nor the route.
-  const compiledSignIn: CompiledSignIn | null = options.signIn === undefined
-    ? null
-    : compileSignIn(options.signIn);
+  const compiledSignIn: CompiledSignIn | null =
+    options.signIn === undefined ? null : compileSignIn(options.signIn);
   // Passkeys (M100e): validated at construction too, beside the sign-in arm,
   // so a malformed origin or rpId refuses before an application exists.
   const compiledPasskeys: CompiledPasskeys | null =
@@ -140,9 +142,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
   const policies = compilePolicies(options.policies);
   // Scoped RBAC (M110b): validated here too. Needs `rbac` (its catalogue) and,
   // for 'sign-in' timing, `signIn`.
-  const compiledScoped: CompiledScopedRbac | null = options.scopedRbac === undefined
-    ? null
-    : compileScopedRbac(options.scopedRbac, options.rbac, compiledSignIn !== null);
+  const compiledScoped: CompiledScopedRbac | null =
+    options.scopedRbac === undefined
+      ? null
+      : compileScopedRbac(options.scopedRbac, options.rbac, compiledSignIn !== null);
   if (options.http !== undefined && compiledIssuers.length === 0 && compiledSignIn === null) {
     throw new AuthPluginConfigurationError(
       'auth-plugin: http is only read for issuers and signIn; configure one or drop http',
@@ -175,9 +178,10 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       const runtime = ctx.services.get<IRuntimeServices>('runtime');
       // Scoped RBAC (M110b): built before the sign-in block, which reads it
       // for 'sign-in' timing. The logger is read at call time.
-      const scoped: ScopedRbac | null = compiledScoped === null
-        ? null
-        : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
+      const scoped: ScopedRbac | null =
+        compiledScoped === null
+          ? null
+          : createScopedRbac(compiledScoped, resolveProbeTiming(runtime), () => ctx.logger);
 
       // The outbound seam is shared by the issuer key-set caches (M100b) and the
       // sign-in routes (M100c): one place to configure it, one place to fake it.
@@ -271,8 +275,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             keySet.close();
           }
         });
-        // Reads cached state only — no I/O — and never reports `down`, because
-        // an identity-provider outage must not restart the application.
+        // Reads cached state only. Shared issuer faults stay in data:
+        // determineStatusCode withdraws every non-up replica from /ready.
         ctx.health.register('auth', () => {
           const states: Record<string, string> = {};
           let current = true;
@@ -282,8 +286,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             current &&= state === 'current';
           });
           return Promise.resolve({
-            status: current ? 'up' : 'degraded',
-            data: { issuers: states },
+            status: 'up',
+            data: { issuers: states, current },
           });
         });
       }
@@ -341,12 +345,8 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           if (provider.compiledIssuer === undefined) {
             continue;
           }
-          const keySet = new IssuerKeySet(
-            provider.compiledIssuer,
-            runtime,
-            http,
-            (name, reason) =>
-              debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
+          const keySet = new IssuerKeySet(provider.compiledIssuer, runtime, http, (name, reason) =>
+            debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
           );
           keySets.set(provider.name, keySet);
           signInKeySets.push(keySet);
@@ -356,33 +356,37 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
-          ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in' ? {} : {
-            scopedGrants: {
-              resolveAll: async (principal) => {
-                const outcome = await scoped.resolver.resolveFromSources(principal, {
-                  kind: 'all',
-                });
-                if (!outcome.ok) {
-                  scoped.evaluator.report(outcome);
-                  throw new GrantResolutionError(outcome.reason, outcome.source);
-                }
-                return outcome.grants;
-              },
-            },
-          }),
-          ...(mfa === null ? {} : {
-            // The configured TTL passes through untouched; `AuthSessionService`
-            // owns the default and is the only reader of the value, so the
-            // option has exactly one owner.
-            mfa: {
-              required: mfa.required,
-              ...(mfa.pendingTtlMs === undefined ? {} : { pendingTtlMs: mfa.pendingTtlMs }),
-            },
-          }),
+          ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in'
+            ? {}
+            : {
+                scopedGrants: {
+                  resolveAll: async (principal) => {
+                    const outcome = await scoped.resolver.resolveFromSources(principal, {
+                      kind: 'all',
+                    });
+                    if (!outcome.ok) {
+                      scoped.evaluator.report(outcome);
+                      throw new GrantResolutionError(outcome.reason, outcome.source);
+                    }
+                    return outcome.grants;
+                  },
+                },
+              }),
+          ...(mfa === null
+            ? {}
+            : {
+                // The configured TTL passes through untouched; `AuthSessionService`
+                // owns the default and is the only reader of the value, so the
+                // option has exactly one owner.
+                mfa: {
+                  required: mfa.required,
+                  ...(mfa.pendingTtlMs === undefined ? {} : { pendingTtlMs: mfa.pendingTtlMs }),
+                },
+              }),
         });
         ctx.services.register(CAPABILITIES.AUTH_SESSION, authSessionService);
         scoped?.resolver.useStoredGrants((request, principal) =>
-          authSessionService.storedGrants(request, principal)
+          authSessionService.storedGrants(request, principal),
         );
 
         strategies.push(
@@ -569,10 +573,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         attachAuthorizationObserver(rbacService, collector);
         authorizationSource = collector;
       }
-      ctx.services.register(
-        CAPABILITIES.AUTHORIZATION_DIAGNOSTICS,
-        authorizationSource,
-      );
+      ctx.services.register(CAPABILITIES.AUTHORIZATION_DIAGNOSTICS, authorizationSource);
 
       // Cleanup on close
       ctx.lifecycle.onClose(() => {
@@ -601,9 +602,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
  * Validates the `policies` option: each definition, and that no two share a
  * name. Returns the validated, frozen copies.
  */
-function compilePolicies(
-  policies: AuthPluginOptions['policies'],
-): readonly PolicyDefinition[] {
+function compilePolicies(policies: AuthPluginOptions['policies']): readonly PolicyDefinition[] {
   if (policies === undefined) {
     return [];
   }

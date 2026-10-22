@@ -12,6 +12,22 @@ Five providers ship: `MemoryProvider` (zero-dependency default), `LocalStoragePr
 import { StoragePlugin } from '@setu-ts/storage-plugin';
 ```
 
+Install the peers for the selected provider when using its built-in lazy loader:
+
+| `provider`            | Optional peer packages                                       |
+| --------------------- | ------------------------------------------------------------ |
+| `'s3'`, `'b2'`        | `@aws-sdk/client-s3` **and** `@aws-sdk/s3-request-presigner` |
+| `'gcs'`               | `@google-cloud/storage`                                      |
+| `'azure'`             | `@azure/storage-blob`                                        |
+| `'memory'`, `'local'` | none                                                         |
+
+Both S3 packages are loaded at startup, even before requesting a signed URL. A missing peer makes
+startup reject with `OptionalDependencyUnavailableError` naming that package. Installing only
+`@aws-sdk/client-s3` is insufficient.
+
+With only the S3 client installed, Node startup reports:
+`OptionalDependencyUnavailableError: Optional dependency '@aws-sdk/s3-request-presigner' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+
 ## Usage
 
 In a full-stack starter composition, configure its `storage` arm in `setu.config.ts`. The starter
@@ -23,10 +39,12 @@ The registration below applies when your application owns its plugin list.
 import { createUploadMiddleware, getUploadedFile, StoragePlugin } from '@setu-ts/storage-plugin';
 import { CAPABILITIES, type IStorage } from '@setu-ts/common';
 
-app.register(StoragePlugin({
-  provider: 's3',
-  options: { bucket: 'uploads', region: 'us-east-1' },
-}));
+app.register(
+  StoragePlugin({
+    provider: 's3',
+    options: { bucket: 'uploads', region: 'us-east-1' },
+  }),
+);
 
 const storage = app.services.get<IStorage>(CAPABILITIES.STORAGE);
 
@@ -228,7 +246,6 @@ approved development dataset: counts aggregate every tenant using the instance.
 
 | Export                        | Kind      |
 | ----------------------------- | --------- |
-| `IAwsS3Client`                | reference |
 | `canSign`                     | function  |
 | `createUploadMiddleware`      | function  |
 | `getUploadedFile`             | function  |
@@ -243,6 +260,7 @@ approved development dataset: counts aggregate every tenant using the instance.
 | `AzureStorageOptions`         | interface |
 | `GcsProviderOptions`          | interface |
 | `GcsStorageOptions`           | interface |
+| `IAwsS3Client`                | interface |
 | `IAzureBlobClient`            | interface |
 | `IGcsClient`                  | interface |
 | `IS3Backend`                  | interface |
@@ -261,7 +279,7 @@ approved development dataset: counts aggregate every tenant using the instance.
 | `StorageProviderOptions`      | type      |
 | `StorageProviderType`         | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

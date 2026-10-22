@@ -1,5 +1,5 @@
-#!/usr/bin/env -S deno run --allow-read --allow-env
-// deno-lint-ignore-file no-console -- console output is the script's purpose (AI_GUIDELINES §11.6)
+#!/usr/bin/env node
+/* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Runnable public consumer for kernel diagnostics (M98a).
  *
@@ -14,7 +14,7 @@
  * imports, no application configuration, no secret capture.
  *
  * Usage:
- *   deno run --allow-read --allow-env scripts/inspect-kernel.ts
+ *   node --import ./scripts/lib/source-register.ts scripts/inspect-kernel.ts
  *
  * @module
  */
@@ -32,62 +32,66 @@ import { RuntimePlugin } from '../packages/runtime/src/index.ts';
  *
  * @returns The composed application
  */
-function buildApp() {
-  return createApplication({
-    plugins: [
-      RuntimePlugin(),
-      {
-        name: 'logging',
-        version: '1.0.0',
-        register(ctx) {
-          ctx.middleware.add((_ctx, next) => next(), { name: 'request-log', priority: 20 });
+async function main(): Promise<void> {
+  function buildApp() {
+    return createApplication({
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'logging',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.middleware.add((_ctx, next) => next(), { name: 'request-log', priority: 20 });
+          },
+        },
+        {
+          name: 'catalog',
+          version: '1.0.0',
+          provides: ['catalog-items'],
+          register(ctx) {
+            ctx.services.register('catalog-items', { items: [] });
+            ctx.router.get('/items', {
+              handler: (ctx) => ctx.response.json({ items: [] }),
+              middleware: [(_ctx, next) => next()],
+            });
+          },
+        },
+      ],
+      // The disclosure decision, made explicit: these exact names may leave
+      // the process. Everything unlisted is projected as opaque ids.
+      diagnostics: {
+        labels: {
+          plugins: ['catalog'],
+          capabilities: ['catalog-items', CAPABILITIES.RUNTIME],
+          routes: ['/items'],
+          middleware: ['request-log'],
         },
       },
-      {
-        name: 'catalog',
-        version: '1.0.0',
-        provides: ['catalog-items'],
-        register(ctx) {
-          ctx.services.register('catalog-items', { items: [] });
-          ctx.router.get('/items', {
-            handler: (ctx) => ctx.response.json({ items: [] }),
-            middleware: [(_ctx, next) => next()],
-          });
-        },
-      },
-    ],
-    // The disclosure decision, made explicit: these exact names may leave
-    // the process. Everything unlisted is projected as opaque ids.
-    diagnostics: {
-      labels: {
-        plugins: ['catalog'],
-        capabilities: ['catalog-items', CAPABILITIES.RUNTIME],
-        routes: ['/items'],
-        middleware: ['request-log'],
-      },
-    },
-  });
+    });
+  }
+
+  const app = buildApp();
+  await app.start(); // no port: no socket is ever bound
+
+  // Drive one request through the application so the event ring has content.
+  const response = await app.inject({ method: 'GET', url: '/items' });
+  console.log(`injected GET /items -> ${response.statusCode}`);
+
+  const source = app.diagnostics;
+  if (source === undefined) {
+    console.error('diagnostics were not enabled — this is a bug in the script');
+    process.exitCode = 1;
+    return;
+  }
+
+  const snapshot: DiagnosticsSnapshot = source.snapshot();
+  const batch: DiagnosticsBatch = source.read(0, 128);
+
+  // ONLY the public DTOs are emitted — never a live service, route definition,
+  // or plugin object.
+  console.log(JSON.stringify(snapshot, null, 2));
+  console.log(JSON.stringify(batch, null, 2));
+
+  await app.stop();
 }
-
-const app = buildApp();
-await app.start(); // no port: no socket is ever bound
-
-// Drive one request through the application so the event ring has content.
-const response = await app.inject({ method: 'GET', url: '/items' });
-console.log(`injected GET /items -> ${response.statusCode}`);
-
-const source = app.diagnostics;
-if (source === undefined) {
-  console.error('diagnostics were not enabled — this is a bug in the script');
-  Deno.exit(1);
-}
-
-const snapshot: DiagnosticsSnapshot = source.snapshot();
-const batch: DiagnosticsBatch = source.read(0, 128);
-
-// ONLY the public DTOs are emitted — never a live service, route definition,
-// or plugin object.
-console.log(JSON.stringify(snapshot, null, 2));
-console.log(JSON.stringify(batch, null, 2));
-
-await app.stop();
+if (import.meta.main) await main();

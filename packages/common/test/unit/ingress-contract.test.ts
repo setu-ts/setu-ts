@@ -2,10 +2,10 @@
  * Compile-time contract tests for the M86 ingress behaviour contract
  * (plan §3.1–§3.3).
  *
- * These assertions are decided by `deno task check` — if the envelope gains a
+ * These assertions are decided by `pnpm run check` — if the envelope gains a
  * member (`state`, `services`), loses a `readonly`, or the kind union drifts,
  * this file stops compiling. Runtime expectations are asserted alongside so
- * the file also fails loudly under `deno task test`.
+ * the file also fails loudly under `pnpm run test`.
  *
  * `IPipelineBehavior` (services/cqrs.ts) is UNTOUCHED by M86: the assertions
  * below prove it still carries its committed signature AND satisfies
@@ -28,8 +28,8 @@ import type {
  * (mutually assignable in the identity sense), so each pinned shape below
  * fails on any added, removed, or re-typed member.
  */
-type Equals<A, B> = (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true
-  : false;
+type Equals<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 
 // Compile-time: the envelope is pinned to exactly the members below, all
 // readonly, with `attempt`, `headers` and `consumer` OPTIONAL
@@ -61,10 +61,8 @@ const keySetPinned: Equals<
 > = true;
 
 // Compile-time: the kind union is pinned to exactly the four ingress paths.
-const kindUnionPinned: Equals<
-  IngressKind,
-  'queue' | 'scheduler' | 'messaging' | 'websocket'
-> = true;
+const kindUnionPinned: Equals<IngressKind, 'queue' | 'scheduler' | 'messaging' | 'websocket'> =
+  true;
 
 // Compile-time: under `exactOptionalPropertyTypes` a type whose `attempt` is
 // REQUIRED and admits `undefined` is NOT assignable to the envelope's optional
@@ -114,9 +112,7 @@ function acceptsPipelineBehavior(
 
 // The same proof for the ingress sibling: any `IIngressBehavior` is accepted
 // where a `BehaviorLike<IngressContext, void>` is required.
-function acceptsIngressBehavior(
-  behavior: IIngressBehavior,
-): BehaviorLike<IngressContext, void> {
+function acceptsIngressBehavior(behavior: IIngressBehavior): BehaviorLike<IngressContext, void> {
   return behavior;
 }
 
@@ -147,7 +143,7 @@ describe('IngressContext contract (M86 §3.3)', () => {
 
   it('rejects an explicit `attempt: undefined` at compile time', () => {
     // Decided at compile time by the @ts-expect-error directive above; the
-    // runtime assertion keeps the file failing loudly under `deno task test`.
+    // runtime assertion keeps the file failing loudly under `pnpm run test`.
     expect(rejectsUndefinedAttempt.name).toBe('email.send');
     expect(admitsUndefinedAttempt.attempt).toBeUndefined();
   });

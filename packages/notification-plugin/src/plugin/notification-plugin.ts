@@ -117,10 +117,12 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
         // payload exists to carry. Started together, total latency is bounded
         // by ONE probe timeout however many channels there are.
         const names = Array.from(channelMap.keys());
-        const outcomes = await Promise.all(names.map((name) => {
-          const probe = probes.get(name);
-          return probe === undefined ? Promise.resolve(undefined) : probe();
-        }));
+        const outcomes = await Promise.all(
+          names.map((name) => {
+            const probe = probes.get(name);
+            return probe === undefined ? Promise.resolve(undefined) : probe();
+          }),
+        );
 
         // Assembled in channel-map order, so the payload's key order does not
         // depend on which probe settled first.
@@ -255,14 +257,8 @@ export function createProvider(config: MailChannelConfig, ctx?: IPluginContext):
 export function createProvider(config: TwilioChannelConfig): SmsTransport;
 export function createProvider(config: FcmChannelConfig, ctx?: IPluginContext): PushTransport;
 export function createProvider(config: SlackChannelConfig): SlackTransport;
-export function createProvider(
-  config: ChannelConfig,
-  ctx?: IPluginContext,
-): NotificationTransport;
-export function createProvider(
-  config: ChannelConfig,
-  ctx?: IPluginContext,
-): NotificationTransport {
+export function createProvider(config: ChannelConfig, ctx?: IPluginContext): NotificationTransport;
+export function createProvider(config: ChannelConfig, ctx?: IPluginContext): NotificationTransport {
   switch (config.provider) {
     case 'mail': {
       if (!ctx || !ctx.services.has(CAPABILITIES.MAIL)) {

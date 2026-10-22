@@ -21,10 +21,7 @@ import { createMockPlugin, createTestApp } from '@setu-ts/testing';
 import { RuntimePlugin } from '@setu-ts/runtime';
 
 const app = await createTestApp({
-  plugins: [
-    RuntimePlugin(),
-    createMockPlugin({ name: 'database', service: { query: () => [] } }),
-  ],
+  plugins: [RuntimePlugin(), createMockPlugin({ name: 'database', service: { query: () => [] } })],
 });
 
 app.router.get('/users', (ctx) => ctx.response.json([{ id: 1 }]));
@@ -178,12 +175,14 @@ the double as a provider ahead of its consumers:
 await createTestApp({
   app: createApp(),
   without: ['mail-plugin'],
-  overrides: [createMockPlugin({
-    name: 'mail-plugin',
-    provides: CAPABILITIES.MAIL,
-    service: fakeMailer,
-    priority: PLUGIN_PRIORITY.HIGH, // ahead of the consumer that captures it
-  })],
+  overrides: [
+    createMockPlugin({
+      name: 'mail-plugin',
+      provides: CAPABILITIES.MAIL,
+      service: fakeMailer,
+      priority: PLUGIN_PRIORITY.HIGH, // ahead of the consumer that captures it
+    }),
+  ],
 });
 ```
 
@@ -258,6 +257,13 @@ const res3 = await inject(app, req);
 > injected twice or injected and then handed to `app.fetch()` — the second call throws and names the
 > cause rather than quietly sending no body. Build a separate `Request` per call.
 
+For an oversized multipart upload in an in-process test on Node 24 or Node 26 (up to 26.12.0), use
+`inject()` with an encoded body (or build the multipart body from a `Blob`) instead of passing
+file-bearing `FormData` to `app.fetch(new Request(...))`. The undici those releases bundle
+(7.20.0–8.11.2) throws an uncaught `ERR_INVALID_STATE` when the runtime cancels that stream at
+`maxBodyBytes`; undici 8.12.0 fixes it. Node 22, Bun, Deno, real-socket uploads and `inject()` do
+not take that path.
+
 ### createMockPlugin
 
 Creates an `IPlugin` that registers a mock service under a capability token.
@@ -294,9 +300,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 const fixtures = new FixtureManager();
 
 beforeEach(async () => {
-  fixtures
-    .mock('database', { query: () => [] })
-    .mock('cache', { get: () => null });
+  fixtures.mock('database', { query: () => [] }).mock('cache', { get: () => null });
 
   const app = await createTestApp({
     plugins: [RuntimePlugin(), ...fixtures.plugins()],
@@ -395,5 +399,5 @@ in PUBLIC_API.md for the full option tables and notes.
 | `TestContextOptions`  | interface |
 | `TestAppOptions`      | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

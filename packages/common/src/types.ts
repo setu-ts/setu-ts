@@ -12,14 +12,7 @@
  *
  * @since 0.1.0
  */
-export type HttpMethod =
-  | 'GET'
-  | 'HEAD'
-  | 'POST'
-  | 'PUT'
-  | 'PATCH'
-  | 'DELETE'
-  | 'OPTIONS';
+export type HttpMethod = 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE' | 'OPTIONS';
 
 /**
  * JavaScript runtimes the framework can execute on.
@@ -46,13 +39,7 @@ export type LogLevel = 'fatal' | 'error' | 'warn' | 'info' | 'debug' | 'trace';
  *
  * @since 0.1.0
  */
-export type LifecyclePhase =
-  | 'register'
-  | 'init'
-  | 'bootstrap'
-  | 'active'
-  | 'shutdown'
-  | 'close';
+export type LifecyclePhase = 'register' | 'init' | 'bootstrap' | 'active' | 'shutdown' | 'close';
 
 /**
  * Health state reported by a health indicator.

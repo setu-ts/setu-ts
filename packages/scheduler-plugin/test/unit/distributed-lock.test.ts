@@ -27,19 +27,13 @@ describe('resolveLock', () => {
         return Promise.resolve();
       },
     };
-    const lock = await resolveLock(
-      { distributedLock: { lock: custom } },
-      runtime,
-    );
+    const lock = await resolveLock({ distributedLock: { lock: custom } }, runtime);
     expect(lock).toBe(custom);
   });
 
   it('returns MemoryLock when enabled is false', async () => {
     const runtime = new FakeRuntime();
-    const lock = await resolveLock(
-      { distributedLock: { enabled: false } },
-      runtime,
-    );
+    const lock = await resolveLock({ distributedLock: { enabled: false } }, runtime);
     expect(lock).toBeDefined();
     const token = await lock.acquire('test', 5000);
     expect(token).toBeTruthy();
@@ -54,10 +48,7 @@ describe('resolveLock', () => {
 
   it('returns MemoryLock when enabled true but storage not redis', async () => {
     const runtime = new FakeRuntime();
-    const lock = await resolveLock(
-      { distributedLock: { enabled: true } },
-      runtime,
-    );
+    const lock = await resolveLock({ distributedLock: { enabled: true } }, runtime);
     const token = await lock.acquire('test', 5000);
     expect(token).toBeTruthy();
   });
@@ -131,15 +122,19 @@ describe('resolveLockTimeouts (M101a V8-24)', () => {
       acquireTimeoutMs: 0,
       commandTimeoutMs: 15_000,
     });
-    expect(resolveLockTimeouts({ acquireTimeoutMs: 0, commandTimeoutMs: 60_000 }))
-      .toEqual({ acquireTimeoutMs: 0, commandTimeoutMs: 60_000 });
+    expect(resolveLockTimeouts({ acquireTimeoutMs: 0, commandTimeoutMs: 60_000 })).toEqual({
+      acquireTimeoutMs: 0,
+      commandTimeoutMs: 60_000,
+    });
   });
 
   it('accepts a command bound at or below the acquire bound, 0 included', () => {
-    expect(resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 200 }).commandTimeoutMs)
-      .toBe(200);
-    expect(resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 0 }).commandTimeoutMs)
-      .toBe(0);
+    expect(
+      resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 200 }).commandTimeoutMs,
+    ).toBe(200);
+    expect(
+      resolveLockTimeouts({ acquireTimeoutMs: 500, commandTimeoutMs: 0 }).commandTimeoutMs,
+    ).toBe(0);
   });
 
   it('refuses a command bound that outlasts a non-zero acquire bound, naming both', () => {

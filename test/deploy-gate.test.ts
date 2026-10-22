@@ -1,5 +1,7 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { run as runProcess } from './../scripts/lib/run.ts';
+import { readFileSync, readdirSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   BUILD_MATRIX,
   buildGeneratedImage,
@@ -16,9 +18,10 @@ import {
   PRODUCTION_DEVTOOL_PROBE,
   renderDrift,
   SKIP_EXIT_CODE,
+  failureTail,
 } from '../scripts/check-deploy.ts';
 
-const read = (path: string): string => Deno.readTextFileSync(path);
+const read = (path: string): string => readFileSync(path, 'utf8');
 
 /**
  * Strips comment lines so an assertion is about EFFECTIVE configuration.
@@ -102,10 +105,7 @@ describe('renderDrift', () => {
   });
 
   it('sorts each list so the report is stable', () => {
-    const report: DriftReport = renderDrift(
-      map({ 'z.yaml': '1', 'a.yaml': '1' }),
-      new Map(),
-    );
+    const report: DriftReport = renderDrift(map({ 'z.yaml': '1', 'a.yaml': '1' }), new Map());
     expect(report.added).toEqual(['a.yaml', 'z.yaml']);
   });
 });
@@ -122,10 +122,7 @@ describe('missingTools', () => {
 
 describe('pathCandidates', () => {
   it('expands PATH entries in order', () => {
-    expect(pathCandidates('helm', '/usr/bin:/opt/bin')).toEqual([
-      '/usr/bin/helm',
-      '/opt/bin/helm',
-    ]);
+    expect(pathCandidates('helm', '/usr/bin:/opt/bin')).toEqual(['/usr/bin/helm', '/opt/bin/helm']);
   });
 
   it('tolerates a trailing slash on a PATH entry', () => {
@@ -179,8 +176,8 @@ describe('build matrix', () => {
     // The real guard against an example silently falling out of coverage: a new apps/ directory
     // must be classified deliberately.
     const directories: string[] = [];
-    for (const entry of Deno.readDirSync('apps')) {
-      if (entry.isDirectory) directories.push(entry.name);
+    for (const entry of readdirSync('apps', { withFileTypes: true })) {
+      if (entry.isDirectory()) directories.push(entry.name);
     }
     const classified = new Set([
       ...BUILD_MATRIX.map((target) => target.app),
@@ -200,30 +197,44 @@ describe('Dockerfiles', () => {
   const runtime = read('docker/Dockerfile');
   const compiled = read('docker/Dockerfile.compiled');
 
-  it('pins the SAME Deno version in both, so a bump is a one-line change', () => {
-    const version = (source: string): string | undefined =>
-      source.match(/ARG DENO_VERSION=([\d.]+)/)?.[1];
-    expect(version(runtime)).toBeDefined();
-    expect(version(runtime)).toBe(version(compiled));
+  it('pins the SAME Node major and pnpm version in both, so a bump is a one-line change', () => {
+    const node = (source: string): string[] =>
+      [...source.matchAll(/^FROM node:(\d+)-/gm)].map((match) => match[1]!);
+    const pnpm = (source: string): string | undefined =>
+      source.match(/npm install --global pnpm@([\d.]+)/)?.[1];
+    expect(node(runtime)).toEqual(['24', '24']);
+    expect(node(compiled)).toEqual(['24']);
+    expect(pnpm(runtime)).toBeDefined();
+    expect(pnpm(runtime)).toBe(pnpm(compiled));
+    // The root manifest pins the same pnpm the images install.
+    expect(read('package.json')).toContain(`"packageManager": "pnpm@${pnpm(runtime)}"`);
   });
 
-  it('pins a Deno version rather than a floating tag', () => {
-    // A floating tag makes an "unsupported lockfile version" failure arrive on an unrelated day.
-    expect(runtime).not.toMatch(/FROM denoland\/deno:(alpine|latest)\s*$/m);
+  it('pins a Node version rather than a floating tag', () => {
+    // A floating tag makes a runtime upgrade arrive on an unrelated day.
+    for (const source of [runtime, compiled]) {
+      expect(source).not.toMatch(/^FROM node(:latest|:lts[^\s]*)?(\s|$)/m);
+    }
   });
 
-  it('copies the workspace root BEFORE packages, which resolution requires', () => {
-    // Without deno.json the build fails: an example maps only its direct dependencies, so
-    // @setu-ts/common resolves against JSR instead of the local workspace member.
-    const rootCopy = runtime.indexOf('COPY deno.json');
-    const packagesCopy = runtime.indexOf('COPY packages');
-    expect(rootCopy).toBeGreaterThan(-1);
-    expect(packagesCopy).toBeGreaterThan(rootCopy);
+  it('copies the workspace manifest and lock BEFORE packages, which a frozen install requires', () => {
+    // `pnpm install --frozen-lockfile` refuses to run without the lock, and the workspace file is
+    // what lets `--filter <app>...` see the framework members the app depends on.
+    for (const source of [runtime, compiled]) {
+      const lock = source.indexOf('pnpm-lock.yaml');
+      const workspace = source.indexOf('pnpm-workspace.yaml');
+      const packagesCopy = source.indexOf('COPY packages');
+      expect(lock).toBeGreaterThan(-1);
+      expect(workspace).toBeGreaterThan(-1);
+      expect(packagesCopy).toBeGreaterThan(lock);
+      expect(packagesCopy).toBeGreaterThan(workspace);
+      expect(source).toContain('pnpm install --frozen-lockfile');
+    }
   });
 
-  it('builds the compiled binary on a glibc base, since distroless/cc is glibc', () => {
-    // An alpine build stage links against musl and the binary will not run on distroless/cc.
-    expect(compiled).toMatch(/FROM denoland\/deno:\$\{DENO_VERSION\} AS build/);
+  it('builds the SEA on a glibc base, since distroless/cc is glibc', () => {
+    // An alpine builder copies a musl node binary, which will not run on distroless/cc.
+    expect(compiled).toMatch(/^FROM node:24-bookworm AS build$/m);
     expect(compiled).toContain('gcr.io/distroless/cc-debian12');
   });
 
@@ -305,23 +316,13 @@ describe('skip contract', () => {
     // cluster mode honoured it; render/build/compose exited 1, so a contributor without helm got
     // a hard FAILED and CI could not tell "tool missing" from "gate genuinely failed".
     //
-    // PATH is narrowed to Deno's own directory so `helm` cannot be found while `deno` still can.
-    const denoDir = Deno.execPath().replace(/\/[^/]+$/, '');
-    const result = await new Deno.Command(Deno.execPath(), {
-      args: [
-        'run',
-        '--allow-read',
-        '--allow-write',
-        '--allow-run',
-        '--allow-env',
-        'scripts/check-deploy.ts',
-        '--render',
-      ],
-      env: { PATH: denoDir },
-      clearEnv: true,
-      stdout: 'piped',
-      stderr: 'piped',
-    }).output();
+    // PATH is narrowed to Node's own directory so `helm` cannot be found while `node` still can.
+    const denoDir = process.execPath.replace(/\/[^/]+$/, '');
+    const result = await runProcess(
+      process.execPath,
+      ['--import', './scripts/lib/source-register.ts', 'scripts/check-deploy.ts', '--render'],
+      { env: { ...process.env, ...{ PATH: denoDir } } },
+    );
 
     expect(result.code).toBe(SKIP_EXIT_CODE);
   });
@@ -361,10 +362,10 @@ describe('generated mode (M95a)', () => {
 
   it('is absent from CI\u2019s only skip allowlist, so a dropped proof cannot read as a pass', async () => {
     // The M37c lesson: an exemption is a one-word edit, and a bare grep cannot
-    // see its own allowlist grow. CI runs this gate (`deno task check:deploy`)
+    // see its own allowlist grow. CI runs this gate (`pnpm run check:deploy`)
     // with no skip allowance at all — a skip must surface as exit 77, never as
     // a listed name.
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const allowSkip = /ALLOW_SKIP:\s*(.+)/.exec(workflow)?.[1] ?? '';
     expect(allowSkip).not.toContain('generated');
   });
@@ -379,13 +380,13 @@ describe('graceful shutdown in the containerized examples', () => {
   ];
 
   it('every containerized example installs a SIGTERM handler', () => {
-    // Without one, Deno's default action ends the process immediately (measured: 144 ms, exit
+    // Without one, the default action ends the process immediately (measured: 144 ms, exit
     // 143) and app.stop() never runs, making terminationGracePeriodSeconds decorative.
     for (const path of MATRIX_ENTRY_POINTS) {
       const source = read(path);
-      // Either the Deno listener or the portable `IRuntimeServices.onSignal`
+      // Either a Node `process.on` listener or the portable `IRuntimeServices.onSignal`
       // seam (M70h) that `setu new` emits — both register the handler.
-      expect(source).toMatch(/addSignalListener\(|\bonSignal\?\.\(/);
+      expect(source).toMatch(/\bprocess\.on\(|\bonSignal\?\.\(/);
       expect(source).toContain('SIGTERM');
       expect(source).toContain('app.stop()');
     }
@@ -395,7 +396,8 @@ describe('graceful shutdown in the containerized examples', () => {
     // A rejecting onShutdown hook makes stop() reject. Verified against a real app: without
     // .catch the process dies with "Uncaught (in promise)" and Deno.exit(0) never runs.
     for (const path of MATRIX_ENTRY_POINTS) {
-      expect(read(path)).toMatch(/app\.stop\(\)[\s\S]{0,300}\.catch\(/);
+      // `\s*`: Prettier breaks a long chain before `.stop()`.
+      expect(read(path)).toMatch(/app\s*\.stop\(\)[\s\S]{0,300}\.catch\(/);
     }
   });
 });
@@ -433,28 +435,23 @@ describe('generated deployment install ordering', () => {
       env: Readonly<Record<string, string>> | undefined;
     }[] = [];
     const order: string[] = [];
-    await buildGeneratedImage(
-      '/workspace/acme',
-      'test-image',
-      REGISTRY,
-      (command, options) => {
-        calls.push({ command, cwd: options?.cwd, env: options?.env });
-        order.push(command.slice(-1)[0]!);
-        return Promise.resolve({ success: true, stdout: '', stderr: '' });
-      },
-    );
+    await buildGeneratedImage('/workspace/acme', 'test-image', REGISTRY, (command, options) => {
+      calls.push({ command, cwd: options?.cwd, env: options?.env });
+      order.push(command.slice(-1)[0]!);
+      return Promise.resolve({ success: true, stdout: '', stderr: '' });
+    });
     expect(order).toEqual(['install', 'apps/orders/main.ts', '/workspace/acme']);
     expect(calls).toHaveLength(3);
     // Every install resolves the framework from the same registry: the host's,
     // and the image's own install step through the build argument.
     const env = { NPM_CONFIG_REGISTRY: REGISTRY };
     expect(calls[0]).toEqual({
-      command: [Deno.execPath(), 'install'],
+      command: ['deno', 'install'],
       cwd: '/workspace/acme',
       env,
     });
     expect(calls[1]).toEqual({
-      command: [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      command: ['deno', 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
       cwd: '/workspace/acme',
       env,
     });
@@ -489,7 +486,7 @@ describe('generated deployment install ordering', () => {
       },
     );
     expect(result).toBe(failure);
-    expect(commands).toEqual([[Deno.execPath(), 'install']]);
+    expect(commands).toEqual([['deno', 'install']]);
   });
 
   it('never builds an image after entry point caching fails', async () => {
@@ -508,8 +505,8 @@ describe('generated deployment install ordering', () => {
     );
     expect(result).toBe(failure);
     expect(commands).toEqual([
-      [Deno.execPath(), 'install'],
-      [Deno.execPath(), 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
+      ['deno', 'install'],
+      ['deno', 'cache', '--lock=deno.lock', 'apps/orders/main.ts'],
     ]);
   });
 });
@@ -542,5 +539,16 @@ describe('the generated deployment gate proves the devtool is excluded (M101f V8
     expect(source).toContain('await cli([...GENERATED_MEMBER_ARGS,');
     expect(source).toContain('for (const layout of GENERATED_LAYOUTS)');
     expect(source).toContain('PRODUCTION_DEVTOOL_PROBE,');
+  });
+});
+
+describe('failed step output', () => {
+  it('keeps the indented tail of a failed build and drops blank lines', () => {
+    const output = ['', ...Array.from({ length: 40 }, (_, i) => `line ${i}`), '', ''].join('\n');
+    const tail = failureTail(output).split('\n');
+    expect(tail).toHaveLength(30);
+    expect(tail[0]).toBe('      line 10');
+    expect(tail.at(-1)).toBe('      line 39');
+    expect(failureTail(' \n\n')).toBe('');
   });
 });

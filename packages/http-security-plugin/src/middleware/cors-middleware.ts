@@ -94,10 +94,7 @@ export function corsMiddleware(options: CorsOptions = {}): MiddlewareFunction {
   const exposedHeaders = options.exposedHeaders ?? [];
   const maxAge = options.maxAge;
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void | HandlerResult> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void | HandlerResult> => {
     const requestOrigin = ctx.request.headers.get('Origin');
 
     // No Origin header — not a CORS request, pass through

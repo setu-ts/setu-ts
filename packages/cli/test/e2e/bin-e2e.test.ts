@@ -40,7 +40,7 @@ function exec(
       process.execPath,
       [
         '--import',
-        new URL('../../../../test/node-source-register.ts', import.meta.url).href,
+        new URL('../../../../scripts/lib/source-register.ts', import.meta.url).href,
         '--import',
         pathToFileURL(tsx).href,
         bin,

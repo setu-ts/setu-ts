@@ -22,7 +22,7 @@ const b = instance({ id: 'b', host: '10.0.0.2' });
 
 function setup(
   options: Partial<ServiceDiscoveryPluginOptions> = {},
-  instances: readonly typeof a[] = [a, b],
+  instances: readonly (typeof a)[] = [a, b],
 ): { service: ServiceDiscoveryService; provider: FakeProvider; runtime: FakeRuntime } {
   const provider = createFakeProvider(instances);
   const runtime = createFakeRuntime();
@@ -64,9 +64,7 @@ describe('ServiceDiscoveryService — cache', () => {
 
   it('coalesces concurrent reads of a cold service into one provider call', async () => {
     const { service, provider } = setup();
-    const results = await Promise.all(
-      Array.from({ length: 10 }, () => service.resolve('billing')),
-    );
+    const results = await Promise.all(Array.from({ length: 10 }, () => service.resolve('billing')));
     expect(provider.resolveCalls).toBe(1);
     for (const result of results) {
       expect(result.map((i) => i.id)).toEqual(['a', 'b']);

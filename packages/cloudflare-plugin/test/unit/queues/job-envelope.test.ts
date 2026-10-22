@@ -68,8 +68,10 @@ describe('encodeJobEnvelope', () => {
 
 describe('readEnvelopeHeaders', () => {
   it('returns a well-formed string map', () => {
-    expect(readEnvelopeHeaders({ traceparent: 'tp', 'x-a': 'b' }))
-      .toEqual({ traceparent: 'tp', 'x-a': 'b' });
+    expect(readEnvelopeHeaders({ traceparent: 'tp', 'x-a': 'b' })).toEqual({
+      traceparent: 'tp',
+      'x-a': 'b',
+    });
     expect(readEnvelopeHeaders({})).toEqual({});
   });
 

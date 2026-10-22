@@ -139,9 +139,7 @@ function defaultRuntimeAdapters(
  * @throws {Error} If no factory is registered for the resolved platform
  * @since 0.2.0
  */
-export function createRuntimeServices(
-  options?: CreateRuntimeServicesOptions,
-): IRuntimeServices {
+export function createRuntimeServices(options?: CreateRuntimeServicesOptions): IRuntimeServices {
   const platform: RuntimePlatform = options?.platform ?? detectRuntime();
   const adapters = options?.adapters ?? defaultRuntimeAdapters(options?.env);
 

@@ -1,8 +1,10 @@
 /**
- * Configuration errors raised by the authentication plugin.
+ * Configuration and backend errors raised by the authentication plugin.
  *
  * @module
  */
+
+import { withHttpStatusHint } from '@setu-ts/common';
 
 /**
  * Thrown when AuthPlugin is configured without a usable passive
@@ -54,5 +56,25 @@ export class SamlRuntimeLoadError extends Error {
         'enable the nodejs_compat compatibility flag, without which it cannot bundle.',
       cause === undefined ? undefined : { cause },
     );
+  }
+}
+
+/**
+ * A rate-limit Redis connection fault carrying a value-free HTTP 503 hint.
+ * The driver failure is retained as cause; this error never admits traffic.
+ * @since 0.10.0
+ */
+export class RateLimitStoreUnavailableError extends Error {
+  /** Stable discriminant across realms. */
+  override readonly name = 'RateLimitStoreUnavailableError';
+
+  /** @param cause - Original connection fault, preserved unchanged */
+  constructor(cause: unknown) {
+    super('Rate limiting is temporarily unavailable.', { cause });
+    withHttpStatusHint(this, {
+      status: 503,
+      title: 'Service Unavailable',
+      detail: 'Rate limiting is temporarily unavailable.',
+    });
   }
 }

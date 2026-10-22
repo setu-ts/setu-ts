@@ -43,7 +43,7 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     async register(ctx: IPluginContext): Promise<void> {
-      const connectRuntime = options.connectModule ?? await loadConnectModule();
+      const connectRuntime = options.connectModule ?? (await loadConnectModule());
 
       let healthService: IHealthService | undefined;
       try {
@@ -83,7 +83,8 @@ export function GrpcPlugin(options: GrpcPluginOptions = {}): IPlugin {
             available: grpcService.available,
             serviceCount: grpcService.serviceCount,
           },
-        }));
+        }),
+      );
 
       ctx.lifecycle.onClose(() => {
         grpcService.close();

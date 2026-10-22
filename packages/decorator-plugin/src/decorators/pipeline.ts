@@ -29,9 +29,7 @@ export type { MiddlewareLike } from '../internal.ts';
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function UseGuards(
-  ...middlewares: MiddlewareLike[]
-): SetuClassOrMethodDecorator {
+export function UseGuards(...middlewares: MiddlewareLike[]): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
   return classOrMethodDecorator(
     (store, target) => {
@@ -53,9 +51,7 @@ export function UseGuards(
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function UseInterceptors(
-  ...middlewares: MiddlewareLike[]
-): SetuClassOrMethodDecorator {
+export function UseInterceptors(...middlewares: MiddlewareLike[]): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
   return classOrMethodDecorator(
     (store, target) => {
@@ -77,9 +73,7 @@ export function UseInterceptors(
  * @returns A class or method decorator
  * @since 0.1.0
  */
-export function UseFilters(
-  ...middlewares: MiddlewareLike[]
-): SetuClassOrMethodDecorator {
+export function UseFilters(...middlewares: MiddlewareLike[]): SetuClassOrMethodDecorator {
   const normalized = middlewares.map(normalizeMiddleware);
   return classOrMethodDecorator(
     (store, target) => {

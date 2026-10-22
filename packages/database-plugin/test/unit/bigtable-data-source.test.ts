@@ -33,10 +33,7 @@ function setup(
   const store = new FakeBigtableStore();
   const client = createFakeBigtableClient(store);
   const target = resolveBigtableTarget(entity, mapping);
-  const source = createBigtableDataSource(
-    client.instance('i').table(target.table),
-    target,
-  );
+  const source = createBigtableDataSource(client.instance('i').table(target.table), target);
   return { store, source, table: target.table };
 }
 
@@ -95,13 +92,15 @@ describe('create', () => {
     // `foo` — the entity silently changed shape. The same-payload check above
     // could not see it, because `foo` is never written.
     const { source } = setup('User', { User: { columns: { foo: 'cf:bar' } } });
-    await expect(source.create({ id: 'u1', bar: 'written-as-bar' }))
-      .rejects.toThrow(/reserves for 'foo'/);
+    await expect(source.create({ id: 'u1', bar: 'written-as-bar' })).rejects.toThrow(
+      /reserves for 'foo'/,
+    );
     // The same check covers a payload carrying BOTH — the declared field and
     // the unmapped one that lands on its address — so no separate
     // same-payload check is needed.
-    await expect(source.create({ id: 'u2', foo: 'a', bar: 'b' }))
-      .rejects.toThrow(UnsupportedQueryFeatureError);
+    await expect(source.create({ id: 'u2', foo: 'a', bar: 'b' })).rejects.toThrow(
+      UnsupportedQueryFeatureError,
+    );
     await expect(source.update('u1', { bar: 'x' })).rejects.toThrow(/in update/);
     // A remapped qualifier no field name reaches stays perfectly usable, which
     // is why this is a write-time check and not a mapping-time refusal.
@@ -120,8 +119,7 @@ describe('findById', () => {
     const { source } = setup();
     await source.create({ id: 1, name: 'numeric' });
     expect(await source.findById('1')).toEqual({ id: 1, name: 'numeric' });
-    await expect(source.create({ id: '1', name: 'string' }))
-      .rejects.toThrow(/does not overwrite/);
+    await expect(source.create({ id: '1', name: 'string' })).rejects.toThrow(/does not overwrite/);
   });
 
   it('answers null for an absent row', async () => {
@@ -179,18 +177,28 @@ describe('update', () => {
     });
     await source.create({ tenantId: 't1', orderId: 'o1', total: 1 });
     const key = { tenantId: 't1', orderId: 'o1' };
-    expect(await source.update(key, { tenantId: 't1', total: 2 }))
-      .toEqual({ tenantId: 't1', orderId: 'o1', total: 2 });
+    expect(await source.update(key, { tenantId: 't1', total: 2 })).toEqual({
+      tenantId: 't1',
+      orderId: 'o1',
+      total: 2,
+    });
     // An explicitly-undefined key field is not a move; it writes no cell.
-    expect(await source.update(key, { orderId: undefined, total: 3 }))
-      .toEqual({ tenantId: 't1', orderId: 'o1', total: 3 });
-    await expect(source.update(key, { tenantId: 't2' })).rejects.toThrow(/cannot move a row/);
+    expect(await source.update(key, { orderId: undefined, total: 3 })).toEqual({
+      tenantId: 't1',
+      orderId: 'o1',
+      total: 3,
+    });
+    await expect(source.update(key, { tenantId: 't2' })).rejects.toThrow(
+      /cannot change the primary key/,
+    );
   });
 
   it('refuses a payload that would move the row to a different key', async () => {
     const { source } = setup();
     await source.create({ id: 'u1', name: 'ada' });
-    await expect(source.update('u1', { id: 'u2' })).rejects.toThrow(/cannot move a row/);
+    await expect(source.update('u1', { id: 'u2' })).rejects.toThrow(
+      /cannot change the primary key/,
+    );
   });
 
   it('accepts a payload restating the SAME key value', async () => {
@@ -236,19 +244,23 @@ describe('findAll', () => {
   it('evaluates an ordered comparison client-side against decoded values', async () => {
     const { source } = setup();
     await seedUsers(source);
-    const rows = await source.findAll(query({
-      filter: { type: 'comparison', field: 'age', operator: 'gt', value: 35 },
-    }));
+    const rows = await source.findAll(
+      query({
+        filter: { type: 'comparison', field: 'age', operator: 'gt', value: 35 },
+      }),
+    );
     expect(rows.map((r) => r.id)).toEqual(['u1', 'u2', 'u4']);
   });
 
   it('projects to the selected fields after evaluating the filter', async () => {
     const { source } = setup();
     await seedUsers(source);
-    const rows = await source.findAll(query({
-      select: ['name'],
-      filter: { type: 'comparison', field: 'city', operator: 'contains', value: 'lon' },
-    }));
+    const rows = await source.findAll(
+      query({
+        select: ['name'],
+        filter: { type: 'comparison', field: 'city', operator: 'contains', value: 'lon' },
+      }),
+    );
     expect(rows).toEqual([{ name: 'ada' }, { name: 'cyd' }]);
   });
 
@@ -296,10 +308,12 @@ describe('findAll', () => {
     await seedUsers(source);
     store.reads.length = 0;
     expect(
-      await source.findAll(query({
-        where: { id: 'u1' },
-        filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'u2' },
-      })),
+      await source.findAll(
+        query({
+          where: { id: 'u1' },
+          filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'u2' },
+        }),
+      ),
     ).toEqual([]);
     expect(store.reads).toHaveLength(0);
   });
@@ -320,15 +334,18 @@ describe('count', () => {
     await source.create({ id: 'u1', age: 30, bio: 'x'.repeat(64) });
     await source.create({ id: 'u2', age: 40, bio: 'y'.repeat(64) });
     store.reads.length = 0;
-    expect(await source.count({}, { type: 'comparison', field: 'age', operator: 'gt', value: 35 }))
-      .toBe(1);
+    expect(
+      await source.count({}, { type: 'comparison', field: 'age', operator: 'gt', value: 35 }),
+    ).toBe(1);
     // On a wide-column store, shipping every column to answer a number IS the
     // cost of the operation.
     const filter = store.reads[0].options.filter as {
       interleave: readonly (readonly { column?: readonly string[] }[])[];
     };
-    expect([...(filter.interleave[0][0].column as readonly string[])].sort())
-      .toEqual(['age', 'id']);
+    expect([...(filter.interleave[0][0].column as readonly string[])].sort()).toEqual([
+      'age',
+      'id',
+    ]);
   });
 
   it('counts an equality-scoped subset', async () => {
@@ -343,12 +360,15 @@ describe('count', () => {
     await source.create({ id: 'u1' });
     store.reads.length = 0;
     expect(
-      await source.count({ id: 'u1' }, {
-        type: 'comparison',
-        field: 'id',
-        operator: 'eq',
-        value: 'x',
-      }),
+      await source.count(
+        { id: 'u1' },
+        {
+          type: 'comparison',
+          field: 'id',
+          operator: 'eq',
+          value: 'x',
+        },
+      ),
     ).toBe(0);
     expect(store.reads).toHaveLength(0);
   });

@@ -23,7 +23,7 @@ describe('DatabaseOutboxStore — column mapping', () => {
           claimVersion: Number.MAX_SAFE_INTEGER - 1,
           leaseUntil: 1_700_000_030_000,
         }),
-      )
+      ),
     );
     expect((await store.scanPending(undefined, 10))[0]).toMatchObject({
       claimVersion: Number.MAX_SAFE_INTEGER - 1,
@@ -97,10 +97,12 @@ describe('DatabaseOutboxStore — column mapping', () => {
     const service = await memoryService();
     const store = new DatabaseOutboxStore(service, ENTITY);
 
-    const failed = await service.transaction(async (uow) => {
-      await store.append(uow, record(1));
-      throw new Error('business write failed');
-    }).catch((error: unknown) => error);
+    const failed = await service
+      .transaction(async (uow) => {
+        await store.append(uow, record(1));
+        throw new Error('business write failed');
+      })
+      .catch((error: unknown) => error);
 
     expect((failed as Error).message).toBe('business write failed');
     expect(await allRows(service)).toEqual([]);

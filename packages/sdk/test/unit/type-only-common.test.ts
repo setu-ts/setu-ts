@@ -18,7 +18,7 @@ async function sourceFiles(dir: URL): Promise<URL[]> {
   for await (const entry of await nodeFs.opendir(dir)) {
     const child = new URL(entry.name + (entry.isDirectory() ? '/' : ''), dir);
     if (entry.isDirectory()) {
-      files.push(...await sourceFiles(child));
+      files.push(...(await sourceFiles(child)));
     } else if (entry.name.endsWith('.ts')) {
       files.push(child);
     }
@@ -61,7 +61,7 @@ describe('@setu-ts/sdk — common imports are type-only', () => {
       }[];
     };
     const sdkModules = graph.modules.filter((module) =>
-      module.specifier.includes('/packages/sdk/src/')
+      module.specifier.includes('/packages/sdk/src/'),
     );
     let commonEdges = 0;
     const runtimeEdges: string[] = [];

@@ -81,11 +81,7 @@ async function startWith(controllers: readonly (new () => object)[]): Promise<Wa
 async function startWithModules(modules: readonly (new () => object)[]): Promise<Warning[]> {
   const warnings: Warning[] = [];
   const app = createApplication({
-    plugins: [
-      testRuntimePlugin(),
-      collectingLoggerPlugin(warnings),
-      DecoratorPlugin({ modules }),
-    ],
+    plugins: [testRuntimePlugin(), collectingLoggerPlugin(warnings), DecoratorPlugin({ modules })],
   });
   await app.start();
   await app.stop();
@@ -109,8 +105,8 @@ describe('startup warnings', () => {
     }
 
     const warnings = await startWith([Undecorated]);
-    const warning = warnings.find((w) =>
-      w.message === 'Controller has no @Controller metadata and registers no routes'
+    const warning = warnings.find(
+      (w) => w.message === 'Controller has no @Controller metadata and registers no routes',
     );
     expect(warning).toBeDefined();
     expect(warning?.metadata?.['controller']).toBe('Undecorated');
@@ -133,9 +129,10 @@ describe('startup warnings', () => {
     class UndecoratedModule {}
 
     const warnings = await startWithModules([UndecoratedModule]);
-    const warning = warnings.find((entry) =>
-      entry.message ===
-        'Class passed in DecoratorPlugin({ modules }) has no @Module metadata and contributes nothing'
+    const warning = warnings.find(
+      (entry) =>
+        entry.message ===
+        'Class passed in DecoratorPlugin({ modules }) has no @Module metadata and contributes nothing',
     );
     expect(warning?.metadata?.['module']).toBe('UndecoratedModule');
   });
@@ -151,8 +148,8 @@ describe('startup warnings', () => {
     }
 
     const warnings = await startWith([ParamController]);
-    const warning = warnings.find((w) =>
-      w.message === 'Decorated parameter cannot be resolved and will be undefined'
+    const warning = warnings.find(
+      (w) => w.message === 'Decorated parameter cannot be resolved and will be undefined',
     );
     expect(warning).toBeDefined();
     expect(warning?.metadata?.['controller']).toBe('ParamController');
@@ -175,8 +172,8 @@ describe('startup warnings', () => {
     metadataStore.storeParam(RawController, 'read', { index: 0, type: 'custom' });
 
     const warnings = await startWith([RawController]);
-    const warning = warnings.find((w) =>
-      w.message === 'Decorated parameter cannot be resolved and will be undefined'
+    const warning = warnings.find(
+      (w) => w.message === 'Decorated parameter cannot be resolved and will be undefined',
     );
     expect(warning).toBeDefined();
     expect(warning?.metadata?.['customType']).toBe('(none)');

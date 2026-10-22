@@ -59,11 +59,13 @@ export function createFakeContext(runtime: IRuntimeServices): FakeContext {
     logger: {
       warn: (message: string, metadata?: Readonly<Record<string, unknown>>): void => {
         logged.push(
-          metadata === undefined ? { level: 'warn', message } : {
-            level: 'warn',
-            message,
-            metadata,
-          },
+          metadata === undefined
+            ? { level: 'warn', message }
+            : {
+                level: 'warn',
+                message,
+                metadata,
+              },
         );
       },
     },

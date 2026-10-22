@@ -30,4 +30,19 @@ export interface HttpAdapterOptions {
    * @since 0.5.0
    */
   readonly maxBodyBytes?: number;
+
+  /**
+   * Last-resort sink for a server-side fault the adapter cannot answer with a
+   * response. Supplied by `RuntimePlugin`, which resolves it at call time: the
+   * registered logger when there is one, else
+   * `IRuntimeServices.reportError`. Omitted, the adapter stays silent.
+   *
+   * The record is already sanitized by the caller — a `serializeError` spread,
+   * with no request data — so a sink that writes it verbatim cannot leak a
+   * request payload.
+   *
+   * @param record - The already sanitized diagnostic
+   * @since 0.10.0
+   */
+  readonly reportError?: (record: Readonly<Record<string, unknown>>) => void;
 }

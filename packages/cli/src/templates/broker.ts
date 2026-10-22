@@ -27,6 +27,25 @@ const MESSAGING_PACKAGE = 'messaging-plugin';
 const QUEUE_PACKAGE = 'queue-plugin';
 
 /**
+ * Carries a transport's operational note onto the host, once.
+ *
+ * Both overlays read the same `connection.note`, and a transport with both arms
+ * (redis, rabbitmq) applies both, so an append without the guard would print the
+ * paragraph twice in the generated README.
+ *
+ * @param host - The host the arm rewrote
+ * @param spec - The selected transport
+ * @returns The host with the note appended, or unchanged when there is none
+ */
+function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHost {
+  const note = spec.connection?.note;
+  if (note === undefined) return host;
+  const notes = host.transportNotes ?? [];
+  if (notes.includes(note)) return host;
+  return { ...host, transportNotes: [...notes, note] };
+}
+
+/**
  * Rewrites the host's `MessagingPlugin` wiring to the transport's broker arm.
  *
  * A no-op when the spec declares no messaging arm or no connection (the
@@ -48,14 +67,17 @@ export function withBrokerArgs(
 ): ResolvedHost {
   if (spec.connection === undefined || spec.messagingArgs === undefined) return host;
   if (!host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE)) return host;
-  return withClientDependencies(
-    rewritePluginArgs(
-      host,
-      MESSAGING_PACKAGE,
-      spec.messagingArgs,
-      renderConnection(spec.connection, profile, override),
+  return withTransportNote(
+    withClientDependencies(
+      rewritePluginArgs(
+        host,
+        MESSAGING_PACKAGE,
+        spec.messagingArgs,
+        renderConnection(spec.connection, profile, override),
+      ),
+      spec.messagingClients ?? [],
     ),
-    spec.messagingClients ?? [],
+    spec,
   );
 }
 
@@ -81,14 +103,17 @@ export function withQueueArgs(
 ): ResolvedHost {
   if (spec.connection === undefined || spec.queueArgs === undefined) return host;
   if (!host.plugins.some((wiring) => wiring.pkg === QUEUE_PACKAGE)) return host;
-  return withClientDependencies(
-    rewritePluginArgs(
-      host,
-      QUEUE_PACKAGE,
-      spec.queueArgs,
-      renderConnection(spec.connection, profile, override),
+  return withTransportNote(
+    withClientDependencies(
+      rewritePluginArgs(
+        host,
+        QUEUE_PACKAGE,
+        spec.queueArgs,
+        renderConnection(spec.connection, profile, override),
+      ),
+      spec.queueClients ?? [],
     ),
-    spec.queueClients ?? [],
+    spec,
   );
 }
 
@@ -105,12 +130,15 @@ export function withQueueArgs(
 export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] {
   const connection = spec.connection;
   if (connection === undefined) return [];
-  return [{
-    name: connection.variable,
-    description: `Where the ${spec.name} transport connects. The default is this project's local ` +
-      `development value; deployments set the real endpoint here.`,
-    develop: connection.localDefault,
-  }];
+  return [
+    {
+      name: connection.variable,
+      description:
+        `Where the ${spec.name} transport connects. The default is this project's local ` +
+        `development value; deployments set the real endpoint here.`,
+      develop: connection.localDefault,
+    },
+  ];
 }
 
 /**
@@ -126,20 +154,21 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
  * @param specs - The selected transports, in flag order
  * @returns The compose file plus any backing-service config files
  */
-export function brokerComposeFiles(
-  specs: readonly TransportSpec[],
-): readonly GeneratedFile[] {
+export function brokerComposeFiles(specs: readonly TransportSpec[]): readonly GeneratedFile[] {
   // One arm can serve both flags (`--broker redis --queue redis`); its service
   // block must appear once, not twice.
-  const backing = [...new Map(
-    specs.filter((spec) => spec.compose !== undefined).map((spec) => [spec.name, spec]),
-  ).values()];
+  const backing = [
+    ...new Map(
+      specs.filter((spec) => spec.compose !== undefined).map((spec) => [spec.name, spec]),
+    ).values(),
+  ];
 
   if (backing.length === 0) return [];
 
-  const files: GeneratedFile[] = [{
-    path: BROKER_COMPOSE_FILE,
-    contents: `# Local development backing services for this project.
+  const files: GeneratedFile[] = [
+    {
+      path: BROKER_COMPOSE_FILE,
+      contents: `# Local development backing services for this project.
 #
 #   docker compose -f ${BROKER_COMPOSE_FILE} up -d
 #
@@ -149,7 +178,8 @@ export function brokerComposeFiles(
 services:
 ${backing.map((spec) => (spec.compose?.services ?? '').replace(/\n$/, '')).join('\n')}
 `,
-  }];
+    },
+  ];
 
   for (const spec of backing) {
     for (const file of spec.compose?.files ?? []) files.push(file);
@@ -175,22 +205,28 @@ export function standaloneOverlayRefusal(
   host: ResolvedHost,
 ): string | undefined {
   if (runtime === 'cloudflare-workers') {
-    return `--${flag} cannot apply on Cloudflare Workers: the Workers build replaces ` +
+    return (
+      `--${flag} cannot apply on Cloudflare Workers: the Workers build replaces ` +
       `${MESSAGING_PACKAGE} and ${QUEUE_PACKAGE} with the platform's own queues and a Durable ` +
       `Object, so there is no wiring left for the flag to rewrite and it would report success ` +
-      `while the project talked to Cloudflare. Scaffold for deno, node or bun to select one.`;
+      `while the project talked to Cloudflare. Scaffold for deno, node or bun to select one.`
+    );
   }
   if (host.appFactory !== undefined) {
-    return `--${flag} cannot apply to a starter-composed template: the whole plugin set is ` +
+    return (
+      `--${flag} cannot apply to a starter-composed template: the whole plugin set is ` +
       `rendered through the starter factory, so a plugin-list rewrite would be dropped and the ` +
       `project would look connected while talking to nobody. Use --template microservice to ` +
-      `select a ${flag}.`;
+      `select a ${flag}.`
+    );
   }
   const pkg = flag === 'broker' ? MESSAGING_PACKAGE : QUEUE_PACKAGE;
   if (!host.plugins.some((wiring) => wiring.pkg === pkg)) {
-    return `--${flag} has nothing to configure: this template registers no ${pkg} wiring, so the ` +
+    return (
+      `--${flag} has nothing to configure: this template registers no ${pkg} wiring, so the ` +
       `flag would be accepted and silently do nothing. Use --template microservice to select ` +
-      `a ${flag} (add --style class-based for decorators).`;
+      `a ${flag} (add --style class-based for decorators).`
+    );
   }
   return undefined;
 }

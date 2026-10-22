@@ -50,7 +50,7 @@ type PolicyMethod = (...args: readonly unknown[]) => unknown;
 /** Reads a method off an instance, or `undefined` when it is not a function. */
 function methodOf(instance: unknown, name: string): PolicyMethod | undefined {
   const value = (instance as Record<string, unknown>)[name];
-  return typeof value === 'function' ? value as PolicyMethod : undefined;
+  return typeof value === 'function' ? (value as PolicyMethod) : undefined;
 }
 
 /**
@@ -77,9 +77,7 @@ export function toPolicyDefinition(
     );
   }
   if (meta.abilities.size === 0) {
-    throw new Error(
-      `DecoratorPlugin: policy class ${label} declares no @Ability() method.`,
-    );
+    throw new Error(`DecoratorPlugin: policy class ${label} declares no @Ability() method.`);
   }
   const abilities: Record<string, PolicyAbility<never>> = {};
   for (const [method, anonymous] of meta.abilities) {
@@ -91,20 +89,21 @@ export function toPolicyDefinition(
     }
     const check = (principal: IPrincipal | null, value: unknown): unknown =>
       fn.call(instance, principal, value);
-    abilities[method] = (anonymous
-      ? { anonymous: true, check }
-      : (principal: IPrincipal, value: unknown) =>
-        check(principal, value)) as PolicyAbility<
-        never
-      >;
+    abilities[method] = (
+      anonymous
+        ? { anonymous: true, check }
+        : (principal: IPrincipal, value: unknown) => check(principal, value)
+    ) as PolicyAbility<never>;
   }
   const before = methodOf(instance, BEFORE);
-  return before === undefined ? { name: meta.name, abilities } : {
-    name: meta.name,
-    abilities,
-    before: (principal, ability, value) =>
-      before.call(instance, principal, ability, value) as boolean | undefined,
-  };
+  return before === undefined
+    ? { name: meta.name, abilities }
+    : {
+        name: meta.name,
+        abilities,
+        before: (principal, ability, value) =>
+          before.call(instance, principal, ability, value) as boolean | undefined,
+      };
 }
 
 /**
@@ -211,9 +210,10 @@ export function createPolicyMiddleware(
     const service = ctx.services.get<IAuthorizationPolicyService>(
       CAPABILITIES.AUTHORIZATION_POLICIES,
     );
-    const resolved = typeof target === 'function'
-      ? await (target as (ctx: IRequestContext) => unknown)(ctx)
-      : target;
+    const resolved =
+      typeof target === 'function'
+        ? await (target as (ctx: IRequestContext) => unknown)(ctx)
+        : target;
     if (!(await service.can(user, name, ability, resolved))) {
       respondWithAuthorizationFailure(
         ctx,
@@ -412,9 +412,9 @@ export function appendScopedRbacMiddleware(
     for (const [index, ability] of abilities.entries()) {
       if (service.describe(SCOPED_RBAC_POLICY, ability) === undefined) {
         throw new Error(
-          `${label} is decorated with @${decorator}(${
-            JSON.stringify(requirement.names[index])
-          }), ` +
+          `${label} is decorated with @${decorator}(${JSON.stringify(
+            requirement.names[index],
+          )}), ` +
             'which is not in the scoped RBAC catalogue — configure AuthPlugin({ scopedRbac }) with ' +
             'an rbac role granting it.',
         );

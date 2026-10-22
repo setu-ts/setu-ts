@@ -35,6 +35,9 @@ import {
   loadApp,
 } from '../app-loader.ts';
 
+import { detectTargetRuntime } from '../utils/runtime-detector.ts';
+import { cliInvocation } from '../templates/project-files.ts';
+
 /**
  * The registration shape the kernel stores under `CAPABILITIES.CLI_COMMAND`.
  *
@@ -201,24 +204,23 @@ export async function runCommandsListing(
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const config = stringFlag(args.flags, 'config');
 
-  if (!await configModuleExists(deps.fs, dir, config)) {
+  if (!(await configModuleExists(deps.fs, dir, config))) {
     reportMissingConfig(dir, config, deps.error);
     return EXIT_USAGE;
   }
 
   try {
+    const runtime = await detectTargetRuntime(deps.fs, dir);
     return await withPluginCommands(deps, dir, config, (commands) => {
       if (commands.length === 0) {
         deps.log('No plugin commands are registered by this application.');
-        deps.log(
-          `Plugins publish them with \`ctx.cli.register('plugin:command', handler)\`.`,
-        );
+        deps.log(`Plugins publish them with \`ctx.cli.register('plugin:command', handler)\`.`);
         return EXIT_OK;
       }
 
       deps.log(`Commands provided by this application's plugins:`);
       for (const command of [...commands].sort((a, b) => a.name.localeCompare(b.name))) {
-        deps.log(`  ${PROGRAM_NAME} ${command.name}`);
+        deps.log(`  ${cliInvocation(runtime)} ${command.name}`);
       }
       return EXIT_OK;
     });
@@ -256,7 +258,7 @@ export async function dispatchPluginCommand(
   const dir = resolveDir(deps.cwd, stringFlag(args.flags, 'dir'));
   const config = stringFlag(args.flags, 'config');
 
-  if (!await configModuleExists(deps.fs, dir, config)) {
+  if (!(await configModuleExists(deps.fs, dir, config))) {
     deps.error(`Unknown command: ${escapeName(name)}`);
     reportMissingConfig(dir, config, deps.error);
     return EXIT_USAGE;

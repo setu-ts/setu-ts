@@ -118,7 +118,7 @@ describe('createClient', () => {
         createClient({
           baseUrl: 'https://api.example.com',
           retry: { limit, delay: 100, backoff: 'fixed' } as unknown as ClientRetryPolicy,
-        })
+        }),
       ).toThrow('retry.limit must be a positive safe integer');
     });
   }
@@ -129,7 +129,7 @@ describe('createClient', () => {
         createClient({
           baseUrl: 'https://api.example.com',
           retry: { limit: 2, delay, backoff: 'fixed' } as unknown as ClientRetryPolicy,
-        })
+        }),
       ).toThrow('retry.delay must be a finite non-negative number');
     });
   }
@@ -157,7 +157,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         retry: { limit: 2, delay: 2_147_483_648, backoff: 'fixed' },
-      })
+      }),
     ).toThrow('retry.delay exceeds the maximum timer delay');
   });
 
@@ -166,7 +166,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         retry: { limit: 1024, delay: 2, backoff: 'exponential' },
-      })
+      }),
     ).toThrow('retry exponential backoff must remain finite');
   });
 
@@ -175,7 +175,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         retry: { limit: 3, delay: 1_000_000_000, backoff: 'exponential' },
-      })
+      }),
     ).toThrow('retry exponential backoff exceeds the maximum timer delay');
   });
 
@@ -184,7 +184,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         circuitBreaker: { threshold: 0, timeout: 30_000, resetTimeout: 10_000 },
-      })
+      }),
     ).toThrow('circuitBreaker.threshold must be >= 1');
   });
 
@@ -193,7 +193,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         rateLimit: { maxRequests: 0, windowMs: 10_000 },
-      })
+      }),
     ).toThrow('rateLimit.maxRequests must be >= 1');
   });
 
@@ -202,7 +202,7 @@ describe('createClient', () => {
       createClient({
         baseUrl: 'https://api.example.com',
         rateLimit: { maxRequests: 5, windowMs: 0 },
-      })
+      }),
     ).toThrow('rateLimit.windowMs must be > 0');
   });
 

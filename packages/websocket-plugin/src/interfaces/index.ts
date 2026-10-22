@@ -167,5 +167,4 @@ export interface WebSocketRouteDefinition {
  * @since 0.3.0
  */
 export type WebSocketRouteEntry =
-  | WebSocketRouteDefinition
-  | RegistryFactory<WebSocketRouteDefinition>;
+  WebSocketRouteDefinition | RegistryFactory<WebSocketRouteDefinition>;

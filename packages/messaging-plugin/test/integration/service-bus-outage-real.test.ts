@@ -53,9 +53,7 @@ const skipReal = connectionString === undefined;
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
@@ -66,90 +64,94 @@ interface HealthBody {
   readonly checks: Record<string, { status: string; data?: Record<string, unknown> }>;
 }
 
-describe('REAL Service Bus outage through /health and /ready (M95b §3.3, M101a §3.2)', {
-  skip: skipReal,
-}, () => {
-  it('publish → 200; stop → publish rejects → 503 at +0/+3/+7 s; restart → publish → 200', async () => {
-    // he-sb is the emulator container the documented run command names; its
-    // AMQP port is published on 5673 (5672 is RabbitMQ's).
-    const containerId = (await docker(['ps', '-q', '--filter', 'name=he-sb'])).trim();
-    expect(containerId).not.toBe('');
+describe(
+  'REAL Service Bus outage through /health and /ready (M95b §3.3, M101a §3.2)',
+  {
+    skip: skipReal,
+  },
+  () => {
+    it('publish → 200; stop → publish rejects → 503 at +0/+3/+7 s; restart → publish → 200', async () => {
+      // he-sb is the emulator container the documented run command names; its
+      // AMQP port is published on 5673 (5672 is RabbitMQ's).
+      const containerId = (await docker(['ps', '-q', '--filter', 'name=he-sb'])).trim();
+      expect(containerId).not.toBe('');
 
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        HealthPlugin(),
-        MessagingPlugin({
-          broker: 'service-bus',
-          connectionString: connectionString ?? '',
-          retryOptions: { maxRetries: 0 },
-        }),
-      ],
-    });
-    const statusOf = async (path: string): Promise<number> => {
-      const response = await app.fetch(new Request(`http://localhost${path}`));
-      await response.body?.cancel();
-      return response.status;
-    };
-    const messagingCheck = async (): Promise<{ status: string; reachable: unknown }> => {
-      const response = await app.fetch(new Request('http://localhost/health'));
-      const body = (await response.json()) as HealthBody;
-      const check = body.checks['messaging'];
-      return { status: check?.status ?? 'absent', reachable: check?.data?.['reachable'] };
-    };
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HealthPlugin({ details: true }),
+          MessagingPlugin({
+            broker: 'service-bus',
+            connectionString: connectionString ?? '',
+            retryOptions: { maxRetries: 0 },
+          }),
+        ],
+      });
+      const statusOf = async (path: string): Promise<number> => {
+        const response = await app.fetch(new Request(`http://localhost${path}`));
+        await response.body?.cancel();
+        return response.status;
+      };
+      const messagingCheck = async (): Promise<{ status: string; reachable: unknown }> => {
+        const response = await app.fetch(new Request('http://localhost/health'));
+        const body = (await response.json()) as HealthBody;
+        const check = body.checks['messaging'];
+        return { status: check?.status ?? 'absent', reachable: check?.data?.['reachable'] };
+      };
 
-    await app.start();
-    try {
-      const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
-
-      // (running) a successful publish IS the data-plane evidence: with the
-      // management probe resolving `undefined` against this emulator in
-      // every state, only the recorded success can answer `up`.
-      await broker.publish('orders-roundtrip', { phase: 'running' });
-      expect(await statusOf('/ready')).toBe(200);
-
-      // (stopped) a real stop. The publish against the dead namespace is
-      // awaited to its rejection — a status-less network failure, exactly
-      // the shape the evidence predicate records.
-      await docker(['stop', containerId]);
-      await wait(1_000);
-      let stoppedError: unknown = undefined;
+      await app.start();
       try {
-        await broker.publish('orders-roundtrip', { phase: 'stopped' });
-      } catch (error) {
-        stoppedError = error;
-      }
-      expect(stoppedError).toBeDefined();
+        const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
-      for (const delayMs of [0, 3_000, 4_000]) {
-        await wait(delayMs);
-        expect(await messagingCheck()).toEqual({ status: 'down', reachable: false });
-        expect(await statusOf('/ready')).toBe(503);
-      }
+        // (running) a successful publish IS the data-plane evidence: with the
+        // management probe resolving `undefined` against this emulator in
+        // every state, only the recorded success can answer `up`.
+        await broker.publish('orders-roundtrip', { phase: 'running' });
+        expect(await statusOf('/ready')).toBe(200);
 
-      // (restart) the container returns; a successful publish re-records
-      // evidence and the answer returns to `up`.
-      await docker(['start', containerId]);
-      let reconnected = false;
-      for (let i = 0; i < 60 && !reconnected; i++) {
+        // (stopped) a real stop. The publish against the dead namespace is
+        // awaited to its rejection — a status-less network failure, exactly
+        // the shape the evidence predicate records.
+        await docker(['stop', containerId]);
         await wait(1_000);
+        let stoppedError: unknown = undefined;
         try {
-          await broker.publish('orders-roundtrip', { phase: 'recovered' });
-          reconnected = true;
-        } catch {
-          // The emulator is still coming up; retry.
+          await broker.publish('orders-roundtrip', { phase: 'stopped' });
+        } catch (error) {
+          stoppedError = error;
         }
+        expect(stoppedError).toBeDefined();
+
+        for (const delayMs of [0, 3_000, 4_000]) {
+          await wait(delayMs);
+          expect(await messagingCheck()).toEqual({ status: 'down', reachable: false });
+          expect(await statusOf('/ready')).toBe(503);
+        }
+
+        // (restart) the container returns; a successful publish re-records
+        // evidence and the answer returns to `up`.
+        await docker(['start', containerId]);
+        let reconnected = false;
+        for (let i = 0; i < 60 && !reconnected; i++) {
+          await wait(1_000);
+          try {
+            await broker.publish('orders-roundtrip', { phase: 'recovered' });
+            reconnected = true;
+          } catch {
+            // The emulator is still coming up; retry.
+          }
+        }
+        expect(reconnected).toBe(true);
+        // The indicator caches for 5 s, so the recovery is observed after it.
+        await wait(5_500);
+        expect(await statusOf('/ready')).toBe(200);
+      } finally {
+        // Leave the container RUNNING: R11 records that a second consecutive
+        // run against a stopped or dirty emulator fails for reasons unrelated
+        // to the change.
+        await runProcess('docker', { args: ['start', containerId] });
+        await app.stop().catch(() => {});
       }
-      expect(reconnected).toBe(true);
-      // The indicator caches for 5 s, so the recovery is observed after it.
-      await wait(5_500);
-      expect(await statusOf('/ready')).toBe(200);
-    } finally {
-      // Leave the container RUNNING: R11 records that a second consecutive
-      // run against a stopped or dirty emulator fails for reasons unrelated
-      // to the change.
-      await runProcess('docker', { args: ['start', containerId] });
-      await app.stop().catch(() => {});
-    }
-  });
-});
+    });
+  },
+);

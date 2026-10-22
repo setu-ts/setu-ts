@@ -12,7 +12,7 @@ import { adaptGraphqlModule } from '../../src/runtime/graphql-loader.ts';
 
 describe('adapted real graphql runtime round-trip', () => {
   it('parses, builds a schema, and executes a real query', async () => {
-    let graphql: typeof import('graphql') | null = null;
+    let graphql: typeof import('graphql') | null;
     try {
       graphql = await import('graphql');
     } catch (_e) {

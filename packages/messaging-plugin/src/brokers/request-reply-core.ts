@@ -100,13 +100,17 @@ interface PendingRequest {
 }
 
 function isRequestEnvelope(value: unknown): value is RequestEnvelope {
-  return typeof value === 'object' && value !== null &&
-    (value as { kind?: unknown }).kind === 'rr-request';
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'rr-request'
+  );
 }
 
 function isReplyEnvelope(value: unknown): value is ReplyEnvelope {
-  return typeof value === 'object' && value !== null &&
-    (value as { kind?: unknown }).kind === 'rr-reply';
+  return (
+    typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'rr-reply'
+  );
 }
 
 /**
@@ -217,21 +221,25 @@ export class RequestReplyCore {
     handler: (message: unknown, metadata: MessageMetadata) => unknown | Promise<unknown>,
     options?: SubscribeOptions,
   ): Promise<ISubscription> {
-    return this.#deps.subscribe(requestChannel(topic), async (message, metadata) => {
-      if (!isRequestEnvelope(message)) {
-        return;
-      }
-      const { correlationId, replyTo, payload } = message;
-      let response: ReplyEnvelope;
-      try {
-        const result = await handler(payload, metadata);
-        response = { kind: 'rr-reply', correlationId, ok: true, payload: result };
-      } catch (err) {
-        const remoteMessage = err instanceof Error ? err.message : String(err);
-        response = { kind: 'rr-reply', correlationId, ok: false, error: remoteMessage };
-      }
-      await this.#deps.publish(replyTo, response);
-    }, options);
+    return this.#deps.subscribe(
+      requestChannel(topic),
+      async (message, metadata) => {
+        if (!isRequestEnvelope(message)) {
+          return;
+        }
+        const { correlationId, replyTo, payload } = message;
+        let response: ReplyEnvelope;
+        try {
+          const result = await handler(payload, metadata);
+          response = { kind: 'rr-reply', correlationId, ok: true, payload: result };
+        } catch (err) {
+          const remoteMessage = err instanceof Error ? err.message : String(err);
+          response = { kind: 'rr-reply', correlationId, ok: false, error: remoteMessage };
+        }
+        await this.#deps.publish(replyTo, response);
+      },
+      options,
+    );
   }
 
   /**
@@ -286,12 +294,14 @@ export class RequestReplyCore {
     const generationAtStart = this.#generation;
 
     if (!this.#inboxInit) {
-      this.#inboxInit = this.#deps.openInbox((message) => {
-        this.#onReply(message);
-      }).catch((error: unknown) => {
-        this.#inboxInit = null;
-        throw error;
-      });
+      this.#inboxInit = this.#deps
+        .openInbox((message) => {
+          this.#onReply(message);
+        })
+        .catch((error: unknown) => {
+          this.#inboxInit = null;
+          throw error;
+        });
     }
     return this.#inboxInit.then((inbox) => ({ inbox, generation: generationAtStart }));
   }

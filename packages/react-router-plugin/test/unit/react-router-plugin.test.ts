@@ -5,7 +5,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-// deno-lint-ignore no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Any = any;
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { SsrRuntime } from '../../src/interfaces/index.ts';
@@ -127,7 +127,7 @@ describe('react-router-plugin', () => {
       },
       router: routerApi,
       health: {
-        // deno-lint-ignore ban-types
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
         register(_name: string, _fn: Function) {
           // noop for tests
         },
@@ -142,12 +142,12 @@ describe('react-router-plugin', () => {
   }
 
   function makeLoadRequestHandler(response: Response) {
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     return async (_path: string, _mode: string): Promise<SsrRuntime> => {
       void _path;
       void _mode;
       return {
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         handler: async () => response,
         createLoadContext: createFakeLoadContextFactory(),
       };
@@ -186,7 +186,7 @@ describe('react-router-plugin', () => {
     const plugin = ReactRouterPlugin({
       serverBuildPath: './build/server',
       loadRequestHandler: (() =>
-        // deno-lint-ignore require-await
+        // eslint-disable-next-line require-await
         Promise.resolve(async () => new Response('ok'))) as unknown as never,
     });
 
@@ -380,7 +380,7 @@ describe('react-router-plugin', () => {
     const healthResults = new Map<string, () => Promise<{ status: string; data?: unknown }>>();
     const fakeCtx = buildFakeCtx();
     fakeCtx.health = {
-      // deno-lint-ignore ban-types
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
       register(name: string, fn: Function) {
         healthResults.set(name, fn as () => Promise<{ status: string; data?: unknown }>);
       },
@@ -429,3 +429,81 @@ function addRoute(routes: Map<string, string[]>, path: string, method: string) {
   if (!m.includes(method)) m.push(method);
   routes.set(path, m);
 }
+
+describe('the module arm (M113d §3.10)', () => {
+  // A minimal context: register() with the default loader touches the router,
+  // the service registry, the health registry and the runtime platform.
+  function moduleArmCtx(): Any {
+    const registered = new Map<string, unknown>();
+    const routes = new Map<string, string[]>();
+    const add =
+      (method: string) =>
+      (path: string): void => {
+        const m = routes.get(path) ?? [];
+        m.push(method);
+        routes.set(path, m);
+      };
+    const router: Record<string, unknown> = {
+      get: add('GET'),
+      post: add('POST'),
+      put: add('PUT'),
+      patch: add('PATCH'),
+      delete: add('DELETE'),
+      head: add('HEAD'),
+      options: add('OPTIONS'),
+      group() {},
+      listRoutes() {
+        return Array.from(routes.entries());
+      },
+    };
+    return {
+      services: {
+        register(_token: unknown, service: unknown): void {
+          registered.set('ssr', service);
+        },
+        get(): unknown {
+          return registered.get('ssr');
+        },
+      },
+      router,
+      runtime: { platform: () => 'deno' as const },
+      health: { register(): void {} },
+    } as Any;
+  }
+
+  it('register() uses the default loader with the supplied module, no path import', async () => {
+    // The build arrives as a module — the form a bundled Cloudflare Worker
+    // uses. The default loader must use it directly, never import a path.
+    const plugin = ReactRouterPlugin({
+      serverBuild: { default: { routes: {} } },
+    });
+
+    const fakeCtx = moduleArmCtx();
+    await plugin.register(fakeCtx);
+
+    const ssrService = fakeCtx.services.get(CAPABILITIES.SSR);
+    expect(ssrService).toBeDefined();
+    expect(typeof (ssrService as SsrService).render).toBe('function');
+  });
+
+  it('register() hands a custom loader the supplied module as its third argument', async () => {
+    // A module-aware custom loader reads the build through the typed seam,
+    // with no cast: the placeholder path alone could not reach it.
+    const serverBuild = { default: { routes: {} } };
+    const received: unknown[] = [];
+    const plugin = ReactRouterPlugin({
+      serverBuild,
+      loadRequestHandler: (path, mode, options) => {
+        received.push(path, mode, options?.serverBuild);
+        return Promise.resolve({
+          handler: () => Promise.resolve(new Response('ok')),
+          createLoadContext: () => ({}),
+        } as Any);
+      },
+    });
+
+    await plugin.register(moduleArmCtx());
+
+    expect(received).toEqual(['<serverBuild>', 'production', serverBuild]);
+  });
+});

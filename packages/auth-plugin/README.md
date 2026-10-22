@@ -29,8 +29,7 @@ The authentication capability is named `CAPABILITIES.AUTH` (value `'authenticati
 
 Without `rbac`, the four authorization guards answer **`501 Not Implemented`** rather than throwing
 — see [Guards](#guards). A configured policy that the caller fails answers
-`403 Insufficient
-privileges`; it never names the required role or permission.
+`403 Insufficient privileges`; it never names the required role or permission.
 
 > **Refresh tokens and rate limiting ship in this package.** `IJwtService` itself exposes only
 > `sign` / `verify` / `decode`, but do not hand-roll a refresh token as `sign({ expiresIn: '7d' })`
@@ -40,7 +39,7 @@ privileges`; it never names the required role or permission.
 ## Installation
 
 ```bash
-deno add @setu-ts/auth-plugin
+deno add npm:@setu-ts/auth-plugin
 ```
 
 ## Usage
@@ -48,28 +47,30 @@ deno add @setu-ts/auth-plugin
 ```typescript
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
-app.register(AuthPlugin({
-  jwt: {
-    secret: config.get('JWT_SECRET'), // HS256; use privateKey/publicKey PEMs for RS256
-    audience: 'my-app-users', // expected `aud`, enforced on verify
-    issuer: 'my-app', // expected `iss`, enforced on verify
-  },
-  apiKey: {
-    header: 'X-API-Key',
-    validate: (key) => apiKeyService.validate(key), // (key) => Promise<IPrincipal | null>
-  },
-  local: {
-    // (identifier, secret) => Promise<IPrincipal | null>
-    verify: (identifier, secret) => userService.checkPassword(identifier, secret),
-  },
-  rbac: {
-    roles: {
-      admin: { permissions: ['*'], inherits: ['manager'] },
-      manager: { permissions: ['users:read', 'users:write'], inherits: ['user'] },
-      user: { permissions: ['profile:read', 'profile:write'] },
+app.register(
+  AuthPlugin({
+    jwt: {
+      secret: config.get('JWT_SECRET'), // HS256; use privateKey/publicKey PEMs for RS256
+      audience: 'my-app-users', // expected `aud`, enforced on verify
+      issuer: 'my-app', // expected `iss`, enforced on verify
     },
-  },
-}));
+    apiKey: {
+      header: 'X-API-Key',
+      validate: (key) => apiKeyService.validate(key), // (key) => Promise<IPrincipal | null>
+    },
+    local: {
+      // (identifier, secret) => Promise<IPrincipal | null>
+      verify: (identifier, secret) => userService.checkPassword(identifier, secret),
+    },
+    rbac: {
+      roles: {
+        admin: { permissions: ['*'], inherits: ['manager'] },
+        manager: { permissions: ['users:read', 'users:write'], inherits: ['user'] },
+        user: { permissions: ['profile:read', 'profile:write'] },
+      },
+    },
+  }),
+);
 
 // AuthPlugin registers passive authentication globally at priority 300.
 ```
@@ -100,6 +101,19 @@ app.router.post('/auth/login', async (ctx) => {
   return ctx.response.json({ accessToken });
 });
 ```
+
+## JWT time boundaries
+
+The first-party `JwtService.verify` (the `IJwtService` registered under `'jwt'`) reads time as
+fractional seconds, `runtime.now() / 1000`, with no clock tolerance. It rejects with `Token expired`
+once `now >= exp`, and with `Token not yet valid` while `now < nbf`. At `nbf` the token passes the
+not-before check; at `exp` it fails the expiry check. Previously, a token could be accepted for up
+to one second after `exp`; clients must refresh before `exp`.
+
+The outside-issuer verifier configured through `issuers` also uses fractional seconds, but applies
+`clockToleranceSec`: it rejects as expired once `now >= exp + clockToleranceSec` (previously `>`),
+and as not yet valid while `now + clockToleranceSec < nbf` (unchanged). The tolerance defaults to 30
+seconds and is at most 300 seconds.
 
 ## Strategies
 
@@ -236,10 +250,12 @@ const app = createApplication({
         },
       },
       scopedRbac: {
-        sources: [{
-          kind: 'static',
-          grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
-        }],
+        sources: [
+          {
+            kind: 'static',
+            grants: [{ subject: 'ann', role: 'approver', scope: { type: 'tenant', id: 'acme' } }],
+          },
+        ],
         // A child tenant inherits its parent's grants.
         inheritsFrom: (scope) => (scope.id === 'acme-eu' ? [{ type: 'tenant', id: 'acme' }] : []),
       },
@@ -268,12 +284,16 @@ that bundle catalogue permissions; `timing` is `'request'` (default — a revoca
 next request), `{ kind: 'cache', ttlMs, maxEntries }` (within `ttlMs`) or `'sign-in'` (stored in the
 auth session — until sign-out); a `custom` source sees only the principal's id and `iss`, so its
 answer is safe to share, while a `claims` source is mapped from the credential on every check and
-never cached, since two tokens for one principal can carry different claims. A direct
-`policies.can(...)` call made while serving a request passes the request as the target's `context`,
-or the tenant comparison is skipped. Every bound (`sourceTimeoutMs`, `maxGrantsPerPrincipal`,
-`maxScopeDepth`, `maxScopeNodes`, `maxCustomRoles`, `maxPermissionsPerRole`) refuses an out-of-range
-value at construction, and exceeding one denies. The decorator form is
-`@ScopedRoles`/`@ScopedPermissions` in `@setu-ts/decorator-plugin`. Full guide:
+never cached, since two tokens for one principal can carry different claims. **Only grants decide a
+scoped check:** the `roles` and `permissions` a principal carries itself (a JWT `roles` claim, a
+`'*'` permission) count in no scope unless `principalAuthorityIsGlobal: true`, which makes each one
+global — the behaviour before 0.10.0. The unscoped `requireRole`/`requirePermission` guards read the
+principal either way. A direct `policies.can(...)` call made while serving a request passes the
+request as the target's `context`, or the tenant comparison is skipped. Every bound
+(`sourceTimeoutMs`, `maxGrantsPerPrincipal`, `maxScopeDepth`, `maxScopeNodes`, `maxCustomRoles`,
+`maxPermissionsPerRole`) refuses an out-of-range value at construction, and exceeding one denies.
+The decorator form is `@ScopedRoles`/`@ScopedPermissions` in `@setu-ts/decorator-plugin`. Full
+guide:
 [Scoped Roles](https://github.com/setu-ts/setu-ts/blob/main/docs/authorization.md#scoped-roles).
 
 ## Guards
@@ -343,8 +363,11 @@ evaluate.
 
 `PasswordHasher` is an exported utility for provisioning passwords and verifying them inside a
 `local.verify` callback. It draws a random 16-byte salt and derives a 32-byte key with PBKDF2-SHA256
-(100 000 iterations) via `runtime.subtle` / `runtime.randomBytes`, comparing with a fixed-time
-check.
+via `runtime.subtle` / `runtime.randomBytes`, comparing with a fixed-time check. New hashes use
+**600,000 iterations** (OWASP's 2023 guidance) unless `iterations` says otherwise — an integer from
+100,000 to 10,000,000, refused at construction otherwise. `verify` reads the count stored in each
+hash, so a hash made at another count keeps verifying, and `needsRehash(stored)` reports a hash made
+with fewer iterations than configured, so it can be replaced the next time its password is known.
 
 ```typescript
 import { PasswordHasher } from '@setu-ts/auth-plugin';
@@ -352,7 +375,18 @@ import { PasswordHasher } from '@setu-ts/auth-plugin';
 const hasher = new PasswordHasher(runtime); // IRuntimeServices resolved from the 'runtime' token
 const stored = await hasher.hash('correct horse battery staple');
 const ok = await hasher.verify(stored, 'correct horse battery staple'); // true
+
+// On a successful sign-in, upgrade a hash made at a lower count:
+if (ok && hasher.needsRehash(stored)) {
+  const upgraded = await hasher.hash('correct horse battery staple');
+  // …persist `upgraded` in place of `stored`
+}
 ```
+
+A hash costs about 80 ms on Node at 600,000 iterations (15 ms at 100,000), so keep a sign-in route
+behind `rateLimitMiddleware`. A deployed Cloudflare Worker is reported to refuse PBKDF2 counts above
+100,000 (local workerd accepts 600,000; this is not verified against a deployed Worker), so a
+Workers application passes `new PasswordHasher(runtime, { iterations: 100_000 })`.
 
 ## Options
 
@@ -412,20 +446,22 @@ whose `iss` names a configured provider is recognized by the issuer strategy nex
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 AuthPlugin({
-  issuers: [{
-    name: 'keycloak',
-    issuer: 'https://id.example.com/realms/acme',
-    audience: 'orders-api',
-    keys: { discovery: true },
-    toPrincipal: (claims) =>
-      typeof claims.sub === 'string'
-        ? {
-          // Namespaced: `sub` is unique only within its issuer.
-          id: `${claims.iss}|${claims.sub}`,
-          roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
-        }
-        : null,
-  }],
+  issuers: [
+    {
+      name: 'keycloak',
+      issuer: 'https://id.example.com/realms/acme',
+      audience: 'orders-api',
+      keys: { discovery: true },
+      toPrincipal: (claims) =>
+        typeof claims.sub === 'string'
+          ? {
+              // Namespaced: `sub` is unique only within its issuer.
+              id: `${claims.iss}|${claims.sub}`,
+              roles: Array.isArray(claims.roles) ? claims.roles.map(String) : [],
+            }
+          : null,
+    },
+  ],
 });
 ```
 
@@ -441,14 +477,15 @@ AuthPlugin({
   with `algorithms`. `none` and every `HS*` algorithm are refused before any key is looked up, so a
   token signed with HMAC using the provider's public key as the secret cannot pass.
 - **Claims.** `iss` exact, `aud` must contain `audience`, `exp` required; `exp`, `nbf` and a future
-  `iat` allow `clockToleranceSec` (default 30, at most 300). `toPrincipal` receives the full
-  verified claims and decides where roles live — the plugin never guesses. **Namespace the id
-  whenever this issuer is not the only identity source** — `sub` is unique only within its issuer,
-  and a self-issued `jwt`, another issuer, an API key, a session or a custom strategy can each
-  produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the example) separates an
-  outside `sub` from the other sources only if none of them can produce an id of that form — a
-  self-issued `sub` or a user-chosen username could — so namespace every source (for example
-  ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
+  `iat` allow `clockToleranceSec` (default 30, at most 300). Expiry is refused at
+  `now >= exp + clockToleranceSec`; not-before is refused while `now + clockToleranceSec < nbf`.
+  `toPrincipal` receives the full verified claims and decides where roles live — the plugin never
+  guesses. **Namespace the id whenever this issuer is not the only identity source** — `sub` is
+  unique only within its issuer, and a self-issued `jwt`, another issuer, an API key, a session or a
+  custom strategy can each produce the same id. ``{ id: `${claims.iss}|${claims.sub}` }`` (as in the
+  example) separates an outside `sub` from the other sources only if none of them can produce an id
+  of that form — a self-issued `sub` or a user-chosen username could — so namespace every source
+  (for example ``{ id: `local|${id}` }``) or keep the other sources' ids free of the separator.
 - **Rotation.** The key set is cached for `keySet.ttlMs` (default 10 minutes). A token naming an
   unknown `kid` triggers at most one refetch per `keySet.minRefreshIntervalMs` (default 60 s), and
   concurrent refetches share one request, so forged `kid`s cannot turn requests into outbound
@@ -457,9 +494,9 @@ AuthPlugin({
   indefinitely while its endpoint is unreachable. Each fetch is bounded by `keySet.fetchTimeoutMs`
   (default 5 s), 64 KiB and 64 keys, and does not follow redirects. `ttlMs` may not exceed
   `maxStaleMs`. Fetches in flight are aborted when the application begins stopping.
-- **Health.** An `auth` indicator reports `up` when every issuer's key set is current, and
-  `degraded` with each issuer's state (`stale`, `expired`, `unfetched`) otherwise — never `down`, so
-  a provider outage does not restart the application. It reads cached state and performs no I/O, so
+- **Health.** The `auth` indicator stays `up`; `data.current` is true only when every issuer's key
+  set is current. `data.issuers` carries `stale`, `expired` and `unfetched` states. Shared issuer
+  faults do not withdraw this replica from `/ready`. It reads cached state and performs no I/O, so
   it reports `unfetched` until the first token from that issuer arrives.
 - **Failures** return no principal and are logged at `debug` with a fixed reason code, never the
   token.
@@ -602,7 +639,8 @@ app.router.get('/account', (ctx) =>
   ctx.response.html(
     `<form method="post" action="/auth/logout">${csrfTokenField(ctx)}` +
       `<button>Sign out</button></form>`,
-  ));
+  ),
+);
 ```
 
 - **What sign-out revokes depends on the session strategy.** With `SessionPlugin({ store })` the
@@ -642,23 +680,25 @@ const app = createApplication({
     SessionPlugin({ secret: 'replace-with-at-least-32-characters!!', store: 'memory' }),
     AuthPlugin({
       signIn: {
-        providers: [{
-          kind: 'saml',
-          name: 'corp',
-          entityId: 'https://app.example.com/saml',
-          idp: {
-            entityId: 'https://sts.example.com/acme',
-            ssoUrl: 'https://sts.example.com/acme/saml2',
-            // Several certificates let a signing-key rotation overlap.
-            certs: [idpSigningCert],
+        providers: [
+          {
+            kind: 'saml',
+            name: 'corp',
+            entityId: 'https://app.example.com/saml',
+            idp: {
+              entityId: 'https://sts.example.com/acme',
+              ssoUrl: 'https://sts.example.com/acme/saml2',
+              // Several certificates let a signing-key rotation overlap.
+              certs: [idpSigningCert],
+            },
+            acsUrl: 'https://app.example.com/auth/corp/acs',
+            // A NameID is unique only within its issuer: namespace it.
+            toPrincipal: (profile) => ({
+              id: `corp|${profile.nameID}`,
+              claims: { email: profile.attributes.email },
+            }),
           },
-          acsUrl: 'https://app.example.com/auth/corp/acs',
-          // A NameID is unique only within its issuer: namespace it.
-          toPrincipal: (profile) => ({
-            id: `corp|${profile.nameID}`,
-            claims: { email: profile.attributes.email },
-          }),
-        }],
+        ],
       },
     }),
   ],
@@ -750,7 +790,7 @@ SessionPlugin({
 HttpSecurityPlugin({ csrf: { exclude: ['/auth/corp/acs'] } });
 ```
 
-**The library.** `@node-saml/node-saml@^5` is imported lazily when a `saml` provider is configured,
+**The library.** `@node-saml/node-saml` is imported lazily when a `saml` provider is configured,
 awaited in `register()`, so a missing package fails at startup with `SamlRuntimeLoadError` rather
 than at the first login. Pass `module` to inject it instead. On Cloudflare Workers it needs the
 `nodejs_compat` compatibility flag; without it the library cannot bundle, and the error says so.
@@ -771,6 +811,20 @@ is not an `AuthPlugin` option and registers nothing. It computes RFC 6238 TOTP c
 a shared implementation, and must implement `stageSecret`, `confirmSecret`, `claimStep`,
 `reserveAttempt` and `consumeRecoveryCode` as single atomic operations (a compare-and-set or a
 transaction) — each one closes a race that a read followed by a write reopens.
+
+A shared `ITotpStore` implementation must preserve these operations across replicas:
+
+| Method                                                  | Operation / return contract                                                                                                                                                                                                           | Race closed                                                                  |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `getEnrolment(principalId)`                             | Read the enrolment or `null`; memory returns a copy                                                                                                                                                                                   | Read without mutating the stored record                                      |
+| `stageSecret(principalId, secret, label)`               | Atomically create an unconfirmed record with step 0; replace secret/label on an unconfirmed record; on a confirmed record set pending fields, keeping the active secret. Never reset an existing step or confirmation. Returns `void` | Re-enrolment cannot undo a concurrent step claim                             |
+| `confirmSecret(principalId, secret, minStep)`           | Atomically confirm only the still-awaiting secret, clear pending fields, raise the claimed step to at least `minStep`. `true` when applied; `false` without changes if missing or replaced                                            | A code checked for an old candidate cannot confirm a new one                 |
+| `deleteEnrolment(principalId)`                          | Delete enrolment, recovery codes and attempt counts; `void`                                                                                                                                                                           | Remove factor state, including recovery codes                                |
+| `claimStep(principalId, step)`                          | Atomically raise the claimed step; `true` only if greater than the previous step, `false` for replay or missing enrolment                                                                                                             | Concurrent uses of one code cannot both claim its step                       |
+| `reserveAttempt(principalId, now, { limit, windowMs })` | Atomically expire old attempts, count this attempt before verification and return `{ allowed, count }`. Refused attempts are not stored; memory reports the stored count plus one for a refusal                                       | A burst cannot bypass lockout; refused guesses cannot extend it indefinitely |
+| `clearAttempts(principalId)`                            | Clear counted attempts after successful verification; `void`                                                                                                                                                                          | Clear the window without writing back a stale count                          |
+| `saveRecoveryCodes(principalId, digests)`               | Replace the whole recovery set with SHA-256 hex digests, never plaintext; `void`                                                                                                                                                      | Regeneration replaces the previous set                                       |
+| `consumeRecoveryCode(principalId, digest)`              | Atomically find and consume; `true` once, `false` when absent or already used                                                                                                                                                         | Concurrent uses of one recovery code cannot both succeed                     |
 
 A password-only application sets `providers: []` with `mfa` (an empty list is refused unless `mfa`
 or `passkeys` is set) and records its own principal through `IAuthSessionService.signIn`, as the
@@ -1156,7 +1210,7 @@ registered under no capability token. Over-limit requests are short-circuited wi
 (`Retry-After` always set; `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` set unless
 `standardHeaders: false` — `Reset` and `Retry-After` are both delta-seconds). The default store is
 in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
-ioredis-compatible `client`, or `npm:ioredis@5.x` is lazily imported on first use).
+ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
 
 The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
 configured error format. The operational paths `/live`, `/ready`, `/health`, `/metrics`,
@@ -1183,15 +1237,14 @@ The default key resolves in this order: the authenticated principal, the client 
 | `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: { ip: '203.0.113.7' }, state: new Map() })`  | `"ip:203.0.113.7"` |
 | `(await import('@setu-ts/auth-plugin')).defaultRateLimitKey({ request: {}, state: new Map() })`                     | `"anonymous"`      |
 
-`IRequest.ip` is the step worth knowing about: **no first-party adapter can populate it**, because a
-web `Request` carries no peer address, so it is set only by a custom `IHttpAdapter`. On the shipped
-runtimes, then, an unauthenticated request with no `ipSecurityMiddleware` reaches the shared bucket
-and the example below is **not** per IP.
+Node, Deno and Bun populate `IRequest.ip` with the socket peer, so an unauthenticated caller uses
+`ip:<peer>` even without IP security middleware. Workers and plain fetch calls have no peer and
+still use the shared bucket unless a trusted header or custom key resolves a client.
 
-To make it per caller, register `ipSecurityMiddleware` with `trustProxy` **and** the constraint that
-matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own takes the
-forwarded header's **leftmost** entry, which is safe only behind a proxy that OVERWRITES that
-header. The standard nginx idiom **appends**, and there the leftmost entry is supplied by the
+To make it per client behind a proxy, register `ipSecurityMiddleware` with `trustProxy` **and** the
+constraint that matches your deployment — or pass your own `keyGenerator`. `trustProxy` on its own
+takes the forwarded header's **leftmost** entry, which is safe only behind a proxy that OVERWRITES
+that header. The standard nginx idiom **appends**, and there the leftmost entry is supplied by the
 caller: a client rotating forged `X-Forwarded-For` values would get a fresh bucket per request,
 which is a weaker position than the shared `'anonymous'` one it replaced. Supply `trustedProxies`
 (your proxies' addresses or CIDR blocks) or `proxyHops` so the header is walked right to left and
@@ -1206,11 +1259,13 @@ import {
 
 // Keyed by the authenticated user. Absent a principal AND a client IP, every
 // caller shares ONE 'anonymous' bucket — see the key-resolution order above.
-app.middleware.add(rateLimitMiddleware({
-  windowMs: 60_000,
-  max: 100,
-  exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
-}));
+app.middleware.add(
+  rateLimitMiddleware({
+    windowMs: 60_000,
+    max: 100,
+    exclude: [...DEFAULT_RATE_LIMIT_EXCLUDED_PATHS, /^\/internal\//],
+  }),
+);
 
 // Redis-backed, keyed by authenticated user
 rateLimitMiddleware({
@@ -1314,6 +1369,7 @@ MIT
 | `MemorySamlRequestStore`            | class     |
 | `MemoryTotpStore`                   | class     |
 | `PasswordHasher`                    | class     |
+| `RateLimitStoreUnavailableError`    | class     |
 | `RedisRateLimitStore`               | class     |
 | `RefreshTokenService`               | class     |
 | `SamlRuntimeLoadError`              | class     |
@@ -1348,6 +1404,7 @@ MIT
 | `PasskeyOptions`                    | interface |
 | `PasskeyRegistrationContext`        | interface |
 | `PasskeySaveOptions`                | interface |
+| `PasswordHasherOptions`             | interface |
 | `ProviderTokens`                    | interface |
 | `RateLimitOptions`                  | interface |
 | `RateLimitResult`                   | interface |
@@ -1394,10 +1451,19 @@ MIT
 | `TotpProofResult`                   | type      |
 | `TotpVerifyResult`                  | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#authplugin-setu-tsauth-plugin).
+
+## Readiness and dependency outages (M113b)
+
+`RedisRateLimitStore.increment/reset` wrap recognised connection faults in
+`RateLimitStoreUnavailableError`, preserving `cause`. With `errorHandler`, clients receive 503 and
+`Rate limiting is temporarily unavailable.` Other errors propagate unchanged. The constructor's
+`commandTimeoutMs` defaults to 15000, accepts 0–2147483647, and throws `RangeError` for invalid
+values including NaN. Zero omits ioredis's bound; an injected client keeps its own settings.
+Configure a larger bound when necessary.

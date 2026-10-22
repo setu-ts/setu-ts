@@ -58,15 +58,16 @@ function sourceBatch(
   after: number,
   overrides: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const decisions: Array<Record<string, unknown>> = after === 0
-    ? [
-      decision(1),
-      compoundDecision(2, [
-        { ruleAlias: 'A', reason: 'not-held' },
-        { ruleAlias: 'E', reason: 'direct-role' },
-      ]),
-    ]
-    : [];
+  const decisions: Array<Record<string, unknown>> =
+    after === 0
+      ? [
+          decision(1),
+          compoundDecision(2, [
+            { ruleAlias: 'A', reason: 'not-held' },
+            { ruleAlias: 'E', reason: 'direct-role' },
+          ]),
+        ]
+      : [];
   const last = decisions.length > 0 ? (decisions[decisions.length - 1]!.sequence as number) : after;
   const first = decisions.length > 0 ? (decisions[0]!.sequence as number) : after;
   return {
@@ -116,44 +117,24 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
 
   it('refuses an unsupported batch without coverage', () => {
     expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(7, { state: 'unsupported' }),
-        INSTANCE,
-        7,
-        128,
-      ),
+      readAuthorizationSourceBatch(sourceBatch(7, { state: 'unsupported' }), INSTANCE, 7, 128),
     ).toBeNull();
   });
 
   it('refuses a non-unsupported batch that carries coverage', () => {
     expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(0, { coverage: 'unknown' }),
-        INSTANCE,
-        0,
-        128,
-      ),
+      readAuthorizationSourceBatch(sourceBatch(0, { coverage: 'unknown' }), INSTANCE, 0, 128),
     ).toBeNull();
   });
 
   it('refuses a disabled or unsupported batch carrying decisions', () => {
     // A disabled batch with no decisions is valid (the source observes nothing).
     expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(7, { state: 'disabled' }),
-        INSTANCE,
-        7,
-        128,
-      ),
+      readAuthorizationSourceBatch(sourceBatch(7, { state: 'disabled' }), INSTANCE, 7, 128),
     ).not.toBeNull();
     // The same state carrying decisions is refused.
     expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(0, { state: 'disabled' }),
-        INSTANCE,
-        0,
-        128,
-      ),
+      readAuthorizationSourceBatch(sourceBatch(0, { state: 'disabled' }), INSTANCE, 0, 128),
     ).toBeNull();
   });
 
@@ -177,14 +158,16 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
   });
 
   it('refuses the wrong version or instance', () => {
-    expect(readAuthorizationSourceBatch(sourceBatch(0, { version: 2 }), INSTANCE, 0, 128))
-      .toBeNull();
+    expect(
+      readAuthorizationSourceBatch(sourceBatch(0, { version: 2 }), INSTANCE, 0, 128),
+    ).toBeNull();
     expect(readAuthorizationSourceBatch(sourceBatch(0), 'other', 0, 128)).toBeNull();
   });
 
   it('refuses a state outside the fixed vocabulary', () => {
-    expect(readAuthorizationSourceBatch(sourceBatch(0, { state: 'bogus' }), INSTANCE, 0, 128))
-      .toBeNull();
+    expect(
+      readAuthorizationSourceBatch(sourceBatch(0, { state: 'bogus' }), INSTANCE, 0, 128),
+    ).toBeNull();
   });
 
   it('refuses more decisions than the requested limit', () => {
@@ -219,22 +202,8 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
   });
 
   it('refuses a next/lost pair that disagrees with the decisions', () => {
-    expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(0, { next: 99 }),
-        INSTANCE,
-        0,
-        128,
-      ),
-    ).toBeNull();
-    expect(
-      readAuthorizationSourceBatch(
-        sourceBatch(0, { lost: 99 }),
-        INSTANCE,
-        0,
-        128,
-      ),
-    ).toBeNull();
+    expect(readAuthorizationSourceBatch(sourceBatch(0, { next: 99 }), INSTANCE, 0, 128)).toBeNull();
+    expect(readAuthorizationSourceBatch(sourceBatch(0, { lost: 99 }), INSTANCE, 0, 128)).toBeNull();
   });
 
   it('refuses a decision with an unknown key or a bad id grammar', () => {
@@ -354,8 +323,9 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
       });
       const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
       expect(validated!.decisions[0]!.stepsEvaluated).toBe(0);
-      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
-        .toBe(true);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE))).toBe(
+        true,
+      );
     });
 
     it('accepts a compound whose repeated rule evaluated more steps than distinct rules', () => {
@@ -375,8 +345,9 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
       });
       const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
       expect(validated).not.toBeNull();
-      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
-        .toBe(true);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE))).toBe(
+        true,
+      );
     });
 
     it('refuses a single check naming no rule', () => {
@@ -397,8 +368,9 @@ describe('readAuthorizationSourceBatch — the exact source validator', () => {
       });
       const validated = readAuthorizationSourceBatch(batch, INSTANCE, 0, 128);
       expect(validated!.decisions[0]!.stepsTruncated).toBe(false);
-      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE)))
-        .toBe(true);
+      expect(isAuthorizationBatchProjection(projectAuthorizationBatch(validated!, INSTANCE))).toBe(
+        true,
+      );
     });
   });
 

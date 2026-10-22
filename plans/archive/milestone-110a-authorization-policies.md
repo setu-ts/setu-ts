@@ -58,13 +58,13 @@ OpenFGA or Casbin — plugs in at.
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                                                           | Resolution (picked side)                                                                                                                                                                                                                                                                                                                | Doc deliverable (same PR)                                            |
-| -- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| C1 | ROADMAP names the route guard `can(policy, ability, target?)`; AI_GUIDELINES §10.4 names guards `requireXxx`.                                                                                                      | §10.4 wins: the guard is `requirePolicy`. `can` stays the name of the boolean member on the service, where it reads naturally.                                                                                                                                                                                                          | ROADMAP M110a scope bullet corrected to `requirePolicy`.             |
-| C2 | ROADMAP gives every ability the signature `(principal \| null, target?) → boolean`.                                                                                                                                | Refined, not inherited: an ability sees `null` ONLY when it opts in (`{ anonymous: true, check }`). Otherwise an anonymous principal is denied `401` before the check runs, so the default is fail-closed and a non-anonymous check is typed `IPrincipal` (no null handling to forget). Also what makes the M57 brand truthful (§3.10). | ROADMAP M110a "Policies" bullet amended; PUBLIC_API states the rule. |
-| C3 | ROADMAP's contract sketch is `authorize(...) → Promise<AuthorizationDecision>` beside `can(...) → Promise<boolean>`; the same section's survey says applications need "a throwing check plus a non-throwing twin". | The survey wins: `authorize` REJECTS on a deny (with an `errorHandler`-honoured `401`/`403` hint) and `can` resolves a boolean; both call one private evaluation. No public `AuthorizationDecision` type — it would be dead surface (the guard derives `401` vs `403` from principal presence, §3.6).                                   | ROADMAP M110a contract bullet corrected.                             |
-| C4 | ROADMAP: "an unknown policy or ability named by a guard … fails at `register()`". A functional guard is a value an application builds; no `register()` sees it.                                                    | Refused at STARTUP instead: AuthPlugin's `onBootstrap` hook scans `ctx.router.listRoutes()` for policy-guard brands and throws before `listen`. `@RequirePolicy` is refused in DecoratorPlugin's own `register()`. Both precede serving; a route added after `start()` is the documented residual (§3.7).                               | ROADMAP wording "fails at startup"; PUBLIC_API states the residual.  |
-| C5 | ARCHITECTURE §14 "Authorization" lists the six guards as the whole authorization surface.                                                                                                                          | Extended, not contradicted.                                                                                                                                                                                                                                                                                                             | ARCHITECTURE §14 gains a "Policies" subsection.                      |
+| #   | Conflict                                                                                                                                                                                                           | Resolution (picked side)                                                                                                                                                                                                                                                                                                                | Doc deliverable (same PR)                                            |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| C1  | ROADMAP names the route guard `can(policy, ability, target?)`; AI_GUIDELINES §10.4 names guards `requireXxx`.                                                                                                      | §10.4 wins: the guard is `requirePolicy`. `can` stays the name of the boolean member on the service, where it reads naturally.                                                                                                                                                                                                          | ROADMAP M110a scope bullet corrected to `requirePolicy`.             |
+| C2  | ROADMAP gives every ability the signature `(principal \| null, target?) → boolean`.                                                                                                                                | Refined, not inherited: an ability sees `null` ONLY when it opts in (`{ anonymous: true, check }`). Otherwise an anonymous principal is denied `401` before the check runs, so the default is fail-closed and a non-anonymous check is typed `IPrincipal` (no null handling to forget). Also what makes the M57 brand truthful (§3.10). | ROADMAP M110a "Policies" bullet amended; PUBLIC_API states the rule. |
+| C3  | ROADMAP's contract sketch is `authorize(...) → Promise<AuthorizationDecision>` beside `can(...) → Promise<boolean>`; the same section's survey says applications need "a throwing check plus a non-throwing twin". | The survey wins: `authorize` REJECTS on a deny (with an `errorHandler`-honoured `401`/`403` hint) and `can` resolves a boolean; both call one private evaluation. No public `AuthorizationDecision` type — it would be dead surface (the guard derives `401` vs `403` from principal presence, §3.6).                                   | ROADMAP M110a contract bullet corrected.                             |
+| C4  | ROADMAP: "an unknown policy or ability named by a guard … fails at `register()`". A functional guard is a value an application builds; no `register()` sees it.                                                    | Refused at STARTUP instead: AuthPlugin's `onBootstrap` hook scans `ctx.router.listRoutes()` for policy-guard brands and throws before `listen`. `@RequirePolicy` is refused in DecoratorPlugin's own `register()`. Both precede serving; a route added after `start()` is the documented residual (§3.7).                               | ROADMAP wording "fails at startup"; PUBLIC_API states the residual.  |
+| C5  | ARCHITECTURE §14 "Authorization" lists the six guards as the whole authorization surface.                                                                                                                          | Extended, not contradicted.                                                                                                                                                                                                                                                                                                             | ARCHITECTURE §14 gains a "Policies" subsection.                      |
 
 ## 3. Design decisions
 
@@ -116,10 +116,12 @@ OpenFGA or Casbin — plugs in at.
     principal: IPrincipal | null,
     target: T | undefined,
   ) => boolean | Promise<boolean>;
-  type PolicyAbility<T> = PolicyCheck<T> | {
-    readonly anonymous: true;
-    readonly check: AnonymousPolicyCheck<T>;
-  };
+  type PolicyAbility<T> =
+    | PolicyCheck<T>
+    | {
+        readonly anonymous: true;
+        readonly check: AnonymousPolicyCheck<T>;
+      };
   interface PolicyDefinition<A extends string = string, T = never> {
     readonly name: string;
     readonly abilities: Readonly<Record<A, PolicyAbility<T>>>;
@@ -132,8 +134,7 @@ OpenFGA or Casbin — plugs in at.
   ```
 
   `auth-plugin` exports
-  `definePolicy<A extends string, T>(definition: PolicyDefinition<A, T>):
-  PolicyDefinition<A, T>`,
+  `definePolicy<A extends string, T>(definition: PolicyDefinition<A, T>): PolicyDefinition<A, T>`,
   which validates (§3.3) and returns a frozen copy. Ability names are inferred from the object
   literal's keys, so `requirePolicy(postPolicy, 'updaet')` is a compile error. The target type is
   inferred from the check's annotated parameter (`update: (p, post: Post | undefined) => …`); an
@@ -143,8 +144,7 @@ OpenFGA or Casbin — plugs in at.
   reasoning.** The first draft declared `before` as a function-typed PROPERTY with default
   `T = unknown`, and a typed policy was then NOT assignable to the bare `PolicyDefinition` the
   registry accepts
-  (`TS2322: PolicyDefinition<"update" | "read", Post> is not assignable to
-  PolicyDefinition<string, unknown>`)
+  (`TS2322: PolicyDefinition<"update" | "read", Post> is not assignable to PolicyDefinition<string, unknown>`)
   — under `strictFunctionTypes` a check is contravariant in its target and `before` in its ability,
   so `AuthPluginOptions.policies: readonly PolicyDefinition[]` would have refused every typed
   policy. (1) `before` is a METHOD signature, which TypeScript checks bivariantly, so
@@ -154,6 +154,7 @@ OpenFGA or Casbin — plugs in at.
   `PolicyDefinition` is therefore the type-erased form the registry stores; evaluation passes the
   caller's target through an internal cast. The probe also confirmed the misspelled-ability error
   and `before`'s ability-union inference both survive the change.
+
 - **Why:** one target type per policy keeps generics tractable; the `anonymous` object arm makes
   opting in to `null` explicit and greppable.
 - **Test home:** `auth-plugin/test/unit/policies/define-policy.test.ts` — a `@ts-expect-error` row
@@ -215,13 +216,11 @@ OpenFGA or Casbin — plugs in at.
 ### 3.6 The route guard `requirePolicy`
 
 - **Decision:**
-  `requirePolicy<A, T>(policy: PolicyDefinition<A, T>, ability: A, target?: T |
-  ((ctx: IRequestContext) => T | Promise<T>))`.
+  `requirePolicy<A, T>(policy: PolicyDefinition<A, T>, ability: A, target?: T | ((ctx: IRequestContext) => T | Promise<T>))`.
   Per request: no `AUTHORIZATION_POLICIES` provider →
   `respondWithAuthorizationFailure(ctx, 'not-configured')` (501); else resolve target (a FUNCTION
   target is always called as an extractor; documented);
-  `allowed = await service.can(user ?? null,
-  policy.name, ability, target)`; deny → respond
+  `allowed = await service.can(user ?? null, policy.name, ability, target)`; deny → respond
   `authentication-required` when no user, else `insufficient-privileges`; allow → `next()`. An
   extractor's throw PROPAGATES (the request fails — `errorHandler` maps a `DatabaseUnavailableError`
   to `503` rather than a misleading `403`); the handler never runs. The guard is a policy OBJECT
@@ -258,11 +257,9 @@ OpenFGA or Casbin — plugs in at.
 ### 3.9 One owner for the refusal bodies
 
 - **Decision:** `common` gains
-  `authorizationFailureInit(failure: AuthorizationFailure):
-  HttpStatusHint` returning the
+  `authorizationFailureInit(failure: AuthorizationFailure): HttpStatusHint` returning the
   `{ status, title, detail }` each arm writes; `respondWithAuthorizationFailure` is rewritten to
-  `respondWithError(target,
-  authorizationFailureInit(failure))`. `AuthorizationDeniedError` brands
+  `respondWithError(target, authorizationFailureInit(failure))`. `AuthorizationDeniedError` brands
   with the same value.
 - **Why:** §11.1 — two writers of three status/title/detail triples would drift.
 - **Test home:** `common/test/unit/authorization-responder.test.ts` (each arm's init; the responder
@@ -285,11 +282,10 @@ OpenFGA or Casbin — plugs in at.
 - **Decision:** `@Policy(name)` (class) records the policy name; `@Ability(options?)` (method,
   `options.anonymous?: boolean`) marks a method as an ability; an optional `before` method is the
   `before` hook (by method name, matching NestJS).
-  `DecoratorPluginOptions.policies?: readonly
-  Constructor[]` — at `register()`, BEFORE
-  controllers: each class goes through `registerInContainer` then `instantiate()` — the same two
-  calls `registerController` makes, so constructor injection works with and without `DiPlugin` — and
-  is converted to a `PolicyDefinition` whose checks call the bound methods, and `define`d on the
+  `DecoratorPluginOptions.policies?: readonly Constructor[]` — at `register()`, BEFORE controllers:
+  each class goes through `registerInContainer` then `instantiate()` — the same two calls
+  `registerController` makes, so constructor injection works with and without `DiPlugin` — and is
+  converted to a `PolicyDefinition` whose checks call the bound methods, and `define`d on the
   resolved `AUTHORIZATION_POLICIES` service. Refusals at `register()`: a class without `@Policy`, a
   `@Policy` class with no `@Ability`, `policies` given with no provider.
   `@RequirePolicy(policy, ability, target?)` (method; repeatable — ALL must allow, evaluated top to

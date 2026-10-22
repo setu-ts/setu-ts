@@ -1,14 +1,19 @@
 /** Real Chromium checks for the example and an unmodified fresh full-stack scaffold. */
-import { afterAll, beforeAll, describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
-import { type Browser, chromium, type Page } from 'npm:playwright@1.63.0';
-import { createDenoRuntimeServices } from '@setu-ts/runtime';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
+import { mkdir, mkdtemp, rm, rename } from 'node:fs/promises';
+import { run } from '../../../scripts/lib/run.ts';
+import { type Browser, chromium, type Page } from 'playwright';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../../packages/cli/src/cli.ts';
+import { REPO_ROOT } from '../../../packages/cli/test/fixtures/generated-project.ts';
 import {
-  REPO_ROOT,
-  useWorkspacePackages,
-  withGeneratedServer,
-} from '../../../packages/cli/test/fixtures/generated-project.ts';
+  startOverlay,
+  npmInstall,
+  withNodeServer,
+  type RegistryOverlay,
+} from '../../../packages/cli/test/fixtures/node-project.ts';
+
+let overlay: RegistryOverlay;
 
 let browser: Browser;
 let scratch: string;
@@ -16,40 +21,18 @@ let scaffold: string;
 const email = 'browser@example.test';
 
 async function command(project: string, args: string[]): Promise<void> {
-  const result = await new Deno.Command(Deno.execPath(), {
-    args,
-    cwd: project,
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
-  expect(
-    result.code,
-    new TextDecoder().decode(result.stdout) +
-      new TextDecoder().decode(result.stderr),
-  ).toBe(0);
+  const result = await run('pnpm', args, { cwd: project });
+  expect(result.code, result.stdout + result.stderr).toBe(0);
 }
 
 beforeAll(async () => {
-  await Deno.mkdir(`${REPO_ROOT}/.tmp/browser`, { recursive: true });
-  scratch = await Deno.makeTempDir({
-    dir: `${REPO_ROOT}/.tmp/browser`,
-    prefix: 'suite-',
-  });
-  const runtime = createDenoRuntimeServices();
+  await mkdir(`${REPO_ROOT}/.tmp/browser`, { recursive: true });
+  scratch = await mkdtemp(`${REPO_ROOT}/.tmp/browser/suite-`);
+  overlay = await startOverlay();
+  const runtime = createNodeRuntimeServices();
   const messages: string[] = [];
   expect(
-    // `--runtime deno` explicitly: Node is the default target since M111d, and
-    // everything below — the workspace repointing, `deno task build`, the
-    // generated server — drives the Deno form. The Node full-stack scaffold is
-    // installed, built and served by packages/cli's node-scaffold-e2e.
-    await runCli([
-      'new',
-      'shop',
-      '--template',
-      'full-stack',
-      '--runtime',
-      'deno',
-    ], {
+    await runCli(['new', 'shop', '--template', 'full-stack', '--runtime', 'node'], {
       fs: runtime.fs!,
       cwd: scratch,
       now: () => runtime.now(),
@@ -59,21 +42,27 @@ beforeAll(async () => {
     messages.join('\n'),
   ).toBe(0);
   scaffold = `${scratch}/shop`;
-  await useWorkspacePackages(scaffold);
-  await command(scaffold, ['task', 'build']);
-  await command(`${REPO_ROOT}/apps/full-stack`, ['task', 'build']);
+  const installed = await npmInstall(scaffold, overlay);
+  expect(installed.code, installed.output).toBe(0);
+  await command(scaffold, ['run', 'build']);
+  await command(`${REPO_ROOT}/apps/full-stack`, ['run', 'build']);
+  // Chromium creates its singleton socket under TMPDIR and refuses to start when the directory
+  // is missing. The path is relative to this process's cwd (the app directory under
+  // `pnpm --filter … exec`), which a fresh checkout does not have.
+  await mkdir('.tmp/browser', { recursive: true });
   // Use the bundled Chromium executable checked by harness.ts, not a system browser.
   browser = await chromium.launch({
     channel: 'chromium',
     // Linux socket paths are bounded to 108 bytes. A relative temp path keeps
     // Chromium's singleton socket inside this workspace even in deep worktrees.
-    env: { ...Deno.env.toObject(), TMPDIR: '.tmp/browser' },
+    env: { ...process.env, TMPDIR: '.tmp/browser' },
   });
-});
+}, 900_000);
 
 afterAll(async () => {
   await browser?.close();
-  if (scratch !== undefined) await Deno.remove(scratch, { recursive: true });
+  await overlay?.close();
+  if (scratch !== undefined) await rm(scratch, { recursive: true });
 });
 
 /** A new cookie jar for each check, driving the real application's generated entry. */
@@ -82,7 +71,7 @@ async function drive(
   check: (page: Page, origin: string) => Promise<void>,
   javaScriptEnabled = true,
 ): Promise<void> {
-  await withGeneratedServer(project, async (origin) => {
+  await withNodeServer(project, async (origin) => {
     const context = await browser.newContext({ javaScriptEnabled });
     try {
       const page = await context.newPage();
@@ -131,18 +120,13 @@ async function referencedAssets(page: Page, origin: string): Promise<string[]> {
   return [...assets].sort();
 }
 
-async function assertAssets(
-  page: Page,
-  origin: string,
-  assets: readonly string[],
-): Promise<void> {
+async function assertAssets(page: Page, origin: string, assets: readonly string[]): Promise<void> {
   for (const path of assets) {
     const response = await page.request.get(`${origin}${path}`);
     expect(response.status(), `missing referenced asset ${path}`).toBe(200);
-    expect(response.headers()['content-type'], `wrong content type for ${path}`)
-      .toMatch(
-        path.endsWith('.css') ? /text\/css/ : /(?:text|application)\/javascript/,
-      );
+    expect(response.headers()['content-type'], `wrong content type for ${path}`).toMatch(
+      path.endsWith('.css') ? /text\/css/ : /(?:text|application)\/javascript/,
+    );
   }
 }
 
@@ -154,7 +138,7 @@ async function loginForm(page: Page, origin: string): Promise<void> {
 
 for (const target of ['example', 'scaffold'] as const) {
   describe(`full-stack browser — ${target}`, () => {
-    const project = () => target === 'example' ? `${REPO_ROOT}/apps/full-stack` : scaffold;
+    const project = () => (target === 'example' ? `${REPO_ROOT}/apps/full-stack` : scaffold);
 
     it('renders the landing page through SSR', async () => {
       await drive(project(), async (page, origin) => {
@@ -186,6 +170,9 @@ for (const target of ['example', 'scaffold'] as const) {
           () => page.getByRole('link', { name: 'Sign in', exact: true }).click(),
           '/login',
         );
+        // The URL can change before React commits the new route, so wait for
+        // the form rather than counting at once (a CI flake on PR #465).
+        await page.locator('form').first().waitFor();
         expect(await page.locator('form').count()).toBe(1);
       });
     });
@@ -221,28 +208,28 @@ for (const target of ['example', 'scaffold'] as const) {
       });
     });
     it('degrades to a real POST and 302 with JavaScript disabled', async () => {
-      await drive(project(), async (page, origin) => {
-        await loginForm(page, origin);
-        const posted = page.waitForResponse((response) =>
-          response.request().method() === 'POST' &&
-          new URL(response.url()).pathname === '/login'
-        );
-        await page.getByRole('button', { name: 'Sign in' }).click();
-        const response = await posted;
-        expect(response.status()).toBe(302);
-        await page.waitForURL('**/products');
-      }, false);
+      await drive(
+        project(),
+        async (page, origin) => {
+          await loginForm(page, origin);
+          const posted = page.waitForResponse(
+            (response) =>
+              response.request().method() === 'POST' &&
+              new URL(response.url()).pathname === '/login',
+          );
+          await page.getByRole('button', { name: 'Sign in' }).click();
+          const response = await posted;
+          expect(response.status()).toBe(302);
+          await page.waitForURL('**/products');
+        },
+        false,
+      );
     });
     it('detects missing hydration when the client entry is aborted while SSR still renders', async () => {
       await drive(project(), async (page, origin) => {
-        await page.route(
-          '**/assets/entry.client-*.js',
-          (route) => route.abort(),
-        );
+        await page.route('**/assets/entry.client-*.js', (route) => route.abort());
         await page.goto(origin, { waitUntil: 'networkidle' });
-        expect(await page.locator('body').textContent()).toContain(
-          'You are not signed in.',
-        );
+        expect(await page.locator('body').textContent()).toContain('You are not signed in.');
         await expect(
           clientTransition(
             page,
@@ -254,10 +241,7 @@ for (const target of ['example', 'scaffold'] as const) {
     });
     it('detects a document navigation on Form when the client entry is aborted', async () => {
       await drive(project(), async (page, origin) => {
-        await page.route(
-          '**/assets/entry.client-*.js',
-          (route) => route.abort(),
-        );
+        await page.route('**/assets/entry.client-*.js', (route) => route.abort());
         await loginForm(page, origin);
         await expect(
           clientTransition(
@@ -274,14 +258,14 @@ for (const target of ['example', 'scaffold'] as const) {
         const missing = assets.find((path) => path.includes('entry.client-'))!;
         expect(missing).toBeDefined();
         const path = `${project()}/build/client${missing}`;
-        await Deno.rename(path, `${path}.missing`);
+        await rename(path, `${path}.missing`);
         try {
           expect((await page.request.get(origin)).status()).toBe(200);
           await expect(assertAssets(page, origin, assets)).rejects.toThrow(
             `missing referenced asset ${missing}`,
           );
         } finally {
-          await Deno.rename(`${path}.missing`, path);
+          await rename(`${path}.missing`, path);
         }
       });
     });

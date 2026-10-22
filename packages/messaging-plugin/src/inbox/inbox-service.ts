@@ -303,7 +303,7 @@ export class InboxService implements IInbox {
           ...(base.envelopeId !== undefined ? { envelopeId: base.envelopeId } : {}),
           lastError: errorLine(error),
           now: this.#deps.runtime.now(),
-        })
+        }),
       );
     } catch (recordError) {
       this.#warn('inbox: recording a delivery failure failed', {

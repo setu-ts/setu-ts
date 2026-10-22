@@ -11,19 +11,23 @@ const createFakeRuntime = (overrides?: Partial<GraphqlRuntime>): GraphqlRuntime 
   ({
     parse: (_src: string) => ({
       kind: 'Document',
-      definitions: [{
-        kind: 'OperationDefinition',
-        operation: 'query',
-        selectionSet: { kind: 'SelectionSet', selections: [] },
-      }],
+      definitions: [
+        {
+          kind: 'OperationDefinition',
+          operation: 'query',
+          selectionSet: { kind: 'SelectionSet', selections: [] },
+        },
+      ],
     }),
     validate: () => [],
     execute: () => Promise.resolve({ data: { hello: 'world' } }),
     subscribe: () =>
-      Promise.resolve((async function* () {
-        yield { data: { counter: 1 } };
-        yield { data: { counter: 2 } };
-      })()),
+      Promise.resolve(
+        (async function* () {
+          yield { data: { counter: 1 } };
+          yield { data: { counter: 2 } };
+        })(),
+      ),
     buildSchema: () => ({}),
     validateSchema: () => [],
     getOperationAST: (document: { definitions: unknown[] }) => document.definitions[0] ?? null,
@@ -77,11 +81,13 @@ describe('subscribeGraphql', () => {
     const runtime = createFakeRuntime({
       parse: (_src: string) => ({
         kind: 'Document',
-        definitions: [{
-          kind: 'OperationDefinition',
-          operation: 'subscription',
-          selectionSet: { kind: 'SelectionSet', selections: [] },
-        }],
+        definitions: [
+          {
+            kind: 'OperationDefinition',
+            operation: 'subscription',
+            selectionSet: { kind: 'SelectionSet', selections: [] },
+          },
+        ],
       }),
     });
     const schema = createFakeSchema();
@@ -156,11 +162,13 @@ describe('subscribeGraphql', () => {
         parseCallCount++;
         return {
           kind: 'Document',
-          definitions: [{
-            kind: 'OperationDefinition',
-            operation: 'query',
-            selectionSet: { kind: 'SelectionSet', selections: [] },
-          }],
+          definitions: [
+            {
+              kind: 'OperationDefinition',
+              operation: 'query',
+              selectionSet: { kind: 'SelectionSet', selections: [] },
+            },
+          ],
         };
       },
     });
@@ -230,11 +238,13 @@ describe('subscribeGraphql', () => {
     const runtime = createFakeRuntime({
       parse: (_src: string) => ({
         kind: 'Document',
-        definitions: [{
-          kind: 'OperationDefinition',
-          operation: 'subscription',
-          selectionSet: { kind: 'SelectionSet', selections: [] },
-        }],
+        definitions: [
+          {
+            kind: 'OperationDefinition',
+            operation: 'subscription',
+            selectionSet: { kind: 'SelectionSet', selections: [] },
+          },
+        ],
       }),
       subscribe: () =>
         Promise.resolve({
@@ -263,11 +273,13 @@ describe('subscribeGraphql', () => {
 describe('subscribeGraphql — a throw from graphql is contained', () => {
   const subscriptionDoc = {
     kind: 'Document',
-    definitions: [{
-      kind: 'OperationDefinition',
-      operation: 'subscription',
-      selectionSet: { kind: 'SelectionSet', selections: [] },
-    }],
+    definitions: [
+      {
+        kind: 'OperationDefinition',
+        operation: 'subscription',
+        selectionSet: { kind: 'SelectionSet', selections: [] },
+      },
+    ],
   };
 
   it('turns a throwing `subscribe` into a maskable error outcome, not a rejection', async () => {

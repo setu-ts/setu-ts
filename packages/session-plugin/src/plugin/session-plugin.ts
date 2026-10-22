@@ -29,8 +29,12 @@ import { VERSION } from '../version.ts';
 const MIDDLEWARE_PRIORITY = {
   /** After security headers (250), before authentication (300). */
   SESSION: 260,
-  /** After the session loads and after the stateless CSRF check (270). */
-  CSRF_FORM: 275,
+  /**
+   * After the session loads (260), after authentication (300) and before
+   * authorization (350): the bearer exemption reads the credential source
+   * recorded and the session loaded, so it must run after both.
+   */
+  CSRF_FORM: 325,
 } as const;
 
 /**
@@ -100,12 +104,17 @@ export function SessionPlugin(options: SessionPluginOptions = {}): IPlugin {
 
       const store = createStore(options.store, ctx, runtime);
 
-      const service = new SessionService(config, ring, {
-        subtle: runtime.subtle,
-        randomBytes: (length) => runtime.randomBytes(length),
-        now: () => runtime.now(),
-        uuid: () => runtime.uuid(),
-      }, store);
+      const service = new SessionService(
+        config,
+        ring,
+        {
+          subtle: runtime.subtle,
+          randomBytes: (length) => runtime.randomBytes(length),
+          now: () => runtime.now(),
+          uuid: () => runtime.uuid(),
+        },
+        store,
+      );
 
       // Registered before anything else that could throw. `createStore` may have
       // armed the memory store's sweep interval, and an uncleared interval keeps

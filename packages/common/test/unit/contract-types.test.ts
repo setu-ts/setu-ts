@@ -4,12 +4,12 @@
  * `WebSocketConnectionContext.user` member, and the widened
  * `IWebSocketService.routeUpgrade` signature.
  *
- * These assertions are decided by `deno task check` — if a required member is
+ * These assertions are decided by `pnpm run check` — if a required member is
  * ever dropped or an optional one is narrowed away, this file stops compiling.
  * The `@ts-expect-error` directive is self-validating: an unused directive
  * fails the build, so a required member silently becoming optional is caught.
  * Runtime expectations are asserted alongside so the file also fails loudly
- * under `deno task test`.
+ * under `pnpm run test`.
  */
 import { describe, expect, it } from 'vitest';
 import type {
@@ -45,9 +45,9 @@ const contextWithUser: WebSocketConnectionContext = {
 // assignable to the widened signature — a lower-arity function remains
 // assignable when the added parameter is optional.
 type RouteUpgrade = NonNullable<IWebSocketService['routeUpgrade']>;
-const singleParamRouteUpgrade: RouteUpgrade = (_request: Request): Promise<
-  WebSocketUpgradeDecision | null
-> => Promise.resolve(null);
+const singleParamRouteUpgrade: RouteUpgrade = (
+  _request: Request,
+): Promise<WebSocketUpgradeDecision | null> => Promise.resolve(null);
 
 // `fromHeaders` is a REQUIRED member of `ISessionService`: an implementation
 // that omits it is a compile error. The directive is self-validating — if the

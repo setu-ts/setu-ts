@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Tests for RuntimePlugin — HTTP adapter registration, CF platform no-throw,
  * and the new IHttpAdapter surface (setHandler/fetch/listen/close).
@@ -10,10 +10,12 @@ import { RuntimePlugin } from '../../src/plugin/runtime-plugin.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IHttpAdapter,
+  ILogger,
   IPluginContext,
   IRuntimeServices,
   RuntimePlatform,
 } from '@setu-ts/common';
+import type { HttpAdapterOptions } from '../../src/adapters/shared/adapter-options.ts';
 import { describe, expect, it } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -73,9 +75,9 @@ function createFakeRuntimeServices(platform: RuntimePlatform = 'deno'): IRuntime
     subtle: {} as SubtleCrypto,
     now: () => 0,
     hrtime: () => 0,
-    setTimeout: () => ({} as unknown),
+    setTimeout: () => ({}) as unknown,
     clearTimeout: () => {},
-    setInterval: () => ({} as unknown),
+    setInterval: () => ({}) as unknown,
     clearInterval: () => {},
     env: {},
     exit: () => {
@@ -122,7 +124,7 @@ describe('runtime-plugin | CF platform', () => {
     const adapter = ctx.services.get(CAPABILITIES.HTTP_ADAPTER) as IHttpAdapter;
     expect(adapter).toBeDefined();
     // CF adapter: fetch works, listen throws
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -209,6 +211,24 @@ describe('runtime-plugin | default factory mappings', () => {
     expect(typeof adapter.close).toBe('function');
   });
 
+  it('closes the local diagnostics listener when the application closes', () => {
+    const hooks: Array<() => void> = [];
+    const ctx = createCtx();
+    ctx.lifecycle.onClose = (hook: () => void) => {
+      hooks.push(hook);
+    };
+    const plugin = RuntimePlugin({
+      platform: 'deno',
+      adapters: { deno: () => createFakeRuntimeServices('deno') },
+    });
+    plugin.register(ctx as any);
+
+    // The kernel runs close hooks on both the normal and failed-startup paths,
+    // so the listener must be released from one even when nothing was registered.
+    expect(hooks).toHaveLength(1);
+    expect(() => hooks[0]?.()).not.toThrow();
+  });
+
   it('maps bun to BunHttpAdapter via custom factory', () => {
     // When Bun is not available, the default BunHttpAdapter constructor
     // will use the defaultBunServeHost which casts globalThis.Bun.
@@ -276,7 +296,7 @@ describe('runtime-plugin | fake adapter records calls', () => {
 
     plugin.register(ctx);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     fakeAdapter.setHandler(async () => ({
       snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: 'test' }),
     }));
@@ -366,9 +386,7 @@ describe('runtime-plugin | missing factory throws', () => {
       },
     } as any;
 
-    expect(() => plugin.register(ctx as any)).toThrow(
-      'No HTTP adapter for platform: deno',
-    );
+    expect(() => plugin.register(ctx as any)).toThrow('No HTTP adapter for platform: deno');
   });
 });
 
@@ -416,8 +434,9 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
   // which is how this option's value is supplied in a real deployment.
   for (const bad of [Number.NaN, -1, 1.5, Number.POSITIVE_INFINITY]) {
     it(`refuses maxBodyBytes: ${String(bad)} by name`, () => {
-      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: bad }))
-        .toThrow(/maxBodyBytes must be a non-negative integer/);
+      expect(() => RuntimePlugin({ platform: 'deno', maxBodyBytes: bad })).toThrow(
+        /maxBodyBytes must be a non-negative integer/,
+      );
     });
   }
 
@@ -432,7 +451,137 @@ describe('runtime-plugin | maxBodyBytes option domain', () => {
       RuntimePlugin({
         platform: 'deno',
         adapters: { deno: () => createFakeRuntimeServices('deno') },
-      })
+      }),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// reportError — resolved at call time (M113h §3.8b)
+// ---------------------------------------------------------------------------
+
+/** Registers the plugin against a registry-backed ctx and captures its options. */
+function createReportingHarness(services: IRuntimeServices): {
+  readonly captured: HttpAdapterOptions;
+  readonly ctx: { readonly services: { register(capability: string, value: unknown): void } };
+} {
+  let captured: HttpAdapterOptions | undefined;
+  const plugin = RuntimePlugin({
+    platform: 'node',
+    adapters: { node: () => services },
+    httpAdapters: {
+      node: (options) => {
+        captured = options;
+        return new FakeHttpAdapter();
+      },
+    },
+  });
+
+  const ctx: any = {
+    lifecycle: noopLifecycle(),
+    services: {
+      registry: new Map<string, unknown>(),
+      register(capability: string, value: unknown): void {
+        this.registry.set(capability, value);
+      },
+      get(capability: string) {
+        return this.registry.get(capability);
+      },
+      has(capability: string) {
+        return this.registry.has(capability);
+      },
+    },
+  };
+  plugin.register(ctx);
+
+  return { captured: captured!, ctx };
+}
+
+/** A logger whose `error` records its arguments. */
+function recordingLogger(errors: Array<{ message: string; metadata?: unknown }>): ILogger {
+  const logger: ILogger = {
+    level: 'debug',
+    fatal() {},
+    error(message, metadata) {
+      errors.push({ message, metadata });
+    },
+    warn() {},
+    info() {},
+    debug() {},
+    trace() {},
+    child() {
+      return logger;
+    },
+  };
+  return logger;
+}
+
+describe('runtime-plugin | reportError', () => {
+  it('routes to the registered logger, resolved at CALL time', () => {
+    const errors: Array<{ message: string; metadata?: unknown }> = [];
+    const { captured, ctx } = createReportingHarness(createFakeRuntimeServices('node'));
+    // The logger plugin registers AFTER RuntimePlugin (HIGHEST priority), so it
+    // is absent during `register` — the reporter must still find it later.
+    ctx.services.register(CAPABILITIES.LOGGER, recordingLogger(errors));
+
+    captured.reportError!({
+      level: 'error',
+      msg: 'WebSocket handshake failed',
+      message: 'npm install ws',
+    });
+
+    expect(errors).toEqual([
+      {
+        message: 'WebSocket handshake failed',
+        metadata: { message: 'npm install ws' },
+      },
+    ]);
+    // The logger method IS the level, and the message is its first argument, so
+    // neither is repeated in the metadata.
+    expect(errors[0]?.metadata).not.toHaveProperty('level');
+    expect(errors[0]?.metadata).not.toHaveProperty('msg');
+  });
+
+  it('falls back to services.reportError when no logger is registered', () => {
+    const reported: Readonly<Record<string, unknown>>[] = [];
+    const services = {
+      ...createFakeRuntimeServices('node'),
+      reportError: (record: Readonly<Record<string, unknown>>): void => {
+        reported.push(record);
+      },
+    };
+    const { captured } = createReportingHarness(services);
+
+    captured.reportError!({ level: 'error', msg: 'WebSocket handshake failed' });
+
+    expect(reported).toEqual([{ level: 'error', msg: 'WebSocket handshake failed' }]);
+  });
+
+  it('swallows a throwing logger without falling through to reportError', () => {
+    const reported: Readonly<Record<string, unknown>>[] = [];
+    const services = {
+      ...createFakeRuntimeServices('node'),
+      reportError: (record: Readonly<Record<string, unknown>>): void => {
+        reported.push(record);
+      },
+    };
+    const { captured, ctx } = createReportingHarness(services);
+    const errors: Array<{ message: string; metadata?: unknown }> = [];
+    const logger = recordingLogger(errors);
+    ctx.services.register(CAPABILITIES.LOGGER, {
+      ...logger,
+      error() {
+        throw new Error('broken logger');
+      },
+    });
+
+    expect(() => captured.reportError!({ msg: 'WebSocket handshake failed' })).not.toThrow();
+    expect(reported).toEqual([]);
+  });
+
+  it('is silent when neither a logger nor a reportError sink exists', () => {
+    const { captured } = createReportingHarness(createFakeRuntimeServices('node'));
+
+    expect(() => captured.reportError!({ msg: 'WebSocket handshake failed' })).not.toThrow();
   });
 });

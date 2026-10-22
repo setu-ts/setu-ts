@@ -160,7 +160,7 @@ export class WorkersCron {
     const failures = results
       .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
       .map((result) =>
-        result.reason instanceof Error ? result.reason : new Error(String(result.reason))
+        result.reason instanceof Error ? result.reason : new Error(String(result.reason)),
       );
 
     if (failures.length > 0) {

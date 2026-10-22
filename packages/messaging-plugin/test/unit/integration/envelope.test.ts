@@ -85,9 +85,14 @@ describe('createEnvelope', () => {
   });
 
   it('omits exactly the metadata members that are absent, never writing undefined', () => {
-    const envelope = createEnvelope(createFakeRuntime(), definition, { orderId: 'o-1' }, {
-      correlationId: 'root-1',
-    });
+    const envelope = createEnvelope(
+      createFakeRuntime(),
+      definition,
+      { orderId: 'o-1' },
+      {
+        correlationId: 'root-1',
+      },
+    );
     expect(envelope.correlationId).toBe('root-1');
     expect('causationId' in envelope).toBe(false);
     expect('aggregateId' in envelope).toBe(false);
@@ -108,8 +113,9 @@ describe('validateEnvelope', () => {
   it('accepts an unknown extra field and it survives onto the validated envelope', () => {
     const value = { ...VALID_ENVELOPE, addedByLaterFrameworkVersion: 42 };
     const validated = validateEnvelope(value, definition);
-    expect((validated as unknown as Record<string, unknown>)['addedByLaterFrameworkVersion'])
-      .toBe(42);
+    expect((validated as unknown as Record<string, unknown>)['addedByLaterFrameworkVersion']).toBe(
+      42,
+    );
   });
 
   it('refuses null, a primitive, and an array as malformed', () => {
@@ -211,10 +217,10 @@ describe('envelope guards found in review (PR #287)', () => {
   // consumer refused it, and on the default composition that refusal is
   // reported and dropped, so the event vanished silently.
   it('refuses an undefined payload at the producer and names the null remedy', () => {
-    expect(() => createEnvelope(runtime, guarded, undefined as never))
-      .toThrow(TypeError);
-    expect(() => createEnvelope(runtime, guarded, undefined as never))
-      .toThrow(/must publish `null` instead/);
+    expect(() => createEnvelope(runtime, guarded, undefined as never)).toThrow(TypeError);
+    expect(() => createEnvelope(runtime, guarded, undefined as never)).toThrow(
+      /must publish `null` instead/,
+    );
   });
 
   it('publishes a null payload, the documented payloadless shape', () => {
@@ -231,14 +237,16 @@ describe('envelope guards found in review (PR #287)', () => {
   // aggregate version it cannot use while the producer believed it sent one.
   for (const bad of [NaN, Infinity, -Infinity]) {
     it(`refuses a non-finite aggregateVersion (${String(bad)}) at the producer`, () => {
-      expect(() => createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: bad }))
-        .toThrow(/"aggregateVersion" must be a finite number/);
+      expect(() => createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: bad })).toThrow(
+        /"aggregateVersion" must be a finite number/,
+      );
     });
   }
 
   it('accepts a finite aggregateVersion unchanged', () => {
-    expect(createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: 0 }).aggregateVersion)
-      .toBe(0);
+    expect(
+      createEnvelope(runtime, guarded, { n: 1 }, { aggregateVersion: 0 }).aggregateVersion,
+    ).toBe(0);
   });
 
   // `occurredAt` is exposed to application code as an ISO-8601 instant; an
@@ -249,32 +257,29 @@ describe('envelope guards found in review (PR #287)', () => {
   // Measured on a +05:30 host, '2026-01-01T00:00:00' became
   // '2025-12-31T18:30:00.000Z', so such an event means a different instant on
   // every consumer.
-  for (
-    const bad of [
-      'not a timestamp',
-      '2026-01-01', // date-only: not an instant
-      '2026-01-01T00:00:00', // no zone designator: local-time drift
-      'Thu, 01 Jan 1970 00:00:00 GMT', // RFC 2822, implementation-defined
-      '2026-13-45T00:00:00Z', // well-shaped but an impossible date
-    ]
-  ) {
+  for (const bad of [
+    'not a timestamp',
+    '2026-01-01', // date-only: not an instant
+    '2026-01-01T00:00:00', // no zone designator: local-time drift
+    'Thu, 01 Jan 1970 00:00:00 GMT', // RFC 2822, implementation-defined
+    '2026-13-45T00:00:00Z', // well-shaped but an impossible date
+  ]) {
     it(`refuses an occurredAt that is not an ISO-8601 instant: ${bad}`, () => {
-      expect(() => validateEnvelope({ ...base, occurredAt: bad }, guarded))
-        .toThrow(/not an ISO-8601 instant/);
+      expect(() => validateEnvelope({ ...base, occurredAt: bad }, guarded)).toThrow(
+        /not an ISO-8601 instant/,
+      );
     });
   }
 
   // The interoperable RFC 3339 profile, so a producer in another language is
   // not refused for emitting a legal instant this framework does not itself
   // emit (no fractional seconds, a numeric offset, lowercase designators).
-  for (
-    const good of [
-      '2026-01-01T00:00:00Z',
-      '2026-01-01T00:00:00.000Z',
-      '2026-01-01T00:00:00+05:30',
-      '2026-01-01t00:00:00z',
-    ]
-  ) {
+  for (const good of [
+    '2026-01-01T00:00:00Z',
+    '2026-01-01T00:00:00.000Z',
+    '2026-01-01T00:00:00+05:30',
+    '2026-01-01t00:00:00z',
+  ]) {
     it(`accepts the ISO-8601 instant ${good}`, () => {
       expect(validateEnvelope({ ...base, occurredAt: good }, guarded).occurredAt).toBe(good);
     });
@@ -290,14 +295,16 @@ describe('envelope guards found in review (PR #287)', () => {
   // event, so a wrong primitive propagates one hop before anyone sees it.
   for (const field of ['correlationId', 'causationId', 'aggregateId'] as const) {
     it(`refuses a non-string ${field}`, () => {
-      expect(() => validateEnvelope({ ...base, [field]: 12345 }, guarded))
-        .toThrow(new RegExp(`"${field}" field must be a string`));
+      expect(() => validateEnvelope({ ...base, [field]: 12345 }, guarded)).toThrow(
+        new RegExp(`"${field}" field must be a string`),
+      );
     });
   }
 
   it('refuses a non-finite aggregateVersion on the wire', () => {
-    expect(() => validateEnvelope({ ...base, aggregateVersion: 'four' }, guarded))
-      .toThrow(/"aggregateVersion" field must be a finite number/);
+    expect(() => validateEnvelope({ ...base, aggregateVersion: 'four' }, guarded)).toThrow(
+      /"aggregateVersion" field must be a finite number/,
+    );
   });
 
   it('accepts an envelope carrying every optional field correctly typed', () => {

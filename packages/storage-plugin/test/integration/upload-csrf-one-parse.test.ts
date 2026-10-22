@@ -1,7 +1,7 @@
 /**
  * M94b e2e: one multipart POST, two first-party consumers.
  *
- * `csrfFormMiddleware` runs globally at priority 275, AHEAD of the route's
+ * `csrfFormMiddleware` runs globally at priority 325, AHEAD of the route's
  * upload middleware. With the shared accessor, both read the SAME `FormBody`:
  * a token in a multipart FIELD now verifies (before this milestone the
  * request could only `403`), and the file is still delivered. The one-parse
@@ -47,19 +47,15 @@ function formStashPlugin(): IPlugin {
         }
         await next();
       };
-      // CSRF_FORM is 275; 300 runs after it and before the route middleware.
-      ctx.middleware.add(stash, { name: 'form-stash', priority: 300 });
+      // CSRF_FORM is 325; 330 runs after it and before the route middleware.
+      ctx.middleware.add(stash, { name: 'form-stash', priority: 330 });
     },
   };
 }
 
 function boot(): ReturnType<typeof createApplication> {
   const app = createApplication({
-    plugins: [
-      RuntimePlugin(),
-      SessionPlugin({ secret: SECRET, csrf: {} }),
-      formStashPlugin(),
-    ],
+    plugins: [RuntimePlugin(), SessionPlugin({ secret: SECRET, csrf: {} }), formStashPlugin()],
   });
   app.router.get('/form', {
     handler: (c: IRequestContext): HandlerResult => c.response.json({ token: getCsrfToken(c) }),
@@ -74,12 +70,15 @@ function boot(): ReturnType<typeof createApplication> {
       return c.response.json({
         sameReference: stashed !== undefined && form !== undefined && Object.is(stashed, form),
         tokenInField: typeof form?.get('_csrf') === 'string',
-        file: upload === undefined ? null : {
-          name: upload.name,
-          filename: upload.filename,
-          size: upload.size,
-          text: new TextDecoder().decode(upload.data),
-        },
+        file:
+          upload === undefined
+            ? null
+            : {
+                name: upload.name,
+                filename: upload.filename,
+                size: upload.size,
+                text: new TextDecoder().decode(upload.data),
+              },
       });
     },
   });
@@ -87,8 +86,7 @@ function boot(): ReturnType<typeof createApplication> {
 }
 
 function multipartBody(fields: string[], boundary: string): string {
-  return fields.map((field) => `--${boundary}\r\n${field}\r\n`).join('') +
-    `--${boundary}--\r\n`;
+  return fields.map((field) => `--${boundary}\r\n${field}\r\n`).join('') + `--${boundary}--\r\n`;
 }
 
 describe('one multipart POST through CSRF and the upload middleware (M94b)', () => {
@@ -100,15 +98,21 @@ describe('one multipart POST through CSRF and the upload middleware (M94b)', () 
       const formRes = await app.fetch(new Request('http://localhost/form'));
       expect(formRes.status).toBe(200);
       const { token } = (await formRes.json()) as { token: string };
-      const cookie = formRes.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+      const cookie = formRes.headers
+        .getSetCookie()
+        .map((c) => c.split(';')[0])
+        .join('; ');
       expect(token.length).toBeGreaterThan(0);
 
       // 2. The request that 403'd before this milestone: token in a FIELD.
-      const body = multipartBody([
-        `Content-Disposition: form-data; name="_csrf"\r\n\r\n${token}`,
-        'Content-Disposition: form-data; name="file"; filename="doc.txt"\r\n' +
-        'Content-Type: text/plain\r\n\r\nUPLOAD',
-      ], 'fb94');
+      const body = multipartBody(
+        [
+          `Content-Disposition: form-data; name="_csrf"\r\n\r\n${token}`,
+          'Content-Disposition: form-data; name="file"; filename="doc.txt"\r\n' +
+            'Content-Type: text/plain\r\n\r\nUPLOAD',
+        ],
+        'fb94',
+      );
       const res = await app.fetch(
         new Request('http://localhost/upload', {
           method: 'POST',
@@ -136,10 +140,13 @@ describe('one multipart POST through CSRF and the upload middleware (M94b)', () 
         new Request('http://localhost/upload', {
           method: 'POST',
           headers: { 'content-type': MULTIPART_CT },
-          body: multipartBody([
-            'Content-Disposition: form-data; name="file"; filename="doc.txt"\r\n' +
-            'Content-Type: text/plain\r\n\r\nUPLOAD',
-          ], 'fb94'),
+          body: multipartBody(
+            [
+              'Content-Disposition: form-data; name="file"; filename="doc.txt"\r\n' +
+                'Content-Type: text/plain\r\n\r\nUPLOAD',
+            ],
+            'fb94',
+          ),
         }),
       );
       expect(res.status).toBe(403);

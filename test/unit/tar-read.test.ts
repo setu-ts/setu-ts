@@ -1,5 +1,4 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { gunzipBounded, MAX_UNPACKED_TARBALL_BYTES, readTar } from '../../scripts/tar-read.ts';
 import { archive, paxRecord, tarEntry } from '../fixtures/tar-fixture.ts';
 
@@ -31,14 +30,13 @@ describe('ustar/pax reader', () => {
     expect(new TextDecoder().decode(files.get('global'))).toBe('two');
   });
   it('rejects truncation, invalid end blocks, corruption and malformed pax', () => {
-    for (
-      const bytes of [
-        new Uint8Array(1),
-        tarEntry('file', 'x'),
-        archive(tarEntry('file', 'x')).subarray(0, 520),
-        archive().subarray(0, 512),
-      ]
-    ) expect(() => readTar(bytes)).toThrow();
+    for (const bytes of [
+      new Uint8Array(1),
+      tarEntry('file', 'x'),
+      archive(tarEntry('file', 'x')).subarray(0, 520),
+      archive().subarray(0, 512),
+    ])
+      expect(() => readTar(bytes)).toThrow();
     const corrupt = archive(tarEntry('file', 'x'));
     corrupt[0]++;
     expect(() => readTar(corrupt)).toThrow('checksum');
@@ -50,8 +48,9 @@ describe('ustar/pax reader', () => {
   it('gunzips within the bound and refuses output past it', async () => {
     const gzip = async (bytes: Uint8Array<ArrayBuffer>): Promise<Uint8Array<ArrayBuffer>> =>
       new Uint8Array(
-        await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')))
-          .arrayBuffer(),
+        await new Response(
+          new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip')),
+        ).arrayBuffer(),
       );
     const small = new TextEncoder().encode('hello tar');
     expect(await gunzipBounded(await gzip(small))).toEqual(small);

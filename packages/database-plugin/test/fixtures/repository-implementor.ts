@@ -8,7 +8,7 @@
  * test double — must supply every required member, and a convention that
  * depends on remembering fails the way this did. This fixture turns "a
  * required member was added to `IRepository`" into a COMPILE ERROR inside the
- * repository, at the moment it is added: `deno task check` covers `test/`, so
+ * repository, at the moment it is added: `pnpm run check` covers `test/`, so
  * dropping one member from this class (or adding a required member to the
  * interface without updating it) fails the gate, which no reviewer has to
  * notice.
@@ -56,9 +56,9 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
     const where = options?.where;
     if (where !== undefined) {
       rows = rows.filter((row) =>
-        Object.entries(where).every(([key, value]) =>
-          (row as Record<string, unknown>)[key] === value
-        )
+        Object.entries(where).every(
+          ([key, value]) => (row as Record<string, unknown>)[key] === value,
+        ),
       );
     }
     const orderBy = options?.orderBy;
@@ -114,9 +114,9 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
     if (where === undefined) return Promise.resolve(this.#rows.length);
     return Promise.resolve(
       this.#rows.filter((row) =>
-        Object.entries(where).every(([key, value]) =>
-          (row as Record<string, unknown>)[key] === value
-        )
+        Object.entries(where).every(
+          ([key, value]) => (row as Record<string, unknown>)[key] === value,
+        ),
       ).length,
     );
   }
@@ -153,7 +153,9 @@ export class InMemoryRowRepository implements IRepository<Row, string> {
     // the same coercion the round-trip compares against, so the two clauses
     // read as one rule.
     const start = options.cursor === undefined ? 0 : Number(options.cursor);
-    const malformed = !Number.isSafeInteger(start) || start < 0 ||
+    const malformed =
+      !Number.isSafeInteger(start) ||
+      start < 0 ||
       (options.cursor !== undefined && String(start) !== options.cursor);
     if (malformed) {
       return Promise.reject(new Error(`Malformed cursor: ${String(options.cursor)}`));

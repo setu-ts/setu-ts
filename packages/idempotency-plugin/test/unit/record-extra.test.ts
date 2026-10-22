@@ -75,8 +75,7 @@ describe('record codec — store limit and redaction (M109a §3.10)', () => {
         resolved({ redaction: redactor }),
         undefined,
       ).omitted,
-    )
-      .toBe('redaction');
+    ).toBe('redaction');
     // A JSON array is not a plain object either.
     const jsonHeaders = new Headers({ 'content-type': 'application/json' });
     expect(

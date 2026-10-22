@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface methods must be async (IPlugin)
+/* eslint-disable require-await -- interface methods must be async (IPlugin) */
 /**
  * Coverage tests for DatabasePlugin createAdapter branches.
  *
@@ -186,9 +186,8 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(
-            fakeDb,
-            (database, work) => database.transaction(work),
+          drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+            database.transaction(work),
           ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
@@ -312,9 +311,8 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(
-            fakeDb,
-            (database, work) => database.transaction(work),
+          drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+            database.transaction(work),
           ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },
@@ -349,9 +347,8 @@ describe('DatabasePlugin — createAdapter branch coverage', () => {
       const plugin = DatabasePlugin({
         type: 'drizzle',
         options: {
-          drizzleInstance: createDrizzleDatabase(
-            fakeDb,
-            (database, work) => database.transaction(work),
+          drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+            database.transaction(work),
           ),
           drizzleTables: { user: createFakeDrizzleTable('user') },
         },

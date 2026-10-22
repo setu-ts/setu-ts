@@ -44,10 +44,7 @@ import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limi
  * middleware reads at request time — never the host clock — so the double
  * stays correct for anyone who copies it into a fake-clock test.
  */
-function recordingStore(
-  counts: Map<string, number>,
-  runtime: IRuntimeServices,
-): RateLimitStore {
+function recordingStore(counts: Map<string, number>, runtime: IRuntimeServices): RateLimitStore {
   return {
     increment(key: string, windowMs: number): Promise<RateLimitResult> {
       const count = (counts.get(key) ?? 0) + 1;

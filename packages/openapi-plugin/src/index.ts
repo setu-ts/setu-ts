@@ -17,6 +17,7 @@ export type { OpenApiServiceOptions } from './services/openapi-service.ts';
 export type { IOpenApiService } from './interfaces/openapi-service.ts';
 
 // Generator
+export { OperationIdError } from './errors.ts';
 export { OpenApiGenerator } from './generators/openapi-generator.ts';
 export type {
   OpenApiDocument,
@@ -37,4 +38,4 @@ export type {
 
 // UI
 export { swaggerUiHtml } from './ui/swagger-ui.ts';
-export type { SwaggerUiOptions } from './ui/swagger-ui.ts';
+export type { SwaggerUiOptions, SwaggerOptions } from './ui/swagger-ui.ts';

@@ -120,9 +120,7 @@ describe('notification-plugin integration (through a real kernel app)', () => {
 
     // SMS — Twilio form-encoded POST with Basic auth.
     const smsCall = smsHttp.getLastCall();
-    expect(smsCall?.url).toBe(
-      'https://api.twilio.com/2010-04-01/Accounts/AC_test/Messages.json',
-    );
+    expect(smsCall?.url).toBe('https://api.twilio.com/2010-04-01/Accounts/AC_test/Messages.json');
     expect(smsCall?.body).toBe(
       'To=%2B15554443333&From=%2B15550000000&Body=Your+order+42+has+been+confirmed.',
     );

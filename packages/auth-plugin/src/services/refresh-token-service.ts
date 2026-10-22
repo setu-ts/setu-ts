@@ -57,11 +57,13 @@ export class RefreshTokenService {
   private readonly jwt: IJwtService;
   private readonly store: RefreshTokenStore;
   private readonly runtime: IRuntimeServices;
-  private readonly accessTokenOptions: {
-    readonly expiresIn?: string;
-    readonly audience?: string;
-    readonly issuer?: string;
-  } | undefined;
+  private readonly accessTokenOptions:
+    | {
+        readonly expiresIn?: string;
+        readonly audience?: string;
+        readonly issuer?: string;
+      }
+    | undefined;
   private readonly refreshTokenExpiresIn: string;
   private readonly refreshTokenExpiresInMs: number;
   private readonly accessTokenRevocationStore: IAccessTokenRevocationStore | undefined;
@@ -153,12 +155,14 @@ export class RefreshTokenService {
       revoked: false,
       familyId,
       accessTokenJti,
-      ...(this.accessTokenExpiresInMs === undefined ? {} : {
-        accessTokenExpiresAt: accessTokenRevocationExpiry(
-          accessToken,
-          this.runtime.now() + this.accessTokenExpiresInMs + 1_000,
-        ),
-      }),
+      ...(this.accessTokenExpiresInMs === undefined
+        ? {}
+        : {
+            accessTokenExpiresAt: accessTokenRevocationExpiry(
+              accessToken,
+              this.runtime.now() + this.accessTokenExpiresInMs + 1_000,
+            ),
+          }),
     };
 
     return { pair: { accessToken, refreshToken }, record };
@@ -174,9 +178,7 @@ export class RefreshTokenService {
     // or tampered token — all of those mean "no new pair", never an error.
     let payload: { sub: string; type?: string; jti?: string };
     try {
-      payload = await this.jwt.verify<{ sub: string; type?: string; jti?: string }>(
-        refreshToken,
-      );
+      payload = await this.jwt.verify<{ sub: string; type?: string; jti?: string }>(refreshToken);
     } catch {
       return null;
     }
@@ -263,11 +265,11 @@ export class RefreshTokenService {
 }
 
 /**
- * Return the instant at which JwtService will reject a token with this `exp`.
+ * Return the retention deadline for revocation of a token with this `exp`.
  *
- * JwtService accepts `exp === floor(now / 1000)`, so revocation must remain
- * active until the next whole second. A custom signer that omits `exp` falls
- * back to the conservative lifetime calculated after signing.
+ * JwtService rejects at `exp`. Retaining revocation for one additional second
+ * provides a safety margin against clock differences. A custom signer that
+ * omits `exp` falls back to the conservative lifetime calculated after signing.
  */
 function accessTokenRevocationExpiry(token: string, fallback: number): number {
   const encodedPayload = token.split('.')[1];

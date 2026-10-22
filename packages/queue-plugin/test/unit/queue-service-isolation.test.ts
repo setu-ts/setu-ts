@@ -119,8 +119,9 @@ describe('QueueService — one failing name never stops the others', () => {
     await service.disconnect();
 
     expect(handled.length).toBeGreaterThan(0);
-    expect(logged.some((l) => l.message === 'queue recurring enqueue failed' && l.name === 'bad'))
-      .toBe(true);
+    expect(
+      logged.some((l) => l.message === 'queue recurring enqueue failed' && l.name === 'bad'),
+    ).toBe(true);
     // Only the good entry was advanced: the failed one stays due for a retry.
     expect(adapter.advanced).toHaveLength(handled.length);
   });

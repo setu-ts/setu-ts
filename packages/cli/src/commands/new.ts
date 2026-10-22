@@ -44,7 +44,12 @@ import {
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { projectFiles, resolveHost, withEnvFile } from '../templates/project-files.ts';
+import {
+  cliInvocation,
+  projectFiles,
+  resolveHost,
+  withEnvFile,
+} from '../templates/project-files.ts';
 import { readEnvFilePath } from '../templates/env-file.ts';
 import { DEFAULT_BASE_PORT, readPortFlag } from '../workspace/manifest.ts';
 import {
@@ -67,6 +72,7 @@ import type { PortProbe } from '../workspace/port-probe.ts';
 import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
 import {
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   type GeneratedFile,
   interruptedRunRetryHint,
@@ -75,6 +81,7 @@ import {
   writeFiles,
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
+import { runAgentsCommand } from './agents.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -122,10 +129,12 @@ function planWorkspace(
   name: string,
   runtime: TargetRuntime,
   args: ParsedArgs,
-): { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+):
+  | { readonly ok: true; readonly files: readonly GeneratedFile[] }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
   // Deno, Node and Bun all host a workspace; Cloudflare Workers does not, and
   // that is a topology difference rather than a missing profile — each Worker is
   // its own deploy unit with its own `wrangler.toml`, so several in one repository
@@ -133,10 +142,11 @@ function planWorkspace(
   if (!isWorkspaceRuntime(runtime)) {
     return {
       ok: false,
-      message: `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
+      message:
+        `--runtime ${runtime} cannot host a workspace: each Worker is its own deploy ` +
         `unit with its own wrangler.toml, so several of them are several deployments rather ` +
         `than members of one. Workspaces target ${WORKSPACE_RUNTIMES.join(', ')}; scaffold a ` +
-        `standalone project instead with \`${PROGRAM_NAME} new ${name} --runtime ${runtime}\`.`,
+        `standalone project instead with \`${cliInvocation(runtime)} new ${name} --runtime ${runtime}\`.`,
     };
   }
 
@@ -148,9 +158,10 @@ function planWorkspace(
     const suggested = getTemplate(templateFlag) === undefined ? '<name>' : templateFlag;
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
+      message:
+        `A workspace root registers no plugins, so --template ${escapeName(templateFlag)} ` +
         `has nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template ${suggested}\`.`,
     };
   }
 
@@ -161,14 +172,16 @@ function planWorkspace(
   if (styleFlag !== undefined) {
     // The same rule as --template above: escaped when quoted, and suggested
     // only when it is one of the two styles the axis has.
-    const suggested = styleFlag === 'functional' || styleFlag === 'class-based'
-      ? styleFlag
-      : '<functional|class-based>';
+    const suggested =
+      styleFlag === 'functional' || styleFlag === 'class-based'
+        ? styleFlag
+        : '<functional|class-based>';
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
+      message:
+        `A workspace root registers no plugins, so --style ${escapeName(styleFlag)} has ` +
         `nothing to configure. Create the workspace, then add a service with ` +
-        `\`${PROGRAM_NAME} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
+        `\`${cliInvocation(runtime)} generate ${APP_VERB} <name> --template rest --style ${suggested}\`.`,
     };
   }
 
@@ -199,9 +212,10 @@ function planWorkspace(
   if (args.flags['devtool'] !== undefined || args.flags['devtool-port'] !== undefined) {
     return {
       ok: false,
-      message: `A workspace root registers no plugins, so there is nothing for the devtool to` +
+      message:
+        `A workspace root registers no plugins, so there is nothing for the devtool to` +
         ` enable. Create the workspace, add a member, then run` +
-        ` \`${PROGRAM_NAME} devtool enable <member>\`.`,
+        ` \`${cliInvocation(runtime)} devtool enable <member>\`.`,
     };
   }
 
@@ -211,7 +225,8 @@ function planWorkspace(
     if (args.flags[flag] !== undefined) {
       return {
         ok: false,
-        message: `--${flag} selects one standalone project's own transport backend; a ` +
+        message:
+          `--${flag} selects one standalone project's own transport backend; a ` +
           `workspace's members share one instead. Create the workspace with ` +
           `--transport <name> — its value covers the message brokers too.`,
       };
@@ -248,12 +263,12 @@ function planWorkspace(
  * @param args - The parsed arguments
  * @returns The transport spec and endpoint, or the refusal to print
  */
-function readTransport(
-  args: ParsedArgs,
-): { readonly ok: true; readonly spec: TransportSpec; readonly url?: string } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+function readTransport(args: ParsedArgs):
+  | { readonly ok: true; readonly spec: TransportSpec; readonly url?: string }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
   const raw = args.flags['transport'];
   const named = raw === undefined ? DEFAULT_TRANSPORT : raw;
   if (typeof named !== 'string') {
@@ -270,13 +285,14 @@ function readTransport(
     const alias = Object.hasOwn(TRANSPORT_ALIASES, named) ? TRANSPORT_ALIASES[named] : undefined;
     return {
       ok: false,
-      message: alias === undefined
-        ? `Unknown transport "${escapeName(named)}". Expected one of: ${TRANSPORTS.join(', ')}.`
-        : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
-          `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
-          `through the discovery map, or a broker (${
-            TRANSPORTS.filter((t) => t !== 'http' && t !== 'grpc').join(', ')
-          }).`,
+      message:
+        alias === undefined
+          ? `Unknown transport "${escapeName(named)}". Expected one of: ${TRANSPORTS.join(', ')}.`
+          : `There is no raw ${named} transport: every inter-service path here is HTTP over ` +
+            `${named} or a broker client over ${named}. Use --transport ${alias} for direct calls ` +
+            `through the discovery map, or a broker (${TRANSPORTS.filter(
+              (t) => t !== 'http' && t !== 'grpc',
+            ).join(', ')}).`,
     };
   }
 
@@ -297,7 +313,8 @@ function readTransport(
     if (spec.connection !== undefined) {
       return {
         ok: false,
-        message: `--transport ${spec.name} is not configured by URL: its connection value is ` +
+        message:
+          `--transport ${spec.name} is not configured by URL: its connection value is ` +
           `read from ${spec.connection.variable} at run time, because it is a project id or a ` +
           `secret and a generated file is the wrong place for either. Leave it unset to use the ` +
           `local emulator. --transport-url applies to ${applies}.`,
@@ -306,7 +323,8 @@ function readTransport(
 
     return {
       ok: false,
-      message: `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
+      message:
+        `--transport ${spec.name} has no broker, so --transport-url has nothing to ` +
         `address. It applies to ${applies}.`,
     };
   }
@@ -322,8 +340,10 @@ function readTransport(
  * @returns The refusal message
  */
 function dependsOnRefusal(): string {
-  return `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
-    `existing workspace member this service waits for, and only a workspace has members.`;
+  return (
+    `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
+    `existing workspace member this service waits for, and only a workspace has members.`
+  );
 }
 
 /**
@@ -341,10 +361,12 @@ function dependsOnRefusal(): string {
 function readArmFlag(
   args: ParsedArgs,
   flag: 'broker' | 'queue',
-): { readonly ok: true; readonly spec?: TransportSpec } | {
-  readonly ok: false;
-  readonly message: string;
-} {
+):
+  | { readonly ok: true; readonly spec?: TransportSpec }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
   const raw = args.flags[flag];
   if (raw === undefined) return { ok: true };
 
@@ -354,16 +376,18 @@ function readArmFlag(
   }
 
   const spec = getTransport(raw);
-  const hasArm = spec !== undefined &&
+  const hasArm =
+    spec !== undefined &&
     (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
   if (spec === undefined || (raw !== 'memory' && !hasArm)) {
     // The two failures are told apart, because "no such transport" and "this
     // transport has no arm for this flag" are different mistakes.
-    const prefix = spec === undefined
-      ? `Unknown ${flag} "${escapeName(raw)}".`
-      : flag === 'broker'
-      ? `"${raw}" declares no message-broker wiring.`
-      : `"${raw}" declares no queue wiring.`;
+    const prefix =
+      spec === undefined
+        ? `Unknown ${flag} "${escapeName(raw)}".`
+        : flag === 'broker'
+          ? `"${raw}" declares no message-broker wiring.`
+          : `"${raw}" declares no queue wiring.`;
     return {
       ok: false,
       message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
@@ -439,10 +463,11 @@ async function planProject(
   args: ParsedArgs,
   probe?: PortProbe,
 ): Promise<
-  { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string } | {
-    readonly ok: false;
-    readonly message: string;
-  }
+  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    }
 > {
   // `--port` sets a workspace's base port and means nothing to a standalone
   // project, whose entry binds 3000. Accepting it silently would report success
@@ -450,7 +475,8 @@ async function planProject(
   if (args.flags['port'] !== undefined) {
     return {
       ok: false,
-      message: `--port applies to \`${PROGRAM_NAME} new <name> --workspace\`, which allocates ` +
+      message:
+        `--port applies to \`${PROGRAM_NAME} new <name> --workspace\`, which allocates ` +
         `member ports from it. A standalone project binds the port its \`main.ts\` names.`,
     };
   }
@@ -469,7 +495,8 @@ async function planProject(
     if (args.flags[flag] !== undefined) {
       return {
         ok: false,
-        message: `--${flag} applies to \`${PROGRAM_NAME} new <name> --workspace\`: it decides ` +
+        message:
+          `--${flag} applies to \`${PROGRAM_NAME} new <name> --workspace\`: it decides ` +
           `how a workspace's services talk to each other, and a standalone project has none. ` +
           `To configure THIS project's own backends, use --broker <name> and --queue <name>.`,
       };
@@ -500,9 +527,10 @@ async function planProject(
   if (configured === undefined) {
     return {
       ok: false,
-      message: runtime === 'cloudflare-workers'
-        ? '--env-file is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
-        : '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
+      message:
+        runtime === 'cloudflare-workers'
+          ? '--env-file is unavailable on Cloudflare Workers; use Worker bindings for configuration.'
+          : '--env-file requires a template that registers ConfigPlugin (rest, microservice, class-based, or full-stack).',
     };
   }
 
@@ -510,7 +538,10 @@ async function planProject(
   // starter-composed template, or a template registering no matching wiring.
   // `memory` passes these checks everywhere the flag itself is accepted and
   // rewrites nothing below.
-  for (const [flag, selected] of [['broker', broker.spec], ['queue', queue.spec]] as const) {
+  for (const [flag, selected] of [
+    ['broker', broker.spec],
+    ['queue', queue.spec],
+  ] as const) {
     if (selected === undefined) continue;
     const refusal = standaloneOverlayRefusal(flag, runtime, configured);
     if (refusal !== undefined) return { ok: false, message: refusal };
@@ -526,7 +557,7 @@ async function planProject(
     // Refused before anything is resolved: the listener refuses every
     // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
     // startup rather than degrade.
-    const runtimeRefusal = devtoolRuntimeRefusal(runtime);
+    const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'scaffold');
     if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
     // A starter factory owns its construction, and kernel diagnostics reach
     // the constructor only — refused where it can be named, not at run.
@@ -553,7 +584,7 @@ async function planProject(
   }
   // Absent, the port is the documented standalone default, overridable with
   // --devtool-port and range-checked by the shared port-flag reader.
-  const devtoolPort = devtoolPortFlag.port ?? await standaloneDevtoolPort(probe);
+  const devtoolPort = devtoolPortFlag.port ?? (await standaloneDevtoolPort(probe));
   if (devtoolPort === undefined) {
     return {
       ok: false,
@@ -579,11 +610,9 @@ async function planProject(
  * @param deps - Filesystem and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
-export async function runNewCommand(
-  args: ParsedArgs,
-  deps: NewDependencies,
-): Promise<number> {
-  const usage = `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
+export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Promise<number> {
+  const usage =
+    `Usage: ${PROGRAM_NAME} new <project-name> [--template <name>] ` +
     `[--runtime <target>] [--env-file <path>] [--workspace] [--dir <path>]`;
 
   // `--help` is never an error.
@@ -634,6 +663,7 @@ export async function runNewCommand(
     deps.log('  --yes, -y           Take every default and ask nothing');
     deps.log('  --dir <path>        Create the project under this directory');
     deps.log('  --dry-run           Print what would be created, write nothing');
+    deps.log('  --agents            Write an AGENTS.md brief after scaffolding');
     return EXIT_OK;
   }
 
@@ -649,9 +679,10 @@ export async function runNewCommand(
   // It is a no-op when no prompter is present (nothing would be asked anyway),
   // never an error.
   const yes = args.flags['yes'] === true || args.flags['y'] === true;
-  const selection = yes || deps.ask === undefined
-    ? { kind: 'resolved' as const, args }
-    : await resolveNewChoices(args, deps.ask, deps.log);
+  const selection =
+    yes || deps.ask === undefined
+      ? { kind: 'resolved' as const, args }
+      : await resolveNewChoices(args, deps.ask, deps.log);
   if (selection.kind === 'cancelled') {
     deps.error('Cancelled; nothing was written.');
     return EXIT_INTERRUPTED;
@@ -661,9 +692,9 @@ export async function runNewCommand(
   const runtimeFlag = stringFlag(chosen.flags, 'runtime');
   if (runtimeFlag !== undefined && !isTargetRuntime(runtimeFlag)) {
     deps.error(
-      `Unknown runtime "${escapeName(runtimeFlag)}". Expected one of: ${
-        TARGET_RUNTIMES.join(', ')
-      }.`,
+      `Unknown runtime "${escapeName(runtimeFlag)}". Expected one of: ${TARGET_RUNTIMES.join(
+        ', ',
+      )}.`,
     );
     return EXIT_USAGE;
   }
@@ -679,9 +710,7 @@ export async function runNewCommand(
     // The name is quoted back as typed, so it goes through `escapeName`: a
     // control character in the refusal would forge a standalone line in the
     // rendered message.
-    deps.error(
-      `Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`,
-    );
+    deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
     return EXIT_USAGE;
   }
   const projectName = names.kebab;
@@ -690,10 +719,12 @@ export async function runNewCommand(
   // an error: the alias is byte-identical and stays. Only the standalone plan
   // carries one: a workspace root refuses --template, so it can never be an alias.
   let planNotice: string | undefined;
-  let plan: { readonly ok: true; readonly files: readonly GeneratedFile[] } | {
-    readonly ok: false;
-    readonly message: string;
-  };
+  let plan:
+    | { readonly ok: true; readonly files: readonly GeneratedFile[] }
+    | {
+        readonly ok: false;
+        readonly message: string;
+      };
   if (workspace) {
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
@@ -741,8 +772,8 @@ export async function runNewCommand(
   }));
 
   if (args.flags['dry-run'] === true) {
-    for (const file of files) deps.log(`would create ${escapeName(file.path)}`);
-    return EXIT_OK;
+    const code = await reportDryRunPlan(deps, files);
+    return code;
   }
 
   const existing = await findExisting(deps.fs, files);
@@ -762,6 +793,10 @@ export async function runNewCommand(
       deps.interrupt === undefined ? { root: root } : { root: root, signal: deps.interrupt },
     );
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+    if (chosen.flags['agents'] === true) {
+      const code = await runAgentsCommand({ positionals: [], flags: {} }, { ...deps, cwd: root });
+      if (code !== EXIT_OK) return code;
+    }
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
     if (interrupted !== undefined) {
@@ -778,7 +813,7 @@ export async function runNewCommand(
   if (workspace) {
     deps.log(`Created workspace ${projectName}. Next:`);
     deps.log(`  cd ${projectName}`);
-    deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} orders --template microservice`);
+    deps.log(`  ${cliInvocation(runtime)} generate ${APP_VERB} orders --template microservice`);
     return EXIT_OK;
   }
 
@@ -788,10 +823,10 @@ export async function runNewCommand(
     runtime === 'deno'
       ? '  deno task start'
       : runtime === 'cloudflare-workers'
-      ? '  npm install && npx wrangler dev'
-      : runtime === 'bun'
-      ? '  bun install && bun run start'
-      : '  npm install && npm start',
+        ? '  npm install && npx wrangler dev'
+        : runtime === 'bun'
+          ? '  bun install && bun run start'
+          : '  npm install && npm start',
   );
   return EXIT_OK;
 }

@@ -46,10 +46,7 @@ const MIGRATION_FILE = /^\d{14}-[a-z0-9-]+\.ts$/;
  * @param dir - The project directory to scan
  * @returns The migration file names, without the `.ts` suffix, oldest first
  */
-export async function readMigrationNames(
-  fs: IFileSystem,
-  dir: string,
-): Promise<readonly string[]> {
+export async function readMigrationNames(fs: IFileSystem, dir: string): Promise<readonly string[]> {
   let entries: readonly string[];
   try {
     entries = await fs.readdir(joinPath(dir, MIGRATIONS_DIR));

@@ -25,16 +25,14 @@ class ThrowingAdapter implements QueueAdapter {
     return this.#connected;
   }
 
-  enqueue<T>(
-    _job: {
-      id: string;
-      name: string;
-      data: T;
-      attempts: number;
-      maxAttempts: number;
-      availableAtMs: number;
-    },
-  ): Promise<void> {
+  enqueue<T>(_job: {
+    id: string;
+    name: string;
+    data: T;
+    attempts: number;
+    maxAttempts: number;
+    availableAtMs: number;
+  }): Promise<void> {
     // Success
     return Promise.resolve();
   }
@@ -61,12 +59,7 @@ class ThrowingAdapter implements QueueAdapter {
     return Promise.resolve();
   }
 
-  requeue(
-    _name: string,
-    _id: string,
-    _availableAtMs: number,
-    _attempts: number,
-  ): Promise<void> {
+  requeue(_name: string, _id: string, _availableAtMs: number, _attempts: number): Promise<void> {
     // Success
     return Promise.resolve();
   }
@@ -83,13 +76,15 @@ class ThrowingAdapter implements QueueAdapter {
 
   fetchRecurringDue(_nowMs: number): Promise<readonly StoredRecurring[]> {
     // Return a recurring job that will trigger advanceRecurring
-    return Promise.resolve([{
-      id: 'test-id',
-      name: 'test',
-      data: {},
-      cron: 'invalid-cron-expression-for-test',
-      nextRunAtMs: Date.now(),
-    }]);
+    return Promise.resolve([
+      {
+        id: 'test-id',
+        name: 'test',
+        data: {},
+        cron: 'invalid-cron-expression-for-test',
+        nextRunAtMs: Date.now(),
+      },
+    ]);
   }
 
   advanceRecurring(_id: string, _nextRunAtMs: number): Promise<void> {
@@ -179,10 +174,14 @@ describe('QueueService - coverage', () => {
 
     it('poll skips processor at concurrency limit', async () => {
       // Register processor with concurrency 1
-      service.process('limit-test', async () => {
-        // Keep processing slow
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }, { concurrency: 1 });
+      service.process(
+        'limit-test',
+        async () => {
+          // Keep processing slow
+          await new Promise((resolve) => setTimeout(resolve, 1000));
+        },
+        { concurrency: 1 },
+      );
 
       // Add 2 jobs
       await service.add('limit-test', {});
@@ -326,11 +325,15 @@ describe('QueueService - coverage', () => {
     it('poll skips when at concurrency limit', async () => {
       // Register a processor with concurrency 1
       let processing = false;
-      service.process('limit-test', async () => {
-        processing = true;
-        // Keep processing slow to maintain inFlight count
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }, { concurrency: 1 });
+      service.process(
+        'limit-test',
+        async () => {
+          processing = true;
+          // Keep processing slow to maintain inFlight count
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        },
+        { concurrency: 1 },
+      );
 
       // Add first job
       await service.add('limit-test', {});
@@ -377,10 +380,14 @@ describe('QueueService - coverage', () => {
 
     it('poll skips when reserve already in progress', async () => {
       // Register a processor
-      service.process('skip-test', async () => {
-        // Keep processing slow to maintain inFlight
-        await new Promise((resolve) => setTimeout(resolve, 5000));
-      }, { concurrency: 1 });
+      service.process(
+        'skip-test',
+        async () => {
+          // Keep processing slow to maintain inFlight
+          await new Promise((resolve) => setTimeout(resolve, 5000));
+        },
+        { concurrency: 1 },
+      );
 
       // Add a job to start processing
       await service.add('skip-test', {});
@@ -392,9 +399,13 @@ describe('QueueService - coverage', () => {
 
     it('poll handles limit <= 0 edge case', async () => {
       // Register processor with very high concurrency
-      service.process('limit-test', async () => {
-        // Should not be called
-      }, { concurrency: 100 });
+      service.process(
+        'limit-test',
+        async () => {
+          // Should not be called
+        },
+        { concurrency: 100 },
+      );
 
       // Add many jobs
       for (let i = 0; i < 10; i++) {

@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Start-key cursor pagination.
  *
@@ -8,7 +9,6 @@ import type { IDataSource, NormalizedQuery, PageResult } from '@setu-ts/common';
 import { decodeCursor, encodeCursor, sortFingerprint } from '@setu-ts/common';
 import { resolveBigtableTarget } from '../../src/adapters/bigtable/bigtable-mapping.ts';
 import { createBigtableDataSource } from '../../src/adapters/bigtable/bigtable-data-source.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bigtable-client.ts';
 
 /** Builds a fully-resolved page query. */
@@ -38,18 +38,13 @@ function setup(maxPageFetches?: number): { store: FakeBigtableStore; source: IDa
 }
 
 /** Walks every page, returning the ids seen in order. */
-async function walk(
-  source: IDataSource,
-  base: Partial<NormalizedQuery>,
-): Promise<string[]> {
+async function walk(source: IDataSource, base: Partial<NormalizedQuery>): Promise<string[]> {
   const ids: string[] = [];
   let cursor: string | undefined;
   for (let page = 0; page < 20; page += 1) {
-    const result: PageResult = await (source.findPage as (
-      q: NormalizedQuery,
-    ) => Promise<PageResult>)(
-      query(cursor === undefined ? base : { ...base, cursor }),
-    );
+    const result: PageResult = await (
+      source.findPage as (q: NormalizedQuery) => Promise<PageResult>
+    )(query(cursor === undefined ? base : { ...base, cursor }));
     ids.push(...result.rows.map((row) => String(row.id)));
     if (result.nextCursor === null) return ids;
     cursor = result.nextCursor;
@@ -58,11 +53,39 @@ async function walk(
 }
 
 describe('findPage', () => {
+  it('refuses decoded key segments incompatible with the target without leaking them', async () => {
+    const store = new FakeBigtableStore();
+    const target = resolveBigtableTarget('Order', {
+      Order: { rowKey: { fields: ['tenantId', 'orderId'], separator: '#' } },
+    });
+    const source = createBigtableDataSource(
+      createFakeBigtableClient(store).instance('i').table('Order'),
+      target,
+    );
+    const cursor = encodeCursor({
+      orderedValues: [],
+      keyValues: ['private#segment', 'o'],
+      sortFingerprint: '',
+    });
+    const error: unknown = await source.findPage!(query({ cursor, limit: 1 })).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(InvalidCursorError);
+    expect((error as Error).message).not.toContain('private#segment');
+    expect(store.reads).toEqual([]);
+  });
   it('walks every row exactly once over deliberately TIED non-key values', async () => {
     const { source } = setup();
     // Six rows carrying only two distinct `rank` values: a walk that omitted
     // the key tiebreaker would return four of six and report success.
-    for (const [id, rank] of [['u1', 1], ['u2', 1], ['u3', 1], ['u4', 2], ['u5', 2], ['u6', 2]]) {
+    for (const [id, rank] of [
+      ['u1', 1],
+      ['u2', 1],
+      ['u3', 1],
+      ['u4', 2],
+      ['u5', 2],
+      ['u6', 2],
+    ]) {
       await source.create({ id, rank });
     }
     expect(await walk(source, { limit: 2 })).toEqual(['u1', 'u2', 'u3', 'u4', 'u5', 'u6']);
@@ -88,11 +111,13 @@ describe('findPage', () => {
       filter: { type: 'comparison', field: 'even', operator: 'eq', value: true },
     });
     expect(ids).toEqual(['u2', 'u4', 'u6']);
-    const first = await source.findPage?.(query({
-      limit: 2,
-      select: ['id'],
-      filter: { type: 'comparison', field: 'even', operator: 'eq', value: true },
-    }));
+    const first = await source.findPage?.(
+      query({
+        limit: 2,
+        select: ['id'],
+        filter: { type: 'comparison', field: 'even', operator: 'eq', value: true },
+      }),
+    );
     expect(first?.rows[0]).toEqual({ id: 'u2' });
   });
 
@@ -126,8 +151,9 @@ describe('findPage', () => {
 
   it('refuses a malformed cursor token by name', async () => {
     const { source } = setup();
-    await expect(source.findPage?.(query({ limit: 1, cursor: 'not-a-token!!' })))
-      .rejects.toThrow(UnsupportedQueryFeatureError);
+    await expect(source.findPage?.(query({ limit: 1, cursor: 'not-a-token!!' }))).rejects.toThrow(
+      InvalidCursorError,
+    );
   });
 
   it('refuses a cursor minted under a different sort', async () => {
@@ -137,8 +163,9 @@ describe('findPage', () => {
       keyValues: ['u1'],
       sortFingerprint: 'name:desc',
     });
-    await expect(source.findPage?.(query({ limit: 1, cursor: foreign })))
-      .rejects.toThrow(/minted under sort 'name:desc'/);
+    await expect(source.findPage?.(query({ limit: 1, cursor: foreign }))).rejects.toThrow(
+      InvalidCursorError,
+    );
   });
 
   it('refuses a cursor carrying the wrong number of key values', async () => {
@@ -153,8 +180,9 @@ describe('findPage', () => {
       keyValues: ['t1'],
       sortFingerprint: sortFingerprint({}),
     });
-    await expect(source.findPage?.(query({ limit: 1, cursor: shortCursor })))
-      .rejects.toThrow(/1 key values for a 2-field row key/);
+    await expect(source.findPage?.(query({ limit: 1, cursor: shortCursor }))).rejects.toThrow(
+      InvalidCursorError,
+    );
   });
 
   it('accepts a cursor minted under the explicit key sort', async () => {
@@ -211,10 +239,12 @@ describe('findPage', () => {
     const { store, source } = setup(1);
     for (let i = 1; i <= 6; i += 1) await source.create({ id: `u${i}`, rank: i });
     store.reads.length = 0;
-    const page = await source.findPage?.(query({
-      limit: 2,
-      filter: { type: 'comparison', field: 'rank', operator: 'gt', value: 5 },
-    }));
+    const page = await source.findPage?.(
+      query({
+        limit: 2,
+        filter: { type: 'comparison', field: 'rank', operator: 'gt', value: 5 },
+      }),
+    );
     expect(page?.rows).toEqual([]);
     expect(page?.nextCursor).not.toBe(null);
     expect(store.reads).toHaveLength(1);
@@ -233,16 +263,20 @@ describe('findPage', () => {
   it('answers an empty terminal page for a contradictory page query', async () => {
     const { source } = setup();
     await source.create({ id: 'u1' });
-    const page = await source.findPage?.(query({
-      limit: 2,
-      where: { id: 'u1' },
-      filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'zz' },
-    }));
+    const page = await source.findPage?.(
+      query({
+        limit: 2,
+        where: { id: 'u1' },
+        filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'zz' },
+      }),
+    );
     expect(page).toEqual({ rows: [], nextCursor: null });
-    const unlimited = await source.findPage?.(query({
-      where: { id: 'u1' },
-      filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'zz' },
-    }));
+    const unlimited = await source.findPage?.(
+      query({
+        where: { id: 'u1' },
+        filter: { type: 'comparison', field: 'id', operator: 'eq', value: 'zz' },
+      }),
+    );
     expect(unlimited).toEqual({ rows: [], nextCursor: null });
   });
 });

@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6)
+/* eslint-disable no-console -- console output is sanctioned in scripts (AI_GUIDELINES §11.6) */
 /**
  * Residual-version gate for the sites the other release gates cannot see.
  *
@@ -45,6 +45,10 @@
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { readFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 
 /** A `@setu-ts/*` reference naming a version other than the shipping one. */
 export interface StaleReference {
@@ -203,8 +207,8 @@ export function isSweptPath(path: string): boolean {
 /** What {@linkcode trackedFiles} needs back from `git ls-files`. */
 export interface ListOutput {
   readonly success: boolean;
-  readonly stdout: Uint8Array;
-  readonly stderr: Uint8Array;
+  readonly stdout: string;
+  readonly stderr: string;
 }
 
 /** The injectable seam that runs `git ls-files`. */
@@ -212,7 +216,11 @@ export type ListRunner = () => Promise<ListOutput>;
 
 /** Spawns the real `git ls-files`. The one external-I/O line in this module. */
 const runGitLsFiles: ListRunner = () =>
-  new Deno.Command('git', { args: ['ls-files'], stdout: 'piped', stderr: 'piped' }).output();
+  runProcess('git', ['ls-files']).then((result) => ({
+    success: result.code === 0,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  }));
 
 /**
  * Lists the repository's tracked files.
@@ -228,9 +236,9 @@ const runGitLsFiles: ListRunner = () =>
 export async function trackedFiles(run: ListRunner = runGitLsFiles): Promise<readonly string[]> {
   const listed = await run();
   if (!listed.success) {
-    throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr)}`);
+    throw new Error(`git ls-files failed: ${listed.stderr}`);
   }
-  return new TextDecoder().decode(listed.stdout).split('\n').filter(Boolean);
+  return listed.stdout.split('\n').filter(Boolean);
 }
 
 /**
@@ -244,7 +252,7 @@ export async function sweepTrackedFiles(
   current: string,
   paths?: readonly string[],
 ): Promise<SweepResult> {
-  const candidates = (paths ?? await trackedFiles()).filter(isSweptPath);
+  const candidates = (paths ?? (await trackedFiles())).filter(isSweptPath);
   const findings: StaleReference[] = [];
   let filesScanned = 0;
   let referencesSeen = 0;
@@ -252,7 +260,7 @@ export async function sweepTrackedFiles(
   for (const path of candidates) {
     let source: string;
     try {
-      source = await Deno.readTextFile(path);
+      source = await readFile(path, 'utf8');
     } catch (error) {
       // A path git lists but the working tree does not have is ordinary — a
       // deleted-but-staged file, or a `paths` argument naming one. Anything
@@ -261,7 +269,7 @@ export async function sweepTrackedFiles(
       // the vacuity guard would stay green while a stale reference sat in the
       // file that failed to open. This gate's whole failure mode is a silent
       // pass, so a read it cannot perform must be loud.
-      if (error instanceof Deno.errors.NotFound) continue;
+      if (isNotFound(error)) continue;
       throw error;
     }
     filesScanned += 1;
@@ -296,8 +304,8 @@ export function reportSweep(
       failed: true,
       lines: [
         `version-sweep FAILED: scanned ${filesScanned} file(s) and found NO @setu-ts ` +
-        'references at all. The sweep pattern is broken — a scope rename or a lockfile ' +
-        'format change would look exactly like this, and so would a clean tree.',
+          'references at all. The sweep pattern is broken — a scope rename or a lockfile ' +
+          'format change would look exactly like this, and so would a clean tree.',
       ],
     };
   }
@@ -309,9 +317,9 @@ export function reportSweep(
         `version-sweep FAILED: ${findings.length} reference(s) name a version other than ${current}.`,
         ...findings.map((f) => `  ${f.file}:${f.line}  @setu-ts/${f.pkg}@${f.version}`),
         '\nThese sites are invisible to release:verify (which reads manifests) and to ' +
-        'check:docs (which reads Markdown). A stale source specifier still RESOLVES, so ' +
-        'it publishes green and makes the package depend on the previous release. ' +
-        'Mark a deliberately historical reference with a `version:history` comment.',
+          'check:docs (which reads Markdown). A stale source specifier still RESOLVES, so ' +
+          'it publishes green and makes the package depend on the previous release. ' +
+          'Mark a deliberately historical reference with a `version:history` comment.',
       ],
     };
   }
@@ -320,7 +328,7 @@ export function reportSweep(
     failed: false,
     lines: [
       `version-sweep passed: ${referencesSeen} @setu-ts reference(s) across ` +
-      `${filesScanned} file(s), all naming ${current}.`,
+        `${filesScanned} file(s), all naming ${current}.`,
     ],
   };
 }
@@ -350,16 +358,21 @@ export async function main(current: string): Promise<boolean> {
  * @returns The `version` field of the kernel manifest
  */
 export async function workspaceVersion(): Promise<string> {
-  const manifest = JSON.parse(
-    await Deno.readTextFile('packages/kernel/deno.json'),
-  ) as { version?: string };
+  const manifest = JSON.parse(await readFile('packages/kernel/deno.json', 'utf8')) as {
+    version?: string;
+  };
   if (manifest.version === undefined || manifest.version.length === 0) {
     throw new Error('packages/kernel/deno.json has no version field to sweep against.');
   }
   return manifest.version;
 }
 
-if (import.meta.main) {
-  const version = Deno.args[0] ?? await workspaceVersion();
-  Deno.exit(await main(version) ? 1 : 0);
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runVersionSweepMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const version = args[0] ?? (await workspaceVersion());
+  return (await main(version)) ? 1 : 0;
 }
+
+if (import.meta.main) process.exitCode = await runVersionSweepMain();

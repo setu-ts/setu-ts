@@ -105,10 +105,13 @@ app.router.post('/users', async (ctx) => {
 ### Fastify
 
 ```typescript
-app.register(async (fastify) => {
-  fastify.get('/users', () => []);
-  fastify.post('/users', () => ({}));
-}, { prefix: '/api' });
+app.register(
+  async (fastify) => {
+    fastify.get('/users', () => []);
+    fastify.post('/users', () => ({}));
+  },
+  { prefix: '/api' },
+);
 ```
 
 ### Setu-TS
@@ -288,13 +291,17 @@ app.addSchema({
   required: ['name', 'email'],
 });
 
-app.post('/users', {
-  schema: {
-    body: 'userSchema',
+app.post(
+  '/users',
+  {
+    schema: {
+      body: 'userSchema',
+    },
   },
-}, async (request, reply) => {
-  return { created: true };
-});
+  async (request, reply) => {
+    return { created: true };
+  },
+);
 ```
 
 ### Setu-TS

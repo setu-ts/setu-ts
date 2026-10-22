@@ -1,118 +1,87 @@
-// deno-lint-ignore-file no-console -- a skipped prerequisite must be visible in CI.
-const redisUrl = Deno.env.get('REDIS_URL');
-if (redisUrl === undefined) {
-  console.warn(
-    'SKIP: set REDIS_URL to run the two-replica realtime backplane smoke check.',
-  );
-  Deno.exit(77);
-}
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import {
+  freePort,
+  skip,
+  SOURCE_HOST_ARGS,
+  startHost,
+  stopHost,
+  waitForHttp,
+} from '../smoke-helpers.ts';
+import type { Host } from '../smoke-helpers.ts';
 
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
+const redisUrl = process.env['REDIS_URL'] ?? skip('set REDIS_URL to run the two-replica check.');
+
+interface Replica {
+  readonly host: Host;
+  readonly baseUrl: string;
 }
 
 /**
  * Starts one replica in a process of its own.
  *
- * Separate processes are the whole point of this check: both replicas inside a
- * single process would be carried by the backplane's process-local `'memory'`
- * transport, so the check would stay green with no cross-replica delivery at
- * all — the exact demonstration this example exists to make.
+ * Two replicas in one process would share the backplane's in-process
+ * transport, so the check would pass with no cross-replica delivery at all.
  */
-function spawnReplica(port: number, url: string): Deno.ChildProcess {
-  return new Deno.Command('deno', {
-    args: ['run', '-A', 'main.ts', String(port)],
-    env: { REDIS_URL: url },
-    stdout: 'null',
-    stderr: 'inherit',
-  }).spawn();
+function startReplica(port: number): Replica {
+  const host = startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(port)], {
+    ...process.env,
+    REDIS_URL: redisUrl,
+  });
+  return { host, baseUrl: `http://127.0.0.1:${port}` };
 }
 
-async function waitForReady(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      // Any answer proves the socket is bound; this path is deliberately unrouted.
-      await fetch(`http://127.0.0.1:${port}/__ready`, {
-        signal: AbortSignal.timeout(250),
-      }).then((response) => response.body?.cancel());
-      return;
-    } catch {
-      // The replica has not started listening yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Replica on port ${port} did not start within ten seconds.`);
-}
-
-async function readMessage(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
-  expected: string,
-): Promise<void> {
+/** Reads an SSE stream until a `data:` line carrying the expected message arrives. */
+async function readUntil(stream: ReadableStream<Uint8Array>, expected: string): Promise<void> {
   const decoder = new TextDecoder();
   let received = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) {
-      throw new Error(
-        'SSE stream closed before the cross-replica event arrived.',
-      );
-    }
-    received += decoder.decode(value, { stream: true });
+  for await (const chunk of stream) {
+    received += decoder.decode(chunk, { stream: true });
     if (received.includes(`data: ${expected}`)) return;
   }
+  throw new Error('The SSE stream closed before the message arrived.');
 }
 
-const replicaAPort = unusedPort();
-const replicaBPort = unusedPort();
-const replicaA = spawnReplica(replicaAPort, redisUrl);
-const replicaB = spawnReplica(replicaBPort, redisUrl);
-const streaming = new AbortController();
+describe('realtime example', () => {
+  const replicas: Replica[] = [];
+  const streaming = new AbortController();
 
-try {
-  await waitForReady(replicaAPort);
-  await waitForReady(replicaBPort);
-  const events = await fetch(`http://127.0.0.1:${replicaBPort}/events`, {
-    signal: streaming.signal,
-  });
-  if (events.body === null || !events.ok) {
-    throw new Error('Replica B did not open an SSE stream.');
-  }
-
-  const expected = 'from-replica-a';
-  const delivered = readMessage(events.body.getReader(), expected);
-  const published = await fetch(`http://127.0.0.1:${replicaAPort}/publish`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message: expected }),
-  });
-  if (published.status !== 204) {
-    throw new Error(`Replica A publish returned ${published.status}.`);
-  }
-
-  await Promise.race([
-    delivered,
-    new Promise<never>((_, reject) => {
-      setTimeout(
-        () => reject(new Error('Timed out waiting for replica B.')),
-        5_000,
-      );
-    }),
-  ]);
-} finally {
-  streaming.abort();
-  for (const replica of [replicaA, replicaB]) {
-    // Guarded per replica, not around the loop: `kill()` on an already-exited
-    // child throws, which from here would both replace the real failure AND skip
-    // the second replica, leaving it running.
-    try {
-      replica.kill('SIGTERM');
-    } catch {
-      // Already gone; both statuses are awaited below.
+  before(async () => {
+    // Recorded as soon as each process starts, so `after` stops it even if
+    // a later replica never becomes ready.
+    for (const port of [await freePort(), await freePort()]) {
+      replicas.push(startReplica(port));
     }
-  }
-  await Promise.all([replicaA.status, replicaB.status]);
-}
+    for (const { baseUrl } of replicas) {
+      // Any answer proves the socket is bound; this path is deliberately unrouted.
+      await waitForHttp(`${baseUrl}/__ready`, { label: `Replica at ${baseUrl}` });
+    }
+  });
+
+  after(async () => {
+    streaming.abort();
+    const exitCodes = await Promise.all(replicas.map(({ host }) => stopHost(host)));
+    assert.deepEqual(exitCodes, [0, 0], 'a replica did not shut down cleanly');
+  });
+
+  it('delivers a message published on replica A to a subscriber on replica B', async () => {
+    const [publisher, subscriber] = replicas as [Replica, Replica];
+    const events = await fetch(`${subscriber.baseUrl}/events`, { signal: streaming.signal });
+    assert.ok(events.ok && events.body !== null, 'replica B did not open an SSE stream');
+    const delivered = readUntil(events.body, 'from-replica-a');
+
+    const published = await fetch(`${publisher.baseUrl}/publish`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'from-replica-a' }),
+    });
+    assert.equal(published.status, 204);
+
+    await Promise.race([
+      delivered,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Timed out waiting for replica B.')), 5_000).unref();
+      }),
+    ]);
+  });
+});

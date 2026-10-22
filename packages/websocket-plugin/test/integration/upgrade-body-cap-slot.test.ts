@@ -35,7 +35,8 @@ function RoutePlugin(): IPlugin {
     version: '0.0.0',
     dependencies: ['websocket'],
     register(ctx: IPluginContext): void {
-      ctx.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET)
+      ctx.services
+        .get<IWebSocketService>(CAPABILITIES.WEBSOCKET)
         .route('/ws', { onMessage: () => {} });
     },
   };

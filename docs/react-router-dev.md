@@ -57,12 +57,12 @@ The app then needs exactly one extra route: a proxy for the URLs Vite owns.
     "react": "19.3.0", // MUST resolve to the exact same version as react-dom
     "react-dom": "19.3.0",
     "react-router": "^8.4.0",
-    "isbot": "^5" // only with React Router's default server entry; see note below
+    "isbot": "^5", // only with React Router's default server entry; see note below
   },
   "devDependencies": {
     "@react-router/dev": "^8.4.0",
-    "vite": "^8.0.0"
-  }
+    "vite": "^8.0.0",
+  },
 }
 ```
 
@@ -129,38 +129,42 @@ const viteServer = await vite.createServer({
   logLevel: 'error',
   // Every @setu-ts package a route imports, resolved by Deno so the route and
   // this entry share one module instance (context keys are matched by identity).
-  plugins: [viteDevExternals({
-    packages: ['@setu-ts/common', '@setu-ts/react-router-plugin'],
-    resolve: (specifier) => import.meta.resolve(specifier),
-  })],
+  plugins: [
+    viteDevExternals({
+      packages: ['@setu-ts/common', '@setu-ts/react-router-plugin'],
+      resolve: (specifier) => import.meta.resolve(specifier),
+    }),
+  ],
 });
 await viteServer.listen();
 
 // Vite types a loaded module as Record<string, any>; this virtual module is
 // React Router's ServerBuild by contract.
 const loadServerBuild = async (): Promise<ServerBuild> =>
-  await viteServer.ssrLoadModule('virtual:react-router/server-build') as ServerBuild;
+  (await viteServer.ssrLoadModule('virtual:react-router/server-build')) as ServerBuild;
 
 const app = createApplication();
 app.register(RuntimePlugin());
-app.register(ReactRouterPlugin({
-  // Unused when loadRequestHandler is supplied, but the option is required —
-  // pass the virtual id so the health indicator reports something meaningful.
-  serverBuildPath: 'virtual:react-router/server-build',
-  mode: 'development',
-  // Omit assetsDir in dev: there is no build/client, and Vite serves the client graph.
-  loadRequestHandler: (_path, mode) => {
-    const handler = createRequestHandler(loadServerBuild, mode);
-    return Promise.resolve({
-      // The plugin supplies the instance returned by createLoadContext below.
-      // Its public handler type uses unknown so it can stay React Router-free.
-      handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
-      // Must come from the same react-router module as the handler — RR checks
-      // `context instanceof RouterContextProvider` nominally.
-      createLoadContext: () => new RouterContextProvider(),
-    });
-  },
-}));
+app.register(
+  ReactRouterPlugin({
+    // Unused when loadRequestHandler is supplied, but the option is required —
+    // pass the virtual id so the health indicator reports something meaningful.
+    serverBuildPath: 'virtual:react-router/server-build',
+    mode: 'development',
+    // Omit assetsDir in dev: there is no build/client, and Vite serves the client graph.
+    loadRequestHandler: (_path, mode) => {
+      const handler = createRequestHandler(loadServerBuild, mode);
+      return Promise.resolve({
+        // The plugin supplies the instance returned by createLoadContext below.
+        // Its public handler type uses unknown so it can stay React Router-free.
+        handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
+        // Must come from the same react-router module as the handler — RR checks
+        // `context instanceof RouterContextProvider` nominally.
+        createLoadContext: () => new RouterContextProvider(),
+      });
+    },
+  }),
+);
 ```
 
 Note the two halves of `SsrRuntime`. `createLoadContext` is not optional busywork: React Router 8
@@ -173,10 +177,9 @@ rationale.
 ```typescript
 app.router.get(`${BASE}*`, async (ctx) => {
   const url = new URL(ctx.request.url);
-  const upstream = await fetch(
-    `http://localhost:${VITE_PORT}${url.pathname}${url.search}`,
-    { headers: ctx.request.headers },
-  );
+  const upstream = await fetch(`http://localhost:${VITE_PORT}${url.pathname}${url.search}`, {
+    headers: ctx.request.headers,
+  });
 
   ctx.response.status(upstream.status);
   for (const [key, value] of upstream.headers.entries()) {
@@ -217,11 +220,13 @@ Nothing changes: build with `react-router build`, then register the plugin with 
 and let it use the default loader.
 
 ```typescript
-app.register(ReactRouterPlugin({
-  serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-  assetsDir: './build/client/assets',
-  mode: 'production',
-}));
+app.register(
+  ReactRouterPlugin({
+    serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+    assetsDir: './build/client/assets',
+    mode: 'production',
+  }),
+);
 ```
 
 Keep the dev-only Vite import and proxy route behind an environment check so neither reaches a

@@ -17,9 +17,10 @@ export function generateSse(
 ): readonly GeneratedFile[] {
   const classBased = generatorMode(options.plugins) === 'class-based';
   const seam = classBased ? CONTROLLERS_SEAM : FUNCTIONAL_CONTROLLERS_SEAM;
-  const hook = options.plugins.has('react-router-plugin') && options.plugins.has('sdk')
-    ? [{ path: `src/hooks/use-${names.kebab}.ts`, contents: renderHook(names) }]
-    : [];
+  const hook =
+    options.plugins.has('react-router-plugin') && options.plugins.has('sdk')
+      ? [{ path: `src/hooks/use-${names.kebab}.ts`, contents: renderHook(names) }]
+      : [];
   return [
     {
       path: `${HTTP_SEAM_DIR}/${names.kebab}.controller.ts`,

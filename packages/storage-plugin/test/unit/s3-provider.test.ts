@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any ban-unused-ignore require-await
+/* eslint-disable @typescript-eslint/no-explicit-any, require-await */
 /**
 
  * Tests for {@linkcode S3Provider}, {@linkcode adaptAwsS3Module},
@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PassThrough } from 'node:stream';
 import type { IS3Backend } from '../../src/interfaces/index.ts';
 import {
@@ -61,7 +61,6 @@ describe('adaptAwsS3Module', () => {
 
     // Create distinct command classes with proper constructor names for detection.
     function makeCommandClass(name: string) {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const C = class {
         input: Record<string, unknown>;
         constructor(input: Record<string, unknown>) {
@@ -81,7 +80,6 @@ describe('adaptAwsS3Module', () => {
       mod: {
         s3: {
           S3Client: class {
-            // deno-lint-ignore no-explicit-any
             send(cmd: any): Promise<unknown> {
               const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
               if (cmd.constructor.name === 'PutObjectCommand') {
@@ -172,7 +170,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(_cmd: any): Promise<unknown> {
             return Promise.resolve({});
           }
@@ -203,7 +200,6 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-explicit-any
         getSignedUrl(_client: any, _cmd: any, opts: { expiresIn?: number } | undefined) {
           receivedExpiresIn = opts?.expiresIn;
           return Promise.resolve('https://presigned.url?expires=9999');
@@ -219,7 +215,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(_cmd: any): Promise<unknown> {
             return Promise.resolve({});
           }
@@ -250,7 +245,6 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-explicit-any
         getSignedUrl() {
           return Promise.reject(new Error('PresignerUnavailable'));
         },
@@ -266,7 +260,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               // Return a Body shaped like AWS SDK v3 SdkStreamMixin.
@@ -306,7 +299,6 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-explicit-any
         getSignedUrl() {
           return Promise.resolve('https://presigned.url');
         },
@@ -322,7 +314,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               return Promise.resolve({
@@ -361,7 +352,6 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-explicit-any
         getSignedUrl() {
           return Promise.resolve('https://presigned.url');
         },
@@ -405,7 +395,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
             if (cmd.constructor.name === 'GetObjectCommand') {
@@ -461,7 +450,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'HeadObjectCommand') {
               const err = new Error('AuthError');
@@ -655,7 +643,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(_cmd: any): Promise<unknown> {
             return Promise.resolve({});
           }
@@ -686,7 +673,6 @@ describe('adaptAwsS3Module', () => {
         },
       },
       presigner: {
-        // deno-lint-ignore no-explicit-any
         getSignedUrl(_client: any, _cmd: any, _opts?: Record<string, unknown>) {
           throw new Error('presigner unavailable');
         },
@@ -712,7 +698,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
             if (cmd.constructor.name === 'GetObjectCommand') {
@@ -785,7 +770,6 @@ describe('adaptAwsS3Module', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             const input = cmd.input || (cmd as { input?: Record<string, unknown> }).input;
             if (cmd.constructor.name === 'GetObjectCommand') {
@@ -1033,7 +1017,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               // Return Body as array-like (not Uint8Array)
@@ -1082,7 +1065,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'DeleteObjectCommand') {
               return Promise.reject(new Error('network error'));
@@ -1130,7 +1112,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               // Reject with non-Error value — isS3NotFound won't catch it
@@ -1208,7 +1189,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               const err = new Error('NoSuchKey');
@@ -1258,7 +1238,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'HeadObjectCommand') {
               const err = new Error('NotFound');
@@ -1308,7 +1287,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               const err = new Error('AccessDenied');
@@ -1357,7 +1335,6 @@ describe('S3Provider', () => {
     const fakeMod = {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               const err = new Error('TimeoutError');
@@ -1412,7 +1389,6 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
     return {
       s3: {
         S3Client: class {
-          // deno-lint-ignore no-explicit-any
           send(cmd: any): Promise<unknown> {
             if (cmd.constructor.name === 'GetObjectCommand') {
               return Promise.resolve({ Body: getBody() });
@@ -1452,13 +1428,15 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
   it('wraps a node-shaped Body so cancel destroys it and a late chunk cannot throw', async () => {
     let transformCalled = false;
     const body = new PassThrough();
-    // deno-lint-ignore no-explicit-any
     (body as any).transformToWebStream = () => {
       transformCalled = true;
       return new ReadableStream();
     };
     body.on('error', () => {}); // pipeline-owned; a post-destroy write raises one
-    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const facade = adaptAwsS3Module(
+      sdkModuleReturning(() => body),
+      { bucket: 'b' },
+    );
     const stream = await facade.getStream('k');
     body.write(new Uint8Array([1, 2]));
     const reader = (stream as ReadableStream<Uint8Array>).getReader();
@@ -1484,8 +1462,40 @@ describe('adaptAwsS3Module getStream — SDK node-body wrapping', () => {
       },
     });
     const body = { transformToWebStream: () => adapted };
-    const facade = adaptAwsS3Module(sdkModuleReturning(() => body), { bucket: 'b' });
+    const facade = adaptAwsS3Module(
+      sdkModuleReturning(() => body),
+      { bucket: 'b' },
+    );
     const stream = await facade.getStream('k');
     expect(stream).toBe(adapted);
+  });
+});
+
+describe('loadAwsS3Module — the guarded imports (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when a package is absent', async () => {
+    const { loadAwsS3Module } = await import('../../src/providers/s3-provider.ts');
+    vi.doMock('@aws-sdk/client-s3', () => {
+      throw new Error('Cannot find package');
+    });
+    vi.doMock('@aws-sdk/s3-request-presigner', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAwsS3Module();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(['@aws-sdk/client-s3', '@aws-sdk/s3-request-presigner']).toContain(
+        loadError.dependency,
+      );
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-s3');
+      vi.doUnmock('@aws-sdk/s3-request-presigner');
+    }
   });
 });

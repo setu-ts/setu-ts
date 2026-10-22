@@ -86,8 +86,9 @@ describe('validation metadata brand', () => {
     const schema = acceptingSchema();
     const service: IValidationService = new ValidationService(defaultFormatter);
 
-    expect(validationMetadataOf(validateBody(schema)))
-      .toEqual(validationMetadataOf(service.middleware(schema, 'body')));
+    expect(validationMetadataOf(validateBody(schema))).toEqual(
+      validationMetadataOf(service.middleware(schema, 'body')),
+    );
   });
 
   it('does not change the short-circuit behaviour it brands', async () => {

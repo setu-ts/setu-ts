@@ -162,9 +162,9 @@ describe('within on a real kernel (M109b §3.3)', () => {
       expect(second.statusCode).toBe(200);
       expect(second.json<{ id: string }>().id).toBe('o-1');
 
-      const rows = await captured.database!.getRepository<Record<string, unknown>, EntityKey>(
-        'Orders',
-      ).findAll();
+      const rows = await captured
+        .database!.getRepository<Record<string, unknown>, EntityKey>('Orders')
+        .findAll();
       expect(rows).toHaveLength(1);
     } finally {
       await app.stop();

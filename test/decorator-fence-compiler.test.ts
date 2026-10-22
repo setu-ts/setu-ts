@@ -13,7 +13,7 @@
  * This test deterministically extracts every TypeScript fenced block from
  * `docs/decorators.md` that imports from `@setu-ts/`, writes each to a scratch
  * `.ts` file under `.tmp/decorator-fences/`, and invokes `deno check --config
- * test/fixtures/snippets/deno.json` on each. It depends only on committed files
+ * test/fixtures/snippets/tsconfig.json` on each. It depends only on committed files
  * (the guide, the snippet import map, and the workspace packages). On failure
  * it reports the fence index, the line number of its opening fence, and the
  * nearest preceding heading so a future broken fence is locatable.
@@ -24,13 +24,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { compileFence } from './fixtures/snippets/fence-engine.ts';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import { scanFences } from '../scripts/check-docs.ts';
 
 const GUIDE = 'docs/decorators.md';
-const SNIPPET_CONFIG = 'test/fixtures/snippets/deno.json';
 const SCRATCH_DIR = '.tmp/decorator-fences';
 
 /**
@@ -100,24 +101,10 @@ function importsFromSetuTs(code: string): boolean {
 /**
  * Invokes `deno check --config <config> <file>` and returns exit code + stderr.
  */
-async function denoCheck(
-  filePath: string,
-): Promise<{ code: number; stderr: string }> {
-  const cmd = new Deno.Command('deno', {
-    args: ['check', '--config', SNIPPET_CONFIG, filePath],
-    stdout: 'null',
-    stderr: 'piped',
-  });
-  const output = await cmd.output();
-  return {
-    code: output.code,
-    stderr: new TextDecoder().decode(output.stderr),
-  };
-}
 
 /** Reads the guide and returns the Setu-TS-importing fences. */
 async function setuTsFences(): Promise<Fence[]> {
-  const markdown = await Deno.readTextFile(GUIDE);
+  const markdown = await readFile(GUIDE, 'utf8');
   const all = extractFences(markdown);
   return all.filter((f) => importsFromSetuTs(f.code));
 }
@@ -126,12 +113,13 @@ describe('docs/decorators.md actual-fence compiler', () => {
   it('compiles every @setu-ts/-importing fence against the workspace', async () => {
     const setu = await setuTsFences();
     expect(setu.length).toBeGreaterThan(0);
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     const failures: string[] = [];
+    const compiler = {};
     for (const fence of setu) {
       const file = `${SCRATCH_DIR}/fence-${fence.index}-L${fence.line}.ts`;
-      await Deno.writeTextFile(file, fence.code);
-      const { code, stderr } = await denoCheck(file);
+      await writeFile(file, fence.code);
+      const { code, stderr } = await compileFence(file, compiler);
       if (code !== 0) {
         failures.push(
           `fence #${fence.index} at line ${fence.line} (heading: "${fence.heading}")` +
@@ -165,7 +153,7 @@ describe('docs/decorators.md actual-fence compiler', () => {
     // code blocks. They must not return. Prose may mention them to explain
     // NestJS differences; code blocks must not import or use them as Setu-TS
     // APIs.
-    const markdown = await Deno.readTextFile(GUIDE);
+    const markdown = await readFile(GUIDE, 'utf8');
     const all = extractFences(markdown);
     const setuTsCode = all
       .filter((f) => f.lang === 'typescript')

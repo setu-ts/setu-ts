@@ -1,45 +1,33 @@
-const output = await new Deno.Command('deno', {
-  args: ['compile', '--allow-net', '--allow-env', '--output', '../../.tmp/hono-example', 'main.ts'],
-  stdout: 'inherit',
-  stderr: 'inherit',
-}).output();
-if (!output.success) {
-  throw new Error('deno compile did not produce the example binary.');
-}
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { run } from '../../scripts/lib/run.ts';
+import { freePort, startHost, stopHost, waitForHttp } from '../smoke-helpers.ts';
+import type { Host } from '../smoke-helpers.ts';
 
-function unusedPort(): number {
-  const listener = Deno.listen({ hostname: '127.0.0.1', port: 0 });
-  const address = listener.addr;
-  listener.close();
-  if (!('port' in address)) throw new Error('Expected a TCP listener.');
-  return address.port;
-}
+const BINARY = fileURLToPath(new URL('../../.tmp/compiled-binary/server', import.meta.url));
 
-const port = unusedPort();
-const server = new Deno.Command('.tmp/hono-example', {
-  cwd: '../..',
-  stdout: 'piped',
-  stderr: 'piped',
-  args: [String(port)],
-}).spawn();
-let cleanupError: unknown;
-try {
-  await new Promise((resolve) => setTimeout(resolve, 300));
-  const response = await fetch(`http://127.0.0.1:${port}/health`);
-  if (!response.ok || (await response.json() as { status: string }).status !== 'ok') {
-    throw new Error('The compiled binary did not serve GET /health.');
-  }
-} finally {
-  try {
-    server.kill('SIGTERM');
-  } catch (error) {
-    if (!(error instanceof TypeError) || error.message !== 'Child process has already terminated') {
-      cleanupError = error;
-    }
-  }
-  await server.status;
-}
+describe('compiled-binary example', () => {
+  let server: Host;
+  let baseUrl: string;
 
-if (cleanupError !== undefined) {
-  throw cleanupError;
-}
+  before(async () => {
+    const built = await run('pnpm', ['run', 'build:sea'], { inherit: true });
+    assert.equal(built.code, 0, 'the single-executable build failed');
+    const port = await freePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    server = startHost(BINARY, [String(port)]);
+    await waitForHttp(`${baseUrl}/health`, { label: 'The compiled executable' });
+  });
+
+  after(async () => {
+    assert.equal(await stopHost(server), 0, 'the executable did not shut down cleanly');
+  });
+
+  it('serves /health from the standalone executable', async () => {
+    const response = await fetch(`${baseUrl}/health`);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { status: 'ok' });
+  });
+});

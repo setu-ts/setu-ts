@@ -12,6 +12,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type {
   CursorPayload,
   EntityKey,
@@ -237,23 +239,14 @@ function duplicatesKey(
   return findRecordIndexForRecords(records, store, recordKey(store, record)) !== -1;
 }
 
-/**
- * Whether an update payload would change the row's primary key. A key is
- * immutable here (MongoDB's `_id` rule): a key rewritten onto another row's
- * key would recreate exactly the duplicate {@linkcode duplicatesKey} refuses.
- * Restating the same value is allowed.
- */
-function changesKey(
+/** Preserve stored key types even when a route string and body number compare equal. */
+function withoutKey(
   store: EntityStore,
-  row: Record<string, unknown>,
-  data: Partial<Record<string, unknown>>,
-): boolean {
-  return store.primaryKey.some((col) => col in data && data[col] !== row[col]);
-}
-
-/** The refusal for an update that would change a primary key. */
-function immutableKeyError(entity: string): Error {
-  return new Error(`Entity '${entity}': an update cannot change the primary key`);
+  data: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(data).filter(([column]) => !store.primaryKey.includes(column)),
+  );
 }
 
 /** The refusal for a duplicate primary key; never echoes the key's value. */
@@ -326,7 +319,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * every third-party implementor reading this as the reference, the one
    * pattern that makes a liveness probe lie.
    */
-  // deno-lint-ignore require-await -- reads synchronous lifecycle state
+  // eslint-disable-next-line require-await -- reads synchronous lifecycle state
   async isHealthy(): Promise<boolean> {
     return this.isReady();
   }
@@ -346,7 +339,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const exclusive = options?.isolation === 'serializable';
     const generation = this._transactionGeneration;
     return this.acquireTransactionSlot(exclusive, generation).then((release) =>
-      this.createTransaction(release, generation)
+      this.createTransaction(release, generation),
     );
   }
 
@@ -513,7 +506,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       this._activeExclusiveTransaction ||
       this._activeSharedTransactions > 0 ||
       this._transactionAdmissions.length === 0
-    ) return;
+    )
+      return;
 
     const first = this._transactionAdmissions.shift();
     if (first === undefined) return;
@@ -571,8 +565,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
     /** The index in `overlay.creates` of this entity's buffered row keyed `id`, or `-1`. */
     const bufferedCreateIndex = (id: EntityKey): number => {
       const store = this.getStore(entity);
-      return overlay.creates.findIndex((c) =>
-        c.entity === entity && findRecordIndexForRecords([c.record], store, id) === 0
+      return overlay.creates.findIndex(
+        (c) => c.entity === entity && findRecordIndexForRecords([c.record], store, id) === 0,
       );
     };
 
@@ -630,9 +624,12 @@ export class MemoryAdapter implements IDatabaseAdapter {
         return Promise.resolve({ ...record });
       },
 
-      update: (id, data) => {
+      // eslint-disable-next-line require-await -- atomic memory mutation; validation errors must reject.
+      update: async (id, data) => {
         assertActiveGeneration();
         const store = this.getStore(entity);
+        data = { ...data };
+        assertPrimaryKeyUnchanged(entity, store.primaryKey, id, data);
         // Find in effective records
         const effective = effectiveRecords();
         const targetIndex = findRecordIndexForRecords(effective, store, id);
@@ -640,19 +637,17 @@ export class MemoryAdapter implements IDatabaseAdapter {
           return Promise.reject(new Error(`Entity '${entity}' with id not found`));
         }
         const target = effective[targetIndex];
-        if (changesKey(store, target, data)) {
-          return Promise.reject(immutableKeyError(entity));
-        }
-        const newRecord = { ...target, ...data };
+        const newRecord = { ...target, ...withoutKey(store, data) };
         const buffered = bufferedCreateIndex(id);
         if (buffered !== -1) {
           // A row this transaction created is edited in place, never shadowed.
           overlay.creates[buffered] = { entity, record: newRecord };
         } else {
-          overlay.shadows.set(
-            overlayKey(entity, id, store.primaryKey),
-            { entity, id, record: newRecord },
-          );
+          overlay.shadows.set(overlayKey(entity, id, store.primaryKey), {
+            entity,
+            id,
+            record: newRecord,
+          });
         }
         return Promise.resolve({ ...newRecord });
       },
@@ -706,7 +701,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       create: (data) => this.insertEntity(entity, data),
       update: (id, data) => this.updateEntity(entity, id, data),
       delete: (id) => this.deleteEntity(entity, id),
-      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      // eslint-disable-next-line require-await -- atomic store mutation; errors must reject.
       updateWhere: async (id, where, data) => {
         const checked = checkWritePrecondition(where, data);
         if (!checked.ok) {
@@ -715,15 +710,15 @@ export class MemoryAdapter implements IDatabaseAdapter {
         where = checked.where;
         data = checked.data;
         const store = this.getStore(entity);
+        assertPrimaryKeyUnchanged(entity, store.primaryKey, id, data);
         const index = findRecordIndex(store, id);
         if (index === -1 || !matchesWhere(store.records[index], where)) return null;
         // No await between lookup, predicate and write: the committed store is
         // changed in one synchronous turn, including the key-immutability check.
-        if (changesKey(store, store.records[index], data)) throw immutableKeyError(entity);
-        store.records[index] = { ...store.records[index], ...data };
+        store.records[index] = { ...store.records[index], ...withoutKey(store, data) };
         return { ...store.records[index] };
       },
-      // deno-lint-ignore require-await -- atomic store mutation; errors must reject.
+      // eslint-disable-next-line require-await -- atomic store mutation; errors must reject.
       deleteWhere: async (id, where) => {
         const checked = checkWritePrecondition(where);
         if (!checked.ok) {
@@ -766,10 +761,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @param query - Normalized query options
    * @returns Matching entities
    */
-  queryEntities(
-    entity: string,
-    query: NormalizedQuery,
-  ): Promise<Record<string, unknown>[]> {
+  queryEntities(entity: string, query: NormalizedQuery): Promise<Record<string, unknown>[]> {
     const store = this.getStore(entity);
     const columnError = unknownColumnError(entity, store.records, query);
     if (columnError) return Promise.reject(columnError);
@@ -810,10 +802,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @param id - Primary key value (scalar or composite record)
    * @returns The entity or `null`
    */
-  findEntityById(
-    entity: string,
-    id: EntityKey,
-  ): Promise<Record<string, unknown> | null> {
+  findEntityById(entity: string, id: EntityKey): Promise<Record<string, unknown> | null> {
     const store = this.getStore(entity);
     const idx = findRecordIndex(store, id);
     if (idx === -1) return Promise.resolve(null);
@@ -856,20 +845,20 @@ export class MemoryAdapter implements IDatabaseAdapter {
    * @returns The updated entity
    * @throws {Error} If the entity does not exist
    */
-  updateEntity(
+  // eslint-disable-next-line require-await -- atomic memory mutation; validation errors must reject.
+  async updateEntity(
     entity: string,
     id: EntityKey,
     data: Partial<Record<string, unknown>>,
   ): Promise<Record<string, unknown>> {
     const store = this.getStore(entity);
+    data = { ...data };
+    assertPrimaryKeyUnchanged(entity, store.primaryKey, id, data);
     const index = findRecordIndex(store, id);
     if (index === -1) {
       return Promise.reject(new Error(`Entity '${entity}' with id not found`));
     }
-    if (changesKey(store, store.records[index], data)) {
-      return Promise.reject(immutableKeyError(entity));
-    }
-    store.records[index] = { ...store.records[index], ...data };
+    store.records[index] = { ...store.records[index], ...withoutKey(store, data) };
     return Promise.resolve({ ...store.records[index] });
   }
 
@@ -905,8 +894,8 @@ export class MemoryAdapter implements IDatabaseAdapter {
       return Promise.resolve(store.records.length);
     }
     return Promise.resolve(
-      store.records.filter((row) =>
-        matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter))
+      store.records.filter(
+        (row) => matchesWhere(row, where) && (filter === undefined || matchesFilter(row, filter)),
       ).length,
     );
   }
@@ -960,11 +949,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
       decoded = decodeCursor(query.cursor);
       if (decoded === null) {
         return Promise.reject(
-          new UnsupportedQueryFeatureError(
-            'cursor-pagination',
-            'memory',
-            `entity '${entity}': malformed cursor token`,
-          ),
+          new InvalidCursorError(`Entity '${entity}': malformed cursor token.`),
         );
       }
     }
@@ -974,12 +959,16 @@ export class MemoryAdapter implements IDatabaseAdapter {
     const fingerprint = sortFingerprint(query.orderBy);
     if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
       return Promise.reject(
-        new UnsupportedQueryFeatureError(
-          'cursor-pagination',
-          'memory',
-          `entity '${entity}': cursor fingerprint mismatch — expected '${fingerprint}', ` +
-            `got '${decoded.sortFingerprint}'`,
-        ),
+        new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),
+      );
+    }
+    if (
+      decoded !== null &&
+      (decoded.keyValues.length !== this.getStore(entity).primaryKey.length ||
+        decoded.orderedValues.length !== Object.keys(query.orderBy).length)
+    ) {
+      return Promise.reject(
+        new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`),
       );
     }
 
@@ -1043,9 +1032,10 @@ export class MemoryAdapter implements IDatabaseAdapter {
     );
 
     return Promise.resolve({
-      rows: query.select.length > 0
-        ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
-        : pageRows.map((r) => ({ ...r })),
+      rows:
+        query.select.length > 0
+          ? pageRows.map((r) => projectFields(r, query.select) as Record<string, unknown>)
+          : pageRows.map((r) => ({ ...r })),
       nextCursor,
     });
   }

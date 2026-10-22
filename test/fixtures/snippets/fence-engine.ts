@@ -14,7 +14,7 @@
  * explicit classification:
  *
  *   - **compile-complete** — standalone Setu-TS code, extracted and
- *     `deno check`ed directly.
+ *     checked through the TypeScript compiler API directly.
  *   - **compile-fragment** — a Setu-TS fragment compiled using a deterministic,
  *     committed prelude that supplies only surrounding declarations/types and
  *     never masks API errors. The prelude imports real exported types and uses
@@ -35,10 +35,15 @@
  *
  * The engine reuses [`scanFences`](../../scripts/check-docs.ts) so fence
  * tracking is CommonMark-faithful, and compiles from a committed-only clean
- * checkout (the snippet import map at `test/fixtures/snippets/deno.json`).
+ * checkout (the snippet import map at `test/fixtures/snippets/tsconfig.json`).
  *
  * @module
  */
+
+import ts from 'typescript';
+import { Worker } from 'node:worker_threads';
+import { resolve } from 'node:path';
+import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import { scanFences } from '../../../scripts/check-docs.ts';
 
 /**
@@ -54,10 +59,10 @@ import { scanFences } from '../../../scripts/check-docs.ts';
 export const TS_ALIASES = new Set(['typescript', 'ts', 'tsx', 'jsx']);
 
 /**
- * The file extension a fence must be written to before `deno check` sees it.
+ * The file extension a fence must be written to before the compiler sees it.
  *
  * `.tsx` for a JSX fence, `.ts` otherwise. Load-bearing rather than cosmetic:
- * Deno decides whether to PARSE JSX from the extension, so a fence carrying
+ * The compiler decides whether to parse JSX from the extension, so a fence carrying
  * real JSX written to `.ts` dies with `SyntaxError: Expected ',', got '.'`
  * before type-checking begins. Both fence compilers hardcoded `.ts`, which
  * held only because every `tsx` fence in the corpus happened to contain no JSX
@@ -74,7 +79,7 @@ export function fenceExtension(lang: string): 'ts' | 'tsx' {
   return lang === 'tsx' || lang === 'jsx' ? 'tsx' : 'ts';
 }
 
-/** The thirteen curated guides whose copyable fences must compile or be classified. */
+/** The fourteen curated guides whose copyable fences must compile or be classified. */
 export const GUIDES = [
   'docs/getting-started.md',
   'docs/programmatic-api.md',
@@ -89,17 +94,15 @@ export const GUIDES = [
   'docs/migration-nestjs.md',
   'docs/runtime-deployment.md',
   'docs/authorization.md',
+  'docs/webhooks.md',
 ] as const;
 
-/** The committed snippet import map used for all fence compilation. */
-export const SNIPPET_CONFIG = 'test/fixtures/snippets/deno.json';
+/** The committed snippet compiler configuration used for all fence compilation. */
+export const SNIPPET_CONFIG = 'test/fixtures/snippets/tsconfig.json';
 
 /** The four explicit classifications a TypeScript/TSX fence may receive. */
 export type Classification =
-  | 'compile-complete'
-  | 'compile-fragment'
-  | 'external-source'
-  | 'non-runnable-pseudocode';
+  'compile-complete' | 'compile-fragment' | 'external-source' | 'non-runnable-pseudocode';
 
 /** The classification of a non-TypeScript fence (not subject to compilation). */
 export type SkipClassification = 'skip';
@@ -557,8 +560,7 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
  * Reports whether a fence imports from a `@setu-ts/` package.
  */
 export function importsFromSetuTs(code: string): boolean {
-  return /from\s+['"]@setu-ts\//.test(code) ||
-    /import\s+['"]@setu-ts\//.test(code);
+  return /from\s+['"]@setu-ts\//.test(code) || /import\s+['"]@setu-ts\//.test(code);
 }
 
 /**
@@ -693,11 +695,7 @@ function isPseudocodeAllowed(guide: string, line: number): boolean {
  * external-source. The migration guides pair every `### NestJS`/`### Fastify`
  * heading with a `### Setu-TS` counterpart; the Setu-TS side is compiled.
  */
-const EXTERNAL_HEADINGS = new Set([
-  '### NestJS',
-  '### NestJS (TypeORM)',
-  '### Fastify',
-]);
+const EXTERNAL_HEADINGS = new Set(['### NestJS', '### NestJS (TypeORM)', '### Fastify']);
 
 /**
  * Classifies a fence per the explicit policy. See the module doc for the four
@@ -743,8 +741,8 @@ export function classify(fence: Fence): ClassifiedFence {
   // 2. A TS fence that does NOT import @setu-ts/.
   //    Pseudocode allow-list (last resort, reviewed against source).
   if (isPseudocodeAllowed(fence.guide, fence.line)) {
-    const entry = PSEUDOCODE_ALLOWLIST.find((e) =>
-      e.guide === fence.guide && e.line === fence.line
+    const entry = PSEUDOCODE_ALLOWLIST.find(
+      (e) => e.guide === fence.guide && e.line === fence.line,
     )!;
     return {
       fence,
@@ -799,10 +797,7 @@ export function classify(fence: Fence): ClassifiedFence {
  * (the function is pure and the set of globals is closed). The id is the sorted
  * globals joined by `+`, with a `rel` suffix when a relative import is present.
  */
-function wrapperIdFor(
-  globals: readonly string[],
-  hasRelativeImport: boolean,
-): string {
+function wrapperIdFor(globals: readonly string[], hasRelativeImport: boolean): string {
   const sorted = [...globals].sort();
   const base = sorted.length === 0 ? 'none' : sorted.join('+');
   return hasRelativeImport ? `${base}+rel` : base;
@@ -828,8 +823,7 @@ function wrapperIdFor(
  * @returns The interface name to declare `app` as
  */
 export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' {
-  return /\bapp\.(?:inject|unregister|hasPlugin)\b/.test(code) ||
-      /\binject\s*\(\s*app\b/.test(code)
+  return /\bapp\.(?:inject|unregister|hasPlugin)\b/.test(code) || /\binject\s*\(\s*app\b/.test(code)
     ? 'IKernelApplication'
     : 'IApplication';
 }
@@ -853,16 +847,14 @@ export function appTypeFor(code: string): 'IApplication' | 'IKernelApplication' 
  */
 export async function writeProjectStubs(scratchDir: string): Promise<void> {
   const parent = scratchDir.replace(/\/[^/]+$/, '');
-  await Deno.mkdir(scratchDir, { recursive: true });
-  const source = "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
+  await mkdir(scratchDir, { recursive: true });
+  const source =
+    "import { createApplication, type IKernelApplication } from '@setu-ts/kernel';\n" +
     'export function createApp(): IKernelApplication {\n' +
     '  return createApplication({ plugins: [] });\n' +
     '}\n';
-  await Deno.writeTextFile(
-    `${parent}/setu.config.ts`,
-    source,
-  );
-  await Deno.writeTextFile(`${scratchDir}/setu.config.ts`, source);
+  await writeFile(`${parent}/setu.config.ts`, source);
+  await writeFile(`${scratchDir}/setu.config.ts`, source);
 }
 
 /**
@@ -907,7 +899,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     // import — that would be "Import declaration conflicts with local
     // declaration").
     if (
-      TYPE_EXPORTS[name] !== undefined && !importsIdentifier(code, name) &&
+      TYPE_EXPORTS[name] !== undefined &&
+      !importsIdentifier(code, name) &&
       !fenceDeclares(name)
     ) {
       typeNames.add(name);
@@ -919,10 +912,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // globals (they're not in FRAGMENT_GLOBALS but are still real type imports).
   for (const name of Object.keys(TYPE_EXPORTS)) {
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (
-      wordRe.test(code) && !importsIdentifier(code, name) &&
-      !fenceDeclares(name)
-    ) {
+    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
       typeNames.add(name);
     }
   }
@@ -945,7 +935,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // declare the global itself — a fence that declares `const app` provides its
   // own type and needs no prelude `app`).
   if (
-    present.has('app') && !fenceDeclares('app') &&
+    present.has('app') &&
+    !fenceDeclares('app') &&
     // Only the SELECTED type is suppressed. Testing both meant a fence that
     // imports `IApplication` for its own use while calling `app.inject` had
     // its `IKernelApplication` import dropped, leaving the declaration below
@@ -956,11 +947,9 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   }
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     const pluginUse =
-      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
-        .test(
-          code,
-        ) ||
-      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/.test(
+        code,
+      ) || /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
     if (pluginUse) {
       if (!importsIdentifier(code, 'IPluginContext')) {
         typeNames.add('IPluginContext');
@@ -970,7 +959,8 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     }
   }
   if (
-    present.has('platform') && !fenceDeclares('platform') &&
+    present.has('platform') &&
+    !fenceDeclares('platform') &&
     !importsIdentifier(code, 'RuntimePlatform')
   ) {
     typeNames.add('RuntimePlatform');
@@ -1013,10 +1003,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
     }
     if (dominated) continue;
     const wordRe = new RegExp(`\\b${name}\\b`);
-    if (
-      wordRe.test(code) && !importsIdentifier(code, name) &&
-      !fenceDeclares(name)
-    ) {
+    if (wordRe.test(code) && !importsIdentifier(code, name) && !fenceDeclares(name)) {
       const pkg = VALUE_EXPORTS[name]!;
       const list = valByPkg.get(pkg) ?? [];
       list.push(name);
@@ -1041,14 +1028,10 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // against the real callback signature.
   if (present.has('ctx') && !fenceDeclares('ctx')) {
     const pluginUse =
-      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/
-        .test(
-          code,
-        ) ||
-      /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
-    lines.push(
-      `declare const ctx: ${pluginUse ? 'IPluginContext' : 'IRequestContext'};`,
-    );
+      /\bctx\.(?:lifecycle|health|router|middleware|runtime|environment|metrics|openapi|decorators|cli|config|logger|metadata|container|options|app)\b/.test(
+        code,
+      ) || /\bctx\.services\.(?:register|registerFactory|unregister)\b/.test(code);
+    lines.push(`declare const ctx: ${pluginUse ? 'IPluginContext' : 'IRequestContext'};`);
   }
   // `platform` — a RuntimePlatform value.
   if (present.has('platform') && !fenceDeclares('platform')) {
@@ -1061,22 +1044,16 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   // Test-harness globals (describe/it/expect) — the snippet import map does
   // not resolve @std/testing, so declare minimal signatures.
   if (present.has('describe')) {
-    lines.push(
-      'declare function describe(name: string, fn: () => void | Promise<void>): void;',
-    );
+    lines.push('declare function describe(name: string, fn: () => void | Promise<void>): void;');
   }
   if (present.has('it')) {
-    lines.push(
-      'declare function it(name: string, fn: () => void | Promise<void>): void;',
-    );
+    lines.push('declare function it(name: string, fn: () => void | Promise<void>): void;');
   }
   // The lifecycle hooks, which a fixture-management example reaches for as
   // readily as `describe`/`it` — same reason, same shape.
   for (const hook of ['beforeEach', 'afterEach', 'beforeAll', 'afterAll']) {
     if (present.has(hook)) {
-      lines.push(
-        `declare function ${hook}(fn: () => void | Promise<void>): void;`,
-      );
+      lines.push(`declare function ${hook}(fn: () => void | Promise<void>): void;`);
     }
   }
   if (present.has('expect')) {
@@ -1107,10 +1084,7 @@ export function buildPrelude(globals: readonly string[], code: string): string {
  * redeclares a name the fence defines and never re-imports a symbol the fence
  * already imports.
  */
-export function assembleSource(
-  fence: Fence,
-  classified: ClassifiedFence,
-): string {
+export function assembleSource(fence: Fence, classified: ClassifiedFence): string {
   if (classified.kind === 'compile-complete') return fence.code;
   if (classified.kind !== 'compile-fragment') return fence.code;
   const globals = referencesFragmentGlobal(fence.code);
@@ -1119,21 +1093,111 @@ export function assembleSource(
 }
 
 /**
- * Invokes `deno check --config <config> <file>` and returns exit code + stderr.
+ * Compiles one fence with the shared strict options. A caller-owned context reuses
+ * unchanged dependency diagnostics across an inventory; each fence gets its own program.
+ * Changed source versions invalidate TypeScript's cache, including negative controls.
  */
-export async function denoCheck(
+export async function compileFenceInProcess(
   filePath: string,
+  context: { builder?: ts.SemanticDiagnosticsBuilderProgram } = {},
 ): Promise<{ code: number; stderr: string }> {
-  const cmd = new Deno.Command('deno', {
-    args: ['check', '--config', SNIPPET_CONFIG, filePath],
-    stdout: 'null',
-    stderr: 'piped',
-  });
-  const output = await cmd.output();
-  return {
-    code: output.code,
-    stderr: new TextDecoder().decode(output.stderr),
+  const input = normaliseFenceSpecifiers(await readFile(filePath, 'utf8'));
+  const config = ts.readConfigFile(SNIPPET_CONFIG, ts.sys.readFile);
+  if (config.error)
+    return { code: 1, stderr: ts.flattenDiagnosticMessageText(config.error.messageText, '\n') };
+  const parsed = ts.parseJsonConfigFileContent(config.config, ts.sys, 'test/fixtures/snippets');
+  const options = parsed.options;
+  const host = ts.createIncrementalCompilerHost(options);
+  const read = host.readFile.bind(host);
+  host.readFile = (file) => {
+    return resolve(file) === resolve(filePath) ? input : read(file);
   };
+  const program = ts.createProgram([filePath], options, host, context.builder?.getProgram());
+  const builder = ts.createSemanticDiagnosticsBuilderProgram(program, host, context.builder);
+  context.builder = builder;
+  const diagnostics = [
+    ...parsed.errors,
+    ...program.getOptionsDiagnostics(),
+    ...program.getGlobalDiagnostics(),
+    ...builder.getSyntacticDiagnostics(),
+    ...builder.getSemanticDiagnostics(),
+  ].filter((diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error);
+  return {
+    code: diagnostics.length ? 1 : 0,
+    stderr: ts.formatDiagnostics(diagnostics, {
+      getCanonicalFileName: (f) => f,
+      getCurrentDirectory: () => process.cwd(),
+      getNewLine: () => '\n',
+    }),
+  };
+}
+
+/**
+ * One compiler thread per caller-owned inventory keeps the unmeasured TypeScript
+ * engine outside the test profiler. Every request still creates its own program,
+ * and the thread caches only unchanged dependency diagnostics. Standalone requests
+ * terminate their thread; inventory threads are unreferenced between requests.
+ */
+export async function compileFence(
+  filePath: string,
+  context?: { worker?: Worker },
+): Promise<{ code: number; stderr: string }> {
+  const worker =
+    context?.worker ??
+    new Worker(new URL('./compiler-worker.ts', import.meta.url), { env: {}, execArgv: [] });
+  if (context) context.worker = worker;
+  worker.ref();
+  try {
+    return await new Promise((resolve, reject) => {
+      const onError = (error: Error): void => {
+        worker.off('message', onMessage);
+        reject(error);
+      };
+      const onMessage = (result: { code: number; stderr: string } | { error: string }): void => {
+        worker.off('error', onError);
+        if ('error' in result) reject(new Error(result.error));
+        else resolve(result);
+      };
+      worker.once('error', onError);
+      worker.once('message', onMessage);
+      worker.postMessage(filePath);
+    });
+  } finally {
+    if (context) worker.unref();
+    else await worker.terminate();
+  }
+}
+
+/** Rewrite only module specifiers, leaving prose strings and comments untouched. */
+export function normaliseFenceSpecifiers(source: string): string {
+  const sf = ts.createSourceFile(
+    'fence.tsx',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX,
+  );
+  const edits: { start: number; end: number; text: string }[] = [];
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isStringLiteral(node) &&
+      (((ts.isImportDeclaration(node.parent) || ts.isExportDeclaration(node.parent)) &&
+        node.parent.moduleSpecifier === node) ||
+        (ts.isCallExpression(node.parent) &&
+          node.parent.expression.kind === ts.SyntaxKind.ImportKeyword) ||
+        (ts.isLiteralTypeNode(node.parent) && ts.isImportTypeNode(node.parent.parent)))
+    ) {
+      let value = node.text;
+      value = value.replace(/^@hono\/hono(?=\/|$)/, 'hono');
+      if (value !== node.text)
+        edits.push({ start: node.getStart(sf) + 1, end: node.getEnd() - 1, text: value });
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  for (const edit of edits.sort((a, b) => b.start - a.start))
+    source = source.slice(0, edit.start) + edit.text + source.slice(edit.end);
+  return source;
 }
 
 /**
@@ -1142,7 +1206,7 @@ export async function denoCheck(
 export async function allFences(): Promise<readonly ClassifiedFence[]> {
   const out: ClassifiedFence[] = [];
   for (const guide of GUIDES) {
-    const markdown = await Deno.readTextFile(guide);
+    const markdown = await readFile(guide, 'utf8');
     for (const fence of extractFences(guide, markdown)) {
       out.push(classify(fence));
     }

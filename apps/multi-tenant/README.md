@@ -4,9 +4,8 @@ The `MultiTenancyPlugin` resolves a tenant from `x-tenant-id`; its memory store 
 tenant's notes.
 
 ```bash
-cd apps/multi-tenant
-deno task start
-deno task smoke
+pnpm --dir apps/multi-tenant run start
+pnpm --dir apps/multi-tenant run smoke
 ```
 
 The smoke check proves that tenant B cannot read tenant A's write.

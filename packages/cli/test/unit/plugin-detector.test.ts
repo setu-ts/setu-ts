@@ -7,7 +7,7 @@ describe('detectPlugins', () => {
     const fs = createFakeFs({
       '/app/deno.jsonc': '{ "imports": { // plugin\n "@setu-ts/auth-plugin": "jsr:x", }, }',
     });
-    expect([...await detectPlugins(fs, '/app')]).toEqual(['auth-plugin']);
+    expect([...(await detectPlugins(fs, '/app'))]).toEqual(['auth-plugin']);
   });
   it('reads the imports map of a Deno project', async () => {
     const fs = createFakeFs({
@@ -41,7 +41,7 @@ describe('detectPlugins', () => {
         dependencies: { '@setu-ts/cqrs-plugin': '*' },
       }),
     });
-    expect([...await detectPlugins(fs, '/app')]).toEqual(['cqrs-plugin']);
+    expect([...(await detectPlugins(fs, '/app'))]).toEqual(['cqrs-plugin']);
   });
 
   it('returns an empty set when neither manifest exists', async () => {
@@ -81,6 +81,6 @@ describe('detectPlugins', () => {
         },
       }),
     });
-    expect([...await detectPlugins(fs, '/app')]).toEqual(['cache-plugin']);
+    expect([...(await detectPlugins(fs, '/app'))]).toEqual(['cache-plugin']);
   });
 });

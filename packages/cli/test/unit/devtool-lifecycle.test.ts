@@ -23,8 +23,7 @@ const diagnostics =
   '...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {})';
 const signature =
   'devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions }';
-const config =
-  `export function createApp(${signature}) { return createApplication({ plugins: [${plugins}], ${diagnostics} }); }`;
+const config = `export function createApp(${signature}) { return createApplication({ plugins: [${plugins}], ${diagnostics} }); }`;
 const manifest: WorkspaceManifest = {
   version: 1,
   basePort: 5869,
@@ -135,8 +134,9 @@ describe('M101f lifecycle refusals and allocation', () => {
         cwd: '/',
       }),
     ).toBe(0);
-    expect(await runAppCommand(parseArgs(['app', 'orders', '--devtool']), { ...deps, dir: '/ws' }))
-      .toBe(0);
+    expect(
+      await runAppCommand(parseArgs(['app', 'orders', '--devtool']), { ...deps, dir: '/ws' }),
+    ).toBe(0);
     const before = fs.writes.length;
     const log = createRecorder();
     expect(
@@ -172,18 +172,17 @@ describe('M101f lifecycle refusals and allocation', () => {
       allocateDevtoolPort({ ...manifest, members: [{ name: 'a', port: 1, devtoolPort: 6005 }] }),
     ).toBe(6006);
     expect(
-      devtoolRangeStart(
-        { ...manifest, devtoolBasePort: undefined } as unknown as WorkspaceManifest,
-      ),
+      devtoolRangeStart({
+        ...manifest,
+        devtoolBasePort: undefined,
+      } as unknown as WorkspaceManifest),
     ).toBe(6869);
     expect(
-      devtoolRangeStart(
-        {
-          ...manifest,
-          basePort: 65530,
-          devtoolBasePort: undefined,
-        } as unknown as WorkspaceManifest,
-      ),
+      devtoolRangeStart({
+        ...manifest,
+        basePort: 65530,
+        devtoolBasePort: undefined,
+      } as unknown as WorkspaceManifest),
     ).toBe(65535);
     expect(
       allocateDevtoolPort({
@@ -213,9 +212,10 @@ describe('M101f lifecycle refusals and allocation', () => {
         '/ws/apps/orders/deno.json': JSON.stringify({
           tasks: { start: 'deno run -A main.ts' },
           imports: Object.fromEntries(
-            ['common', 'kernel', 'runtime'].map((
-              name,
-            ) => [`@setu-ts/${name}`, `npm:@setu-ts/${name}@^0.7.0`]),
+            ['common', 'kernel', 'runtime'].map((name) => [
+              `@setu-ts/${name}`,
+              `npm:@setu-ts/${name}@^0.7.0`,
+            ]),
           ),
         }),
       });
@@ -237,16 +237,17 @@ describe('M101f lifecycle refusals and allocation', () => {
   });
 
   it('names Node, Bun and Workers before looking for a Deno project', async () => {
-    for (
-      const [runtime, files] of [
-        ['node', { '/ws/package.json': '{"scripts":{"start":"node main.ts"}}' }],
-        ['bun', { '/ws/package.json': '{"scripts":{"start":"bun main.ts"}}' }],
-        ['cloudflare-workers', {
+    for (const [runtime, files] of [
+      ['node', { '/ws/package.json': '{"scripts":{"start":"node main.ts"}}' }],
+      ['bun', { '/ws/package.json': '{"scripts":{"start":"bun main.ts"}}' }],
+      [
+        'cloudflare-workers',
+        {
           '/ws/wrangler.jsonc': '{}',
           '/ws/deno.json': '{"tasks":{"start":"deno serve main.ts"}}',
-        }],
-      ] as const
-    ) {
+        },
+      ],
+    ] as const) {
       const fs = createFakeFs(files);
       const error = createRecorder();
       expect(
@@ -375,13 +376,16 @@ describe('M101f lifecycle refusals and allocation', () => {
         cwd: '/',
       }),
     ).toBe(0);
-    for (
-      const argv of [['app', 'alpha', '--devtool'], ['app', 'beta'], ['app', 'gamma', '--devtool']]
-    ) {
+    for (const argv of [
+      ['app', 'alpha', '--devtool'],
+      ['app', 'beta'],
+      ['app', 'gamma', '--devtool'],
+    ]) {
       expect(await runAppCommand(parseArgs(argv), { ...deps, dir: '/ws' })).toBe(0);
     }
-    const members = (JSON.parse(fs.read('/ws/setu.workspace.json')) as WorkspaceManifest).members
-      .map((member) => [member.name, member.port, member.devtoolPort]);
+    const members = (
+      JSON.parse(fs.read('/ws/setu.workspace.json')) as WorkspaceManifest
+    ).members.map((member) => [member.name, member.port, member.devtoolPort]);
     expect(members).toEqual([
       ['alpha', 3000, 4000],
       ['beta', 3001, undefined],

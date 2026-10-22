@@ -120,7 +120,9 @@ function isRecordProjection(value: unknown, alias: string): boolean {
       return false;
     }
   } else if (
-    typeof statusClass !== 'string' || !STATUS_CLASSES.has(statusClass) || responses === 0
+    typeof statusClass !== 'string' ||
+    !STATUS_CLASSES.has(statusClass) ||
+    responses === 0
   ) {
     return false;
   }

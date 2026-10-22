@@ -56,11 +56,7 @@ export class ConsulProvider implements DiscoveryProvider {
    * @param http - The HTTP seam
    * @param runtime - Supplies timers and `uuid()` for the default instance id
    */
-  constructor(
-    options: ConsulProviderOptions,
-    http: IDiscoveryHttp,
-    runtime: IRuntimeServices,
-  ) {
+  constructor(options: ConsulProviderOptions, http: IDiscoveryHttp, runtime: IRuntimeServices) {
     this.#options = options;
     this.#http = http;
     this.#runtime = runtime;
@@ -115,9 +111,10 @@ export class ConsulProvider implements DiscoveryProvider {
       // Consul returns an EMPTY STRING for a service registered without an
       // explicit address; the node address is the real one. Omitting this
       // fallback yields `http://:8080`.
-      const host = service.Address !== undefined && service.Address !== ''
-        ? service.Address
-        : (raw.Node?.Address ?? '');
+      const host =
+        service.Address !== undefined && service.Address !== ''
+          ? service.Address
+          : (raw.Node?.Address ?? '');
       if (host === '') {
         continue;
       }
@@ -150,14 +147,21 @@ export class ConsulProvider implements DiscoveryProvider {
   /**
    * M70c: probes the agent's leader endpoint — `GET /v1/status/leader` — through
    * the existing `IDiscoveryHttp` seam. 2xx means the agent is reachable; any
-   * other status or a transport failure means it is not.
+   * other status or a transport failure means it is not. The runtime aborts
+   * the request after 2 s so a hung agent cannot hold the connection open.
    */
   async isHealthy(): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = this.#runtime.setTimeout(() => controller.abort(), 2000);
     try {
-      const response = await this.#http.request(`${this.#base}/v1/status/leader`);
+      const response = await this.#http.request(`${this.#base}/v1/status/leader`, {
+        signal: controller.signal,
+      });
       return response.ok;
     } catch {
       return false;
+    } finally {
+      this.#runtime.clearTimeout(timer);
     }
   }
 
@@ -229,10 +233,10 @@ export class ConsulProvider implements DiscoveryProvider {
    */
   async deregisterSelf(registration: SelfRegistration): Promise<void> {
     const id = encodeURIComponent(this.selfId(registration));
-    const response = await this.#http.request(
-      `${this.#base}/v1/agent/service/deregister/${id}`,
-      { method: 'PUT', headers: this.headers() },
-    );
+    const response = await this.#http.request(`${this.#base}/v1/agent/service/deregister/${id}`, {
+      method: 'PUT',
+      headers: this.headers(),
+    });
     if (!response.ok) {
       throw new Error(`Consul deregistration failed with HTTP ${response.status}`);
     }

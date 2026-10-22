@@ -26,7 +26,7 @@ const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
  *
  * The test dependencies come from {@linkcode TEST_DEPENDENCY_MANIFEST}, which
  * every host carries now that `setu generate module` is ungated. What is added
- * here is the REST baseline's health permission; the decorator compiler setting
+ * here is the REST baseline's health permission and Zod schema dependency; the decorator compiler setting
  * is restricted to the class-based opt-in below.
  */
 export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
@@ -34,7 +34,9 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // `HealthPlugin`'s `self` indicator reads `runtime.hostname()` on every probe.
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
-  denoPermissions: ['--allow-sys'],
+  denoPermissions: ['--allow-sys', '--allow-read'],
+  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4' },
+  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4' },
 };
 
 /** Manifest additions unique to the class-based module composition. */
@@ -90,7 +92,7 @@ export function withModuleSeam(
   return wirings.map((wiring) =>
     wiring.pkg === 'decorator-plugin'
       ? { ...wiring, args: renderDecoratorArgs(controllers, services, ingress) }
-      : wiring
+      : wiring,
   );
 }
 
@@ -117,7 +119,9 @@ function renderDecoratorArgs(controllers: string, services: string, ingress: str
     `modules: [...${MODULES_EXPORT}] }`;
   // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
   if (inline.length <= 76) return inline;
-  return `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
+  return (
+    `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
     `        ingress: [${ingress}],\n` +
-    `        modules: [...${MODULES_EXPORT}],\n      }`;
+    `        modules: [...${MODULES_EXPORT}],\n      }`
+  );
 }

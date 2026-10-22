@@ -28,13 +28,32 @@ import { GENERATED_LINE_WIDTH as LINE_WIDTH } from '../templates/root-settings.t
  * broken — `deno fmt` does not break a word either, so breaking one here would
  * produce output the formatter immediately rejoins.
  *
+ * An inline code span is one word even when it contains spaces: `deno fmt`
+ * never breaks inside backticks, so splitting one here produced a line it
+ * immediately rejoined (a fresh `--broker nats` README failed its own
+ * `deno fmt --check` at `topic: 'app.realtime'`).
+ *
  * @param text - The paragraph, with any existing line breaks
  * @param indent - Prefix for every line after the first, e.g. `'  '` for a
  * Markdown list item's continuation
  * @returns The paragraph wrapped to the emitted width
  */
 export function wrapProse(text: string, indent = ''): string {
-  const words = text.split(/\s+/).filter((word) => word !== '');
+  // Whitespace-delimited, then re-joined across a space only while a backtick
+  // span is still open — so punctuation beside a span (`\`app\`.` in the NATS
+  // note) stays attached to it, and two separate spans remain two words.
+  const words: string[] = [];
+  let current = '';
+  let inCode = false;
+  for (const token of text.split(/\s+/).filter((word) => word !== '')) {
+    current = current === '' ? token : `${current} ${token}`;
+    if ((token.match(/`/g) ?? []).length % 2 === 1) inCode = !inCode;
+    if (!inCode) {
+      words.push(current);
+      current = '';
+    }
+  }
+  if (current !== '') words.push(current);
   if (words.length === 0) return '';
 
   const lines: string[] = [];

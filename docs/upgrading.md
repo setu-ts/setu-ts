@@ -10,9 +10,514 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## 0.10.0
+
+### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)
+
+Every package now declares `"node": "^22.23.4 || ^24.22.1 || >=26.12.1"`: the first releases of each
+supported line carrying the Node.js security fixes of 2026-10-21. npm only warns on an `engines`
+mismatch unless `engine-strict` is set, so an older Node keeps installing; the range records the
+floor, it does not enforce it. The fixes are in Node itself, so no Setu-TS code change closes them:
+
+- **Upgrade Node** on developer machines, CI and servers.
+- **Rebuild container images with `--pull`.** A cached `node:24-alpine` or `node:24-bookworm` layer
+  stays on the release it was pulled at.
+- **Rebuild every single executable (SEA)**, including one built from `docker/Dockerfile.compiled`.
+  A SEA embeds the Node binary it was built with, so one built before the patch carries every one of
+  these bugs until it is rebuilt with a patched Node. The advisory also names SEAs for
+  CVE-2026-106074, under which `crypto.randomUUID()` and `crypto.randomInt()` can repeat values
+  across processes — `runtime.uuid()` uses `crypto.randomUUID()` for connection, claim, audit and
+  idempotency ids.
+- **Treat outbound HTTPS as exposed until patched.** Node's `fetch` decompresses a
+  `Content-Encoding: br` response itself, so a server that an attacker controls or can intercept
+  reaches the Brotli decoder flaw (CVE-2026-111497, rated High, out-of-bounds write) through any
+  outbound call: the SDK client, OIDC discovery and key-set fetches, Consul and Kubernetes
+  discovery, Vault, and the SendGrid, Twilio, FCM and Slack providers.
+
+### Declared `@ApiOperation` ids and descriptions (0.10.0)
+
+`@ApiOperation({ operationId, description })` now reaches the document through optional
+`RouteSchema.operationId` and `RouteSchema.description`; programmatic routes can declare both too.
+Previously ignored ids are now used verbatim: `@ApiOperation({ operationId: 'listUsers' })` on
+`GET /users` changes `get-users` to `listUsers`. Regenerate SDK clients and update their callers:
+the method and every id-derived name can change — `<Op>Args`, `<Op>Error`, `is<Op>Error`,
+`<Op>Error<status>Body`, `<Op>Body`, `<Op>Response<status>` and `<Op><Param>Param`. Hoisted
+components follow the id too (`GetUsersBody` → `ListUsersBody`, only where a schema is hoisted), as
+does `x-setu-unrepresentable[].at`; update references to those names.
+
+Declared ids are reserved before derived ones. In a mixed document, an undeclared route's
+`get-users` becomes `get-users-2` when another route declares `get-users`, even if the undeclared
+route was registered first. Check those client names too. Documents without declared ids or
+descriptions remain byte-identical.
+
+Empty or whitespace-only ids and duplicate declared ids among included routes now fail `app.start()`
+with `OperationIdError` from `@setu-ts/openapi-plugin`, carrying `reason: 'blank' | 'duplicate'` and
+a message naming the id and affected `METHOD path` routes. Direct `OpenApiGenerator.generate()`
+calls throw the same error. Remove an id to keep deriving it, or choose a unique nonblank id.
+Excluded paths and owners neither claim nor collide. Startup scans routes without building the
+document; routes registered after bootstrap are checked when the document is first built, so invalid
+late declarations cause a request-time `500`.
+
+Check SDK names as well: declared `getUsers` beside undeclared `GET /users` (derived `get-users`) is
+valid OpenAPI, but `generateOpenApiClient` refuses it with `Duplicate operation name` because both
+sanitize to `getUsers`. Choose ids with distinct sanitized TypeScript names.
+
+### Environment secrets fall back to config (V9-77, 0.10.0, `@setu-ts/secrets-plugin`)
+
+When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in
+ConfigPlugin's snapshot, including `.env` values. Environment strings still win and are returned
+unchanged. This also affects `SessionPlugin`'s `SESSION_SECRET` and full-stack starter apps, which
+always compose `SecretsPlugin`. A consequence to check: `SessionPlugin` used to refuse to start when
+no `SESSION_SECRET` existed outside a dotenv file; a dotenv file present at runtime now satisfies
+that check. If a deployment relied on the refusal, keep dotenv files out of production or set
+`configFallback: false`. To preserve environment-only reads, use:
+
+```typescript
+SecretsPlugin({ options: { configFallback: false } });
+```
+
+`configFallback` defaults to `true`. A non-boolean value throws at plugin construction naming
+`options.configFallback`; other providers ignore the option. With no CONFIG capability, the env
+provider silently reads only the environment.
+
+A validation schema must declare the secret key or pass unknown keys through; stripped keys stay
+missing. Config-sourced secrets follow `${NAME}` expansion: for literal references in secrets
+containing `$`, use `ConfigPlugin({ expandVariables: false })` or set the secret in the real
+environment. Only string config values qualify. On Workers, config normally contains the same string
+bindings as `runtime.env` and adds no keys; an injected `ConfigPlugin({ instance })` or another
+`IConfig` provider can supply additional keys. `envFilePath` requires filesystem support.
+
+### Declare JSON media types on validated bodies (M114, 0.10.0, `@setu-ts/validation-plugin`)
+
+Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes
+using the first-party validation service. It also accepts any `application/*+json` type, ignoring
+case and parameters. An unsupported type, including `text/plain` or an absent header, now answers
+`415 Unsupported Media Type` before reading the body. In particular, `fetch` with a string body and
+no headers sends `text/plain` and is refused instead of validated; an empty body-validated request
+without the header answers 415 instead of 400. A form type on a JSON-only route now answers 415
+instead of 400; `{ forms: true }` still opts that validator into form bodies. Routes reading
+`ctx.request.json()` directly are unchanged. Replacement `IValidationService` implementations own
+their media-type handling. Cookie-authenticated routes still need `csrfMiddleware` or
+`csrfFormMiddleware`.
+
+### Refresh generated output for M114 (0.10.0, `@setu-ts/cli`, `@setu-ts/validation-plugin`)
+
+**Existing generated modules need no layout changes.** Their `src/controllers/<name>.routes.ts`
+files are still wired by the controllers barrel, and only newly generated modules use the new
+layout. A project scaffolded before this milestone does not call `registerModules`;
+`setu generate module` prints the import line and the `registerModules(app.router, app.services);`
+call to add.
+
+- **To adopt the new module layout for a pre-M114 functional module:** move
+  `src/controllers/<name>.routes.ts` into `src/modules/<name>/`, change its service import to
+  `./<name>.service.ts`, widen its registrar to
+  `register<Pascal>Routes(router: IRouterApi, services?: IServiceRegistry)` (importing the type from
+  `@setu-ts/common`; the regenerated index passes both), replace `src/modules/<name>/index.ts` with
+  the registrar the CLI now generates — it imports `register<Pascal>Routes` from
+  `./<name>.routes.ts` and exports
+  `register<Pascal>Module(router: IRouterApi, services?: IServiceRegistry)`, which calls
+  `register<Pascal>Routes(router, services)` — in the same change. The module scan admits a
+  functional module only when its `index.ts` exports `register<Pascal>Module`, and the moved routes
+  file no longer reaches the controllers barrel, so until the index is replaced the routes are not
+  registered and every `--module <name>` command refuses the module. Then run any
+  `setu generate … --module <name>` command (or add the two lines the command prints) so the
+  activation barrel is regenerated. The module's `index.ts` no longer re-exports the service —
+  import it from `./<name>.service.ts` directly.
+- **To stop casting validated values:** switch the
+  `ctx.state.get(validatedStateKey('body')) as z.infer<typeof Schema>` read to the validator itself
+  — declare `const body = validateBody(Schema);`, list it in the route's `middleware`, and read
+  `body.value(ctx)` in the handler. `value(ctx)` throws a `TypeError` naming the target when that
+  validator did not run on the request or a later validator for the same target overwrote it. The
+  state-key read still works and is unchanged if you keep it.
+- **Generated tests and tasks:** new scaffolds split `test` (every `*.test.ts` except
+  `*.e2e.test.ts`) and `test:e2e` (only `*.e2e.test.ts`, over real HTTP through the CLI-owned
+  `test/support/server.ts`); `setu new` emits `test/e2e/app.e2e.test.ts` on socket targets, and
+  `setu g module` adds a per-module `<name>.e2e.test.ts` beside the module. `<name>.test.ts`
+  replaces `<name>.service.test.ts` (it drives the module in-process through
+  `createTestApp({ app: await createApp() })`), and a module on Cloudflare Workers no longer emits a
+  test.
+- **Validation:** send the JSON media-type header described above. To accept form posts, pass
+  `{ forms: true }` to `validateBody` or `@ValidateBody` and add `csrfFormMiddleware`; that route
+  then validates `application/x-www-form-urlencoded` and `multipart/form-data` bodies with the same
+  schema — numbers and booleans arrive as strings (use `z.coerce`), a file part is the framework's
+  `FormFile` (not a web `File`), a repeated field becomes an array in wire order, and a name ending
+  `[]` is always an array. An over-limit body on a validated route answers `413` instead of `400`
+  when `RuntimePlugin({ maxBodyBytes })` is set. `zod` is declared by every template that installs
+  `validation-plugin` and added by `setu add validation` on every runtime; `setu g module` and
+  `setu g schema` print the runtime's install command in a project that lacks it.
+
+### Refresh generated output for M113h (0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
+
+New scaffolds emit the corrected output; an existing project keeps working, and these steps are what
+adopts the fixes.
+
+- **NATS.** New scaffolds set `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`, so every
+  topic published through NATS must start with `app.`. An existing project keeps its own stream and
+  subjects. If it uses `RealtimeBackplanePlugin` on the `'messaging'` transport, set
+  `topic: 'app.realtime'`; its default `setu-ts.realtime` is outside the emitted set. Only one
+  stream per account may own `rr.inbox.>`, so remove the scaffold's `MESSAGING` stream before
+  adopting the set on an account that already has one.
+- **Ignore rules.** Add `**/.env`, `**/.env.*` and `!**/.env.example` to `.dockerignore`, and
+  `.env`, `.env.*`, `!.env.example` to the workspace root `.gitignore`. A custom `--env-file name`
+  is not covered by the generic rules.
+- **`ws` on Node.** Re-run `setu add websocket`; it writes the `ws` peer into `package.json` even
+  when the plugin is already installed. A missing `ws` now also reports the failed handshake once
+  instead of refusing silently.
+- **Workers full-stack `check`.** A Workers full-stack project's `check` script now runs the build
+  first, because its entry imports the compiled server build. An existing project can change its
+  `check` script to `npm run build && tsc --noEmit`.
+- **Adopted workspaces.** `setu adopt` records `healthProbes`/`metricsEndpoint` from the project's
+  dependencies. A workspace adopted before this release keeps its manifest as written: an absent
+  record stays "unknown", so its Kubernetes probes stay `tcpSocket` and its Prometheus annotations
+  stay off until you set the fields.
+
+### Add a `create<Pascal>JobProcessor` export to existing job modules, and expect `--dry-run` to exit 1 on a collision (M113i, 0.10.0, `@setu-ts/cli`)
+
+**Standalone job modules in a functional project with `queue-plugin`.** `setu generate job` now
+emits the module's exported `create<Pascal>JobProcessor` factory and the managed `src/jobs/index.ts`
+barrel beside it. An existing standalone `src/jobs/<name>.job.ts` that exports no processor factory
+is skipped and reported by `setu generate`: add the `create<Pascal>JobProcessor` export to the
+module, or delete the file and regenerate it. A functional project without `queue-plugin` is
+unchanged: the standalone function is emitted and scanned as before, with no skip report.
+
+**`--dry-run` exit codes.** The `--dry-run` of `setu generate`, `setu new`, `setu library` and
+`setu generate app` now reports `WOULD REFUSE: <path> already exists` for every file a real run
+would refuse to overwrite and exits 1 when any exists, matching `setu adopt`; before, it printed
+`would create` for every file and exited 0 before the existing-file check ran. A script or CI step
+that ran a dry run over files that already exist and expected exit 0 must handle the new exit 1. A
+clean dry run still exits 0, printing the `would create` / `would update` / `unchanged` lines.
+
+### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
+
+Regenerate managed `src/migrations/run.ts` and `index.ts` with `setu generate migration`. Replace
+custom `runMigrations('up')` calls with
+`runMigrations('up', { database, ledger: createMigrationLedger(database) })`, importing
+`createMigrationLedger` from `@setu-ts/database-plugin`. Existing zero-argument `up`/`down` methods
+remain assignable; new migrations can receive `{ database }`.
+
+Create the application-owned ledger table or entity mapping described in the database-plugin README
+before running. Run one migration job and make each change idempotent: ledger writes follow changes
+outside any transaction. Memory history exists only in the serving process. Import `MIGRATION_NAMES`
+from `./src/migrations/index.ts` and opt in with
+`DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })`. Socket entry points boot the whole
+app without a port; named connections need a caller resolving that connection. Workers runners have
+no executable entry block: call from code holding bindings or use `wrangler d1 migrations`.
+
+Discovery warm-cache outages now keep the indicator `up`. If you alerted on `degraded`, inspect
+`data.degraded` and `data.reachable` instead; `/ready` keeps serving warm replicas.
+
+### Review `IRequest.ip`, rate-limit buckets and loader URLs (M113n, 0.10.0, breaking)
+
+Node, Deno and Bun now set `IRequest.ip` to the socket peer, normalized from IPv4-mapped IPv6.
+Unauthenticated `defaultRateLimitKey` calls therefore use `ip:<peer>` instead of one global
+`anonymous` bucket. Review limiter budgets; behind a proxy register IP security with
+`trustProxy: true` and `trustedProxies` to count clients rather than proxies.
+
+The trusted-proxy walk now starts at that peer. List every legitimate proxy or sidecar; a sidecar
+omitted from the list now resolves as the client and its forwarded headers are ignored. Direct
+callers cannot select their own identity with a forged header. `proxyHops` and the leftmost default
+still use header-only selection for the client IP, and in the `X-Forwarded-*` family a header too
+short for `proxyHops`, or an all-trusted chain, resolves no client rather than the proxy itself.
+With `trustedProxies`, a trusted proxy that sends no forwarding header also resolves no client, so
+make sure each proxy writes one. Workers and plain fetch have no peer and retain the header-only
+path. Workers can use `ipHeader: 'CF-Connecting-IP'`, which Cloudflare overwrites.
+
+With IP security in `trustedProxies` mode and a trusted socket peer, React Router loaders/actions
+now see the public URL; no other mode publishes a forwarded origin. Update redirects or tests that
+expected the internal URL. `requestOriginOf` and `publicRequestUrl` in `@setu-ts/common` expose the
+same origin. Select `forwardedHeader: 'forwarded'` for RFC 7239 instead of `X-Forwarded-*`; do not
+also set `ipHeader`. Configure your proxy to overwrite the chosen origin headers. Use a configured
+base URL for security-sensitive links.
+
+`csrf: {}` works behind standard TLS termination using a validated `X-Forwarded-*` own-origin
+candidate, even without IP security, for requests whose browser sends `Sec-Fetch-Site: same-origin`
+(every current browser does). This comparison grants no proxy trust to session cookies or URLs.
+Session `cookie.secure: 'auto'` follows the trusted origin protocol; its default stays `true`.
+`'auto'` with `sameSite: 'none'` is refused at construction. See
+[Behind a reverse proxy](./deployment.md#behind-a-reverse-proxy).
+
+### Fix invalid scheduler times that reject with `RangeError` and refresh JWTs before `exp` (M113m, breaking)
+
+**Fix invalid values before registering a job.** The async `delay` call now rejects with a
+`RangeError` for a non-finite or negative `delayMs`; `every` rejects for a non-finite or
+non-positive `intervalMs`; `delay`, `every` and `cron` reject for a non-finite or negative
+`retry.delay`. Check configured or computed values before registration. Zero `delayMs` and zero
+`retry.delay` are still accepted, and there is no upper delay or interval limit. Long waits now run
+until their due time instead of being clamped to about 1 ms.
+
+**Pause only re-runs unfinished one-shots.** A one-shot that already succeeded or exhausted its
+retries is removed even while paused and is not re-run. A one-shot paused mid-retry stays registered
+and resumes from attempt 1 with its original delay, discarding remaining backoff. Disconnect
+releases its `:once` slot regardless of outcome. A cancelled fire is not reported as success:
+diagnostics settle it with `false` and count it in `failed`, since no separate cancellation counter
+exists. An in-flight handler can still reach a final success or failure after pause or disconnect.
+`resume()` now rejects on a disconnected service: call `connect()` first.
+
+**Refresh before `exp`.** First-party `JwtService.verify` now uses fractional seconds without clock
+tolerance and rejects once `now >= exp`, instead of accepting a token for up to one second after
+expiry; it also rejects while `now < nbf`. Update tests or clients that assumed a token remained
+valid during the second of its `exp`. The outside-issuer verifier (`issuers`) now rejects exactly at
+`exp + clockToleranceSec` too (previously only after it); its not-before check remains
+`now + clockToleranceSec < nbf`.
+
+### Key-change and cursor refusals answer `400`; Drizzle refuses unknown payload fields; bound PostgreSQL calls with `query_timeout` (M113g, breaking)
+
+**Catch `PrimaryKeyChangeError`, not the old answers, for a key change through `update`.** Every
+`update` and `updateWhere` of the eight data sources now refuses a payload that carries a key column
+whose value differs from the addressed key, with `PrimaryKeyChangeError` (branded `400 Bad Request`,
+fixed detail "An update cannot change a row's primary key."), before any I/O. If your code relied on
+the old divergence — Drizzle, Prisma or D1 moving the row, or MongoDB, Cosmos DB or DynamoDB
+answering success with the key column stripped — the same call now rejects. An equal value is still
+accepted, compared as a string for `string`, `number`, `bigint` and `ObjectId`-like values and by
+time for `Date` values, so `update('5', { id: 5 })` works and `'05'` against `5` is refused.
+Bigtable's old `501` `UnsupportedQueryFeatureError` (`row-key`) answer is the same `400`; if you
+branch on `instanceof UnsupportedQueryFeatureError` or on the `501` status for a Bigtable key
+change, switch to `PrimaryKeyChangeError`.
+
+**Catch `InvalidCursorError` for a bad cursor.** A `?cursor=` token that is malformed, was made
+under a different sort, or is the wrong shape for the target now rejects with `InvalidCursorError`
+(branded `400 Bad Request`, fixed detail "The pagination cursor is not valid for this query.") from
+every `findPage` implementation, before any backend call; `instanceof UnsupportedQueryFeatureError`
+no longer matches it. `501` remains for a backend that cannot page the query at all, so a catch that
+meant "this backend cannot page" must now distinguish the two.
+
+**Pick the columns before a Drizzle write.** A Drizzle `create`, `update` or `updateWhere` payload
+that names a field that is not a column of the table is now refused by name before any I/O instead
+of being dropped by Drizzle, with `UnknownPayloadFieldError` (`400`); if you passed a whole DTO,
+project the table's columns first. A Drizzle table whose key column is not a column of the table is
+now refused when the repository is created (`getRepository`), instead of lazily inside `findById`,
+`update` or `delete` — check the table definition and the `primaryKey` override at startup, not on
+first use.
+
+**Bound PostgreSQL calls with `query_timeout`.** The plugin adds no call deadline of its own — a
+JavaScript deadline cannot cancel the statement, and inside a transaction it rejects while the
+statement may still commit. Set `query_timeout` (and `connectionTimeoutMillis` for the connect
+attempt) on the `Pool` you hand Drizzle; a query that hits the bound now answers
+`504 Gateway Timeout` with `DatabaseTimeoutError` (fixed detail "The database did not answer in
+time."), and node-postgres's second connect-timeout message
+(`Connection terminated due to connection timeout`) answers `503` beside
+`timeout exceeded when trying to connect` instead of a masked `500`. The timed-out statement may
+have run, so a write's outcome is unknown — make a retried write idempotent. The behaviour of a
+timed-out statement inside a transaction is measured in this milestone; see the
+`@setu-ts/database-plugin` README's `Bounding a call` section.
+
+### Health `details` and `SwaggerOptions` (M113f, breaking)
+
+**V9-47:** `/health`, `/live`, and `/ready` now return status-only checks by default:
+`{ status, timestamp, checks: { name: { status } } }`. Dashboards that read `checks[*].data` or
+`latencyMs` must set `HealthPlugin({ details: true })` (or a starter's `health: { details: true }`).
+Programmatic health reports stay full and the gRPC bridge is unchanged; diagnostics never carried
+indicator `data` and are unaffected.
+
+**V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
+that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need `--allow-read`.
+Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets
+instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
+`openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
+`assets: { baseUrl: '/assets' }`; the starters select the CDN there when no Swagger asset mode is
+chosen; a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare
+the dependency and select CDN mode for Workers automatically. If you add `swagger-ui-dist` to an
+existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends install analytics; set
+`"scarfSettings": { "enabled": false }` in your root `package.json` to opt out, as generated
+projects do. In a workspace the setting belongs in the root `package.json`, the one npm is run from;
+a member's own setting is ignored.
+
+Handled 4xx now logs once at `warn`; handled 5xx logs once at `error`. Completion logs report the
+responder's status rule; a custom `respond` hook choosing another status is not reflected there.
+Without a logger, handled 5xx and kernel unhandled errors reach the runtime's default error sink.
+
+### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
+
+**Scoped RBAC no longer reads the principal's own roles.** If your scoped checks
+(`requireScopedRole`, `requireScopedPermission`, `@ScopedRoles`, `@ScopedPermissions`) passed
+because a token carried the role or permission, they now answer `403` until the principal holds a
+grant for that scope. Issue the grants, or set `scopedRbac: { …, principalAuthorityIsGlobal: true }`
+to keep the old behaviour — every principal role and permission then counts in every scope.
+
+**Form CSRF skips only a bearer request that a bearer strategy authenticated and that restored no
+session.** With `SessionPlugin({ csrf: {} })`, a request carrying `Authorization: Bearer <token>` is
+no longer checked for a form token when a bearer (header-credential) strategy authenticated it and
+it restored no session. If you added an `exclude` such as `/^\/api\//` only to let a bearer API
+through, you can remove it. To keep checking those requests, set `csrf: { exemptBearer: false }`.
+The exemption no longer trusts a bare header: a junk bearer header beside a session cookie is still
+verified, and an unauthenticated bearer header is verified too. A request carrying a valid session
+cookie must send the CSRF header even with a valid bearer token, because the handler would otherwise
+act on that browser's session — so a browser app calling the bearer API while holding a session
+cookie must send the CSRF header. A request the bearer rule exempts also gets no browser session:
+whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
+so it cannot plant a session in a browser whose cookie no longer restores. The form-CSRF middleware
+moved from priority 275 to 325 (after authentication at 300, before authorization at 350) to make
+that check; custom middleware registered between 275 and 325 that relied on form CSRF having run
+must move above 325.
+
+**Anonymous sessions on the store strategy stay in the cookie.** Nothing to change. During a rolling
+deploy an older replica treats the new anonymous cookie as no session, so a visitor with a form open
+may get one `403` and must reload it; signed-in sessions are unaffected.
+
+**`PasswordHasher` hashes at 600,000 iterations.** Existing hashes keep verifying. To upgrade them,
+re-hash on a successful sign-in:
+
+```typescript
+if ((await hasher.verify(user.passwordHash, password)) && hasher.needsRehash(user.passwordHash)) {
+  await saveHash(user.id, await hasher.hash(password));
+}
+```
+
+On Cloudflare Workers, which are reported to refuse PBKDF2 counts above 100,000, construct the
+hasher with `new PasswordHasher(runtime, { iterations: 100_000 })`.
+
+### Outbox and inbox `release` refusals answer `400`/`404`/`409`; `OutboxRowStateError` gains `invalid-id` (M113j)
+
+**`release` refusals no longer answer a masked `500`.** An unhandled `release` refusal under
+`errorHandler` now answers its own status: `400` for a bad row id (`invalid-id`), `404` for an
+absent row (`missing`), and `409` for a row in the wrong state (`not-failed` for the outbox,
+`not-parked` for the inbox). `InboxRowStateError` and `OutboxRowStateError` are branded with
+`withHttpStatusHint`, so the answer carries the mapped status with the class's own title and detail;
+the row id and the stored status stay out of the body. No reader action is needed — match the new
+status instead of the old `500`; the rejection is the same one.
+
+**`OutboxRowStateError.outcome` gains `'invalid-id'`.** An outbox `release` with an empty or
+non-string row id no longer rejects with a bare `TypeError`; it rejects with
+`OutboxRowStateError('invalid-id')` (the `400` above), like the other refusals. If you switch on
+`outcome` exhaustively without a `default`, add a case for `'invalid-id'`.
+
+### Queue reconnect, `QueueProcessorDefinition` and Deno shutdown (M113c)
+
+RabbitMQ queues now recover automatically. Unacked jobs can be delivered again with their original
+attempt count after a reconnect; make processors idempotent. Injected connections remain
+caller-owned.
+
+Redis queues now use a renewed 30000 ms delivery lease (`visibilityTimeoutMs`, from `1000` to
+`2147483647`, on both RedisQueue and QueuePlugin). Redis 5+ and `eval` are required for the lease; a
+minimal injected client without `eval` keeps the old behavior, with one connection-error report
+naming the inactive option when a reporter is configured (`QueuePlugin` always configures one). The
+service renews every third of the lease while a processor runs, with no overlap, and reports renewal
+failure once. Raise the duration for expected event-loop pauses; delivery remains at least once, so
+make processors idempotent. A live stuck processor keeps renewing and is not reclaimed.
+
+**Drain old replicas before upgrading.** Their processing scores are immediately expired under the
+new model; stuck jobs return on reserve. Each abandoned lease counts as an attempt, and dispatch
+dead-letters a job above `maxAttempts` without running it. Redis and RabbitMQ now reject a stale
+ack, retry or dead-letter with internal `StaleClaimError`; the service records failed settlement and
+leaves the current delivery intact. Claim tokens are delivery fences, not authorization; Redis ACLs
+remain the boundary.
+
+`QueueProcessorDefinition<T>` accepts typed payload processors and calls them as methods on the
+definition. Its `processor` member loses `readonly`; enforce immutability in application code if
+needed.
+
+Deno stop initiates HTTP shutdown after the kernel's bounded drain and waits for shutdown or a 1000
+ms grace, catching a rejection. Lifecycle cleanup then runs even with requests still in flight. Put
+resource teardown in shutdown/close hooks. The default drain plus grace bounds stop at about 11 s.
+
+Redis `keyPrefix` defaults to `queue:`. Give applications on shared Redis distinct prefixes. Drain
+or migrate existing jobs before changing a deployed prefix; the RabbitMQ `prefix` option does not
+configure Redis.
+
+### Workers projects: thread `waitUntil` through the factory
+
+<!-- version:history -->
+
+A Workers project scaffolded by 0.10.0 passes the platform's `waitUntil` from `src/index.ts` into
+`createApp` in `setu.config.ts` as its SECOND parameter, on every template. The CLI does not edit an
+existing project, so a project scaffolded by 0.9.0 or earlier keeps what it had: only the
+`microservice` template threaded `waitUntil`, and the others call `createApp(env)`.
+
+`setu add cloudflare` prints a registration that reads `waitUntil`. To use it in an older `rest`,
+`class-based` or `full-stack` Workers project, make two edits:
+
+```typescript
+// setu.config.ts — add the second parameter
+export function createApp(
+  env: Readonly<Record<string, unknown>> = {},
+  waitUntil?: (promise: Promise<unknown>) => void,
+  _devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
+): IKernelApplication {
+
+// src/index.ts — import the sink and pass it
+import { waitUntil } from 'cloudflare:workers';
+// …
+return createApp(env, waitUntil);
+```
+
+A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
+rename it to `waitUntil` when you add the registration.
+
+Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Workers, and
+`cacheApiMiddleware` awaits its cache write before answering instead of losing it.
+
+### Full-stack Workers projects: pass `serverBuild` as a module
+
+<!-- version:history -->
+
+A `full-stack` Workers project scaffolded by 0.9.0 builds but cannot start: its `setu.config.ts`
+locates the server build with `new URL('./build/server/index.js', import.meta.url)`, which a bundled
+Worker cannot resolve. Scaffolding a new project is simplest. To repair an existing one:
+
+- In `src/index.ts`, add `import * as serverBuild from '../build/server/index.js';` and call
+  `createApp(env, waitUntil, undefined, { serverBuild })`.
+- In `setu.config.ts`, give `createApp` a second `_waitUntil` parameter and widen the `ssr`
+  parameter to
+  `{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>`. In the
+  `reactRouter` options, pass `serverBuild: ssr.serverBuild` when `ssr` carries one, and keep
+  `serverBuildPath` otherwise (`setu commands` loads this file without the entry).
+- In `wrangler.toml`, add `[assets]` with `directory = "./build/client"` and `[build]` with
+  `command = "npm run build"`, so the client bundle is served and the server build exists before the
+  Worker is bundled.
+- Create `.dev.vars` with `SESSION_SECRET` for `wrangler dev`, add it to `.gitignore`, and set the
+  production value with `npx wrangler secret put SESSION_SECRET`.
+
+### Readiness and `RedisRateLimitStore` outage migration (M113b)
+
+- **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
+  previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
+  changes overall status for these conditions. Migrate alerts to inbox `data.parked` /
+  `data.reasons`, outbox `data.reasons` (all six reasons), realtime-backplane `data.reachable`,
+  worker-pool `data.available`, static-files `data.fs`, auth `data.current` / `data.issuers`, and
+  feature-flags `data.healthy` / `data.detail`. `degraded` still means out of rotation: `/ready`
+  503, `/health` 200. Healthy Kubernetes and Consul discovery probes now preserve their receiver and
+  allow readiness.
+- **Breaking Redis outage responses (M113b).** Cache and rate-limit connection faults now carry 503
+  status hints instead of reaching `errorHandler` as masked 500s; cache-backed sessions inherit the
+  cache response. Update response handling to accept 503 and inspect `cause` instead of checking raw
+  driver errors. WRONGTYPE/programming errors are unchanged.
+- **Breaking rate-limit wait bound (M113b).** Built `RedisRateLimitStore` clients now use a 15000 ms
+  command bound. Configure `commandTimeoutMs` higher for slow Redis, or `0` for the previous
+  unbounded wait; configure injected clients directly.
+
+### Messaging `publishTimeoutMs`, `reconnect` and Kafka group starts (M113a)
+
+- Kafka and Pub/Sub now bound publishes at 15000 ms, including RPC and outbox publishes. Set
+  `publishTimeoutMs` higher for slow brokers or to `0` for the previous unbounded wait. A timeout
+  does not prove rejection: the message may still arrive, so retries need de-duplication.
+- An injected Kafka factory without `admin()` reports unknown reachability. Supply an admin-capable
+  factory for a probe; its timeouts remain your responsibility. Lazy clients build a separate
+  short-timeout health client. Pub/Sub transports may return `undefined` from `isHealthy()`; code
+  consuming that member directly must handle unknown. Existing boolean implementations still fit.
+- Lazy NATS connections reconnect forever by default. To retain the previous budget use
+  `reconnect: { maxAttempts: 10, waitMs: 2000 }`; exhausted connections stay down. Configure an
+  injected connection yourself: combining `client` and `reconnect` throws `TypeError`.
+- Fresh Kafka groups start at the high watermark captured during `subscribe()`. Remove sleeps or
+  repeated publishes that worked around losing the first message; a single post-subscribe publish is
+  delivered once the consumer joins, without replaying earlier history. Existing committed groups
+  are unchanged. The first join seeks assigned uncommitted partitions to the minimum start offsets
+  advertised by current members, so concurrent first starts also deliver messages published after
+  any member’s subscription resolves, without replaying history before the first subscription. Group
+  members are trusted for this: joining needs only Read on the group, so a principal without topic
+  Read can still make a new group replay unlogged; restrict who can join the consumer group (Kafka
+  group ACLs) where a replayed history matters. Without admin the step is skipped. Injected
+  factories try importing kafkajs once at connect; if unavailable, members seek their own offsets
+  and concurrent first starts can miss messages. A member crashing before the join takes its start
+  offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
+  non-fatal.
+
+<!-- version:history -->
+
 ## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
+
+<!-- version:history -->
 
 From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
 CLI is a Node program. What an existing project changes depends on its target:
@@ -22,7 +527,8 @@ CLI is a Node program. What an existing project changes depends on its target:
 - **Node, Bun or Workers project.** Replace each `npm:@jsr/setu-ts__<pkg>@^0.8.0` dependency with
   `^0.9.0` under the key it already has (`"@setu-ts/kernel": "^0.9.0"`), delete the
   `@jsr:registry=…` line from `.npmrc` (or the file, if that was its only line), and reinstall.
-- **Deno project.** Replace each `jsr:@setu-ts/<pkg>@^0.8.0` import with
+- **Deno project.** Search for `jsr:@setu-ts/[^"\s]+@[^"\s]+` (matching both `@^0.8.0` and
+  `@0.8.0`). Replace each `jsr:@setu-ts/<pkg>@…` import, whatever its range, with
   `npm:@setu-ts/<pkg>@^0.9.0`, add `"nodeModulesDir": "auto"` to `deno.json`, and run
   `deno install`. The CLI now imports `setu.config.ts` from Node to find plugin commands, so it
   reads the project's `node_modules`; until `deno install` has created it, `setu <command>` refuses
@@ -219,6 +725,8 @@ refuse newly generated entries with `PREPARATION_FAILED`.
 
 ### Update programmatic CLI `Prompter` implementations
 
+<!-- version:history -->
+
 `Prompter.select` now returns `PromptSelection`. Replace a string result with
 `{ kind: 'answer', value }`, inability to prompt with `{ kind: 'unavailable' }`, and user
 cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`. This is a
@@ -368,6 +876,8 @@ the topic first, or set `retry: { retries: 0 }` to fail immediately.
 
 ### Run Node.js 22 or later (`engines.node >=22`)
 
+<!-- version:history -->
+
 The documented floor was Node 18; five packages use `Promise.withResolvers`, which Node 22 was the
 first to ship. Upgrade runtimes and production images to Node 22 or newer before installing `0.9.0`
 (CI verifies on Node 24).
@@ -433,12 +943,13 @@ not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hon
 
 ### Repair projects scaffolded by an earlier `setu new`
 
+<!-- version:history -->
+
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
 copy the fix from a fresh scaffold:
 
-- **Workers:** pin `wrangler` and `@cloudflare/workers-types` as a fresh
-  `setu new --runtime
-  cloudflare-workers` project does (the old pair fails `npm install` with
+- **Workers:** pin `"wrangler": "~4.148.0"` and `"@cloudflare/workers-types": "^5.20261006.1"` as a
+  fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
 - **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
@@ -638,6 +1149,8 @@ unchanged — so any value reaching it is written to the page verbatim. With a u
 `<script>alert(1)</script>` that example emits the script tag, where JSX and hono's `html` tag both
 emit `&lt;script&gt;`.
 
+<!-- version:history -->
+
 Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
 changed is the documentation. If you copied that shape, switch to either escaping form. The
 `@hono/hono` import below is the JSR name earlier releases used; on npm write `hono/html` instead
@@ -773,8 +1286,7 @@ const client: IRedisClient = {
 
 `ioredis` already has it, so an application passing a real client needs no change. The probe treats
 a rejection as unreachability rather than an error, so a double that rejects reports
-`reachable:
-false` on `/health` and nothing else.
+`reachable: false` on `/health` and nothing else.
 
 ### Add `rotate` and `revokeFamily` to a custom `RefreshTokenStore`
 

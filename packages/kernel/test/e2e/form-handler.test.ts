@@ -85,7 +85,12 @@ describe('a handler reads an unknown-shaped form through entries() (M94b)', () =
       expect(res.statusCode).toBe(200);
       expect(res.json()).toEqual({
         count: 4,
-        pairs: [['b', '2'], ['a', '1'], ['c', '3'], ['a', '4']],
+        pairs: [
+          ['b', '2'],
+          ['a', '1'],
+          ['c', '3'],
+          ['a', '4'],
+        ],
       });
     } finally {
       await app.stop();

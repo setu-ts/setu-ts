@@ -85,7 +85,9 @@ export function algorithmFamily(alg: unknown): IssuerAlgorithm | null {
   if (alg === 'Ed25519') {
     return 'EdDSA';
   }
-  return (SUPPORTED_ALGORITHMS as readonly string[]).includes(alg) ? alg as IssuerAlgorithm : null;
+  return (SUPPORTED_ALGORITHMS as readonly string[]).includes(alg)
+    ? (alg as IssuerAlgorithm)
+    : null;
 }
 
 /**
@@ -155,8 +157,8 @@ export function selectKey(
   family: IssuerAlgorithm,
   kid: string | undefined,
 ): Jwk | KeyRefusal {
-  const candidates = keys.filter((key) =>
-    keyFits(key, family) && (kid === undefined || key.kid === kid)
+  const candidates = keys.filter(
+    (key) => keyFits(key, family) && (kid === undefined || key.kid === kid),
   );
   if (candidates.length === 0) {
     return 'no-matching-key';

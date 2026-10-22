@@ -53,12 +53,18 @@ describe('LogProvider', () => {
     // success. Observed through `.catch`, so a synchronous throw would fail.
     const sunk: OutgoingMail[] = [];
     const provider = new LogProvider({ sink: (m) => sunk.push(m) });
-    const before = await provider.send(MESSAGE).then(() => 'resolved', (e: Error) => e.message);
+    const before = await provider.send(MESSAGE).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
     expect(before).toBe('LogProvider is not connected');
 
     await provider.connect();
     await provider.disconnect();
-    const after = await provider.send(MESSAGE).then(() => 'resolved', (e: Error) => e.message);
+    const after = await provider.send(MESSAGE).then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    );
     expect(after).toBe('LogProvider is not connected');
 
     expect(provider.messages).toHaveLength(0);

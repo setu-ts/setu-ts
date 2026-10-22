@@ -51,16 +51,16 @@ export default function LoginRoute() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <Form method='post'>
-      {actionData?.error ? <p role='alert'>{actionData.error}</p> : null}
-      <input type='hidden' name='_csrf' value={csrfToken} />
+    <Form method="post">
+      {actionData?.error ? <p role="alert">{actionData.error}</p> : null}
+      <input type="hidden" name="_csrf" value={csrfToken} />
       <label>
-        Email <input type='email' name='email' required />
+        Email <input type="email" name="email" required />
       </label>
       <label>
-        Password <input type='password' name='password' required />
+        Password <input type="password" name="password" required />
       </label>
-      <button type='submit'>Sign in</button>
+      <button type="submit">Sign in</button>
     </Form>
   );
 }

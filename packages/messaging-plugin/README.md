@@ -5,8 +5,8 @@ Cross-service messaging. Registers an `IMessageBroker` under `CAPABILITIES.MESSA
 
 Eight brokers ship: `InMemoryBroker` (zero-dependency default), `RedisStreamsBroker`,
 `RabbitMqBroker`, `NatsBroker` (JetStream), `KafkaBroker`, `GcpPubSubBroker`
-(`npm:@google-cloud/pubsub`), `ServiceBusBroker` (`npm:@azure/service-bus`), and a custom-injected
-arm. Each cloud client is an **optional** dependency, lazily imported or injected.
+(`@google-cloud/pubsub`), `ServiceBusBroker` (`@azure/service-bus`), and a custom-injected arm. Each
+cloud client is an **optional** dependency, lazily imported or injected.
 
 ## Installation
 
@@ -26,10 +26,7 @@ import { CAPABILITIES, type IMessageBroker } from '@setu-ts/common';
 declare function provisionAccount(userId: string): Promise<void>;
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' }),
-  ],
+  plugins: [RuntimePlugin(), MessagingPlugin({ broker: 'rabbitmq', url: 'amqp://localhost:5672' })],
 });
 
 // Plugins register during `start()`, so the capability is resolvable only after it.
@@ -191,16 +188,16 @@ handler. With no behaviours configured, no `PipelinedBroker` decorator is applie
 
 ## Brokers
 
-| `broker`          | Backing client             | Request-reply | Driven against a real backend in CI |
-| ----------------- | -------------------------- | ------------- | ----------------------------------- |
-| `'memory'`        | none                       | yes           | — (in-process; no backend)          |
-| `'redis-streams'` | `npm:ioredis`              | yes           | yes — Redis 7 (`redis-real` suites) |
-| `'rabbitmq'`      | `npm:amqplib`              | yes           | yes — RabbitMQ 4 (outage suite)     |
-| `'nats'`          | NATS JetStream client      | yes           | yes — `nats:2-alpine -js` (M90d)    |
-| `'kafka'`         | `npm:kafkajs`              | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
-| `'pubsub'`        | `npm:@google-cloud/pubsub` | yes²          | no — emulator suite is local-only   |
-| `'service-bus'`   | `npm:@azure/service-bus`   | yes²          | no — emulator suite is local-only   |
-| `'custom'`        | injected `IMessageBroker`  | yes³          | — (whatever the adapter provides)   |
+| `broker`          | Backing client            | Request-reply | Driven against a real backend in CI |
+| ----------------- | ------------------------- | ------------- | ----------------------------------- |
+| `'memory'`        | none                      | yes           | — (in-process; no backend)          |
+| `'redis-streams'` | `ioredis`                 | yes           | yes — Redis 7 (`redis-real` suites) |
+| `'rabbitmq'`      | `amqplib`                 | yes           | yes — RabbitMQ 4 (outage suite)     |
+| `'nats'`          | NATS JetStream client     | yes           | yes — `nats:2-alpine -js` (M90d)    |
+| `'kafka'`         | `kafkajs`                 | yes¹          | yes — `apache/kafka:4.0.0` (M90d)   |
+| `'pubsub'`        | `@google-cloud/pubsub`    | yes²          | no — emulator suite is local-only   |
+| `'service-bus'`   | `@azure/service-bus`      | yes²          | no — emulator suite is local-only   |
+| `'custom'`        | injected `IMessageBroker` | yes³          | — (whatever the adapter provides)   |
 
 ¹ Kafka needs its reply topic to exist — see below. ² Cloud brokers need their reply topic to
 pre-exist (GCP) or require `Manage` right for admin (Azure). ³ Custom brokers carry whatever RPC
@@ -216,6 +213,8 @@ recovery at `info` — instead of `ioredis` printing every reconnect failure to 
 injected client gets no listener: it belongs to the caller.
 
 ### RabbitMQ durability
+
+<!-- version:history -->
 
 Consumer-group queues are declared durable, and every message is published **persistent** — a
 durable queue keeps only persistent messages across a broker restart. Before 0.9.0 messages were
@@ -247,6 +246,8 @@ stored anything — and the broker logs one warning saying so; a real amqplib co
 it.
 
 ### RabbitMQ consumer recovery
+
+<!-- version:history -->
 
 Since 0.9.0, durable consumer-group handlers **must be idempotent**: failures redeliver, and a crash
 after a confirmed copy but before the original ack can duplicate a message.
@@ -395,6 +396,15 @@ MessagingPlugin({
 
 An existing stream is never touched, with or without `streamSubjects`.
 
+A lazily built NATS connection reconnects forever by default
+(`reconnect: { maxAttempts: -1, waitMs: 2000 }`). Set a finite `maxAttempts` to cap attempts; when
+exhausted, the connection closes and health stays down until the application replaces it.
+`maxAttempts` must be an integer ≥ -1; `waitMs` an integer 1–2147483647. Invalid values throw
+`RangeError` at plugin or broker construction. `reconnect` with an injected `client` throws
+`TypeError`: configure that connection in the application instead.
+
+<!-- version:history -->
+
 **`publish()` resolves once JetStream has stored the message.** It waits for the server's
 acknowledgement, so a publish to a subject no stream captures rejects with an error naming the
 subject (the server answers `503`), and an unresponsive server rejects after the client's own 5 s
@@ -441,6 +451,15 @@ subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon t
 not recoverable by splitting. A derived or supplied name over 255 characters is refused at
 `subscribe()`. Topics must already exist; the broker creates none.
 
+### Kafka and Pub/Sub publish bounds
+
+Both brokers bound each transport publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded),
+including RPC requests/replies and outbox relay publishes. A value outside 0–2147483647, `NaN` or
+Infinity throws `RangeError` at plugin and broker construction. A timeout names the broker, topic
+and bound and says it may still be delivered: it does not cancel the transport or prove the message
+was dropped. Configure a longer bound for slow brokers, or `0` to restore the previous unbounded
+wait; account for possible delivery before retrying.
+
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —
@@ -454,6 +473,33 @@ may not contain `:` (the broker refuses one at creation), while a group id may, 
 `defaultQueue: 'orders-eu'` + topic `created` and `defaultQueue: 'orders'` + topic `eu-created` both
 produce `orders-eu-created`, putting two differently-subscribed consumers into one group and
 restoring the empty-assignment failure this derivation exists to prevent.
+
+A new group with no committed partition offsets captures the topic high watermarks during
+`subscribe()`, before `run()`. On its first group join each member seeks only its assigned,
+still-uncommitted partitions to the minimum start offset advertised by the current members. A
+message published after `subscribe()` resolves on any member is delivered to the group, including
+when several members first start together; nothing published before the first member’s `subscribe()`
+is replayed. `subscribe()` returns without waiting for the join. A group with any committed offset
+captures nothing; committed partitions and subsequent joins are left untouched.
+
+**Group members are trusted.** The minimum is taken over what every current member advertises, so
+any client able to join the group can move a new group's start earlier, which replays history to it;
+it can never move the start later. Kafka authorizes joining a group with Read on the group alone,
+while committing offsets also needs Read on the topic, so where group and topic ACLs are split a
+principal that cannot commit the group's offsets (and cannot read the topic) can still make a new
+group replay the topic's retained history. The lowering is not logged. Restrict group membership
+(Kafka Read ACLs on the group, not only on the topic) where replay matters. Advertisements are keyed
+by topic, member metadata above 64 KiB is skipped, and an offset longer than 19 digits is refused;
+only the first refusal per subscription is logged.
+
+This requires an admin-capable factory and a loadable `kafkajs` module. With an injected factory,
+the module is tried once at `connect()` for the round-robin wrapper and metadata codec. If absent,
+each member seeks to its own watermark, so concurrent first starts can miss messages. Without
+`admin()` the step is skipped and kafkajs latest-offset behavior retains its start-position window.
+A member that crashes between subscribing and joining takes its start offsets with it. Admin or
+metadata failures warn once per subscription with topic and group (falling back to `logger.error`);
+bad member metadata is skipped individually while other usable snapshots still contribute to the
+minimum. Admin or seek failures leave affected partitions with latest-offset behavior.
 
 ### Kafka topics
 
@@ -636,9 +682,13 @@ const app = createApplication({
       subscriptions: [
         // Consumer: the handler receives the PARSED payload, the envelope, and
         // the transport metadata. A malformed envelope never reaches it.
-        onIntegrationEvent(orderPlaced, async (payload) => {
-          await provisionOrder(payload.orderId);
-        }, { queue: 'billing' }),
+        onIntegrationEvent(
+          orderPlaced,
+          async (payload) => {
+            await provisionOrder(payload.orderId);
+          },
+          { queue: 'billing' },
+        ),
       ],
     }),
   ],
@@ -867,10 +917,7 @@ function metadataFor(event: IDomainEvent): {
   return metadata;
 }
 
-async function publishPending(
-  runtime: IRuntimeServices,
-  broker: IMessageBroker,
-): Promise<void> {
+async function publishPending(runtime: IRuntimeServices, broker: IMessageBroker): Promise<void> {
   for (const event of events.pending()) {
     await publishIntegrationEvent(runtime, broker, orderPlaced, orderPlaced.parse(event.data), {
       ...metadataFor(event),
@@ -932,9 +979,14 @@ const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
 await db.transaction(async (uow) => {
   await uow.getRepository('Order').create({ id: 'o-1', total: 42 });
   // The SAME unit of work: the row commits or rolls back with the order.
-  await outbox.write(uow, orderPlaced, { orderId: 'o-1' }, {
-    metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
-  });
+  await outbox.write(
+    uow,
+    orderPlaced,
+    { orderId: 'o-1' },
+    {
+      metadata: { aggregateId: 'o-1', aggregateVersion: 1 },
+    },
+  );
 });
 // Optional: request a sweep now instead of waiting for the next interval.
 outbox.dispatch();
@@ -947,13 +999,13 @@ for a named instance) and an `outbox` health indicator. At `onInit` it resolves 
 default `relay.schedule: true` and no scheduler registered, `start()` rejects
 `OutboxRelayUnscheduledError`.
 
-| Member                                      | What it does                                                                                                                                                      |
-| ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection |
-| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                      |
-| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                        |
-| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                    |
-| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`)                                                                           |
+| Member                                      | What it does                                                                                                                                                                                                                |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `write(scope, definition, payload, input?)` | Builds the envelope (id, ordering key and deduplication id fixed NOW) and appends the row through `scope`. Resolves the envelope id; every refusal is a rejection                                                           |
+| `dispatch()`                                | Requests a sweep without waiting: coalesced (one running, one follow-up), never throws, a no-op once closing                                                                                                                |
+| `sweep()`                                   | Runs or joins a sweep and resolves its `OutboxSweepResult`                                                                                                                                                                  |
+| `purge()`                                   | Deletes settled rows older than `retainSentMs`                                                                                                                                                                              |
+| `release(id, action, { tenantId? })`        | Returns a `failed` row to `pending` (`'retry'`) or settles it unpublished (`'discard'`); refuses a bad id (`'invalid-id'`, 400), an absent row (404) or a non-failed row (409) with the status-hinted `OutboxRowStateError` |
 
 `write` uses ONE implementation of the publish precedence with `publishIntegrationEvent`: the
 caller's `orderingKey` beats the definition's selector, and `deduplicationId` defaults to the
@@ -1096,7 +1148,7 @@ with no separators, so a collation that ignores punctuation cannot reorder it.
 The mappings for the other adapters:
 
 ```typescript
-import { bigint, integer, pgTable, text } from 'npm:drizzle-orm@^0.45.2/pg-core';
+import { bigint, integer, pgTable, text } from 'drizzle-orm/pg-core';
 import { CosmosAdapter, DynamoAdapter, MongoAdapter } from '@setu-ts/database-plugin';
 
 // Drizzle: register this table as `drizzleTables: { Outbox: outbox }`.
@@ -1197,11 +1249,14 @@ calls it. `'retry'` returns the row to `pending` with zero attempts and `leaseUn
 release takes effect at the relay's next lap.
 
 **One deadline per sweep.** `relay.sweepDeadlineMs` (default 30 000), on the monotonic clock, bounds
-the whole sweep and purge. Each publish and store call has its own bound (default 5 000 each). A row
-starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status write
-reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction requires
-`publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all three
-options.
+the whole sweep and purge, EXCEPT that the status write settling an already-invoked publish runs to
+its own `storeTimeoutMs` even when a pause has exhausted the budget: a sweep that overran by a pause
+can outlive the deadline by at most one `storeTimeoutMs`, and the shutdown drain that waits for it
+is bounded by the same amount. Each publish and store call has its own bound (default 5 000 each). A
+row starts only while `publishTimeoutMs + 2 × storeTimeoutMs` fits: the claim, publish and status
+write reserve 15 000 ms by default, leaving the first 15 000 ms for row starts. Construction
+requires `publishTimeoutMs + 2 × storeTimeoutMs < sweepDeadlineMs`; equality is refused naming all
+three options.
 
 **Several relays may sweep one store.** Each row is claimed through an atomic compare-and-set on
 `claimVersion`, incrementing it once and recording `leaseUntil`. Another relay waits until
@@ -1216,11 +1271,14 @@ rule no longer bears on correctness. Claims use the same protocol on every suppo
 bridge refuses sources without native conditional writes.
 
 The overlap kinds are `fenced` (the pre-publish check refused an expired claim), `claim-lost` (a
-status write found another version) and `duplicate` (`markSent` found the row already sent). Any
-kind, including a dispatch sweep, degrades health with `relay-overlap` inside the configured window.
-Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0` disables
-only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator diagnostic, and
-is absent from transition outcomes.
+status write found another version) and `duplicate` (`markSent` found the row already sent, or
+`markFailure` did after the relay's publish timed out — the copy may have duplicated). A settlement
+answer is recorded even when it arrives after the call's own bound or the sweep deadline; a relay
+paused inside its publish may also report the `store-write-failing` health reason for that sweep.
+Any kind, including a dispatch sweep, adds the health reason `relay-overlap` inside the configured
+window. Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0`
+disables only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator
+diagnostic, and is absent from transition outcomes.
 
 On DynamoDB a stale GSI page cannot cause a publish: the claim's conditional write checks the latest
 base item. This follows AWS's documented model and is exercised against DynamoDB Local, not the
@@ -1228,8 +1286,8 @@ service.
 
 On shutdown the relay drains in an `onShutdown` hook, before any `onClose` hook closes the broker or
 the database: the jobs are removed, `dispatch()` becomes a no-op, and the in-flight sweep finishes
-within its deadline. A failure caused by the application stopping is never counted against
-`maxAttempts`.
+within its deadline plus, when a pause made it overrun, one `storeTimeoutMs`. A failure caused by
+the application stopping is never counted against `maxAttempts`.
 
 ### Tenancy
 
@@ -1280,7 +1338,7 @@ set by default.
 ### Health and metrics
 
 The `outbox` indicator reads the store's counts through a cached, bounded probe (5 s TTL, 2 s
-bound): `down` when the store does not answer, otherwise `degraded` with `data.reasons` from a fixed
+bound): `down` when the store does not answer, otherwise `up` with `data.reasons` from a fixed
 vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
 tenant id, ordering key, topic or error text.
 
@@ -1555,8 +1613,9 @@ messaging behaviour chain. A re-publish reaches every consumer group of the topi
 inbox skip it, groups without one process it again. `parked()` never returns an envelope, and the
 health indicator carries a count only. Parked rows are purged by `retainMs` like every other row,
 envelope included, so a parked row does not outlive the window: release or discard a parked delivery
-within that window (the `inbox` health indicator reports `degraded` while any row is parked), and
-`discard` clears one sooner. These are operator capabilities — gate any route that calls them.
+within that window (the `inbox` indicator stays `up` with parked rows in `data.parked` and
+`data.reasons`), and `discard` clears one sooner. These are operator capabilities — gate any route
+that calls them.
 
 ### Backends
 
@@ -1654,8 +1713,9 @@ Any `IInboxStore` from `@setu-ts/common` can back the inbox. It must keep the br
 rejection; a second marker with the same id is refused; `find` returns `undefined` for a row of
 another `kind`; `recordFailure` writes outside any transaction; `park` answers `'exists'` when a
 marker is already present; `parked` never returns the envelope; `release` writes only from `parked`;
-`purge` never deletes a parked marker; `verify` rejects when the backend cannot serve the inbox; and
-every method rejects rather than throwing synchronously.
+`purge` deletes rows of every status, `parked` included, at most `limit` per status; `verify`
+rejects when the backend cannot serve the inbox; and every method rejects rather than throwing
+synchronously.
 
 ## Bridging in-process events
 
@@ -1711,14 +1771,35 @@ changes, and the first has **two layers** because the health indicator is not th
 indicator wraps every arm's `reachability()` in its own `createCachedProbe` (5-second TTL, 2-second
 bound), which is the universal outer bound: a probe that cannot answer — a **hung** broker, the
 condition a stopped one never produces — settles `reachable: 'unknown'` instead of holding `/health`
-open. `RabbitMqBroker` and `ServiceBusBroker` additionally build their own cached, bounded probes,
-which is what `isHealthy()` reads; that inner layer is what protects a **direct** caller, such as
-`realtime-backplane-plugin`'s `'messaging'` transport, which resolves the broker itself and never
-passes through this indicator. Second, the RabbitMQ probe is a real round trip (a throwaway channel
-open/close), replacing the connection-fault flag read that a hung broker never trips. Residual
-exposure, stated rather than implied: a deployment whose Service Bus management plane is unreachable
-and that publishes nothing keeps reporting `reachable: 'unknown'` with status `up` until its first
-publish — an operator who needs the signal can publish synthetically.
+open. `RabbitMqBroker`, `ServiceBusBroker`, `KafkaBroker` and `GcpPubSubBroker` additionally build
+their own cached, bounded probes, which is what `isHealthy()` reads; that inner layer is what
+protects a **direct** caller, such as `realtime-backplane-plugin`'s `'messaging'` transport, which
+resolves the broker itself and never passes through this indicator. Second, the RabbitMQ probe is a
+real round trip (a throwaway channel open/close), replacing the connection-fault flag read that a
+hung broker never trips. Residual exposure, stated rather than implied: a deployment whose Service
+Bus management plane is unreachable and that publishes nothing keeps reporting
+`reachable: 'unknown'` with status `up` until its first publish — an operator who needs the signal
+can publish synthetically.
+
+A Kafka publish bound covers everything `send()` waits for, including leader election for a topic
+the broker auto-creates on first use — measured at over 2 s right after a broker restart — so keep
+`publishTimeoutMs` well above that when topics are created on demand.
+
+The Kafka probe uses a second client (`<clientId>-health`) with zero retries, a 1500 ms request
+timeout and 1000 ms connection timeout; one probe admin connects at startup and closes at shutdown.
+An injected factory supplies `admin({ retry: { retries: 0 } })` with its own timeouts; without
+`admin`, Kafka reachability is unknown. A separate group admin connects on the first subscription,
+shared across concurrent subscriptions, and closes at shutdown.
+
+| Broker  | Round trip                                                                                 | Stopped                    | Hung                                                   |
+| ------- | ------------------------------------------------------------------------------------------ | -------------------------- | ------------------------------------------------------ |
+| Kafka   | `describeCluster()` on the dedicated admin                                                 | `false` / `down`           | request timeout or 2 s bound → `undefined` / `unknown` |
+| Pub/Sub | `getTopics({ pageSize: 1, autoPaginate: false, gaxOpts: { timeout: 1500, retry: null } })` | gRPC 14 → `false` / `down` | gRPC 4 or 2 s bound → `undefined` / `unknown`          |
+
+Pub/Sub treats any other numeric gRPC code, including 7 (permission denied) and 16
+(unauthenticated), as reachable: a publisher-only account need not have `pubsub.topics.list`, and an
+authorization response proves the server answered. A failure without a numeric code is `false`.
+Unknown reachability still reports `up`; changing readiness for unknown is outside this milestone.
 
 ## Exports
 
@@ -1830,10 +1911,17 @@ publish — an operator who needs the signal can publish synthetically.
 | `ServiceBusMessagingOptions`            | type      |
 | `SubscriptionEntry`                     | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#messaging-setu-tsmessaging-plugin).
+
+## Readiness and dependency outages (M113b)
+
+Inbox parked rows and all six outbox reasons keep the indicator `up` and `/ready` at 200. Alert on
+inbox `data.parked` / `data.reasons` and outbox `data.reasons` (`oldest-pending-age`, `failed-rows`,
+`failed-scan-cap`, `blocked-key-cap`, `store-write-failing`, `relay-overlap`). Lifecycle and
+unreachable-store `down` arms remain.

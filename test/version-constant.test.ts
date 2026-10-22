@@ -8,20 +8,21 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
 
-/** Every workspace member directory, read from the root manifest. */
-async function members(): Promise<string[]> {
-  const root = JSON.parse(await Deno.readTextFile('deno.json')) as { workspace: string[] };
-  return root.workspace.map((entry) => entry.replace(/^\.\//, ''));
-}
+import { pathToFileURL } from 'node:url';
+import { resolve } from 'node:path';
+import { readFile, stat } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
+import { workspaceMembers } from '../scripts/lib/workspace.ts';
 
 /** The members that read their own version, which are the ones carrying the constant. */
 async function membersWithConstant(): Promise<string[]> {
   const found: string[] = [];
-  for (const dir of await members()) {
-    const exists = await Deno.stat(`${dir}/src/version.ts`).then(() => true, () => false);
+  for (const dir of await workspaceMembers()) {
+    const exists = await stat(`${dir}/src/version.ts`).then(
+      () => true,
+      () => false,
+    );
     if (exists) found.push(dir);
   }
   return found;
@@ -36,9 +37,11 @@ describe('src/version.ts agrees with deno.json and package.json', () => {
   it('every VERSION equals both manifest versions', async () => {
     const disagreements: string[] = [];
     for (const dir of await membersWithConstant()) {
-      const { VERSION } = await import(`../${dir}/src/version.ts`) as { VERSION: string };
-      const deno = JSON.parse(await Deno.readTextFile(`${dir}/deno.json`)).version;
-      const npm = JSON.parse(await Deno.readTextFile(`${dir}/package.json`)).version;
+      const { VERSION } = (await import(
+        /* @vite-ignore */ pathToFileURL(resolve(`${dir}/src/version.ts`)).href
+      )) as { VERSION: string };
+      const deno = JSON.parse(await readFile(`${dir}/deno.json`, 'utf8')).version;
+      const npm = JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).version;
       if (VERSION !== deno || VERSION !== npm) {
         disagreements.push(`${dir}: VERSION ${VERSION}, deno.json ${deno}, package.json ${npm}`);
       }

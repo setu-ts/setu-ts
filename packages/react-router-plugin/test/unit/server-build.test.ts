@@ -6,7 +6,7 @@ import * as nodeFs from 'node:fs/promises';
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import type { SsrRequestHandler } from '../../src/interfaces/index.ts';
+import type { ReactRouterPluginOptions, SsrRequestHandler } from '../../src/interfaces/index.ts';
 import {
   assembleHandler,
   assertSsrRuntime,
@@ -27,22 +27,15 @@ describe('server-build', () => {
       headers: { 'Content-Type': 'text/html' },
     });
 
-    const createRequestHandler = (
-      build: unknown,
-      mode?: string,
-    ): SsrRequestHandler => {
+    const createRequestHandler = (build: unknown, mode?: string): SsrRequestHandler => {
       factoryCalled = true;
       capturedBuild = build;
       capturedMode = mode;
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (_request, _context) => fakeRRResponse;
     };
 
-    const handler = assembleHandler(
-      fakeBuild,
-      createRequestHandler,
-      'production',
-    );
+    const handler = assembleHandler(fakeBuild, createRequestHandler, 'production');
 
     // assembleHandler calls createRequestHandler immediately, so factoryCalled is true.
     expect(factoryCalled).toBe(true);
@@ -62,7 +55,7 @@ describe('server-build', () => {
     let receivedContext: unknown = null;
 
     const createRequestHandler = () => {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async (request: Request, context: unknown) => {
         receivedRequest = request;
         receivedContext = context;
@@ -134,9 +127,7 @@ describe('server-build', () => {
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is missing', () => {
-    expect(() => createLoadContextFactory({})).toThrow(
-      "exposes no 'RouterContextProvider' export",
-    );
+    expect(() => createLoadContextFactory({})).toThrow("exposes no 'RouterContextProvider' export");
   });
 
   it('createLoadContextFactory throws when RouterContextProvider is not callable', () => {
@@ -147,7 +138,7 @@ describe('server-build', () => {
 
   it('assertSsrRuntime returns the runtime when both members are functions', () => {
     const runtime = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       handler: async () => new Response('ok'),
       createLoadContext: createFakeLoadContextFactory(),
     };
@@ -156,7 +147,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects a bare handler and names the pre-0.2.0 shape', () => {
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     const legacy = async () => new Response('ok');
 
     expect(() => assertSsrRuntime(legacy)).toThrow(
@@ -165,9 +156,7 @@ describe('server-build', () => {
   });
 
   it('assertSsrRuntime rejects an object missing createLoadContext and lists its keys', () => {
-    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow(
-      'an object with keys [handler]',
-    );
+    expect(() => assertSsrRuntime({ handler: () => {} })).toThrow('an object with keys [handler]');
   });
 
   it('assertSsrRuntime rejects a runtime whose handler is not a function', () => {
@@ -204,8 +193,78 @@ describe('server-build', () => {
 
   it('loadRequestHandler rejects when server build path does not exist', async () => {
     const nonExistentPath = './__non_existent_build_path_for_test__';
-    await expect(
-      loadRequestHandler(nonExistentPath, 'production'),
-    ).rejects.toThrow('Failed to load React Router server build');
+    await expect(loadRequestHandler(nonExistentPath, 'production')).rejects.toThrow(
+      'Failed to load React Router server build',
+    );
+  });
+});
+
+// ── M113d §3.10 — the module arm ─────────────────────────────────────────────
+
+describe('loadRequestHandler — the module arm (M113d §3.10)', () => {
+  const fakeRR = (): Record<string, unknown> =>
+    ({
+      createRequestHandler: (build: unknown, mode: string) => (_request: Request) =>
+        Promise.resolve(new Response(`${mode}:${String(build)}`)),
+      RouterContextProvider: class {},
+    }) as unknown as Record<string, unknown>;
+
+  it('produces the same handler and context factory from a module as from a path', async () => {
+    const tmp = await tempDir({ prefix: 'rr-module-arm-' });
+    try {
+      const buildPath = `${tmp}/build.mjs`;
+      await nodeFs.writeFile(buildPath, 'export default { routes: {} };\n');
+      const byPath = await loadRequestHandler(buildPath, 'production', {
+        rrImportHook: () => Promise.resolve(fakeRR()),
+      });
+      const byModule = await loadRequestHandler('<serverBuild>', 'production', {
+        rrImportHook: () => Promise.resolve(fakeRR()),
+        serverBuild: { default: { routes: {} } },
+      });
+      expect(typeof byPath.handler).toBe('function');
+      expect(typeof byModule.handler).toBe('function');
+      expect(typeof byPath.createLoadContext).toBe('function');
+      expect(typeof byModule.createLoadContext).toBe('function');
+      // The same build object reaches createRequestHandler: the served string
+      // names the mode and the build, identical on both arms.
+      const responseA = await (byPath.handler as SsrRequestHandler)(
+        new Request('http://localhost/'),
+        {},
+      );
+      const responseB = await (byModule.handler as SsrRequestHandler)(
+        new Request('http://localhost/'),
+        {},
+      );
+      expect(await responseA.text()).toBe(await responseB.text());
+    } finally {
+      await nodeFs.rm(tmp, { recursive: true });
+    }
+  });
+
+  it('unwraps a default-export module, and uses a bare namespace as-is', async () => {
+    const unwrapped = await loadRequestHandler('<serverBuild>', 'production', {
+      rrImportHook: () => Promise.resolve(fakeRR()),
+      serverBuild: { default: { routes: {} } },
+    });
+    const bare = await loadRequestHandler('<serverBuild>', 'production', {
+      rrImportHook: () => Promise.resolve(fakeRR()),
+      serverBuild: { routes: {} },
+    });
+    expect(typeof unwrapped.handler).toBe('function');
+    expect(typeof bare.handler).toBe('function');
+  });
+});
+
+describe('ReactRouterPluginOptions — the arms are exclusive at the type level (M113d §3.10)', () => {
+  it('refuses neither arm and both arms at compile time', () => {
+    function arms(): ReadonlyArray<ReactRouterPluginOptions> {
+      return [
+        // @ts-expect-error — supplying NEITHER serverBuildPath nor serverBuild is a compile error.
+        {},
+        // @ts-expect-error — supplying BOTH is a compile error: exactly one arm.
+        { serverBuildPath: 'https://example.test/build/server/index.js', serverBuild: {} },
+      ];
+    }
+    expect(typeof arms).toBe('function');
   });
 });

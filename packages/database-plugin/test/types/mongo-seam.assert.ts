@@ -14,9 +14,9 @@
  * STATICALLY — a dynamic `import()` inside a test body is exactly what let the
  * graphql facade drift, because `deno check` never compared the two type
  * worlds — and assigns a real `MongoClient` to `IMongoClient` with NO cast. It
- * is reached by `deno task check`, which type-checks every module under
- * `packages/`, and is deliberately NOT named `*.test.ts`, so `deno test` never
- * executes it: the assertion is the type-check itself. The moment the facade
+ * is reached by `pnpm run check`, which type-checks the package `test/` trees
+ * `tsconfig.check.json` includes, and is deliberately NOT named `*.test.ts`, so
+ * the test runner never executes it: the assertion is the type-check itself. The moment the facade
  * drifts again, this file is the TS2322 that fails the build instead of an
  * application's.
  *

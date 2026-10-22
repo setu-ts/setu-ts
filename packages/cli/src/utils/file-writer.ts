@@ -4,10 +4,54 @@
  * @module
  */
 
-import type { IFileSystem } from '@setu-ts/common';
+import type { IFileSystem, StatResult } from '@setu-ts/common';
+import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
+
+/** Optional CLI-only handle-based I/O, supplied by the executable's process boundary. */
+export interface ICliFileSystem extends IFileSystem {
+  /** Opens non-blocking, checks the opened handle is regular, and reads at most maxBytes + 1. */
+  readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Snapshots without following the leaf link, then replaces using a fresh inode and rename.
+   * Failures after temp creation starts carry RegularFileWriteError; only those whose
+   * `mayHaveChanged` is true (the rename was attempted) are rolled back. Snapshot failures
+   * (including close) precede any mutation and need no undo.
+   */
+  writeRegularFile?(
+    path: string,
+    bytes: Uint8Array,
+    maxExistingBytes: number,
+  ): Promise<{ before: Uint8Array | undefined }>;
+  /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
+  readonly invokingUid?: number;
+  /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
+  directoryOwnership?(path: string): Promise<{
+    readonly uid: number;
+    readonly isSymbolicLink: boolean;
+    readonly isDirectory: boolean;
+  }>;
+}
+
+/** Carries undo bytes when a handle-based write or close fails after the snapshot. */
+export class RegularFileWriteError extends Error {
+  readonly before: Uint8Array | undefined;
+  /** False when the failure provably left the target untouched, so no rollback is due. */
+  readonly mayHaveChanged: boolean;
+
+  /** @param before - Previous bytes, or undefined for a file created by this attempt.
+   * @param cause - The write or close failure.
+   * @param mayHaveChanged - Whether the target may have been altered; defaults to true.
+   */
+  constructor(before: Uint8Array | undefined, cause: unknown, mayHaveChanged = true) {
+    super(failureMessage(cause), { cause });
+    this.before = before;
+    this.mayHaveChanged = mayHaveChanged;
+    this.name = 'RegularFileWriteError';
+  }
+}
 
 /**
  * One file a schematic asks the command layer to create.
@@ -314,9 +358,9 @@ export function interruptedRunRetryHint(
   const directory = wouldCreateDirectory.replace(/\/+$/, '');
   const prefix = `${directory}/`;
   if (!existing.every((path) => path.startsWith(prefix))) return undefined;
-  return `If an earlier run was interrupted before this change, delete ${
-    escapeName(directory)
-  } and run this again.`;
+  return `If an earlier run was interrupted before this change, delete ${escapeName(
+    directory,
+  )} and run this again.`;
 }
 
 /** One attempted write, recorded before the filesystem can partially modify it. */
@@ -331,18 +375,15 @@ export interface WriteOutcome {
   readonly outcome: 'created' | 'updated' | 'unchanged';
 }
 
-function outcomeFor(
-  path: string,
-  before: Uint8Array | undefined,
-  after: Uint8Array,
-): WriteOutcome {
+function outcomeFor(path: string, before: Uint8Array | undefined, after: Uint8Array): WriteOutcome {
   return {
     path,
-    outcome: before === undefined
-      ? 'created'
-      : before.length === after.length && before.every((byte, index) => byte === after[index])
-      ? 'unchanged'
-      : 'updated',
+    outcome:
+      before === undefined
+        ? 'created'
+        : before.length === after.length && before.every((byte, index) => byte === after[index])
+          ? 'unchanged'
+          : 'updated',
   };
 }
 
@@ -370,10 +411,87 @@ async function ensureDirectory(
   known.add(path);
 }
 
-/** Captures bytes at the write boundary, never interpreting unreadability as absence. */
+/**
+ * The largest existing file the CLI reads before classifying or overwriting a
+ * file it generates; generated files are far smaller.
+ */
+export const MAX_EXISTING_FILE_BYTES: number = 1024 * 1024;
+
+/**
+ * Captures bytes at the write boundary, never interpreting unreadability as
+ * absence.
+ *
+ * Checked before it is read: a CLI-owned path is predictable, so a repository
+ * can commit a link or a special file there — a link to `/dev/zero` reads
+ * forever and a FIFO never returns. `stat` (which follows links) runs first,
+ * and only a regular file under {@linkcode MAX_EXISTING_FILE_BYTES} is opened
+ * at all. A missing path still means "not there yet".
+ */
 async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array | undefined> {
+  let stat: StatResult;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+  if (!stat.isFile) {
+    throw new Error(
+      `${escapeName(path)} is not a regular file; the CLI will not read or replace it.`,
+    );
+  }
+  if (stat.size > MAX_EXISTING_FILE_BYTES) {
+    throw new Error(
+      `${escapeName(path)} is ${stat.size} bytes, larger than the 1 MiB the CLI will read ` +
+        'for a file it generates.',
+    );
+  }
   try {
     return (await fs.readFile(path)).slice();
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+}
+
+/**
+ * Reads a developer-owned text file the CLI only inspects. The executable checks
+ * the opened handle and bounds the read; filesystems without that optional CLI
+ * capability retain the stat-then-read fallback.
+ *
+ * @param fs - The filesystem to read through
+ * @param path - The file to read
+ * @returns The decoded text, or `undefined` when the path does not exist
+ * @throws {Error} When the path is not a regular file, is larger than 1 MiB, or
+ *   is not valid UTF-8
+ */
+export async function readExistingText(
+  fs: ICliFileSystem,
+  path: string,
+): Promise<string | undefined> {
+  if (fs.readRegularFile !== undefined) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        await fs.readRegularFile(path, MAX_EXISTING_FILE_BYTES),
+      );
+    } catch (cause) {
+      if (!isMissingPath(cause)) throw cause;
+      return undefined;
+    }
+  }
+  let stat: StatResult;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+  if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES)
+    throw new Error(`${path}: expected a regular file at most 1 MiB`);
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      await fs.readFile(path),
+    );
   } catch (cause) {
     if (!isMissingPath(cause)) throw cause;
     return undefined;
@@ -395,8 +513,40 @@ export async function classifyFiles(
   return outcomes;
 }
 
+/**
+ * Reports the same collisions and managed-file outcomes as a real write, without writing.
+ *
+ * @param deps - The filesystem and output sinks
+ * @param files - The planned files
+ * @returns The error exit code for collisions, otherwise the success exit code
+ */
+export async function reportDryRunPlan(
+  deps: {
+    readonly fs: IFileSystem;
+    readonly log: (line: string) => void;
+    readonly error: (line: string) => void;
+  },
+  files: readonly GeneratedFile[],
+): Promise<number> {
+  const existing = await findExisting(deps.fs, files);
+  const collisions = new Set(existing);
+  const outcomes = await classifyFiles(
+    deps.fs,
+    files.filter((file) => !collisions.has(file.path)),
+  );
+  for (const outcome of outcomes) {
+    deps.log(
+      outcome.outcome === 'unchanged'
+        ? `unchanged ${escapeName(outcome.path)}`
+        : `would ${outcome.outcome === 'created' ? 'create' : 'update'} ${escapeName(outcome.path)}`,
+    );
+  }
+  for (const path of existing) deps.error(`WOULD REFUSE: ${escapeName(path)} already exists`);
+  return existing.length > 0 ? EXIT_ERROR : EXIT_OK;
+}
+
 /** Restores even a write that rejected after truncating its target. */
-async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
+async function restoreFile(fs: ICliFileSystem, undo: FileUndo): Promise<void> {
   const { before } = undo;
   if (before === undefined) {
     try {
@@ -406,13 +556,15 @@ async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
     }
     return;
   }
+  if (fs.writeRegularFile !== undefined) {
+    await fs.writeRegularFile(undo.path, before, MAX_EXISTING_FILE_BYTES);
+    return;
+  }
   const current = await previousBytes(fs, undo.path);
   // A read-only file can reject without changing anything. Do not turn that
   // into a spurious rollback failure by trying to rewrite the intact bytes.
-  if (
-    current?.length === before.length &&
-    current.every((byte, index) => byte === before[index])
-  ) return;
+  if (current?.length === before.length && current.every((byte, index) => byte === before[index]))
+    return;
   await fs.writeFile(undo.path, before);
 }
 
@@ -436,12 +588,16 @@ function failureMessage(cause: unknown): string {
  * @throws The original failure, or an AggregateError naming incomplete recovery
  */
 export async function writeFiles(
-  fs: IFileSystem,
+  fs: ICliFileSystem,
   files: readonly GeneratedFile[],
   options: { readonly root: string; readonly signal?: AbortSignal },
 ): Promise<readonly WriteOutcome[]> {
   // Every target is checked BEFORE the first write, so a link anywhere in the
   // plan refuses the whole batch with nothing written.
+  // assertInsideProject checks the parents; the Node writer replaces the leaf
+  // via rename. Agents workspace writes also check directory ownership:
+  // a chain owned by the invoking user cannot be rearranged by another user.
+  // Other writes still resolve parents by name.
   for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];
@@ -452,11 +608,27 @@ export async function writeFiles(
     for (const file of files) {
       throwIfInterrupted(options.signal);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
-      const before = await previousBytes(fs, file.path);
-      attempted.push({ path: file.path, before });
-      await fs.writeFile(file.path, encoder.encode(file.contents));
+      const bytes = encoder.encode(file.contents);
+      let before: Uint8Array | undefined;
+      if (fs.writeRegularFile !== undefined) {
+        try {
+          ({ before } = await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
+        } catch (cause) {
+          // A failure before the rename left the target untouched: undoing it would only
+          // risk reporting a spurious incomplete rollback, or removing a file another
+          // process created at an absent target meanwhile.
+          if (cause instanceof RegularFileWriteError && cause.mayHaveChanged)
+            attempted.push({ path: file.path, before: cause.before });
+          throw cause;
+        }
+        attempted.push({ path: file.path, before });
+      } else {
+        before = await previousBytes(fs, file.path);
+        attempted.push({ path: file.path, before });
+        await fs.writeFile(file.path, bytes);
+      }
       throwIfInterrupted(options.signal);
-      outcomes.push(outcomeFor(file.path, before, encoder.encode(file.contents)));
+      outcomes.push(outcomeFor(file.path, before, bytes));
     }
     return outcomes;
   } catch (cause) {
@@ -590,13 +762,15 @@ export async function withFileTransaction<T>(
     }
     // A nested write batch rolls back through this abort-aware journal, so its
     // aggregate can wrap the interruption even when outer recovery also fails.
-    const originalCause = cause instanceof AggregateError && cause.cause instanceof InterruptedError
-      ? cause.cause
-      : cause;
+    const originalCause =
+      cause instanceof AggregateError && cause.cause instanceof InterruptedError
+        ? cause.cause
+        : cause;
     if (failures.length > 0) {
       throw new AggregateError(
         [cause, ...failures],
         `${failureMessage(cause)}; rollback incomplete: ${failures.map(failureMessage).join('; ')}`,
+        // eslint-disable-next-line preserve-caught-error -- the interruption, unwrapped, is the cause
         { cause: originalCause },
       );
     }

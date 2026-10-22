@@ -20,10 +20,30 @@ export function renderConfigOptions(envFilePath: string): string {
   return `{ envFilePath: '${envFilePath}', envFileOptional: true }`;
 }
 
+/**
+ * Whether the generated container rules keep a dotenv file out of an image.
+ *
+ * The generated `.dockerignore` covers exactly `.env` and `.env.*` names. It
+ * additionally KEEPS `.env.example` (it is committed and meant to be visible),
+ * so this returns `false` for it — not because it is a secret, but because the
+ * generic dotenv rules deliberately exclude it from what they match.
+ *
+ * A custom `--env-file` name such as `local.env` or `secrets` is not covered and
+ * must be added to `.dockerignore` by hand.
+ *
+ * @param name - The final path segment of a dotenv file
+ * @returns Whether `.env`/`.env.*` rules match it
+ */
+export function isCoveredDotenvName(name: string): boolean {
+  return (
+    name === '.env' ||
+    (name.startsWith('.env.') && name.length > '.env.'.length && name !== '.env.example')
+  );
+}
+
 /** A parsed environment-file path. */
 export type EnvFilePathResult =
-  | { readonly ok: true; readonly path?: string }
-  | { readonly ok: false; readonly message: string };
+  { readonly ok: true; readonly path?: string } | { readonly ok: false; readonly message: string };
 
 /** Reads a relative environment-file path without permitting a project escape. */
 export function readEnvFilePath(
@@ -36,9 +56,11 @@ export function readEnvFilePath(
   }
   if (
     value.startsWith('/') ||
-    value.split('/').some((part) =>
-      part === '' || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part)
-    )
+    value
+      .split('/')
+      .some(
+        (part) => part === '' || part === '.' || part === '..' || !/^[A-Za-z0-9._-]+$/.test(part),
+      )
   ) {
     return {
       ok: false,
@@ -46,4 +68,23 @@ export function readEnvFilePath(
     };
   }
   return { ok: true, path: value };
+}
+
+/**
+ * The dotenv path a configuration declares, when it declares a valid one.
+ *
+ * One reader for the devtool's approved-key scan and for `setu adopt`, so a
+ * project cannot name one path to the tooling and a different one to the
+ * conversion. Validation is {@linkcode readEnvFilePath}'s, so an absolute path,
+ * an empty or `.`/`..` segment, or a character outside the accepted set makes
+ * the declaration unusable rather than moving a file somewhere unexpected.
+ *
+ * @param configSource - The project's `setu.config.ts` text
+ * @returns The validated relative path, or `undefined` when none is declared or it is unusable
+ */
+export function configuredEnvFilePath(configSource: string): string | undefined {
+  const configured = /\benvFilePath:\s*'([^']+)'/.exec(configSource)?.[1];
+  if (configured === undefined) return undefined;
+  const parsed = readEnvFilePath({ 'env-file': configured });
+  return parsed.ok ? parsed.path : undefined;
 }

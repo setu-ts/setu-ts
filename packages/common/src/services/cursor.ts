@@ -272,10 +272,10 @@ export function keysetPredicate(
  *   commas, in `orderBy` declaration order)
  * @since 0.2.0
  */
-export function sortFingerprint(
-  orderBy: Readonly<Record<string, OrderDirection>>,
-): string {
-  return Object.entries(orderBy).map(([field, direction]) => `${field}:${direction}`).join(',');
+export function sortFingerprint(orderBy: Readonly<Record<string, OrderDirection>>): string {
+  return Object.entries(orderBy)
+    .map(([field, direction]) => `${field}:${direction}`)
+    .join(',');
 }
 
 /**
@@ -375,9 +375,7 @@ function encodeCursorValue(value: CursorValue): EncodedCursorValue {
     );
   }
   if (value instanceof Date && !Number.isFinite(value.getTime())) {
-    throw new Error(
-      'cursor-pagination: cannot encode an invalid Date into a cursor.',
-    );
+    throw new Error('cursor-pagination: cannot encode an invalid Date into a cursor.');
   }
   return value instanceof Date ? { t: 'D', v: value.toISOString() } : value;
 }
@@ -409,8 +407,12 @@ function isEncodedDate(value: unknown): value is EncodedDate {
 
 /** Type guard for a decoded cursor token's outer JSON payload shape. */
 function isEncodedPayload(value: unknown): value is EncodedCursorPayload {
-  return isRecord(value) && Array.isArray(value.orderedValues) &&
-    Array.isArray(value.keyValues) && typeof value.sortFingerprint === 'string';
+  return (
+    isRecord(value) &&
+    Array.isArray(value.orderedValues) &&
+    Array.isArray(value.keyValues) &&
+    typeof value.sortFingerprint === 'string'
+  );
 }
 
 /** Narrow an unknown value to an object whose string keys carry unknown values. */
@@ -428,10 +430,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * @since 0.2.0
  */
 function base64Url(input: string): string {
-  return base64FromBytes(utf8(input))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+  return base64FromBytes(utf8(input)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /**

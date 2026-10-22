@@ -15,8 +15,10 @@ guarantees; the other two are out of scope here:
 1. **No duplicate processing.** A second arrival of a key whose work completed is answered from the
    record (HTTP) or skipped (ingress); a concurrent second arrival is refused (`409` on HTTP, a
    retryable rejection on ingress).
-2. **The work and its record committed together** — writing the record inside the business
-   transaction is a later milestone.
+2. **The work and its record committed together** — tier C
+   ([`within`](#tier-c-the-work-and-its-record-commit-together)) delivers this for database work:
+   the claim, the business writes and the record commit in ONE transaction. Side effects outside
+   that transaction are still at-least-once (guarantee 3).
 3. **External side effects once** — achievable only by forwarding a derived key (see
    [`derivedIdempotencyKey`](#forwarding-a-key-to-a-provider)) to a provider that de-duplicates.
 
@@ -26,6 +28,15 @@ guarantees; the other two are out of scope here:
 npm install @setu-ts/idempotency-plugin
 # Deno: deno add npm:@setu-ts/idempotency-plugin
 ```
+
+The Redis store lazy-loads the optional peer `ioredis`:
+
+```bash
+npm install ioredis
+# Deno: deno add npm:ioredis
+```
+
+Without it, startup fails with `OptionalDependencyUnavailableError` naming `ioredis`.
 
 ## Usage
 
@@ -106,6 +117,32 @@ tampered record answers `503` instead of being replayed.
 **Query order matters.** The default fingerprint hashes the raw query exactly as received, so
 `?a=1&b=2` and `?b=2&a=1` fingerprint differently.
 
+## From a browser
+
+A keyed request carries a non-safelisted header, so a cross-origin browser call is preflighted. The
+`corsMiddleware` from `@setu-ts/http-security-plugin` must allow it and expose the replay header:
+`allowedHeaders` must include `idempotency-key`, and `exposedHeaders: ['idempotent-replayed']` is
+needed for the page to read the `Idempotent-Replayed` header. The CORS middleware must run before
+`idempotent()`: a replay only adds headers, so the exposed list survives it.
+
+Send the key per call through the generated operation's trailing `request` parameter
+(`request?: OperationRequestOptions`): `api.createOrder({ body }, { idempotencyKey })`.
+`ClientOptions.idempotency` (`ClientIdempotencyOptions`) generates a key by default for `POST` and
+`PATCH`; `ClientOptions.headers` carrying the key header is refused while it is configured, so the
+per-call `idempotencyKey` is the way to reuse one key across SDK client instances acting for the
+same principal (a retry after a page reload, say). Records are scoped by the authenticated identity,
+so on a route with `principal: 'required'` (the default) another principal's request with the same
+key runs its own work rather than replaying yours. That isolation holds only for authenticated
+callers and a correctly built scope: on a `principal: 'optional'` route every anonymous caller
+shares one scope, so a caller who guesses another anonymous caller's key is served that caller's
+stored result (see [the HTTP check order](#the-http-check-order)). Generate keys with enough entropy
+to be unguessable, and pair such a route with `response: 'status'` unless its response is safe to
+show any anonymous caller.
+
+A custom key header is renamed in three places: the route's `key: { header }`,
+`ClientIdempotencyOptions.header` on the SDK side, and the CORS `allowedHeaders` entry (the
+preflight must allow the header the SDK sends under its new name).
+
 ## Ingress: the allow-list and the consumer identity
 
 `idempotentIngress(options)` acts only on an explicit `topics` (broker) and/or `jobNames` (queue)
@@ -156,6 +193,12 @@ Configure it with `IdempotencyPlugin({ transactional: { store } })`, where `stor
 `createDatabaseIdempotencyStore()` from `@setu-ts/database-plugin` (or any
 `ITransactionalIdempotencyStore`). The store is resolved and `verify()`d at `onInit`.
 
+The default purge is scheduled, so the example registers `SchedulerPlugin()`. Without
+`CAPABILITIES.SCHEDULER`, startup rejects with `IdempotencyConfigurationError`. Alternatively set
+`transactional.purge: { schedule: false }` and call `idempotency.purgeTransactional()` yourself.
+That alternative is mandatory on Workers, where `SchedulerPlugin` throws; call the purge from a Cron
+Trigger.
+
 A handler that creates an order calls `within` itself, because middleware cannot own the handler's
 transaction. The scope comes from the authenticated principal and tenant only — never from the
 request body — and is encoded with `JSON.stringify`, so no tenant or user id can be crafted to
@@ -166,6 +209,7 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IIdempotencyService } from '@setu-ts/common';
 import { createDatabaseIdempotencyStore, DatabasePlugin } from '@setu-ts/database-plugin';
 import type { IUnitOfWork } from '@setu-ts/database-plugin';
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 import { IdempotencyPlugin } from '@setu-ts/idempotency-plugin';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -174,6 +218,7 @@ const app = createApplication({
   plugins: [
     RuntimePlugin(),
     DatabasePlugin(),
+    SchedulerPlugin(),
     IdempotencyPlugin({ transactional: { store: createDatabaseIdempotencyStore() } }),
   ],
 });
@@ -221,19 +266,23 @@ Local (M90f). Tier C was driven against a real Prisma 7.10 client on PostgreSQL 
 committed real-backend suite uses Drizzle.
 
 **Expiry and retention.** A record is authoritative from commit until the scheduled purge deletes
-it; `expiresAt` (from `within`'s `ttlMs`, default 86,400,000 ms) only makes it ELIGIBLE. The purge
-deletes up to `purge.batch` (default 100) eligible records every `purge.intervalMs` (default
-60,000), so **the table stays bounded only while inflow stays below that rate**. A key reused after
-`ttlMs` replays until the purge runs. On Workers, set `purge: { schedule: false }` and call
-`service.purgeTransactional()` from a Cron Trigger.
+it; `expiresAt` (from `within`'s `ttlMs`, default 86,400,000 ms) only makes it ELIGIBLE. `within`'s
+`ttlMs` must be an integer from 60,000 ms (one minute) to 2,592,000,000 ms (30 days); outside that
+range every call fails with `IdempotencyConfigurationError` "idempotency: within ttlMs is out of
+range". The purge deletes up to `purge.batch` (default 100) eligible records every
+`purge.intervalMs` (default 60,000), so **the table stays bounded only while inflow stays below that
+rate**. A key reused after `ttlMs` replays until the purge runs. On Workers, set
+`purge: { schedule: false }` and call `service.purgeTransactional()` from a Cron Trigger.
 
 **Known purge race.** Two purges running at once (two replicas, or a manual `purgeTransactional()`
 beside the scheduled one) can delete a record that a client re-created in the moment between them,
 so a retry of that request runs `fn` again. The purge re-reads each record inside its delete
 transaction, which closes the window on MongoDB and narrows it elsewhere to about one round trip on
-PostgreSQL (READ COMMITTED) and to the commit of the deferred batch on DynamoDB and D1. Closing it
-fully needs a conditional delete, which the portable repository does not offer yet (M105). Run the
-scheduled purge on one replica if a key can be reused right after it expires.
+PostgreSQL (READ COMMITTED) and to the commit of the deferred batch on DynamoDB and D1. The portable
+repository does offer a conditional delete (`deleteWhere(id, where)`, M105), but the purge does not
+use it: a record is two rows (`id` and `${id}.r`) that must go together, and deferred-write
+transaction sources omit conditional members. Run the scheduled purge on one replica if a key can be
+reused right after it expires.
 
 ### Memory store capacity
 
@@ -335,7 +384,7 @@ package implements.
 | `IdempotencyStoreConfig`               | type      |
 | `IdempotencyWithinErrorReason`         | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

@@ -9,8 +9,8 @@
  * yield (M99c §3.1) this document aborted generation with
  * `Duplicate generated name 'GetItemsResponse200'`. It is committed as the
  * third generated-output fixture (the M70m X11-9 precedent): the emitted
- * client is type-checked by `deno task check`, format-checked by
- * `deno task fmt:check`, and compared byte-for-byte by
+ * client is type-checked by `pnpm run check`, format-checked by
+ * `pnpm run fmt:check`, and compared byte-for-byte by
  * `codegen-name-collision.test.ts`, so the fallback's emitted shape stays
  * under the repo's own gates.
  *
@@ -22,6 +22,37 @@ import type { SdkOpenApiDocument } from '../../src/codegen/openapi-types.ts';
 export const nameCollisionDocument: SdkOpenApiDocument = {
   openapi: '3.1.0',
   paths: {
+    '/clients/{client}': {
+      get: {
+        operationId: 'client',
+        parameters: [{ name: 'client', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/options/{opts}': {
+      get: {
+        operationId: 'opts',
+        parameters: [
+          { name: 'opts', in: 'path', required: true },
+          { name: 'filter', in: 'query' },
+        ],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/encoded/{encodeURIComponent}': {
+      get: {
+        operationId: 'encodeURIComponent',
+        parameters: [{ name: 'encodeURIComponent', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
+    '/requests/{request}': {
+      get: {
+        operationId: 'request',
+        parameters: [{ name: 'request', in: 'path', required: true }],
+        responses: { '200': { description: 'ok' } },
+      },
+    },
     '/items': {
       get: {
         operationId: 'get-items',

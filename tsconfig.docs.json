@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.check.json",
+  "compilerOptions": {
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["packages/*/src", "packages/starters/*/src"],
+  "exclude": []
+}

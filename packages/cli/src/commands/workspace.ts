@@ -1,7 +1,7 @@
 /** Workspace maintenance commands. */
 
 import { formatForTarget } from '../utils/prettier-format.ts';
-import { devEntryVariants, DEVTOOL_ENTRY_MODULE, renderDevEntry } from '../devtool/dev-entry.ts';
+import { DEVTOOL_ENTRY_MODULE, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
 import type { ParsedArgs } from '../args.ts';
@@ -30,6 +30,7 @@ import {
 } from '../workspace/manifest.ts';
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { transportSpec } from '../workspace/transport.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 
@@ -82,7 +83,7 @@ async function reallocate(
       ...next,
       devtoolBasePort: devtoolRangeStart(manifest),
       members: next.members.map((member) =>
-        member.name === old.name ? { ...member, devtoolPort: port } : member
+        member.name === old.name ? { ...member, devtoolPort: port } : member,
       ),
     };
   }
@@ -94,13 +95,15 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   const profile = workspaceProfile(manifest.runtime);
   const transport = transportSpec(manifest.transport);
   return [
-    ...manifest.members.filter((member) => member.devtoolPort !== undefined).map((member) => ({
-      path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
-      contents: renderDevEntry({
-        devtoolPort: member.devtoolPort!,
-        port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
-      }),
-    })),
+    ...manifest.members
+      .filter((member) => member.devtoolPort !== undefined)
+      .map((member) => ({
+        path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
+        contents: renderDevEntry({
+          devtoolPort: member.devtoolPort!,
+          port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
+        }),
+      })),
     ...manifest.members.map((member) => ({
       path: joinPath('apps', member.name, DISCOVERY_MODULE),
       contents: renderDiscoveryModule(member, manifest.members, profile),
@@ -153,21 +156,21 @@ export async function runWorkspaceCommand(
     }
     if (source === undefined) {
       deps.error(
-        `${
-          escapeName(path)
-        }: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with setu devtool enable ${
-          escapeName(member.name)
-        }, then run this again.`,
+        `${escapeName(
+          path,
+        )}: the member records devtool port ${member.devtoolPort} but this entry is missing, so the launcher has nothing to start; recreate it with ${cliInvocation(read.manifest.runtime)} devtool enable ${escapeName(
+          member.name,
+        )}, then run this again.`,
       );
       return EXIT_ERROR;
     }
-    if (!devEntryVariants(member.devtoolPort).includes(source)) {
+    if (!isDevEntry(source, member.devtoolPort)) {
       deps.error(
-        `${
-          escapeName(path)
-        }: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run setu devtool enable ${
-          escapeName(member.name)
-        }) or move the port literal yourself.`,
+        `${escapeName(
+          path,
+        )}: the devtool launcher accepts only the CLI's rendering of this file, so an edited entry cannot be launched; restore it (delete it and run ${cliInvocation(read.manifest.runtime)} devtool enable ${escapeName(
+          member.name,
+        )}) or move the port literal yourself.`,
       );
       return EXIT_ERROR;
     }
@@ -196,9 +199,9 @@ export async function runWorkspaceCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update workspace ports: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Failed to update workspace ports: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
   }

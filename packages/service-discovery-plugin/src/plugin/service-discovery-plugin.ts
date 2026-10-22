@@ -95,17 +95,13 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
       // reached is `down`, not `up` — the X10-3 case the old comment hid);
       // `degraded` means a stale cache is being served; `isHealthy()` is the
       // live reachability probe. Mapping: never resolved AND not reachable is
-      // `down`; degraded (or a warm cache that just went unreachable) is
-      // `degraded`; otherwise `up`.
+      // `down`; otherwise `up`. A serving warm cache stays in rotation while
+      // the shared backend failure remains visible in data.
       const discoveryIndicator = async (): Promise<HealthCheckResult> => {
         const reachable = await service.isHealthy();
         const everResolved = service.everResolved;
         const degraded = service.degraded;
-        const status = !everResolved && !reachable
-          ? 'down'
-          : degraded || (everResolved && !reachable)
-          ? 'degraded'
-          : 'up';
+        const status = !everResolved && !reachable ? 'down' : 'up';
         return {
           status,
           data: {

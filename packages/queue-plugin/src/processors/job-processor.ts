@@ -84,6 +84,29 @@ export interface JobRunnerHooks<T> {
 }
 
 /**
+ * Builds the job a processor and `onFailed` receive from a stored job. One
+ * construction for both the dispatch path and the abandoned-job path, so the
+ * two cannot disagree about which fields a job carries.
+ *
+ * @typeParam T - The job payload type
+ * @param storedJob - The stored job
+ * @returns The job handed to application code
+ */
+export function toJob<T>(storedJob: StoredJob<T>): IJob<T> {
+  return {
+    id: storedJob.id,
+    name: storedJob.name,
+    data: storedJob.data,
+    attempts: storedJob.attempts,
+    // Conditional spread, never `headers: storedJob.headers`: the plain
+    // assignment would create an own property whose value is `undefined`, so a
+    // consumer testing presence (`'headers' in job`) would see a channel that
+    // does not exist — the exact inversion of the contract's three states.
+    ...(storedJob.headers === undefined ? {} : { headers: storedJob.headers }),
+  };
+}
+
+/**
  * Runs a job processor and handles the result.
  *
  * On success: calls `ack`.
@@ -114,22 +137,12 @@ export async function runJob<T>(
   report?: (message: string, error: unknown, meta?: Record<string, unknown>) => void,
   hooks?: JobRunnerHooks<T>,
 ): Promise<void> {
-  const job: IJob<T> = {
-    id: storedJob.id,
-    name: storedJob.name,
-    data: storedJob.data,
-    attempts: storedJob.attempts,
-    // Conditional spread, never `headers: storedJob.headers`: the plain
-    // assignment would create an own property whose value is `undefined`, so a
-    // consumer testing presence (`'headers' in job`) would see a channel that
-    // does not exist — the exact inversion of the contract's three states.
-    ...(storedJob.headers === undefined ? {} : { headers: storedJob.headers }),
-  };
+  const job = toJob(storedJob);
 
   // The claim token identifies THIS delivery, so an adapter can reject a settle
   // that belongs to a superseded one. Adapters with no transport-level claim
-  // (memory, redis, rabbitmq) leave `claimToken` unset and ignore the argument,
-  // so the job id is a serviceable stand-in; SQS sets it in `reserve` and
+  // (memory, or Redis without eval) leave `claimToken` unset and ignore the argument,
+  // so the job id is a serviceable stand-in; Redis, RabbitMQ and SQS set it in `reserve` and
   // validates it on every settle. Passing the id unconditionally made every SQS
   // settle fail its own claim check, so nothing was ever deleted, requeued, or
   // dead-lettered.
@@ -158,13 +171,7 @@ export async function runJob<T>(
         'retryable-error',
         'requeued',
         () =>
-          adapter.requeue(
-            storedJob.name,
-            storedJob.id,
-            availableAtMs,
-            nextAttempts,
-            claimToken,
-          ),
+          adapter.requeue(storedJob.name, storedJob.id, availableAtMs, nextAttempts, claimToken),
         report,
       );
       return;
@@ -296,9 +303,12 @@ export function withIngressBehaviors<T>(
   // Clear the gate once open so the steady state costs nothing. A REJECTED
   // gate is deliberately left in place: startup failed, the chain is never
   // completed, and running through a partial chain is what this prevents.
-  void chainReady?.then(() => {
-    gate = undefined;
-  }, () => {});
+  void chainReady?.then(
+    () => {
+      gate = undefined;
+    },
+    () => {},
+  );
 
   const dispatch = (job: IJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {
@@ -349,7 +359,7 @@ export function withIngressBehaviors<T>(
  * @param error - What the processor threw on the final attempt
  * @param report - Sink for a failure inside the callback itself
  */
-async function notifyFailed<T>(
+export async function notifyFailed<T>(
   hooks: JobRunnerHooks<T> | undefined,
   job: IJob<T>,
   error: unknown,

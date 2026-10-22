@@ -21,7 +21,7 @@ import {
 import type { IRuntimeServices, QueueDepthScope, TimerHandle } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from '../adapters/queue-adapter.ts';
 import type { StoredJob, StoredRecurring } from '../interfaces/index.ts';
-import { runJob } from '../processors/job-processor.ts';
+import { notifyFailed, runJob, toJob } from '../processors/job-processor.ts';
 import { toReportableError } from './reportable-error.ts';
 import type { JobOutcome } from '../processors/job-processor.ts';
 import type { QueueCollector } from '../metrics/queue-collector.ts';
@@ -88,6 +88,8 @@ export class QueueService implements IQueue {
   // returned and hand that same value back to clearInterval.
   #workerHandle: TimerHandle | null = null;
   #recurringHandle: TimerHandle | null = null;
+  /** Per-delivery timers are also owned by the service's disconnect boundary. */
+  #renewalHandles = new Set<TimerHandle>();
   #connected = false;
   #logger: QueueLogger | undefined;
   /**
@@ -173,6 +175,7 @@ export class QueueService implements IQueue {
   }
 
   async disconnect(): Promise<void> {
+    this.#connected = false;
     // Stop worker loop
     if (this.#workerHandle !== null) {
       this.#runtime.clearInterval(this.#workerHandle);
@@ -185,8 +188,10 @@ export class QueueService implements IQueue {
       this.#recurringHandle = null;
     }
 
+    for (const handle of this.#renewalHandles) this.#runtime.clearInterval(handle);
+    this.#renewalHandles.clear();
+
     await this.#adapter.disconnect();
-    this.#connected = false;
   }
 
   isReady(): boolean {
@@ -468,16 +473,74 @@ export class QueueService implements IQueue {
     }
   }
 
-  #dispatchJob<T>(
-    storedJob: StoredJob<T>,
-    reg: ProcessorRegistration<T>,
-  ): void {
+  #dispatchJob<T>(storedJob: StoredJob<T>, reg: ProcessorRegistration<T>): void {
     // M98f: the attempt is observed from dispatch. The observer receives the
     // name (allowlist lookup), the raw id (alias lookup) and the attempt —
     // nothing else — and a throwing observer only costs the observation.
     const observed = this.#beginObservation(storedJob);
     const processor = async () => {
+      let renewalTimer: TimerHandle | undefined;
       try {
+        // Renewal starts before either path: an over-budget job's onFailed runs
+        // under the claim too, or a callback slower than the lease is reclaimed
+        // and handed to onFailed again on every period (M113c audit M1).
+        const renewal = this.#adapter.claimRenewal;
+        const token = storedJob.claimToken;
+        if (this.#connected && renewal !== undefined && token !== undefined) {
+          let pending = false;
+          let reported = false;
+          const reportFailure = (error: unknown): void => {
+            if (reported) return;
+            reported = true;
+            this.#report('queue job claim renewal failed', error, {
+              job: storedJob.id,
+              name: storedJob.name,
+            });
+          };
+          renewalTimer = this.#runtime.setInterval(() => {
+            if (pending) return;
+            pending = true;
+            // The promise wrapper also catches a synchronously throwing facade.
+            void Promise.resolve()
+              .then(() => renewal.extend(storedJob.name, storedJob.id, token))
+              .then((extended) => {
+                if (!extended) reportFailure(new Error('queue job claim is stale'));
+              }, reportFailure)
+              .finally(() => {
+                pending = false;
+              });
+          }, renewal.intervalMs);
+          this.#renewalHandles.add(renewalTimer);
+        }
+        if (storedJob.attempts > storedJob.maxAttempts) {
+          const abandoned = new Error('attempt budget exhausted');
+          this.#report('queue job abandoned by a dead worker — dead-lettered', abandoned, {
+            job: storedJob.id,
+            name: storedJob.name,
+          });
+          // The same "this job is being abandoned" signal a final failed
+          // attempt sends, BEFORE the dead-letter (the runJob order).
+          await notifyFailed(
+            reg.onFailed === undefined ? undefined : { onFailed: reg.onFailed },
+            toJob(storedJob),
+            abandoned,
+            (message, error, meta) => this.#report(message, error, meta),
+          );
+          try {
+            await this.#adapter.deadLetter(
+              storedJob.name,
+              storedJob.id,
+              this.#runtime.now(),
+              storedJob.claimToken ?? storedJob.id,
+            );
+          } catch (error) {
+            observed?.settled('terminal-error', 'failed');
+            throw error;
+          }
+          observed?.settled('terminal-error', 'dead-lettered');
+          this.#collector?.jobSettled(storedJob.name, 'dead_lettered');
+          return;
+        }
         await runJob<T>(
           this.#runtime,
           this.#adapter,
@@ -488,12 +551,18 @@ export class QueueService implements IQueue {
             ...(reg.onFailed === undefined ? {} : { onFailed: reg.onFailed }),
             onProcessorOutcome: (name: string, outcome: JobOutcome) =>
               this.#collector?.jobSettled(name, outcome),
-            ...(observed === null ? {} : {
-              onAttemptSettled: (outcome, settlement) => observed.settled(outcome, settlement),
-            }),
+            ...(observed === null
+              ? {}
+              : {
+                  onAttemptSettled: (outcome, settlement) => observed.settled(outcome, settlement),
+                }),
           },
         );
       } finally {
+        if (renewalTimer !== undefined) {
+          this.#runtime.clearInterval(renewalTimer);
+          this.#renewalHandles.delete(renewalTimer);
+        }
         // Decrement in-flight when the job settles
         reg.inFlight--;
         // M98f: a runner that rejected before reporting a settlement must not

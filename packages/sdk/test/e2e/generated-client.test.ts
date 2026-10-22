@@ -18,9 +18,7 @@ import { createApi as createParamsApi } from '../fixtures/params-client.ts';
 import * as redirectClient from '../fixtures/redirect-client.ts';
 import type { ClientResponse } from '../../src/index.ts';
 
-function makeFetch(
-  handler: (req: Request) => Response | Promise<Response>,
-) {
+function makeFetch(handler: (req: Request) => Response | Promise<Response>) {
   return (input: RequestInfo | URL, init?: RequestInit) => {
     const req = new Request(input, init);
     return Promise.resolve(handler(req));
@@ -28,6 +26,90 @@ function makeFetch(
 }
 
 describe('generated-client e2e', () => {
+  it('keeps the per-call key in the configured header across a 503 retry', async () => {
+    const keys: (string | null)[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      idempotency: { header: 'X-Operation-Key' },
+      retry: { limit: 2, delay: 0, backoff: 'fixed' },
+      fetch: makeFetch((req) => {
+        keys.push(req.headers.get('X-Operation-Key'));
+        return keys.length === 1
+          ? new Response('busy', { status: 503 })
+          : Response.json({ id: '1', name: 'Ada' });
+      }),
+    });
+    const response = await createApi(client).getUserById('1', { idempotencyKey: 'order-123' });
+    expect(response.data).toEqual({ id: '1', name: 'Ada' });
+    expect(keys).toEqual(['order-123', 'order-123']);
+  });
+
+  it('refuses a malformed per-call key before any network call', async () => {
+    let calls = 0;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch(() => {
+        calls++;
+        return Response.json({ id: '1', name: 'Ada' });
+      }),
+    });
+    const api = createApi(client);
+    for (const key of ['bad\r\nX-Injected: 1', 'quote"', '']) {
+      await expect(api.getUserById('1', { idempotencyKey: key })).rejects.toBeInstanceOf(
+        RangeError,
+      );
+    }
+    expect(calls).toBe(0);
+  });
+
+  it('passes the per-call signal to fetch and aborts an in-flight request', async () => {
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | null | undefined;
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          observedSignal = init?.signal;
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), {
+            once: true,
+          });
+          controller.abort(new DOMException('cancelled', 'AbortError'));
+        }),
+    });
+    await expect(
+      createApi(client).getUserById('1', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(observedSignal?.aborted).toBe(true);
+  });
+
+  it('sends no key when the per-call options are omitted', async () => {
+    const keys: (string | null)[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      idempotency: {},
+      fetch: makeFetch((req) => {
+        keys.push(req.headers.get('Idempotency-Key'));
+        return Response.json([]);
+      }),
+    });
+    await createApi(client).listUsers();
+    expect(keys).toEqual([null]);
+  });
+
+  it('does not forward extra JavaScript caller properties from per-call options', async () => {
+    const methods: string[] = [];
+    const client = createClient({
+      baseUrl: 'https://api.example.com',
+      fetch: makeFetch((req) => {
+        methods.push(req.method);
+        return Response.json([]);
+      }),
+    });
+    const request = { idempotencyKey: 'safe-key', method: 'DELETE' };
+    await createApi(client).listUsers(undefined, request);
+    expect(methods).toEqual(['GET']);
+  });
+
   it('follows a real 303 and exposes only the target response', async () => {
     const port = await nodeUnusedPort();
 
@@ -53,10 +135,13 @@ describe('generated-client e2e', () => {
     await app.start({ hostname: '127.0.0.1', port });
     try {
       const client = createClient({ baseUrl: `http://127.0.0.1:${port}` });
-      const error = await redirectClient.createApi(client).followRedirect().then(
-        () => undefined,
-        (e: unknown) => e,
-      );
+      const error = await redirectClient
+        .createApi(client)
+        .followRedirect()
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
       expect(redirectClient.isFollowRedirectError(error)).toBe(true);
       if (redirectClient.isFollowRedirectError(error)) expect(error.status).toBe(303);
     } finally {
@@ -111,11 +196,12 @@ describe('generated-client e2e', () => {
   it('propagates a non-2xx response as HttpClientError through generated code', async () => {
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ detail: 'not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ detail: 'not found' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 
@@ -199,11 +285,12 @@ describe('typed error responses (X11-7)', () => {
     // guard, where before this it was `unknown` for every declared 4xx.
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ code: 'gone', detail: 'no such user' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ code: 'gone', detail: 'no such user' }), {
+            status: 404,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 
@@ -225,10 +312,12 @@ describe('typed error responses (X11-7)', () => {
         // a `Record<string, unknown>` — would satisfy every runtime assertion
         // in this file while typing nothing, and an unused `@ts-expect-error`
         // is itself a compile error, so this cannot rot into a no-op.
+        /* eslint-disable @typescript-eslint/no-unused-expressions -- the access is the type assertion */
         // @ts-expect-error - the 404 body carries no `conflictingId`
         e.body.conflictingId;
+        /* eslint-enable @typescript-eslint/no-unused-expressions */
       } else {
-        throw new Error(`unexpected status ${e.status}`);
+        throw new Error(`unexpected status ${e.status}`, { cause: e });
       }
     }
   });
@@ -236,11 +325,12 @@ describe('typed error responses (X11-7)', () => {
   it('narrows the OTHER arm to its own body shape', async () => {
     const client = createClient({
       baseUrl: 'https://api.example.com',
-      fetch: makeFetch(() =>
-        new Response(JSON.stringify({ conflictingId: 'u2' }), {
-          status: 409,
-          headers: { 'Content-Type': 'application/json' },
-        })
+      fetch: makeFetch(
+        () =>
+          new Response(JSON.stringify({ conflictingId: 'u2' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          }),
       ),
     });
 
@@ -248,7 +338,8 @@ describe('typed error responses (X11-7)', () => {
       await createApi(client).getUserById('1');
       throw new Error('expected the 409 to throw');
     } catch (e) {
-      if (!isGetUserByIdError(e) || e.status !== 409) throw new Error('expected a 409 arm');
+      if (!isGetUserByIdError(e) || e.status !== 409)
+        throw new Error('expected a 409 arm', { cause: e });
       const id: string = e.body.conflictingId;
       expect(id).toBe('u2');
     }

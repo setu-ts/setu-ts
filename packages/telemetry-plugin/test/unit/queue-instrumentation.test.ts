@@ -4,7 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   createAmqplibInstrumentation,
   createKafkaJsInstrumentation,
@@ -112,5 +112,51 @@ describe('queue-instrumentation', () => {
   it('loadKafkaJsInstrumentation should reject when importFn rejects', async () => {
     const importFn = () => Promise.reject(new Error('inject-fail'));
     await expect(loadKafkaJsInstrumentation(undefined, importFn)).rejects.toThrow('inject-fail');
+  });
+});
+
+describe('the guarded default imports (M113d §3.1)', () => {
+  it('loadAmqplibInstrumentation rejects when the amqplib instrumentation is absent', async () => {
+    const { loadAmqplibInstrumentation } =
+      await import('../../src/instrumentation/queue-instrumentation.ts');
+    vi.doMock('@opentelemetry/instrumentation-amqplib', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadAmqplibInstrumentation(undefined);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/instrumentation-amqplib');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/instrumentation-amqplib');
+    }
+  });
+
+  it('loadKafkaJsInstrumentation rejects when the kafkajs instrumentation is absent', async () => {
+    const { loadKafkaJsInstrumentation } =
+      await import('../../src/instrumentation/queue-instrumentation.ts');
+    vi.doMock('@opentelemetry/instrumentation-kafkajs', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadKafkaJsInstrumentation(undefined);
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/instrumentation-kafkajs');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/instrumentation-kafkajs');
+    }
   });
 });

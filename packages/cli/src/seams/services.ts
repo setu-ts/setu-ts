@@ -72,23 +72,26 @@ function renderServicesBarrel(artifacts: SeamArtifacts): string {
   const names = seamNames(artifacts, 'service');
   const header = seamHeader('setu generate service', [
     `DecoratorPlugin({ services: [...${APP_SERVICES_EXPORT}] })`,
+    `a starter's \`decorators: { services: [...${APP_SERVICES_EXPORT}] }\` arm`,
   ]);
   const imports = [
     `import type { Constructor } from '@setu-ts/common';`,
     renderSeamImports(names, importSymbols, (kebab) => `./${kebab}.service.ts`),
-  ].filter((line) => line !== '').join('\n\n');
+  ]
+    .filter((line) => line !== '')
+    .join('\n\n');
 
   const entries = names.map((name) => `${deriveNames(name).pascal}Service`);
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +
-    ` * Every generated service, for \`DecoratorPlugin({ services })\`.\n` +
-    ` *\n` +
-    ` * An \`@Injectable\` service registers under its declared \`<name>-service\` token. One\n` +
-    ` * generated before this seam existed has no decorator, so it registers under its\n` +
-    ` * class name instead — regenerate it to get the token.\n` +
-    ` */\n` +
-    renderExportedArray(APP_SERVICES_EXPORT, 'Constructor', entries),
+      ` * Every generated service, for \`DecoratorPlugin({ services })\`.\n` +
+      ` *\n` +
+      ` * An \`@Injectable\` service registers under its declared \`<name>-service\` token. One\n` +
+      ` * generated before this seam existed has no decorator, so it registers under its\n` +
+      ` * class name instead — regenerate it to get the token.\n` +
+      ` */\n` +
+      renderExportedArray(APP_SERVICES_EXPORT, 'Constructor', entries),
   ]);
 }
 

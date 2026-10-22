@@ -32,13 +32,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readFile, readdir, stat, mkdir, writeFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   assembleSource,
   classify,
-  denoCheck,
+  compileFence,
   extractFences,
   fenceExtension,
   TS_ALIASES,
@@ -63,7 +64,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/messaging-plugin/README.md': 16,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
-  'packages/multi-tenancy-plugin/README.md': 3,
+  'packages/multi-tenancy-plugin/README.md': 4,
   'packages/scheduler-plugin/README.md': 3,
   // M90i: +1 for the trace-propagation example.
   'packages/queue-plugin/README.md': 10,
@@ -91,7 +92,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
   'packages/session-plugin/README.md': 12,
-  'packages/audit-plugin/README.md': 3,
+  'packages/audit-plugin/README.md': 4,
   // M101h: +1 for the Redaction policy-shape example.
   'packages/common/README.md': 3,
   // M92: +1 for the @Render example.
@@ -106,8 +107,8 @@ const READMES: Readonly<Record<string, number>> = {
   // M103: the new package's README is born gated — usage, a catalogue source,
   // the view-rendering path, the React Router loader recipe, and both halves
   // of the browser recipe (the exposing plugin and the `/format` client).
-  'packages/localization-plugin/README.md': 6,
-  'packages/validation-plugin/README.md': 2,
+  'packages/localization-plugin/README.md': 7,
+  'packages/validation-plugin/README.md': 3,
   'packages/sse-plugin/README.md': 6,
   'packages/websocket-plugin/README.md': 10,
   'packages/realtime-backplane-plugin/README.md': 3,
@@ -126,7 +127,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M101h: the events README is born gated — installation, usage, the
   // aggregate-local recorder and the new dispatch-diagnostics example.
   'packages/events-plugin/README.md': 4,
-  'packages/config-plugin/README.md': 6,
+  'packages/config-plugin/README.md': 7,
   'packages/di-plugin/README.md': 2,
   'packages/exceptions/README.md': 3,
   'packages/feature-flags-plugin/README.md': 2,
@@ -154,12 +155,13 @@ const READMES: Readonly<Record<string, number>> = {
 
 /** Reads every fence the engine would compile from one README. */
 async function compilableFences(readme: string) {
-  const markdown = await Deno.readTextFile(readme);
+  const markdown = await readFile(readme, 'utf8');
   return extractFences(readme, markdown)
     .filter((fence) => TS_ALIASES.has(fence.lang))
     .map((fence) => ({ fence, classified: classify(fence) }))
-    .filter(({ classified }) =>
-      classified.kind === 'compile-complete' || classified.kind === 'compile-fragment'
+    .filter(
+      ({ classified }) =>
+        classified.kind === 'compile-complete' || classified.kind === 'compile-fragment',
     );
 }
 
@@ -195,11 +197,11 @@ const UNGATED: readonly string[] = [
 async function everyPackageReadme(): Promise<string[]> {
   const found: string[] = [];
   const walk = async (dir: string, depth: number): Promise<void> => {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       const path = `${dir}/${entry.name}`;
       try {
-        await Deno.stat(`${path}/README.md`);
+        await stat(`${path}/README.md`);
         found.push(`${path}/README.md`);
       } catch {
         // no README here; a grouping directory such as packages/starters
@@ -243,23 +245,25 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // of callouts than to teach every consumer of the scanner about them.
     const offenders: string[] = [];
     for (const readme of [...Object.keys(READMES), ...UNGATED]) {
-      const source = await Deno.readTextFile(readme);
+      const source = await readFile(readme, 'utf8');
       if (/^>\s*```/m.test(source)) offenders.push(readme);
     }
     expect(offenders).toEqual([]);
   });
 
   it('should compile every Setu-TS fence in every listed README', async () => {
-    await Deno.mkdir(SCRATCH_DIR, { recursive: true });
+    await mkdir(SCRATCH_DIR, { recursive: true });
     await writeProjectStubs(SCRATCH_DIR);
     const failures: string[] = [];
+    const compiler = {};
 
     for (const readme of Object.keys(READMES)) {
       for (const { fence, classified } of await compilableFences(readme)) {
-        const file = `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
+        const file =
+          `${SCRATCH_DIR}/${readme.replaceAll('/', '_')}-${fence.index}` +
           `.${fenceExtension(fence.lang)}`;
-        await Deno.writeTextFile(file, assembleSource(fence, classified));
-        const { code, stderr } = await denoCheck(file);
+        await writeFile(file, assembleSource(fence, classified));
+        const { code, stderr } = await compileFence(file, compiler);
         if (code !== 0) {
           failures.push(
             `${readme} fence #${fence.index} at line ${fence.line} ` +

@@ -1,9 +1,11 @@
 import { data, type MiddlewareFunction, useRouteError } from 'react-router';
 
 /** Refusal used by the real-build smoke to pin the React Router boundary. */
-export const middleware: MiddlewareFunction<Response>[] = [() => {
-  throw data(null, { status: 403 });
-}];
+export const middleware: MiddlewareFunction<Response>[] = [
+  () => {
+    throw data(null, { status: 403 });
+  },
+];
 
 export default function ForbiddenRoute() {
   return null;

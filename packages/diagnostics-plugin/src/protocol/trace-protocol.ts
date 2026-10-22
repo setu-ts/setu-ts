@@ -76,8 +76,7 @@ const ALL_ZERO_SPAN_ID = '0'.repeat(16);
 
 /** A valid W3C trace id: 32 lowercase hex, never all-zero. */
 function isTraceId(value: unknown): value is string {
-  return typeof value === 'string' && TRACE_ID_PATTERN.test(value) &&
-    value !== ALL_ZERO_TRACE_ID;
+  return typeof value === 'string' && TRACE_ID_PATTERN.test(value) && value !== ALL_ZERO_TRACE_ID;
 }
 
 /** A valid W3C span id: 16 lowercase hex, never all-zero. */
@@ -253,11 +252,16 @@ function readRecord(value: unknown): ValidatedTraceObservation | null {
     ageMs,
   } = value;
   if (
-    !isCount(sequence) || sequence < 1 ||
-    !isDisplayAlias(serviceAlias) || !isDisplayAlias(operationAlias) ||
-    !isTraceId(traceId) || !isSpanId(spanId) ||
-    !isOneOf(kind, SPAN_KINDS) || !isOneOf(outcome, OUTCOMES) ||
-    !isMs(durationMs) || !isMs(ageMs)
+    !isCount(sequence) ||
+    sequence < 1 ||
+    !isDisplayAlias(serviceAlias) ||
+    !isDisplayAlias(operationAlias) ||
+    !isTraceId(traceId) ||
+    !isSpanId(spanId) ||
+    !isOneOf(kind, SPAN_KINDS) ||
+    !isOneOf(outcome, OUTCOMES) ||
+    !isMs(durationMs) ||
+    !isMs(ageMs)
   ) {
     return null;
   }
@@ -368,8 +372,11 @@ export function readTraceSourceBatch(
     const { next, lost, closed, droppedSpans } = value;
     const rawRecords = copyBounded(value.records, limit);
     if (
-      rawRecords === null || rawRecords.length > limit ||
-      !isCount(next) || !isCount(lost) || typeof closed !== 'boolean' ||
+      rawRecords === null ||
+      rawRecords.length > limit ||
+      !isCount(next) ||
+      !isCount(lost) ||
+      typeof closed !== 'boolean' ||
       !isCount(droppedSpans)
     ) {
       return null;
@@ -377,9 +384,7 @@ export function readTraceSourceBatch(
     // A source that observes nothing retains nothing: `disabled` and
     // `unsupported` observe by definition, and a closed source has cleared
     // its ring.
-    if (
-      (state === 'disabled' || state === 'unsupported' || closed) && rawRecords.length > 0
-    ) {
+    if ((state === 'disabled' || state === 'unsupported' || closed) && rawRecords.length > 0) {
       return null;
     }
     const records: ValidatedTraceObservation[] = [];
@@ -511,16 +516,26 @@ function isRecordProjection(value: unknown): boolean {
   if (!Array.isArray(links) || links.length > MAX_TRACE_LINKS) {
     return false;
   }
-  return isCount(value.sequence) && value.sequence >= 1 &&
-    isDisplayAlias(value.serviceAlias) && isDisplayAlias(value.operationAlias) &&
-    isTraceId(value.traceId) && isSpanId(value.spanId) &&
+  return (
+    isCount(value.sequence) &&
+    value.sequence >= 1 &&
+    isDisplayAlias(value.serviceAlias) &&
+    isDisplayAlias(value.operationAlias) &&
+    isTraceId(value.traceId) &&
+    isSpanId(value.spanId) &&
     (!parentKnown || isSpanId(value.parentSpanId)) &&
-    links.every((link) =>
-      isRecord(link) && hasExactKeys(link, LINK_KEYS) && isTraceId(link.traceId) &&
-      isSpanId(link.spanId)
+    links.every(
+      (link) =>
+        isRecord(link) &&
+        hasExactKeys(link, LINK_KEYS) &&
+        isTraceId(link.traceId) &&
+        isSpanId(link.spanId),
     ) &&
-    isOneOf(value.kind, SPAN_KINDS) && isOneOf(value.outcome, OUTCOMES) &&
-    isMs(value.durationMs) && isMs(value.ageMs);
+    isOneOf(value.kind, SPAN_KINDS) &&
+    isOneOf(value.outcome, OUTCOMES) &&
+    isMs(value.durationMs) &&
+    isMs(value.ageMs)
+  );
 }
 
 /** Validates one projected sampler description. */
@@ -534,9 +549,14 @@ function isSamplerProjection(value: unknown): boolean {
   }
   if (kind === 'traceidratio') {
     const hasRatio = Object.hasOwn(value, 'ratio');
-    return hasExactKeys(value, hasRatio ? ['kind', 'ratio'] : ['kind']) && hasRatio &&
-      typeof value.ratio === 'number' && Number.isFinite(value.ratio) &&
-      value.ratio >= 0 && value.ratio <= 1;
+    return (
+      hasExactKeys(value, hasRatio ? ['kind', 'ratio'] : ['kind']) &&
+      hasRatio &&
+      typeof value.ratio === 'number' &&
+      Number.isFinite(value.ratio) &&
+      value.ratio >= 0 &&
+      value.ratio <= 1
+    );
   }
   return hasExactKeys(value, ['kind']);
 }
@@ -561,17 +581,22 @@ export function isTraceBatchProjection(value: unknown): value is TraceDiagnostic
   }
   const records = value.records;
   if (
-    value.version !== 1 || typeof value.instanceId !== 'string' ||
+    value.version !== 1 ||
+    typeof value.instanceId !== 'string' ||
     value.instanceId.length === 0 ||
-    !isOneOf(value.state, SOURCE_STATES) || !isOneOf(value.coverage, COVERAGE) ||
+    !isOneOf(value.state, SOURCE_STATES) ||
+    !isOneOf(value.coverage, COVERAGE) ||
     !Array.isArray(value.instrumentation) ||
     !value.instrumentation.every((kind) => isOneOf(kind, INSTRUMENTATION)) ||
     new Set(value.instrumentation as string[]).size !==
       (value.instrumentation as unknown[]).length ||
     !isSamplerProjection(value.sampler) ||
-    !Array.isArray(records) || records.length > MAX_TRACE_RECORDS ||
-    !isCount(value.next) || !isCount(value.lost) ||
-    typeof value.closed !== 'boolean' || !isCount(value.droppedSpans)
+    !Array.isArray(records) ||
+    records.length > MAX_TRACE_RECORDS ||
+    !isCount(value.next) ||
+    !isCount(value.lost) ||
+    typeof value.closed !== 'boolean' ||
+    !isCount(value.droppedSpans)
   ) {
     return false;
   }
@@ -581,7 +606,7 @@ export function isTraceBatchProjection(value: unknown): value is TraceDiagnostic
   for (let index = 1; index < records.length; index++) {
     if (
       (records[index] as { sequence: number }).sequence <=
-        (records[index - 1] as { sequence: number }).sequence
+      (records[index - 1] as { sequence: number }).sequence
     ) {
       return false;
     }

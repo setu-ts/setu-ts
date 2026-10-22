@@ -104,8 +104,11 @@ function isMalformedBody(error: unknown): boolean {
     if (error instanceof MalformedRequestBodyError) {
       return true;
     }
-    return typeof error === 'object' && error !== null &&
-      (error as { name?: unknown }).name === 'MalformedRequestBodyError';
+    return (
+      typeof error === 'object' &&
+      error !== null &&
+      (error as { name?: unknown }).name === 'MalformedRequestBodyError'
+    );
   } catch {
     return false;
   }

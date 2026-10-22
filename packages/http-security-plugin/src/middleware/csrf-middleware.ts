@@ -7,7 +7,8 @@
  * @module
  */
 import type { IRequestContext, MiddlewareFunction, PathPattern } from '@setu-ts/common';
-import { createPathMatcher, respondWithError } from '@setu-ts/common';
+import { createPathMatcher, respondWithError, requestOriginOf } from '@setu-ts/common';
+import { xForwardedOrigin } from './ip-security-middleware.ts';
 
 /** HTTP methods considered unsafe (mutable) for CSRF purposes. */
 const UNSAFE_METHODS: ReadonlySet<string> = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
@@ -18,8 +19,13 @@ export interface CsrfOptions {
   readonly enabled?: boolean;
   /**
    * Additional trusted origins (scheme+host) beyond the request's own origin.
-   * The request's own origin (derived from `request.url`) is always implicitly
-   * trusted. Default: `[]`.
+   * Implicitly trusts the URL origin; the published public origin unless the
+   * browser reports `Sec-Fetch-Site` as anything but `same-origin`; and — only
+   * when it reports `same-origin` — the validated leftmost X-Forwarded
+   * protocol/host candidate. Scripts cannot set `Sec-Fetch-Site`, while they
+   * can set `X-Forwarded-*` on a CORS request the server admits, so either
+   * forwarded candidate alone would let a credentialed CORS origin pass. This
+   * comparison grants no proxy trust to other consumers. Default: `[]`.
    *
    * An origin allowlist cannot admit an IdP that serves
    * `Referrer-Policy: no-referrer` (Keycloak does): the browser posts the ACS
@@ -73,10 +79,7 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
   // never inspected (M101c, V8-9).
   const isExcluded = createPathMatcher(options.exclude ?? []);
 
-  return async (
-    ctx: IRequestContext,
-    next: () => Promise<void>,
-  ): Promise<void> => {
+  return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
     // Excluded paths skip the CSRF check entirely — no method test, no
     // origin inspection.
     if (isExcluded(ctx.request.path)) {
@@ -115,8 +118,23 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     // Check if the source origin is trusted
     const requestOrigin = getRequestOrigin(ctx.request.url);
 
+    // A browser that reports the request as anything but same-origin cannot
+    // legitimately carry the target's public origin, so neither forwarded
+    // candidate is consulted: a trusted proxy passing a client's
+    // `X-Forwarded-Host` through would otherwise let a credentialed CORS
+    // origin publish, and then match, its own host (M113n audit N1).
+    const fetchSite = ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase();
+    const forwardedCandidates = fetchSite === undefined || fetchSite === 'same-origin';
+
     // The request's own origin is always implicitly trusted
-    if (requestOrigin && sourceOrigin === requestOrigin) {
+    if (
+      requestOrigin &&
+      (sourceOrigin === requestOrigin ||
+        (forwardedCandidates &&
+          (sourceOrigin === requestOriginOf(ctx).origin ||
+            (fetchSite === 'same-origin' &&
+              sameOriginBehindProxy(ctx, sourceOrigin, requestOrigin)))))
+    ) {
       await next();
       return;
     }
@@ -175,4 +193,29 @@ function getRequestOrigin(url: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The zero-configuration proxy candidate: an `X-Forwarded-Proto`/`X-Forwarded-Host`
+ * origin, consulted only when the browser reports the request same-origin.
+ *
+ * `X-Forwarded-*` are not forbidden request headers, and the CORS middleware
+ * echoes requested headers by default, so a script on a credentialed CORS
+ * origin could otherwise send `X-Forwarded-Host: <its own host>` and match its
+ * own `Origin` (M113n audit F1). `Sec-Fetch-Site` is forbidden to scripts.
+ */
+function sameOriginBehindProxy(
+  ctx: IRequestContext,
+  sourceOrigin: string,
+  requestOrigin: string,
+): boolean {
+  const url = new URL(ctx.request.url);
+  return (
+    sourceOrigin ===
+    xForwardedOrigin(ctx, {
+      protocol: url.protocol === 'https:' ? 'https' : 'http',
+      host: url.host,
+      origin: requestOrigin,
+    }).origin
+  );
 }

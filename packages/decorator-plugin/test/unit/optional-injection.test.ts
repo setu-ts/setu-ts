@@ -12,7 +12,10 @@ describe('Optional constructor dependencies', () => {
     @Injectable()
     @Inject('required', Optional('maybe'))
     class Target {
-      constructor(readonly required: unknown, readonly maybe?: unknown) {}
+      constructor(
+        readonly required: unknown,
+        readonly maybe?: unknown,
+      ) {}
     }
     expect([...metadataStore.ctorOptional(Target)]).toEqual([1]);
     expect(metadataStore.getService(Target)?.inject).toEqual(['required', 'maybe']);
@@ -22,7 +25,11 @@ describe('Optional constructor dependencies', () => {
     @Injectable()
     @Inject(Optional('a'), 'b', Optional('c'))
     class Several {
-      constructor(readonly a?: unknown, readonly b?: unknown, readonly c?: unknown) {}
+      constructor(
+        readonly a?: unknown,
+        readonly b?: unknown,
+        readonly c?: unknown,
+      ) {}
     }
     expect([...metadataStore.ctorOptional(Several)].sort()).toEqual([0, 2]);
   });

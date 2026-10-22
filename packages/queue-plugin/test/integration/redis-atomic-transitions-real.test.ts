@@ -30,15 +30,16 @@ describe('RedisQueue Lua transitions against live Redis', { skip: url === undefi
     try {
       await queue.connect();
       await queue.enqueue(job(name, 'a'));
-      expect((await queue.reserve(name, 5, 100)).map((j) => j.id)).toEqual(['a']);
+      const [first] = await queue.reserve(name, 5, 100);
+      expect(first.id).toBe('a');
 
-      await queue.requeue(name, 'a', 150, 1);
+      await queue.requeue(name, 'a', 150, 1, first.claimToken);
       expect(await inspect.zscore(`queue:${name}:ready`, 'a')).toBe('150');
       expect(await inspect.zcard(`queue:${name}:processing`)).toBe(0);
       const again = await queue.reserve<{ n: number }>(name, 5, 150);
       expect(again[0]).toMatchObject({ id: 'a', attempts: 1, data: { n: 7 } });
 
-      await queue.deadLetter(name, 'a', 200);
+      await queue.deadLetter(name, 'a', 200, again[0].claimToken);
       expect(await inspect.zrange(`queue:${name}:dead`, 0, -1)).toEqual(['a']);
       expect(await inspect.hget(`queue:${name}:jobs`, 'a')).toBeNull();
       expect(await inspect.hget(`queue:${name}:dead:jobs`, 'a')).not.toBeNull();

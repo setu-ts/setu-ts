@@ -89,20 +89,12 @@ describe('WorkerPoolPlugin — register', () => {
     expect((after?.data as { pools: unknown[] }).pools).toHaveLength(1);
   });
 
-  it('reports degraded, not up, on a runtime without workers', async () => {
-    // H-70c-5 changed the STATUS this test pins, not the payload. It
-    // previously asserted `'up'` beside `available: false`, which is the
-    // defect itself written down as an expectation: every `run()` on such a
-    // runtime rejects with `WorkerPoolUnavailableError`, so the capability
-    // could not execute one task while the indicator called it healthy.
-    //
-    // `degraded` rather than `down` because M45 registers this plugin on
-    // Cloudflare Workers deliberately — `degraded` keeps `/ready` at 200
-    // there while still surfacing in the payload.
+  it('reports up with available false on a runtime without workers', async () => {
+    // Availability stays in data; determineStatusCode withdraws non-up replicas.
     const fake = createFakeContext(createFakeRuntime(new FakeTimers()));
     WorkerPoolPlugin().register(fake.ctx);
     const result = await fake.healthIndicators.get('worker-pool')?.();
-    expect(result?.status).toBe('degraded');
+    expect(result?.status).toBe('up');
     expect(result?.data).toEqual({
       budget: { maxWorkers: 0, workers: 0 },
       available: false,
@@ -172,7 +164,8 @@ describe('WorkerPoolPlugin — optional metrics wiring', () => {
     await expect(promise).resolves.toBe('done');
 
     expect(
-      metrics.require(WORKER_POOL_METRICS.COMPLETED)
+      metrics
+        .require(WORKER_POOL_METRICS.COMPLETED)
         .valueFor({ [TASK_MODULE_LABEL]: 'file:///t.ts' }),
     ).toBe(1);
   });

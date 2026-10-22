@@ -8,6 +8,7 @@
  */
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { RuntimePlatform } from '@setu-ts/common';
+import { setImmediate } from 'node:timers/promises';
 
 /** Pending timer. */
 export interface PendingTimer {
@@ -17,6 +18,8 @@ export interface PendingTimer {
   fn: () => void | Promise<void>;
   /** Delay in ms. */
   delay: number;
+  /** Absolute epoch deadline, used only by advanceTo. */
+  dueAt: number;
   /** Whether this is an interval. */
   interval: boolean;
 }
@@ -43,6 +46,9 @@ export class FakeRuntime implements IRuntimeServices {
 
   /** Pending async timer callbacks to await. */
   #pendingAsync: Array<Promise<void>> = [];
+
+  /** Rejections from callbacks driven by advanceTo. */
+  #timerErrors: unknown[] = [];
 
   constructor(env: Readonly<Record<string, string | undefined>> = {}) {
     this.#env = env;
@@ -116,6 +122,50 @@ export class FakeRuntime implements IRuntimeServices {
     this.#pendingAsync = [];
   }
 
+  /** Set the wall clock without firing timers, including backwards steps. */
+  setTime(epochMs: number): void {
+    this.#time = epochMs;
+  }
+
+  /**
+   * Drives absolute deadlines in order, including timers armed by callbacks.
+   * Yields to the host between ticks so async handlers can arm their next wait
+   * without blocking this clock driver on a retry that needs a later tick.
+   * Unlike advance(), an interval can fire repeatedly within this call.
+   */
+  async advanceTo(epochMs: number): Promise<void> {
+    await setImmediate();
+    while (true) {
+      if (this.#timerErrors.length > 0) {
+        throw this.#timerErrors.shift();
+      }
+      let next: PendingTimer | undefined;
+      for (const timer of this.#timers.values()) {
+        if (timer.dueAt <= epochMs && (next === undefined || timer.dueAt < next.dueAt)) {
+          next = timer;
+        }
+      }
+      if (next === undefined) break;
+      this.#time = next.dueAt;
+      if (next.interval) {
+        next.dueAt += next.delay;
+      } else {
+        this.#timers.delete(next.id);
+      }
+      const result = next.fn();
+      if (result instanceof Promise) {
+        void result.catch((error: unknown) => {
+          this.#timerErrors.push(error);
+        });
+      }
+      await setImmediate();
+    }
+    if (this.#timerErrors.length > 0) {
+      throw this.#timerErrors.shift();
+    }
+    this.#time = epochMs;
+  }
+
   /**
    * Get the count of pending timers.
    */
@@ -145,7 +195,8 @@ export class FakeRuntime implements IRuntimeServices {
 
   setTimeout(fn: () => void, ms: number): TimerHandle {
     const id = this.#nextId++;
-    this.#timers.set(id, { id, fn, delay: ms, interval: false });
+    const delay = ms > 2_147_483_647 || Number.isNaN(ms) ? 1 : ms;
+    this.#timers.set(id, { id, fn, delay, dueAt: this.#time + delay, interval: false });
     return id;
   }
 
@@ -155,7 +206,8 @@ export class FakeRuntime implements IRuntimeServices {
 
   setInterval(fn: () => void, ms: number): TimerHandle {
     const id = this.#nextId++;
-    this.#timers.set(id, { id, fn, delay: ms, interval: true });
+    const delay = ms > 2_147_483_647 || Number.isNaN(ms) ? 1 : ms;
+    this.#timers.set(id, { id, fn, delay, dueAt: this.#time + delay, interval: true });
     return id;
   }
 

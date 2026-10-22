@@ -116,8 +116,9 @@ function byOp(snapshot: StorageDiagnosticsSnapshot): Map<string, Record<string, 
 describe('storage diagnostics — option validation', () => {
   it('approves a well-formed option (positive control)', () => {
     expect(compileStorageDiagnosticsAlias({ enabled: true, alias: 'primary' })).toBe('primary');
-    expect(compileStorageDiagnosticsAlias({ enabled: true, alias: 'a'.repeat(64) }))
-      .toBe('a'.repeat(64));
+    expect(compileStorageDiagnosticsAlias({ enabled: true, alias: 'a'.repeat(64) })).toBe(
+      'a'.repeat(64),
+    );
   });
 
   const invalid: ReadonlyArray<[string, () => unknown, ErrorConstructor, string]> = [
@@ -169,8 +170,7 @@ describe('storage diagnostics — option validation', () => {
   for (const [name, make, ctor, message] of invalid) {
     it(`refuses ${name}`, () => {
       expect(() => compileStorageDiagnosticsAlias(make() as never)).toThrow(message);
-      expect(() => compileStorageDiagnosticsAlias(make() as never))
-        .toThrow(ctor);
+      expect(() => compileStorageDiagnosticsAlias(make() as never)).toThrow(ctor);
     });
   }
 });
@@ -624,9 +624,7 @@ describe('storage diagnostics — service seam', () => {
     const service = new StorageService(provider);
     const { c } = collector();
     attachStorageCollector(service, c);
-    await expect(service.getStream('missing')).rejects.toThrow(
-      'Storage object not found: missing',
-    );
+    await expect(service.getStream('missing')).rejects.toThrow('Storage object not found: missing');
     expect(byOp(c.snapshot()).get('getStream')).toMatchObject({ failed: 1 });
   });
 
@@ -685,23 +683,14 @@ describe('storage diagnostics — service seam', () => {
     // process, exactly as without diagnostics.
     const code = `
       import { StorageService } from '${
-      new URL(
-        '../../src/services/storage-service.ts',
-        import.meta.url,
-      ).href
-    }';
+        new URL('../../src/services/storage-service.ts', import.meta.url).href
+      }';
       import { attachStorageCollector } from '${
-      new URL(
-        '../../src/services/storage-service.ts',
-        import.meta.url,
-      ).href
-    }';
+        new URL('../../src/services/storage-service.ts', import.meta.url).href
+      }';
       import { StorageObservationCollector } from '${
-      new URL(
-        '../../src/diagnostics/storage-observations.ts',
-        import.meta.url,
-      ).href
-    }';
+        new URL('../../src/diagnostics/storage-observations.ts', import.meta.url).href
+      }';
       const provider = {
         connect: () => Promise.resolve(),
         disconnect: () => Promise.resolve(),
@@ -747,8 +736,10 @@ describe('storage diagnostics — plugin registration', () => {
 
   it('registers an enabled source with the approved alias', async () => {
     const { ctx, registered } = createFakeContext();
-    await StoragePlugin({ provider: 'memory', diagnostics: { enabled: true, alias: 'files' } })
-      .register(ctx);
+    await StoragePlugin({
+      provider: 'memory',
+      diagnostics: { enabled: true, alias: 'files' },
+    }).register(ctx);
     const source = registered.get(CAPABILITIES.STORAGE_DIAGNOSTICS) as IStorageDiagnosticsSource;
     const snapshot = source.snapshot();
     expect(snapshot.state).toBe('no-data');
@@ -761,20 +752,22 @@ describe('storage diagnostics — plugin registration', () => {
       StoragePlugin({
         provider: 'memory',
         diagnostics: { enabled: true, alias: '' },
-      })
+      }),
     ).toThrow(STORAGE_DIAGNOSTICS_ERRORS.aliasBytes);
     expect(() =>
       StoragePlugin({
         provider: 'memory',
         diagnostics: { enabled: false, alias: 'a' } as never,
-      })
+      }),
     ).toThrow(STORAGE_DIAGNOSTICS_ERRORS.enabled);
   });
 
   it('registers the service and source and cleans up before disconnect on close', async () => {
     const { ctx, registered, onCloseHandlers } = createFakeContext();
-    await StoragePlugin({ provider: 'memory', diagnostics: { enabled: true, alias: 'files' } })
-      .register(ctx);
+    await StoragePlugin({
+      provider: 'memory',
+      diagnostics: { enabled: true, alias: 'files' },
+    }).register(ctx);
     const service = registered.get(CAPABILITIES.STORAGE) as StorageService;
     const source = registered.get(CAPABILITIES.STORAGE_DIAGNOSTICS) as IStorageDiagnosticsSource;
     // One observed settlement before close.

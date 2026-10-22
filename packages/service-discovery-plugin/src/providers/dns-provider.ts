@@ -37,15 +37,15 @@ interface DnsProviderCommon {
  */
 export type DnsProviderOptions =
   | (DnsProviderCommon & {
-    /** Read SRV records, honoring RFC 2782 priority tiers. */
-    readonly mode: 'srv';
-  })
+      /** Read SRV records, honoring RFC 2782 priority tiers. */
+      readonly mode: 'srv';
+    })
   | (DnsProviderCommon & {
-    /** Read address records. */
-    readonly mode: 'a';
-    /** Port every resolved address is reached on — DNS carries none. */
-    readonly port: number;
-  });
+      /** Read address records. */
+      readonly mode: 'a';
+      /** Port every resolved address is reached on — DNS carries none. */
+      readonly port: number;
+    });
 
 /**
  * Keeps only the records in the numerically lowest priority tier.
@@ -59,9 +59,7 @@ export type DnsProviderOptions =
  * @returns The lowest-priority tier, or an empty list
  * @since 0.2.0
  */
-export function lowestPriorityTier(
-  records: readonly SrvRecord[],
-): readonly SrvRecord[] {
+export function lowestPriorityTier(records: readonly SrvRecord[]): readonly SrvRecord[] {
   if (records.length === 0) {
     return [];
   }
@@ -90,11 +88,7 @@ export class DnsProvider implements DiscoveryProvider {
    * @param runtime - Supplies timers for the poll
    * @param options - Mode, template, port, and poll interval
    */
-  constructor(
-    resolver: IDnsResolver,
-    runtime: IRuntimeServices,
-    options: DnsProviderOptions,
-  ) {
+  constructor(resolver: IDnsResolver, runtime: IRuntimeServices, options: DnsProviderOptions) {
     this.#resolver = resolver;
     this.#runtime = runtime;
     this.#options = options;

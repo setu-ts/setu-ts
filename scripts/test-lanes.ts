@@ -1,6 +1,8 @@
 /** Single source of truth for the Node and Deno package-test lanes (M111b). */
 /** Converted suites that still prove Deno runtime behavior. */
 export const DENO_LANE_TESTS = [
+  // The loopback diagnostics listener is a Deno-only runtime subject (C4).
+  'test/inspect-local-diagnostics.test.ts',
   'packages/diagnostics-plugin/test/unit/cache-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/realtime-observations.test.ts',
@@ -15,6 +17,7 @@ export const DENO_LANE_TESTS = [
   'packages/cli/test/unit/process-boundary.test.ts',
   'packages/runtime/test/unit/create-runtime-services.test.ts',
   'packages/runtime/test/e2e/worker-host-real.test.ts',
+  'packages/runtime/test/e2e/deno-stop-bounded.test.ts',
   'packages/runtime/test/integration/deno-http-adapter.test.ts',
   'packages/runtime/test/unit/deno-dns-resolver.test.ts',
   'packages/runtime/test/unit/deno-http-adapter-rpc.test.ts',
@@ -41,18 +44,21 @@ export const DENO_LANE_TESTS = [
   'packages/diagnostics-plugin/test/integration/security.test.ts',
   'packages/runtime/test/unit/local-diagnostics-listener.test.ts',
   'packages/runtime/test/integration/read-stream-real.test.ts',
+  'packages/runtime/test/integration/peer-address-real.test.ts',
   'packages/runtime/test/integration/signal-real.test.ts',
   'packages/realtime-backplane-plugin/test/integration/realtime-observations-redis.test.ts',
 ] as const;
 
 /** Suites whose subject needs the real Deno host. */
 export const NODE_EXCLUDED_TESTS = [
+  'test/inspect-local-diagnostics.test.ts',
   'packages/websocket-plugin/test/integration/guarded-upgrade.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-guards.test.ts',
   'packages/websocket-plugin/test/integration/websocket-integration.test.ts',
 
   'packages/runtime/test/e2e/worker-host-real.test.ts',
+  'packages/runtime/test/e2e/deno-stop-bounded.test.ts',
   'packages/runtime/test/integration/deno-http-adapter.test.ts',
   'packages/runtime/test/unit/deno-dns-resolver.test.ts',
   'packages/runtime/test/unit/deno-http-adapter-rpc.test.ts',

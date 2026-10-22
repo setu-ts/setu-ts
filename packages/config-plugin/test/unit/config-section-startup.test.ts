@@ -14,10 +14,9 @@ describe('typed configuration sections | startup validation', () => {
       schema: z.object({ MODE: z.enum(['development', 'production']) }),
     });
 
-    const error = await loadConfig(
-      createRuntime({ env: { APP_MODE: 'secret-invalid-mode' } }),
-      { sections: [application] },
-    ).catch((reason: unknown) => reason);
+    const error = await loadConfig(createRuntime({ env: { APP_MODE: 'secret-invalid-mode' } }), {
+      sections: [application],
+    }).catch((reason: unknown) => reason);
 
     expect(error).toBeInstanceOf(Error);
     expect((error as Error).message).toBe('Configuration section "APP_" validation failed.');
@@ -91,7 +90,7 @@ function createInjectedConfig(data: Readonly<Record<string, unknown>>): IConfig 
   return {
     get<T>(key: string, options?: { readonly default: T }): T | undefined {
       const value = data[key];
-      return value === undefined ? options?.default : value as T;
+      return value === undefined ? options?.default : (value as T);
     },
     getOrThrow<T>(key: string): T {
       const value = data[key];

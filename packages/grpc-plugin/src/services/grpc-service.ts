@@ -105,10 +105,7 @@ export class GrpcService implements IGrpcService {
     return this.#services.length;
   }
 
-  addService<TDef extends GrpcServiceDefinition>(
-    definition: TDef,
-    implementation?: unknown,
-  ): void {
+  addService<TDef extends GrpcServiceDefinition>(definition: TDef, implementation?: unknown): void {
     const { typeName } = definition;
     if (this.#services.some((s) => (s.definition as GrpcServiceDefinition).typeName === typeName)) {
       throw new Error(`Service '${typeName}' has already been registered`);

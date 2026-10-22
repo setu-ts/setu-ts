@@ -1,0 +1,26 @@
+{
+  "name": "setu-ts-example-graphql-demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.20.6",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/cache-plugin": "workspace:^",
+    "@setu-ts/websocket-plugin": "workspace:^",
+    "@setu-ts/graphql-plugin": "workspace:^",
+    "graphql": "^16",
+    "graphql-ws": "^6.0.0",
+    "@apollo/client": "^3.13.0",
+    "js-sha256": "^0.11.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "tsx main.ts",
+    "smoke": "tsx smoke.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "interop": "tsx interop.ts"
+  }
+}

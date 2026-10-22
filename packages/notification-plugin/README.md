@@ -19,16 +19,18 @@ import { NotificationPlugin } from '@setu-ts/notification-plugin';
 import { NotificationPlugin } from '@setu-ts/notification-plugin';
 import { CAPABILITIES, type INotifier } from '@setu-ts/common';
 
-app.register(NotificationPlugin({
-  channels: {
-    email: { provider: 'mail' },
-    sms: {
-      provider: 'twilio',
-      options: { accountSid: '…', authToken: '…', from: '+15550100' },
+app.register(
+  NotificationPlugin({
+    channels: {
+      email: { provider: 'mail' },
+      sms: {
+        provider: 'twilio',
+        options: { accountSid: '…', authToken: '…', from: '+15550100' },
+      },
+      slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
     },
-    slack: { provider: 'slack', options: { webhookUrl: 'https://hooks.slack.com/…' } },
-  },
-}));
+  }),
+);
 
 const notifier = app.services.get<INotifier>(CAPABILITIES.NOTIFICATION);
 
@@ -159,7 +161,7 @@ unused and the runtime requirement does not apply.
 | `NotificationTransport`         | type      |
 | `ProviderType`                  | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

@@ -1,9 +1,9 @@
-// deno-lint-ignore-file no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6)
+/* eslint-disable no-console -- a gate prints what it found (AI_GUIDELINES §11.5/§11.6) */
 /**
  * The Node-manifest generator and drift gate (M111a plan §3.1).
  *
  * Writes every workspace member's `package.json` and `tsconfig.json`, the root
- * solution `tsconfig.json`, `pnpm-workspace.yaml`, and the root `package.json`
+ * solution `tsconfig.json`, app type-check configs, Deno lane config, and the root `package.json`
  * `workspaces` field, from four inputs: each member's `deno.json`
  * (`name`/`version`/`exports`), a scan of every TypeScript file under its
  * `src` and `test` trees, the committed external-range table
@@ -34,12 +34,18 @@
  * (§3.4 safeguard 2).
  *
  * Usage:
- *   deno run --allow-read --allow-write scripts/node-manifests.ts --write
- *   deno run --allow-read scripts/node-manifests.ts --check
+ *   node scripts/node-manifests.ts --write
+ *   node scripts/node-manifests.ts --check
  *
  * @module
  */
 
+import { readFile, readdir, writeFile, mkdir } from 'node:fs/promises';
+import { type Dirent } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
+import { workspaceApps, workspaceMembers } from './lib/workspace.ts';
+
+import { DENO_LANE_TESTS, DENO_ONLY_SOURCES } from './test-lanes.ts';
 import { type ImportEdge, scanImportEdges } from './npm-specifier-audit.ts';
 import { PACKAGE_METADATA } from './jsr-metadata.ts';
 import { REPOSITORY_URL } from './npm-release-gate.ts';
@@ -96,19 +102,38 @@ export interface GenerationResult {
 
 /** The build tools every member carries, pinned identically (plan §3.6). */
 const BUILD_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
-  'typescript': '6.0.3',
+  typescript: '6.0.3',
   '@types/node': '^24',
 };
 
 /** The members whose `src` references the `Deno` global get its ambient types (plan §3.6). */
 const TEST_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
-  'vitest': '5.0.3',
+  vitest: '5.0.3',
   '@vitest/coverage-v8': '5.0.3',
-  'esbuild': '0.28.2',
+  esbuild: '0.28.2',
   '@hono/node-server': '^2.0.0',
 };
 
+/** The repository's formatter and linter, root-only and pinned like the test tools (M111e1 §3.5). */
+const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
+  prettier: '3.9.10',
+  eslint: '10.12.0',
+  '@eslint/js': '10.0.1',
+  '@eslint/compat': '2.1.1',
+  '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
+  'typescript-eslint': '8.71.2',
+  globals: '17.13.0',
+  espree: '11.2.0',
+};
+
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
+
+/**
+ * The supported Node range, written into every member manifest and the root. The floor on each
+ * line is its first release carrying the 2026-10-21 security fixes (Node 22.23.4, 24.22.1 and 26.12.1);
+ * Node 22 stays supported because five packages need only `Promise.withResolvers`.
+ */
+export const NODE_ENGINES_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
 
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
 const DECORATOR_PLUGIN_DIR = 'packages/decorator-plugin';
@@ -164,11 +189,7 @@ export function basePackageName(specifier: string): string {
 }
 
 /** The `EXTERNAL_RANGES` lookup, refusing an external the committed table does not carry. */
-export function lookupRange(
-  name: string,
-  file: string,
-  refusals: string[],
-): string | null {
+export function lookupRange(name: string, file: string, refusals: string[]): string | null {
   const range = EXTERNAL_RANGES[name];
   if (range === undefined) {
     refusals.push(
@@ -224,9 +245,7 @@ export function classifyMember(
       const depName = basePackageName(workspaceName(edge.specifier));
       const depDir = nameToDir.get(depName);
       if (depDir === undefined) {
-        refusals.push(
-          `${edge.file}: imports "${edge.specifier}", which is not a workspace member`,
-        );
+        refusals.push(`${edge.file}: imports "${edge.specifier}", which is not a workspace member`);
         continue;
       }
       dependencies.set(depName, 'workspace:^');
@@ -290,12 +309,17 @@ export function classifyMember(
   // Classification overrides, each applied only when the scan actually found the dependency;
   // an override whose target is absent is itself a refusal (the table cannot drift ahead of the code).
   for (const override of overridesFor(member.dir)) {
-    const scanned = dependencies.get(override.dependency) ??
+    const scanned =
+      dependencies.get(override.dependency) ??
       peerDependencies.get(override.dependency) ??
       devDependencies.get(override.dependency);
     if (scanned === undefined && override.kind === 'dev-dependency-types') {
       // A types companion is not itself imported; it must accompany its typed package.
-      const typed = peerDependencies.get(override.dependency.replace(/^@types\//, ''));
+      const typedName = override.dependency.replace(/^@types\//, '');
+      const typed =
+        peerDependencies.get(typedName) ??
+        dependencies.get(typedName) ??
+        devDependencies.get(typedName);
       if (typed === undefined) {
         refusals.push(
           `override ${member.dir} → ${override.dependency}: its typed package is not a ` +
@@ -408,9 +432,8 @@ function sortedRecord(map: ReadonlyMap<string, string>): Record<string, string> 
 export function renderPackageJson(member: MemberInput, classified: ClassifiedMember): string {
   const description = PACKAGE_METADATA[member.name.replace(/^@setu-ts\//, '')]?.description;
   if (description === undefined) throw new Error(`${member.name}: missing package description`);
-  const effects = Object.keys(SIDE_EFFECT_MODULES).filter((path) =>
-    path.startsWith(`${member.dir}/`)
-  )
+  const effects = Object.keys(SIDE_EFFECT_MODULES)
+    .filter((path) => path.startsWith(`${member.dir}/`))
     .map((path) => distPath(path.slice(member.dir.length + 1), '.js'));
   const exports: Record<string, { types: string; default: string }> = {};
   for (const entry of member.exports) {
@@ -430,8 +453,8 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     sideEffects: effects.length === 0 ? false : effects,
     type: 'module',
     license: 'MIT',
-    engines: { node: '>=22' },
-    files: ['dist', 'src', 'README.md', 'LICENSE'],
+    engines: { node: NODE_ENGINES_RANGE },
+    files: ['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md'],
     exports,
     ...(BIN_ENTRIES[member.dir] === undefined ? {} : { bin: BIN_ENTRIES[member.dir] }),
     scripts: { build: 'tsc -b' },
@@ -493,110 +516,117 @@ export function renderTsconfig(member: MemberInput, classified: ClassifiedMember
 
 /** Renders the root solution `tsconfig.json` referencing every member. */
 export function renderSolutionTsconfig(dirs: readonly string[]): string {
-  return `${
-    JSON.stringify(
-      { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
-      null,
-      2,
-    )
-  }\n`;
-}
-
-/**
- * Renders `pnpm-workspace.yaml`, listing every member explicitly.
- *
- * `ignoreWorkspaceCycles` is load-bearing, not a workaround: the TEST-only
- * workspace edges are cyclic by design (kernel's tests import runtime and
- * testing; runtime's tests import kernel — the plan's §1 probe recorded that
- * 40 of 51 members' tests import packages their src does not), pnpm's
- * resolver allows them, and `pnpm -r` refuses only the topological ORDERING.
- * Each member's build is `tsc -b`, which orders its own project references,
- * so an arbitrary member order is correct.
- *
- * `allowBuilds` DENIES the two dependencies that ship install scripts
- * (`protobufjs`, `sse4_crc32`, both reached only through the Google Cloud
- * SDKs). pnpm 12 fails `install --frozen-lockfile` with ERR_PNPM_IGNORED_BUILDS
- * while a script is undecided, and approving one would run third-party code on
- * every install for a dependency no test exercises for real.
- */
-export function renderPnpmWorkspace(dirs: readonly string[]): string {
-  const lines = dirs.map((dir) => `  - ${dir}`);
-  return (
-    `packages:\n${lines.join('\n')}\n` +
-    '\n' +
-    '# Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each\n' +
-    "# member's build is `tsc -b`, which orders its own references.\n" +
-    'ignoreWorkspaceCycles: true\n' +
-    '\n' +
-    '# Google SDK install scripts are denied: both are transitive deps of\n' +
-    '# the Google Cloud SDKs the tests reach only through fakes and guarded\n' +
-    '# suites. pnpm 12 refuses a frozen install while either is undecided.\n' +
-    'allowBuilds:\n' +
-    '  protobufjs: false\n' +
-    '  sse4_crc32: false\n' +
-    '  # The TC39 decorator transformer requires its native build.\n' +
-    '  esbuild: true\n'
-  );
+  return `${JSON.stringify(
+    { files: [], references: dirs.map((dir) => ({ path: `./${dir}` })) },
+    null,
+    2,
+  )}\n`;
 }
 
 /** Renders the root `package.json` (private workspace root, §3.2/§3.6). */
-export function renderRootPackageJson(dirs: readonly string[]): string {
-  return `${
-    JSON.stringify(
-      {
-        name: 'setu-ts',
-        private: true,
-        packageManager: 'pnpm@12.11.2',
-        engines: { node: '>=22' },
-        workspaces: dirs,
-        type: 'module',
-        scripts: {
-          test:
-            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts',
-          'test:coverage':
-            'deno run --allow-run=pnpm --allow-read=. --allow-write=coverage-node scripts/test-node.ts --coverage',
-        },
-        devDependencies: { ...BUILD_DEV_DEPENDENCIES, ...TEST_DEV_DEPENDENCIES },
+export function renderRootPackageJson(): string {
+  return `${JSON.stringify(
+    {
+      name: 'setu-ts',
+      private: true,
+      packageManager: 'pnpm@12.11.2',
+      engines: { node: NODE_ENGINES_RANGE },
+      type: 'module',
+      scripts: {
+        check: 'tsc -p tsconfig.check.json --noEmit',
+        'ci:local': 'node scripts/local-ci.ts',
+        'check:apps': 'node scripts/check-apps.ts',
+        'check:browser': 'node apps/full-stack/browser/harness.ts',
+        'check:docs':
+          'node scripts/check-docs.ts && node scripts/check-prose-assertions.ts && node scripts/check-example-behaviour.ts && node scripts/check-since-tags.ts && node scripts/check-changelog-coverage.ts && node scripts/generate-api-docs.ts --check',
+        'check:since-tags': 'node scripts/check-since-tags.ts',
+        'check:changelog-coverage': 'node scripts/check-changelog-coverage.ts',
+        'check:api-docs': 'node scripts/generate-api-docs.ts --check',
+        'check:compat':
+          'SETU_TEST_MEMBER=packages/validation-plugin pnpm exec vitest run packages/validation-plugin/test/unit/validation-service.test.ts && SETU_TEST_MEMBER=packages/openapi-plugin pnpm exec vitest run packages/openapi-plugin/test/unit/zod-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-to-openapi.test.ts packages/openapi-plugin/test/unit/zod4-dedup.test.ts packages/openapi-plugin/test/integration/openapi-zod4-integration.test.ts && SETU_TEST_MEMBER=packages/database-plugin pnpm exec vitest run packages/database-plugin/test/integration/real-import.test.ts packages/database-plugin/test/integration/real-drizzle-adapter.test.ts',
+        'check:script-coverage': 'pnpm run test:tooling:coverage',
+        'docs:api': 'node scripts/generate-api-docs.ts',
+        'release:docs': 'node scripts/generate-api-docs.ts',
+        'check:plan': 'node scripts/plan-lint.ts',
+        'check:node-build': 'node scripts/check-node-build.ts',
+        'check:versions': 'node scripts/version-sweep.ts',
+        'check:deploy': 'node scripts/check-deploy.ts',
+        'deploy:render': 'node scripts/check-deploy.ts --render --write',
+        test: 'node scripts/test-node.ts',
+        'test:coverage': 'node scripts/test-node.ts --coverage',
+        'test:coverage:pkg': 'node scripts/test-node.ts --coverage',
+        audit: 'node scripts/audit.ts',
+        'audit:ci': 'node scripts/audit.ts',
+        'release:verify': 'node scripts/verify-release.ts',
+        'release:bump': 'node scripts/bump-version.ts',
+        'release:verify-repos': 'node scripts/verify-jsr-repos.ts',
+        'release:resolved-set': 'node scripts/release-resolved-set.ts',
+        'dependency:drift': 'node scripts/dependency-drift.ts',
+        'release:create-packages': 'node scripts/create-jsr-packages.ts',
+        'release:placeholders': 'node scripts/write-npm-placeholders.ts',
+        'release:publish': 'node scripts/npm-publish.ts',
+        'release:link-repos': 'node scripts/link-jsr-repos.ts',
+        'release:archive-old-scope': 'node scripts/archive-old-scope.ts',
+        'release:set-metadata': 'node scripts/set-jsr-metadata.ts',
+        lint: 'eslint .',
+        fmt: 'pnpm exec prettier --write . && deno fmt --no-config --line-width=100 --single-quote packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
+        'fmt:check':
+          'pnpm exec prettier --check . && deno fmt --no-config --line-width=100 --single-quote --check packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
+        'docs:exports': 'node scripts/generate-package-exports.ts',
+        'test:deno-lane': 'node scripts/test-deno-lane.ts',
+        'test:tooling': 'SETU_TEST_MEMBER=tooling vitest run',
+        'test:tooling:coverage': 'SETU_TEST_MEMBER=tooling vitest run --coverage',
+        format: 'prettier --write .',
+        'format:check': 'prettier --check .',
       },
-      null,
-      2,
-    )
-  }\n`;
+      devDependencies: {
+        ...BUILD_DEV_DEPENDENCIES,
+        ...TEST_DEV_DEPENDENCIES,
+        ...LINT_DEV_DEPENDENCIES,
+        typedoc: '0.28.20',
+        yaml: '2.9.1',
+        hono: EXTERNAL_RANGES.hono,
+        zod: EXTERNAL_RANGES['zod-v3']!.replace('npm:zod@', ''),
+        graphql: EXTERNAL_RANGES.graphql,
+        'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
+      },
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 /** Renders `tsconfig.base.json` — the eight strictness options verbatim plus the Node-build options (§3.6). */
 export function renderTsconfigBase(): string {
-  return `${
-    JSON.stringify(
-      {
-        compilerOptions: {
-          target: 'es2024',
-          lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
-          module: 'nodenext',
-          moduleResolution: 'nodenext',
-          strict: true,
-          noUnusedLocals: true,
-          noUnusedParameters: true,
-          noImplicitReturns: true,
-          noFallthroughCasesInSwitch: true,
-          noImplicitOverride: true,
-          exactOptionalPropertyTypes: true,
-          useUnknownInCatchVariables: true,
-          rewriteRelativeImportExtensions: true,
-          declaration: true,
-          declarationMap: true,
-          sourceMap: true,
-          isolatedDeclarations: true,
-          composite: true,
-          verbatimModuleSyntax: true,
-          skipLibCheck: true,
-          types: ['node'],
-        },
+  return `${JSON.stringify(
+    {
+      compilerOptions: {
+        target: 'es2024',
+        lib: ['es2024', 'esnext.decorators', 'dom', 'dom.iterable'],
+        module: 'nodenext',
+        moduleResolution: 'nodenext',
+        strict: true,
+        noUnusedLocals: true,
+        noUnusedParameters: true,
+        noImplicitReturns: true,
+        noFallthroughCasesInSwitch: true,
+        noImplicitOverride: true,
+        exactOptionalPropertyTypes: true,
+        useUnknownInCatchVariables: true,
+        rewriteRelativeImportExtensions: true,
+        declaration: true,
+        declarationMap: true,
+        sourceMap: true,
+        isolatedDeclarations: true,
+        composite: true,
+        verbatimModuleSyntax: true,
+        skipLibCheck: true,
+        types: ['node'],
       },
-      null,
-      2,
-    )
-  }\n`;
+    },
+    null,
+    2,
+  )}\n`;
 }
 
 /**
@@ -683,9 +713,10 @@ export function renderDenoJson(raw: string, aliases: ReadonlyMap<string, string>
   ].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   for (const [key, value] of entries) merged[key] = value;
 
-  const block = Object.keys(merged).length === 0
-    ? ''
-    : `"imports": ${JSON.stringify(merged, null, 2).replaceAll('\n', '\n  ')}`;
+  const block =
+    Object.keys(merged).length === 0
+      ? ''
+      : `"imports": ${JSON.stringify(merged, null, 2).replaceAll('\n', '\n  ')}`;
   const start = raw.search(/"imports"\s*:\s*\{/);
   if (start === -1) {
     if (block === '') return raw;
@@ -753,21 +784,63 @@ export function generateWorkspace(members: readonly MemberInput[], license = '')
     files.set(`${member.dir}/deno.json`, renderDenoJson(member.denoJson, externalAliases(member)));
   }
   files.set('tsconfig.base.json', renderTsconfigBase());
+  files.set('tsconfig.check.json', renderCheckTsconfig());
   files.set('tsconfig.json', renderSolutionTsconfig(dirs));
-  files.set('pnpm-workspace.yaml', renderPnpmWorkspace(dirs));
-  files.set('package.json', renderRootPackageJson(dirs));
+  files.set('package.json', renderRootPackageJson());
   return { files, refusals };
 }
 
 // ── I/O seam ──────────────────────────────────────────────────────────────────
 
-/** Reads a JSON file, or null when absent/unparseable. */
-async function readJson(path: string): Promise<unknown | null> {
-  try {
-    return JSON.parse(await Deno.readTextFile(path));
-  } catch {
-    return null;
+/** Generate the standalone native-runtime lane's import map and strict options. */
+export function renderLaneConfig(members: readonly MemberInput[], laneJson: string): string {
+  const lane = JSON.parse(laneJson) as {
+    imports: Record<string, string>;
+    scopes: Record<string, Record<string, string>>;
+  };
+  const imports = { ...lane.imports };
+  const permissions: Record<string, unknown> = {};
+  for (const member of members) {
+    if (DENO_LANE_TESTS.some((path) => path.startsWith(`${member.dir}/test/`))) {
+      const manifest = JSON.parse(member.denoJson) as { test: { permissions: unknown } };
+      permissions[member.dir.slice('packages/'.length)] = manifest.test.permissions;
+    }
+    for (const entry of member.exports) {
+      const name = member.name + (entry.subpath === '.' ? '' : entry.subpath.slice(1));
+      imports[name] = './' + relative(resolve('test/deno-lane'), resolve(member.dir, entry.source));
+    }
   }
+  const base = JSON.parse(renderTsconfigBase()) as {
+    compilerOptions: Record<string, unknown>;
+  };
+  const options: Record<string, unknown> = {};
+  for (const key of [
+    'strict',
+    'noUnusedLocals',
+    'noUnusedParameters',
+    'noImplicitReturns',
+    'noFallthroughCasesInSwitch',
+    'noImplicitOverride',
+    'exactOptionalPropertyTypes',
+    'useUnknownInCatchVariables',
+  ])
+    options[key] = base.compilerOptions[key];
+  return (
+    JSON.stringify(
+      {
+        compilerOptions: {
+          ...options,
+          lib: ['deno.ns', 'deno.window', 'dom', 'dom.iterable', 'esnext'],
+        },
+        nodeModulesDir: 'auto',
+        permissions,
+        imports,
+        scopes: lane.scopes,
+      },
+      null,
+      2,
+    ) + '\n'
+  );
 }
 
 /** Every `.ts`/`.tsx` file under `dir`, repository-relative. */
@@ -775,15 +848,16 @@ async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
   // Sorted, because `readDir` yields filesystem order — which differs between
   // a developer's disk and a CI checkout, and so would reorder the generated
   // manifests and fail `--check` on a tree that is not out of date.
-  const entries: Deno.DirEntry[] = [];
-  for await (const entry of Deno.readDir(`${root}/${dir}`)) entries.push(entry);
+  const entries: Dirent[] = [];
+  for await (const entry of await readdir(`${root}/${dir}`, { withFileTypes: true }))
+    entries.push(entry);
   entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   for (const entry of entries) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       if (entry.name === 'node_modules' || entry.name === 'dist') continue;
       yield* walkSources(root, path);
-    } else if (entry.isFile && /\.(ts|tsx|mts)$/.test(entry.name)) {
+    } else if (entry.isFile() && /\.(ts|tsx|mts)$/.test(entry.name)) {
       yield path;
     }
   }
@@ -791,7 +865,7 @@ async function* walkSources(root: string, dir: string): AsyncGenerator<string> {
 
 /** Reads one member's inputs from the tree under `root`. */
 async function readMember(root: string, dir: string): Promise<MemberInput> {
-  const denoJson = await Deno.readTextFile(`${root}/${dir}/deno.json`).catch(() => '');
+  const denoJson = await readFile(`${root}/${dir}/deno.json`, 'utf8').catch(() => '');
   let config: { name?: string; version?: string; exports?: unknown } | null;
   try {
     config = JSON.parse(denoJson);
@@ -805,14 +879,14 @@ async function readMember(root: string, dir: string): Promise<MemberInput> {
   for (const sub of ['src', 'test']) {
     try {
       for await (const file of walkSources(root, `${dir}/${sub}`)) {
-        files.set(file, await Deno.readTextFile(`${root}/${file}`));
+        files.set(file, await readFile(`${root}/${file}`, 'utf8'));
       }
     } catch {
       // No such directory: the member declares none.
     }
   }
-  const currentPackageJson = await Deno.readTextFile(`${root}/${dir}/package.json`).catch(() =>
-    null
+  const currentPackageJson = await readFile(`${root}/${dir}/package.json`, 'utf8').catch(
+    () => null,
   );
   return {
     dir,
@@ -826,12 +900,10 @@ async function readMember(root: string, dir: string): Promise<MemberInput> {
   };
 }
 
-/** Reads the workspace layout from the `deno.json` under `root`. */
+/** Reads framework members from the authored pnpm workspace inventory. */
 async function readMembers(root: string): Promise<MemberInput[]> {
-  const config = (await readJson(`${root}/deno.json`)) as { workspace?: readonly string[] } | null;
-  if (config?.workspace === undefined) throw new Error('deno.json: no workspace list');
   const members: MemberInput[] = [];
-  for (const entry of config.workspace) {
+  for (const entry of await workspaceMembers(root)) {
     members.push(await readMember(root, entry.replace(/^\.\//, '')));
   }
   return members;
@@ -846,7 +918,7 @@ async function checkAgainstTree(
   for (const [path, content] of generated) {
     let current: string;
     try {
-      current = await Deno.readTextFile(`${root}/${path}`);
+      current = await readFile(`${root}/${path}`, 'utf8');
     } catch {
       differences.push(`${path}: missing (run node-manifests --write)`);
       continue;
@@ -871,10 +943,19 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
     return 2;
   }
   const members = await readMembers(root);
-  const { files, refusals } = generateWorkspace(
+  const { files: generated, refusals } = generateWorkspace(
     members,
-    await Deno.readTextFile(`${root}/LICENSE`),
+    await readFile(`${root}/LICENSE`, 'utf8'),
   );
+  const files = new Map(generated);
+  if (refusals.length === 0) {
+    const lane = await readFile(`${root}/test/deno-lane/deno.json`, 'utf8');
+    files.set('test/deno-lane/lane.config.json', renderLaneConfig(members, lane));
+    files.set('tsconfig.apps.json', renderAppsTsconfig());
+    for (const app of await workspaceApps(root)) {
+      files.set(`${app}/tsconfig.json`, renderAppTsconfig(app));
+    }
+  }
   if (refusals.length > 0) {
     for (const refusal of refusals) console.error(`✗ ${refusal}`);
     console.error(`${refusals.length} refusal(s).`);
@@ -882,8 +963,11 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
   }
   if (mode === 'write') {
     for (const [path, content] of files) {
-      const current = await Deno.readTextFile(`${root}/${path}`).catch(() => null);
-      if (current !== content) await Deno.writeTextFile(`${root}/${path}`, content);
+      const current = await readFile(`${root}/${path}`, 'utf8').catch(() => null);
+      if (current !== content) {
+        await mkdir(dirname(`${root}/${path}`), { recursive: true });
+        await writeFile(`${root}/${path}`, content);
+      }
     }
     console.log(`Wrote ${files.size} generated file(s).`);
     return 0;
@@ -901,5 +985,117 @@ export async function runNodeManifests(args: readonly string[], root = '.'): Pro
 }
 
 if (import.meta.main) {
-  Deno.exit(await runNodeManifests(Deno.args));
+  await (async () => {
+    process.exitCode = await runNodeManifests(process.argv.slice(2));
+    return;
+  })();
+}
+
+/** Type-check both source and tests; the native Deno lane owns its exclusions. */
+export function renderCheckTsconfig(): string {
+  return (
+    JSON.stringify(
+      {
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          composite: false,
+          declaration: false,
+          declarationMap: false,
+          isolatedDeclarations: false,
+          noEmit: true,
+          allowImportingTsExtensions: true,
+          jsx: 'react-jsx',
+          jsxImportSource: 'hono/jsx',
+          types: ['node', './packages/runtime/node_modules/@types/deno'],
+          paths: sourcePaths(),
+        },
+        include: [
+          'packages/*/src',
+          'packages/*/test',
+          'packages/starters/*/src',
+          'packages/starters/*/test',
+          'scripts',
+          'test',
+        ],
+        exclude: [
+          ...DENO_LANE_TESTS,
+          ...DENO_ONLY_SOURCES,
+          'test/deno-lane',
+          'test/fixtures/snippets',
+        ],
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** The shared source aliases for repository and app type checking. */
+export function sourcePaths(prefix = './'): Record<string, string[]> {
+  const paths = {
+    '@setu-ts/rest-starter': ['./packages/starters/rest-starter/src/index.ts'],
+    '@setu-ts/microservice-starter': ['./packages/starters/microservice-starter/src/index.ts'],
+    '@setu-ts/full-stack-starter': ['./packages/starters/full-stack-starter/src/index.ts'],
+    '@setu-ts/*': ['./packages/*/src/index.ts'],
+    '@setu-ts/runtime/worker': ['./packages/runtime/src/worker/define-worker-task.ts'],
+    '@setu-ts/cli/main': ['./packages/cli/src/main.ts'],
+    '@setu-ts/localization-plugin/format': ['./packages/localization-plugin/src/format/index.ts'],
+  };
+  return Object.fromEntries(
+    Object.entries(paths).map(([key, values]) => [
+      key,
+      values.map((value) => prefix + value.slice(2)),
+    ]),
+  );
+}
+
+/** Root options for apps that consume source without emitting it. */
+export function renderAppsTsconfig(): string {
+  return (
+    JSON.stringify(
+      {
+        extends: './tsconfig.base.json',
+        compilerOptions: {
+          noEmit: true,
+          composite: false,
+          declaration: false,
+          declarationMap: false,
+          isolatedDeclarations: false,
+          allowImportingTsExtensions: true,
+          rewriteRelativeImportExtensions: false,
+          typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+          types: ['node', 'deno'],
+          paths: sourcePaths(),
+        },
+      },
+      null,
+      2,
+    ) + '\n'
+  );
+}
+
+/** Generated per-app roots; full-stack replaces paths to add its React route alias. */
+export function renderAppTsconfig(app: string): string {
+  return (
+    JSON.stringify(
+      {
+        extends: '../../tsconfig.apps.json',
+        ...(app === 'apps/full-stack'
+          ? {
+              compilerOptions: {
+                jsx: 'react-jsx',
+                paths: { ...sourcePaths('../../'), '~/*': ['./app/*'] },
+              },
+            }
+          : {}),
+        include: [
+          '**/*.ts',
+          '**/*.tsx',
+          ...(app === 'apps/full-stack' ? ['node_modules/vite/client.d.ts'] : []),
+        ],
+      },
+      null,
+      2,
+    ) + '\n'
+  );
 }

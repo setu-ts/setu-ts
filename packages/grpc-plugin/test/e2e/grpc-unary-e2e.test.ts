@@ -52,7 +52,7 @@ describe('gRPC Unary E2E', () => {
     const rpcResponse = await app.fetch(rpcRequest);
     expect(rpcResponse.status).toBe(200);
     // EXACT decoded body — the impl return value must appear verbatim.
-    const body = await rpcResponse.json() as { response: string };
+    const body = (await rpcResponse.json()) as { response: string };
     expect(body).toEqual({ response: 'echo: hello grpc' });
 
     // Non-RPC request falls through to Hono (no route) → 404.
@@ -81,7 +81,9 @@ describe('gRPC Unary E2E', () => {
       }),
     );
     expect(rpcResponse.status).toBe(200);
-    expect(await rpcResponse.json() as { response: string }).toEqual({ response: 'echo: custom' });
+    expect((await rpcResponse.json()) as { response: string }).toEqual({
+      response: 'echo: custom',
+    });
 
     // Outside the custom basePath → falls through → 404.
     const outside = await app.fetch(

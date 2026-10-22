@@ -41,26 +41,30 @@ describe('readWorkspaceManifest', () => {
   });
 
   it('reads dependency metadata only when every named sibling exists', async () => {
-    const fs = workspace(renderWorkspaceManifest({
-      version: WORKSPACE_VERSION,
-      runtime: 'deno',
-      basePort: 3000,
-      transport: 'http',
-      members: [
-        { name: 'orders', port: 3000 },
-        { name: 'billing', port: 3001, dependsOn: ['orders'] },
-      ],
-    }));
+    const fs = workspace(
+      renderWorkspaceManifest({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [
+          { name: 'orders', port: 3000 },
+          { name: 'billing', port: 3001, dependsOn: ['orders'] },
+        ],
+      }),
+    );
     const result = await readWorkspaceManifest(fs, '/ws');
     expect(result.ok).toBe(true);
 
-    const invalid = workspace(JSON.stringify({
-      version: WORKSPACE_VERSION,
-      runtime: 'deno',
-      basePort: 3000,
-      transport: 'http',
-      members: [{ name: 'billing', port: 3001, dependsOn: ['orders'] }],
-    }));
+    const invalid = workspace(
+      JSON.stringify({
+        version: WORKSPACE_VERSION,
+        runtime: 'deno',
+        basePort: 3000,
+        transport: 'http',
+        members: [{ name: 'billing', port: 3001, dependsOn: ['orders'] }],
+      }),
+    );
     const refused = await readWorkspaceManifest(invalid, '/ws');
     expect(refused.ok).toBe(false);
   });
@@ -96,10 +100,7 @@ describe('readWorkspaceManifest', () => {
   });
 
   it('reports a missing version', async () => {
-    const result = await readWorkspaceManifest(
-      workspace('{"basePort":3000,"members":[]}'),
-      '/ws',
-    );
+    const result = await readWorkspaceManifest(workspace('{"basePort":3000,"members":[]}'), '/ws');
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.problem.kind).toBe('malformed');
@@ -174,7 +175,10 @@ describe('readWorkspaceManifest', () => {
 
   // Refused rather than defaulted: quietly moving every member off the bus the
   // manifest asked for would leave services that cannot reach each other.
-  for (const [label, value] of [['an unknown name', '"carrier-pigeon"'], ['a number', '42']]) {
+  for (const [label, value] of [
+    ['an unknown name', '"carrier-pigeon"'],
+    ['a number', '42'],
+  ]) {
     it(`refuses ${label} as the transport`, async () => {
       const result = await readWorkspaceManifest(
         workspace(
@@ -211,16 +215,14 @@ describe('readWorkspaceManifest', () => {
   // One bad entry invalidates the manifest rather than being dropped: a
   // silently omitted member is one every sibling's map stops naming, and the
   // CLI would then hand its port to someone else.
-  for (
-    const [label, entry] of [
-      ['a non-object entry', '"orders"'],
-      ['a null entry', 'null'],
-      ['an entry with no name', '{"port":3000}'],
-      ['an entry with an empty name', '{"name":"","port":3000}'],
-      ['an entry with no port', '{"name":"orders"}'],
-      ['an entry whose port is not a number', '{"name":"orders","port":"3000"}'],
-    ] as const
-  ) {
+  for (const [label, entry] of [
+    ['a non-object entry', '"orders"'],
+    ['a null entry', 'null'],
+    ['an entry with no name', '{"port":3000}'],
+    ['an entry with an empty name', '{"name":"","port":3000}'],
+    ['an entry with no port', '{"name":"orders"}'],
+    ['an entry whose port is not a number', '{"name":"orders","port":"3000"}'],
+  ] as const) {
     it(`reports ${label}`, async () => {
       const result = await readWorkspaceManifest(
         workspace(`{"version":${WORKSPACE_VERSION},"basePort":3000,"members":[${entry}]}`),
@@ -310,12 +312,12 @@ describe('renderWorkspaceManifest', () => {
       runtime: 'deno',
       basePort: 4100,
       transport: 'http',
-      members: [{ name: 'orders', port: 4100 }, { name: 'billing', port: 4101 }],
+      members: [
+        { name: 'orders', port: 4100 },
+        { name: 'billing', port: 4101 },
+      ],
     };
-    const result = await readWorkspaceManifest(
-      workspace(renderWorkspaceManifest(manifest)),
-      '/ws',
-    );
+    const result = await readWorkspaceManifest(workspace(renderWorkspaceManifest(manifest)), '/ws');
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest).toEqual(manifest);
@@ -353,7 +355,10 @@ describe('allocatePort', () => {
         runtime: 'deno',
         basePort: 3000,
         transport: 'http',
-        members: [{ name: 'a', port: 3000 }, { name: 'b', port: 3001 }],
+        members: [
+          { name: 'a', port: 3000 },
+          { name: 'b', port: 3001 },
+        ],
       }),
     ).toBe(3002);
   });
@@ -367,14 +372,20 @@ describe('allocatePort', () => {
         runtime: 'deno',
         basePort: 3000,
         transport: 'http',
-        members: [{ name: 'a', port: 4100 }, { name: 'b', port: 3001 }],
+        members: [
+          { name: 'a', port: 4100 },
+          { name: 'b', port: 3001 },
+        ],
       }),
     ).toBe(4101);
   });
 
   // Member order comes from a file a human may reorder.
   it('does not depend on member order', () => {
-    const ports = [{ name: 'a', port: 3005 }, { name: 'b', port: 3001 }];
+    const ports = [
+      { name: 'a', port: 3005 },
+      { name: 'b', port: 3001 },
+    ];
     const forwards = allocatePort({
       version: WORKSPACE_VERSION,
       runtime: 'deno',

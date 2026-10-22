@@ -7,6 +7,8 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
+
 import type { DatabaseAdapterOptions, DrizzleAdapterOptions } from '../../interfaces/index.ts';
 import type { FilterComparison, TransactionOptions } from '@setu-ts/common';
 import { escapeLikePattern } from '../../query/like-escape.ts';
@@ -41,10 +43,16 @@ import {
   PoolSaturatedProbeSkipped,
   readPoolCapacity,
 } from '../../health/database-capacity.ts';
-import { isPoolExhaustion } from '../../errors/classify.ts';
+import { isUnansweredConnect, isValueTypeRefusal } from '../../errors/classify.ts';
+import { scrubDriverError } from '../../errors/scrub.ts';
+import { renderDiagnosticName } from '../../errors/diagnostic-name.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
-import { UnsupportedIsolationLevelError, UnsupportedQueryFeatureError } from '../../errors.ts';
+import {
+  UnknownPayloadFieldError,
+  UnsupportedIsolationLevelError,
+  UnsupportedQueryFeatureError,
+} from '../../errors.ts';
 import {
   normalizePageQuery,
   PageNormalizationError,
@@ -157,9 +165,7 @@ export type DrizzleOperators = {
    * `%` and `_` a caller searches for stay wildcards on SQLite (which has no
    * default escape character) — a literal search then matches nothing.
    */
-  sql?:
-    & ((strings: TemplateStringsArray, ...values: unknown[]) => unknown)
-    & RawStatementTag;
+  sql?: ((strings: TemplateStringsArray, ...values: unknown[]) => unknown) & RawStatementTag;
   /**
    * Drizzle's `SQL` constructor. `rawQuery` needs it because `execute()` takes
    * an `SQLWrapper` — an object carrying `getSQL()` — and a chunk list is the
@@ -234,9 +240,9 @@ export class DrizzleAdapter implements IDatabaseAdapter {
   private _configuredDatabase: DrizzleDatabaseIdentity | null = null;
   private _transactionBridge:
     | ((
-      work: (transaction: unknown) => Promise<void>,
-      options?: TransactionOptions,
-    ) => Promise<void>)
+        work: (transaction: unknown) => Promise<void>,
+        options?: TransactionOptions,
+      ) => Promise<void>)
     | null = null;
   private _supportsIsolation = false;
   private _connected = false;
@@ -289,10 +295,11 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       // names it. Drizzle publishes no dialect discriminant, so the class name
       // is the only signal — which is why the option exists, and why an
       // unrecognised name refuses a nested path instead of guessing.
-      const jsonDialect = (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
+      const jsonDialect =
+        (this._options as DrizzleAdapterOptions | undefined)?.dialect ??
         dialectFromDrizzleClassName(
-          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)
-            ?.dialect?.constructor?.name,
+          (this._db as { dialect?: { constructor?: { name?: string } } } | undefined)?.dialect
+            ?.constructor?.name,
         );
       const operators: DrizzleOperators = {
         eq: ns.eq as (col: unknown, val: unknown) => unknown,
@@ -336,16 +343,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error(
         `Failed to load Drizzle query operators: ${
           error instanceof Error ? error.message : String(error)
-        }. ` +
-          'Install drizzle-orm alongside the injected drizzleInstance.',
+        }. ` + 'Install drizzle-orm alongside the injected drizzleInstance.',
         { cause: error },
       );
     }
 
     // A usable Drizzle adapter must know how entity names map to real tables.
-    const tables =
-      (this._options as DatabaseAdapterOptions & { drizzleTables?: Record<string, unknown> })
-        .drizzleTables;
+    const tables = (
+      this._options as DatabaseAdapterOptions & { drizzleTables?: Record<string, unknown> }
+    ).drizzleTables;
     if (tables === undefined || Object.keys(tables).length === 0) {
       throw new Error(
         'DrizzleAdapter requires options.drizzleTables with at least one real Drizzle table definition.',
@@ -402,8 +408,8 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * - When `poolStats` reports every connection busy with callers waiting
    *   (`idle === 0 && waiting > 0`), no `SELECT 1` is queued at all — a
    *   queued probe is one more waiter on the pool it is measuring.
-   * - A rejection that IS pool exhaustion (the node-postgres connection
-   *   timeout) is rethrown, since the database never answered either way.
+   * - A pool-wait, new-connection or query-read timeout is rethrown,
+   *   since the database never answered either way.
    *
    * The `database` indicator then reads the capacity snapshot to tell a
    * saturated pool (`up`, `reachable: 'unknown'`) from an unanswered probe.
@@ -417,7 +423,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       await this.rawQuery('SELECT 1');
       return true;
     } catch (error) {
-      if (isPoolExhaustion(error)) {
+      if (isUnansweredConnect(error)) {
         throw error;
       }
       return false;
@@ -523,7 +529,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     const statement = new sqlClass(bindRawStatement(sql, params ?? [], tag));
     const result = await execute.call(this._db, statement);
     this.#completedQueries++;
-    return (result as { rows?: T[] }).rows ?? result as T[];
+    return (result as { rows?: T[] }).rows ?? (result as T[]);
   }
 
   /**
@@ -536,13 +542,15 @@ export class DrizzleAdapter implements IDatabaseAdapter {
       throw new Error('DrizzleAdapter is not connected — call connect() first');
     }
     const entities = (this._options as DrizzleAdapterOptions | undefined)?.entities;
-    return this.#countingCompletions(createDrizzleDataSourceInner(
-      this._db,
-      entity,
-      this.resolveTables(),
-      this._operators!,
-      entities,
-    ));
+    return this.#countingCompletions(
+      createDrizzleDataSourceInner(
+        this._db,
+        entity,
+        this.resolveTables(),
+        this._operators!,
+        entities,
+      ),
+    );
   }
 
   /**
@@ -688,12 +696,20 @@ function createDrizzleDataSourceInner(
   const drizzleTable = table as DrizzleTable;
   const primaryKeyOverride = entities?.[entity]?.primaryKey;
   const keyColumns = resolveKeyColumns(primaryKeyOverride ?? 'id');
+  for (const column of keyColumns) columnFor(drizzleTable, entity, column);
+  const assertPayloadColumns = (data: Readonly<Record<string, unknown>>): void => {
+    for (const field of Object.keys(data)) {
+      if (data[field] !== undefined && !hasColumn(drizzleTable, field)) {
+        throw new UnknownPayloadFieldError(entity, field);
+      }
+    }
+  };
 
   return {
     async findById(id) {
       const values = keyValues(id, keyColumns, `findById on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await instance.select().from(drizzleTable).where(predicate);
@@ -721,16 +737,13 @@ function createDrizzleDataSourceInner(
     },
 
     findPage: (query) =>
-      findDrizzlePage(
-        instance,
-        drizzleTable,
-        entity,
-        query,
-        operators,
-        keyColumns,
-      ),
+      findDrizzlePage(instance, drizzleTable, entity, query, operators, keyColumns),
 
     async create(data) {
+      // One own-property snapshot, checked and written: a getter on the
+      // caller's object cannot show the check one value and the write another.
+      data = { ...data };
+      assertPayloadColumns(data);
       const rows = await returningRows(
         instance.insert(drizzleTable).values(data),
         entity,
@@ -740,9 +753,12 @@ function createDrizzleDataSourceInner(
     },
 
     async update(id, data) {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
+      assertPayloadColumns(data);
       const values = keyValues(id, keyColumns, `update on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
@@ -756,7 +772,7 @@ function createDrizzleDataSourceInner(
     async delete(id) {
       const values = keyValues(id, keyColumns, `delete on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[i])
+        operators.eq(columnFor(drizzleTable, entity, col), values[i]),
       );
       const predicate = predicates.length === 1 ? predicates[0] : operators.and(...predicates);
       const rows = await returningRows(
@@ -773,11 +789,15 @@ function createDrizzleDataSourceInner(
         throw new UnsupportedQueryFeatureError('write-precondition', 'drizzle', checked.problem);
       }
       where = checked.where;
+      // The private copy checkWritePrecondition returns is the one checked and
+      // the one written, so the caller's object is read exactly once.
       data = checked.data;
+      assertPayloadColumns(data);
+      assertPrimaryKeyUnchanged(entity, keyColumns, id, data);
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `updateWhere on '${entity}'`);
       const keyPredicates = keyColumns.map((col, index) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+        operators.eq(columnFor(drizzleTable, entity, col), values[index]),
       );
       const predicate = operators.and(
         ...keyPredicates,
@@ -799,7 +819,7 @@ function createDrizzleDataSourceInner(
       assertPreconditionColumns(drizzleTable, where);
       const values = keyValues(id, keyColumns, `deleteWhere on '${entity}'`);
       const keyPredicates = keyColumns.map((col, index) =>
-        operators.eq(columnFor(drizzleTable, entity, col), values[index])
+        operators.eq(columnFor(drizzleTable, entity, col), values[index]),
       );
       const predicate = operators.and(
         ...keyPredicates,
@@ -894,13 +914,7 @@ async function findDrizzlePage(
   if (normalized.cursor !== undefined) {
     decoded = decodeCursor(normalized.cursor);
     if (decoded === null) {
-      return Promise.reject(
-        new UnsupportedQueryFeatureError(
-          'cursor-pagination',
-          'drizzle',
-          `cursor-pagination: entity '${entity}': malformed cursor token`,
-        ),
-      );
+      return Promise.reject(new InvalidCursorError(`Entity '${entity}': malformed cursor token.`));
     }
   }
 
@@ -909,13 +923,15 @@ async function findDrizzlePage(
   const fingerprint = sortFingerprint(normalized.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new UnsupportedQueryFeatureError(
-        'cursor-pagination',
-        'drizzle',
-        `cursor-pagination: entity '${entity}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),
     );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== keyColumns.length ||
+      decoded.orderedValues.length !== Object.keys(normalized.orderBy).length)
+  ) {
+    return Promise.reject(new InvalidCursorError(`Entity '${entity}': cursor key shape mismatch.`));
   }
 
   // 4. Keyset predicate through the shared builder; it is a FilterExpression,
@@ -925,16 +941,18 @@ async function findDrizzlePage(
   // sorting by `orderBy` alone leaves tied rows in an order the backend
   // picks freely and the predicate skips or repeats them.
   const keysetSort = resolveKeysetSort(normalized.orderBy, keyColumns);
-  const keyset = decoded === null
-    ? undefined
-    : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
+  const keyset =
+    decoded === null
+      ? undefined
+      : keysetPredicate(decoded.orderedValues, decoded.keyValues, normalized.orderBy, keyColumns);
 
   // 5. One-extra-row probe. A non-zero skip is never applied: the keyset
   //    position replaces offset (and §3.10 refused the two together).
   const probeLimit = normalized.limit > 0 ? normalized.limit + 1 : normalized.limit;
-  const internalSelect = normalized.select.length > 0
-    ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
-    : [];
+  const internalSelect =
+    normalized.select.length > 0
+      ? [...new Set([...normalized.select, ...keyColumns, ...Object.keys(normalized.orderBy)])]
+      : [];
   const where = predicateFor(
     table,
     entity,
@@ -942,9 +960,7 @@ async function findDrizzlePage(
     operators,
     conjoinFilters(normalized.filter, keyset),
   );
-  let builder = instance.select(
-    selectedColumns(table, entity, internalSelect),
-  ).from(table);
+  let builder = instance.select(selectedColumns(table, entity, internalSelect)).from(table);
   if (where !== undefined) {
     builder = builder.where(where);
   }
@@ -955,26 +971,38 @@ async function findDrizzlePage(
   if (probeLimit > 0) {
     builder = builder.limit(probeLimit);
   }
-  const found = await builder;
+  let found: Record<string, unknown>[];
+  try {
+    found = await builder;
+  } catch (error) {
+    // A well-formed cursor can still carry a value of the wrong type for its
+    // sort column — the cursor records no column types to check. PostgreSQL
+    // refuses it with a class 22 data exception; that is the client's cursor,
+    // so it answers 400 rather than a masked 500 (M113g, plan §3.5a). A page
+    // without a cursor keeps the driver error unchanged.
+    // drops-cause: the raw driver error quotes the forged value, so the cause
+    // forwarded is its value-free scrubbed copy rather than the caught value.
+    if (decoded !== null && isValueTypeRefusal(error)) {
+      throw new InvalidCursorError(`Entity '${entity}': cursor value rejected by the database.`, {
+        cause: scrubDriverError(error),
+      });
+    }
+    throw error;
+  }
 
   // 6. Probe outcome: more than `limit` rows means a next page exists and the
   //    LAST returned row mints the cursor; otherwise the page is terminal.
   const hasMore = normalized.limit > 0 && found.length > normalized.limit;
   const pageRows = hasMore ? found.slice(0, normalized.limit) : found;
-  const nextCursor = mintNextCursor(
-    pageRows,
-    normalized.orderBy,
-    keyColumns,
-    fingerprint,
-    hasMore,
-  );
+  const nextCursor = mintNextCursor(pageRows, normalized.orderBy, keyColumns, fingerprint, hasMore);
 
   // 7. The caller's projection is what comes back — the key columns and the
   //    ordered fields joined the internal select only for the probe and the
   //    cursor minting, and are stripped here.
-  const rows = internalSelect.length > 0
-    ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
-    : pageRows;
+  const rows =
+    internalSelect.length > 0
+      ? pageRows.map((row) => projectFields(row, normalized.select) as Record<string, unknown>)
+      : pageRows;
   return { rows, nextCursor };
 }
 
@@ -982,9 +1010,15 @@ async function findDrizzlePage(
 const COUNT_ALIAS = 'value';
 
 function hasColumn(value: unknown, field: string): boolean {
-  return value !== null && typeof value === 'object' &&
+  if (value === null || typeof value !== 'object') return false;
+  const columns = (value as Record<symbol, unknown>)[Symbol.for('drizzle:Columns')];
+  if (columns !== null && typeof columns === 'object' && !Array.isArray(columns)) {
+    return Object.prototype.hasOwnProperty.call(columns, field);
+  }
+  return (
     Object.prototype.hasOwnProperty.call(value, field) &&
-    (value as Record<string, unknown>)[field] !== undefined;
+    (value as Record<string, unknown>)[field] !== undefined
+  );
 }
 
 /**
@@ -1007,7 +1041,7 @@ function assertPreconditionColumns(table: DrizzleTable, where: Record<string, un
 function columnFor(table: DrizzleTable, entity: string, field: string): unknown {
   if (!hasColumn(table, field)) {
     throw new Error(
-      `Drizzle table '${entity}' has no '${field}' column required by the database repository.`,
+      `Drizzle table '${entity}' has no ${renderDiagnosticName(field)} column required by the database repository.`,
     );
   }
   return table[field];
@@ -1021,7 +1055,7 @@ function predicateFor(
   filter?: FilterExpression,
 ): unknown | undefined {
   const predicates = Object.entries(where).map(([field, value]) =>
-    operators.eq(columnFor(table, entity, field), value)
+    operators.eq(columnFor(table, entity, field), value),
   );
   if (filter !== undefined) {
     const filterPredicate = filterPredicateFor(table, entity, filter, operators);
@@ -1066,8 +1100,7 @@ function filterPredicateFor(
     throw new UnsupportedQueryFeatureError(
       'nested-path',
       'drizzle',
-      `Filter on entity '${entity}' carries an empty field path. ` +
-        'Name at least one column.',
+      `Filter on entity '${entity}' carries an empty field path. ` + 'Name at least one column.',
     );
   }
   const baseColumn = columnFor(table, entity, segments[0]);
@@ -1093,9 +1126,9 @@ function filterPredicateFor(
       // defines no default escape character, so without the clause the
       // backslashes below are matched literally and a search for a value
       // holding `%` or `_` returns nothing at all.
-      return filterOperators.sql`${baseColumn} like ${`%${
-        escapeLikePattern(filter.value)
-      }%`} escape '\\'`;
+      return filterOperators.sql`${baseColumn} like ${`%${escapeLikePattern(
+        filter.value,
+      )}%`} escape '\\'`;
     case 'gt':
       return filterOperators.gt(baseColumn, filter.value);
     case 'gte':
@@ -1180,10 +1213,9 @@ function jsonPathPredicate(
       case 'postgresql':
         return ops.sql`(${column} #>> ${postgresPathArray(path)})::numeric`;
       case 'mysql':
-        return ops
-          .sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${
-          jsonPathString(path)
-        })) AS DECIMAL(65,30))`;
+        return ops.sql`CAST(JSON_UNQUOTE(JSON_EXTRACT(${column}, ${jsonPathString(
+          path,
+        )})) AS DECIMAL(65,30))`;
       case 'sqlite':
         return ops.sql`json_extract(${column}, ${jsonPathString(path)})`;
     }
@@ -1227,10 +1259,7 @@ function jsonPathPredicate(
 }
 
 type FilterOperators = Required<
-  Pick<
-    DrizzleOperators,
-    'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'sql'
-  >
+  Pick<DrizzleOperators, 'or' | 'gt' | 'gte' | 'lt' | 'lte' | 'inArray' | 'isNull' | 'sql'>
 >;
 
 /** Ensure a directly-created source has the native operators its filter needs. */

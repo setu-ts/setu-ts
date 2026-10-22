@@ -89,9 +89,9 @@ describe('AuthPlugin middleware registration', () => {
     });
 
     await app.start();
-    const auth = app.diagnostics!.snapshot().nodes.find(
-      (node) => node.kind === 'middleware' && node.label === 'auth',
-    );
+    const auth = app
+      .diagnostics!.snapshot()
+      .nodes.find((node) => node.kind === 'middleware' && node.label === 'auth');
 
     expect(auth?.priority).toBe(425);
     await app.stop();

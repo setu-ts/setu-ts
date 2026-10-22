@@ -43,9 +43,8 @@ describe('DatabaseIdempotencyStore.run (M109b §3.1, §3.6)', () => {
   it('creates the claim first and the result row, and returns the work value', async () => {
     const service = await memoryService();
     const store = storeOver(service);
-    const value = await store.run(
-      claim('a'),
-      () => Promise.resolve({ result: '{"v":1}', value: { n: 1 } }),
+    const value = await store.run(claim('a'), () =>
+      Promise.resolve({ result: '{"v":1}', value: { n: 1 } }),
     );
 
     expect(value).toEqual({ n: 1 });
@@ -93,7 +92,7 @@ describe('DatabaseIdempotencyStore.run (M109b §3.1, §3.6)', () => {
                 },
               };
             },
-          })
+          }),
         ),
     };
     await expect(
@@ -106,9 +105,8 @@ describe('DatabaseIdempotencyStore.run (M109b §3.1, §3.6)', () => {
 describe('DatabaseIdempotencyStore.find (M109b §3.1)', () => {
   it('reads the committed record as a whole', async () => {
     const service = await memoryService();
-    await storeOver(service).run(
-      claim('a'),
-      () => Promise.resolve({ result: '{"v":7}', value: 7 }),
+    await storeOver(service).run(claim('a'), () =>
+      Promise.resolve({ result: '{"v":7}', value: 7 }),
     );
 
     expect(await storeOver(service).find(claim('a').id)).toEqual({
@@ -143,9 +141,7 @@ describe('DatabaseIdempotencyStore.find (M109b §3.1)', () => {
 
   it('is undefined for a claim row of another kind', async () => {
     const service = await memoryService();
-    await seed(service, [
-      { id: claim('a').id, kind: 'business', role: 'claim', result: null },
-    ]);
+    await seed(service, [{ id: claim('a').id, kind: 'business', role: 'claim', result: null }]);
     expect(await storeOver(service).find(claim('a').id)).toBeUndefined();
   });
 
@@ -200,7 +196,7 @@ describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
           work({
             getRepository: <E, Id extends EntityKey = string>(entity: string) =>
               failResultDelete(uow.getRepository<E, Id>(entity)),
-          })
+          }),
         ),
     };
     const store = storeOver(service);
@@ -216,15 +212,19 @@ describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
     try {
       const idempotency = app.services.get<IIdempotencyService>(CAPABILITIES.IDEMPOTENCY);
       const options = { key: 'interrupted-purge', scope: 'scope', namespace: 'namespace' };
-      expect(await idempotency.within(options, () => Promise.resolve('winner')))
-        .toEqual({ value: 'winner', replayed: false });
+      expect(await idempotency.within(options, () => Promise.resolve('winner'))).toEqual({
+        value: 'winner',
+        replayed: false,
+      });
       const before = await allRows(inner);
       await expect(store.purge(Number.MAX_SAFE_INTEGER, 10)).rejects.toThrow(
         'result delete refused',
       );
       expect(await allRows(inner)).toEqual(before);
-      expect(await idempotency.within(options, () => Promise.resolve('unexpected')))
-        .toEqual({ value: 'winner', replayed: true });
+      expect(await idempotency.within(options, () => Promise.resolve('unexpected'))).toEqual({
+        value: 'winner',
+        replayed: true,
+      });
     } finally {
       await app.stop();
     }
@@ -268,9 +268,8 @@ describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
         const repo = inner.getRepository<Row>(ENTITY);
         await repo.delete(claim('reused').id);
         await repo.delete(`${claim('reused').id}.r`);
-        await store.run(
-          claim('reused', { createdAt: 5_000, expiresAt: 90_000 }),
-          () => Promise.resolve({ result: '{"v":"fresh"}', value: 2 }),
+        await store.run(claim('reused', { createdAt: 5_000, expiresAt: 90_000 }), () =>
+          Promise.resolve({ result: '{"v":"fresh"}', value: 2 }),
         );
       }
       return await inner.transaction(work, options);
@@ -305,21 +304,16 @@ describe('DatabaseIdempotencyStore.purge (M109b §3.10)', () => {
   it('deletes only expired records and honours the limit', async () => {
     const service = await memoryService();
     const store = storeOver(service);
-    await store.run(
-      claim('old', { expiresAt: 1_000 }),
-      () => Promise.resolve({ result: '{}', value: 1 }),
+    await store.run(claim('old', { expiresAt: 1_000 }), () =>
+      Promise.resolve({ result: '{}', value: 1 }),
     );
-    await store.run(
-      claim('new', { expiresAt: 9_000 }),
-      () => Promise.resolve({ result: '{}', value: 2 }),
+    await store.run(claim('new', { expiresAt: 9_000 }), () =>
+      Promise.resolve({ result: '{}', value: 2 }),
     );
 
     expect(await store.purge(3_000, 10)).toBe(1);
     const remaining = await allRows(service);
-    expect(remaining.map((row) => row.id)).toEqual([
-      claim('new').id,
-      `${claim('new').id}.r`,
-    ]);
+    expect(remaining.map((row) => row.id)).toEqual([claim('new').id, `${claim('new').id}.r`]);
   });
 
   it('counts at most `limit` records', async () => {
@@ -369,16 +363,15 @@ describe('createDatabaseIdempotencyStore (M109b §3.6)', () => {
   it('resolves the default database, and a named one', async () => {
     const service = await memoryService();
     await createDatabaseIdempotencyStore()(registry('database', service)).verify();
-    await createDatabaseIdempotencyStore({ database: 'default' })(registry('database', service))
-      .verify();
+    await createDatabaseIdempotencyStore({ database: 'default' })(
+      registry('database', service),
+    ).verify();
     await createDatabaseIdempotencyStore({ database: 'billing' })(
       registry('database.billing', service),
-    )
-      .verify();
+    ).verify();
     expect(() =>
-      createDatabaseIdempotencyStore({ database: 'billing' })(registry('database', service))
-    )
-      .toThrow('missing database.billing');
+      createDatabaseIdempotencyStore({ database: 'billing' })(registry('database', service)),
+    ).toThrow('missing database.billing');
   });
 
   it('refuses an empty entity at the call', () => {

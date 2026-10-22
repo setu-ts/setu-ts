@@ -12,9 +12,7 @@ import type {
 // Fake NodeModules — in-memory fs stub with a Stats-like return from stat()
 // ---------------------------------------------------------------------------
 
-function createFakeNodeModules(
-  overrides?: Partial<NodeModules>,
-): NodeModules {
+function createFakeNodeModules(overrides?: Partial<NodeModules>): NodeModules {
   const files = new Map<string, Uint8Array>();
 
   const fakeFs = {
@@ -65,10 +63,8 @@ function createFakeNodeModules(
       files.delete(path);
       return Promise.resolve();
     },
-    createReadStream: (
-      _path: string,
-      _options?: { start?: number; end?: number },
-    ) => ({ on: () => {}, resume: () => {} } as never),
+    createReadStream: (_path: string, _options?: { start?: number; end?: number }) =>
+      ({ on: () => {}, resume: () => {} }) as never,
   };
 
   const fakeProc = {
@@ -260,10 +256,8 @@ function createFakeNodeHost(overrides: Partial<NodeHost> = {}): NodeHost {
       dirs.delete(path);
       return Promise.resolve();
     },
-    createReadStream: (
-      _path: string,
-      _options?: { start?: number; end?: number },
-    ) => ({ on: () => {}, resume: () => {} } as never),
+    createReadStream: (_path: string, _options?: { start?: number; end?: number }) =>
+      ({ on: () => {}, resume: () => {} }) as never,
     ...overrides,
   };
 }
@@ -438,9 +432,7 @@ describe('Node runtime readStream branches', () => {
     const host = buildNodeHost(createFakeNodeModules());
     const fs = createNodeRuntimeServices({ ...host, createReadStream: () => null }).fs;
 
-    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow(
-      'Failed to create read stream',
-    );
+    await expect(fs!.readStream!('/tmp/missing')).rejects.toThrow('Failed to create read stream');
   });
 
   it('converts an injected Node Readable into a web stream', async () => {

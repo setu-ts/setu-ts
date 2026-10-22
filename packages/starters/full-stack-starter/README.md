@@ -124,6 +124,11 @@ const app = createApplication({
 |                  | MultiTenancyPlugin | Tenant isolation               |
 |                  | ReactRouterPlugin  | React SSR & file-based routing |
 
+OpenApiPlugin self-hosts Swagger UI by default, so install `swagger-ui-dist` (`^5`) in the consuming
+application, or pass `openapi: { swagger: { assets: 'cdn' } }`. Without either, startup fails with
+`OptionalDependencyUnavailableError`. On Cloudflare Workers, which has no filesystem to self-host
+from, the starter selects the CDN itself when no Swagger asset mode is chosen.
+
 The inherited `auth` arm accepts any `AuthPluginOptions` with at least one passive strategy (`jwt`,
 `apiKey`, `session`, or `strategies`). When present, `AuthPlugin` installs authentication middleware
 globally at priority 300 unless `auth.middleware` disables or moves it.
@@ -259,7 +264,8 @@ Three things to know:
 - **A DI mistake fails every page, not startup.** An unlisted service, a misspelled token, or a
   missing `di` arm starts cleanly and answers `/health` with 200, then throws in
   `populateLoadContext` on every server-rendered request. The smoke test `setu new` generates
-  requests `/` as well as `/health`, so `deno task test` catches it; keep that request in.
+  requests `/` as well as `/health`, so the project's own test script catches it; keep that request
+  in.
 
 ## Composing from configuration
 
@@ -270,12 +276,15 @@ yet. `createFullStackAppFromConfig` closes that ordering gap for every option at
 ```typescript
 import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
 
-const app = await createFullStackAppFromConfig((config) => ({
-  // `prismaClient` is generated and constructed by the application — a Prisma v7
-  // client carries its own connection configuration, so `url` is not an option.
-  database: { type: 'prisma', options: { prismaClient } },
-  session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
-}), { config: { envFilePath: ['.env.local', '.env'] } });
+const app = await createFullStackAppFromConfig(
+  (config) => ({
+    // `prismaClient` is generated and constructed by the application — a Prisma v7
+    // client carries its own connection configuration, so `url` is not an option.
+    database: { type: 'prisma', options: { prismaClient } },
+    session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+  }),
+  { config: { envFilePath: ['.env.local', '.env'] } },
+);
 
 const config = fullStackConfigOf(app); // the exact snapshot passed to the callback
 
@@ -368,5 +377,5 @@ Two consequences follow from the list being positional:
 | `RealtimeArm`                     | interface |
 | `StaticPluginOptions`             | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

@@ -16,7 +16,7 @@ the kernel router.
 ## Installation
 
 ```bash
-deno add npm:graphql@^16 @setu-ts/graphql-plugin
+deno add npm:graphql npm:@setu-ts/graphql-plugin
 ```
 
 ## Usage
@@ -59,7 +59,7 @@ await app.start({ port: 3000 });
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { GraphqlPlugin } from '@setu-ts/graphql-plugin';
-import { buildSchema } from 'npm:graphql@^16';
+import { buildSchema } from 'graphql';
 
 const schema = buildSchema(`
   type Query {
@@ -68,10 +68,7 @@ const schema = buildSchema(`
 `);
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    GraphqlPlugin({ schema }),
-  ],
+  plugins: [RuntimePlugin(), GraphqlPlugin({ schema })],
 });
 
 await app.start({ port: 3000 });
@@ -83,8 +80,8 @@ If your application uses its own copy of `graphql`, inject it to avoid cross-cop
 
 ```typescript
 import { adaptGraphqlModule, GraphqlPlugin } from '@setu-ts/graphql-plugin';
-import { buildSchema } from 'npm:graphql@^16';
-import * as graphql from 'npm:graphql@^16';
+import { buildSchema } from 'graphql';
+import * as graphql from 'graphql';
 
 GraphqlPlugin({
   schema: buildSchema('type Query { hello: String }'),
@@ -312,7 +309,7 @@ MIT
 | `ResolverMap`                 | type      |
 | `TypeResolverMap`             | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

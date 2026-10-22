@@ -1,15 +1,15 @@
 # DI and decorators example
 
-This app combines `DiPlugin` with `DecoratorPlugin`. The decorated controller receives its
-`GreetingService` through parameter-level `@Inject('greeting-service')`.
+This app combines `DiPlugin` with `DecoratorPlugin`, with each feature declared as a `@Module`. The
+decorated controller receives its `GreetingService` through the class-level
+`@Inject(GREETING_SERVICE)`.
 
-`/lifetimes` visibly calls `container.createScope()`: singleton services are shared across those
-scopes, while scoped services are retained inside one scope and differ between scopes. The framework
-does **not** create a DI scope per request; applications that need request scoping must create and
-carry that scope themselves.
+`LifetimesController` (`GET /lifetimes`) visibly calls `container.createScope()`: singleton services
+are shared across those scopes, while scoped services are retained inside one scope and differ
+between scopes. The framework does **not** create a DI scope per request; applications that need
+request scoping must create and carry that scope themselves.
 
 ```bash
-cd apps/di-decorators
-deno task start
-deno task smoke
+pnpm --dir apps/di-decorators run start
+pnpm --dir apps/di-decorators run smoke
 ```

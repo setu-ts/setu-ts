@@ -34,10 +34,7 @@ function manifestOf(
  * @param path - The path to read
  * @returns Its contents
  */
-function contentsOf(
-  files: readonly { path: string; contents: string }[],
-  path: string,
-): string {
+function contentsOf(files: readonly { path: string; contents: string }[], path: string): string {
   const file = files.find((candidate) => candidate.path === path);
   expect(file).toBeDefined();
   return file?.contents ?? '';
@@ -195,13 +192,28 @@ describe('workspaceContainerFiles', () => {
     it('keeps the repository history out of the build context', () => {
       expect(ignore()).toContain('\n.git\n');
     });
+
+    it('keeps every dotenv file out, and keeps the example (V9-39)', () => {
+      const contents = ignore();
+      expect(contents).toContain('\n**/.env\n');
+      expect(contents).toContain('**/.env.*');
+      expect(contents).toContain('!**/.env.example');
+      // The limit is stated, not implied: the rules cover .env and .env.* only,
+      // and a custom --env-file name must be added by hand (F2).
+      expect(contents).toContain('Dotenv files whose names are .env or .env.*');
+      expect(contents).toContain('A custom --env-file name such as local.env is NOT');
+      expect(contents).toContain('add its path from here (apps/<member>/local.env)');
+    });
   });
 
   describe('the Compose file', () => {
     it('publishes each member on the port the manifest allocated it', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]),
+          manifestOf([
+            { name: 'orders', port: 3000 },
+            { name: 'billing', port: 3001 },
+          ]),
           transportSpec('http'),
         ),
         COMPOSE_FILE,
@@ -242,7 +254,10 @@ describe('workspaceContainerFiles', () => {
     it('sorts services by name', () => {
       const compose = contentsOf(
         workspaceContainerFiles(
-          manifestOf([{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }]),
+          manifestOf([
+            { name: 'orders', port: 3000 },
+            { name: 'billing', port: 3001 },
+          ]),
           transportSpec('http'),
         ),
         COMPOSE_FILE,

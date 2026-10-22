@@ -56,10 +56,10 @@ describe('four relay sweeps over one outbox', () => {
     expect(new Set(broker.published.map((p) => p.message.id)).size).toBe(200);
     for (let k = 0; k < 10; k++) {
       expect(
-        broker.published.filter((p) => p.options?.orderingKey === `K${k}`)
+        broker.published
+          .filter((p) => p.options?.orderingKey === `K${k}`)
           .map((p) => (p.message.data as { n: number }).n),
-      )
-        .toEqual(Array.from({ length: 20 }, (_, index) => k + index * 10));
+      ).toEqual(Array.from({ length: 20 }, (_, index) => k + index * 10));
     }
     expect(lost).toBeGreaterThan(0);
   });

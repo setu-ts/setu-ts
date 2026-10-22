@@ -26,7 +26,7 @@ import type { HealthCheckResult, IHealthIndicator, IRuntimeServices } from '@set
 export function createSelfIndicator(runtime: IRuntimeServices): IHealthIndicator {
   return {
     name: 'self',
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     async check(): Promise<HealthCheckResult> {
       return {
         status: 'up',

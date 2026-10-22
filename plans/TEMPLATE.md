@@ -2,7 +2,7 @@
 
 <!--
   PLAN TEMPLATE. Copy to plans/milestone-<N>-<desc>.md and replace every <FILL: ...>.
-  `deno task check:plan` FAILS while any <FILL: ...> placeholder or required section is
+  `pnpm run check:plan` FAILS while any <FILL: ...> placeholder or required section is
   missing, and warns on undecided-alternative markers and non-canonical plans/ files —
   a plan that does not lint clean is not ready to implement.
 
@@ -44,9 +44,9 @@
   are genuinely none, write a single row "None found (checked <docs>)".
 -->
 
-| #  | Conflict | Resolution (picked side) | Doc deliverable (same PR) |
-| -- | -------- | ------------------------ | ------------------------- |
-| C1 | <FILL>   | <FILL>                   | <FILL>                    |
+| #   | Conflict | Resolution (picked side) | Doc deliverable (same PR) |
+| --- | -------- | ------------------------ | ------------------------- |
+| C1  | <FILL>   | <FILL>                   | <FILL>                    |
 
 ## 3. Design decisions
 
@@ -112,12 +112,12 @@ may not carry a BREAKING entry; verify-release check 10 refuses one.>
 
 ```bash
 git branch --show-current   # MUST be feat/m<N>-<desc>, never main
-deno task check:plan        # this plan lints clean
-deno task fmt:check
-deno task lint
-deno task check
-deno task test
-deno task test:coverage     # read ANSI-stripped per-file table; ≥90% branch/function/line every src file
+pnpm run check:plan        # this plan lints clean
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test
+pnpm run test:coverage     # read ANSI-stripped per-file table; ≥90% branch/function/line every src file
 ```
 
 ## 8. Risks & mitigations

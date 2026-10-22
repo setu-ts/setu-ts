@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- structural service doubles implement async contracts
+/* eslint-disable require-await -- structural service doubles implement async contracts */
 import { describe, expect, it } from 'vitest';
 import type { EntityKey, IAdapterTransaction, IDatabaseAdapter } from '@setu-ts/common';
 import type {
@@ -88,29 +88,30 @@ describe('typed Drizzle accessors', () => {
         beginTransaction: () => Promise.resolve(transaction()),
         rawQuery: <T>() => Promise.resolve([] as T[]),
       };
-      const expected =
-        `Drizzle query access requires adapter 'drizzle'; configured adapter is '${type}'.`;
-      const database = createDrizzleDatabase(
-        createFakeDrizzleInstance(),
-        (configured, work) => configured.transaction(work),
+      const expected = `Drizzle query access requires adapter 'drizzle'; configured adapter is '${type}'.`;
+      const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+        configured.transaction(work),
       );
       expect(() => getDrizzleDatabase(adapterService(adapter, type), database)).toThrow(expected);
       expect(() =>
         getDrizzleTransaction(
-          new UnitOfWork(transaction(), () => {
-            throw new Error('unused');
-          }, type),
+          new UnitOfWork(
+            transaction(),
+            () => {
+              throw new Error('unused');
+            },
+            type,
+          ),
           database,
-        )
+        ),
       ).toThrow(expected);
     });
   }
 
   it('rejects external structural service and Unit-of-Work scopes', () => {
     const invalid = 'Drizzle query access requires a database-plugin service or unit of work.';
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
     expect(() => getDrizzleDatabase(externalService(), database)).toThrow(invalid);
     const externalUow: IUnitOfWork = {
@@ -125,17 +126,15 @@ describe('typed Drizzle accessors', () => {
     expect(() => getDrizzleDatabase('database' as unknown as IDatabaseService, database)).toThrow(
       invalid,
     );
-    expect(() => getDrizzleDatabase((() => undefined) as unknown as IDatabaseService, database))
-      .toThrow(
-        invalid,
-      );
+    expect(() =>
+      getDrizzleDatabase((() => undefined) as unknown as IDatabaseService, database),
+    ).toThrow(invalid);
   });
 
   it('keeps widened services runtime-truthful as outer scopes', async () => {
     const fakeDb = createFakeDrizzleInstance();
-    const database = createDrizzleDatabase(
-      fakeDb,
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(fakeDb, (configured, work) =>
+      configured.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: database,
@@ -151,9 +150,8 @@ describe('typed Drizzle accessors', () => {
 
   it('rejects mutation, spread, assignment, prototype, and clone lookalikes', async () => {
     const fakeDb = createFakeDrizzleInstance();
-    const database = createDrizzleDatabase(
-      fakeDb,
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(fakeDb, (configured, work) =>
+      configured.transaction(work),
     );
     const invalid =
       'DrizzleAdapter requires options.drizzleInstance to be created by createDrizzleDatabase().';
@@ -237,13 +235,11 @@ describe('typed Drizzle accessors', () => {
   it('rejects a witness belonging to another configured database', async () => {
     const first = createFakeDrizzleInstance();
     const second = createFakeDrizzleInstance();
-    const firstDatabase = createDrizzleDatabase(
-      first,
-      (configured, work) => configured.transaction(work),
+    const firstDatabase = createDrizzleDatabase(first, (configured, work) =>
+      configured.transaction(work),
     );
-    const secondDatabase = createDrizzleDatabase(
-      second,
-      (configured, work) => configured.transaction(work),
+    const secondDatabase = createDrizzleDatabase(second, (configured, work) =>
+      configured.transaction(work),
     );
     const adapter = new DrizzleAdapter({
       drizzleInstance: firstDatabase,
@@ -263,9 +259,8 @@ describe('typed Drizzle accessors', () => {
   // the whole reason the handle carries a registered identity rather than a
   // plain object.
   it('rejects a scope whose internal handle is not package-created', () => {
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
     const forgedHandles = [
       // A structural look-alike identity that was never registered.
@@ -309,9 +304,8 @@ describe('drizzle configuration registry', () => {
   });
 
   it('recognises a registered configuration through the same predicate', () => {
-    const database = createDrizzleDatabase(
-      createFakeDrizzleInstance(),
-      (configured, work) => configured.transaction(work),
+    const database = createDrizzleDatabase(createFakeDrizzleInstance(), (configured, work) =>
+      configured.transaction(work),
     );
 
     expect(isDrizzleDatabase(database)).toBe(true);

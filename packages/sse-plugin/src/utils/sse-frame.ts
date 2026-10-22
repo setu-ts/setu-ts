@@ -45,9 +45,8 @@ export function encodeSseMessage(msg: SseMessage): string {
     throw new TypeError('SSE message data must not be undefined');
   }
 
-  const dataLines = typeof msg.data === 'string'
-    ? msg.data.split('\n')
-    : [JSON.stringify(msg.data)];
+  const dataLines =
+    typeof msg.data === 'string' ? msg.data.split('\n') : [JSON.stringify(msg.data)];
   for (const line of dataLines) {
     result += `data: ${line}\n`;
   }

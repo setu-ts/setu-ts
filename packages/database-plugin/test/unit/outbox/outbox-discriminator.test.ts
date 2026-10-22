@@ -69,8 +69,7 @@ describe('DatabaseOutboxStore — the discriminator', () => {
           sentBy: 'r/scheduled',
           deleteNow: false,
         }),
-      )
-        .toEqual({ outcome: 'missing' });
+      ).toEqual({ outcome: 'missing' });
       expect(
         await store.markSent(id, {
           claimVersion: 0,
@@ -78,8 +77,7 @@ describe('DatabaseOutboxStore — the discriminator', () => {
           sentBy: 'r/scheduled',
           deleteNow: true,
         }),
-      )
-        .toEqual({ outcome: 'missing' });
+      ).toEqual({ outcome: 'missing' });
       expect(
         await store.markFailure(id, {
           claimVersion: 0,

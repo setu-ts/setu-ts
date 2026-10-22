@@ -33,9 +33,7 @@ export interface ScheduledJob<T = unknown> {
  * @param job - The scheduled job instance
  * @since 0.1.0
  */
-export type SchedulerJobHandler<T = unknown> = (
-  job: ScheduledJob<T>,
-) => void | Promise<void>;
+export type SchedulerJobHandler<T = unknown> = (job: ScheduledJob<T>) => void | Promise<void>;
 
 /**
  * Backoff strategy for retry delays.

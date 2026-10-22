@@ -19,6 +19,7 @@
  */
 
 import { resolve, sep } from 'node:path';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
 import type { GeneratedFile } from './file-writer.ts';
@@ -38,7 +39,12 @@ export type PrettierLoader = () => Promise<PrettierApi>;
 
 /** The default loader: Prettier, a regular dependency of this package. */
 export const loadPrettier: PrettierLoader = async () => {
-  const prettier = await import('prettier');
+  let prettier: typeof import('prettier');
+  try {
+    prettier = await import('prettier');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('prettier', { cause: error });
+  }
   return {
     resolveConfigFile: (path) => prettier.resolveConfigFile(path),
     resolveConfig: (path, options) => prettier.resolveConfig(path, options),
@@ -124,7 +130,7 @@ async function projectConfig(
   const file = await prettier.resolveConfigFile(path);
   const root = resolve(projectRoot);
   if (file === null || !resolve(file).startsWith(`${root}${sep}`)) return PRETTIER_OPTIONS;
-  return await prettier.resolveConfig(path, { config: file }) ?? PRETTIER_OPTIONS;
+  return (await prettier.resolveConfig(path, { config: file })) ?? PRETTIER_OPTIONS;
 }
 
 /** One file Prettier could not format, kept as rendered. */
@@ -173,15 +179,16 @@ export async function formatPlannedFiles(
     try {
       // Resolved for EACH destination, so an `overrides` entry or a nested
       // config file applies exactly as the project's own `format:check` reads it.
-      const config = projectRoot === undefined
-        ? PRETTIER_OPTIONS
-        : await projectConfig(prettier, projectRoot, destination(projectRoot, file.path));
+      const config =
+        projectRoot === undefined
+          ? PRETTIER_OPTIONS
+          : await projectConfig(prettier, projectRoot, destination(projectRoot, file.path));
       out.push({ ...file, contents: await prettier.format(file.contents, { ...config, parser }) });
     } catch (cause) {
       out.push(file);
       skipped.push({
         path: file.path,
-        reason: cause instanceof Error ? cause.message.split('\n')[0] ?? '' : String(cause),
+        reason: cause instanceof Error ? (cause.message.split('\n')[0] ?? '') : String(cause),
       });
     }
   }

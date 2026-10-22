@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { createFakeApp, type FakeApp, type FakeCommand } from '../fixtures/fake-app.ts';
 import { parseArgs } from '../../src/args.ts';
+import { VERSION } from '../../src/version.ts';
 import { dispatchPluginCommand, runCommandsListing } from '../../src/commands/plugin-commands.ts';
 
 const CONFIG = '/app/setu.config.ts';
@@ -51,20 +52,24 @@ const noop: FakeCommand['handler'] = () => {};
 
 describe('runCommandsListing', () => {
   it('lists the registered commands and exits 0', async () => {
-    const h = harness(createFakeApp([
-      { name: 'db:migrate', handler: noop },
-      { name: 'cache:clear', handler: noop },
-    ]));
+    const h = harness(
+      createFakeApp([
+        { name: 'db:migrate', handler: noop },
+        { name: 'cache:clear', handler: noop },
+      ]),
+    );
     expect(await h.list()).toBe(0);
-    expect(h.out.text()).toContain('setu cache:clear');
-    expect(h.out.text()).toContain('setu db:migrate');
+    expect(h.out.text()).toContain(`npx @setu-ts/cli@${VERSION} cache:clear`);
+    expect(h.out.text()).toContain(`npx @setu-ts/cli@${VERSION} db:migrate`);
   });
 
   it('sorts the listing so output is stable', async () => {
-    const h = harness(createFakeApp([
-      { name: 'z:last', handler: noop },
-      { name: 'a:first', handler: noop },
-    ]));
+    const h = harness(
+      createFakeApp([
+        { name: 'z:last', handler: noop },
+        { name: 'a:first', handler: noop },
+      ]),
+    );
     await h.list();
     expect(h.out.text().indexOf('a:first')).toBeLessThan(h.out.text().indexOf('z:last'));
   });
@@ -101,12 +106,14 @@ describe('the no-socket boot', () => {
     it(`observes interruption after ${stage} without running a handler`, async () => {
       const controller = new AbortController();
       let ran = false;
-      const app = createFakeApp([{
-        name: 'probe:run',
-        handler: () => {
-          ran = true;
+      const app = createFakeApp([
+        {
+          name: 'probe:run',
+          handler: () => {
+            ran = true;
+          },
         },
-      }]);
+      ]);
       const err = createRecorder();
       const start = app.start;
       app.start = async () => {
@@ -133,12 +140,17 @@ describe('the no-socket boot', () => {
 
   it('reports failed shutdown honestly while keeping an interrupted outcome', async () => {
     const controller = new AbortController();
-    const app = createFakeApp([{
-      name: 'probe:run',
-      handler: () => {
-        controller.abort();
-      },
-    }], { failStop: 'cannot close pool' });
+    const app = createFakeApp(
+      [
+        {
+          name: 'probe:run',
+          handler: () => {
+            controller.abort();
+          },
+        },
+      ],
+      { failStop: 'cannot close pool' },
+    );
     const err = createRecorder();
     expect(
       await dispatchPluginCommand('probe:run', parseArgs([]), {
@@ -175,14 +187,16 @@ describe('the no-socket boot', () => {
   });
 
   it('tears down when the handler throws', async () => {
-    const h = harness(createFakeApp([
-      {
-        name: 'db:migrate',
-        handler: () => {
-          throw new Error('migration failed');
+    const h = harness(
+      createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: () => {
+            throw new Error('migration failed');
+          },
         },
-      },
-    ]));
+      ]),
+    );
     expect(await h.dispatch('db:migrate')).toBe(1);
     expect(h.app.stopCount()).toBe(1);
   });
@@ -201,9 +215,11 @@ describe('the no-socket boot', () => {
       // Reporting exit 1 here would invite the user to re-run a
       // non-idempotent command that already succeeded.
       let ran = false;
-      const h = harness(failing('db:migrate', () => {
-        ran = true;
-      }));
+      const h = harness(
+        failing('db:migrate', () => {
+          ran = true;
+        }),
+      );
       expect(await h.dispatch('db:migrate')).toBe(0);
       expect(ran).toBe(true);
     });
@@ -222,14 +238,19 @@ describe('the no-socket boot', () => {
     });
 
     it('lets the original failure win when the handler also threw', async () => {
-      const h = harness(createFakeApp([
-        {
-          name: 'db:migrate',
-          handler: () => {
-            throw new Error('migration failed');
-          },
-        },
-      ], { failStop: 'pool drain timed out' }));
+      const h = harness(
+        createFakeApp(
+          [
+            {
+              name: 'db:migrate',
+              handler: () => {
+                throw new Error('migration failed');
+              },
+            },
+          ],
+          { failStop: 'pool drain timed out' },
+        ),
+      );
       expect(await h.dispatch('db:migrate')).toBe(1);
       expect(h.err.text()).toContain('migration failed');
     });
@@ -249,8 +270,8 @@ describe('non-Error failures', () => {
   function rawFailing(stage: 'start' | 'stop') {
     const app = {
       services: { getAll: () => [{ name: 'db:migrate', handler: () => {} }] },
-      start: () => stage === 'start' ? Promise.reject('EPERM') : Promise.resolve(),
-      stop: () => stage === 'stop' ? Promise.reject('EBUSY') : Promise.resolve(),
+      start: () => (stage === 'start' ? Promise.reject('EPERM') : Promise.resolve()),
+      stop: () => (stage === 'stop' ? Promise.reject('EBUSY') : Promise.resolve()),
     };
     const err = createRecorder();
     const deps = {
@@ -286,56 +307,64 @@ describe('non-Error failures', () => {
 describe('dispatchPluginCommand', () => {
   it('runs the matching handler and exits 0', async () => {
     let ran = false;
-    const h = harness(createFakeApp([
-      {
-        name: 'db:migrate',
-        handler: () => {
-          ran = true;
+    const h = harness(
+      createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: () => {
+            ran = true;
+          },
         },
-      },
-    ]));
+      ]),
+    );
     expect(await h.dispatch('db:migrate')).toBe(0);
     expect(ran).toBe(true);
   });
 
   it('passes the trailing positionals to the handler', async () => {
     let seen: readonly string[] | undefined;
-    const h = harness(createFakeApp([
-      {
-        name: 'db:migrate',
-        handler: (args) => {
-          seen = args;
+    const h = harness(
+      createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: (args) => {
+            seen = args;
+          },
         },
-      },
-    ]));
+      ]),
+    );
     await h.dispatch('db:migrate', ['--dir', '/app', 'up', '3']);
     expect(seen).toEqual(['up', '3']);
   });
 
   it('awaits an async handler', async () => {
     let done = false;
-    const h = harness(createFakeApp([
-      {
-        name: 'db:migrate',
-        handler: async () => {
-          await Promise.resolve();
-          done = true;
+    const h = harness(
+      createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: async () => {
+            await Promise.resolve();
+            done = true;
+          },
         },
-      },
-    ]));
+      ]),
+    );
     expect(await h.dispatch('db:migrate')).toBe(0);
     expect(done).toBe(true);
   });
 
   it('exits 1 with the handler message when it throws', async () => {
-    const h = harness(createFakeApp([
-      {
-        name: 'db:migrate',
-        handler: () => {
-          throw new Error('migration failed');
+    const h = harness(
+      createFakeApp([
+        {
+          name: 'db:migrate',
+          handler: () => {
+            throw new Error('migration failed');
+          },
         },
-      },
-    ]));
+      ]),
+    );
     expect(await h.dispatch('db:migrate')).toBe(1);
     expect(h.err.text()).toContain('migration failed');
   });
@@ -385,10 +414,12 @@ describe('duplicate registrations', () => {
     const count = () => {
       runs++;
     };
-    const h = harness(createFakeApp([
-      { name: 'db:migrate', handler: count },
-      { name: 'db:migrate', handler: count },
-    ]));
+    const h = harness(
+      createFakeApp([
+        { name: 'db:migrate', handler: count },
+        { name: 'db:migrate', handler: count },
+      ]),
+    );
     await h.dispatch('db:migrate');
     expect(runs).toBe(0);
   });

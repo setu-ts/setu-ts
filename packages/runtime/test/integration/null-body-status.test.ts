@@ -56,11 +56,14 @@ describe('a null-body status written with a body', () => {
 
   it('keeps headers the handler and middleware wrote', async () => {
     const app = await createTestApp({ plugins: [RuntimePlugin()], autoStart: false });
-    app.middleware.add(async (ctx, next) => {
-      await next();
-      ctx.response.appendHeader('set-cookie', 'sid=abc');
-      ctx.response.header('x-security', 'on');
-    }, { priority: 10, name: 'after' });
+    app.middleware.add(
+      async (ctx, next) => {
+        await next();
+        ctx.response.appendHeader('set-cookie', 'sid=abc');
+        ctx.response.header('x-security', 'on');
+      },
+      { priority: 10, name: 'after' },
+    );
     app.router.delete('/r', (ctx) => ctx.response.status(204).json({ deleted: true }));
     await app.start();
     try {

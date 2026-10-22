@@ -80,27 +80,30 @@ describe('runWithin first call and replay (M109b §3.3)', () => {
   it('isolates colon-bearing tenant and principal pairs with the recommended scope recipe', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });
-    const pairs = [['acme', 'x:y'], ['acme:x', 'y']];
+    const pairs = [
+      ['acme', 'x:y'],
+      ['acme:x', 'y'],
+    ];
     for (const [tenantId, principalId] of pairs) {
       const scope = JSON.stringify([tenantId, principalId]);
       const value = JSON.stringify([tenantId, principalId]);
-      expect(await runWithin(dependencies, options({ scope }), () => Promise.resolve(value)))
-        .toEqual({ value, replayed: false });
+      expect(
+        await runWithin(dependencies, options({ scope }), () => Promise.resolve(value)),
+      ).toEqual({ value, replayed: false });
     }
     for (const [tenantId, principalId] of pairs) {
       const scope = JSON.stringify([tenantId, principalId]);
-      expect(await runWithin(dependencies, options({ scope }), () => Promise.resolve('unexpected')))
-        .toEqual({ value: JSON.stringify([tenantId, principalId]), replayed: true });
+      expect(
+        await runWithin(dependencies, options({ scope }), () => Promise.resolve('unexpected')),
+      ).toEqual({ value: JSON.stringify([tenantId, principalId]), replayed: true });
     }
   });
 
   it('returns the same ISO string for a Date on the first call and replay', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });
-    const first = await runWithin<unknown, unknown>(
-      dependencies,
-      options(),
-      () => Promise.resolve(new Date(0)),
+    const first = await runWithin<unknown, unknown>(dependencies, options(), () =>
+      Promise.resolve(new Date(0)),
     );
     const replay = await runWithin(dependencies, options(), () => Promise.resolve('unexpected'));
     expect(first.value instanceof Date).toBe(false);
@@ -112,15 +115,11 @@ describe('runWithin first call and replay (M109b §3.3)', () => {
   it('omits undefined object members on the first call and replay', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });
-    const first = await runWithin(
-      dependencies,
-      options(),
-      () => Promise.resolve({ id: 'order', omitted: undefined }),
+    const first = await runWithin(dependencies, options(), () =>
+      Promise.resolve({ id: 'order', omitted: undefined }),
     );
-    const replay = await runWithin(
-      dependencies,
-      options(),
-      () => Promise.resolve({ id: 'unexpected' }),
+    const replay = await runWithin(dependencies, options(), () =>
+      Promise.resolve({ id: 'unexpected' }),
     );
     expect(Object.hasOwn(first.value, 'omitted')).toBe(false);
     expect(Object.hasOwn(replay.value, 'omitted')).toBe(false);
@@ -136,10 +135,8 @@ describe('runWithin first call and replay (M109b §3.3)', () => {
     }
     const { store } = statefulStore();
     const dependencies = deps({ store });
-    const first = await runWithin(
-      dependencies,
-      options(),
-      () => Promise.resolve({ receipt: new Receipt() }),
+    const first = await runWithin(dependencies, options(), () =>
+      Promise.resolve({ receipt: new Receipt() }),
     );
     const replay = await runWithin(dependencies, options(), () => Promise.resolve('unexpected'));
     expect(first.value.receipt instanceof Receipt).toBe(false);
@@ -157,10 +154,8 @@ describe('runWithin first call and replay (M109b §3.3)', () => {
     });
     const runtime = createClockRuntime();
     runtime.advance(5_000);
-    const result = await runWithin<number, unknown>(
-      deps({ store, runtime }),
-      options(),
-      () => Promise.resolve(41),
+    const result = await runWithin<number, unknown>(deps({ store, runtime }), options(), () =>
+      Promise.resolve(41),
     );
 
     expect(result).toEqual({ value: 41, replayed: false });
@@ -196,22 +191,19 @@ describe('runWithin first call and replay (M109b §3.3)', () => {
     await runWithin<number, unknown>(dependencies, options(), () => Promise.resolve(7));
     // Well past the record's expiresAt (2_000): still authoritative.
     runtime.advance(10_000_000);
-    expect(await runWithin<number, unknown>(dependencies, options(), () => Promise.resolve(9)))
-      .toEqual({ value: 7, replayed: true });
+    expect(
+      await runWithin<number, unknown>(dependencies, options(), () => Promise.resolve(9)),
+    ).toEqual({ value: 7, replayed: true });
   });
 
   it('keeps two scopes apart', async () => {
     const { store } = statefulStore();
     const dependencies = deps({ store });
-    const a = await runWithin<string, unknown>(
-      dependencies,
-      options({ scope: 't1:u1' }),
-      () => Promise.resolve('a'),
+    const a = await runWithin<string, unknown>(dependencies, options({ scope: 't1:u1' }), () =>
+      Promise.resolve('a'),
     );
-    const b = await runWithin<string, unknown>(
-      dependencies,
-      options({ scope: 't1:u2' }),
-      () => Promise.resolve('b'),
+    const b = await runWithin<string, unknown>(dependencies, options({ scope: 't1:u2' }), () =>
+      Promise.resolve('b'),
     );
     expect(a).toEqual({ value: 'a', replayed: false });
     expect(b).toEqual({ value: 'b', replayed: false });
@@ -239,9 +231,7 @@ describe('runWithin refusals before and inside the transaction (M109b §3.3)', (
 
   it('refuses an unserialisable fingerprint before any store call', async () => {
     expect(
-      await reasonOf(
-        runWithin(deps(), options({ fingerprint: 1n }), () => Promise.resolve(1)),
-      ),
+      await reasonOf(runWithin(deps(), options({ fingerprint: 1n }), () => Promise.resolve(1))),
     ).toBe('fingerprint-invalid');
   });
 
@@ -250,8 +240,9 @@ describe('runWithin refusals before and inside the transaction (M109b §3.3)', (
     const store = fakeTransactionalStore({
       find: () => Promise.resolve(recordWith(fingerprint, '{"v":1}')),
     });
-    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1))))
-      .toBe('fingerprint-mismatch');
+    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1)))).toBe(
+      'fingerprint-mismatch',
+    );
   });
 
   it('rethrows the work\u2019s own error unchanged and does not re-read', async () => {
@@ -277,18 +268,17 @@ describe('runWithin refusals before and inside the transaction (M109b §3.3)', (
     });
     expect(
       await reasonOf(
-        runWithin(
-          deps({ store: tooLarge, maxResultBytes: 4 }),
-          options(),
-          () => Promise.resolve({ big: 'x'.repeat(100) }),
+        runWithin(deps({ store: tooLarge, maxResultBytes: 4 }), options(), () =>
+          Promise.resolve({ big: 'x'.repeat(100) }),
         ),
       ),
     ).toBe('result-too-large');
 
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
-    expect(await reasonOf(runWithin(deps(), options(), () => Promise.resolve(cyclic))))
-      .toBe('result-unserializable');
+    expect(await reasonOf(runWithin(deps(), options(), () => Promise.resolve(cyclic)))).toBe(
+      'result-unserializable',
+    );
   });
 
   it('never re-runs the work on a tampered stored result', async () => {
@@ -302,10 +292,12 @@ describe('runWithin refusals before and inside the transaction (M109b §3.3)', (
     const [id] = [...records.keys()];
     records.set(id, { fingerprint: records.get(id)!.fingerprint, result: 'not an envelope' });
     expect(
-      await reasonOf(runWithin(dependencies, options(), () => {
-        runs++;
-        return Promise.resolve(9);
-      })),
+      await reasonOf(
+        runWithin(dependencies, options(), () => {
+          runs++;
+          return Promise.resolve(9);
+        }),
+      ),
     ).toBe('record-invalid');
     expect(runs).toBe(1);
   });
@@ -324,8 +316,9 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
         return Promise.reject(new Error('lost the race'));
       },
     });
-    expect(await runWithin<number, unknown>(deps({ store }), options(), () => Promise.resolve(9)))
-      .toEqual({ value: 1, replayed: true });
+    expect(
+      await runWithin<number, unknown>(deps({ store }), options(), () => Promise.resolve(9)),
+    ).toEqual({ value: 1, replayed: true });
   });
 
   it('answers conflict for a DuplicateKeyError and for a 409 hint', async () => {
@@ -346,8 +339,9 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
           }),
         ),
     });
-    expect(await reasonOf(runWithin(deps({ store: hinted }), options(), () => Promise.resolve(1))))
-      .toBe('conflict');
+    expect(
+      await reasonOf(runWithin(deps({ store: hinted }), options(), () => Promise.resolve(1))),
+    ).toBe('conflict');
   });
 
   it('answers store-failed for any other rejection, logging only the class', async () => {
@@ -378,8 +372,9 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
       },
       run: () => Promise.reject(new Error('write down')),
     });
-    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1))))
-      .toBe('store-failed');
+    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1)))).toBe(
+      'store-failed',
+    );
   });
 
   it('does not read a throwing cause getter as a conflict', async () => {
@@ -390,8 +385,9 @@ describe('runWithin recovery after a store-side rejection (M109b §3.3)', () => 
       },
     });
     const store = fakeTransactionalStore({ run: () => Promise.reject(hostile) });
-    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1))))
-      .toBe('store-failed');
+    expect(await reasonOf(runWithin(deps({ store }), options(), () => Promise.resolve(1)))).toBe(
+      'store-failed',
+    );
   });
 
   it('answers store-failed when a bounded read times out', async () => {

@@ -19,6 +19,7 @@
  * @module
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { GrpcDescriptorError, GrpcRuntimeLoadError } from '../errors/grpc-errors.ts';
 import type {
   ConnectRouterLike,
@@ -50,8 +51,7 @@ const INSTALL_COMMANDS: Record<keyof typeof SPECIFIERS, string> = {
     'deno add npm:@connectrpc/connect@^2.1.2 · npm i @connectrpc/connect · bun add @connectrpc/connect',
   protobuf:
     'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
-  wkt:
-    'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
+  wkt: 'deno add npm:@bufbuild/protobuf@^2.7.0 · npm i @bufbuild/protobuf · bun add @bufbuild/protobuf',
 };
 
 /** Structural shape of `@connectrpc/connect`. */
@@ -128,10 +128,7 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
     reviveDescriptorSet(base64: string): FileRegistryLike {
       let fileDescriptorSet: unknown;
       try {
-        fileDescriptorSet = protobuf.fromBinary(
-          wkt.FileDescriptorSetSchema,
-          decodeBase64(base64),
-        );
+        fileDescriptorSet = protobuf.fromBinary(wkt.FileDescriptorSetSchema, decodeBase64(base64));
       } catch (cause) {
         throw new GrpcDescriptorError(
           'the embedded descriptor set could not be decoded as a FileDescriptorSet',
@@ -141,10 +138,7 @@ export function adaptConnectModule(modules: ConnectModuleLike): ConnectRuntime {
       return protobuf.createFileRegistry(fileDescriptorSet);
     },
 
-    getService(
-      registry: FileRegistryLike,
-      serviceName: string,
-    ): ServiceDescriptorLike | undefined {
+    getService(registry: FileRegistryLike, serviceName: string): ServiceDescriptorLike | undefined {
       return registry.getService(serviceName);
     },
 
@@ -178,10 +172,36 @@ export interface ConnectImporters {
  * assertion pinned and the published artifact lost.
  */
 export const DEFAULT_IMPORTERS: ConnectImporters = {
-  connect: () => import('@connectrpc/connect'),
-  protocol: () => import('@connectrpc/connect/protocol'),
-  protobuf: () => import('@bufbuild/protobuf'),
-  wkt: () => import('@bufbuild/protobuf/wkt'),
+  connect: async () => {
+    try {
+      return await import('@connectrpc/connect');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@connectrpc/connect', { cause: error });
+    }
+  },
+  protocol: async () => {
+    try {
+      return await import('@connectrpc/connect/protocol');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@connectrpc/connect/protocol', {
+        cause: error,
+      });
+    }
+  },
+  protobuf: async () => {
+    try {
+      return await import('@bufbuild/protobuf');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf', { cause: error });
+    }
+  },
+  wkt: async () => {
+    try {
+      return await import('@bufbuild/protobuf/wkt');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf/wkt', { cause: error });
+    }
+  },
 };
 
 /**

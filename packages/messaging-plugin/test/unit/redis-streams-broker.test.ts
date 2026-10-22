@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -236,9 +236,10 @@ describe('RedisStreamsBroker', () => {
       blockSizeMs: 5,
     });
     await broker.connect();
-    const delivered: Array<
-      { body: unknown; headers: Readonly<Record<string, string>> | undefined }
-    > = [];
+    const delivered: Array<{
+      body: unknown;
+      headers: Readonly<Record<string, string>> | undefined;
+    }> = [];
     await broker.subscribeWithHeaders('reserved', (message, metadata) => {
       delivered.push({ body: message, headers: metadata.headers });
     });
@@ -259,12 +260,14 @@ describe('RedisStreamsBroker', () => {
 
   it('takes the first payload field when a foreign producer wrote two', async () => {
     const client = new FakeRedisStreamsClient({
-      seededMessages: [{
-        id: '1-0',
-        payload: '{"real":"body"}',
-        // A duplicate `payload` field, as only a foreign producer could write.
-        fields: { payload: 'HIJACKED' },
-      }],
+      seededMessages: [
+        {
+          id: '1-0',
+          payload: '{"real":"body"}',
+          // A duplicate `payload` field, as only a foreign producer could write.
+          fields: { payload: 'HIJACKED' },
+        },
+      ],
     });
     const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
       client,
@@ -313,9 +316,9 @@ describe('RedisStreamsBroker', () => {
     const broker = new RedisStreamsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.publish('test', { data: 'test' }),
-    ).rejects.toThrow('RedisStreamsBroker is not connected');
+    await expect(broker.publish('test', { data: 'test' })).rejects.toThrow(
+      'RedisStreamsBroker is not connected',
+    );
   });
 
   it('subscribe throws when not connected', async () => {
@@ -324,9 +327,9 @@ describe('RedisStreamsBroker', () => {
     const broker = new RedisStreamsBroker(runtime, serializer, {});
 
     // Don't connect
-    await expect(
-      broker.subscribe('test', async () => {}),
-    ).rejects.toThrow('RedisStreamsBroker is not connected');
+    await expect(broker.subscribe('test', async () => {})).rejects.toThrow(
+      'RedisStreamsBroker is not connected',
+    );
   });
 
   it('handler failure does NOT acknowledge message', async () => {
@@ -344,7 +347,7 @@ describe('RedisStreamsBroker', () => {
     await broker.connect();
 
     // Handler that always fails
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await broker.subscribe('test.stream', async () => {
       throw new Error('Handler always fails');
     });
@@ -596,13 +599,12 @@ describe('RedisStreamsBroker', () => {
     const fakeClient = new FakeRedisStreamsClient();
     // Override xgroup to throw a different error
     const originalXgroup = fakeClient.xgroup.bind(fakeClient);
-    // deno-lint-ignore require-await
-    fakeClient.xgroup = async (
+    fakeClient.xgroup = (
       command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
       ...args: string[]
     ) => {
       if (command === 'CREATE') {
-        throw new Error('Some other error');
+        return Promise.reject(new Error('Some other error'));
       }
       return originalXgroup(command, ...args);
     };
@@ -637,7 +639,7 @@ describe('RedisStreamsBroker', () => {
 
     // Subscribe - this starts the poll loop
     let pollCount = 0;
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     await broker.subscribe('test.stream', async () => {
       pollCount++;
     });
@@ -754,4 +756,30 @@ it('accepts an empty stream batch without delivering a fabricated message', asyn
   expect(deliveries).toBe(0);
   await subscription.unsubscribe();
   await broker.disconnect();
+});
+
+describe('RedisStreamsBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { RedisStreamsBroker } = await import('../../src/brokers/redis-streams-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer());
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
+  });
 });

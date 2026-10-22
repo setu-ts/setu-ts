@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- documentation snippet fixtures mirror guide examples
+/* eslint-disable no-console -- documentation snippet fixtures mirror guide examples */
 // Lifecycle hooks from docs/plugin-architecture.md - must compile against the workspace.
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';

@@ -31,6 +31,7 @@ import { RbacService } from '../../src/services/rbac-service.ts';
 /**
  * Create a fake response that records the status and body.
  */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- read only through `typeof`
 function createFakeResponse(): {
   response: IResponse;
   status: number;
@@ -79,10 +80,10 @@ function createFakeResponse(): {
 /**
  * Create a fake request context with controllable user and services.
  */
-function createContext(opts: {
-  user?: IPrincipal;
-  authz?: IAuthorizationService;
-}): { ctx: IRequestContext; response: ReturnType<typeof createFakeResponse> } {
+function createContext(opts: { user?: IPrincipal; authz?: IAuthorizationService }): {
+  ctx: IRequestContext;
+  response: ReturnType<typeof createFakeResponse>;
+} {
   let statusCode = 200;
   let respBody: unknown = null;
   const _abortCtrl = new AbortController();

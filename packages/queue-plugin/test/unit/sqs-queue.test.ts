@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { SqsQueue } from '../../src/adapters/sqs-queue.ts';
 import type { ISqsTransport } from '../../src/adapters/sqs-queue.ts';
@@ -14,9 +14,9 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
     platform: () => platform as ReturnType<IRuntimeServices['platform']>,
     uuid: () => 'uuid-1',
     now: () => 1000000,
-    setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+    setTimeout: (_fn: () => void) => 1 as unknown as ReturnType<typeof setTimeout>,
     clearTimeout: () => {},
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -98,14 +98,16 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await expect(queue.enqueue({
-        id: 'job-1',
-        name: 'unknown',
-        data: {},
-        attempts: 0,
-        maxAttempts: 3,
-        availableAtMs: 0,
-      })).rejects.toThrow(SqsQueueNotConfiguredError);
+      await expect(
+        queue.enqueue({
+          id: 'job-1',
+          name: 'unknown',
+          data: {},
+          attempts: 0,
+          maxAttempts: 3,
+          availableAtMs: 0,
+        }),
+      ).rejects.toThrow(SqsQueueNotConfiguredError);
     });
 
     it('throws SqsDelayTooLongError when delay exceeds 900s', async () => {
@@ -114,14 +116,16 @@ describe('SqsQueue', () => {
       });
       await queue.connect();
 
-      await expect(queue.enqueue({
-        id: 'job-1',
-        name: 'jobs',
-        data: {},
-        attempts: 0,
-        maxAttempts: 3,
-        availableAtMs: 1000000 + 1_000_000,
-      })).rejects.toThrow(SqsDelayTooLongError);
+      await expect(
+        queue.enqueue({
+          id: 'job-1',
+          name: 'jobs',
+          data: {},
+          attempts: 0,
+          maxAttempts: 3,
+          availableAtMs: 1000000 + 1_000_000,
+        }),
+      ).rejects.toThrow(SqsDelayTooLongError);
     });
 
     it('sends with delaySeconds when availableAtMs > now', async () => {
@@ -226,17 +230,19 @@ describe('SqsQueue', () => {
         send: () => Promise.resolve(),
         receive: (_q, max) => {
           receivedMax = max;
-          return Promise.resolve([{
-            body: JSON.stringify({
-              v: 1,
-              id: 'job-1',
-              name: 'jobs',
-              data: { ok: true },
-              maxAttempts: 3,
-            }),
-            receiptHandle: 'handle-1',
-            approximateReceiveCount: '2',
-          }]);
+          return Promise.resolve([
+            {
+              body: JSON.stringify({
+                v: 1,
+                id: 'job-1',
+                name: 'jobs',
+                data: { ok: true },
+                maxAttempts: 3,
+              }),
+              receiptHandle: 'handle-1',
+              approximateReceiveCount: '2',
+            },
+          ]);
         },
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
@@ -316,11 +322,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.resolve();
@@ -365,11 +373,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '2',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '2',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: (_q, _r, seconds) => {
           visibilitySeconds = seconds;
@@ -424,11 +434,13 @@ describe('SqsQueue', () => {
           return Promise.resolve();
         },
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '3',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '3',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.resolve();
@@ -455,11 +467,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '3',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '3',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.resolve();
@@ -486,11 +500,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: '',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: '',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
@@ -509,11 +525,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: 'not-json',
-            receiptHandle: 'handle-1',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: 'not-json',
+              receiptHandle: 'handle-1',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
@@ -532,11 +550,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-1',
-            approximateReceiveCount: undefined,
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-1',
+              approximateReceiveCount: undefined,
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
@@ -585,14 +605,16 @@ describe('SqsQueue', () => {
         queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
       });
 
-      await expect(queue.enqueue({
-        id: 'j1',
-        name: 'jobs',
-        data: {},
-        attempts: 0,
-        maxAttempts: 3,
-        availableAtMs: 0,
-      })).rejects.toThrow('not connected');
+      await expect(
+        queue.enqueue({
+          id: 'j1',
+          name: 'jobs',
+          data: {},
+          attempts: 0,
+          maxAttempts: 3,
+          availableAtMs: 0,
+        }),
+      ).rejects.toThrow('not connected');
     });
 
     it('throws when reserve without connection', async () => {
@@ -614,14 +636,18 @@ describe('SqsQueue', () => {
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       await queue.ack('jobs', 'nonexistent', 'claim-token');
@@ -637,14 +663,18 @@ describe('SqsQueue', () => {
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       await queue.requeue('jobs', 'nonexistent', 2000000, 1, 'claim-token');
@@ -660,14 +690,18 @@ describe('SqsQueue', () => {
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       await queue.deadLetter('jobs', 'nonexistent', 1000000, 'claim-token');
@@ -679,24 +713,30 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '3',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '3',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        // No deadLetterQueues
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          // No deadLetterQueues
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
@@ -713,11 +753,13 @@ describe('SqsQueue', () => {
           return Promise.resolve();
         },
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '3',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '3',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.resolve();
@@ -725,15 +767,19 @@ describe('SqsQueue', () => {
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
@@ -750,11 +796,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(), // DLQ send succeeds
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '3',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '3',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.reject(new Error('source delete network error'));
@@ -762,15 +810,19 @@ describe('SqsQueue', () => {
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          deadLetterQueues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs-dlq' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
@@ -791,23 +843,29 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: '',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: '',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const queue = new SqsQueue(createRuntime(), {
-        queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
-        client: transport,
-      }, {
-        error: (msg: string) => {
-          logged = msg;
+      const queue = new SqsQueue(
+        createRuntime(),
+        {
+          queues: { jobs: 'https://sqs.us-east-1.amazonaws.com/123456/jobs' },
+          client: transport,
         },
-      });
+        {
+          error: (msg: string) => {
+            logged = msg;
+          },
+        },
+      );
       await queue.connect();
 
       const jobs = await queue.reserve('jobs', 1, 1000000);
@@ -832,11 +890,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify(envelope),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify(envelope),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: () => Promise.resolve(),
         changeVisibility: () => Promise.resolve(),
         close: () => Promise.resolve(),
@@ -863,14 +923,12 @@ describe('SqsQueue', () => {
       expect('headers' in (job as object)).toBe(false);
     });
 
-    for (
-      const [label, value] of [
-        ['a non-object', 'not-a-map'],
-        ['null', null],
-        ['an array', ['traceparent', 'tp']],
-        ['a map with a non-string value', { traceparent: 'tp', depth: 3 }],
-      ] as const
-    ) {
+    for (const [label, value] of [
+      ['a non-object', 'not-a-map'],
+      ['null', null],
+      ['an array', ['traceparent', 'tp']],
+      ['a map with a non-string value', { traceparent: 'tp', depth: 3 }],
+    ] as const) {
       it(`DROPS ${label} and still runs the job`, async () => {
         // Losing the work in order to protect the record of it is the inversion
         // this package rejects elsewhere: the job runs, untraced, and the drop
@@ -949,11 +1007,13 @@ describe('SqsQueue', () => {
       const transport: ISqsTransport = {
         send: () => Promise.resolve(),
         receive: () =>
-          Promise.resolve([{
-            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-            receiptHandle: 'handle-j1',
-            approximateReceiveCount: '1',
-          }]),
+          Promise.resolve([
+            {
+              body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+              receiptHandle: 'handle-j1',
+              approximateReceiveCount: '1',
+            },
+          ]),
         delete: (_q, receipt) => {
           deletedReceipt = receipt;
           return Promise.resolve();
@@ -966,9 +1026,9 @@ describe('SqsQueue', () => {
         platform: () => 'node' as ReturnType<IRuntimeServices['platform']>,
         uuid: () => 'uuid-1',
         now: () => 1000000,
-        setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+        setTimeout: (_fn: () => void) => 1 as unknown as ReturnType<typeof setTimeout>,
         clearTimeout: () => {},
-        setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+        setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
         clearInterval: () => {},
         randomBytes: () => new Uint8Array(16),
         subtle: undefined,
@@ -1028,9 +1088,7 @@ describe('loadSqsModule (exported)', () => {
   });
 
   it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
-    const { loadSqsModule, adaptSqsModule } = await import(
-      '../../src/adapters/sqs-queue.ts'
-    );
+    const { loadSqsModule, adaptSqsModule } = await import('../../src/adapters/sqs-queue.ts');
 
     // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
     // adapted PORT rather than just reaching the import line is what catches SDK
@@ -1125,14 +1183,11 @@ describe('adaptSqsModule', () => {
       },
     };
 
-    adaptSqsModule(
-      mod as unknown as import('../../src/adapters/sqs-queue.ts').SqsSdkModule,
-      {
-        region: 'eu-west-1',
-        credentials: { accessKeyId: 'k', secretAccessKey: 's' },
-        endpoint: 'http://localhost:9324',
-      },
-    );
+    adaptSqsModule(mod as unknown as import('../../src/adapters/sqs-queue.ts').SqsSdkModule, {
+      region: 'eu-west-1',
+      credentials: { accessKeyId: 'k', secretAccessKey: 's' },
+      endpoint: 'http://localhost:9324',
+    });
 
     expect(capturedConfig.region).toBe('eu-west-1');
     expect(capturedConfig.credentials).toEqual({ accessKeyId: 'k', secretAccessKey: 's' });
@@ -1234,14 +1289,11 @@ describe('C1: class-level lazy SQS config', () => {
       DeleteMessageCommand: class {},
       ChangeMessageVisibilityCommand: class {},
     };
-    adaptSqsModule(
-      mod as unknown as import('../../src/adapters/sqs-queue.ts').SqsSdkModule,
-      {
-        region: 'us-west-2',
-        credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret' },
-        endpoint: 'http://elasticmq:9324',
-      },
-    );
+    adaptSqsModule(mod as unknown as import('../../src/adapters/sqs-queue.ts').SqsSdkModule, {
+      region: 'us-west-2',
+      credentials: { accessKeyId: 'AKIA', secretAccessKey: 'secret' },
+      endpoint: 'http://elasticmq:9324',
+    });
     expect(capturedConfig).not.toBeUndefined();
     expect(capturedConfig!.region).toBe('us-west-2');
     expect(capturedConfig!.endpoint).toBe('http://elasticmq:9324');
@@ -1255,11 +1307,19 @@ describe('C2: maxAttempts preserved', () => {
     const transport: import('../../src/adapters/sqs-queue.ts').ISqsTransport = {
       send: () => Promise.resolve(),
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 1, id: 'job-1', name: 'jobs', data: { x: 1 }, maxAttempts: 5 }),
-          receiptHandle: 'handle-1',
-          approximateReceiveCount: '1',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({
+              v: 1,
+              id: 'job-1',
+              name: 'jobs',
+              data: { x: 1 },
+              maxAttempts: 5,
+            }),
+            receiptHandle: 'handle-1',
+            approximateReceiveCount: '1',
+          },
+        ]),
       delete: () => Promise.resolve(),
       changeVisibility: () => Promise.resolve(),
       close: () => Promise.resolve(),
@@ -1293,11 +1353,13 @@ describe('C10: DLQ receives original body', () => {
         return Promise.resolve();
       },
       receive: () =>
-        Promise.resolve([{
-          body: originalBody,
-          receiptHandle: 'receipt-handle-1',
-          approximateReceiveCount: '3',
-        }]),
+        Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle: 'receipt-handle-1',
+            approximateReceiveCount: '3',
+          },
+        ]),
       delete: () => Promise.resolve(),
       changeVisibility: () => Promise.resolve(),
       close: () => Promise.resolve(),
@@ -1336,11 +1398,13 @@ describe('SqsQueue stable identity and current receipt', () => {
       receive: () => {
         callCount++;
         const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
-        return Promise.resolve([{
-          body: originalBody,
-          receiptHandle,
-          approximateReceiveCount: String(callCount),
-        }]);
+        return Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle,
+            approximateReceiveCount: String(callCount),
+          },
+        ]);
       },
       delete: () => Promise.resolve(),
       changeVisibility: () => Promise.resolve(),
@@ -1380,11 +1444,13 @@ describe('SqsQueue stable identity and current receipt', () => {
       receive: () => {
         callCount++;
         const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
-        return Promise.resolve([{
-          body: originalBody,
-          receiptHandle,
-          approximateReceiveCount: String(callCount),
-        }]);
+        return Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle,
+            approximateReceiveCount: String(callCount),
+          },
+        ]);
       },
       delete: (_q, receiptHandle) => {
         deletedReceipts.push(receiptHandle);
@@ -1436,11 +1502,13 @@ describe('SqsQueue stable identity and current receipt', () => {
       receive: () => {
         callCount++;
         const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
-        return Promise.resolve([{
-          body: originalBody,
-          receiptHandle,
-          approximateReceiveCount: String(callCount),
-        }]);
+        return Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle,
+            approximateReceiveCount: String(callCount),
+          },
+        ]);
       },
       delete: () => Promise.resolve(),
       changeVisibility: (_q, receiptHandle) => {
@@ -1495,11 +1563,13 @@ describe('SqsQueue stable identity and current receipt', () => {
       receive: () => {
         callCount++;
         const receiptHandle = callCount === 1 ? 'receipt-A' : 'receipt-B';
-        return Promise.resolve([{
-          body: originalBody,
-          receiptHandle,
-          approximateReceiveCount: String(callCount),
-        }]);
+        return Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle,
+            approximateReceiveCount: String(callCount),
+          },
+        ]);
       },
       delete: (_q, receiptHandle) => {
         deletedReceipts.push(receiptHandle);
@@ -1552,11 +1622,13 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const transport: ISqsTransport = {
       send: () => Promise.resolve(),
       receive: () =>
-        Promise.resolve([{
-          body: originalBody,
-          receiptHandle: 'receipt-B',
-          approximateReceiveCount: '2',
-        }]),
+        Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle: 'receipt-B',
+            approximateReceiveCount: '2',
+          },
+        ]),
       delete: (_q, receiptHandle) => {
         deletedReceipts.push(receiptHandle);
         return Promise.resolve();
@@ -1601,11 +1673,13 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const transport: ISqsTransport = {
       send: () => Promise.resolve(),
       receive: () =>
-        Promise.resolve([{
-          body: originalBody,
-          receiptHandle: 'receipt-B',
-          approximateReceiveCount: '2',
-        }]),
+        Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle: 'receipt-B',
+            approximateReceiveCount: '2',
+          },
+        ]),
       delete: () => Promise.resolve(),
       changeVisibility: (_q, _r, _s) => {
         visibilityReceipts.push('receipt-B');
@@ -1647,11 +1721,13 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
     const transport: ISqsTransport = {
       send: () => Promise.resolve(),
       receive: () =>
-        Promise.resolve([{
-          body: originalBody,
-          receiptHandle: 'receipt-B',
-          approximateReceiveCount: '3',
-        }]),
+        Promise.resolve([
+          {
+            body: originalBody,
+            receiptHandle: 'receipt-B',
+            approximateReceiveCount: '3',
+          },
+        ]),
       delete: (_q, receiptHandle) => {
         deletedReceipts.push(receiptHandle);
         return Promise.resolve();
@@ -1684,9 +1760,7 @@ describe('SqsQueue — Finding 4: stale claim overlap prevention', () => {
 
 // B4 — SQS envelope validation
 describe('SqsQueue — B4 envelope validation', () => {
-  function baseTransport(
-    override?: Partial<ISqsTransport>,
-  ): ISqsTransport {
+  function baseTransport(override?: Partial<ISqsTransport>): ISqsTransport {
     return {
       send: () => Promise.resolve(),
       receive: () => Promise.resolve([]),
@@ -1730,20 +1804,26 @@ describe('SqsQueue — B4 envelope validation', () => {
     let diagnostic = '';
     const transport = baseTransport({
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 99, id: 'bad-v', name: 'jobs', data: {}, maxAttempts: 3 }),
-          receiptHandle: 'h-1',
-          approximateReceiveCount: '1',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({ v: 99, id: 'bad-v', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'h-1',
+            approximateReceiveCount: '1',
+          },
+        ]),
     });
-    const queue = new SqsQueue(createRuntime(), {
-      queues: { jobs: 'http://localhost/jobs' },
-      client: transport,
-    }, {
-      error: (msg: string) => {
-        diagnostic = msg;
+    const queue = new SqsQueue(
+      createRuntime(),
+      {
+        queues: { jobs: 'http://localhost/jobs' },
+        client: transport,
       },
-    });
+      {
+        error: (msg: string) => {
+          diagnostic = msg;
+        },
+      },
+    );
     await queue.connect();
 
     const jobs = await queue.reserve('jobs', 10, 1000000);
@@ -1754,11 +1834,13 @@ describe('SqsQueue — B4 envelope validation', () => {
   it('skips missing/non-string id', async () => {
     const transport = baseTransport({
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 1, id: 123, name: 'jobs', data: {}, maxAttempts: 3 }),
-          receiptHandle: 'h-1',
-          approximateReceiveCount: '1',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({ v: 1, id: 123, name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'h-1',
+            approximateReceiveCount: '1',
+          },
+        ]),
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
@@ -1773,11 +1855,13 @@ describe('SqsQueue — B4 envelope validation', () => {
   it('skips mismatched name (cross-routed)', async () => {
     const transport = baseTransport({
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 1, id: 'j1', name: 'other-queue', data: {}, maxAttempts: 3 }),
-          receiptHandle: 'h-1',
-          approximateReceiveCount: '1',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'other-queue', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'h-1',
+            approximateReceiveCount: '1',
+          },
+        ]),
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
@@ -1792,11 +1876,13 @@ describe('SqsQueue — B4 envelope validation', () => {
   it('skips invalid maxAttempts (NaN)', async () => {
     const transport = baseTransport({
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: NaN }),
-          receiptHandle: 'h-1',
-          approximateReceiveCount: '1',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: NaN }),
+            receiptHandle: 'h-1',
+            approximateReceiveCount: '1',
+          },
+        ]),
     });
     const queue = new SqsQueue(createRuntime(), {
       queues: { jobs: 'http://localhost/jobs' },
@@ -1811,18 +1897,24 @@ describe('SqsQueue — B4 envelope validation', () => {
   it('skips invalid ApproximateReceiveCount (NaN)', async () => {
     const transport = baseTransport({
       receive: () =>
-        Promise.resolve([{
-          body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
-          receiptHandle: 'h-1',
-          approximateReceiveCount: 'not-a-number',
-        }]),
+        Promise.resolve([
+          {
+            body: JSON.stringify({ v: 1, id: 'j1', name: 'jobs', data: {}, maxAttempts: 3 }),
+            receiptHandle: 'h-1',
+            approximateReceiveCount: 'not-a-number',
+          },
+        ]),
     });
-    const queue = new SqsQueue(createRuntime(), {
-      queues: { jobs: 'http://localhost/jobs' },
-      client: transport,
-    }, {
-      error: () => {},
-    });
+    const queue = new SqsQueue(
+      createRuntime(),
+      {
+        queues: { jobs: 'http://localhost/jobs' },
+        client: transport,
+      },
+      {
+        error: () => {},
+      },
+    );
     await queue.connect();
 
     const jobs = await queue.reserve('jobs', 10, 1000000);
@@ -1906,4 +1998,27 @@ it('skips malformed envelopes and stale settlements safely without a logger', as
   expect(deletions).toBe(0);
   await queue.disconnect();
   await queue.disconnect();
+});
+
+describe('loadSqsModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    const { loadSqsModule } = await import('../../src/adapters/sqs-queue.ts');
+    vi.doMock('@aws-sdk/client-sqs', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadSqsModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-sqs');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-sqs');
+    }
+  });
 });

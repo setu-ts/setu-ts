@@ -108,8 +108,10 @@ describe('what an npm workspace renders', () => {
    * @returns The contents, or an empty string
    */
   function rootFile(path: string): string {
-    return workspaceRootFiles('acme', 3000, HTTP, NODE)
-      .find((file) => file.path === path)?.contents ?? '';
+    return (
+      workspaceRootFiles('acme', 3000, HTTP, NODE).find((file) => file.path === path)?.contents ??
+      ''
+    );
   }
 
   it('declares members in package.json, not deno.json', () => {
@@ -129,8 +131,9 @@ describe('what an npm workspace renders', () => {
   // The framework installs from npm under its own names, so the root carries no
   // registry mapping (before 0.9 it mapped the @jsr scope).
   it('writes no .npmrc at the root', () => {
-    expect(workspaceRootFiles('acme', 3000, HTTP, NODE).some((file) => file.path === '.npmrc'))
-      .toBe(false);
+    expect(
+      workspaceRootFiles('acme', 3000, HTTP, NODE).some((file) => file.path === '.npmrc'),
+    ).toBe(false);
   });
 
   // Bun installs into each member too, so an ignore naming only the root would
@@ -139,6 +142,12 @@ describe('what an npm workspace renders', () => {
     const ignore = rootFile('.gitignore');
     expect(ignore).toContain('node_modules/');
     expect(ignore).toContain('apps/*/node_modules/');
+    // Both profiles ignore React Router's typegen directory (V9-11).
+    expect(ignore).toContain('.react-router/');
+    // Both profiles ignore each member's dotenv file, keeping the example (V9-39).
+    expect(ignore).toContain('.env\n');
+    expect(ignore).toContain('.env.*');
+    expect(ignore).toContain('!.env.example');
   });
 
   it('records the runtime, so every later command reads it back', () => {
@@ -151,7 +160,10 @@ describe('what an npm workspace renders', () => {
   it('reads sibling hosts through process.env', () => {
     const module = renderDiscoveryModule(
       { name: 'orders', port: 3000 },
-      [{ name: 'orders', port: 3000 }, { name: 'billing', port: 3001 }],
+      [
+        { name: 'orders', port: 3000 },
+        { name: 'billing', port: 3001 },
+      ],
       NODE,
     );
     expect(module).toContain('process.env.BILLING_HOST');
@@ -183,26 +195,27 @@ describe('what an npm workspace renders', () => {
   // …and a test it can actually run: `@std/testing` in a Node library would need a
   // JSR dependency nothing else there uses.
   it('gives a library its own toolchain test runner', () => {
-    const test = libraryFiles('acme', deriveNames('shared'), NODE)
-      .find((file) => file.path.endsWith('.test.ts'))?.contents ?? '';
+    const test =
+      libraryFiles('acme', deriveNames('shared'), NODE).find((file) =>
+        file.path.endsWith('.test.ts'),
+      )?.contents ?? '';
     expect(test).toContain(`from 'node:test'`);
     expect(test).not.toContain('@std/testing');
   });
 
   it('builds members on a Node base image, installing from the root', () => {
-    const dockerfile = workspaceContainerFiles(
-      {
-        version: WORKSPACE_VERSION,
-        runtime: 'node',
-        basePort: 3000,
-        transport: 'http',
-        members: [
-          { name: 'orders', port: 3000 },
-        ],
-      },
-      HTTP,
-      NODE,
-    ).find((file) => file.path === DOCKERFILE)?.contents ?? '';
+    const dockerfile =
+      workspaceContainerFiles(
+        {
+          version: WORKSPACE_VERSION,
+          runtime: 'node',
+          basePort: 3000,
+          transport: 'http',
+          members: [{ name: 'orders', port: 3000 }],
+        },
+        HTTP,
+        NODE,
+      ).find((file) => file.path === DOCKERFILE)?.contents ?? '';
 
     expect(dockerfile).toContain('FROM node:');
     expect(dockerfile).not.toContain('denoland/deno');
@@ -230,8 +243,9 @@ describe('what a Bun workspace renders differently', () => {
   const HTTP = transportSpec('http');
 
   it('keeps npm root shape while changing every command', () => {
-    const root = workspaceRootFiles('acme', 3000, HTTP, BUN)
-      .find((file) => file.path === 'package.json')?.contents ?? '';
+    const root =
+      workspaceRootFiles('acme', 3000, HTTP, BUN).find((file) => file.path === 'package.json')
+        ?.contents ?? '';
     const manifest = JSON.parse(root) as {
       workspaces?: string[];
       scripts?: Record<string, string>;
@@ -242,17 +256,18 @@ describe('what a Bun workspace renders differently', () => {
   });
 
   it('builds on the Bun image and installs with Bun', () => {
-    const dockerfile = workspaceContainerFiles(
-      {
-        version: WORKSPACE_VERSION,
-        runtime: 'bun',
-        basePort: 3000,
-        transport: 'http',
-        members: [{ name: 'orders', port: 3000 }],
-      },
-      HTTP,
-      BUN,
-    ).find((file) => file.path === DOCKERFILE)?.contents ?? '';
+    const dockerfile =
+      workspaceContainerFiles(
+        {
+          version: WORKSPACE_VERSION,
+          runtime: 'bun',
+          basePort: 3000,
+          transport: 'http',
+          members: [{ name: 'orders', port: 3000 }],
+        },
+        HTTP,
+        BUN,
+      ).find((file) => file.path === DOCKERFILE)?.contents ?? '';
 
     expect(dockerfile).toContain('FROM oven/bun');
     expect(dockerfile).toContain('bun install');
@@ -303,7 +318,8 @@ describe('a connection fallback is rendered as a literal, never as code', () => 
   ];
 
   async function evaluate(expression: string): Promise<unknown> {
-    const source = 'const Deno = { env: { get: (_: string) => undefined } };\n' +
+    const source =
+      'const Deno = { env: { get: (_: string) => undefined } };\n' +
       'const process = { env: {} as Record<string, string | undefined> };\n' +
       `export const value = ${expression};\n`;
     const directory = await tempDir();
@@ -326,10 +342,12 @@ describe('a connection fallback is rendered as a literal, never as code', () => 
 
   // Byte-identical for an ordinary URL, so no existing generated project changes.
   it('renders an ordinary value exactly as before', () => {
-    expect(workspaceProfile('deno').envRead('REDIS_URL', 'redis://127.0.0.1:6379'))
-      .toBe("Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'");
-    expect(workspaceProfile('node').envRead('REDIS_URL', 'redis://127.0.0.1:6379'))
-      .toBe("process.env.REDIS_URL ??\n          'redis://127.0.0.1:6379'");
+    expect(workspaceProfile('deno').envRead('REDIS_URL', 'redis://127.0.0.1:6379')).toBe(
+      "Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'",
+    );
+    expect(workspaceProfile('node').envRead('REDIS_URL', 'redis://127.0.0.1:6379')).toBe(
+      "process.env.REDIS_URL ??\n          'redis://127.0.0.1:6379'",
+    );
   });
 
   // The quote choice deno fmt keeps under the generated projects' singleQuote

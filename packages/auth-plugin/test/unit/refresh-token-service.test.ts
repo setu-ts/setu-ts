@@ -167,9 +167,7 @@ describe('RefreshTokenService', () => {
       expect(oldJti).not.toBe(newJti);
 
       // The re-minted access token carries the snapshot principal's claims
-      const accessPayload = await jwt.verify<{ sub: string; roles: string[] }>(
-        pair2!.accessToken,
-      );
+      const accessPayload = await jwt.verify<{ sub: string; roles: string[] }>(pair2!.accessToken);
       expect(accessPayload.sub).toBe('user-123');
       expect(accessPayload.roles).toEqual(['user']);
     });
@@ -338,13 +336,14 @@ describe('RefreshTokenService', () => {
       const runtime = createFakeRuntime();
       const jwt = new JwtService(runtime, { algorithm: 'HS256', secret: 'test-secret' });
 
-      expect(() =>
-        new RefreshTokenService({
-          jwt,
-          store: new MemoryRefreshTokenStore(runtime),
-          runtime,
-          accessTokenRevocationStore: new MemoryAccessTokenRevocationStore(runtime),
-        })
+      expect(
+        () =>
+          new RefreshTokenService({
+            jwt,
+            store: new MemoryRefreshTokenStore(runtime),
+            runtime,
+            accessTokenRevocationStore: new MemoryAccessTokenRevocationStore(runtime),
+          }),
       ).toThrow('accessToken.expiresIn');
     });
 
@@ -379,15 +378,19 @@ describe('RefreshTokenService', () => {
         store: new MemoryRefreshTokenStore(runtime),
         runtime,
         accessToken: { expiresIn: '1h' },
-        refreshTokenExpiresIn: '1s',
+        refreshTokenExpiresIn: '2s',
         accessTokenRevocationStore,
       });
       const first = await service.issue({ id: 'user-123' });
       const firstAccessJti = (await jwt.verify<{ jti: string }>(first.accessToken)).jti;
-      runtime.setNow(500);
+      runtime.setNow(1_500);
       const second = await service.refresh(first.refreshToken);
 
-      runtime.setNow(1_000); // first record expired; second record remains live until 1,500.
+      // The ancestor expires at 2,000; the descendant JWT expires at 3,000
+      // (iat is floored), and its store record remains live until 3,500.
+      runtime.setNow(2_000);
+      await expect(jwt.verify(first.refreshToken)).rejects.toThrow('Token expired');
+      await expect(jwt.verify(second!.refreshToken)).resolves.toMatchObject({ type: 'refresh' });
       expect(await service.revoke(second!.refreshToken)).toBe(true);
       expect(await accessTokenRevocationStore.isRevoked(firstAccessJti)).toBe(true);
     });

@@ -33,13 +33,15 @@ describe('Redis retry options through MessagingPlugin', () => {
               return true;
             },
           },
-          subscriptions: [{
-            topic: 't',
-            handler: () => {
-              attempts++;
-              throw Error('always');
+          subscriptions: [
+            {
+              topic: 't',
+              handler: () => {
+                attempts++;
+                throw Error('always');
+              },
             },
-          }],
+          ],
         }),
       ],
     });

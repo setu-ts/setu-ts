@@ -78,72 +78,70 @@ export interface LocaleMiddlewareOptions {
  *
  * @since 0.9.0
  */
-export type LocalizationPluginOptions =
-  & {
-    /** The supported BCP 47 tags; the first is the default. */
-    readonly supportedLocales: readonly string[];
+export type LocalizationPluginOptions = {
+  /** The supported BCP 47 tags; the first is the default. */
+  readonly supportedLocales: readonly string[];
+  /**
+   * Accept a supported locale whose catalogue lacks keys the default locale
+   * defines: warned once per locale at `register()`, served from the default
+   * locale at lookup. Default `false` — an incomplete catalogue fails startup.
+   */
+  readonly allowPartialCatalogues?: boolean;
+  /**
+   * What `t()` does for a key no catalogue has: `'key'` answers the key and
+   * warns once (default); `'throw'` throws `MissingMessageError`, for tests
+   * and CI.
+   */
+  readonly onMissing?: 'key' | 'throw';
+  /**
+   * The IANA time zone `Date` values are formatted in. Omitted, the runtime's
+   * own zone is used. A browser formatting the same messages should pass the
+   * same value.
+   */
+  readonly timeZone?: string;
+  /** A tenant's default locale; see {@linkcode LocaleMiddlewareOptions.tenantLocale}. */
+  readonly tenantLocale?: (tenant: ITenant) => string | undefined;
+  /** How the global resolution middleware is registered. */
+  readonly middleware?: {
+    /** Register the global middleware. Default `true`. */
+    readonly enabled?: boolean;
+    /** Its priority. Default `45` — after tenant (40), before logging (50). */
+    readonly priority?: number;
+    /** See {@linkcode LocaleMiddlewareOptions.query}. */
+    readonly query?: string | false;
+    /** See {@linkcode LocaleMiddlewareOptions.cookie}. */
+    readonly cookie?: string | false;
+    /** See {@linkcode LocaleMiddlewareOptions.exclude}. */
+    readonly exclude?: readonly PathPattern[];
+  };
+  /**
+   * Serve each supported locale's catalogue as JSON at
+   * `GET <basePath>/:locale`, for a browser that formats after hydration. Off
+   * when absent.
+   */
+  readonly exposeCatalogues?: {
     /**
-     * Accept a supported locale whose catalogue lacks keys the default locale
-     * defines: warned once per locale at `register()`, served from the default
-     * locale at lookup. Default `false` — an incomplete catalogue fails startup.
+     * The route prefix: one or more plain path segments such as `/i18n` —
+     * letters, digits, `.`, `_`, `~` or `-`, with no segment of only `.` or `..` —
+     * and never the root.
      */
-    readonly allowPartialCatalogues?: boolean;
+    readonly basePath: string;
     /**
-     * What `t()` does for a key no catalogue has: `'key'` answers the key and
-     * warns once (default); `'throw'` throws `MissingMessageError`, for tests
-     * and CI.
+     * The `Cache-Control` value. Default `'private, max-age=3600'` — never
+     * shared, because a session may refresh its cookie on this response. Set
+     * `'public, …'` only when no session cookie reaches the route.
      */
-    readonly onMissing?: 'key' | 'throw';
-    /**
-     * The IANA time zone `Date` values are formatted in. Omitted, the runtime's
-     * own zone is used. A browser formatting the same messages should pass the
-     * same value.
-     */
-    readonly timeZone?: string;
-    /** A tenant's default locale; see {@linkcode LocaleMiddlewareOptions.tenantLocale}. */
-    readonly tenantLocale?: (tenant: ITenant) => string | undefined;
-    /** How the global resolution middleware is registered. */
-    readonly middleware?: {
-      /** Register the global middleware. Default `true`. */
-      readonly enabled?: boolean;
-      /** Its priority. Default `45` — after tenant (40), before logging (50). */
-      readonly priority?: number;
-      /** See {@linkcode LocaleMiddlewareOptions.query}. */
-      readonly query?: string | false;
-      /** See {@linkcode LocaleMiddlewareOptions.cookie}. */
-      readonly cookie?: string | false;
-      /** See {@linkcode LocaleMiddlewareOptions.exclude}. */
-      readonly exclude?: readonly PathPattern[];
-    };
-    /**
-     * Serve each supported locale's catalogue as JSON at
-     * `GET <basePath>/:locale`, for a browser that formats after hydration. Off
-     * when absent.
-     */
-    readonly exposeCatalogues?: {
-      /**
-       * The route prefix: one or more plain path segments such as `/i18n` —
-       * letters, digits, `.`, `_`, `~` or `-`, with no segment of only `.` or `..` —
-       * and never the root.
-       */
-      readonly basePath: string;
-      /**
-       * The `Cache-Control` value. Default `'private, max-age=3600'` — never
-       * shared, because a session may refresh its cookie on this response. Set
-       * `'public, …'` only when no session cookie reaches the route.
-       */
-      readonly cacheControl?: string;
-    };
-  }
-  & (
-    | {
+    readonly cacheControl?: string;
+  };
+} & (
+  | {
       /** The catalogues, keyed by locale tag. */
       readonly catalogues: Readonly<Record<string, MessageCatalogue>>;
       readonly source?: never;
     }
-    | {
+  | {
       /** A source that loads the catalogues once at `register()`. */
       readonly source: IMessageSource;
       readonly catalogues?: never;
     }
-  );
+);

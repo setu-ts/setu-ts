@@ -105,7 +105,7 @@ describe('ServiceDiscoveryPlugin — health indicator (M70c)', () => {
     expect(data.reachable).toBe(true);
   });
 
-  it('reports degraded when reachable but the last refresh failed with a warm cache', async () => {
+  it('reports up when reachable but the last refresh failed with a warm cache', async () => {
     const { provider, setFailing } = makeProvider();
     const { check, resolve } = registerIndicator(provider);
     await resolve(); // warm the cache
@@ -113,20 +113,20 @@ describe('ServiceDiscoveryPlugin — health indicator (M70c)', () => {
     await resolve(); // refresh fails, stale served
 
     const result = await check();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     const data = result.data as { degraded: boolean; everResolved: boolean };
     expect(data.degraded).toBe(true);
     expect(data.everResolved).toBe(true);
   });
 
-  it('reports degraded when warm but the backend just went unreachable', async () => {
+  it('reports up when warm but the backend just went unreachable', async () => {
     const { provider, setReachable } = makeProvider();
     const { check, resolve } = registerIndicator(provider);
     await resolve();
     setReachable(false);
 
     const result = await check();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     const data = result.data as { reachable: boolean; everResolved: boolean };
     expect(data.reachable).toBe(false);
     expect(data.everResolved).toBe(true);

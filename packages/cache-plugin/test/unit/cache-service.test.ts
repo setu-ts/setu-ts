@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
 import { describe, expect, it } from 'vitest';
 
 import { CacheService } from '../../src/services/cache-service.ts';
@@ -144,10 +144,12 @@ describe('CacheService', () => {
       const svc = new CacheService(backend, '');
       let callsToFactory = 0;
 
-      await expect(svc.getOrSet('key', async (): Promise<string> => {
-        callsToFactory++;
-        return 'loaded';
-      })).resolves.toBe('cached');
+      await expect(
+        svc.getOrSet('key', async (): Promise<string> => {
+          callsToFactory++;
+          return 'loaded';
+        }),
+      ).resolves.toBe('cached');
       expect(callsToFactory).toBe(0);
     });
 
@@ -156,15 +158,19 @@ describe('CacheService', () => {
       const svc = new CacheService(backend, '');
       let callsToFactory = 0;
 
-      await expect(svc.getOrSet('key', async (): Promise<string> => {
-        callsToFactory++;
-        throw new Error('origin unavailable');
-      })).rejects.toThrow('origin unavailable');
+      await expect(
+        svc.getOrSet('key', async (): Promise<string> => {
+          callsToFactory++;
+          throw new Error('origin unavailable');
+        }),
+      ).rejects.toThrow('origin unavailable');
 
-      await expect(svc.getOrSet('key', async (): Promise<string> => {
-        callsToFactory++;
-        return 'recovered';
-      })).resolves.toBe('recovered');
+      await expect(
+        svc.getOrSet('key', async (): Promise<string> => {
+          callsToFactory++;
+          return 'recovered';
+        }),
+      ).resolves.toBe('recovered');
       expect(callsToFactory).toBe(2);
     });
 

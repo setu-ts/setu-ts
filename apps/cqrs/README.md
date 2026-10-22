@@ -4,7 +4,6 @@ Uses `CqrsPlugin` to put a note through a command handler and read it through a 
 handler.
 
 ```bash
-cd apps/cqrs
-deno task start
-deno task smoke
+pnpm --dir apps/cqrs run start
+pnpm --dir apps/cqrs run smoke
 ```

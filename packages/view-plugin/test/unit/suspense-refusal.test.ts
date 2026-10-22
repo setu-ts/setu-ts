@@ -30,11 +30,7 @@ function AsyncTreeWithoutSuspense() {
 
 /** A tree holding a PENDING `<Suspense>` boundary — `callbacks.length === 1`. */
 function SuspenseTree() {
-  return h(
-    'div',
-    null,
-    h(Suspense, { fallback: h('p', null, 'wait') }, h(DelayedChild, null)),
-  );
+  return h('div', null, h(Suspense, { fallback: h('p', null, 'wait') }, h(DelayedChild, null)));
 }
 
 /** The `html` tagged template with an async interpolation — no `callbacks`. */

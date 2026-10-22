@@ -95,15 +95,16 @@ export class MemoryAccessTokenRevocationStore implements IAccessTokenRevocationS
 
     let index = 0;
     while (true) {
-      const left = (index * 2) + 1;
+      const left = index * 2 + 1;
       const right = left + 1;
       if (left >= this.#expiryHeap.length) {
         break;
       }
-      const smallerChild = right < this.#expiryHeap.length &&
-          this.#expiryHeap[right]!.expiresAt < this.#expiryHeap[left]!.expiresAt
-        ? right
-        : left;
+      const smallerChild =
+        right < this.#expiryHeap.length &&
+        this.#expiryHeap[right]!.expiresAt < this.#expiryHeap[left]!.expiresAt
+          ? right
+          : left;
       if (this.#expiryHeap[smallerChild]!.expiresAt >= last.expiresAt) {
         break;
       }

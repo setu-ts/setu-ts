@@ -96,7 +96,7 @@ export function createHttpMiddleware(
 
   const release = async (key: string, token: string, namespace: string): Promise<void> => {
     try {
-      if (await deps.store.release(key, token) === 'lost') {
+      if ((await deps.store.release(key, token)) === 'lost') {
         safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {
@@ -110,7 +110,7 @@ export function createHttpMiddleware(
     namespace: string,
   ): Promise<void> => {
     try {
-      if (await deps.store.complete(key, token, record, resolved.ttlMs) === 'lost') {
+      if ((await deps.store.complete(key, token, record, resolved.ttlMs)) === 'lost') {
         safeLog(deps.logger, 'warn', LEASE_LAPSED, { namespace });
       }
     } catch (error) {

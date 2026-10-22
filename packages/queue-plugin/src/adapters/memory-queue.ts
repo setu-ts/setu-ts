@@ -38,7 +38,7 @@ export class MemoryQueue implements QueueAdapter {
     this.#recurringJobs = new Map();
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async connect(): Promise<void> {
     this.#ready = new Map();
     this.#processing = new Map();
@@ -48,7 +48,7 @@ export class MemoryQueue implements QueueAdapter {
     this.#connected = true;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async disconnect(): Promise<void> {
     this.#ready = new Map();
     this.#processing = new Map();
@@ -89,7 +89,7 @@ export class MemoryQueue implements QueueAdapter {
     });
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async enqueue<T>(job: StoredJob<T>): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -101,7 +101,7 @@ export class MemoryQueue implements QueueAdapter {
     ready.sort((a, b) => a.availableAtMs - b.availableAtMs);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async reserve<T>(name: string, limit: number, nowMs: number): Promise<readonly StoredJob<T>[]> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -129,7 +129,7 @@ export class MemoryQueue implements QueueAdapter {
     return due as readonly StoredJob<T>[];
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async ack(name: string, id: string, _claimToken?: string): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -139,7 +139,7 @@ export class MemoryQueue implements QueueAdapter {
     processing.delete(id);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async requeue<T>(
     name: string,
     id: string,
@@ -168,7 +168,7 @@ export class MemoryQueue implements QueueAdapter {
     ready.sort((a, b) => a.availableAtMs - b.availableAtMs);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async deadLetter(name: string, id: string, _nowMs: number, _claimToken?: string): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -187,7 +187,7 @@ export class MemoryQueue implements QueueAdapter {
     dead.push({ ...job });
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async storeRecurring(rec: StoredRecurring): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -198,7 +198,7 @@ export class MemoryQueue implements QueueAdapter {
     this.#recurringDue.sort((a, b) => a.nextRunAtMs - b.nextRunAtMs);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async fetchRecurringDue(nowMs: number): Promise<readonly StoredRecurring[]> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');
@@ -207,7 +207,7 @@ export class MemoryQueue implements QueueAdapter {
     return this.#recurringDue.filter((r) => r.nextRunAtMs <= nowMs);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async advanceRecurring(id: string, nextRunAtMs: number): Promise<void> {
     if (!this.#connected) {
       throw new Error('MemoryQueue is not connected');

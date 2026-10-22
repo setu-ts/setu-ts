@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixture mirrors async ioredis signatures
+/* eslint-disable require-await -- test fixture mirrors async ioredis signatures */
 /**
  * Fake ioredis client for testing RedisStore without a real Redis server.
  *
@@ -94,16 +94,10 @@ export function createFakeIoredis(opts?: FakeIoredisOptions): {
       return data.has(key) ? 1 : 0;
     },
 
-    async scan(
-      cursor: string,
-      matcher: string,
-      matchValue?: string,
-    ): Promise<[string, string[]]> {
+    async scan(cursor: string, matcher: string, matchValue?: string): Promise<[string, string[]]> {
       calls.push({ method: 'scan', args: [cursor, matcher, matchValue] });
       const pattern = matchValue ?? '*';
-      const regex = new RegExp(
-        `^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
-      );
+      const regex = new RegExp(`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
       const matched: string[] = [];
       for (const key of data.keys()) {
         if (regex.test(key)) {

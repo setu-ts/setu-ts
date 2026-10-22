@@ -89,28 +89,30 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
     options?.behaviors ?? [];
   const jobInstances = jobs
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: SchedulerJobDefinition; index: number } =>
-      typeof slot.entry !== 'function'
+    .filter(
+      (slot): slot is { entry: SchedulerJobDefinition; index: number } =>
+        typeof slot.entry !== 'function',
     );
   const jobFactories = jobs
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<SchedulerJobDefinition>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<SchedulerJobDefinition>; index: number } =>
+        typeof slot.entry === 'function',
     );
   // M98k: validated here, before any application exists — the one
   // validation of these options. `null` when `diagnostics` was omitted,
   // which is the inert disabled-source configuration.
-  const diagnostics: CompiledSchedulerDiagnostics | null = options?.diagnostics === undefined
-    ? null
-    : compileSchedulerDiagnostics(options.diagnostics);
+  const diagnostics: CompiledSchedulerDiagnostics | null =
+    options?.diagnostics === undefined ? null : compileSchedulerDiagnostics(options.diagnostics);
 
-  const behaviorInstances = behaviors.filter((entry): entry is IIngressBehavior =>
-    typeof entry !== 'function'
+  const behaviorInstances = behaviors.filter(
+    (entry): entry is IIngressBehavior => typeof entry !== 'function',
   );
   const behaviorFactories = behaviors
     .map((entry, index) => ({ entry, index }))
-    .filter((slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
-      typeof slot.entry === 'function'
+    .filter(
+      (slot): slot is { entry: RegistryFactory<IIngressBehavior>; index: number } =>
+        typeof slot.entry === 'function',
     );
   // The LIVE behaviour list the chain reads on every fire. Instances are
   // available at registration; when factories exist, `onInit` replaces it
@@ -158,7 +160,7 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
 
       // Resolve distributed lock
       // A built Redis lock client's reconnect failures go to the logger (read
-      // at call time) rather than ioredis's own console fallback.
+      // at call time) rather than being dropped.
       const lock = await resolveLock(
         options,
         ctx.runtime,
@@ -194,12 +196,12 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       };
       const service = declaredBehaviors
         ? new BehaviorChainSchedulerService(
-          ctx.runtime,
-          lock,
-          serviceOptions,
-          behaviorChain,
-          behaviorFactories.length === 0 ? undefined : chainReady,
-        )
+            ctx.runtime,
+            lock,
+            serviceOptions,
+            behaviorChain,
+            behaviorFactories.length === 0 ? undefined : chainReady,
+          )
         : new SchedulerService(ctx.runtime, lock, serviceOptions);
 
       // Connect the service
@@ -214,12 +216,15 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
       // replacement of the scheduler token is outside its coverage. Not
       // opted in, the source is inert (`disabled`) and nothing is attached:
       // every fire runs the pre-M98k path.
-      const collector = diagnostics === null ? null : new SchedulerObservationCollector(
-        diagnostics.alias,
-        diagnostics.jobs,
-        ctx.runtime.now.bind(ctx.runtime),
-        ctx.runtime.hrtime.bind(ctx.runtime),
-      );
+      const collector =
+        diagnostics === null
+          ? null
+          : new SchedulerObservationCollector(
+              diagnostics.alias,
+              diagnostics.jobs,
+              ctx.runtime.now.bind(ctx.runtime),
+              ctx.runtime.hrtime.bind(ctx.runtime),
+            );
       if (collector !== null) {
         attachSchedulerCollector(service, collector);
       }
@@ -281,11 +286,11 @@ export function SchedulerPlugin(options?: SchedulerPluginOptions): IPlugin {
               ...behaviors.map((entry, index) =>
                 typeof entry === 'function'
                   ? resolveRegistryEntry(
-                    entry,
-                    ctx.services,
-                    `SchedulerPlugin({ behaviors })[${index}]`,
-                  )
-                  : entry
+                      entry,
+                      ctx.services,
+                      `SchedulerPlugin({ behaviors })[${index}]`,
+                    )
+                  : entry,
               ),
             );
 

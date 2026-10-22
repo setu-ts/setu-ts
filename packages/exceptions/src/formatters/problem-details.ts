@@ -160,9 +160,10 @@ export function buildProblemDetails(
   // that happens to use that key name (M70f code review, finding 4). Only an
   // error the responder built carries the marker, so a thrown error keeps the
   // pre-M70f shape: `detail` is the message.
-  const carriedDetail = isHttp && RESPONDER_DETAIL in error
-    ? (error as HttpError & { [RESPONDER_DETAIL]?: unknown })[RESPONDER_DETAIL]
-    : undefined;
+  const carriedDetail =
+    isHttp && RESPONDER_DETAIL in error
+      ? (error as HttpError & { [RESPONDER_DETAIL]?: unknown })[RESPONDER_DETAIL]
+      : undefined;
   const detail = typeof carriedDetail === 'string' ? carriedDetail : error.message;
 
   return {

@@ -63,12 +63,17 @@ async function makeService(
   const clock = makeClock(NOW);
   const config = resolveSessionConfig({ ...options, mode });
   const ring = await deriveKeyRing(crypto.subtle, [SECRET], mode);
-  const service = new SessionService(config, ring, {
-    subtle: crypto.subtle,
-    randomBytes: (n) => crypto.getRandomValues(new Uint8Array(n)),
-    now: clock.now,
-    uuid: clock.uuid,
-  }, store);
+  const service = new SessionService(
+    config,
+    ring,
+    {
+      subtle: crypto.subtle,
+      randomBytes: (n) => crypto.getRandomValues(new Uint8Array(n)),
+      now: clock.now,
+      uuid: clock.uuid,
+    },
+    store,
+  );
   return { service, clock, config };
 }
 
@@ -178,11 +183,8 @@ describe('SessionService.load', () => {
     const { service } = await makeService();
     const { seal } = await import('../../../src/codec/crypto.ts');
     const ring = await deriveKeyRing(crypto.subtle, [SECRET], 'encrypt');
-    const bogus = await seal(
-      crypto.subtle,
-      ring,
-      JSON.stringify({ unexpected: true }),
-      (n) => crypto.getRandomValues(new Uint8Array(n)),
+    const bogus = await seal(crypto.subtle, ring, JSON.stringify({ unexpected: true }), (n) =>
+      crypto.getRandomValues(new Uint8Array(n)),
     );
 
     const { ctx } = makeContext({
@@ -248,11 +250,7 @@ describe('SessionService.load', () => {
 describe('SessionService shared path (load and fromHeaders)', () => {
   it('returns the same id and payload from both entry points under a non-default config', async () => {
     const store = new RecordingStore();
-    const { service } = await makeService(
-      { cookie: { name: 'sid' } },
-      store,
-      'sign',
-    );
+    const { service } = await makeService({ cookie: { name: 'sid' } }, store, 'sign');
 
     const write = makeContext();
     const session = await service.load(write.ctx);

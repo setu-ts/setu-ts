@@ -57,37 +57,42 @@ const dynamoEndpoint = process.env['DYNAMODB_ENDPOINT'];
 const bigtableEndpoint = process.env['BIGTABLE_EMULATOR_ENDPOINT'];
 const cosmosEndpoint = process.env['COSMOS_ENDPOINT'];
 /** The well-known emulator key, overridable for a real account. */
-const cosmosKey = process.env['COSMOS_KEY'] ??
+const cosmosKey =
+  process.env['COSMOS_KEY'] ??
   'C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==';
 const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 12);
 
-describeOutboxRelayProofs('Cosmos emulator', async () => {
-  const { CosmosClient } = await import('@azure/cosmos');
-  const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
-  const { database } = await client.databases.createIfNotExists({ id: 'setu_m107b' });
-  const container = `proof_${crypto.randomUUID().replaceAll('-', '')}`;
-  await database.containers.createIfNotExists({
-    id: container,
-    partitionKey: { paths: ['/tenantId'] },
-  });
-  const app = appOver(
-    new CosmosAdapter({
-      endpoint: cosmosEndpoint!,
-      key: cosmosKey,
-      database: 'setu_m107b',
-      containers: { Outbox: { container, partitionKey: 'tenantId' } },
-    }),
-  );
-  await app.start();
-  return {
-    db: app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
-    store: new FaultStore(createDatabaseOutboxStore()(app.services)),
-    dispose: async () => {
-      await app.stop();
-      await database.container(container).delete();
-    },
-  };
-}, cosmosEndpoint === undefined);
+describeOutboxRelayProofs(
+  'Cosmos emulator',
+  async () => {
+    const { CosmosClient } = await import('@azure/cosmos');
+    const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
+    const { database } = await client.databases.createIfNotExists({ id: 'setu_m107b' });
+    const container = `proof_${crypto.randomUUID().replaceAll('-', '')}`;
+    await database.containers.createIfNotExists({
+      id: container,
+      partitionKey: { paths: ['/tenantId'] },
+    });
+    const app = appOver(
+      new CosmosAdapter({
+        endpoint: cosmosEndpoint!,
+        key: cosmosKey,
+        database: 'setu_m107b',
+        containers: { Outbox: { container, partitionKey: 'tenantId' } },
+      }),
+    );
+    await app.start();
+    return {
+      db: app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
+      store: new FaultStore(createDatabaseOutboxStore()(app.services)),
+      dispose: async () => {
+        await app.stop();
+        await database.container(container).delete();
+      },
+    };
+  },
+  cosmosEndpoint === undefined,
+);
 
 /** Builds an app over one adapter, relaying only when asked. */
 function appOver(adapter: IDatabaseAdapter, relay: OutboxRelayOptions = {}): IKernelApplication {
@@ -105,13 +110,12 @@ function appOver(adapter: IDatabaseAdapter, relay: OutboxRelayOptions = {}): IKe
 /** Subscribes a recorder of `[envelope id, data.n]` pairs to the order topic. */
 async function recorder(app: IKernelApplication): Promise<[string, number][]> {
   const seen: [string, number][] = [];
-  await app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING).subscribe(
-    orderPlaced.topic,
-    (message) => {
+  await app.services
+    .get<IMessageBroker>(CAPABILITIES.MESSAGING)
+    .subscribe(orderPlaced.topic, (message) => {
       const envelope = message as { id: string; data: { n: number } };
       seen.push([envelope.id, envelope.data.n]);
-    },
-  );
+    });
   return seen;
 }
 
@@ -122,7 +126,10 @@ function settle(ms = 50): Promise<void> {
 
 /** The error `start()` rejected with. */
 async function startFailure(app: IKernelApplication): Promise<unknown> {
-  return await app.start().then(() => undefined, (error: unknown) => error);
+  return await app.start().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 }
 
 describe('outbox over a real MongoDB replica set', { skip: mongoRsUri === undefined }, () => {
@@ -145,11 +152,13 @@ describe('outbox over a real MongoDB replica set', { skip: mongoRsUri === undefi
         await uow.getRepository('Order').create({ id: 'o-1', total: 3 });
         return await outbox.write(uow, orderPlaced, { key: 'K', n: 1 });
       });
-      const failed = await db.transaction(async (uow) => {
-        await uow.getRepository('Order').create({ id: 'o-2', total: 4 });
-        await outbox.write(uow, orderPlaced, { key: 'K', n: 2 });
-        throw new Error('business rule');
-      }).catch((error: unknown) => error);
+      const failed = await db
+        .transaction(async (uow) => {
+          await uow.getRepository('Order').create({ id: 'o-2', total: 4 });
+          await outbox.write(uow, orderPlaced, { key: 'K', n: 2 });
+          throw new Error('business rule');
+        })
+        .catch((error: unknown) => error);
 
       const result = await outbox.sweep();
       await settle();
@@ -182,23 +191,25 @@ describe('outbox over real DynamoDB Local', { skip: dynamoEndpoint === undefined
           { AttributeName: 'id', AttributeType: 'S' },
           ...(withIndex
             ? [
-              { AttributeName: 'status', AttributeType: 'S' as const },
-              { AttributeName: 'position', AttributeType: 'S' as const },
-            ]
+                { AttributeName: 'status', AttributeType: 'S' as const },
+                { AttributeName: 'position', AttributeType: 'S' as const },
+              ]
             : []),
         ],
         KeySchema: [{ AttributeName: 'id', KeyType: 'HASH' }],
         ...(withIndex
           ? {
-            GlobalSecondaryIndexes: [{
-              IndexName: 'by-status-position',
-              KeySchema: [
-                { AttributeName: 'status', KeyType: 'HASH' as const },
-                { AttributeName: 'position', KeyType: 'RANGE' as const },
+              GlobalSecondaryIndexes: [
+                {
+                  IndexName: 'by-status-position',
+                  KeySchema: [
+                    { AttributeName: 'status', KeyType: 'HASH' as const },
+                    { AttributeName: 'position', KeyType: 'RANGE' as const },
+                  ],
+                  Projection: { ProjectionType: 'ALL' as const },
+                },
               ],
-              Projection: { ProjectionType: 'ALL' as const },
-            }],
-          }
+            }
           : {}),
       }),
     );
@@ -280,9 +291,10 @@ describe('outbox over real DynamoDB Local', { skip: dynamoEndpoint === undefined
 
       // Every pending-set read was a Query on the GSI keyed by status; every
       // page after the first carried `position > after` IN the key condition.
-      const pages = sent.filter((read) =>
-        read.input.IndexName === 'by-status-position' &&
-        JSON.stringify(read.input.ExpressionAttributeValues).includes('"pending"')
+      const pages = sent.filter(
+        (read) =>
+          read.input.IndexName === 'by-status-position' &&
+          JSON.stringify(read.input.ExpressionAttributeValues).includes('"pending"'),
       );
       expect(sent.some((read) => read.command === 'scan')).toBe(false);
       expect(pages.length).toBeGreaterThanOrEqual(4);
@@ -318,89 +330,96 @@ describe('outbox over real DynamoDB Local', { skip: dynamoEndpoint === undefined
   });
 });
 
-describe('outbox over the real Bigtable emulator', {
-  skip: bigtableEndpoint === undefined,
-}, () => {
-  it('start() refuses with the bigtable reason', async () => {
-    const app = appOver(
-      new BigtableAdapter({
-        projectId: 'setu-m107',
-        instance: 'setu-m107-instance',
-        apiEndpoint: bigtableEndpoint!,
-      }),
-    );
-    const failure = await startFailure(app);
-    await app.stop().catch(() => {});
-    expect(failure).toBeInstanceOf(OutboxStoreUnavailableError);
-    expect((failure as OutboxStoreUnavailableError).reason).toBe('bigtable');
-  });
-});
-
-describe('outbox in a shared Cosmos container (local emulator only)', {
-  skip: cosmosEndpoint === undefined,
-}, () => {
-  it('never reads, counts, transitions or purges business documents carrying a status', async () => {
-    const { CosmosClient } = await import('@azure/cosmos');
-    const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
-    const { database } = await client.databases.createIfNotExists({ id: 'setu_m107' });
-    const container = `orders_${suffix}`;
-    await database.containers.createIfNotExists({
-      id: container,
-      partitionKey: { paths: ['/tenantId'] },
-    });
-    const app = appOver(
-      new CosmosAdapter({
-        endpoint: cosmosEndpoint!,
-        key: cosmosKey,
-        database: 'setu_m107',
-        containers: {
-          // The outbox maps onto the BUSINESS container and partition.
-          Outbox: { container, partitionKey: 'tenantId' },
-          Order: { container, partitionKey: 'tenantId' },
-        },
-      }),
-    );
-    await app.start();
-    try {
-      const seen = await recorder(app);
-      const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-      const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
-      // Business documents in the SAME container carrying the relay's statuses.
-      await db.getRepository('Order').create({
-        id: 'b-pending',
-        tenantId: 't1',
-        status: 'pending',
-      });
-      await db.getRepository('Order').create({ id: 'b-sent', tenantId: 't1', status: 'sent' });
-      const id = await db.transaction(async (uow) => {
-        await uow.getRepository('Order').create({ id: 'o-1', tenantId: 't1', total: 9 });
-        return await outbox.write(uow, orderPlaced, { n: 1 }, { tenantId: 't1' });
-      });
-
-      const store = createDatabaseOutboxStore()(app.services);
-      expect(await store.stats()).toMatchObject({ pending: 1, failed: 0 });
-      const result = await outbox.sweep();
-      await settle();
-      expect(result.published).toBe(1);
-      expect(seen).toEqual([[id, 1]]);
-      expect(
-        await store.markSent('b-pending', {
-          claimVersion: 0,
-          settledAt: 1,
-          sentBy: 'x',
-          deleteNow: false,
+describe(
+  'outbox over the real Bigtable emulator',
+  {
+    skip: bigtableEndpoint === undefined,
+  },
+  () => {
+    it('start() refuses with the bigtable reason', async () => {
+      const app = appOver(
+        new BigtableAdapter({
+          projectId: 'setu-m107',
+          instance: 'setu-m107-instance',
+          apiEndpoint: bigtableEndpoint!,
         }),
-      )
-        .toEqual({ outcome: 'missing' });
-      expect(await store.purge(Number.MAX_SAFE_INTEGER, 100)).toBe(1);
+      );
+      const failure = await startFailure(app);
+      await app.stop().catch(() => {});
+      expect(failure).toBeInstanceOf(OutboxStoreUnavailableError);
+      expect((failure as OutboxStoreUnavailableError).reason).toBe('bigtable');
+    });
+  },
+);
 
-      const orders = db.getRepository<Record<string, unknown>, string>('Order');
-      expect((await orders.findById('b-pending'))?.status).toBe('pending');
-      expect((await orders.findById('b-sent'))?.status).toBe('sent');
-      expect(await orders.findById('o-1')).not.toBeNull();
-    } finally {
-      await app.stop();
-      await database.container(container).delete();
-    }
-  });
-});
+describe(
+  'outbox in a shared Cosmos container (local emulator only)',
+  {
+    skip: cosmosEndpoint === undefined,
+  },
+  () => {
+    it('never reads, counts, transitions or purges business documents carrying a status', async () => {
+      const { CosmosClient } = await import('@azure/cosmos');
+      const client = new CosmosClient({ endpoint: cosmosEndpoint!, key: cosmosKey });
+      const { database } = await client.databases.createIfNotExists({ id: 'setu_m107' });
+      const container = `orders_${suffix}`;
+      await database.containers.createIfNotExists({
+        id: container,
+        partitionKey: { paths: ['/tenantId'] },
+      });
+      const app = appOver(
+        new CosmosAdapter({
+          endpoint: cosmosEndpoint!,
+          key: cosmosKey,
+          database: 'setu_m107',
+          containers: {
+            // The outbox maps onto the BUSINESS container and partition.
+            Outbox: { container, partitionKey: 'tenantId' },
+            Order: { container, partitionKey: 'tenantId' },
+          },
+        }),
+      );
+      await app.start();
+      try {
+        const seen = await recorder(app);
+        const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        const outbox = app.services.get<IOutbox>(CAPABILITIES.OUTBOX);
+        // Business documents in the SAME container carrying the relay's statuses.
+        await db.getRepository('Order').create({
+          id: 'b-pending',
+          tenantId: 't1',
+          status: 'pending',
+        });
+        await db.getRepository('Order').create({ id: 'b-sent', tenantId: 't1', status: 'sent' });
+        const id = await db.transaction(async (uow) => {
+          await uow.getRepository('Order').create({ id: 'o-1', tenantId: 't1', total: 9 });
+          return await outbox.write(uow, orderPlaced, { n: 1 }, { tenantId: 't1' });
+        });
+
+        const store = createDatabaseOutboxStore()(app.services);
+        expect(await store.stats()).toMatchObject({ pending: 1, failed: 0 });
+        const result = await outbox.sweep();
+        await settle();
+        expect(result.published).toBe(1);
+        expect(seen).toEqual([[id, 1]]);
+        expect(
+          await store.markSent('b-pending', {
+            claimVersion: 0,
+            settledAt: 1,
+            sentBy: 'x',
+            deleteNow: false,
+          }),
+        ).toEqual({ outcome: 'missing' });
+        expect(await store.purge(Number.MAX_SAFE_INTEGER, 100)).toBe(1);
+
+        const orders = db.getRepository<Record<string, unknown>, string>('Order');
+        expect((await orders.findById('b-pending'))?.status).toBe('pending');
+        expect((await orders.findById('b-sent'))?.status).toBe('sent');
+        expect(await orders.findById('o-1')).not.toBeNull();
+      } finally {
+        await app.stop();
+        await database.container(container).delete();
+      }
+    });
+  },
+);

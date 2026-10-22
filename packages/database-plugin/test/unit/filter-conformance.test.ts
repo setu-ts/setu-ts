@@ -490,10 +490,7 @@ function dynamoPathValue(
 }
 
 /** Resolves a `:vN` placeholder to its unmarshalled constant. */
-function dynamoPlaceholderValue(
-  token: string,
-  values: DynamoAttributeMap,
-): unknown {
+function dynamoPlaceholderValue(token: string, values: DynamoAttributeMap): unknown {
   const value = values[token.trim()];
   if (value === undefined) {
     throw new Error(`conformance evaluator: unknown value alias '${token.trim()}'`);
@@ -513,15 +510,14 @@ function evalDynamoAtom(
     // no wildcards — which is exactly the reference `matchesFilter` semantics.
     const actual = dynamoPathValue(contains[1], row, names);
     const expected = dynamoPlaceholderValue(contains[2], values);
-    return typeof actual === 'string' && typeof expected === 'string' &&
-      actual.includes(expected);
+    return typeof actual === 'string' && typeof expected === 'string' && actual.includes(expected);
   }
   const membership = /^(\S+)\s+IN\s+\((.+)\)$/.exec(atom);
   if (membership !== null) {
     const actual = dynamoPathValue(membership[1], row, names);
-    return membership[2].split(',').some((element) =>
-      actual === dynamoPlaceholderValue(element, values)
-    );
+    return membership[2]
+      .split(',')
+      .some((element) => actual === dynamoPlaceholderValue(element, values));
   }
   const comparison = /^(\S+)\s*(=|<>)\s*(\S+)$/.exec(atom);
   if (comparison !== null) {
@@ -628,7 +624,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
       const values = command.ExpressionAttributeValues ?? {};
       const dynamoRows = ids(
         ROWS.filter((row) =>
-          expression === undefined ? true : evalDynamoCondition(row, expression, names, values)
+          expression === undefined ? true : evalDynamoCondition(row, expression, names, values),
         ),
       );
       expect(dynamoRows).toEqual(expected);
@@ -776,7 +772,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
         offset: 0,
         select: [],
       }),
-    ).rejects.toThrow("has no 'sku' column for orderBy");
+    ).rejects.toThrow('has no "sku" column for orderBy');
 
     const drizzleSource = createDrizzleDataSource(
       createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
@@ -792,7 +788,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
         offset: 0,
         select: [],
       }),
-    ).rejects.toThrow("has no 'sku' column");
+    ).rejects.toThrow('has no "sku" column');
   });
 
   it('Memory and Drizzle both refuse an unknown select column, by name', async () => {
@@ -803,7 +799,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
 
     await expect(
       memorySource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
-    ).rejects.toThrow("has no 'sku' column for select");
+    ).rejects.toThrow('has no "sku" column for select');
 
     const drizzleSource = createDrizzleDataSource(
       createFakeDrizzleInstance() as unknown as Parameters<typeof createDrizzleDataSource>[0],
@@ -813,7 +809,7 @@ describe('filter conformance — one query, every adapter (§3.7)', () => {
     );
     await expect(
       drizzleSource.findAll({ where: {}, orderBy: {}, limit: -1, offset: 0, select: ['sku'] }),
-    ).rejects.toThrow("has no 'sku' column");
+    ).rejects.toThrow('has no "sku" column');
   });
 });
 
@@ -947,7 +943,10 @@ describe('findPage cursor-walk conformance — one walk, every data source (§3.
     const referenceCursor = pages[0].nextCursor;
 
     for (const [name, page] of names.map((n, i) => [n, pages[i]] as const)) {
-      expect(page.rows.map((r) => r.id), `${name} rows`).toEqual(referenceRows);
+      expect(
+        page.rows.map((r) => r.id),
+        `${name} rows`,
+      ).toEqual(referenceRows);
       // The shared `mintNextCursor` produces a byte-identical token on every
       // adapter — the whole point of the helpers living in `common`.
       expect(page.nextCursor, `${name} cursor`).toBe(referenceCursor);

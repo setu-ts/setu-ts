@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a release tool prints what it changed.
+/* eslint-disable no-console -- a release tool prints what it changed. */
 /**
  * @module
  *
@@ -49,6 +49,10 @@
  * `check:versions` uses, so a residual old reference fails the bump itself.
  */
 
+import { run as runProcess } from './lib/run.ts';
+import { writeFile, readFile } from 'node:fs/promises';
+
+import { workspaceMembers } from './lib/workspace.ts';
 import { findStaleReferences, isSweptPath } from './version-sweep.ts';
 
 /** One file the bump rewrites. */
@@ -173,10 +177,10 @@ export function rewriteReferences(
   );
   const fromLine = minorLine(from);
   const toLine = minorLine(to);
-  const short = path.endsWith('deno.lock') && fromLine !== toLine
-    ? new RegExp(String.raw`(@setu-ts/[a-z0-9-]+@)${escapeRegExp(fromLine)}(?![\d.-])`, 'g')
-    : null;
-
+  const short =
+    path.endsWith('deno.lock') && fromLine !== toLine
+      ? new RegExp(String.raw`(@setu-ts/[a-z0-9-]+@)${escapeRegExp(fromLine)}(?![\d.-])`, 'g')
+      : null;
   const exempt = exemptLines(path, source);
   const lines = source.split('\n');
   let replacements = 0;
@@ -210,7 +214,9 @@ function exemptLines(path: string, source: string): Set<number> {
     let blockStart = 0;
     let marked = false;
     const flush = (end: number): void => {
-      if (marked) { for (let i = blockStart; i < end; i += 1) exempt.add(i); }
+      if (marked) {
+        for (let i = blockStart; i < end; i += 1) exempt.add(i);
+      }
     };
     for (const [index, line] of lines.entries()) {
       if (/^\s*>?\s*$/.test(line)) {
@@ -269,10 +275,7 @@ function replaceOnce(source: string, pattern: RegExp, replacement: string): stri
  * @param options - The versions, the date and the workspace members
  * @returns The edits, the residual operator steps, and any refusal
  */
-export function planBump(
-  files: ReadonlyMap<string, string>,
-  options: BumpOptions,
-): BumpPlan {
+export function planBump(files: ReadonlyMap<string, string>, options: BumpOptions): BumpPlan {
   const { from, to, date, members } = options;
   const refusals: string[] = [];
   const residual: string[] = [];
@@ -348,7 +351,7 @@ export function planBump(
   //    version it is checked against would fail the test it belongs to).
   //    `check:versions` reads no test file either, so the two agree.
   for (const [path, source] of files) {
-    if (isTestPath(path) || isArchivedPlan(path)) continue;
+    if ((!path.endsWith('deno.lock') && isTestPath(path)) || isArchivedPlan(path)) continue;
     const base = current(path) ?? source;
     const { content, replacements } = rewriteReferences(path, base, from, to);
     if (replacements > 0) stage(path, content, replacements);
@@ -461,8 +464,9 @@ export function planBump(
   const toLine = minorLine(to);
   if (checkDocs !== undefined && !to.includes('-')) {
     const arrayMatch =
-      /export const POST_ALPHA_MINOR_LINES: readonly string\[\] = \[\n([\s\S]*?)\n\];/
-        .exec(checkDocs);
+      /export const POST_ALPHA_MINOR_LINES: readonly string\[\] = \[\n([\s\S]*?)\n\];/.exec(
+        checkDocs,
+      );
     if (arrayMatch === null) {
       refusals.push(
         `${CHECK_DOCS_FILE}: POST_ALPHA_MINOR_LINES was not found in its expected shape.`,
@@ -482,12 +486,12 @@ export function planBump(
   }
 
   residual.push(
-    'Run `deno task check:docs`: prose claims naming the previous release ("the current release ' +
+    'Run `pnpm run check:docs`: prose claims naming the previous release ("the current release ' +
       'is …") are reported there and corrected by hand — this tool never rewrites a bare number.',
-    "Run `deno task deploy:render` (needs helm) or `deno task check:deploy`: the manifests' " +
+    "Run `pnpm run deploy:render` (needs helm) or `pnpm run check:deploy`: the manifests' " +
       'version label was rewritten to what the chart renders, and the render check confirms it.',
-    'Run the first `deno task check` and commit the root `deno.lock` it leaves — its workspace ' +
-      'member entries were rewritten here, and Deno re-resolves nothing when they already agree.',
+    'Run `pnpm install --lockfile-only` and commit the refreshed pnpm lockfile.',
+    'Commit the rewritten test/deno-lane/deno.lock; never regenerate it during a version bump.',
     'Read the CHANGELOG section once as a whole: no entry filed under a published heading, no ' +
       'contradiction between entries (verify-release check 9 covers the merged-PR half).',
     `Grep for a range whose bounds became equal: grep -rn '>=${to} <${to}' --include='*.md' .`,
@@ -518,39 +522,28 @@ export interface MainDeps {
 export const productionDeps: MainDeps = {
   readTracked: readTrackedText,
   isClean: workingTreeIsClean,
-  write: Deno.writeTextFile,
+  write: writeFile,
   today: () => new Date().toISOString().slice(0, 10),
   log: console.log,
   error: console.error,
   syncManifests: async () => {
-    const child = new Deno.Command(Deno.execPath(), {
-      args: [
-        'run',
-        '--allow-read',
-        '--allow-write',
-        '--allow-env=TSC_WATCHFILE,TSC_NONPOLLING_WATCHER,TSC_WATCHDIRECTORY,NODE_INSPECTOR_IPC,VSCODE_INSPECTOR_OPTIONS,NODE_ENV,TSC_WATCH_POLLINGINTERVAL_LOW,TSC_WATCH_POLLINGINTERVAL_MEDIUM,TSC_WATCH_POLLINGINTERVAL_HIGH,TSC_WATCH_POLLINGCHUNKSIZE_LOW,TSC_WATCH_POLLINGCHUNKSIZE_MEDIUM,TSC_WATCH_POLLINGCHUNKSIZE_HIGH,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_LOW,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_MEDIUM,TSC_WATCH_UNCHANGEDPOLLTHRESHOLDS_HIGH',
-        'scripts/node-manifests.ts',
-        '--write',
-      ],
-      stdout: 'inherit',
-      stderr: 'inherit',
-    }).spawn();
-    const status = await child.status;
+    const status = await runProcess(process.execPath, ['scripts/node-manifests.ts', '--write'], {
+      inherit: true,
+    });
     if (status.code !== 0) throw new Error(`node-manifests --write exited ${status.code}`);
   },
 };
 
 /** Files read as text: anything tracked whose bytes carry no NUL. */
 export async function readTrackedText(): Promise<Map<string, string>> {
-  const list = await new Deno.Command('git', { args: ['ls-files', '-z'], stdout: 'piped' })
-    .output();
-  const paths = new TextDecoder().decode(list.stdout).split('\0').filter((p) => p !== '');
+  const list = await runProcess('git', ['ls-files', '-z']);
+  const paths = list.stdout.split('\0').filter((p) => p !== '');
   const files = new Map<string, string>();
   const decoder = new TextDecoder('utf-8', { fatal: true });
   for (const path of paths) {
     let bytes: Uint8Array;
     try {
-      bytes = await Deno.readFile(path);
+      bytes = await readFile(path);
     } catch {
       continue; // a tracked path absent from the working tree (sparse checkout)
     }
@@ -565,9 +558,8 @@ export async function readTrackedText(): Promise<Map<string, string>> {
 }
 
 export async function workingTreeIsClean(): Promise<boolean> {
-  const status = await new Deno.Command('git', { args: ['status', '--porcelain'], stdout: 'piped' })
-    .output();
-  return new TextDecoder().decode(status.stdout).trim() === '';
+  const status = await runProcess('git', ['status', '--porcelain']);
+  return status.stdout.trim() === '';
 }
 
 /**
@@ -586,7 +578,7 @@ export async function main(
   const dryRun = args.includes('--dry-run');
   const allowDirty = args.includes('--allow-dirty');
   const dateIndex = args.indexOf('--date');
-  const date = dateIndex === -1 ? deps.today() : args[dateIndex + 1] ?? '';
+  const date = dateIndex === -1 ? deps.today() : (args[dateIndex + 1] ?? '');
   if (to === undefined) {
     deps.error('usage: release:bump <version> [--dry-run] [--date YYYY-MM-DD] [--allow-dirty]');
     return false;
@@ -600,10 +592,11 @@ export async function main(
   }
 
   const files = await deps.readTracked();
-  const root = JSON.parse(files.get('deno.json') ?? '{}') as {
-    workspace?: readonly string[];
-  };
-  const members = root.workspace ?? [];
+  const members = await workspaceMembers('.', (path) => {
+    const text = files.get(path);
+    if (text === undefined) throw new Error(`${path}: missing tracked workspace inventory`);
+    return Promise.resolve(text);
+  });
   const kernel = JSON.parse(files.get('packages/kernel/deno.json') ?? '{}') as { version?: string };
   const from = kernel.version ?? '';
 
@@ -656,5 +649,8 @@ export async function main(
 }
 
 if (import.meta.main) {
-  Deno.exit((await main(Deno.args)) ? 0 : 1);
+  await (async () => {
+    process.exitCode = (await main(process.argv.slice(2))) ? 0 : 1;
+    return;
+  })();
 }

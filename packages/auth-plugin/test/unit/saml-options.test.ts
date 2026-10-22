@@ -70,24 +70,48 @@ describe('saml arm validation', () => {
   const refusals: ReadonlyArray<[string, Record<string, unknown>, RegExp]> = [
     ['an empty entityId', { entityId: '' }, /non-empty entityId/],
     ['a missing idp', { idp: undefined }, /needs an idp object/],
-    ['an empty idp.entityId', {
-      idp: { entityId: '', ssoUrl: 'https://idp.test/sso', certs: [PEM] },
-    }, /idp\.entityId/],
-    ['an http idp.ssoUrl', {
-      idp: { entityId: 'x', ssoUrl: 'http://idp.example/sso', certs: [PEM] },
-    }, /idp\.ssoUrl/],
-    ['a missing idp.ssoUrl', {
-      idp: { entityId: 'x', certs: [PEM] },
-    }, /idp\.ssoUrl/],
-    ['an empty certs list', {
-      idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: [] },
-    }, /idp\.certs/],
-    ['a non-array certs', {
-      idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: PEM },
-    }, /idp\.certs/],
-    ['an empty cert entry', {
-      idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: [''] },
-    }, /idp\.certs/],
+    [
+      'an empty idp.entityId',
+      {
+        idp: { entityId: '', ssoUrl: 'https://idp.test/sso', certs: [PEM] },
+      },
+      /idp\.entityId/,
+    ],
+    [
+      'an http idp.ssoUrl',
+      {
+        idp: { entityId: 'x', ssoUrl: 'http://idp.example/sso', certs: [PEM] },
+      },
+      /idp\.ssoUrl/,
+    ],
+    [
+      'a missing idp.ssoUrl',
+      {
+        idp: { entityId: 'x', certs: [PEM] },
+      },
+      /idp\.ssoUrl/,
+    ],
+    [
+      'an empty certs list',
+      {
+        idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: [] },
+      },
+      /idp\.certs/,
+    ],
+    [
+      'a non-array certs',
+      {
+        idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: PEM },
+      },
+      /idp\.certs/,
+    ],
+    [
+      'an empty cert entry',
+      {
+        idp: { entityId: 'x', ssoUrl: 'https://idp.test/sso', certs: [''] },
+      },
+      /idp\.certs/,
+    ],
     ['a missing toPrincipal', { toPrincipal: undefined }, /toPrincipal/],
     ['an http acsUrl', { acsUrl: 'http://app.example/auth/corp/acs' }, /acsUrl must be https/],
     [
@@ -121,7 +145,7 @@ describe('saml arm validation', () => {
             toPrincipal: () => null,
           },
         ],
-      })
+      }),
     ).toThrow(/duplicates/);
   });
 

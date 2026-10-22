@@ -166,15 +166,14 @@ class DenoLocalDiagnosticsListener implements ILocalDiagnosticsListener {
     if (this.#closePromise === null) {
       const server = this.#server;
       this.#server = null;
-      this.#closePromise = (server === null ? Promise.resolve() : server.shutdown().then(() =>
-        undefined
-      ))
-        .then(() => {
-          // Whatever path closed this listener — connector revoke, the
-          // RuntimePlugin close hook, or a direct close — the factory must
-          // release its one-active slot exactly once.
-          this.#onClosed();
-        });
+      this.#closePromise = (
+        server === null ? Promise.resolve() : server.shutdown().then(() => undefined)
+      ).then(() => {
+        // Whatever path closed this listener — connector revoke, the
+        // RuntimePlugin close hook, or a direct close — the factory must
+        // release its one-active slot exactly once.
+        this.#onClosed();
+      });
     }
     await this.#closePromise;
   }
@@ -197,11 +196,7 @@ class DenoLocalDiagnosticsListenerFactory implements ILocalDiagnosticsListenerFa
     // Validate BEFORE any bind: a refused call leaves no partial state.
     // Every refusal REJECTS the returned promise (a sync throw would break
     // callers written against the promised contract).
-    if (
-      !Number.isSafeInteger(options.port) ||
-      options.port < 1024 ||
-      options.port > 65535
-    ) {
+    if (!Number.isSafeInteger(options.port) || options.port < 1024 || options.port > 65535) {
       return Promise.reject(new Error(INVALID_PORT_ERROR));
     }
     if (this.#active !== null) {

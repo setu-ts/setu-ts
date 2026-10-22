@@ -175,9 +175,7 @@ describe('audit health — reachability (H-70c-1)', () => {
       // and the probe reads it. A double that omits it reports a parent that
       // is not a directory, which is a shape no filesystem produces here.
       stat: () =>
-        Promise.resolve(
-          { size: 0, isFile: false, isDirectory: true } as unknown as StatResult,
-        ),
+        Promise.resolve({ size: 0, isFile: false, isDirectory: true } as unknown as StatResult),
       readFile: () => Promise.reject(new Error('ENOENT')),
       writeFile: () => Promise.reject(new Error('EROFS: read-only file system')),
       mkdir: () => Promise.resolve(),
@@ -192,8 +190,9 @@ describe('audit health — reachability (H-70c-1)', () => {
     const auditor = services.get(CAPABILITIES.AUDIT) as {
       log(e: Record<string, unknown>): Promise<void>;
     };
-    await expect(auditor.log({ action: 'delete', resource: 'user', result: 'success' }))
-      .rejects.toThrow('EROFS');
+    await expect(
+      auditor.log({ action: 'delete', resource: 'user', result: 'success' }),
+    ).rejects.toThrow('EROFS');
 
     // Past the probe's cache TTL, or the first (healthy) outcome is replayed.
     clock.advance(6_000);
@@ -210,9 +209,7 @@ describe('audit health — reachability (H-70c-1)', () => {
     // healthy — reading `isDirectory` is what tells the two apart.
     const fs = {
       stat: () =>
-        Promise.resolve(
-          { size: 12, isFile: true, isDirectory: false } as unknown as StatResult,
-        ),
+        Promise.resolve({ size: 12, isFile: true, isDirectory: false } as unknown as StatResult),
       readFile: () => Promise.reject(new Error('ENOTDIR')),
       writeFile: () => Promise.reject(new Error('ENOTDIR')),
       mkdir: () => Promise.reject(new Error('ENOTDIR')),

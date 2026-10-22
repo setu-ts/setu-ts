@@ -57,21 +57,19 @@ describe('outbox barrel exports', () => {
   });
 
   it('keeps the outbox internals out of the barrel', () => {
-    for (
-      const internal of [
-        'OutboxService',
-        'OutboxCollector',
-        'createOutboxHealthIndicator',
-        'resolveOutboxOptions',
-        'boundedCall',
-        'sweepStore',
-        'SweepBudget',
-        'PositionClock',
-        'encodeOutboxRecord',
-        'decodeOutboxRecord',
-        'MAX_STORED_OPTIONS_LENGTH',
-      ]
-    ) {
+    for (const internal of [
+      'OutboxService',
+      'OutboxCollector',
+      'createOutboxHealthIndicator',
+      'resolveOutboxOptions',
+      'boundedCall',
+      'sweepStore',
+      'SweepBudget',
+      'PositionClock',
+      'encodeOutboxRecord',
+      'decodeOutboxRecord',
+      'MAX_STORED_OPTIONS_LENGTH',
+    ]) {
       expect(internal in messaging).toBe(false);
     }
   });

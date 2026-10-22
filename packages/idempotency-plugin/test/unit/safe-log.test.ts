@@ -17,7 +17,10 @@ describe('safeLog', () => {
     } as unknown as ILogger;
     safeLog(() => logger, 'warn', 'w', { a: 1 });
     safeLog(() => logger, 'error', 'e', { b: 2 });
-    expect(lines).toEqual([['warn', 'w', { a: 1 }], ['error', 'e', { b: 2 }]]);
+    expect(lines).toEqual([
+      ['warn', 'w', { a: 1 }],
+      ['error', 'e', { b: 2 }],
+    ]);
   });
 
   it('discards a throw from the logger and from the thunk', () => {
@@ -35,7 +38,7 @@ describe('safeLog', () => {
         'error',
         'e',
         {},
-      )
+      ),
     ).not.toThrow();
   });
 

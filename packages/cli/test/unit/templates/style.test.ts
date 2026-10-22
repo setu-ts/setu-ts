@@ -14,6 +14,7 @@ import { REST_RECIPE, REST_TEMPLATE } from '../../../src/templates/rest.ts';
 import { CLASS_BASED_TEMPLATE } from '../../../src/templates/class-based.ts';
 import { composeHost, DECORATOR_WIRING } from '../../../src/templates/style.ts';
 import { DI_WIRING } from '../../../src/templates/di.ts';
+import { resolveHost } from '../../../src/templates/project-files.ts';
 
 /** The packages a functional host must NOT install. */
 const CLASS_ONLY_PACKAGES = new Set(['decorator-plugin', 'di-plugin']);
@@ -30,6 +31,20 @@ function countPlugins(host: ReturnType<typeof composeHost>, pkg: string): number
 }
 
 describe('composeHost', () => {
+  it('omits runtimeSwaps and preserves an unswapped recipe on both style hosts', () => {
+    const recipe = {
+      plugins: REST_RECIPE.plugins,
+      middleware: REST_RECIPE.middleware,
+      manifest: REST_RECIPE.manifest,
+    };
+    for (const style of ['functional', 'class-based'] as const) {
+      const host = composeHost(recipe, style);
+      expect(Object.hasOwn(host, 'runtimeSwaps')).toBe(false);
+      expect(resolveHost(host, 'cloudflare-workers').plugins).toEqual(
+        resolveHost(host, 'node').plugins,
+      );
+    }
+  });
   describe('the class-based arm of rest', () => {
     const host = composeHost(REST_RECIPE, 'class-based');
 
@@ -81,9 +96,11 @@ describe('composeHost', () => {
 
     it('emits the functional showcase', () => {
       const paths = host.files?.map((file) => file.path) ?? [];
-      expect(paths).toContain('src/services/greeting.service.ts');
-      expect(paths).toContain('src/controllers/greeting.controller.ts');
-      const service = host.files?.find((f) => f.path === 'src/services/greeting.service.ts');
+      expect(paths).toContain('src/modules/greeting/greeting.service.ts');
+      expect(paths).toContain('src/modules/greeting/greeting.routes.ts');
+      const service = host.files?.find(
+        (f) => f.path === 'src/modules/greeting/greeting.service.ts',
+      );
       // The functional service is a plain function, not a decorated class.
       expect(service?.contents).not.toContain('@Injectable');
     });

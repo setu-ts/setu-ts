@@ -7,7 +7,7 @@ import { PLUGIN_HEALTH_INDICATORS } from '../utils/plugin-claims.ts';
 import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
-import { readEnvFilePath } from '../templates/env-file.ts';
+import { configuredEnvFilePath } from '../templates/env-file.ts';
 
 /** CLI-owned policy module, refreshed when a plugin is installed. */
 export const DEVTOOL_SOURCES_MODULE = 'src/devtool/diagnostics.ts';
@@ -255,15 +255,13 @@ function normalizedSegments(path: string): readonly string[] {
  * only passes through `<pkg>/`, a URL — is a retarget (audit rounds 6 and 7).
  */
 function namesFrameworkPackage(pkg: string, value: string): boolean {
-  for (
-    const prefix of [
-      `npm:@setu-ts/${pkg}`,
-      `npm:/@setu-ts/${pkg}`,
-      `jsr:@setu-ts/${pkg}`,
-      `jsr:/@setu-ts/${pkg}`,
-      `npm:@jsr/setu-ts__${pkg}`,
-    ]
-  ) {
+  for (const prefix of [
+    `npm:@setu-ts/${pkg}`,
+    `npm:/@setu-ts/${pkg}`,
+    `jsr:@setu-ts/${pkg}`,
+    `jsr:/@setu-ts/${pkg}`,
+    `npm:@jsr/setu-ts__${pkg}`,
+  ]) {
     if (value.startsWith(prefix)) {
       const rest = value.slice(prefix.length);
       return rest === '' || rest[0] === '@' || rest[0] === '/';
@@ -358,8 +356,8 @@ export async function frameworkImportsRetargeted(fs: IFileSystem, dir: string): 
       const read = await readJsonManifest(fs, joinPath(current, file));
       if (read.kind === 'missing') continue;
       if (read.kind !== 'ok') return true;
-      const declaresWorkspace = isRecord(read.value) &&
-        ('workspace' in read.value || 'workspaces' in read.value);
+      const declaresWorkspace =
+        isRecord(read.value) && ('workspace' in read.value || 'workspaces' in read.value);
       // Above the project only a workspace root contributes maps.
       if (current !== dir && !declaresWorkspace) continue;
       workspace ||= declaresWorkspace;
@@ -491,7 +489,7 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
   let mode: 'code' | 'line' | 'block' | "'" | '"' = 'code';
   const code: string[] = [];
   const comments: string[] = [];
-  const blank = (c: string) => c === '\n' || c === '\r' ? c : ' ';
+  const blank = (c: string) => (c === '\n' || c === '\r' ? c : ' ');
   const push = (masked: string, kept: string) => {
     code.push(masked);
     comments.push(kept);
@@ -505,8 +503,13 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
         push('  ', '  ');
         i++;
       } else if (
-        c === '/' || c === '`' || c === '\\' || c === '#' ||
-        source.startsWith('<!--', i) || source.startsWith('-->', i) || !isCodeChar(c)
+        c === '/' ||
+        c === '`' ||
+        c === '\\' ||
+        c === '#' ||
+        source.startsWith('<!--', i) ||
+        source.startsWith('-->', i) ||
+        !isCodeChar(c)
       ) {
         return undefined;
       } else if (c === "'" || c === '"') {
@@ -554,12 +557,14 @@ function maskSource(source: string, blankLiterals: boolean): string | undefined 
 }
 
 /** Returns the executable body of the recognized synchronous createApp factory. */
-export function factoryScope(source: string): {
-  readonly code: string;
-  readonly header: number;
-  readonly start: number;
-  readonly end: number;
-} | undefined {
+export function factoryScope(source: string):
+  | {
+      readonly code: string;
+      readonly header: number;
+      readonly start: number;
+      readonly end: number;
+    }
+  | undefined {
   const code = maskSourceCode(source);
   if (code === undefined) return undefined;
   const header = /^export function createApp\s*\(/m.exec(code);
@@ -606,8 +611,13 @@ function isBlank(c: string): boolean {
 
 /** Identifier characters, checked without a regex per character. */
 function isIdentifierChar(c: string): boolean {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
-    c === '_' || c === '$';
+  return (
+    (c >= 'a' && c <= 'z') ||
+    (c >= 'A' && c <= 'Z') ||
+    (c >= '0' && c <= '9') ||
+    c === '_' ||
+    c === '$'
+  );
 }
 
 /**
@@ -726,6 +736,21 @@ export function referencesIdentifier(code: string, name: string): boolean {
  * @returns Whether a direct call exists
  */
 export function callsIdentifier(code: string, name: string): boolean {
+  return callArguments(code, name).length > 0;
+}
+
+/**
+ * The argument text of every direct call of `name` in masked code, in source
+ * order — the same calls {@linkcode callsIdentifier} counts, so the two cannot
+ * disagree about what a call is. `setu add` reads it to tell a provider called
+ * WITH its generated-artifact seam from one called bare.
+ *
+ * @param code - Masked source
+ * @param name - An identifier
+ * @returns The text between each call's parentheses
+ */
+export function callArguments(code: string, name: string): readonly string[] {
+  const found: string[] = [];
   let closes: Int32Array | undefined;
   for (const reference of code.matchAll(identifierPattern(name, 'g'))) {
     let at = reference.index + name.length;
@@ -743,9 +768,9 @@ export function callsIdentifier(code: string, name: string): boolean {
     let before = reference.index;
     while (before > 0 && (isBlank(code[before - 1]!) || code[before - 1] === '\n')) before -= 1;
     if (code.slice(Math.max(0, before - 8), before).endsWith('function')) continue;
-    return true;
+    found.push(code.slice(at + 1, close));
   }
-  return false;
+  return found;
 }
 
 /** The reference pattern shared by every use check, global for counting. */
@@ -821,7 +846,8 @@ function supportedBackplaneArgument(raw: string, masked: string, trustSources: b
   const trimmed = masked.trim();
   const open = masked.indexOf('{');
   if (
-    !trimmed.startsWith('{') || matchingClose(masked, open, '{') !== masked.trimEnd().length - 1
+    !trimmed.startsWith('{') ||
+    matchingClose(masked, open, '{') !== masked.trimEnd().length - 1
   ) {
     return false;
   }
@@ -859,11 +885,9 @@ const SOURCES_IMPORT = "import { DEVTOOL_SOURCES } from './src/devtool/diagnosti
 function hasActiveSourcesImport(source: string): boolean {
   const mask = maskSourceCode(source);
   if (mask === undefined) return false;
-  for (
-    const found of source.matchAll(
-      /^import \{ DEVTOOL_SOURCES \} from '\.\/src\/devtool\/diagnostics\.ts';$/gm,
-    )
-  ) {
+  for (const found of source.matchAll(
+    /^import \{ DEVTOOL_SOURCES \} from '\.\/src\/devtool\/diagnostics\.ts';$/gm,
+  )) {
     if (mask.slice(found.index, found.index + 6) === 'import') return true;
   }
   return false;
@@ -888,7 +912,9 @@ function sourcesBindingTrusted(code: string): 'declared' | 'absent' | 'foreign' 
   const scope = factoryScope(code);
   const body = scope === undefined ? -1 : scope.start;
   const declaration = body < 0 ? -1 : code.indexOf(SOURCES_DECLARATION, body);
-  const declared = declaration >= 0 && declaration < scope!.end &&
+  const declared =
+    declaration >= 0 &&
+    declaration < scope!.end &&
     code.indexOf(SOURCES_DECLARATION, declaration + 1) < 0 &&
     code.slice(body, declaration).trim() === '';
   let seen = 0;
@@ -952,8 +978,9 @@ function withoutSourceSpread(
  * confirms anything.
  */
 function backplaneConfirmedSupported(source: string, code: string): boolean {
-  const declaration = /^import \{ ([^}\n]+) \} from '@setu-ts\/realtime-backplane-plugin';$/m
-    .exec(source);
+  const declaration = /^import \{ ([^}\n]+) \} from '@setu-ts\/realtime-backplane-plugin';$/m.exec(
+    source,
+  );
   if (
     declaration === null ||
     code.slice(declaration.index, declaration.index + 6) !== 'import' ||
@@ -961,7 +988,9 @@ function backplaneConfirmedSupported(source: string, code: string): boolean {
   ) {
     return false;
   }
-  const name = declaration[1]!.split(',').map(parseImportItem)
+  const name = declaration[1]!
+    .split(',')
+    .map(parseImportItem)
     .find((item) => item?.symbol === 'RealtimeBackplanePlugin')?.local;
   if (name === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name)) return false;
   const uses = maskImportDeclarations(code);
@@ -1008,7 +1037,8 @@ function policyFlags(
 /** Restrict emitted aliases to bounded, printable identifiers and stable order. */
 function approved(names: readonly string[], limit: number): readonly string[] {
   return [...new Set(names.filter((name) => /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(name)))]
-    .sort().slice(0, limit);
+    .sort()
+    .slice(0, limit);
 }
 
 /** Names are already restricted to ASCII identifiers, so these literals need no escaping. */
@@ -1021,10 +1051,11 @@ function sourceRows(
   installed: ReadonlySet<string>,
   names: IDevtoolSourceNames,
 ): readonly ISourceRow[] {
-  return ROWS.filter((row) =>
-    installed.has(row.pkg) &&
-    (row.key !== 'auth' || names.authorization === true) &&
-    (row.key !== 'backplane' || names.customBackplane !== true)
+  return ROWS.filter(
+    (row) =>
+      installed.has(row.pkg) &&
+      (row.key !== 'auth' || names.authorization === true) &&
+      (row.key !== 'backplane' || names.customBackplane !== true),
   );
 }
 
@@ -1036,8 +1067,8 @@ export function renderDevtoolSources(
   const rows = sourceRows(installed, names);
   const imports = [
     ...new Set(
-      rows.map((row) =>
-        `import type { ${row.type} } from '@setu-ts/${row.typePackage ?? row.pkg}';`
+      rows.map(
+        (row) => `import type { ${row.type} } from '@setu-ts/${row.typePackage ?? row.pkg}';`,
       ),
     ),
   ];
@@ -1063,9 +1094,9 @@ export function renderDevtoolSources(
   };
   const entries = rows.map((row) => {
     const option = row.key === 'auth' ? 'authorizationDiagnostics' : 'diagnostics';
-    return `  ${row.key}: {\n    ${option}: {\n      enabled: true,\n      ${
-      policies[row.key]!.join(',\n      ')
-    },\n    } satisfies ${row.type},\n  },`;
+    return `  ${row.key}: {\n    ${option}: {\n      enabled: true,\n      ${policies[
+      row.key
+    ]!.join(',\n      ')},\n    } satisfies ${row.type},\n  },`;
   });
   return {
     path: DEVTOOL_SOURCES_MODULE,
@@ -1158,9 +1189,9 @@ function wireSources(
   if (rows.length === 0) return { source, manual: [] };
   if (
     scope === undefined ||
-    !scope.code.slice(scope.header, scope.start).includes(
-      'devtool?: { plugins?: readonly IPlugin[];',
-    ) ||
+    !scope.code
+      .slice(scope.header, scope.start)
+      .includes('devtool?: { plugins?: readonly IPlugin[];') ||
     sourcesBindingTrusted(scope.code) === 'foreign'
   ) {
     return {
@@ -1181,7 +1212,9 @@ function wireSources(
       manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
       continue;
     }
-    const symbol = imported?.[1]?.split(',').map(parseImportItem)
+    const symbol = imported?.[1]
+      ?.split(',')
+      .map(parseImportItem)
       .find((item) => item?.symbol === row.symbol)?.local;
     if (symbol === undefined || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(symbol)) {
       manual.push(`${row.symbol}({ ...options, ...sources.${row.key} })`);
@@ -1202,20 +1235,16 @@ function wireSources(
     const originalCall = updated.slice(offset, offset + call[0].length);
     const start = originalCall.indexOf('(') + 1;
     const end = originalCall.lastIndexOf(')');
-    const replacement = originalCall.slice(0, start) +
+    const replacement =
+      originalCall.slice(0, start) +
       withSourceArgs(row.pkg, originalCall.slice(start, end), installed, names) +
       originalCall.slice(end);
-    updated = updated.slice(0, offset) + replacement +
-      updated.slice(offset + call[0].length);
+    updated = updated.slice(0, offset) + replacement + updated.slice(offset + call[0].length);
   }
   if (updated === source) return { source, manual };
   if (!hasActiveSourcesImport(updated)) updated = `${SOURCES_IMPORT}\n` + updated;
   const finalScope = factoryScope(updated)!;
-  if (
-    !finalScope.code.slice(finalScope.start, finalScope.end).includes(
-      SOURCES_DECLARATION,
-    )
-  ) {
+  if (!finalScope.code.slice(finalScope.start, finalScope.end).includes(SOURCES_DECLARATION)) {
     const offset = finalScope.start;
     updated = updated.slice(0, offset) + `\n  ${SOURCES_DECLARATION}` + updated.slice(offset);
   }
@@ -1234,17 +1263,15 @@ export async function readDevtoolSourceNames(
   if (generatorMode(installed) === 'functional') {
     try {
       artifacts['job'] = (await fs.readdir(joinPath(dir, 'src/jobs')))
-        .filter((file) => file.endsWith('.job.ts')).map((file) => file.slice(0, -'.job.ts'.length));
+        .filter((file) => file.endsWith('.job.ts'))
+        .map((file) => file.slice(0, -'.job.ts'.length));
     } catch {
       // No functional jobs have been generated yet.
     }
   }
   let envKeys: readonly string[] = [];
-  const configuredPath = /\benvFilePath:\s*'([^']+)'/.exec(config)?.[1];
-  const parsedPath = readEnvFilePath(
-    configuredPath === undefined ? {} : { 'env-file': configuredPath },
-  );
-  const envExample = parsedPath.ok ? `${parsedPath.path ?? '.env'}.example` : '.env.example';
+  const configuredPath = configuredEnvFilePath(config);
+  const envExample = `${configuredPath ?? '.env'}.example`;
   try {
     const env = new TextDecoder().decode(await fs.readFile(joinPath(dir, envExample)));
     envKeys = env.split(/\r?\n/).flatMap((line) => /^([A-Z][A-Z0-9_]*)=/.exec(line)?.[1] ?? []);

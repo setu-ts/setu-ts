@@ -6,6 +6,121 @@ import type { ILogger, ScheduledJob } from '@setu-ts/common';
 import { SchedulerService } from '../../src/services/scheduler-service.ts';
 import { MemoryLock } from '../../src/lock/memory-lock.ts';
 import { FakeRuntime } from '../fixtures/fake-runtime.ts';
+import type { IDistributedLock } from '../../src/interfaces/index.ts';
+
+describe('SchedulerService lock reachability (M113b)', () => {
+  function createService(isHealthy?: () => Promise<boolean | undefined>) {
+    const runtime = new FakeRuntime();
+    const lock: IDistributedLock = {
+      acquire: () => Promise.resolve(null),
+      release: () => Promise.resolve(),
+      ...(isHealthy === undefined ? {} : { isHealthy }),
+    };
+    const service = new SchedulerService(runtime, lock);
+    return { service, runtime, indicator: service.createHealthIndicator() };
+  }
+
+  for (const reachable of [true, false, undefined]) {
+    it(`reports ${String(reachable)} reachability while keeping lifecycle up`, async () => {
+      const { service, indicator } = createService(() => Promise.resolve(reachable));
+      await service.connect();
+      expect(await indicator()).toEqual({
+        status: 'up',
+        data: { connected: true, lock: { reachable: reachable ?? 'unknown' } },
+      });
+      await service.disconnect();
+    });
+  }
+
+  it('reports unknown when the lock has no optional probe', async () => {
+    const { service, indicator } = createService();
+    await service.connect();
+    expect(await indicator()).toEqual({
+      status: 'up',
+      data: { connected: true, lock: { reachable: 'unknown' } },
+    });
+    await service.disconnect();
+  });
+
+  it('reports unknown when a custom lock probe rejects', async () => {
+    const { service, indicator } = createService(() => Promise.reject(new Error('unavailable')));
+    await service.connect();
+    expect((await indicator()).data?.lock).toEqual({ reachable: 'unknown' });
+    await service.disconnect();
+  });
+
+  it('caches reachability for 5 s and coalesces concurrent calls', async () => {
+    let calls = 0;
+    let reachable = true;
+    const { service, runtime, indicator } = createService(() => {
+      calls++;
+      return Promise.resolve(reachable);
+    });
+    await service.connect();
+    const results = await Promise.all([indicator(), indicator()]);
+    expect(results.map((r) => r.data?.lock)).toEqual([{ reachable: true }, { reachable: true }]);
+    expect(calls).toBe(1);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+
+    reachable = false;
+    await runtime.advance(4999);
+    expect((await indicator()).data?.lock).toEqual({ reachable: true });
+    expect(calls).toBe(1);
+    await runtime.advance(1);
+    expect((await indicator()).data?.lock).toEqual({ reachable: false });
+    expect(calls).toBe(2);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await service.disconnect();
+  });
+
+  it('bounds a never-settling probe at 2 s using runtime timers and caches unknown', async () => {
+    let calls = 0;
+    const { service, runtime, indicator } = createService(() => {
+      calls++;
+      return new Promise<boolean | undefined>(() => {});
+    });
+    await service.connect();
+    let settled = false;
+    const pending = indicator().then((result) => {
+      settled = true;
+      return result;
+    });
+    await Promise.resolve();
+    expect(calls).toBe(1);
+    expect(settled).toBe(false);
+    expect(runtime.getNextTimerDelay()).toBe(2000);
+    await runtime.advance(2000);
+    expect(await pending).toEqual({
+      status: 'up',
+      data: { connected: true, lock: { reachable: 'unknown' } },
+    });
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    expect((await indicator()).data?.lock).toEqual({ reachable: 'unknown' });
+    expect(calls).toBe(1);
+    await service.disconnect();
+  });
+
+  it('reports down without probing before connect or after disconnect, even after cache expiry', async () => {
+    let calls = 0;
+    const { service, runtime, indicator } = createService(() => {
+      calls++;
+      return Promise.resolve(true);
+    });
+    const down = { status: 'down', data: { connected: false, lock: { reachable: 'unknown' } } };
+    expect(await indicator()).toEqual(down);
+    expect(calls).toBe(0);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+    await service.connect();
+    expect((await indicator()).data?.lock).toEqual({ reachable: true });
+    expect(calls).toBe(1);
+    await service.disconnect();
+    expect(await indicator()).toEqual(down);
+    await runtime.advance(5000);
+    expect(await indicator()).toEqual(down);
+    expect(calls).toBe(1);
+    expect(runtime.getPendingTimerCount()).toBe(0);
+  });
+});
 
 describe('SchedulerService', () => {
   function createService() {
@@ -159,12 +274,7 @@ describe('SchedulerService', () => {
   it('handler receives job data', async () => {
     const { service } = createService();
     await service.connect();
-    await service.delay(
-      'job1',
-      100,
-      (_job: ScheduledJob<string>) => {},
-      { data: 'hello' },
-    );
+    await service.delay('job1', 100, (_job: ScheduledJob<string>) => {}, { data: 'hello' });
     // Data is stored - verify via getNextRun not throwing
     await service.getNextRun('job1');
     await service.remove('job1');
@@ -252,7 +362,7 @@ describe('SchedulerService', () => {
     // Simulate a lock that always fails to acquire.
     const runtime = new FakeRuntime();
     const lock = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       acquire: async () => null,
       release: async () => {},
     };
@@ -502,9 +612,14 @@ describe('SchedulerService', () => {
   it('every job with data option stores data', async () => {
     const { service } = createService();
     await service.connect();
-    await service.every('data-job', 1000, (_job) => {
-      // Data is stored and passed to handler
-    }, { data: 'test-data' });
+    await service.every(
+      'data-job',
+      1000,
+      (_job) => {
+        // Data is stored and passed to handler
+      },
+      { data: 'test-data' },
+    );
     await service.getNextRun('data-job');
   });
 

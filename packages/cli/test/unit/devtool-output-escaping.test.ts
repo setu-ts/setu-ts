@@ -33,7 +33,8 @@ import { renderWorkspaceManifest, type WorkspaceManifest } from '../../src/works
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 
 /** A factory that already takes and uses the devtool composition. */
-const CONFIG = 'export function createApp(devtool?: { plugins?: readonly IPlugin[]; ' +
+const CONFIG =
+  'export function createApp(devtool?: { plugins?: readonly IPlugin[]; ' +
   'diagnostics?: KernelDiagnosticsOptions }) { return createApplication({ plugins: ' +
   '[...(devtool?.plugins ?? [])], ...(devtool?.diagnostics !== undefined ? ' +
   '{ diagnostics: devtool.diagnostics } : {}) }); }';
@@ -176,13 +177,11 @@ describe('project-controlled text stays on one output line', () => {
   });
 
   it('generate app escapes sibling paths and the devtool-port conflict', async () => {
-    for (
-      const argv of [
-        ['app', 'beta', '--dry-run'],
-        ['app', 'beta'],
-        ['app', 'beta', '--devtool', '--devtool-port', '6500'],
-      ]
-    ) {
+    for (const argv of [
+      ['app', 'beta', '--dry-run'],
+      ['app', 'beta'],
+      ['app', 'beta', '--devtool', '--devtool-port', '6500'],
+    ]) {
       const fs = workspace(FORGED, { devtoolPort: 6500 });
       const out = createRecorder();
       await runAppCommand(parseArgs(argv), {
@@ -229,13 +228,11 @@ describe('project-controlled text stays on one output line', () => {
 
   it('generate app escapes manifest problems a committed manifest can carry (re-audit N3)', async () => {
     const base = { version: 1, basePort: 5869, runtime: 'deno', transport: 'http', members: [] };
-    for (
-      const manifest of [
-        { ...base, transport: 'http\nsetu: FORGED' },
-        // The invalid-port refusal names the field, which embeds the member name.
-        { ...base, members: [{ name: FORGED, port: 70000 }] },
-      ]
-    ) {
+    for (const manifest of [
+      { ...base, transport: 'http\nsetu: FORGED' },
+      // The invalid-port refusal names the field, which embeds the member name.
+      { ...base, members: [{ name: FORGED, port: 70000 }] },
+    ]) {
       const out = createRecorder();
       await runAppCommand(parseArgs(['app', 'beta']), {
         fs: createFakeFs({ '/ws/setu.workspace.json': JSON.stringify(manifest) }),
@@ -257,7 +254,10 @@ describe('project-controlled text stays on one output line', () => {
 
   it('generate escapes a hostile artifact file name and its own output (re-audit N3)', async () => {
     for (const dir of ['/p', '/p\nsetu: FORGED']) {
-      for (const argv of [['service', 'billing', '--dry-run'], ['service', 'billing']]) {
+      for (const argv of [
+        ['service', 'billing', '--dry-run'],
+        ['service', 'billing'],
+      ]) {
         const out = createRecorder();
         await runGenerateCommand(parseArgs(argv), {
           fs: createFakeFs({
@@ -276,15 +276,13 @@ describe('project-controlled text stays on one output line', () => {
 
   it('add escapes a hostile directory in its workspace-root and JSONC refusals (re-audit N3)', async () => {
     const dir = '/p\nsetu: FORGED';
-    for (
-      const files of [
-        {
-          [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),
-          [`${dir}/setu.workspace.json`]: '{}',
-        },
-        { [`${dir}/deno.jsonc`]: '{\n  // comment\n  "imports": {}\n}\n' },
-      ]
-    ) {
+    for (const files of [
+      {
+        [`${dir}/deno.json`]: JSON.stringify({ workspace: ['./apps/*'] }),
+        [`${dir}/setu.workspace.json`]: '{}',
+      },
+      { [`${dir}/deno.jsonc`]: '{\n  // comment\n  "imports": {}\n}\n' },
+    ]) {
       const out = createRecorder();
       await runAddCommand(parseArgs(['cache']), {
         fs: createFakeFs(files),
@@ -358,12 +356,10 @@ describe('project-controlled text stays on one output line', () => {
         expectNoForgedLine(out);
       }
     }
-    for (
-      const files of [
-        { '/p\nsetu: FORGED/setu.workspace.json': '{}' },
-        { '/p\nsetu: FORGED/deno.json': '{}' },
-      ]
-    ) {
+    for (const files of [
+      { '/p\nsetu: FORGED/setu.workspace.json': '{}' },
+      { '/p\nsetu: FORGED/deno.json': '{}' },
+    ]) {
       const out = createRecorder();
       await runAdoptCommand(parseArgs(['--name', 'orders']), {
         fs: createFakeFs(files),
@@ -393,7 +389,11 @@ describe('project-controlled text stays on one output line', () => {
         createApp: () => {
           throw new Error('boom\nsetu: FORGED');
         },
-      })).then(() => '', (error: Error) => error.message);
+      }),
+    ).then(
+      () => '',
+      (error: Error) => error.message,
+    );
     const lines = message.split('\n');
     // Exactly the CLI's own two lines: the detail and the path are escaped,
     // the hint after the deliberate break is intact.
@@ -412,13 +412,11 @@ describe('project-controlled text stays on one output line', () => {
           throw new Error('boom\nsetu: FORGED');
         },
       });
-    for (
-      const run of [
-        (deps: Parameters<typeof runCommandsListing>[1]) => runCommandsListing(parseArgs([]), deps),
-        (deps: Parameters<typeof runCommandsListing>[1]) =>
-          dispatchPluginCommand('demo:hello', parseArgs([]), deps),
-      ]
-    ) {
+    for (const run of [
+      (deps: Parameters<typeof runCommandsListing>[1]) => runCommandsListing(parseArgs([]), deps),
+      (deps: Parameters<typeof runCommandsListing>[1]) =>
+        dispatchPluginCommand('demo:hello', parseArgs([]), deps),
+    ]) {
       const out = createRecorder();
       expect(
         await run({

@@ -24,9 +24,7 @@ const app = createApplication({
     RuntimePlugin(),
     HealthPlugin({
       endpoints: { health: '/health', live: '/live', ready: '/ready' },
-      indicators: [
-        createHttpIndicator('external-api', { url: 'https://api.example.com/health' }),
-      ],
+      indicators: [createHttpIndicator('external-api', { url: 'https://api.example.com/health' })],
     }),
   ],
 });
@@ -35,16 +33,26 @@ await app.start({ port: 3000 });
 
 ## Options
 
-| Option        | Type                       | Default                                                 | Description                                  |
-| ------------- | -------------------------- | ------------------------------------------------------- | -------------------------------------------- |
-| `endpoints`   | `EndpointsOptions`         | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                                 |
-| `indicators`  | `IHealthIndicator[]`       | `[]`                                                    | Indicators registered at startup.            |
-| `diagnostics` | `HealthDiagnosticsOptions` | _(absent — disabled)_                                   | Opt-in minimized health observations (M98d). |
+| Option        | Type                       | Default                                                 | Description                                                                               |
+| ------------- | -------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `endpoints`   | `EndpointsOptions`         | `{ health: '/health', live: '/live', ready: '/ready' }` | Probe paths.                                                                              |
+| `indicators`  | `IHealthIndicator[]`       | `[]`                                                    | Indicators registered at startup.                                                         |
+| `diagnostics` | `HealthDiagnosticsOptions` | _(absent — disabled)_                                   | Opt-in minimized health observations (M98d).                                              |
+| `details`     | `boolean`                  | `false`                                                 | Include indicator data and latency in HTTP responses. Non-booleans throw at construction. |
 
 Indicators passed via `indicators` are registered **before** the `onInit` drain, so they are present
 even when the lifecycle is bypassed.
 
 ## Statuses
+
+HTTP responses from `/health`, `/live`, and `/ready` default to
+`{ status, timestamp, checks: { name: { status } } }`. They omit indicator `data` and `latencyMs`,
+including runtime version and hostname. Set `HealthPlugin({ details: true })` to restore full
+reports for a dashboard; protect those endpoints when their data is sensitive. The option affects
+only those HTTP bodies: `HealthService.check()`, `checkLive()` and `checkReady()` still return full
+reports, and the gRPC bridge is unchanged. Diagnostics are unaffected too, and record only their
+minimized observations, never indicator `data` (see
+[Health observations](#health-observations-m98d)).
 
 An indicator reports `'up'`, `'degraded'`, or `'down'`; the overall report takes the worst status
 among them. A result that is not one of those — not an object, or a `status` outside the three — is
@@ -117,10 +125,23 @@ and `docs/diagnostics-protocol.md` for the wire shape.
 | `HealthObservationState`            | type      |
 | `HealthStatus`                      | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#health-setu-tshealth-plugin).
+
+## What `degraded` means
+
+`/ready` runs every registered indicator except `self`, concurrently, each bounded by
+`indicatorTimeoutMs`. A timeout, a throw, or an invalid result counts as `down`. With only `self`
+registered, `/ready` answers 200 with no checks. `/live` runs only `self`.
+
+`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
+return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+
+Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
+request serving belongs in the indicator's `data`: draining every replica would remove healthy
+serving capacity. Alert on those data fields.

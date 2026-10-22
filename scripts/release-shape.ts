@@ -96,17 +96,21 @@ export function shapeProblems(input: ShapeInput): readonly string[] {
     case 'backwards':
       return [`${version} is not later than the previous release tag.`];
     case 'patch':
-      return breaking === 0 ? [] : [
-        `${version} is a PATCH release but its changelog section carries ${breaking} BREAKING ` +
-        `entr${breaking === 1 ? 'y' : 'ies'}. README's Versioning table promises a patch is ` +
-        'safe to take unread — cut a minor instead, or defer the breaking entries to one.',
-      ];
+      return breaking === 0
+        ? []
+        : [
+            `${version} is a PATCH release but its changelog section carries ${breaking} BREAKING ` +
+              `entr${breaking === 1 ? 'y' : 'ies'}. README's Versioning table promises a patch is ` +
+              'safe to take unread — cut a minor instead, or defer the breaking entries to one.',
+          ];
     case 'minor':
     case 'major':
-      return breaking > 0 || allowQuietMinor ? [] : [
-        `${version} is a ${bump.toUpperCase()} release but its changelog section carries no ` +
-        'BREAKING entry — a spent minor costs every caret pin a manual bump for nothing. Cut a ' +
-        'patch, or pass --allow-quiet-minor to say this is deliberate.',
-      ];
+      return breaking > 0 || allowQuietMinor
+        ? []
+        : [
+            `${version} is a ${bump.toUpperCase()} release but its changelog section carries no ` +
+              'BREAKING entry — a spent minor costs every caret pin a manual bump for nothing. Cut a ' +
+              'patch, or pass --allow-quiet-minor to say this is deliberate.',
+          ];
   }
 }

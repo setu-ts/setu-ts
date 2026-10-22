@@ -56,7 +56,8 @@ export interface SizingSnapshot {
 export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnapshot {
   const maxWorkers: unknown = options?.maxWorkers;
   if (
-    maxWorkers !== undefined && maxWorkers !== Infinity &&
+    maxWorkers !== undefined &&
+    maxWorkers !== Infinity &&
     (!Number.isSafeInteger(maxWorkers) || (maxWorkers as number) <= 0)
   ) {
     throw new RangeError(
@@ -66,7 +67,8 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
   const startup: unknown = options?.startupTimeoutMs;
   if (
     startup !== undefined &&
-    (!Number.isSafeInteger(startup) || (startup as number) <= 0 ||
+    (!Number.isSafeInteger(startup) ||
+      (startup as number) <= 0 ||
       (startup as number) > MAX_TIMER_DELAY_MS)
   ) {
     // No Infinity opt-out on purpose: without a startup deadline a worker that
@@ -85,9 +87,7 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
     // overrides", exactly as the pool lookup treated it before validation was
     // added; reading through it must not throw TypeError at construction.
     const fields = entry as
-      | Partial<Record<keyof PoolOverridesSnapshot, unknown>>
-      | null
-      | undefined;
+      Partial<Record<keyof PoolOverridesSnapshot, unknown>> | null | undefined;
     const poolTimeout: unknown = fields?.taskTimeoutMs;
     assertTaskTimeout(poolTimeout, `pools[${JSON.stringify(specifier)}].taskTimeoutMs`);
     pools.set(specifier, {
@@ -120,7 +120,8 @@ export function readSizingOptions(options?: WorkerPoolPluginOptions): SizingSnap
 export function assertTaskTimeout(value: unknown, name: string): void {
   if (
     value !== undefined &&
-    (!Number.isSafeInteger(value) || (value as number) < 0 ||
+    (!Number.isSafeInteger(value) ||
+      (value as number) < 0 ||
       (value as number) > MAX_TIMER_DELAY_MS)
   ) {
     throw new RangeError(
@@ -143,10 +144,13 @@ export function validateSizingOptions(options?: WorkerPoolPluginOptions): void {
 
 /** Resolves the service-wide bound once, preserving explicitly sized pools. */
 export function resolveMaxWorkers(snapshot: SizingSnapshot, parallelism: number): number {
-  return snapshot.maxWorkers ?? Math.max(
-    parallelism,
-    budgetSize(snapshot.defaultPoolSize),
-    [...snapshot.pools.values()].reduce((sum, pool) => sum + budgetSize(pool.size), 0),
+  return (
+    snapshot.maxWorkers ??
+    Math.max(
+      parallelism,
+      budgetSize(snapshot.defaultPoolSize),
+      [...snapshot.pools.values()].reduce((sum, pool) => sum + budgetSize(pool.size), 0),
+    )
   );
 }
 

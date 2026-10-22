@@ -99,7 +99,8 @@ describe('inbox failures', () => {
 
   it('throws a parse rejection unchanged when maxAttempts is absent', async () => {
     const { store, service, subscription } = failing();
-    const error = await service.deliver(subscription, envelope('e-1', { personId: 7 }), metadata)
+    const error = await service
+      .deliver(subscription, envelope('e-1', { personId: 7 }), metadata)
       .catch((e: unknown) => e);
     expect(error).toBeInstanceOf(IntegrationEventRejectedError);
     expect((error as IntegrationEventRejectedError).reason).toBe('parse');
@@ -140,8 +141,9 @@ describe('inbox failures', () => {
     await expect(service.deliver(subscription, envelope('e-1'), metadata)).rejects.toThrow();
     const second = failing({ maxAttempts: 2 });
     second.store.recordFailure$ = () => Promise.reject(new DrizzleQueryError(leak));
-    await expect(second.service.deliver(second.subscription, envelope('e-1'), metadata)).rejects
-      .toThrow();
+    await expect(
+      second.service.deliver(second.subscription, envelope('e-1'), metadata),
+    ).rejects.toThrow();
     for (const meta of [...logged, ...second.logged]) {
       expect(meta.errorKind).toBe('DrizzleQueryError');
       expect(JSON.stringify(meta)).not.toContain('secret-person');
@@ -214,11 +216,14 @@ describe('errorKind', () => {
       },
     });
     expect(errorKind(throwing)).toBe('Error');
-    const hostileProto = new Proxy({}, {
-      getPrototypeOf() {
-        throw new Error('hostile');
+    const hostileProto = new Proxy(
+      {},
+      {
+        getPrototypeOf() {
+          throw new Error('hostile');
+        },
       },
-    });
+    );
     expect(errorKind(hostileProto)).toBe('Error');
   });
 

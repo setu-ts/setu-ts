@@ -35,7 +35,9 @@ export function Layout(props: { readonly title: string; readonly children: Child
 export function UserList(props: { readonly users: readonly string[] }) {
   return (
     <ul>
-      {props.users.map((user) => <li key={user}>{user}</li>)}
+      {props.users.map((user) => (
+        <li key={user}>{user}</li>
+      ))}
     </ul>
   );
 }

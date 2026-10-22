@@ -218,6 +218,18 @@ describe('attachConnectionErrorReporter', () => {
     expect(emitter.count('error')).toBe(1);
   });
 
+  it('attaches dropping listeners when no reporter is given, so the client never falls back to the console', () => {
+    const client = fakeEmitter();
+
+    expect(attachConnectionErrorReporter(client)).toBe(true);
+    expect(client.count('error')).toBe(1);
+    expect(client.count('ready')).toBe(1);
+    expect(() => {
+      client.emit('error', new Error('refused'));
+      client.emit('ready');
+    }).not.toThrow();
+  });
+
   it('refuses a value with no on method', () => {
     const reporter = createConnectionErrorReporter({ source: 's', logger: () => undefined });
 

@@ -81,20 +81,13 @@ export interface MemoryTenantDataStoreOptions {
  * A string discriminant that maps to an isolation-strategy class.
  */
 export type DatabaseStrategyKind =
-  | 'column-per-tenant'
-  | 'schema-per-tenant'
-  | 'database-per-tenant';
+  'column-per-tenant' | 'schema-per-tenant' | 'database-per-tenant';
 
 /**
  * Resolver configuration — one string name, a custom instance, or a chain.
  */
 export type ResolverConfig =
-  | 'subdomain'
-  | 'header'
-  | 'path'
-  | 'jwt'
-  | ITenantResolver
-  | readonly ITenantResolver[];
+  'subdomain' | 'header' | 'path' | 'jwt' | ITenantResolver | readonly ITenantResolver[];
 
 /**
  * Top-level options for `MultiTenancyPlugin`.

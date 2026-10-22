@@ -71,10 +71,10 @@ function withDiscoveryMap(host: ResolvedHost): ResolvedHost {
     plugins: host.plugins.map((wiring) =>
       wiring.pkg === DISCOVERY_PACKAGE
         ? {
-          ...wiring,
-          args: `{ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`,
-        }
-        : wiring
+            ...wiring,
+            args: `{ provider: 'static', services: ${SERVICE_ENDPOINTS_EXPORT} }`,
+          }
+        : wiring,
     ),
     localImports: [
       ...host.localImports,
@@ -127,26 +127,32 @@ function withTransport(
 
   // The transport's clients (the gRPC runtime) are optional peers of the plugin
   // it appends, so the member declares them itself (`client-dependencies.ts`).
-  return withClientDependencies({
-    ...next,
-    ...(host.appFactory === undefined || transport.name !== 'grpc'
-      ? {}
-      : { appFactoryContext: { ...next.appFactoryContext, grpcBasePath: '/grpc' } }),
-    // The transport's own plugins are appended, so a template that already
-    // registers one of them would collide — none does, and a unit test pins
-    // that across the registry.
-    plugins: [...next.plugins, ...transport.plugins],
-    files: [...next.files, ...(transport.memberFiles?.(member, onDeno) ?? [])],
-    // Each manifest kind gets only its own half: a Deno member's tasks and import
-    // map, an npm member's scripts and devDependencies.
-    ...(onDeno
-      ? {
-        extraTasks: { ...next.extraTasks, ...transport.memberTasks },
-        extraImports: { ...next.extraImports, ...transport.memberImports },
-      }
-      : {
-        extraScripts: { ...next.extraScripts, ...transport.memberScripts },
-        extraDevDependencies: { ...next.extraDevDependencies, ...transport.memberDevDependencies },
-      }),
-  }, transport.clients ?? []);
+  return withClientDependencies(
+    {
+      ...next,
+      ...(host.appFactory === undefined || transport.name !== 'grpc'
+        ? {}
+        : { appFactoryContext: { ...next.appFactoryContext, grpcBasePath: '/grpc' } }),
+      // The transport's own plugins are appended, so a template that already
+      // registers one of them would collide — none does, and a unit test pins
+      // that across the registry.
+      plugins: [...next.plugins, ...transport.plugins],
+      files: [...next.files, ...(transport.memberFiles?.(member, onDeno) ?? [])],
+      // Each manifest kind gets only its own half: a Deno member's tasks and import
+      // map, an npm member's scripts and devDependencies.
+      ...(onDeno
+        ? {
+            extraTasks: { ...next.extraTasks, ...transport.memberTasks },
+            extraImports: { ...next.extraImports, ...transport.memberImports },
+          }
+        : {
+            extraScripts: { ...next.extraScripts, ...transport.memberScripts },
+            extraDevDependencies: {
+              ...next.extraDevDependencies,
+              ...transport.memberDevDependencies,
+            },
+          }),
+    },
+    transport.clients ?? [],
+  );
 }

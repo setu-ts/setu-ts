@@ -10,8 +10,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 import {
   checkChangelogPrs,
@@ -53,13 +52,15 @@ const CHANGELOG = [
 
 describe('parseMergeSubject', () => {
   it('reads the PR number and branch from a GitHub merge subject', () => {
-    expect(parseMergeSubject('Merge pull request #405 from setu-ts/feat/m103-localization-plugin'))
-      .toEqual({ number: 405, branch: 'feat/m103-localization-plugin' });
+    expect(
+      parseMergeSubject('Merge pull request #405 from setu-ts/feat/m103-localization-plugin'),
+    ).toEqual({ number: 405, branch: 'feat/m103-localization-plugin' });
   });
 
   it('ignores a merge that is not a pull request', () => {
-    expect(parseMergeSubject("Merge remote-tracking branch 'origin/develop' into feat/x"))
-      .toBeNull();
+    expect(
+      parseMergeSubject("Merge remote-tracking branch 'origin/develop' into feat/x"),
+    ).toBeNull();
     expect(parseMergeSubject('chore: merge develop into m101d')).toBeNull();
   });
 });
@@ -81,6 +82,37 @@ describe('requiredToken', () => {
     expect(requiredToken(pr(3, 'feat/M70h-cli-scaffolds'))).toBe('M70h');
   });
 
+  it('maps a lettered milestone split into numbered parts (M111e1)', () => {
+    expect(requiredToken(pr(455, 'feat/m111e1-prettier-eslint'))).toBe('M111e1');
+    // Only one digit after the letter, as plan-lint allows: anything longer is not a milestone id.
+    expect(requiredToken(pr(9, 'feat/m111e12-x', ['packages/sdk/src/a.ts']))).toBe('#9');
+  });
+
+  it('credits a numbered-part milestone by its id, and only that part', () => {
+    const changelog = CHANGELOG.replace(
+      '- **Bounded health (M101a).** Every call bounded.',
+      '- **Bounded health (M101a).** Every call bounded.\n- **Errors keep their cause (M111e1).** Fixed.',
+    );
+    const ok = checkChangelogPrs(changelog, '0.9.0', [pr(455, 'feat/m111e1-prettier-eslint')]);
+    expect(ok.findings).toEqual([]);
+    expect(ok.represented).toBe(1);
+    // M111e2 is not M111e1, and an M111e1 entry does not represent a bare M111e branch.
+    const other = checkChangelogPrs(changelog, '0.9.0', [
+      pr(456, 'feat/m111e2-node-scripts'),
+      pr(457, 'feat/m111e-tooling'),
+    ]);
+    expect(other.findings.map((finding) => finding.expectedToken)).toEqual(['M111e2', 'M111e']);
+  });
+
+  it('reports a numbered-part milestone entry misfiled under a published heading', () => {
+    const misfiled = CHANGELOG.replace(
+      '- **Diagnostics (M98o).** Shipped in 0.8.0.',
+      '- **Diagnostics (M98o).** Shipped in 0.8.0.\n- **Tooling (M111e1).** Filed late.',
+    );
+    const result = checkChangelogPrs(misfiled, '0.9.0', [pr(455, 'feat/m111e1-prettier-eslint')]);
+    expect(result.findings.map((finding) => finding.kind)).toEqual(['missing', 'misfiled']);
+  });
+
   it('requires a PR number from any other branch that changed published source', () => {
     expect(requiredToken(pr(412, 'fix/sdk-retry', ['packages/sdk/src/http/client.ts']))).toBe(
       '#412',
@@ -98,8 +130,7 @@ describe('requiredToken', () => {
     // Nor is a script or a workflow.
     expect(
       requiredToken(pr(12, 'chore/ci', ['scripts/verify-release.ts', '.github/workflows/ci.yml'])),
-    )
-      .toBeNull();
+    ).toBeNull();
   });
 
   it("exempts the verified version's own release PR, and only that one", () => {
@@ -108,6 +139,16 @@ describe('requiredToken', () => {
     // Another release's branch, or no version at all, is still held to the source rule.
     expect(requiredToken(pr(394, 'release/v0.8.0', bump), '0.9.0')).toBe('#394');
     expect(requiredToken(pr(451, 'release/v0.9.0', bump))).toBe('#451');
+  });
+
+  it('exempts the main -> develop back-merge after a release, whatever it touched', () => {
+    // #453 carried the v0.9.0 version bump back to develop; every commit in it was already
+    // represented in the section it was released in.
+    const bump = ['packages/kernel/src/version.ts'];
+    expect(requiredToken(pr(453, 'main', bump), '0.9.0')).toBeNull();
+    expect(requiredToken(pr(453, 'main', bump))).toBeNull();
+    // Only the exact branch: a feature branch that merely starts with "main" is not exempt.
+    expect(requiredToken(pr(460, 'fix/main-loop', bump))).toBe('#460');
   });
 });
 
@@ -262,7 +303,8 @@ describe('mergedPullRequests (git seam)', () => {
 describe('runGit (real subprocess)', () => {
   it('returns stdout on success and throws with stderr on failure', async () => {
     expect((await runGit(['--version'])).startsWith('git version')).toBe(true);
-    await expect(runGit(['rev-parse', '--verify', 'refs/heads/no-such-branch-ever']))
-      .rejects.toThrow('git rev-parse --verify refs/heads/no-such-branch-ever failed');
+    await expect(
+      runGit(['rev-parse', '--verify', 'refs/heads/no-such-branch-ever']),
+    ).rejects.toThrow('git rev-parse --verify refs/heads/no-such-branch-ever failed');
   });
 });

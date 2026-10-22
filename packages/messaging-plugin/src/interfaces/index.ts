@@ -29,12 +29,7 @@ import type { ISerializer } from '../serializers/serializer.ts';
  */
 export interface IRedisStreamsClient {
   /** Add a message to a stream. */
-  xadd(
-    name: string,
-    id: string,
-    data: string | Array<string>,
-    ...args: string[]
-  ): Promise<string>;
+  xadd(name: string, id: string, data: string | Array<string>, ...args: string[]): Promise<string>;
   /** Create or manage consumer groups. */
   xgroup(
     command: 'CREATE' | 'DELETE' | 'SETID' | 'DELCONSUMER',
@@ -180,6 +175,8 @@ export interface IKafkaFactory {
   producer(): unknown;
   /** Create a consumer. */
   consumer(options: { groupId: string }): unknown;
+  /** Optional admin for reachability and fresh-group offsets. Injected client timeouts apply. @since 0.10.0 */
+  admin?(options?: { retry?: { retries: number } }): unknown;
 }
 
 /**
@@ -215,14 +212,7 @@ export interface IKafkaEventEmitter {
  * @since 0.1.0
  */
 export type MessagingBrokerType =
-  | 'memory'
-  | 'redis-streams'
-  | 'rabbitmq'
-  | 'nats'
-  | 'kafka'
-  | 'pubsub'
-  | 'service-bus'
-  | 'custom';
+  'memory' | 'redis-streams' | 'rabbitmq' | 'nats' | 'kafka' | 'pubsub' | 'service-bus' | 'custom';
 
 /**
  * Shared options present on every {@linkcode MessagingPluginOptions} arm.
@@ -384,10 +374,7 @@ export interface InMemoryBrokerOptions {
    * `MessagingPlugin` always supplies one backed by the application's logger,
    * so the absent case is reachable only by constructing the broker directly.
    */
-  readonly onDispatchError?: (
-    error: unknown,
-    metadata: MessageMetadata,
-  ) => void | Promise<void>;
+  readonly onDispatchError?: (error: unknown, metadata: MessageMetadata) => void | Promise<void>;
 }
 
 /**
@@ -413,9 +400,7 @@ export interface SubscriptionDefinition {
  *
  * @since 0.3.0
  */
-export type SubscriptionEntry =
-  | SubscriptionDefinition
-  | RegistryFactory<SubscriptionDefinition>;
+export type SubscriptionEntry = SubscriptionDefinition | RegistryFactory<SubscriptionDefinition>;
 
 // ─── Arms of the discriminated union ───────────────────────────────────────────
 
@@ -540,6 +525,15 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface NatsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
+   * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
+   * Invalid values throw RangeError at construction; an injected client with this option
+   * throws TypeError. Exhausting a finite budget closes the connection and health stays down.
+   * @since 0.10.0
+   */
+  reconnect?: { maxAttempts?: number; waitMs?: number };
+
   broker: 'nats';
   url?: string;
   client?: INatsConnection;
@@ -590,6 +584,9 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface KafkaMessagingOptions extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'kafka';
   brokers?: readonly string[];
   client?: IKafkaFactory;
@@ -608,6 +605,9 @@ export interface KafkaMessagingOptions extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** Injected transport (bypasses lazy SDK load). Required for this arm. */
   client: import('../brokers/pubsub-broker.ts').IPubSubTransport;
@@ -634,6 +634,9 @@ export interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
  * @since 0.1.0
  */
 export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   broker: 'pubsub';
   /** GCP project ID. Required for production. */
   projectId: string;
@@ -658,8 +661,7 @@ export interface PubSubMessagingOptionsProduction extends MessagingCommonOptions
  * @since 0.1.0
  */
 export type PubSubMessagingOptions =
-  | PubSubMessagingOptionsInjected
-  | PubSubMessagingOptionsProduction;
+  PubSubMessagingOptionsInjected | PubSubMessagingOptionsProduction;
 
 /**
  * Azure Service Bus SDK retry budget for the data client (M90b / X28-6).
@@ -745,8 +747,7 @@ export interface ServiceBusMessagingOptionsProduction extends MessagingCommonOpt
  * @since 0.1.0
  */
 export type ServiceBusMessagingOptions =
-  | ServiceBusMessagingOptionsInjected
-  | ServiceBusMessagingOptionsProduction;
+  ServiceBusMessagingOptionsInjected | ServiceBusMessagingOptionsProduction;
 
 /**
  * Custom (inject-any-broker) arm.
@@ -854,6 +855,15 @@ export interface RabbitMqOptions {
  * @since 0.1.0
  */
 export interface NatsOptions {
+  /**
+   * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
+   * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
+   * Invalid values throw RangeError at construction; an injected client with this option
+   * throws TypeError. Exhausting a finite budget closes the connection and health stays down.
+   * @since 0.10.0
+   */
+  reconnect?: { maxAttempts?: number; waitMs?: number };
+
   /** NATS connection URL(s). */
   url?: string;
   /** Injected NATS connection. */
@@ -893,6 +903,9 @@ export interface INatsHeaders {
  * @since 0.1.0
  */
 export interface KafkaOptions {
+  /** Publish bound in ms, default 15000; 0 disables it. A timeout may still deliver. @since 0.10.0 */
+  publishTimeoutMs?: number;
+
   /** Kafka bootstrap brokers. */
   brokers?: readonly string[];
   /** Injected Kafka factory. */
@@ -953,8 +966,10 @@ export interface KafkaOptions {
    * Optional logger. Reads a consumer whose `consumer.run()` rejects —
    * kafkajs's crash handler rethrows a disconnect that fails — which would
    * otherwise be an unhandled rejection.
+   * Fresh-group initialization failures use `warn` when supplied, else `error`,
+   * and name the topic and group. The subscription remains active.
    */
-  logger?: { error: (msg: string) => void };
+  logger?: { error: (msg: string) => void; warn?: (msg: string) => void };
 }
 
 /**
@@ -1038,7 +1053,11 @@ export interface OutboxRelayOptions {
    * One deadline over the whole sweep, measured on the monotonic clock.
    * Default `30000`. Must be greater than publishTimeoutMs + 2 * storeTimeoutMs.
    * Rows start while the remaining budget covers that reserve: the first
-   * `15000` ms with default options.
+   * `15000` ms with default options. EXCEPT that the status write settling an
+   * already-invoked publish runs to its own `storeTimeoutMs` even when a pause
+   * has exhausted the budget: a sweep that overran by a pause can outlive this
+   * deadline by at most one `storeTimeoutMs`, and the shutdown drain that waits
+   * for it is bounded by the same amount.
    */
   readonly sweepDeadlineMs?: number;
   /** Bound on one publish. Default `5000`. */
@@ -1106,19 +1125,18 @@ export interface OutboxCommonOptions {
  *
  * @since 0.9.0
  */
-export type OutboxOptions =
-  & OutboxCommonOptions
-  & (
+export type OutboxOptions = OutboxCommonOptions &
+  (
     | {
-      /** The one store every write and the relay use. */
-      readonly store: OutboxStoreEntry;
-      readonly stores?: never;
-    }
+        /** The one store every write and the relay use. */
+        readonly store: OutboxStoreEntry;
+        readonly stores?: never;
+      }
     | {
-      /** A store per tenant id, selected by the `tenantId` a call names. */
-      readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
-      readonly store?: never;
-    }
+        /** A store per tenant id, selected by the `tenantId` a call names. */
+        readonly stores: Readonly<Record<string, OutboxStoreEntry>>;
+        readonly store?: never;
+      }
   );
 
 /**
@@ -1164,12 +1182,7 @@ export interface OutboxSweepResult {
    * closing.
    */
   readonly endedBy:
-    | 'complete'
-    | 'scan-limit'
-    | 'publish-limit'
-    | 'deadline'
-    | 'store-failure'
-    | 'closing';
+    'complete' | 'scan-limit' | 'publish-limit' | 'deadline' | 'store-failure' | 'closing';
 }
 
 /**

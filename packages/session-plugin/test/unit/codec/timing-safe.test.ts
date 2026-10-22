@@ -28,8 +28,9 @@ describe('timingSafeEqualBytes', () => {
   });
 
   it('rejects a single-bit difference', () => {
-    expect(timingSafeEqualBytes(new Uint8Array([0b0000_0001]), new Uint8Array([0b0000_0000])))
-      .toBe(false);
+    expect(timingSafeEqualBytes(new Uint8Array([0b0000_0001]), new Uint8Array([0b0000_0000]))).toBe(
+      false,
+    );
   });
 
   it('distinguishes the extremes of the byte range', () => {

@@ -105,8 +105,9 @@ function kindOf(value: unknown): unknown {
 /** Whether a candidate carries the current version and string `topic`/`id`. */
 function hasEnvelopeHead(value: object): boolean {
   const head = value as { v?: unknown; topic?: unknown; id?: unknown };
-  return head.v === ENVELOPE_VERSION && typeof head.topic === 'string' &&
-    typeof head.id === 'string';
+  return (
+    head.v === ENVELOPE_VERSION && typeof head.topic === 'string' && typeof head.id === 'string'
+  );
 }
 
 /**
@@ -225,10 +226,12 @@ export function encodeRequestEnvelope(
  */
 export function encodeReplyEnvelope(
   correlationId: string,
-  outcome: { readonly ok: true; readonly payload: unknown } | {
-    readonly ok: false;
-    readonly error: string;
-  },
+  outcome:
+    | { readonly ok: true; readonly payload: unknown }
+    | {
+        readonly ok: false;
+        readonly error: string;
+      },
 ): ReplyEnvelope {
   return outcome.ok
     ? { v: ENVELOPE_VERSION, kind: 'rpc-reply', correlationId, ok: true, payload: outcome.payload }
@@ -280,6 +283,9 @@ export function isRequestEnvelope(value: unknown): value is RequestEnvelope {
 export function isReplyEnvelope(value: unknown): value is ReplyEnvelope {
   if (kindOf(value) !== 'rpc-reply') return false;
   const candidate = value as { v?: unknown; correlationId?: unknown; ok?: unknown };
-  return candidate.v === ENVELOPE_VERSION && typeof candidate.correlationId === 'string' &&
-    typeof candidate.ok === 'boolean';
+  return (
+    candidate.v === ENVELOPE_VERSION &&
+    typeof candidate.correlationId === 'string' &&
+    typeof candidate.ok === 'boolean'
+  );
 }

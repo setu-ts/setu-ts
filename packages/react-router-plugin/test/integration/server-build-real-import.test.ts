@@ -20,7 +20,7 @@ import { assembleHandler } from '../../src/handler/server-build.ts';
 // absent optional dependency does not turn the suite red.
 let rrModule: Record<string, unknown> | null = null;
 try {
-  rrModule = await import('react-router') as unknown as Record<string, unknown>;
+  rrModule = (await import('react-router')) as unknown as Record<string, unknown>;
 } catch {
   rrModule = null;
 }
@@ -53,7 +53,7 @@ describe('server-build-real-import', () => {
     };
 
     const mockCrh = ((_build: unknown, _mode?: string) => {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async () => new Response('ok');
     }) as (build: unknown, mode?: string) => SsrRequestHandler;
 
@@ -81,14 +81,14 @@ describe('server-build-real-import', () => {
     };
 
     let receivedBuild: unknown;
-    // deno-lint-ignore ban-types
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-function-type
     const trackedCrh = (build: unknown, _mode: string): Function => {
       receivedBuild = build;
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       return async () => new Response('mock');
     };
 
-    // deno-lint-ignore no-explicit-any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const handler = assembleHandler(syntheticBuild.default, trackedCrh as any, 'production');
     expect(handler).toBeDefined();
     // assembleHandler calls createRequestHandler immediately, so receivedBuild should be set.

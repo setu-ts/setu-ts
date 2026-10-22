@@ -11,7 +11,8 @@ import {
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { VERSION } from '../../src/version.ts';
 
-const CONFIG = 'export function createApp(\n' +
+const CONFIG =
+  'export function createApp(\n' +
   '  _env?: Readonly<Record<string, unknown>>,\n' +
   '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
   '): IApplication {\n  return createApplication({ plugins: [...(devtool?.plugins ?? [])], ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}) });\n}\n';
@@ -38,13 +39,11 @@ function harness(rootDev: string) {
       transport: 'http',
       members: [{ name: 'orders', port: 3000 }],
     }),
-    '/ws/deno.json': `${
-      JSON.stringify(
-        { workspace: ['./apps/*'], fmt: { lineWidth: 100 }, tasks: { dev: rootDev } },
-        null,
-        2,
-      )
-    }\n`,
+    '/ws/deno.json': `${JSON.stringify(
+      { workspace: ['./apps/*'], fmt: { lineWidth: 100 }, tasks: { dev: rootDev } },
+      null,
+      2,
+    )}\n`,
     '/ws/apps/orders/deno.json': MEMBER_DENO_JSON,
     '/ws/apps/orders/setu.config.ts': CONFIG,
   });
@@ -122,9 +121,7 @@ describe('the devtool manifest merge', () => {
     // measures the command's own writes.
     (h.fs.writes as string[]).length = 0;
     expect(await h.run(['enable', 'orders'])).toBe(1);
-    expect(h.err.text()).toContain(
-      'Framework pins in',
-    );
+    expect(h.err.text()).toContain('Framework pins in');
     expect(h.err.text()).toContain('npm:@setu-ts/diagnostics-plugin@^0.6.0');
     expect(h.err.text()).toContain(`npm:@setu-ts/diagnostics-plugin@^${VERSION}`);
     expect(h.fs.writes).toEqual([]);
@@ -132,14 +129,15 @@ describe('the devtool manifest merge', () => {
 
   it('is a no-op for a member whose manifest already carries the pin and tasks', async () => {
     const h = harness(LEGACY_DENO_RUN_ALL);
-    const memberSource = JSON.stringify({
-      tasks: {
-        start: 'deno run --allow-net --allow-env main.ts',
-        dev: 'deno run --allow-net --allow-env main.dev.ts',
-        check: 'deno check main.ts setu.config.ts main.dev.ts',
-      },
-      imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
-    }) + '\n';
+    const memberSource =
+      JSON.stringify({
+        tasks: {
+          start: 'deno run --allow-net --allow-env main.ts',
+          dev: 'deno run --allow-net --allow-env main.dev.ts',
+          check: 'deno check main.ts setu.config.ts main.dev.ts',
+        },
+        imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
+      }) + '\n';
     h.fs.writeFile('/ws/apps/orders/deno.json', new TextEncoder().encode(memberSource));
     expect(await h.run(['enable', 'orders'])).toBe(0);
     expect(h.fs.read('/ws/apps/orders/deno.json')).toBe(memberSource);
@@ -153,13 +151,7 @@ describe('the devtool manifest merge', () => {
     };
     // start, test, the developer's own task, THEN the devtool's additions —
     // insertion order, not the sorted order `withDependency` produces.
-    expect(Object.keys(member.tasks)).toEqual([
-      'start',
-      'test',
-      'db:push',
-      'dev',
-      'check',
-    ]);
+    expect(Object.keys(member.tasks)).toEqual(['start', 'test', 'db:push', 'dev', 'check']);
   });
 
   it('is a no-op on the second run, not an error', async () => {

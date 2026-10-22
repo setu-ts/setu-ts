@@ -56,8 +56,9 @@ describe('Connect real import', { skip: !available }, () => {
 
     const fetchHandler = runtime.createFetchHandler(handler);
     // Connect returns Object.assign(fn, uHandler), so requestPath survives.
-    expect((fetchHandler as unknown as { requestPath: string }).requestPath)
-      .toBe('/grpc.health.v1.Health/Check');
+    expect((fetchHandler as unknown as { requestPath: string }).requestPath).toBe(
+      '/grpc.health.v1.Health/Check',
+    );
   });
 
   it('serves a real unary Check over the real fetch handler', async () => {

@@ -84,14 +84,8 @@ describe('compileQueueDiagnosticsPolicy', () => {
     expectRefusal(options({ instanceAlias: 7 }), QUEUE_COLLECTOR_ERRORS.badInstanceAlias);
     expectRefusal(options({ instanceAlias: '' }), QUEUE_COLLECTOR_ERRORS.aliasBytes);
     expectRefusal(options({ instanceAlias: 'x'.repeat(65) }), QUEUE_COLLECTOR_ERRORS.aliasBytes);
-    expectRefusal(
-      options({ instanceAlias: `${CANARY}\n` }),
-      QUEUE_COLLECTOR_ERRORS.aliasControl,
-    );
-    expectRefusal(
-      options({ instanceAlias: `a\u202eb` }),
-      QUEUE_COLLECTOR_ERRORS.aliasControl,
-    );
+    expectRefusal(options({ instanceAlias: `${CANARY}\n` }), QUEUE_COLLECTOR_ERRORS.aliasControl);
+    expectRefusal(options({ instanceAlias: `a\u202eb` }), QUEUE_COLLECTOR_ERRORS.aliasControl);
   });
 
   it('refuses a malformed queue map', () => {
@@ -140,7 +134,7 @@ describe('compileQueueDiagnosticsPolicy', () => {
       QueuePlugin({
         adapter: 'memory',
         diagnostics: { enabled: false } as unknown as QueueDiagnosticsOptions,
-      })
+      }),
     ).toThrow(QUEUE_COLLECTOR_ERRORS.notEnabled);
     expect(() => QueuePlugin({ adapter: 'memory', diagnostics: options() })).not.toThrow();
   });

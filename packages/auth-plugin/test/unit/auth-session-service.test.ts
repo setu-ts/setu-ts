@@ -98,16 +98,14 @@ describe('AuthSessionService', () => {
   it('refuses to read a corrupted record as an identity', () => {
     const { impl, session } = service();
     void impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
-    for (
-      const corrupt of [
-        'string',
-        7,
-        [],
-        { principal: {}, methods: ['pwd'], at: NOW },
-        { principal: { id: 'u1' }, methods: 'pwd', at: NOW },
-        { principal: { id: 'u1' }, methods: ['pwd'], at: 'now' },
-      ]
-    ) {
+    for (const corrupt of [
+      'string',
+      7,
+      [],
+      { principal: {}, methods: ['pwd'], at: NOW },
+      { principal: { id: 'u1' }, methods: 'pwd', at: NOW },
+      { principal: { id: 'u1' }, methods: ['pwd'], at: 'now' },
+    ]) {
       session.set(AUTH_SESSION_KEY, corrupt);
       expect(impl.current(CTX), JSON.stringify(corrupt)).toBeNull();
     }

@@ -111,9 +111,7 @@ describe('authorization middleware refusals', () => {
     await middleware(ctx, next);
 
     expect(response.statuses).toEqual([401]);
-    expect(response.bodies).toEqual([
-      { error: 'Unauthorized', detail: 'Authentication required' },
-    ]);
+    expect(response.bodies).toEqual([{ error: 'Unauthorized', detail: 'Authentication required' }]);
   });
 
   it('answers generic 403 detail, byte-identical with requireRole', async () => {
@@ -144,9 +142,7 @@ describe('authorization middleware refusals', () => {
     await middleware(ctx, next);
 
     expect(response.statuses).toEqual([403]);
-    expect(response.bodies).toEqual([
-      { error: 'Forbidden', detail: 'Insufficient privileges' },
-    ]);
+    expect(response.bodies).toEqual([{ error: 'Forbidden', detail: 'Insufficient privileges' }]);
   });
 
   it('admits a principal holding any one of the declared roles', async () => {

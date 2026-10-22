@@ -12,7 +12,7 @@ import { readFileSync } from 'node:fs';
  * literal-argument property is what static analysis can see.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   adaptConnectModule,
   type ConnectImporters,
@@ -32,9 +32,10 @@ interface Calls {
   createFileRegistry: unknown[];
 }
 
-function createFakeModules(
-  overrides: { fromBinaryThrows?: boolean } = {},
-): { modules: ConnectModuleLike; calls: Calls } {
+function createFakeModules(overrides: { fromBinaryThrows?: boolean } = {}): {
+  modules: ConnectModuleLike;
+  calls: Calls;
+} {
   const calls: Calls = {
     createConnectRouter: 0,
     createFetchHandler: [],
@@ -144,9 +145,7 @@ describe('adaptConnectModule', () => {
     const bytes = adaptConnectModule(modules).serializeFileDescriptor(file);
 
     expect(bytes).toEqual(new Uint8Array([1, 2, 3]));
-    expect(calls.toBinary).toEqual([
-      { schema: 'FileDescriptorProtoSchema', message: file.proto },
-    ]);
+    expect(calls.toBinary).toEqual([{ schema: 'FileDescriptorProtoSchema', message: file.proto }]);
   });
 });
 
@@ -179,9 +178,10 @@ describe('loadConnectModule', () => {
     const importers: Partial<ConnectImporters> = {};
     for (const key of Object.keys(byKey) as Array<keyof ConnectImporters>) {
       const specifier = SPECIFIER_BY_KEY[key];
-      importers[key] = specifier === failing
-        ? () => Promise.reject(new Error(`Module not found: ${specifier}`))
-        : () => Promise.resolve(byKey[key]);
+      importers[key] =
+        specifier === failing
+          ? () => Promise.reject(new Error(`Module not found: ${specifier}`))
+          : () => Promise.resolve(byKey[key]);
     }
     return importers;
   }
@@ -246,6 +246,37 @@ describe('loadConnectModule', () => {
         'utf8',
       );
       expect(source).toContain(`import('${SPECIFIER_BY_KEY[key]}')`);
+    }
+  });
+});
+
+describe('DEFAULT_IMPORTERS — the guarded imports (M113d §3.1)', () => {
+  it('each default importer rejects with OptionalDependencyUnavailableError naming its specifier', async () => {
+    const { DEFAULT_IMPORTERS } = await import('../../src/transports/connect-loader.ts');
+    const cases: ReadonlyArray<[keyof typeof DEFAULT_IMPORTERS, string]> = [
+      ['connect', '@connectrpc/connect'],
+      ['protocol', '@connectrpc/connect/protocol'],
+      ['protobuf', '@bufbuild/protobuf'],
+      ['wkt', '@bufbuild/protobuf/wkt'],
+    ];
+    for (const [key, specifier] of cases) {
+      vi.doMock(specifier, () => {
+        throw new Error('Cannot find package');
+      });
+      try {
+        let caught: unknown;
+        try {
+          await DEFAULT_IMPORTERS[key]();
+        } catch (error) {
+          caught = error;
+        }
+        const loadError = caught as Error & { dependency: string; cause: unknown };
+        expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+        expect(loadError.dependency).toBe(specifier);
+        expect(loadError.cause).toBeInstanceOf(Error);
+      } finally {
+        vi.doUnmock(specifier);
+      }
     }
   });
 });

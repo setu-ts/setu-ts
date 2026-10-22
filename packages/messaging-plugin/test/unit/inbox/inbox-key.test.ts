@@ -59,8 +59,9 @@ describe('inbox row ids', () => {
   });
 
   it('an ill-formed id keys as its well-formed replacement', async () => {
-    expect((await deriveInboxIds(subtle, 'c', 't', 'a\ud800')).marker)
-      .toBe((await deriveInboxIds(subtle, 'c', 't', 'a�')).marker);
+    expect((await deriveInboxIds(subtle, 'c', 't', 'a\ud800')).marker).toBe(
+      (await deriveInboxIds(subtle, 'c', 't', 'a�')).marker,
+    );
   });
 
   it('a default queue is inbox. plus 16 hex characters, legal on every broker', () => {

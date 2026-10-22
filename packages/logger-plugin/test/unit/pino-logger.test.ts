@@ -158,9 +158,7 @@ describe('PinoLogger', () => {
     } catch {
       // pino not available — the error path should be exercised.
     }
-    await expect(PinoLogger.create({ level: 'info' })).rejects.toThrow(
-      /PinoLogger requires Pino/,
-    );
+    await expect(PinoLogger.create({ level: 'info' })).rejects.toThrow(/PinoLogger requires Pino/);
   });
 
   it('passes bindings as base to Pino', async () => {

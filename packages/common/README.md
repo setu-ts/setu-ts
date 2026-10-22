@@ -1,5 +1,11 @@
 # @setu-ts/common
 
+`IRuntimeServices.reportError?` is the optional last-resort JSON error sink used by the kernel and
+`errorHandler` when no logger is registered. Implementations contain serialization and write
+failures. `IErrorResponder.statusFor?` purely predicts the owner's served status for a thrown value;
+request logging consumes it without reporting a clamp twice. A custom response hook can serve a
+different status, which the predictor does not reflect.
+
 Shared types, interfaces, and capability tokens for the Setu-TS framework.
 
 This package is the framework's contract layer: every other package depends on it, and it depends on
@@ -177,6 +183,7 @@ package fits the plugin architecture.
 
 | Export                                | Kind      |
 | ------------------------------------- | --------- |
+| `assertPrimaryKeyUnchanged`           | function  |
 | `assertRealPathContained`             | function  |
 | `attachConnectionErrorReporter`       | function  |
 | `authorizationFailureInit`            | function  |
@@ -205,8 +212,11 @@ package fits the plugin architecture.
 | `extractContextFromHeaders`           | function  |
 | `formEncodingOf`                      | function  |
 | `fromNullable`                        | function  |
+| `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `isConnectionFault`                   | function  |
+| `isConnectionFaultCode`               | function  |
 | `isErr`                               | function  |
 | `isLexicallyContained`                | function  |
 | `isNone`                              | function  |
@@ -228,12 +238,14 @@ package fits the plugin architecture.
 | `parseJsonBody`                       | function  |
 | `parsePublishOptions`                 | function  |
 | `parseTraceparentToContext`           | function  |
+| `publicRequestUrl`                    | function  |
 | `publishHeaderNameProblem`            | function  |
 | `publishHeaderValueProblem`           | function  |
 | `publishIdProblem`                    | function  |
 | `replaceLocale`                       | function  |
 | `replacePrincipal`                    | function  |
 | `replaceTenant`                       | function  |
+| `requestOriginOf`                     | function  |
 | `resolveKeysetSort`                   | function  |
 | `resolveProbeTiming`                  | function  |
 | `resolveRegistryEntry`                | function  |
@@ -264,10 +276,15 @@ package fits the plugin architecture.
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
 | `DuplicateKeyError`                   | class     |
+| `InvalidCursorError`                  | class     |
 | `MalformedRequestBodyError`           | class     |
+| `OptionalDependencyUnavailableError`  | class     |
+| `PrimaryKeyChangeError`               | class     |
+| `ReconnectSupervisor`                 | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
+| `CREDENTIAL_SOURCE_STATE_KEY`         | const     |
 | `DATA_CLASSIFICATIONS`                | const     |
 | `DEDUPLICATION_ID_HEADER`             | const     |
 | `DEFAULT_SECRET_FIELD_PATTERNS`       | const     |
@@ -284,6 +301,7 @@ package fits the plugin architecture.
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
+| `REQUEST_ORIGIN_STATE_KEY`            | const     |
 | `RESERVED_HEADER_NAMES`               | const     |
 | `RESERVED_HEADER_PREFIXES`            | const     |
 | `RESPONSE_METADATA`                   | const     |
@@ -527,6 +545,7 @@ package fits the plugin architecture.
 | `RealtimeFrame`                       | interface |
 | `RealtimeGaugeReading`                | interface |
 | `RealtimeObservationCollectorInit`    | interface |
+| `ReconnectSupervisorOptions`          | interface |
 | `RecurringOptions`                    | interface |
 | `RedactionContext`                    | interface |
 | `RedactionPolicy`                     | interface |
@@ -579,6 +598,7 @@ package fits the plugin architecture.
 | `TransactionalIdempotencyRecord`      | interface |
 | `TransactionOptions`                  | interface |
 | `ValidationIssue`                     | interface |
+| `ValidationMiddlewareOptions`         | interface |
 | `ValueProvider`                       | interface |
 | `WebSocketCloseEvent`                 | interface |
 | `WebSocketConnectionContext`          | interface |
@@ -688,9 +708,11 @@ package fits the plugin architecture.
 | `RealtimeGaugeState`                  | type      |
 | `RealtimeObservationOperation`        | type      |
 | `RealtimeSourceKind`                  | type      |
+| `ReconnectMode`                       | type      |
 | `Redactor`                            | type      |
 | `RegistryFactory`                     | type      |
 | `RequestHandler`                      | type      |
+| `RequestOrigin`                       | type      |
 | `ResilientCall`                       | type      |
 | `ResponseSnapshot`                    | type      |
 | `ResponseSnapshotInit`                | type      |
@@ -733,5 +755,16 @@ package fits the plugin architecture.
 | `WritePrecondition`                   | type      |
 | `WritePreconditionCheck`              | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+`isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
+recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections. It
+never mutates errors. Command errors such as WRONGTYPE remain unclassified.
+
+`isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
+set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
+`EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
+export; callers cannot mutate the classification vocabulary.

@@ -158,7 +158,7 @@ describe('createValidationMiddleware — JSON parse error', () => {
   it('returns 400 with formatted issue when body JSON is invalid', async () => {
     const schema = createFakeSchema({ success: true });
     const { ctx, responseSnapshot } = createFakeContext({
-      request: { bodyError: true },
+      request: { bodyError: true, headers: { 'content-type': 'application/json' } },
     });
     const nextFn = createNextFn();
     const middleware = createValidationMiddleware(schema, 'body', SERVICE, defaultFormatter);
@@ -353,13 +353,14 @@ describe('createValidationMiddleware — writes the shared validatedStateKey', (
     it(`stores the validated value under validatedStateKey('${target}')`, async () => {
       const schema = createFakeSchema({ success: true, data: { ok: true } });
       const { ctx } = createFakeContext({
-        request: target === 'body'
-          ? { body: { ok: true } }
-          : target === 'cookies'
-          ? { headers: { cookie: 'session=abc' } }
-          : target === 'headers'
-          ? { headers: { 'x-api-key': 'k' } }
-          : {},
+        request:
+          target === 'body'
+            ? { body: { ok: true } }
+            : target === 'cookies'
+              ? { headers: { cookie: 'session=abc' } }
+              : target === 'headers'
+                ? { headers: { 'x-api-key': 'k' } }
+                : {},
         ...(target === 'query' ? { query: { page: '1' } } : {}),
         ...(target === 'params' ? { params: { id: '1' } } : {}),
       });

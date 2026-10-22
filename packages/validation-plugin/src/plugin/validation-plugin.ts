@@ -90,8 +90,9 @@ export function ValidationPlugin(options?: ValidationPluginOptions): IPlugin {
     register(ctx: IPluginContext): void {
       const service = new ValidationService(formatter, {
         ...(options?.whitelist !== undefined && { whitelist: options.whitelist }),
-        ...(options?.forbidNonWhitelisted !== undefined &&
-          { forbidNonWhitelisted: options.forbidNonWhitelisted }),
+        ...(options?.forbidNonWhitelisted !== undefined && {
+          forbidNonWhitelisted: options.forbidNonWhitelisted,
+        }),
       });
       ctx.services.register<IValidationService>(CAPABILITIES.VALIDATION, service);
     },

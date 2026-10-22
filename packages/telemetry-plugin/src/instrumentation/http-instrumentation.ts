@@ -14,6 +14,8 @@
  * @since 0.2.0
  */
 
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+
 /** Result of loading an instrumentation. */
 export interface LoadedInstrumentation {
   instance: unknown;
@@ -39,9 +41,9 @@ export function createHttpInstrumentation(
   configArg: unknown,
 ): unknown {
   const HttpInstrumentation = mod.HttpInstrumentation as unknown;
-  return new (HttpInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (HttpInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**
@@ -54,8 +56,15 @@ export function createHttpInstrumentation(
  */
 export async function loadHttpInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-http'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-http');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-http', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<LoadedInstrumentation> {
   const mod = await importFn();
   const instance = createHttpInstrumentation(mod, configArg);
@@ -75,9 +84,9 @@ export function createFetchInstrumentation(
   configArg: unknown,
 ): unknown {
   const UndiciInstrumentation = mod.UndiciInstrumentation as unknown;
-  return new (UndiciInstrumentation as new (
-    config?: Record<string, unknown>,
-  ) => unknown)(configArg as Record<string, unknown> | undefined);
+  return new (UndiciInstrumentation as new (config?: Record<string, unknown>) => unknown)(
+    configArg as Record<string, unknown> | undefined,
+  );
 }
 
 /**
@@ -90,8 +99,15 @@ export function createFetchInstrumentation(
  */
 export async function loadFetchInstrumentation(
   configArg: unknown | undefined,
-  importFn: () => Promise<Record<string, unknown>> = () =>
-    import('@opentelemetry/instrumentation-undici'),
+  importFn: () => Promise<Record<string, unknown>> = async () => {
+    try {
+      return await import('@opentelemetry/instrumentation-undici');
+    } catch (error) {
+      throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-undici', {
+        cause: error,
+      });
+    }
+  },
 ): Promise<LoadedInstrumentation> {
   const mod = await importFn();
   const instance = createFetchInstrumentation(mod, configArg);

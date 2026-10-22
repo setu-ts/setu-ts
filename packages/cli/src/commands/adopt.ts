@@ -28,6 +28,7 @@ import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.t
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
 import {
+  assertInsideProject,
   findExisting,
   type GeneratedFile,
   joinPath,
@@ -39,9 +40,11 @@ import {
   ADOPTED_DIRECTORIES,
   moveFile,
   planAdoption,
+  probeSupport,
   pruneAdoptedDirectories,
   rewriteEntryPort,
 } from '../workspace/adopt.ts';
+import { detectPlugins } from '../utils/plugin-detector.ts';
 import { workspaceContainerFiles } from '../workspace/compose.ts';
 import { workspaceK8sFiles } from '../workspace/k8s.ts';
 import {
@@ -62,6 +65,30 @@ import {
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import { detectProjectRuntime, workspaceProfile } from '../workspace/runtime-profile.ts';
 import { DEFAULT_TRANSPORT, transportSpec } from '../workspace/transport.ts';
+
+import { cliInvocation } from '../templates/project-files.ts';
+
+/**
+ * Raised inside the conversion transaction when the conversion cannot finish.
+ *
+ * A return value would let the transaction commit its already-applied moves, so
+ * the refusal is thrown instead: `withFileTransaction` rolls back on a throw and
+ * only on a throw. The messages the command would have printed are carried out
+ * to the call site, which prints them once the rollback has finished.
+ */
+class AdoptAbortedError extends Error {
+  /** The lines to print, in order. */
+  readonly messages: readonly string[];
+
+  /**
+   * @param messages - The lines to print, in order
+   */
+  constructor(messages: readonly string[]) {
+    super(messages.join(' '));
+    this.name = 'AdoptAbortedError';
+    this.messages = messages;
+  }
+}
 
 /** Everything `runAdoptCommand` reaches the outside world through. */
 export interface AdoptDependencies {
@@ -107,10 +134,7 @@ function printUsage(log: (message: string) => void): void {
  * @param deps - Filesystem, working directory, and output sinks
  * @returns `0` on success, `1` on a runtime error, `2` on a usage error
  */
-export async function runAdoptCommand(
-  args: ParsedArgs,
-  deps: AdoptDependencies,
-): Promise<number> {
+export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies): Promise<number> {
   if (args.flags['help'] === true || args.flags['h'] === true) {
     printUsage(deps.log);
     return EXIT_OK;
@@ -125,12 +149,19 @@ export async function runAdoptCommand(
     deps.error(
       `${escapeName(joinPath(project, WORKSPACE_MANIFEST))} already exists: this IS a workspace.`,
     );
-    deps.error(`Add a service to it with \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`.`);
+    deps.error(
+      `Add a service to it with \`${cliInvocation(existing.manifest.runtime)} generate ${APP_VERB} <name>\`.`,
+    );
     return EXIT_ERROR;
   }
 
-  const rawName = stringFlag(args.flags, 'name') ??
-    project.split('/').filter((part) => part !== '').at(-1) ?? '';
+  const rawName =
+    stringFlag(args.flags, 'name') ??
+    project
+      .split('/')
+      .filter((part) => part !== '')
+      .at(-1) ??
+    '';
   const names = deriveNames(rawName);
   if (!isIdentifierSafe(names)) {
     deps.error(
@@ -154,6 +185,11 @@ export async function runAdoptCommand(
     return EXIT_ERROR;
   }
 
+  // Read from the project's own manifest BEFORE anything moves, and persisted in
+  // the member record: the Kubernetes renderer has only the manifest, and later
+  // `generate app` / `ports --reallocate` re-renders must keep the same answer.
+  const support = probeSupport(await detectPlugins(deps.fs, project));
+
   // The toolchain the project already uses, not a choice: a project with a
   // package.json is a Node or Bun one, and converting it into a Deno workspace
   // would leave a root whose members its toolchain cannot install.
@@ -168,7 +204,7 @@ export async function runAdoptCommand(
     // service talks without being asked to. `--transport` belongs to a workspace
     // created fresh.
     transport: DEFAULT_TRANSPORT,
-    members: [{ name: names.kebab, port: basePort }],
+    members: [{ name: names.kebab, port: basePort, ...support }],
   };
   const transport = transportSpec(DEFAULT_TRANSPORT);
 
@@ -197,8 +233,13 @@ export async function runAdoptCommand(
     .map((file) =>
       file.path === WORKSPACE_MANIFEST
         ? { ...file, contents: renderWorkspaceManifest(manifest) }
-        : file
+        : file,
     );
+
+  // Files the conversion writes beside the moves — currently the member's own
+  // `.gitignore` for a moved dotenv file. They go through this same batch, so an
+  // interruption rolls them back with everything else.
+  for (const file of plan.creates ?? []) created.push(file);
 
   created.push({
     path: joinPath(memberRoot, DISCOVERY_MODULE),
@@ -224,11 +265,32 @@ export async function runAdoptCommand(
     );
   } catch (cause) {
     deps.error(
-      `Failed to inspect existing files: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Failed to inspect existing files: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
+  }
+
+  // Every path this writes or moves TO is checked here, BEFORE a dry run prints a
+  // plan and before the transaction moves anything. The planner checks the
+  // member's own generated files and every move's SOURCE; the root's generated
+  // files are added above, and the moves' destinations are otherwise unchecked
+  // until `moveFile` runs. A link committed at one of either (`.dockerignore` for
+  // a write, `apps/svc/README.md` for a move) makes the real run refuse while
+  // `findExisting` reports the link as absent — so the world would learn about it
+  // only after the moves had started, and a dry run would have promised a clean
+  // plan for it. That would be worse than no dry run.
+  for (const path of [
+    ...planned.map((file) => file.path),
+    ...plan.files.map((file) => joinPath(project, file.to)),
+  ]) {
+    try {
+      await assertInsideProject(deps.fs, project, path);
+    } catch (cause) {
+      deps.error(cause instanceof Error ? cause.message : String(cause));
+      return EXIT_ERROR;
+    }
   }
 
   if (args.flags['dry-run'] === true) {
@@ -257,12 +319,7 @@ export async function runAdoptCommand(
       const moved = await moveFile(deps.fs, project, file);
       throwIfInterrupted(deps.interrupt);
       if (!moved.ok) {
-        deps.error(moved.message);
-        deps.error(
-          'Stopped part-way. Every file moved so far exists in both places, so nothing is lost — ' +
-            'finish or undo the move by hand.',
-        );
-        return EXIT_ERROR;
+        throw new AdoptAbortedError([moved.message]);
       }
       deps.log(`moved ${escapeName(file.from)} -> ${escapeName(file.to)}`);
     }
@@ -288,10 +345,9 @@ export async function runAdoptCommand(
       if (interrupted !== undefined) {
         throw cause;
       }
-      deps.error(
+      throw new AdoptAbortedError([
         `Failed to write: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
-      );
-      return EXIT_ERROR;
+      ]);
     }
     for (const file of planned) deps.log(`created ${escapeName(file.path)}`);
 
@@ -305,12 +361,11 @@ export async function runAdoptCommand(
       rewritten = rewriteEntryPort(entry, SERVICE_PORT_EXPORT, DISCOVERY_SPECIFIER);
     } catch (cause) {
       if (!isMissingPath(cause)) {
-        deps.error(
-          `Failed to read ${escapeName(entryPath)}: ${
-            escapeName(cause instanceof Error ? cause.message : String(cause))
-          }`,
-        );
-        return EXIT_ERROR;
+        throw new AdoptAbortedError([
+          `Failed to read ${escapeName(entryPath)}: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
+        ]);
       }
       // A Workers project has src/index.ts and no main.ts to rewrite.
     }
@@ -333,15 +388,11 @@ export async function runAdoptCommand(
         if (interrupted !== undefined) {
           throw cause;
         }
-        deps.error(
-          `Failed to rewrite ${escapeName(entryPath)}: ${
-            escapeName(cause instanceof Error ? cause.message : String(cause))
-          }`,
-        );
-        deps.error(
-          'Workspace files and moved project files remain in place; repair the entry before starting it.',
-        );
-        return EXIT_ERROR;
+        throw new AdoptAbortedError([
+          `Failed to rewrite ${escapeName(entryPath)}: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
+        ]);
       }
     }
 
@@ -353,9 +404,7 @@ export async function runAdoptCommand(
     // rewrite reads and keeps.
     let manifestPath = '';
     let pinSource: string | undefined;
-    for (
-      const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']
-    ) {
+    for (const file of manifestKind === 'deno' ? ['deno.json', 'deno.jsonc'] : ['package.json']) {
       manifestPath = joinPath(project, joinPath(memberRoot, file));
       try {
         pinSource = new TextDecoder().decode(await deps.fs.readFile(manifestPath));
@@ -364,16 +413,17 @@ export async function runAdoptCommand(
         if (!isMissingPath(cause)) throw cause;
       }
     }
-    const pins = pinSource === undefined
-      ? { contents: undefined, rewrites: [] }
-      : rewriteLegacyPins(pinSource, manifestKind);
+    const pins =
+      pinSource === undefined
+        ? { contents: undefined, rewrites: [] }
+        : rewriteLegacyPins(pinSource, manifestKind);
     if (pins.unreadable !== undefined) {
       // Never silent: the project still pins the framework however it did before,
       // and the workspace root maps no JSR registry for it.
       deps.error(
-        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${
-          escapeName(pins.unreadable)
-        }`,
+        `Could not read ${escapeName(manifestPath)} to move its framework pins onto npm: ${escapeName(
+          pins.unreadable,
+        )}`,
       );
       deps.error(
         'Rewrite any jsr:@setu-ts/* or npm:@jsr/setu-ts__* pins to the npm packages by hand.',
@@ -401,16 +451,22 @@ export async function runAdoptCommand(
 
     deps.log('');
     deps.log(`Converted into a workspace with ${names.kebab} on port ${basePort}.`);
+    // Printed only after the conversion succeeded: a "move it by hand" note
+    // beside a conversion that was refused or rolled back would describe work
+    // the developer never has to do.
+    for (const note of plan.notes ?? []) deps.log(note);
     if (rewritten === undefined) {
       deps.log('');
-      deps.log(`Its entry does not carry the port literal this rewrites, so bind the allocated`);
+      deps.log(`Its entry does not carry the start line this rewrites, so bind the allocated`);
       deps.log(`port yourself — two lines in ${joinPath(memberRoot, 'main.ts')}:`);
       deps.log(`  import { ${SERVICE_PORT_EXPORT} } from '${DISCOVERY_SPECIFIER}';`);
       deps.log(`  await app.start({ port: ${SERVICE_PORT_EXPORT} });`);
     }
     deps.log('');
     deps.log('Next:');
-    deps.log(`  ${PROGRAM_NAME} generate ${APP_VERB} <name>   # add a second service`);
+    deps.log(
+      `  ${cliInvocation(profile.runtime)} generate ${APP_VERB} <name>   # add a second service`,
+    );
     // From the profile, which is the project's own detected toolchain: a converted
     // Node project has no `deno task`.
     deps.log(`  ${profile.runScript('dev')}   # run every member`);
@@ -420,10 +476,21 @@ export async function runAdoptCommand(
     return await withFileTransaction(deps.fs, perform, deps.interrupt);
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
+    if (interrupted !== undefined) {
+      deps.error(interrupted);
+      return EXIT_INTERRUPTED;
+    }
+    // The transaction has already undone every move and write by the time this
+    // runs: a throw is what asked it to. Reporting "part-way" here would describe
+    // a tree that no longer exists.
+    if (cause instanceof AdoptAbortedError) {
+      for (const message of cause.messages) deps.error(message);
+      deps.error('Nothing was changed: every move was undone.');
+      return EXIT_ERROR;
+    }
     deps.error(
-      interrupted ??
-        `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
+      `Failed to adopt: ${escapeName(cause instanceof Error ? cause.message : String(cause))}`,
     );
-    return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
+    return EXIT_ERROR;
   }
 }

@@ -127,7 +127,7 @@ describe('startRegistryOverlay', () => {
     expect(overlay.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/);
     expect(overlay.packs.get('@setu-ts/common')).toBe(pack);
 
-    const doc = await (await fetch(`${overlay.url}@setu-ts%2fcommon`)).json() as {
+    const doc = (await (await fetch(`${overlay.url}@setu-ts%2fcommon`)).json()) as {
       versions: Record<string, { dist: { tarball: string; shasum: string; integrity: string } }>;
       time: Record<string, string>;
     };
@@ -150,9 +150,10 @@ describe('startRegistryOverlay', () => {
     const pack = await packOf('bytes');
     const remote = upstream();
     const overlay = await start({ packs: new Map([[pack.name, pack]]), fetch: remote.fetchImpl });
-    for (
-      const path of ['@setu-ts/common/-/common-0.9.0.tgz', '@setu-ts%2fcommon/-/common-0.9.0.tgz']
-    ) {
+    for (const path of [
+      '@setu-ts/common/-/common-0.9.0.tgz',
+      '@setu-ts%2fcommon/-/common-0.9.0.tgz',
+    ]) {
       expect(await (await fetch(`${overlay.url}${path}`)).text(), path).toBe('bytes');
     }
     expect(remote.seen).toEqual([]);
@@ -165,7 +166,7 @@ describe('startRegistryOverlay', () => {
       publishedAt: 'now',
       fetch: upstream().fetchImpl,
     });
-    const doc = await (await fetch(`${overlay.url}@setu-ts/common`)).json() as {
+    const doc = (await (await fetch(`${overlay.url}@setu-ts/common`)).json()) as {
       time: Record<string, string>;
     };
     expect(Date.parse(doc.time['0.9.0']!)).toBeGreaterThan(Date.parse('2026-01-01'));
@@ -216,12 +217,14 @@ describe('startRegistryOverlay', () => {
     const overlay = await start({ packs: new Map(), fetch: remote.fetchImpl });
     const response = await new Promise<{ type: string | undefined }>((resolve, reject) => {
       // A raw request carries no accept header at all, unlike `fetch`.
-      import('node:http').then(({ get }) =>
-        get(`${overlay.url}left-pad`, (res) => {
-          res.resume();
-          res.on('end', () => resolve({ type: res.headers['content-type'] }));
-        }).on('error', reject)
-      ).catch(reject);
+      import('node:http')
+        .then(({ get }) =>
+          get(`${overlay.url}left-pad`, (res) => {
+            res.resume();
+            res.on('end', () => resolve({ type: res.headers['content-type'] }));
+          }).on('error', reject),
+        )
+        .catch(reject);
     });
     expect(remote.seen[0]!.accept).toBe('application/json');
     expect(response.type).toBe('application/octet-stream');
@@ -264,8 +267,9 @@ describe('startRegistryOverlay', () => {
     await fs.writeFile(join(root, '.tmp/overlay', key, 'packs.json'), JSON.stringify([pack]));
     const overlay = await start({ root, fetch: upstream().fetchImpl });
     expect([...overlay.packs.keys()]).toEqual(['@setu-ts/common']);
-    expect(await (await fetch(`${overlay.url}@setu-ts/common/-/common-0.9.0.tgz`)).text())
-      .toBe('from the cache');
+    expect(await (await fetch(`${overlay.url}@setu-ts/common/-/common-0.9.0.tgz`)).text()).toBe(
+      'from the cache',
+    );
   });
 
   it('answers 502 naming the failure when upstream is unreachable', async () => {

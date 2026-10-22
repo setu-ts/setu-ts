@@ -1,18 +1,20 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
 import type { IPubSubSubscription, IPubSubTransport } from '../../src/brokers/pubsub-broker.ts';
 import { CloudBrokerUnavailableError } from '../../src/errors.ts';
 import type { MessagingPluginOptions } from '../../src/index.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 
 function createRuntime(platform: string = 'node'): IRuntimeServices {
   return {
     platform: () => platform as ReturnType<IRuntimeServices['platform']>,
     uuid: () => 'uuid-1',
     now: () => 1000000,
-    setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+    setTimeout: (_fn: () => void) => 1 as unknown as ReturnType<typeof setTimeout>,
     clearTimeout: () => {},
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -25,6 +27,96 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
   } as unknown as IRuntimeServices;
 }
 
+describe('M113a Pub/Sub bounds', () => {
+  function transport(): IPubSubTransport {
+    return {
+      publish: async () => {},
+      open: () => Promise.resolve({ close: async () => {} }),
+      createSubscription: async () => {},
+      deleteSubscription: async () => {},
+      close: async () => {},
+      isHealthy: () => Promise.resolve(true),
+    };
+  }
+  it('caches, coalesces and drops the probe on disconnect', async () => {
+    let now = 0;
+    const client = transport();
+    const health = vi.spyOn(client, 'isHealthy');
+    const broker = new GcpPubSubBroker(
+      { ...createFakeRuntime(), hrtime: () => now },
+      new JsonSerializer(),
+      { client },
+    );
+    await broker.connect();
+    expect(await Promise.all([broker.reachability(), broker.reachability()])).toEqual([true, true]);
+    expect(health).toHaveBeenCalledTimes(1);
+    now = 5001;
+    health.mockResolvedValue(false);
+    expect(await broker.reachability()).toBe(false);
+    expect(await broker.isHealthy()).toBe(false);
+    expect(health).toHaveBeenCalledTimes(2);
+    await broker.disconnect();
+    expect(await broker.reachability()).toBeUndefined();
+    await broker.connect();
+    health.mockResolvedValue(true);
+    expect(await broker.reachability()).toBe(true);
+    expect(health).toHaveBeenCalledTimes(3);
+    await broker.disconnect();
+  });
+  it('bounds a never-settling probe at 2 seconds', async () => {
+    vi.useFakeTimers();
+    const client = transport();
+    client.isHealthy = () => new Promise(() => {});
+    const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    try {
+      await broker.connect();
+      const pending = broker.reachability();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await pending).toBeUndefined();
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+  it.each([0, 37])('bounds both publish entry points with timeout %s', async (timeout) => {
+    vi.useFakeTimers();
+    const client = transport();
+    const deferred = Promise.withResolvers<void>();
+    const send = vi.spyOn(client, 'publish').mockReturnValue(deferred.promise);
+    const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      publishTimeoutMs: timeout,
+    });
+    try {
+      await broker.connect();
+      let settled = 0;
+      const pending = [
+        broker.publish('orders', {}),
+        broker.publishWithHeaders('orders', {}, {}),
+      ].map((p) =>
+        p.catch((e: Error) => {
+          settled++;
+          return e.message;
+        }),
+      );
+      await vi.advanceTimersByTimeAsync(36);
+      expect(settled).toBe(0);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(settled).toBe(timeout ? 2 : 0);
+      if (timeout)
+        for (const message of await Promise.all(pending))
+          expect(message).toMatch(/Pub\/Sub.*orders.*37.*it may still be delivered$/);
+      deferred.resolve();
+      if (!timeout) expect(await Promise.all(pending)).toEqual([undefined, undefined]);
+      send.mockResolvedValue();
+      await broker.publish('fast', {});
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+});
+
 describe('GcpPubSubBroker', () => {
   describe('connect()', () => {
     it('uses injected client without loading SDK', async () => {
@@ -35,10 +127,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       expect(broker.isReady()).toBe(true);
@@ -53,18 +149,20 @@ describe('GcpPubSubBroker', () => {
         close: () => Promise.resolve(),
       };
       const serializer = { serialize: (v: unknown) => JSON.stringify(v), deserialize: JSON.parse };
-      expect(() =>
-        new GcpPubSubBroker(createRuntime(), serializer, {
-          client: transport,
-          enableMessageOrdering: true,
-        })
+      expect(
+        () =>
+          new GcpPubSubBroker(createRuntime(), serializer, {
+            client: transport,
+            enableMessageOrdering: true,
+          }),
       ).toThrow(/enableMessageOrdering.*adaptPubSubModule/);
       // `false` is refused too: any value would be silently ignored.
-      expect(() =>
-        new GcpPubSubBroker(createRuntime(), serializer, {
-          client: transport,
-          enableMessageOrdering: false,
-        })
+      expect(
+        () =>
+          new GcpPubSubBroker(createRuntime(), serializer, {
+            client: transport,
+            enableMessageOrdering: false,
+          }),
       ).toThrow(RangeError);
     });
 
@@ -92,10 +190,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime('cloudflare-workers'), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime('cloudflare-workers'),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await expect(broker.connect()).rejects.toThrow(CloudBrokerUnavailableError);
       expect(broker.isReady()).toBe(false);
@@ -115,10 +217,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.publish('test-topic', { foo: 'bar' });
@@ -140,10 +246,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.publish('test', { text: '\u{1F600}' });
@@ -157,8 +267,7 @@ describe('GcpPubSubBroker', () => {
     it('delivers messages through handler', async () => {
       const received: unknown[] = [];
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -169,10 +278,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', (msg) => {
@@ -188,8 +301,7 @@ describe('GcpPubSubBroker', () => {
     it('acks on handler success', async () => {
       let acked = false;
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -200,10 +312,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -224,8 +340,7 @@ describe('GcpPubSubBroker', () => {
     it('nacks on handler throw', async () => {
       let nacked = false;
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -236,10 +351,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {
@@ -268,9 +387,11 @@ describe('GcpPubSubBroker', () => {
     it('reply payload is deserialized from serialized text and acked', async () => {
       let ackCount = 0;
       let nackCount = 0;
-      const opens: Array<
-        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
-      > = [];
+      const opens: Array<{
+        topic: string;
+        subscription: string;
+        cb: (...args: unknown[]) => unknown;
+      }> = [];
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (topic, sub, cb) => {
@@ -281,10 +402,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -321,9 +446,11 @@ describe('GcpPubSubBroker', () => {
 
     it('malformed reply is nacked exactly once', async () => {
       let nackCount = 0;
-      const opens: Array<
-        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
-      > = [];
+      const opens: Array<{
+        topic: string;
+        subscription: string;
+        cb: (...args: unknown[]) => unknown;
+      }> = [];
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (topic, sub, cb) => {
@@ -334,10 +461,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -361,9 +492,11 @@ describe('GcpPubSubBroker', () => {
     it('foreign-correlation reply is acked but not matched', async () => {
       let nackCount = 0;
       let ackCount = 0;
-      const opens: Array<
-        { topic: string; subscription: string; cb: (...args: unknown[]) => unknown }
-      > = [];
+      const opens: Array<{
+        topic: string;
+        subscription: string;
+        cb: (...args: unknown[]) => unknown;
+      }> = [];
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (topic, sub, cb) => {
@@ -374,10 +507,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.respond('topic', () => Promise.resolve({ status: 'ok' }));
@@ -421,10 +558,14 @@ describe('GcpPubSubBroker', () => {
           return Promise.resolve();
         },
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.disconnect();
@@ -441,10 +582,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.disconnect();
@@ -471,10 +616,14 @@ describe('GcpPubSubBroker', () => {
           return Promise.resolve();
         },
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -487,21 +636,23 @@ describe('GcpPubSubBroker', () => {
 
   describe('connect() idempotent', () => {
     it('returns early when already connected', async () => {
-      let connectCount = 0;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: () => Promise.resolve({ close: () => Promise.resolve() } as IPubSubSubscription),
         createSubscription: () => Promise.resolve(),
         deleteSubscription: () => Promise.resolve(),
         close: () => {
-          connectCount++;
           return Promise.resolve();
         },
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.connect();
@@ -533,10 +684,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport, defaultQueue: 'my-queue' });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport, defaultQueue: 'my-queue' },
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {});
@@ -556,10 +711,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       await broker.subscribe('orders', () => {});
@@ -589,10 +748,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
       await broker.connect();
 
       await broker.subscribe('projects/p/topics/orders', () => {});
@@ -614,27 +777,35 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
       await broker.connect();
 
       // 'messaging-consumers.' is 20 characters, so a 236-character topic
       // derives a 256-character name; 235 derives exactly 255 and is allowed.
       const tooLong = 't'.repeat(236);
-      const err = await broker.subscribe(tooLong, () => {}).then(
-        () => null,
-        (e: unknown) => e as Error,
-      );
+      const err = await broker
+        .subscribe(tooLong, () => {})
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
       expect(err?.message).toContain('256 characters');
       expect(err?.message).toContain('at most 255');
       expect(err?.message).toContain('SubscribeOptions.queue');
       await broker.subscribe('t'.repeat(235), () => {});
-      const explicit = await broker.subscribe('x', () => {}, { queue: 'q'.repeat(256) }).then(
-        () => null,
-        (e: unknown) => e as Error,
-      );
+      const explicit = await broker
+        .subscribe('x', () => {}, { queue: 'q'.repeat(256) })
+        .then(
+          () => null,
+          (e: unknown) => e as Error,
+        );
       expect(explicit?.message).toContain('256 characters');
       expect(openCalls).toBe(1);
     });
@@ -649,10 +820,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       // Do NOT call connect()
       await expect(broker.publish('topic', 'msg')).rejects.toThrow('not connected');
@@ -666,10 +841,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       // Do NOT call connect()
       await expect(broker.subscribe('topic', () => {})).rejects.toThrow('not connected');
@@ -692,10 +871,14 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, { client: transport });
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        { client: transport },
+      );
 
       await broker.connect();
       const sub = await broker.subscribe('topic', () => {});
@@ -710,8 +893,7 @@ describe('GcpPubSubBroker', () => {
     it('calls logger.error when handler throws', async () => {
       let logged = '';
       let onMessageCb:
-        | ((msg: { payload: string; ack: () => void; nack: () => void }) => void)
-        | null = null;
+        ((msg: { payload: string; ack: () => void; nack: () => void }) => void) | null = null;
       const transport: IPubSubTransport = {
         publish: () => Promise.resolve(),
         open: (_t, _s, cb) => {
@@ -722,17 +904,21 @@ describe('GcpPubSubBroker', () => {
         deleteSubscription: () => Promise.resolve(),
         close: () => Promise.resolve(),
       };
-      const broker = new GcpPubSubBroker(createRuntime(), {
-        serialize: (v) => JSON.stringify(v),
-        deserialize: (s) => JSON.parse(s),
-      }, {
-        client: transport,
-        logger: {
-          error: (msg: string) => {
-            logged = msg;
+      const broker = new GcpPubSubBroker(
+        createRuntime(),
+        {
+          serialize: (v) => JSON.stringify(v),
+          deserialize: (s) => JSON.parse(s),
+        },
+        {
+          client: transport,
+          logger: {
+            error: (msg: string) => {
+              logged = msg;
+            },
           },
         },
-      });
+      );
 
       await broker.connect();
       await broker.subscribe('topic', () => {
@@ -755,10 +941,14 @@ describe('GcpPubSubBroker', () => {
 describe('GcpPubSubBroker — lazy SDK load', () => {
   it('connect without an injected client exercises the loadPubSubModule() path', async () => {
     const runtime = createRuntime();
-    const broker = new GcpPubSubBroker(runtime, {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { projectId: 'test-project' });
+    const broker = new GcpPubSubBroker(
+      runtime,
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { projectId: 'test-project' },
+    );
 
     // The SDK module is cached in deno.lock, so connect() resolves (loadPubSubModule
     // is exercised, and adaptPubSubModule constructs a REAL PubSub client) and the
@@ -775,8 +965,11 @@ describe('subscribe ack/nack path', () => {
   it('acks when handler succeeds', async () => {
     let ackCalled = false;
     let nackCalled = false;
-    let capturedOnMsg: (msg: { payload: string; ack: () => void; nack: () => void }) => void =
-      () => {};
+    let capturedOnMsg: (msg: {
+      payload: string;
+      ack: () => void;
+      nack: () => void;
+    }) => void = () => {};
     const transport: IPubSubTransport = {
       publish: () => Promise.resolve(),
       open: (_t: string, _s: string, onMsg) => {
@@ -787,10 +980,14 @@ describe('subscribe ack/nack path', () => {
       deleteSubscription: () => Promise.resolve(),
       close: () => Promise.resolve(),
     };
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
     await broker.subscribe('topic', async () => {}, { queue: 'grp' });
@@ -813,8 +1010,11 @@ describe('subscribe ack/nack path', () => {
   it('nacks when handler throws', async () => {
     let ackCalled = false;
     let nackCalled = false;
-    let capturedOnMsg: (msg: { payload: string; ack: () => void; nack: () => void }) => void =
-      () => {};
+    let capturedOnMsg: (msg: {
+      payload: string;
+      ack: () => void;
+      nack: () => void;
+    }) => void = () => {};
     const transport: IPubSubTransport = {
       publish: () => Promise.resolve(),
       open: (_t: string, _s: string, onMsg) => {
@@ -825,15 +1025,23 @@ describe('subscribe ack/nack path', () => {
       deleteSubscription: () => Promise.resolve(),
       close: () => Promise.resolve(),
     };
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
-    await broker.subscribe('topic', () => {
-      throw new Error('boom');
-    }, { queue: 'grp' });
+    await broker.subscribe(
+      'topic',
+      () => {
+        throw new Error('boom');
+      },
+      { queue: 'grp' },
+    );
 
     // Trigger the message callback to hit nack path
     capturedOnMsg({
@@ -853,19 +1061,43 @@ describe('subscribe ack/nack path', () => {
 
 // Broker tests using adaptPubSubModule(fakeSdk) — exercises adapter closures
 describe('GcpPubSubBroker with adapted fake SDK module', () => {
-  function createFakeSdkModuleWithRouting():
-    & import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule
-    & {
+  function createFakeSdkModuleWithRouting(): import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule & {
+    publishes: Array<{ topic: string; data: Uint8Array }>;
+    messageCallbacks: Array<{
+      topic: string;
+      subscription: string;
+      onMessage: (msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string }) => void;
+    }>;
+  } & {
+    topics: Map<
+      string,
+      {
+        messages: Array<{ data: Uint8Array }>;
+        subscriptions: Map<
+          string,
+          {
+            onMessage:
+              | ((msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string }) => void)
+              | null;
+          }
+        >;
+      }
+    >;
+    subscriptions: Map<string, { topic: string; name: string; closed: boolean; deleted: boolean }>;
+  } {
+    type FakeMod = import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule & {
       publishes: Array<{ topic: string; data: Uint8Array }>;
       messageCallbacks: Array<{
         topic: string;
         subscription: string;
-        onMessage: (
-          msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-        ) => void;
+        onMessage: (msg: {
+          ack: () => void;
+          nack: () => void;
+          data: Uint8Array;
+          id: string;
+        }) => void;
       }>;
-    }
-    & {
+    } & {
       topics: Map<
         string,
         {
@@ -874,9 +1106,12 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
             string,
             {
               onMessage:
-                | ((
-                  msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-                ) => void)
+                | ((msg: {
+                    ack: () => void;
+                    nack: () => void;
+                    data: Uint8Array;
+                    id: string;
+                  }) => void)
                 | null;
             }
           >;
@@ -886,47 +1121,16 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
         string,
         { topic: string; name: string; closed: boolean; deleted: boolean }
       >;
-    } {
-    type FakeMod =
-      & import('../../src/brokers/pubsub-broker.ts').PubSubSdkModule
-      & {
-        publishes: Array<{ topic: string; data: Uint8Array }>;
-        messageCallbacks: Array<{
-          topic: string;
-          subscription: string;
-          onMessage: (
-            msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-          ) => void;
-        }>;
-      }
-      & {
-        topics: Map<
-          string,
-          {
-            messages: Array<{ data: Uint8Array }>;
-            subscriptions: Map<
-              string,
-              {
-                onMessage:
-                  | ((
-                    msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-                  ) => void)
-                  | null;
-              }
-            >;
-          }
-        >;
-        subscriptions: Map<
-          string,
-          { topic: string; name: string; closed: boolean; deleted: boolean }
-        >;
-      };
+    };
     const mod = {} as FakeMod;
     mod.topics = new Map();
     let fakeProjectId = '';
     mod.subscriptions = new Map();
 
     mod.PubSub = class {
+      getTopics(): Promise<unknown[]> {
+        return Promise.resolve([[]]);
+      }
       constructor(options: { projectId: string; credentials?: unknown }) {
         // The real SDK reports topics under the project it was built for.
         fakeProjectId = options.projectId;
@@ -978,9 +1182,12 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
         return {
           on(
             event: 'message' | 'error',
-            handler: (
-              msg: { ack: () => void; nack: () => void; data: Uint8Array; id: string },
-            ) => void,
+            handler: (msg: {
+              ack: () => void;
+              nack: () => void;
+              data: Uint8Array;
+              id: string;
+            }) => void,
           ) {
             if (event === 'message') {
               // Find the topic that has this subscription
@@ -1017,10 +1224,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
     const sdk = createFakeSdkModuleWithRouting();
     const transport = adaptPubSubModule(sdk, { projectId: 'test' });
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
     expect(broker.isReady()).toBe(true);
@@ -1052,10 +1263,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
     const sdk = createFakeSdkModuleWithRouting();
     const transport = adaptPubSubModule(sdk, { projectId: 'test' });
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
     const sub = await broker.subscribe('events', () => {});
@@ -1076,10 +1291,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
     const sdk = createFakeSdkModuleWithRouting();
     const transport = adaptPubSubModule(sdk, { projectId: 'test' });
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
     await broker.publish('metrics', { value: 42 });
@@ -1097,10 +1316,14 @@ describe('GcpPubSubBroker with adapted fake SDK module', () => {
     const sdk = createFakeSdkModuleWithRouting();
     const transport = adaptPubSubModule(sdk, { projectId: 'test' });
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -1132,9 +1355,8 @@ describe('loadPubSubModule (exported)', () => {
   });
 
   it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
-    const { loadPubSubModule, adaptPubSubModule } = await import(
-      '../../src/brokers/pubsub-broker.ts'
-    );
+    const { loadPubSubModule, adaptPubSubModule } =
+      await import('../../src/brokers/pubsub-broker.ts');
 
     // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
     // adapted PORT rather than just reaching the import line is what catches SDK
@@ -1184,7 +1406,7 @@ describe('C6: createSubscription error discrimination', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test' },
     );
@@ -1213,7 +1435,7 @@ describe('C6: createSubscription error discrimination', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test' },
     );
@@ -1254,7 +1476,7 @@ describe('C7: on(error) wires to logger', () => {
       },
     };
     const transport = adaptPubSubModule(
-      // deno-lint-ignore no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mod as any,
       { projectId: 'test', logger: fakeLogger },
     );
@@ -1284,9 +1506,11 @@ describe('GcpPubSubBroker — missing credentials', () => {
 // the metadata must carry them — and absence must mean "the transport carried
 // none", never "the adapter did not look".
 describe('GcpPubSubBroker — delivered metadata (X28-4)', () => {
-  function brokerWithDelivery(
-    delivery: Record<string, unknown> | null,
-  ): { broker: GcpPubSubBroker; seen: unknown[]; deliver: () => void } {
+  function brokerWithDelivery(delivery: Record<string, unknown> | null): {
+    broker: GcpPubSubBroker;
+    seen: unknown[];
+    deliver: () => void;
+  } {
     let onMessageCb: ((msg: Record<string, unknown>) => void) | null = null;
     const transport: IPubSubTransport = {
       publish: () => Promise.resolve(),
@@ -1298,10 +1522,14 @@ describe('GcpPubSubBroker — delivered metadata (X28-4)', () => {
       deleteSubscription: () => Promise.resolve(),
       close: () => Promise.resolve(),
     };
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
     const seen: unknown[] = [];
     return { broker, seen, deliver: () => onMessageCb!(delivery ?? {}) };
   }
@@ -1346,5 +1574,33 @@ describe('GcpPubSubBroker — delivered metadata (X28-4)', () => {
     // undefined.
     expect('messageId' in metadata).toBe(false);
     expect('timestamp' in metadata).toBe(false);
+  });
+});
+
+describe('GcpPubSubBroker — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when the peer is absent', async () => {
+    const { GcpPubSubBroker } = await import('../../src/brokers/pubsub-broker.ts');
+    const { JsonSerializer } = await import('../../src/serializers/json-serializer.ts');
+    const { createFakeRuntime } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('@google-cloud/pubsub', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const broker = new GcpPubSubBroker(createFakeRuntime(), new JsonSerializer(), {
+        projectId: 'test-project',
+      });
+      let caught: unknown;
+      try {
+        await broker.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@google-cloud/pubsub');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@google-cloud/pubsub');
+    }
   });
 });

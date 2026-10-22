@@ -66,9 +66,15 @@ describe('HTTP method decorators', () => {
       }
     }
     const routes = metadataStore.getRoutesFor(C);
-    expect(routes.map((r) => r.method).sort()).toEqual(
-      ['DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT'],
-    );
+    expect(routes.map((r) => r.method).sort()).toEqual([
+      'DELETE',
+      'GET',
+      'HEAD',
+      'OPTIONS',
+      'PATCH',
+      'POST',
+      'PUT',
+    ]);
   });
 
   it('multiple HTTP decorators on the same method produce multiple routes', () => {

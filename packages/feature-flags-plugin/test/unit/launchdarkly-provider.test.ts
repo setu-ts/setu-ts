@@ -260,9 +260,7 @@ describe('LaunchDarklyProvider', () => {
 
       // No warm-up: the async path has no cold-context caveat.
       expect(await provider.isEnabledAsync('beta', { userId: 'u1' })).toBe(true);
-      expect(client.variations).toEqual([
-        { key: 'beta', contextKey: 'u1', defaultValue: false },
-      ]);
+      expect(client.variations).toEqual([{ key: 'beta', contextKey: 'u1', defaultValue: false }]);
       await provider.stop();
     });
 

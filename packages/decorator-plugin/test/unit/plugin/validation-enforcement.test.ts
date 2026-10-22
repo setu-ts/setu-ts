@@ -240,3 +240,74 @@ describe('DecoratorPlugin validation enforcement (E1)', () => {
     ]);
   });
 });
+
+describe('DecoratorPlugin form-body opt-in (M114)', () => {
+  beforeEach(() => {
+    metadataStore.clear();
+  });
+
+  it('passes { forms: true } only for an opted-in body, and the two-argument call otherwise', async () => {
+    const formSchema = { kind: 'form' };
+    const jsonSchema = { kind: 'json' };
+    const querySchema = { kind: 'query' };
+
+    @Controller('/forms')
+    class FormsController {
+      @Post('/form')
+      @ValidateBody(formSchema, { forms: true })
+      @ValidateQuery(querySchema)
+      form() {
+        return null;
+      }
+
+      @Post('/json')
+      @ValidateBody(jsonSchema)
+      json() {
+        return null;
+      }
+    }
+
+    const calls: unknown[][] = [];
+    const service: IValidationService = {
+      validate(): Err<readonly ValidationIssue[]> {
+        return { success: false, error: [] };
+      },
+      middleware(...args: unknown[]): MiddlewareFunction {
+        calls.push(args);
+        return (_ctx, next) => next();
+      },
+    };
+    const { ctx } = createFakeContext();
+    ctx.services.register(CAPABILITIES.VALIDATION, service);
+    await DecoratorPlugin({ controllers: [FormsController] }).register(ctx);
+
+    // Argument COUNT is asserted, not only values: a provider implementing the
+    // two-parameter contract must see exactly the call it always did.
+    expect(calls).toEqual([
+      [formSchema, 'body', { forms: true }],
+      [querySchema, 'query'],
+      [jsonSchema, 'body'],
+    ]);
+  });
+
+  it('keeps the opt-in out of the route schema handed to OpenAPI', async () => {
+    const formSchema = { kind: 'form' };
+
+    @Controller('/forms')
+    class FormsController {
+      @Post('/form')
+      @ValidateBody(formSchema, { forms: true })
+      form() {
+        return null;
+      }
+    }
+
+    expect(metadataStore.getRoutesFor(FormsController)[0]?.schema?.bodyForms).toBe(true);
+    const { ctx, routes } = createFakeContext();
+    ctx.services.register(CAPABILITIES.VALIDATION, fakeValidationService().service);
+    await DecoratorPlugin({ controllers: [FormsController] }).register(ctx);
+    const schema = (routes[0]?.route as { schema?: Record<string, unknown> }).schema;
+    expect(schema?.['body']).toBe(formSchema);
+    expect(schema !== undefined && 'bodyForms' in schema).toBe(false);
+  });
+});

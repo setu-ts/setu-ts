@@ -40,6 +40,9 @@ export type { SerializedError } from './errors/serialize-error.ts';
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';
 // Duplicate key — the 409 every database backend's unique-violation maps onto
 export { DuplicateKeyError } from './errors/duplicate-key.ts';
+export { PrimaryKeyChangeError, assertPrimaryKeyUnchanged } from './errors/primary-key-change.ts';
+export { InvalidCursorError } from './errors/invalid-cursor.ts';
+export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
 // `@setu-ts/exceptions` states the status its own error should be answered with
 export { HTTP_STATUS_HINT, httpStatusHintOf, withHttpStatusHint } from './errors/status-hint.ts';
@@ -104,9 +107,13 @@ export {
 } from './request-identity.ts';
 export {
   CLIENT_IP_STATE_KEY,
+  REQUEST_ORIGIN_STATE_KEY,
+  CREDENTIAL_SOURCE_STATE_KEY,
   SESSION_STATE_KEY,
   SESSION_TENANT_BINDING_STATE_KEY,
 } from './state-keys.ts';
+export { publicRequestUrl, requestOriginOf } from './request-origin.ts';
+export type { RequestOrigin } from './request-origin.ts';
 
 // Path-exclusion matcher (M90a) — the one matcher four middlewares share
 export { createPathMatcher } from './path-matcher.ts';
@@ -227,6 +234,7 @@ export type { IConfig } from './services/config.ts';
 export { validatedStateKey } from './services/validation.ts';
 export type {
   IValidationService,
+  ValidationMiddlewareOptions,
   ValidationIssue,
   ValidationTarget,
 } from './services/validation.ts';
@@ -693,3 +701,12 @@ export { hasForbiddenAliasCharacter } from './diagnostics/alias.ts';
 
 export type { WritePrecondition, WritePreconditionCheck } from './services/write-precondition.ts';
 export { checkWritePrecondition } from './services/write-precondition.ts';
+
+/** Shared connection-outage classifier and network errno vocabulary. */
+export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';
+
+export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
+export type {
+  ReconnectMode,
+  ReconnectSupervisorOptions,
+} from './reconnect/reconnect-supervisor.ts';

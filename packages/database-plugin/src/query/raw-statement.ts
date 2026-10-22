@@ -110,8 +110,7 @@ function assertBindable(
   const numbered = placeholders.filter((item) => item.index !== null);
   if (numbered.length > 0 && numbered.length !== placeholders.length) {
     throw new Error(
-      "Raw query mixes '?' and '$N' placeholders in one statement; use one style: " +
-        statement,
+      "Raw query mixes '?' and '$N' placeholders in one statement; use one style: " + statement,
     );
   }
 

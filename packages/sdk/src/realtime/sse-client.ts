@@ -136,14 +136,12 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
     }
   }
 
-  async #deliver(
-    frame: {
-      readonly id?: string;
-      readonly event?: string;
-      readonly data?: string;
-      readonly retry?: number;
-    },
-  ): Promise<void> {
+  async #deliver(frame: {
+    readonly id?: string;
+    readonly event?: string;
+    readonly data?: string;
+    readonly retry?: number;
+  }): Promise<void> {
     if (frame.retry !== undefined) this.#serverRetryMs = frame.retry;
     if (frame.id !== undefined) this.#lastEventId = frame.id;
     if (frame.data === undefined) return;
@@ -152,9 +150,8 @@ class SseClient<TEvents extends SseEventMap> implements ISseClient {
       data: frame.data,
       ...(frame.id === undefined ? {} : { id: frame.id }),
     };
-    const parsed = this.#options.parse === undefined
-      ? JSON.parse(raw.data)
-      : this.#options.parse(raw);
+    const parsed =
+      this.#options.parse === undefined ? JSON.parse(raw.data) : this.#options.parse(raw);
     const event: SseEvent<keyof TEvents & string, TEvents[keyof TEvents]> = {
       event: raw.event as keyof TEvents & string,
       data: parsed,
@@ -201,8 +198,9 @@ function defaultFetch(input: RequestInfo, init?: RequestInit): Promise<Response>
 
 /** Checks the structural shape of a caller-initiated abort. */
 function isAbortError(error: unknown): boolean {
-  return typeof error === 'object' && error !== null && 'name' in error &&
-    error.name === 'AbortError';
+  return (
+    typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+  );
 }
 
 /** Rejects timer values that native platforms would coerce into a hot loop. */

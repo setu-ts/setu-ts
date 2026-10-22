@@ -26,17 +26,17 @@ describe('MemoryProvider', () => {
   });
 
   it('removeFlag makes it unknown (false)', () => {
-    const provider = new MemoryProvider({ 'beta': { enabled: true } });
+    const provider = new MemoryProvider({ beta: { enabled: true } });
     expect(provider.isEnabled('beta')).toBe(true);
     provider.removeFlag('beta');
     expect(provider.isEnabled('beta')).toBe(false);
   });
 
   it('replaceFlags mutates the full store', () => {
-    const provider = new MemoryProvider({ 'a': { enabled: true } });
+    const provider = new MemoryProvider({ a: { enabled: true } });
     expect(provider.isEnabled('a')).toBe(true);
     expect(provider.isEnabled('b')).toBe(false);
-    provider.replaceFlags({ 'b': { enabled: true } });
+    provider.replaceFlags({ b: { enabled: true } });
     expect(provider.isEnabled('a')).toBe(false);
     expect(provider.isEnabled('b')).toBe(true);
   });

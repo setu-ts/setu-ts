@@ -14,10 +14,7 @@ export type { IRequestContext } from '@setu-ts/common';
  *
  * @since 0.1.0
  */
-export type SsrRequestHandler = (
-  request: Request,
-  loadContext: unknown,
-) => Promise<Response>;
+export type SsrRequestHandler = (request: Request, loadContext: unknown) => Promise<Response>;
 
 /**
  * A React Router context key, used by identity as the argument to
@@ -94,43 +91,26 @@ export interface SsrRuntime {
  *
  * @since 0.2.0
  */
-export type PopulateLoadContext = (
-  ctx: IRequestContext,
-  context: RouterLoadContext,
-) => void;
+export type PopulateLoadContext = (ctx: IRequestContext, context: RouterLoadContext) => void;
 
 /**
- * Options for the React Router plugin.
+ * The options shared by both arms of {@linkcode ReactRouterPluginOptions}.
  *
- * @since 0.1.0
+ * @since 0.10.0
  */
-export interface ReactRouterPluginOptions {
-  /**
-   * Path to the React Router Vite server build (default export = `ServerBuild`).
-   *
-   * Must be **absolute** — an absolute filesystem path or a `file:` URL. The
-   * default loader performs `await import(serverBuildPath)`, and a relative
-   * specifier there resolves against this plugin's own module rather than
-   * against the consuming application, so it can never find the build. From an
-   * application module, derive one with
-   * `new URL('./build/server/index.js', import.meta.url).href`.
-   *
-   * In the npm build, a relative specifier is also passed through TypeScript's
-   * `rewriteRelativeImportExtensions` helper, which turns a trailing
-   * `.ts`/`.tsx`/`.mts`/`.cts` into its `.js` counterpart before the import.
-   * An absolute path or `file:` URL is passed through unchanged.
-   *
-   * @since 0.1.0
-   */
-  readonly serverBuildPath: string;
-
+export interface ReactRouterCommonOptions {
   /**
    * Injectable seam for lazy loading the RR runtime. When omitted, the default
-   * performs `await import(serverBuildPath)` + `await import('react-router')`.
+   * loads the server build (by path or module) + `await import('react-router')`.
    *
    * Also the supported hook for a development server: return a handler built
    * over a build thunk (`createRequestHandler(() => vite.ssrLoadModule(...))`)
    * to pick up rebuilds without restarting the process.
+   *
+   * The first argument is the app's `serverBuildPath`, or the placeholder
+   * `'<serverBuild>'` when the build was supplied as a module. On the module
+   * arm the third argument carries that module as `serverBuild`; on the path
+   * arm it is `undefined`.
    *
    * @since 0.2.0 Returns an {@linkcode SsrRuntime} rather than a bare handler,
    * so the context-provider constructor is sourced from the same `react-router`
@@ -139,6 +119,7 @@ export interface ReactRouterPluginOptions {
   readonly loadRequestHandler?: (
     serverBuildPath: string,
     mode: string,
+    options?: { readonly serverBuild?: unknown },
   ) => Promise<SsrRuntime>;
 
   /**
@@ -157,7 +138,7 @@ export interface ReactRouterPluginOptions {
   /**
    * Also serves files from the client-build ROOT — where Vite copies `public/`
    * (`robots.txt`, `favicon.ico`, …) — in addition to
-   * {@linkcode ReactRouterPluginOptions.assetUrlPrefix}, with
+   * {@linkcode ReactRouterCommonOptions.assetUrlPrefix}, with
    * `Cache-Control: public, max-age=0, must-revalidate`: root files are not
    * content-hashed, so they must be revalidated rather than cached immutably.
    * A request matching neither the root nor the prefix still falls through to
@@ -197,3 +178,79 @@ export interface ReactRouterPluginOptions {
    */
   readonly mode?: 'production' | 'development';
 }
+
+/**
+ * The path arm: the server build is loaded by `await import(serverBuildPath)`.
+ *
+ * @since 0.10.0
+ */
+export interface ReactRouterPathOptions extends ReactRouterCommonOptions {
+  /**
+   * Path to the React Router Vite server build (default export = `ServerBuild`).
+   *
+   * Must be **absolute** — an absolute filesystem path or a `file:` URL. The
+   * default loader performs `await import(serverBuildPath)`, and a relative
+   * specifier there resolves against this plugin's own module rather than
+   * against the consuming application, so it can never find the build. From an
+   * application module, derive one with
+   * `new URL('./build/server/index.js', import.meta.url).href`.
+   *
+   * Correct for the socket targets. On Cloudflare Workers a bundled module
+   * cannot resolve `new URL(…, import.meta.url)` against the application, so
+   * the build arrives as a module instead — supply
+   * {@linkcode ReactRouterModuleOptions.serverBuild}.
+   *
+   * In the npm build, a relative specifier is also passed through TypeScript's
+   * `rewriteRelativeImportExtensions` helper, which turns a trailing
+   * `.ts`/`.tsx`/`.mts`/`.cts` into its `.js` counterpart before the import.
+   * An absolute path or `file:` URL is passed through unchanged.
+   *
+   * @since 0.1.0
+   */
+  readonly serverBuildPath: string;
+
+  /**
+   * The exclusivity marker (M113d §3.10): supplying `serverBuild` alongside
+   * `serverBuildPath` is a compile error, because `never` accepts nothing.
+   */
+  readonly serverBuild?: never;
+}
+
+/**
+ * The module arm: the compiled server build is supplied as a module namespace,
+ * so no path import happens at all. This is the form a bundled Cloudflare
+ * Worker uses — the generated entry statically imports
+ * `../build/server/index.js` and passes it here (M113d §3.10).
+ *
+ * @since 0.10.0
+ */
+export interface ReactRouterModuleOptions extends ReactRouterCommonOptions {
+  /**
+   * The namespace of the app's compiled server build (default export =
+   * `ServerBuild`). Mutually exclusive with
+   * {@linkcode ReactRouterPathOptions.serverBuildPath} at the type level:
+   * supplying neither or both is a compile error.
+   *
+   * @since 0.10.0
+   */
+  readonly serverBuild: unknown;
+
+  /**
+   * The exclusivity marker (M113d §3.10): supplying `serverBuildPath`
+   * alongside `serverBuild` is a compile error, because `never` accepts
+   * nothing.
+   */
+  readonly serverBuildPath?: never;
+}
+
+/**
+ * The plugin's options: exactly one of `serverBuildPath` (path arm) and
+ * `serverBuild` (module arm).
+ *
+ * A union `type`, not an `interface`: an application that `extends` it or
+ * merges a declaration into it stops compiling (breaking for implementors,
+ * shipped in minor 0.10.0). A caller passing `serverBuildPath` is unaffected.
+ *
+ * @since 0.1.0
+ */
+export type ReactRouterPluginOptions = ReactRouterPathOptions | ReactRouterModuleOptions;

@@ -111,9 +111,7 @@ export class ResilienceService implements IResilienceService {
   }
 
   /** Resolves the effective circuit-breaker policy, or `undefined` for none. */
-  #resolveCircuitBreaker(
-    value: WrapOptions['circuitBreaker'],
-  ): CircuitBreakerPolicy | undefined {
+  #resolveCircuitBreaker(value: WrapOptions['circuitBreaker']): CircuitBreakerPolicy | undefined {
     if (value === undefined || value === false) {
       return undefined;
     }

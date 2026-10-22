@@ -387,8 +387,9 @@ describe('loadConfig | configuration provenance (M98e)', () => {
         },
       },
     );
-    const snapshot = (registry.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as IConfigDiagnosticsSource)
-      .snapshot('instance-1');
+    const snapshot = (
+      registry.get(CAPABILITIES.CONFIG_DIAGNOSTICS) as IConfigDiagnosticsSource
+    ).snapshot('instance-1');
     expect(snapshot.state).toEqual('ready');
     const byAlias = new Map(snapshot.entries.map((e) => [e.keyAlias, e]));
     expect(byAlias.get('port')).toMatchObject({
@@ -549,8 +550,10 @@ describe('loadConfig | configuration provenance (M98e)', () => {
 
   it('refuses an invalid diagnostics option before anything is read', async () => {
     const runtime = createRuntime({ env: {}, fs: createFakeFileSystem({}) });
-    await expect(loadConfig(runtime, {
-      diagnostics: { enabled: false, keys: {} } as unknown as ConfigDiagnosticsOptions,
-    })).rejects.toThrow(/enabled must be the literal true/);
+    await expect(
+      loadConfig(runtime, {
+        diagnostics: { enabled: false, keys: {} } as unknown as ConfigDiagnosticsOptions,
+      }),
+    ).rejects.toThrow(/enabled must be the literal true/);
   });
 });

@@ -75,7 +75,8 @@ export function resolveCacheApi(scope: unknown = globalThis): ICacheApi | undefi
   // Checked member by member rather than trusting the name: Deno's `caches` is
   // a `CacheStorage` with no `default` at all, and a partial shim would fail
   // at the first call rather than here.
-  const usable = typeof record.match === 'function' &&
+  const usable =
+    typeof record.match === 'function' &&
     typeof record.put === 'function' &&
     typeof record.delete === 'function';
 

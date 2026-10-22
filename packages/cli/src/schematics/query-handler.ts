@@ -6,7 +6,7 @@
 
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
 import { QUERY_HANDLER_SEAM, QUERY_HANDLERS_EXPORT } from '../seams/cqrs.ts';
-import { INGRESS_SEAM } from '../seams/ingress.ts';
+import { ingressNames, INGRESS_SEAM } from '../seams/ingress.ts';
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import {
@@ -28,9 +28,10 @@ export function generateQueryHandler(
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   if (generatorMode(options.plugins) === 'class-based') {
+    const ingress = ingressNames(names, 'query-handler');
     return [
       {
-        path: `${INGRESS_SEAM.dir}/${names.kebab}${INGRESS_SEAM.suffix}`,
+        path: `${INGRESS_SEAM.dir}/${ingress.kebab}${INGRESS_SEAM.suffix}`,
         contents: `import type { CqrsQuery } from '@setu-ts/common';
 import { QueryHandler } from '@setu-ts/decorator-plugin';
 
@@ -48,7 +49,7 @@ export interface ${names.pascal}Query extends CqrsQuery<${names.pascal}Criteria>
 }
 
 /** Decorated query handler, registered through the ingress barrel. */
-export class ${names.pascal}Ingress {
+export class ${ingress.pascal}Ingress {
   @QueryHandler(${names.screaming}_QUERY)
   handle(query: ${names.pascal}Query): Promise<{ readonly id: string }> {
     return Promise.resolve({ id: query.data.id });
@@ -59,7 +60,7 @@ export class ${names.pascal}Ingress {
       {
         path: INGRESS_SEAM.barrel,
         contents: INGRESS_SEAM.renderBarrel({
-          ingress: seamNames(options.artifacts, 'ingress', names.kebab),
+          ingress: seamNames(options.artifacts, 'ingress', ingress.kebab),
         }),
         managed: true,
       },
@@ -83,12 +84,10 @@ export interface ${names.pascal}View {
 }
 
 /** The ${names.pascal} query. */
-${
-    renderDeclarationHeader(
-      `export interface ${names.pascal}Query`,
-      `extends CqrsQuery<${names.pascal}Criteria>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export interface ${names.pascal}Query`,
+  `extends CqrsQuery<${names.pascal}Criteria>`,
+)}
   readonly type: typeof ${names.screaming}_QUERY;
 }
 
@@ -101,25 +100,17 @@ ${
  * The barrel references the factory below by name, so the factory is the single
  * construction site.
  */
-${
-    renderDeclarationHeader(
-      `export class ${names.pascal}QueryHandler`,
-      `implements IQueryHandler<${names.pascal}Query, ${names.pascal}View>`,
-    )
-  }
+${renderDeclarationHeader(
+  `export class ${names.pascal}QueryHandler`,
+  `implements IQueryHandler<${names.pascal}Query, ${names.pascal}View>`,
+)}
   /**
    * Executes the query.
    *
    * @param query - The query to handle
    * @returns The projected view
    */
-${
-    renderMethodSignature(
-      'handle',
-      [`query: ${names.pascal}Query`],
-      `Promise<${names.pascal}View>`,
-    )
-  }
+${renderMethodSignature('handle', [`query: ${names.pascal}Query`], `Promise<${names.pascal}View>`)}
     // Replace with the real read. Queries must not mutate state.
     return Promise.resolve({ id: query.data.id });
   }

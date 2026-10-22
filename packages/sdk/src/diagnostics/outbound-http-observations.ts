@@ -197,7 +197,10 @@ export class OutboundHttpCollector {
     statusClass: OutboundHttpStatusClass,
   ): void {
     if (
-      token === null || this.#closed || this.#failed || token.generation !== this.#generation ||
+      token === null ||
+      this.#closed ||
+      this.#failed ||
+      token.generation !== this.#generation ||
       this.#record === null
     ) {
       return;
@@ -293,7 +296,8 @@ export class OutboundHttpCollector {
   #expireIdle(now: number): void {
     const record = this.#record;
     if (
-      record !== null && record.count >= record.started &&
+      record !== null &&
+      record.count >= record.started &&
       now - record.lastAt > OUTBOUND_HTTP_LIMITS.retentionMs
     ) {
       this.#record = null;

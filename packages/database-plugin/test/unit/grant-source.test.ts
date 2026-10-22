@@ -32,15 +32,13 @@ function registry(service: IDatabaseService): IServiceRegistry {
 async function seededGrants(): Promise<IDatabaseService> {
   const service = await memoryService();
   const repo = service.getRepository<Record<string, unknown>>('grants');
-  for (
-    const row of [
-      { id: 'g1', subject: 'u1', role: 'approver', scopeType: 'tenant', scopeId: 't1' },
-      { id: 'g2', subject: 'u1', role: 'viewer', scopeType: null, scopeId: null },
-      { id: 'g3', subject: 'u1', role: 'owner', scopeType: 'tenant', scopeId: 't2' },
-      { id: 'g4', subject: 'u2', role: 'owner', scopeType: 'tenant', scopeId: 't1' },
-      { id: 'g5', subject: 'u1', role: 'broken', scopeType: 'tenant', scopeId: null },
-    ]
-  ) {
+  for (const row of [
+    { id: 'g1', subject: 'u1', role: 'approver', scopeType: 'tenant', scopeId: 't1' },
+    { id: 'g2', subject: 'u1', role: 'viewer', scopeType: null, scopeId: null },
+    { id: 'g3', subject: 'u1', role: 'owner', scopeType: 'tenant', scopeId: 't2' },
+    { id: 'g4', subject: 'u2', role: 'owner', scopeType: 'tenant', scopeId: 't1' },
+    { id: 'g5', subject: 'u1', role: 'broken', scopeType: 'tenant', scopeId: null },
+  ]) {
     await repo.create(row);
   }
   return service;
@@ -101,8 +99,9 @@ describe('createDatabaseGrantSource', () => {
     // A third matching row exceeds the limit: the question is refused, never
     // answered with an arbitrary two of the three.
     await repo.create({ id: 'c', who: 'u1', grant: 'auditor', kind: null, ref: null });
-    await expect(source.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [] }, live)).rejects
-      .toThrow('createDatabaseGrantSource: more than 2 rows match; the question is refused');
+    await expect(
+      source.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [] }, live),
+    ).rejects.toThrow('createDatabaseGrantSource: more than 2 rows match; the question is refused');
   });
 
   it('the role source refuses rather than truncates past its limit', async () => {
@@ -170,10 +169,9 @@ describe('createDatabaseGrantSource', () => {
     const source = createDatabaseGrantSource({ entity: 'grants' })(registry(await seededGrants()));
     const controller = new AbortController();
     controller.abort();
-    await expect(source.grantsFor({ id: 'u1' }, { kind: 'all' }, controller.signal)).rejects
-      .toThrow(
-        'deadline expired before the query',
-      );
+    await expect(
+      source.grantsFor({ id: 'u1' }, { kind: 'all' }, controller.signal),
+    ).rejects.toThrow('deadline expired before the query');
   });
 
   it('refuses an empty entity, a non-identifier field and an out-of-range limit', () => {
@@ -198,32 +196,30 @@ describe('createDatabaseRoleSource', () => {
   async function seededRoles(): Promise<IDatabaseService> {
     const service = await memoryService();
     const repo = service.getRepository<Record<string, unknown>>('roles');
-    for (
-      const row of [
-        {
-          id: 'r1',
-          scopeType: 'tenant',
-          scopeId: 't1',
-          role: 'regional',
-          permission: 'invoices:approve',
-        },
-        {
-          id: 'r2',
-          scopeType: 'tenant',
-          scopeId: 't1',
-          role: 'regional',
-          permission: 'invoices:read',
-        },
-        {
-          id: 'r3',
-          scopeType: 'tenant',
-          scopeId: 't2',
-          role: 'regional',
-          permission: 'invoices:read',
-        },
-        { id: 'r4', scopeType: 'tenant', scopeId: 't1', role: null, permission: 'x' },
-      ]
-    ) {
+    for (const row of [
+      {
+        id: 'r1',
+        scopeType: 'tenant',
+        scopeId: 't1',
+        role: 'regional',
+        permission: 'invoices:approve',
+      },
+      {
+        id: 'r2',
+        scopeType: 'tenant',
+        scopeId: 't1',
+        role: 'regional',
+        permission: 'invoices:read',
+      },
+      {
+        id: 'r3',
+        scopeType: 'tenant',
+        scopeId: 't2',
+        role: 'regional',
+        permission: 'invoices:read',
+      },
+      { id: 'r4', scopeType: 'tenant', scopeId: 't1', role: null, permission: 'x' },
+    ]) {
       await repo.create(row);
     }
     return service;

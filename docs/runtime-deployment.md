@@ -104,8 +104,9 @@ app.router.get('/events', async (ctx) => {
 
 ### Prerequisites
 
-- Node.js 22+ (`Promise.withResolvers` is used in five packages and shipped in Node 22; CI verifies
-  on Node 24)
+- Node.js 22.23.4+, 24.22.1+ or 26.12.1+ (`Promise.withResolvers` is used in five packages and
+  shipped in Node 22; those releases carry the Node.js security fixes of 2026-10-21; CI verifies on
+  Node 24)
 - npm, pnpm, or yarn
 
 ### Setup
@@ -154,9 +155,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "tsx watch main.ts"
   },
   "dependencies": {
-    "@setu-ts/common": "^0.9.0",
-    "@setu-ts/kernel": "^0.9.0",
-    "@setu-ts/runtime": "^0.9.0"
+    "@setu-ts/common": "^0.10.0",
+    "@setu-ts/kernel": "^0.10.0",
+    "@setu-ts/runtime": "^0.10.0"
   },
   "devDependencies": {
     "tsx": "^4.20.0"
@@ -177,7 +178,7 @@ console.log('Server running on http://localhost:3000');
 #### Docker
 
 ```dockerfile
-# Node 22 or later: the framework uses Promise.withResolvers.
+# Node 22.23.4+, 24.22.1+ or 26.12.1+ (see Prerequisites); rebuild with --pull to pick up patches.
 FROM node:24-alpine
 
 WORKDIR /app
@@ -264,9 +265,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "deno run --watch --allow-net --allow-env main.ts"
   },
   "imports": {
-    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.9.0",
-    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.9.0",
-    "@setu-ts/common": "npm:@setu-ts/common@^0.9.0"
+    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.10.0",
+    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.10.0",
+    "@setu-ts/common": "npm:@setu-ts/common@^0.10.0"
   }
 }
 ```
@@ -460,10 +461,7 @@ import { env, waitUntil } from 'cloudflare:workers';
 // CloudflareWorkersHttpAdapter; `env` populates `runtime.env`.
 function createApp(): IKernelApplication {
   const app = createApplication({
-    plugins: [
-      RuntimePlugin({ env }),
-      CloudflarePlugin({ env, waitUntil }),
-    ],
+    plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, waitUntil })],
   });
 
   app.router.get('/', async (ctx) => {
@@ -639,10 +637,7 @@ declare const env: WorkerEnv;
 declare const waitUntil: (promise: Promise<unknown>) => void;
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin({ env }),
-    CloudflarePlugin({ env, waitUntil }),
-  ],
+  plugins: [RuntimePlugin({ env }), CloudflarePlugin({ env, waitUntil })],
 });
 
 async function reportUsage(_value: string | null): Promise<void> {
@@ -720,8 +715,8 @@ app.router.get('/notice', async (ctx) => {
   const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
   const content = runtime.fs
     ? await runtime.fs.readFile('notice.txt')
-    // Workers has no file system: read from a store instead
-    : await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get<string>('notice');
+    : // Workers has no file system: read from a store instead
+      await ctx.services.get<ICacheStore>(CAPABILITIES.CACHE).get<string>('notice');
   return ctx.response.json({ content });
 });
 ```

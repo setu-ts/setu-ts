@@ -51,6 +51,7 @@ packages:
   - packages/localization-plugin
   - packages/diagnostics-plugin
   - packages/idempotency-plugin
+  - apps/*
 
 # Dev-only workspace edges are cyclic (test-only imports, plan §3.1); each
 # member's build is `tsc -b`, which orders its own references.
@@ -60,6 +61,8 @@ ignoreWorkspaceCycles: true
 # the Google Cloud SDKs the tests reach only through fakes and guarded
 # suites. pnpm 12 refuses a frozen install while either is undecided.
 allowBuilds:
+  # Swagger UI assets need no install-time analytics hook.
+  '@scarf/scarf': false
   protobufjs: false
   sse4_crc32: false
   # The TC39 decorator transformer requires its native build.

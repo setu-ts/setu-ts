@@ -1,8 +1,19 @@
 /**
- * Queue plugin error classes exported for consumer `instanceof` handling.
+ * Queue plugin errors. StaleClaimError is internal; the others are public.
  *
  * @module
  */
+
+/**
+ * A settlement belongs to a delivery that no longer owns the job.
+ * Internal — never barrel-exported. Tokens are delivery fences, not authorization.
+ */
+export class StaleClaimError extends Error {
+  constructor() {
+    super('queue job claim is stale');
+    this.name = 'StaleClaimError';
+  }
+}
 
 /**
  * Thrown by a queue backend's `connect()` when the runtime platform is

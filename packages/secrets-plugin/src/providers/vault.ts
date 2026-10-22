@@ -263,10 +263,14 @@ export class HashiCorpVaultProvider implements SecretProvider {
    * @throws {Error} On a non-404 HTTP error or a body that is not JSON
    */
   async get(name: string): Promise<string | null> {
-    const res = await this.#request(this.#dataUrl(name), {
-      method: 'GET',
-      headers: { 'X-Vault-Token': this.#token },
-    }, true);
+    const res = await this.#request(
+      this.#dataUrl(name),
+      {
+        method: 'GET',
+        headers: { 'X-Vault-Token': this.#token },
+      },
+      true,
+    );
     if (res.status === HTTP_NOT_FOUND) {
       return null;
     }
@@ -295,14 +299,18 @@ export class HashiCorpVaultProvider implements SecretProvider {
    * @throws {Error} On any HTTP error
    */
   async set(name: string, value: string): Promise<void> {
-    const res = await this.#request(this.#dataUrl(name), {
-      method: 'POST',
-      headers: {
-        'X-Vault-Token': this.#token,
-        'Content-Type': 'application/json',
+    const res = await this.#request(
+      this.#dataUrl(name),
+      {
+        method: 'POST',
+        headers: {
+          'X-Vault-Token': this.#token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ data: { [VALUE_FIELD]: value } }),
       },
-      body: JSON.stringify({ data: { [VALUE_FIELD]: value } }),
-    }, false);
+      false,
+    );
     if (!res.ok) {
       throw new Error(`Vault write failed for ${printableSecretName(name)}: HTTP ${res.status}`);
     }
@@ -344,22 +352,25 @@ export class HashiCorpVaultProvider implements SecretProvider {
    */
   async #request(url: string, init: RequestInit, readBody: boolean): Promise<VaultAnswer> {
     try {
-      return await withDeadline(async (signal) => {
-        const res = await this.#http(url, { ...init, signal });
-        if (readBody && res.ok) {
-          const text = await readCappedText(res);
-          return { status: res.status, ok: true, text, oversized: text === null };
-        }
-        await res.body?.cancel().catch(() => {
-          // A body the transport already closed cannot be cancelled; the
-          // status still answered.
-        });
-        return { status: res.status, ok: res.ok, text: null, oversized: false };
-      }, {
-        timeoutMs: this.#timeoutMs,
-        onTimeout: () => new Error(`Vault did not answer within ${this.#timeoutMs} ms`),
-        ...(this.#timing !== undefined && { timing: this.#timing }),
-      });
+      return await withDeadline(
+        async (signal) => {
+          const res = await this.#http(url, { ...init, signal });
+          if (readBody && res.ok) {
+            const text = await readCappedText(res);
+            return { status: res.status, ok: true, text, oversized: text === null };
+          }
+          await res.body?.cancel().catch(() => {
+            // A body the transport already closed cannot be cancelled; the
+            // status still answered.
+          });
+          return { status: res.status, ok: res.ok, text: null, oversized: false };
+        },
+        {
+          timeoutMs: this.#timeoutMs,
+          onTimeout: () => new Error(`Vault did not answer within ${this.#timeoutMs} ms`),
+          ...(this.#timing !== undefined && { timing: this.#timing }),
+        },
+      );
     } catch (error) {
       throw new SecretProviderUnavailableError(PROVIDER_NAME, error);
     }

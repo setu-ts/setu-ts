@@ -260,9 +260,10 @@ function inboxSubscription<T>(
     );
   }
   const instance = inbox.instance;
-  const token = instance === undefined
-    ? CAPABILITIES.INBOX
-    : createCapabilityToken(`${CAPABILITIES.INBOX}.${instance}`);
+  const token =
+    instance === undefined
+      ? CAPABILITIES.INBOX
+      : createCapabilityToken(`${CAPABILITIES.INBOX}.${instance}`);
   const topic = definition.topic;
   return (services: IServiceRegistry): SubscriptionDefinition => {
     if (!services.has(token)) throw new InboxNotConfiguredError(token, 'unregistered');

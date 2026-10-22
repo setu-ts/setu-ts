@@ -13,7 +13,7 @@ The store itself is registered under `CAPABILITIES.METADATA_STORE` (`'metadata-s
 `@ValidateBody`, `@ValidateQuery`, and `@ValidateParams` preserve application-created schemas and
 hand them to the validation/OpenAPI boundaries; this package does not inspect Zod internals. The
 supported Zod ranges are therefore the shared validation contract: `>=3.24.0 <4` and `>=4.4.0 <5`.
-`deno task check:compat` exercises both majors through the validation and OpenAPI owners.
+`pnpm run check:compat` exercises both majors through the validation and OpenAPI owners.
 
 ## Installation
 
@@ -134,7 +134,11 @@ import { Controller, Get, Render } from '@setu-ts/decorator-plugin';
 // `(props) => \`<li>${user}</li>\`` template would NOT: escaping belongs to the
 // rendering runtime, and a plain string component is returned unchanged.
 const UserList = (props: { readonly users: readonly string[] }) => (
-  <ul>{props.users.map((user) => <li>{user}</li>)}</ul>
+  <ul>
+    {props.users.map((user) => (
+      <li>{user}</li>
+    ))}
+  </ul>
 );
 
 @Controller('/pages')
@@ -243,7 +247,9 @@ schema and a description the declaration does not carry.
 - **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
-- **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse`
+- **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse` (`@ApiOperation` forwards `operationId`,
+  `summary` and `description` into the route schema; OpenAPI uses a declared id verbatim and derives
+  one from method and path when it is absent.)
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
 
@@ -493,7 +499,7 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 | `SetuMethodDecorator`        | type      |
 | `SourceValues`               | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

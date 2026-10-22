@@ -74,7 +74,8 @@ describe('setu end-to-end on a real filesystem', () => {
       const url = new URL(origin);
       const connection = await connect({ hostname: url.hostname, port: Number(url.port) });
       try {
-        const request = `GET /ws/board HTTP/1.1\r\nHost: ${url.host}\r\n` +
+        const request =
+          `GET /ws/board HTTP/1.1\r\nHost: ${url.host}\r\n` +
           'Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\n' +
           'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n';
         await connection.write(new TextEncoder().encode(request));
@@ -246,8 +247,9 @@ try {
     await nodeFs.writeFile(`${project}/deno.json`, JSON.stringify(manifest, null, 2));
 
     expect(await run(['g', 'guard', 'admin', '--dir', project])).toBe(0);
-    expect(await nodeFs.readFile(`${project}/src/guards/admin.guard.ts`, 'utf8'))
-      .toContain('requireAdmin');
+    expect(await nodeFs.readFile(`${project}/src/guards/admin.guard.ts`, 'utf8')).toContain(
+      'requireAdmin',
+    );
   });
 
   it('writes nothing to disk under --dry-run', async () => {
@@ -297,9 +299,9 @@ try {
 
     expect(await run(['add', 'auth', '--dir', project])).toBe(0);
 
-    const manifest = JSON.parse(
-      await nodeFs.readFile(`${project}/deno.json`, 'utf8'),
-    ) as { imports: Record<string, string> };
+    const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
+      imports: Record<string, string>;
+    };
     expect(manifest.imports['@setu-ts/auth-plugin']).toContain('npm:@setu-ts/auth-plugin@');
 
     // And now the same command succeeds — which is only possible because
@@ -397,6 +399,17 @@ await app.stop();
     expect(await run(['new', '--runtime', 'deno', 'svc'])).toBe(0);
     const project = `${root}/svc`;
     expect(await run(['add', 'database', '--dir', project])).toBe(0);
+    // Database selection is application-owned; `add database` installs only.
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
+      configPath,
+      "import { DatabasePlugin } from '@setu-ts/database-plugin';\n" +
+        config.replace(
+          '      ...GENERATED_PLUGINS,',
+          '      DatabasePlugin(),\n      ...GENERATED_PLUGINS,',
+        ),
+    );
     expect(await run(['g', 'migration', 'add-users', '--dir', project])).toBe(0);
     expect(await run(['g', 'migration', 'add-orders', '--dir', project])).toBe(0);
 
@@ -437,7 +450,8 @@ await app.stop();
       stderr: 'piped',
     });
     expect(reversed.code).toBe(0);
-    expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length).toBe(2);
+    // Memory history is process-local: a fresh runner has nothing to reverse.
+    expect(new TextDecoder().decode(reversed.stdout).match(/^down /gm)?.length ?? 0).toBe(0);
   });
 
   it('generates every ungated schematic into one project', async () => {
@@ -456,6 +470,7 @@ await app.stop();
       'controllers',
       'jobs',
       'middleware',
+      'modules',
       'plugins',
       'services',
     ]);

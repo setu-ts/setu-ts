@@ -109,7 +109,7 @@ its own client never triggers the lazy import at all — see
 **Links:**
 
 - [README](../packages/common/README.md)
-- [API Reference](./api/common/src/index.ts/index.html)
+- [API Reference](./api/modules/common_src.html)
 
 ---
 
@@ -135,7 +135,7 @@ lifecycle.
 **Links:**
 
 - [README](../packages/kernel/README.md)
-- [API Reference](./api/kernel/src/index.ts/index.html)
+- [API Reference](./api/modules/kernel_src.html)
 
 ---
 
@@ -160,7 +160,7 @@ lifecycle.
 **Links:**
 
 - [README](../packages/runtime/README.md)
-- [API Reference](./api/runtime/src/index.ts/index.html)
+- [API Reference](./api/modules/runtime_src.html)
 
 ---
 
@@ -189,7 +189,7 @@ management.
 **Links:**
 
 - [README](../packages/di-plugin/README.md)
-- [API Reference](./api/di-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/di-plugin_src.html)
 
 ---
 
@@ -218,7 +218,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/decorator-plugin/README.md)
-- [API Reference](./api/decorator-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/decorator-plugin_src.html)
 
 ---
 
@@ -244,7 +244,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/logger-plugin/README.md)
-- [API Reference](./api/logger-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/logger-plugin_src.html)
 
 ---
 
@@ -270,7 +270,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/config-plugin/README.md)
-- [API Reference](./api/config-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/config-plugin_src.html)
 
 ---
 
@@ -296,7 +296,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/validation-plugin/README.md)
-- [API Reference](./api/validation-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/validation-plugin_src.html)
 
 ---
 
@@ -321,7 +321,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/exceptions/README.md)
-- [API Reference](./api/exceptions/src/index.ts/index.html)
+- [API Reference](./api/modules/exceptions_src.html)
 
 ---
 
@@ -346,7 +346,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/openapi-plugin/README.md)
-- [API Reference](./api/openapi-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/openapi-plugin_src.html)
 
 ---
 
@@ -369,16 +369,16 @@ emitDecoratorMetadata).
 - Memory (built-in)
 - Prisma (an injected Prisma v7 client)
 - Drizzle (an injected Drizzle database, wrapped with `createDrizzleDatabase`)
-- MongoDB (via npm:mongodb)
-- DynamoDB (via npm:@aws-sdk/client-dynamodb)
-- Azure Cosmos DB (via npm:@azure/cosmos)
-- Cloud Bigtable (via npm:@google-cloud/bigtable)
+- MongoDB (via mongodb)
+- DynamoDB (via @aws-sdk/client-dynamodb)
+- Azure Cosmos DB (via @azure/cosmos)
+- Cloud Bigtable (via @google-cloud/bigtable)
 - Custom (`type: 'custom'`), for example `D1Adapter` from `cloudflare-plugin`
 
 **Links:**
 
 - [README](../packages/database-plugin/README.md)
-- [API Reference](./api/database-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/database-plugin_src.html)
 
 ---
 
@@ -397,13 +397,13 @@ emitDecoratorMetadata).
 **Stores:**
 
 - Memory (built-in)
-- Redis (via npm:ioredis)
+- Redis (via ioredis)
 - Cloudflare KV
 
 **Links:**
 
 - [README](../packages/cache-plugin/README.md)
-- [API Reference](./api/cache-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/cache-plugin_src.html)
 
 ---
 
@@ -433,7 +433,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/auth-plugin/README.md)
-- [API Reference](./api/auth-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/auth-plugin_src.html)
 
 ---
 
@@ -452,12 +452,12 @@ emitDecoratorMetadata).
 **Brokers:**
 
 - In-memory (built-in)
-- Redis Streams (via npm:ioredis)
-- RabbitMQ (via npm:amqplib)
-- NATS (via npm:nats)
-- Kafka (via npm:kafkajs)
-- GCP Pub/Sub (via npm:@google-cloud/pubsub)
-- Azure Service Bus (via npm:@azure/service-bus)
+- Redis Streams (via ioredis)
+- RabbitMQ (via amqplib)
+- NATS (via nats)
+- Kafka (via kafkajs)
+- GCP Pub/Sub (via @google-cloud/pubsub)
+- Azure Service Bus (via @azure/service-bus)
 
 > Workers is not supported by **this package**: every broker except the in-memory default needs raw
 > sockets or an npm SDK that does not run on the edge. The capability itself IS available there —
@@ -476,7 +476,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/messaging-plugin/README.md)
-- [API Reference](./api/messaging-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/messaging-plugin_src.html)
 
 ---
 
@@ -495,9 +495,9 @@ emitDecoratorMetadata).
 **Adapters:**
 
 - Memory (built-in)
-- Redis (via npm:ioredis)
-- RabbitMQ (via npm:amqplib)
-- SQS (via npm:@aws-sdk/client-sqs)
+- Redis (via ioredis)
+- RabbitMQ (via amqplib)
+- SQS (via @aws-sdk/client-sqs)
 
 > Workers Queues belong to [`@setu-ts/cloudflare-plugin`](#setu-tscloudflare-plugin), not this
 > package — the queue-plugin adapters all need raw sockets or an npm SDK unavailable on the edge.
@@ -505,7 +505,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/queue-plugin/README.md)
-- [API Reference](./api/queue-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/queue-plugin_src.html)
 
 ---
 
@@ -531,7 +531,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/events-plugin/README.md)
-- [API Reference](./api/events-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/events-plugin_src.html)
 
 ---
 
@@ -556,7 +556,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/cqrs-plugin/README.md)
-- [API Reference](./api/cqrs-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/cqrs-plugin_src.html)
 
 ---
 
@@ -583,7 +583,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/metrics-plugin/README.md)
-- [API Reference](./api/metrics-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/metrics-plugin_src.html)
 
 ---
 
@@ -608,7 +608,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/health-plugin/README.md)
-- [API Reference](./api/health-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/health-plugin_src.html)
 
 ---
 
@@ -634,7 +634,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/telemetry-plugin/README.md)
-- [API Reference](./api/telemetry-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/telemetry-plugin_src.html)
 
 ---
 
@@ -660,7 +660,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/scheduler-plugin/README.md)
-- [API Reference](./api/scheduler-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/scheduler-plugin_src.html)
 
 ---
 
@@ -687,7 +687,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/secrets-plugin/README.md)
-- [API Reference](./api/secrets-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/secrets-plugin_src.html)
 
 ---
 
@@ -713,7 +713,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/audit-plugin/README.md)
-- [API Reference](./api/audit-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/audit-plugin_src.html)
 
 ---
 
@@ -739,7 +739,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/resilience-plugin/README.md)
-- [API Reference](./api/resilience-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/resilience-plugin_src.html)
 
 ---
 
@@ -767,7 +767,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/storage-plugin/README.md)
-- [API Reference](./api/storage-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/storage-plugin_src.html)
 
 ---
 
@@ -793,7 +793,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/mail-plugin/README.md)
-- [API Reference](./api/mail-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/mail-plugin_src.html)
 
 ---
 
@@ -819,7 +819,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/notification-plugin/README.md)
-- [API Reference](./api/notification-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/notification-plugin_src.html)
 
 ---
 
@@ -845,7 +845,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/feature-flags-plugin/README.md)
-- [API Reference](./api/feature-flags-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/feature-flags-plugin_src.html)
 
 ---
 
@@ -877,7 +877,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/multi-tenancy-plugin/README.md)
-- [API Reference](./api/multi-tenancy-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/multi-tenancy-plugin_src.html)
 
 ---
 
@@ -903,7 +903,7 @@ emitDecoratorMetadata).
 **Links:**
 
 - [README](../packages/session-plugin/README.md)
-- [API Reference](./api/session-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/session-plugin_src.html)
 
 ---
 
@@ -937,7 +937,7 @@ before `complete` can still repeat that effect; see the package README for the l
 **Links:**
 
 - [README](../packages/idempotency-plugin/README.md)
-- [API Reference](./api/idempotency-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/idempotency-plugin_src.html)
 
 ---
 
@@ -968,7 +968,7 @@ the browser.
 **Links:**
 
 - [README](../packages/localization-plugin/README.md)
-- [API Reference](./api/localization-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/localization-plugin_src.html)
 
 ---
 
@@ -1001,7 +1001,7 @@ the browser.
 **Links:**
 
 - [README](../packages/cloudflare-plugin/README.md)
-- [API Reference](./api/cloudflare-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/cloudflare-plugin_src.html)
 
 ---
 
@@ -1026,7 +1026,7 @@ the browser.
 **Links:**
 
 - [README](../packages/grpc-plugin/README.md)
-- [API Reference](./api/grpc-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/grpc-plugin_src.html)
 
 ---
 
@@ -1052,7 +1052,7 @@ the browser.
 **Links:**
 
 - [README](../packages/graphql-plugin/README.md)
-- [API Reference](./api/graphql-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/graphql-plugin_src.html)
 
 ---
 
@@ -1073,7 +1073,7 @@ the browser.
 **Links:**
 
 - [README](../packages/react-router-plugin/README.md)
-- [API Reference](./api/react-router-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/react-router-plugin_src.html)
 
 ---
 
@@ -1092,7 +1092,7 @@ the browser.
 **Links:**
 
 - [README](../packages/sse-plugin/README.md)
-- [API Reference](./api/sse-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/sse-plugin_src.html)
 
 ---
 
@@ -1117,7 +1117,7 @@ named by reference.
 **Links:**
 
 - [README](../packages/view-plugin/README.md)
-- [API Reference](./api/view-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/view-plugin_src.html)
 
 ---
 
@@ -1136,7 +1136,7 @@ named by reference.
 **Links:**
 
 - [README](../packages/websocket-plugin/README.md)
-- [API Reference](./api/websocket-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/websocket-plugin_src.html)
 
 ---
 
@@ -1157,7 +1157,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/diagnostics-plugin/README.md)
-- [API Reference](./api/diagnostics-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/diagnostics-plugin_src.html)
 
 ### @setu-ts/worker-pool-plugin
 
@@ -1174,7 +1174,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/worker-pool-plugin/README.md)
-- [API Reference](./api/worker-pool-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/worker-pool-plugin_src.html)
 
 ---
 
@@ -1205,7 +1205,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/realtime-backplane-plugin/README.md)
-- [API Reference](./api/realtime-backplane-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/realtime-backplane-plugin_src.html)
 
 ---
 
@@ -1229,7 +1229,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/static-plugin/README.md)
-- [API Reference](./api/static-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/static-plugin_src.html)
 
 ---
 
@@ -1255,7 +1255,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/service-discovery-plugin/README.md)
-- [API Reference](./api/service-discovery-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/service-discovery-plugin_src.html)
 
 ---
 
@@ -1282,7 +1282,7 @@ RuntimePlugin)
 **Links:**
 
 - [README](../packages/http-security-plugin/README.md)
-- [API Reference](./api/http-security-plugin/src/index.ts/index.html)
+- [API Reference](./api/modules/http-security-plugin_src.html)
 
 ---
 
@@ -1306,8 +1306,7 @@ default.
 
 - `setu new <name>` - Create a new project (`--template rest|microservice|class-based|full-stack`,
   `--style functional|class-based`, `--runtime node|deno|bun|cloudflare-workers`, Node by default);
-  `--style
-  class-based` opts into decorators and dependency injection together on `rest` and
+  `--style class-based` opts into decorators and dependency injection together on `rest` and
   `microservice`, and `--template class-based` is a byte-identical alias of
   `--template rest --style class-based`
 - `setu new <name> --workspace` - Create a monorepo root (`--port`, `--transport`)
@@ -1329,7 +1328,7 @@ npm install --global @setu-ts/cli
 
 - [CLI Guide](./cli.md)
 - [README](../packages/cli/README.md)
-- [API Reference](./api/cli/src/index.ts/index.html)
+- [API Reference](./api/modules/cli_src.html)
 
 ---
 
@@ -1355,7 +1354,7 @@ npm create @setu-ts my-app -- --template rest
 **Links:**
 
 - [README](../packages/create/README.md)
-- [API Reference](./api/create/src/index.ts/index.html)
+- [API Reference](./api/modules/create_src.html)
 
 ---
 
@@ -1378,7 +1377,7 @@ npm create @setu-ts my-app -- --template rest
 **Links:**
 
 - [README](../packages/sdk/README.md)
-- [API Reference](./api/sdk/src/index.ts/index.html)
+- [API Reference](./api/modules/sdk_src.html)
 
 ---
 
@@ -1401,7 +1400,7 @@ npm create @setu-ts my-app -- --template rest
 **Links:**
 
 - [README](../packages/testing/README.md)
-- [API Reference](./api/testing/src/index.ts/index.html)
+- [API Reference](./api/modules/testing_src.html)
 
 ---
 
@@ -1423,7 +1422,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/rest-starter/README.md)
-- [API Reference](./api/starters/rest-starter/src/index.ts/index.html)
+- [API Reference](./api/modules/starters_rest-starter_src.html)
 
 ---
 
@@ -1442,7 +1441,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/microservice-starter/README.md)
-- [API Reference](./api/starters/microservice-starter/src/index.ts/index.html)
+- [API Reference](./api/modules/starters_microservice-starter_src.html)
 
 ---
 
@@ -1461,7 +1460,7 @@ OpenAPI, Health, Metrics.
 **Links:**
 
 - [README](../packages/starters/full-stack-starter/README.md)
-- [API Reference](./api/starters/full-stack-starter/src/index.ts/index.html)
+- [API Reference](./api/modules/starters_full-stack-starter_src.html)
 
 ---
 

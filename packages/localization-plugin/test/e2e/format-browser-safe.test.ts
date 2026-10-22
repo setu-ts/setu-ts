@@ -27,7 +27,8 @@ const PACKAGE_DIR = new URL('../../', import.meta.url);
 const FORMAT_DIR = new URL('src/format/', PACKAGE_DIR);
 
 interface InfoDependency {
-  readonly code?: { readonly specifier: string };
+  readonly specifier: string;
+  readonly code?: { readonly specifier?: string; readonly error?: string };
 }
 
 interface InfoModule {
@@ -35,7 +36,15 @@ interface InfoModule {
   readonly dependencies?: readonly InfoDependency[];
 }
 
-/** The modules reachable from `entry` through VALUE imports only. */
+/**
+ * The modules reachable from `entry` through VALUE imports only.
+ *
+ * A value import Deno cannot resolve carries `code.error` and no
+ * `code.specifier` — which is what a workspace package looks like before
+ * `tsc -b` has written its `dist/`. It is reported as `unresolved:<specifier>`
+ * rather than dropped, or a stray import would read as "inside the subpath"
+ * whenever the tree is unbuilt.
+ */
 async function runtimeGraph(entry: URL): Promise<readonly string[]> {
   const output = await runProcess(denoBinary(), {
     args: ['info', '--json', entry.href],
@@ -56,8 +65,14 @@ async function runtimeGraph(entry: URL): Promise<readonly string[]> {
   while (queue.length > 0) {
     const module = bySpecifier.get(queue.shift() as string);
     for (const dependency of module?.dependencies ?? []) {
-      const target = dependency.code?.specifier;
-      if (target !== undefined && !reached.has(target)) {
+      const code = dependency.code;
+      if (code === undefined) continue;
+      if (code.specifier === undefined) {
+        if (code.error !== undefined) reached.add(`unresolved:${dependency.specifier}`);
+        continue;
+      }
+      const target = code.specifier;
+      if (!reached.has(target)) {
         reached.add(target);
         queue.push(target);
       }
@@ -87,13 +102,16 @@ describe('the /format subpath runtime graph', () => {
         await nodeFs.copyFile(new URL(file, FORMAT_DIR), `${scratch}/${file}`);
       }
       const formatFile = `${scratch}/format.ts`;
-      const planted = "import { CAPABILITIES } from '@setu-ts/common';\nvoid CAPABILITIES;\n" +
-        await nodeFs.readFile(formatFile, 'utf8');
+      const planted =
+        "import { CAPABILITIES } from '@setu-ts/common';\nvoid CAPABILITIES;\n" +
+        (await nodeFs.readFile(formatFile, 'utf8'));
       await nodeFs.writeFile(formatFile, planted);
       const graph = await runtimeGraph(new URL(`file://${scratch}/index.ts`));
       const outside = graph.filter((specifier) => !specifier.startsWith(`file://${scratch}/`));
       expect(outside.length).toBeGreaterThan(0);
-      expect(outside.some((specifier) => specifier.includes('/common/'))).toBe(true);
+      // Built tree: `file:///…/packages/common/dist/index.js`; unbuilt tree:
+      // `unresolved:@setu-ts/common`. Either way it is the planted import.
+      expect(outside.some((specifier) => /\/common(\/|$)/.test(specifier))).toBe(true);
     } finally {
       await nodeFs.rm(scratch, { recursive: true });
     }
@@ -112,9 +130,9 @@ describe('the /format subpath without the Deno namespace', () => {
       '  keys: Object.keys(m).sort(),',
       "  text: m.format('Hi {name}, {n}', { name: 'Ada', n: 1234.5 }, 'de-DE'),",
       "  plural: m.format({ one: '{count} item', other: '{count} items' }, { count: 2 }, 'en'),",
-      `  date: m.format('{d}', { d: new Date(${
-        JSON.stringify(date)
-      }) }, 'en-GB', { timeZone: 'UTC' }),`,
+      `  date: m.format('{d}', { d: new Date(${JSON.stringify(
+        date,
+      )}) }, 'en-GB', { timeZone: 'UTC' }),`,
       "  locale: m.negotiateLocale(m.parseAcceptLanguage('en;q=0, *').preferred, ['en', 'fr'],",
       "    m.parseAcceptLanguage('en;q=0, *').excluded),",
       '};',

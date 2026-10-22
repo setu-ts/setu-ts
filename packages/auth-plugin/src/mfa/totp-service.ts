@@ -74,11 +74,7 @@ export type DisableResult = 'ok' | TotpProofResult;
 
 /** The result of completing a sign-in with a second factor. */
 export type TotpCompleteSignInResult =
-  | 'signed-in'
-  | 'invalid'
-  | 'locked'
-  | 'not-enrolled'
-  | 'no-pending';
+  'signed-in' | 'invalid' | 'locked' | 'not-enrolled' | 'no-pending';
 
 /** Lockout parameters: 5 attempts in 15 minutes. */
 const LOCKOUT_LIMIT = 5;
@@ -150,13 +146,17 @@ export class TotpService {
    * @param label - The label shown in the authenticator app (usually the user's email)
    * @returns The base32 secret and the `otpauth://` URI
    */
-  async beginEnrolment(principalId: string, label: string): Promise<{
+  async beginEnrolment(
+    principalId: string,
+    label: string,
+  ): Promise<{
     readonly secret: string;
     readonly uri: string;
   }> {
     const raw = this.#runtime.randomBytes(20);
     const secret = encodeBase32(raw);
-    const uri = `otpauth://totp/${encodeURIComponent(this.#issuer)}:${encodeURIComponent(label)}` +
+    const uri =
+      `otpauth://totp/${encodeURIComponent(this.#issuer)}:${encodeURIComponent(label)}` +
       `?secret=${secret}&issuer=${encodeURIComponent(this.#issuer)}` +
       `&algorithm=SHA1&digits=${TOTP_DIGITS}&period=${TOTP_PERIOD_SECONDS}`;
     // One atomic store operation, never a read followed by a whole-record write:
@@ -368,10 +368,7 @@ export class TotpService {
    * @param proof - A code from the current factor or an unused recovery code
    * @returns The new codes, or why the regeneration was refused
    */
-  async generateRecoveryCodes(
-    principalId: string,
-    proof?: string,
-  ): Promise<RecoveryCodesResult> {
+  async generateRecoveryCodes(principalId: string, proof?: string): Promise<RecoveryCodesResult> {
     const enrolment = await this.#store.getEnrolment(principalId);
     if (enrolment === null || !enrolment.confirmed) {
       return { status: 'not-enrolled' };
@@ -414,10 +411,7 @@ export class TotpService {
     // Normalise, then require the exact canonical shape BEFORE decoding: a
     // decoded-length check would still accept a code with trailing characters.
     const normalised = code.trim().toUpperCase();
-    if (
-      normalised.length !== RECOVERY_CODE_CHARS ||
-      !RECOVERY_CODE_SHAPE.test(normalised)
-    ) {
+    if (normalised.length !== RECOVERY_CODE_CHARS || !RECOVERY_CODE_SHAPE.test(normalised)) {
       return 'invalid';
     }
     // Decode the base32 code back to raw bytes so the digest matches the one
@@ -548,5 +542,7 @@ export class TotpService {
 
 /** Converts a byte array to a lowercase hex string. */
 function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }

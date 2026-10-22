@@ -16,9 +16,7 @@ function makeBody(
 
   for (const part of parts) {
     segments.push(encoder.encode(`--${boundary}\r\n`));
-    segments.push(encoder.encode(
-      `Content-Disposition: form-data; name="${part.name}"\r\n`,
-    ));
+    segments.push(encoder.encode(`Content-Disposition: form-data; name="${part.name}"\r\n`));
     segments.push(encoder.encode(`Content-Type: ${part.mime}\r\n\r\n`));
     segments.push(part.data);
     segments.push(encoder.encode('\r\n'));
@@ -107,11 +105,14 @@ describe('parseMultipart', () => {
   it('parses multiple parts', () => {
     const boundary = 'abc123';
     const part1Data = new TextEncoder().encode('text content');
-    const part2Data = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
-    const body = makeBody([
-      { name: 'text', mime: 'text/plain', data: part1Data },
-      { name: 'binary', mime: 'application/octet-stream', data: part2Data },
-    ], boundary);
+    const part2Data = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    const body = makeBody(
+      [
+        { name: 'text', mime: 'text/plain', data: part1Data },
+        { name: 'binary', mime: 'application/octet-stream', data: part2Data },
+      ],
+      boundary,
+    );
 
     const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
     expect(parts.length).toBe(2);
@@ -217,12 +218,17 @@ describe('parseMultipart', () => {
 
   it('parses binary data correctly', () => {
     const boundary = 'bin-boundary';
-    const binaryData = new Uint8Array([0x00, 0x01, 0x02, 0xFF, 0xFE, 0xFD]);
-    const body = makeBody([{
-      name: 'binary-file',
-      mime: 'application/octet-stream',
-      data: binaryData,
-    }], boundary);
+    const binaryData = new Uint8Array([0x00, 0x01, 0x02, 0xff, 0xfe, 0xfd]);
+    const body = makeBody(
+      [
+        {
+          name: 'binary-file',
+          mime: 'application/octet-stream',
+          data: binaryData,
+        },
+      ],
+      boundary,
+    );
 
     const parts = parseMultipart(body, `multipart/form-data; boundary=${boundary}`);
     expect(parts.length).toBe(1);

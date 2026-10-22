@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import type { InboxRecord } from '@setu-ts/common';
+import { httpStatusHintOf, type InboxRecord } from '@setu-ts/common';
 import { InboxNotReadyError, InboxRowStateError } from '../../../src/index.ts';
 import { InboxService } from '../../../src/inbox/inbox-service.ts';
 import { envelope, FakeInboxStore, inboxRuntime, never, options } from '../../fixtures/inbox.ts';
@@ -138,6 +138,41 @@ describe('IInbox.release', () => {
   it('refuses an unknown action', async () => {
     const { service } = harness();
     await expect(service.release(ROW, 'delete' as never)).rejects.toBeInstanceOf(TypeError);
+  });
+
+  it('each refusal carries its status hint, field by field, quoting nothing from a row', async () => {
+    const { store, service } = harness();
+
+    const invalid = await service.release('nope', 'retry').catch((e: unknown) => e);
+    expect(invalid).toBeInstanceOf(InboxRowStateError);
+    expect(httpStatusHintOf(invalid)).toEqual({
+      status: 400,
+      title: 'Bad Request',
+      detail: 'The inbox row id is malformed.',
+    });
+
+    const missing = await service.release(ROW, 'retry').catch((e: unknown) => e);
+    expect(httpStatusHintOf(missing)).toEqual({
+      status: 404,
+      title: 'Not Found',
+      detail: 'No inbox row has that id.',
+    });
+
+    store.rows.set(ROW, parked({ status: 'processed' }));
+    const notParked = await service.release(ROW, 'discard').catch((e: unknown) => e);
+    expect(httpStatusHintOf(notParked)).toEqual({
+      status: 409,
+      title: 'Conflict',
+      detail: 'The inbox row is not parked, so it cannot be released.',
+    });
+
+    // The hint is value-free: no row id, no stored status, no operator message.
+    for (const error of [invalid, missing, notParked]) {
+      const serialized = JSON.stringify(httpStatusHintOf(error));
+      expect(serialized).not.toContain(ROW);
+      expect(serialized).not.toContain('processed');
+      expect(serialized).not.toContain('inbox:');
+    }
   });
 
   it('bounds the store call', async () => {

@@ -138,10 +138,12 @@ describe('WorkersQueue.addRecurring', () => {
   it('throws, naming Cron Triggers as the platform mechanism instead', async () => {
     const { queue } = build();
 
-    await expect(queue.addRecurring('nightly', {}, { cron: '0 3 * * *' }))
-      .rejects.toBeInstanceOf(CloudflareUnsupportedError);
-    await expect(queue.addRecurring('nightly', {}, { cron: '0 3 * * *' }))
-      .rejects.toThrow(/wrangler\.toml.*\[triggers\] crons/s);
+    await expect(queue.addRecurring('nightly', {}, { cron: '0 3 * * *' })).rejects.toBeInstanceOf(
+      CloudflareUnsupportedError,
+    );
+    await expect(queue.addRecurring('nightly', {}, { cron: '0 3 * * *' })).rejects.toThrow(
+      /wrangler\.toml.*\[triggers\] crons/s,
+    );
   });
 });
 
@@ -296,12 +298,7 @@ describe('WorkersQueue.dispatch', () => {
 
     expect(emails.sort()).toEqual(['a', 'b']);
     expect(reports).toEqual(['r']);
-    expect(messages.map((m) => m.disposition)).toEqual([
-      'acked',
-      'acked',
-      'acked',
-      'retried',
-    ]);
+    expect(messages.map((m) => m.disposition)).toEqual(['acked', 'acked', 'acked', 'retried']);
   });
 
   it("bounds one name's messages by its own concurrency, without throttling another", async () => {
@@ -311,19 +308,27 @@ describe('WorkersQueue.dispatch', () => {
     let fastPeak = 0;
     let fastInFlight = 0;
 
-    queue.process('slow', async () => {
-      slowInFlight += 1;
-      slowPeak = Math.max(slowPeak, slowInFlight);
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      slowInFlight -= 1;
-    }, { concurrency: 1 });
+    queue.process(
+      'slow',
+      async () => {
+        slowInFlight += 1;
+        slowPeak = Math.max(slowPeak, slowInFlight);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        slowInFlight -= 1;
+      },
+      { concurrency: 1 },
+    );
 
-    queue.process('fast', async () => {
-      fastInFlight += 1;
-      fastPeak = Math.max(fastPeak, fastInFlight);
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      fastInFlight -= 1;
-    }, { concurrency: 4 });
+    queue.process(
+      'fast',
+      async () => {
+        fastInFlight += 1;
+        fastPeak = Math.max(fastPeak, fastInFlight);
+        await new Promise((resolve) => setTimeout(resolve, 2));
+        fastInFlight -= 1;
+      },
+      { concurrency: 4 },
+    );
 
     const messages = [
       ...Array.from({ length: 4 }, (_, i) => delivered('slow', i, { id: `s${i}` })),
@@ -374,12 +379,7 @@ describe('WorkersQueue.dispatch', () => {
     ];
     await queue.dispatch(new FakeQueueBatch('q', messages));
 
-    expect(messages.map((m) => m.disposition)).toEqual([
-      'retried',
-      'retried',
-      'retried',
-      'acked',
-    ]);
+    expect(messages.map((m) => m.disposition)).toEqual(['retried', 'retried', 'retried', 'acked']);
   });
 
   it('does not retry — or blame the processor — when ack() itself throws', async () => {
@@ -399,8 +399,7 @@ describe('WorkersQueue.dispatch', () => {
       data: null,
     });
 
-    await expect(queue.dispatch(new FakeQueueBatch('q', [message])))
-      .rejects.toThrow('cannot ack');
+    await expect(queue.dispatch(new FakeQueueBatch('q', [message]))).rejects.toThrow('cannot ack');
 
     expect(ran).toBe(1);
     expect(message.retried).toBe(0);
@@ -429,9 +428,13 @@ describe('WorkersQueue.dispatch', () => {
 describe('WorkersQueue header channel (M90i)', () => {
   it('sends the caller-supplied headers on the envelope', async () => {
     const { queue, producer } = build();
-    await queue.add('mail', { to: 'a@b.c' }, {
-      headers: { traceparent: 'tp', 'x-tenant': 't-1' },
-    });
+    await queue.add(
+      'mail',
+      { to: 'a@b.c' },
+      {
+        headers: { traceparent: 'tp', 'x-tenant': 't-1' },
+      },
+    );
 
     expect(producer.sends).toHaveLength(1);
     const sent = producer.sends[0]!.body as { headers?: unknown };

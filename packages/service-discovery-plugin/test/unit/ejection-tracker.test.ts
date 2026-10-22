@@ -18,9 +18,10 @@ const DEFAULTS = {
   maxEjectionPercent: 100,
 };
 
-function setup(
-  overrides: Partial<typeof DEFAULTS> = {},
-): { tracker: EjectionTracker; runtime: FakeRuntime } {
+function setup(overrides: Partial<typeof DEFAULTS> = {}): {
+  tracker: EjectionTracker;
+  runtime: FakeRuntime;
+} {
   const runtime = createFakeRuntime();
   return {
     tracker: new EjectionTracker(runtime, { ...DEFAULTS, ...overrides }),

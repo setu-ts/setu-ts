@@ -24,16 +24,16 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
-  'prettier': '^3.9.10',
-  'tsx': '^4.23.0',
-  'vitest': '5.0.3',
+  prettier: '^3.9.10',
+  tsx: '^4.23.0',
+  vitest: '5.0.3',
   'zod-v3': 'npm:zod@^3.24.0',
   'zod-v4': 'npm:zod@^4.4.0',
   'xml-crypto': '^6',
   '@simplewebauthn/server': '14.0.3',
   '@prisma/adapter-pg': '^7.10.0',
-  'pg': '^8.0.0',
-  'hono': '^4.12.30',
+  pg: '^8.0.0',
+  hono: '^4.12.30',
   '@hono/node-server': '^2.0.0',
   '@opentelemetry/api': '^1.9.0',
   '@opentelemetry/context-async-hooks': '^2.0.0',
@@ -66,20 +66,23 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@launchdarkly/node-server-sdk': '^9',
   '@node-saml/node-saml': '^5',
   '@types/ws': '^8.18.2',
+  '@types/pg': '^8.23.1',
   '@types/amqplib': '^0.10.8',
+  '@types/swagger-ui-dist': '^3.30.6',
   '@prisma/client': '^7.10.0',
-  'amqplib': '0.10.x',
+  amqplib: '0.10.x',
   'drizzle-orm': '0.45.2',
-  'graphql': '^16',
-  'ioredis': '5.x',
-  'kafkajs': '2.x',
-  'mongodb': '^6.21.0',
-  'nats': '2.x',
-  'nodemailer': '^10',
-  'pino': '10.x',
+  graphql: '^16',
+  ioredis: '5.x',
+  kafkajs: '2.x',
+  mongodb: '^6.21.0',
+  nats: '2.x',
+  nodemailer: '^10',
+  pino: '10.x',
+  'swagger-ui-dist': '^5',
   'react-router': '^8',
-  'ws': '^8.18.0',
-  'zod': '^4.4.0',
+  ws: '^8.18.0',
+  zod: '^4.4.0',
 };
 
 /**
@@ -97,10 +100,39 @@ export interface Override {
 /** The committed overrides (M111a plan §3.1), each with its reason. */
 export const OVERRIDES: readonly Override[] = [
   {
+    package: 'packages/openapi-plugin',
+    dependency: '@types/swagger-ui-dist',
+    kind: 'dev-dependency-types',
+    reason:
+      'The guarded CommonJS absolute-path helper has no bundled declarations; source-based README and guide compilers must resolve its function signature (M113f).',
+  },
+  {
+    package: 'packages/database-plugin',
+    dependency: '@types/pg',
+    kind: 'dev-dependency-types',
+    reason:
+      'The PostgreSQL test harnesses import pg, which ships no declarations (M111e2 check, TS7016).',
+  },
+  {
+    package: 'packages/idempotency-plugin',
+    dependency: '@types/pg',
+    kind: 'dev-dependency-types',
+    reason:
+      'The real-backend within fixture imports pg and is included in the Node type-check gate (M111e2).',
+  },
+  {
+    package: 'packages/websocket-plugin',
+    dependency: '@types/ws',
+    kind: 'dev-dependency-types',
+    reason:
+      'The declarative route test imports ws; its declarations are required by the Node type-check gate (M111e2).',
+  },
+  {
     package: 'packages/cli',
     dependency: 'prettier',
     kind: 'regular-dependency',
-    reason: 'the CLI formats every file it writes into an npm-target project with ' +
+    reason:
+      'the CLI formats every file it writes into an npm-target project with ' +
       'Prettier (utils/prettier-format.ts), so a fresh scaffold passes its own ' +
       '`npm run format:check` — loaded lazily, but required (M111d §3.7, maintainer-approved)',
   },
@@ -108,7 +140,8 @@ export const OVERRIDES: readonly Override[] = [
     package: 'packages/cli',
     dependency: 'tsx',
     kind: 'regular-dependency',
-    reason: 'the CLI loads every project TypeScript module (setu.config.ts, custom ' +
+    reason:
+      'the CLI loads every project TypeScript module (setu.config.ts, custom ' +
       'schematics) through tsx (utils/ts-loader.ts), so `npx @setu-ts/cli` must ' +
       'carry it — an optional peer is never installed for the consumer (M111d §3.3)',
   },
@@ -116,14 +149,16 @@ export const OVERRIDES: readonly Override[] = [
     package: 'packages/runtime',
     dependency: '@hono/node-server',
     kind: 'regular-dependency',
-    reason: "the Node HTTP adapter's ONLY serve path loads it (node-http-adapter.ts), " +
+    reason:
+      "the Node HTTP adapter's ONLY serve path loads it (node-http-adapter.ts), " +
       'so a bare `npm install @setu-ts/runtime` must serve on Node',
   },
   {
     package: 'packages/runtime',
     dependency: '@types/ws',
     kind: 'dev-dependency-types',
-    reason: '`ws` is the one optional peer whose types the tsc build needs: its ' +
+    reason:
+      '`ws` is the one optional peer whose types the tsc build needs: its ' +
       'untyped import is TS7016 (node-ws-upgrader.ts) while amqplib/nodemailer ' +
       'type-check without @types',
   },
@@ -131,7 +166,8 @@ export const OVERRIDES: readonly Override[] = [
     package: 'packages/messaging-plugin',
     dependency: '@types/amqplib',
     kind: 'dev-dependency-types',
-    reason: 'amqplib ships no types and its untyped import is TS7016 once it is ' +
+    reason:
+      'amqplib ships no types and its untyped import is TS7016 once it is ' +
       'INSTALLED (rabbitmq-broker.ts) — the plan §1 probe saw only `ws` fail ' +
       'because its tree had amqplib unresolved, not installed; the same ' +
       'correction applies to queue-plugin',
@@ -140,7 +176,8 @@ export const OVERRIDES: readonly Override[] = [
     package: 'packages/queue-plugin',
     dependency: '@types/amqplib',
     kind: 'dev-dependency-types',
-    reason: 'amqplib ships no types and its untyped import is TS7016 once it is ' +
+    reason:
+      'amqplib ships no types and its untyped import is TS7016 once it is ' +
       'INSTALLED (rabbitmq-queue.ts); same correction as messaging-plugin',
   },
 ];

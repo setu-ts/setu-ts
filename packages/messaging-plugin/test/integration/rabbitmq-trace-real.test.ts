@@ -22,37 +22,45 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
 }
 
 describe('REAL RabbitMqBroker trace headers (guarded)', () => {
-  it('round-trips traceparent through AMQP properties.headers', {
-    skip: process.env['RABBITMQ_URL'] === undefined,
-  }, async () => {
-    const url = process.env['RABBITMQ_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'round-trips traceparent through AMQP properties.headers',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['RABBITMQ_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
-      url,
-      exchangeName: `m75-trace-${crypto.randomUUID()}`,
-    });
-    await broker.connect();
-
-    const received: MessageMetadata[] = [];
-    const subscription = await broker.subscribe('m75.trace', (_message, metadata) => {
-      received.push(metadata);
-    });
-
-    try {
-      // The AMQP binding still needs a moment to settle before the publish is
-      // routable; only the wait for DELIVERY is turned into a bounded poll.
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      await broker.publishWithHeaders('m75.trace', { id: 'message-1' }, {
-        traceparent: TRACEPARENT,
+      const broker = new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), {
+        url,
+        exchangeName: `m75-trace-${crypto.randomUUID()}`,
       });
-      await waitFor(() => received.length === 1, 5_000);
+      await broker.connect();
 
-      expect(received).toHaveLength(1);
-      expect(received[0]?.headers?.traceparent).toBe(TRACEPARENT);
-    } finally {
-      await subscription.unsubscribe();
-      await broker.disconnect();
-    }
-  });
+      const received: MessageMetadata[] = [];
+      const subscription = await broker.subscribe('m75.trace', (_message, metadata) => {
+        received.push(metadata);
+      });
+
+      try {
+        // The AMQP binding still needs a moment to settle before the publish is
+        // routable; only the wait for DELIVERY is turned into a bounded poll.
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        await broker.publishWithHeaders(
+          'm75.trace',
+          { id: 'message-1' },
+          {
+            traceparent: TRACEPARENT,
+          },
+        );
+        await waitFor(() => received.length === 1, 5_000);
+
+        expect(received).toHaveLength(1);
+        expect(received[0]?.headers?.traceparent).toBe(TRACEPARENT);
+      } finally {
+        await subscription.unsubscribe();
+        await broker.disconnect();
+      }
+    },
+  );
 });

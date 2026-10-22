@@ -13,10 +13,7 @@ import type { MetricSnapshot, MetricValue } from '../interfaces/index.ts';
  */
 function escapeLabelValue(value: string): string {
   return replaceUnescapableControls(
-    value
-      .replace(/\\/g, '\\\\')
-      .replace(/\n/g, '\\n')
-      .replace(/"/g, '\\"'),
+    value.replace(/\\/g, '\\\\').replace(/\n/g, '\\n').replace(/"/g, '\\"'),
   );
 }
 
@@ -45,7 +42,7 @@ function escapeLabelValue(value: string): string {
  */
 function replaceUnescapableControls(text: string): string {
   return text.replace(
-    // deno-lint-ignore no-control-regex
+    // eslint-disable-next-line no-control-regex
     /[\u0000-\u001f\u007f\ufffd]|[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/g,
     (char) => {
       if (char === '\ufffd') return '\ufffd\ufffd';
@@ -67,11 +64,7 @@ function replaceUnescapableControls(text: string): string {
  * @returns The escaped help text
  */
 function escapeHelp(help: string): string {
-  return replaceUnescapableControls(
-    help
-      .replace(/\\/g, '\\\\')
-      .replace(/\n/g, '\\n'),
-  );
+  return replaceUnescapableControls(help.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'));
 }
 
 /**

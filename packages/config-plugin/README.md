@@ -35,6 +35,30 @@ const config = app.services.get<IConfig>(CAPABILITIES.CONFIG);
 const port = config.get('PORT', { default: '3000' });
 ```
 
+## Configuration a plugin needs at construction
+
+Factory arguments are evaluated before `app.start()` registers `ConfigPlugin` and loads `.env`. Load
+a snapshot first when another plugin needs those values at construction, then register that same
+snapshot with `instance`; it is used verbatim without loading again:
+
+```typescript
+import { createApplication } from '@setu-ts/kernel';
+import { createRuntimeServices, RuntimePlugin } from '@setu-ts/runtime';
+import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+const runtime = createRuntimeServices();
+const config = await loadConfig(runtime, { envFilePath: '.env', envFileOptional: true });
+const app = createApplication({
+  plugins: [
+    RuntimePlugin(),
+    ConfigPlugin({ instance: config }),
+    AuthPlugin({ jwt: { secret: config.getOrThrow<string>('JWT_SECRET') } }),
+  ],
+});
+await app.start();
+```
+
 ## Options
 
 | Option             | Type                                | Default     | Description                                                                   |
@@ -116,7 +140,7 @@ at read time.
 ```typescript
 import { CAPABILITIES, type IConfig } from '@setu-ts/common';
 import { ConfigPlugin, defineConfigSection, getConfigSection } from '@setu-ts/config-plugin';
-import { z } from 'npm:zod@^3.24.0';
+import { z } from 'zod';
 
 const database = defineConfigSection({
   prefix: 'DATABASE_',
@@ -146,14 +170,16 @@ the whole flat snapshot, while the former receives only its declared, prefix-str
 `diagnostics` is the explicit opt-in to value-free provenance for the approved keys only:
 
 ```typescript
-app.register(ConfigPlugin({
-  envFilePath: ['.env.local', '.env'],
-  diagnostics: {
-    enabled: true, // the literal true: an acknowledgement, not a toggle
-    keys: { PORT: 'port', DATABASE_URL: 'database' },
-    files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
-  },
-}));
+app.register(
+  ConfigPlugin({
+    envFilePath: ['.env.local', '.env'],
+    diagnostics: {
+      enabled: true, // the literal true: an acknowledgement, not a toggle
+      keys: { PORT: 'port', DATABASE_URL: 'database' },
+      files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
+    },
+  }),
+);
 ```
 
 During the ONE load already performed — never a second pass — the loader records where each approved
@@ -253,7 +279,7 @@ When `validationSchema` is not provided, all values remain as strings from the e
 | `ConfigSection`            | interface |
 | `StructuralSchema`         | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

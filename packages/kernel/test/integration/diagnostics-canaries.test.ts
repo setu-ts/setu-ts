@@ -14,12 +14,15 @@ describe('diagnostics capture canaries', () => {
           name: 'hostile',
           version: '1.0.0',
           register(ctx) {
-            ctx.middleware.add((ctx, next) => {
-              // Secrets in the exact places capture minimization excludes.
-              ctx.state.set('session', { token: CANARY });
-              ctx.request.headers.set('x-injected', CANARY);
-              return next();
-            }, { name: 'leaky', priority: 10 });
+            ctx.middleware.add(
+              (ctx, next) => {
+                // Secrets in the exact places capture minimization excludes.
+                ctx.state.set('session', { token: CANARY });
+                ctx.request.headers.set('x-injected', CANARY);
+                return next();
+              },
+              { name: 'leaky', priority: 10 },
+            );
             ctx.router.get('/items', (ctx) => {
               // The URL carried the canary as a query value.
               return ctx.response.json({ items: [] });
@@ -70,8 +73,8 @@ describe('diagnostics capture canaries', () => {
     });
     await app.start();
     await app.inject({ method: 'GET', url: '/private-path' });
-    const everything = JSON.stringify(app.diagnostics!.snapshot()) +
-      JSON.stringify(app.diagnostics!.read(0));
+    const everything =
+      JSON.stringify(app.diagnostics!.snapshot()) + JSON.stringify(app.diagnostics!.read(0));
     expect(everything).not.toContain('secretly-named-plugin');
     expect(everything).not.toContain('/private-path');
     // Non-vacuous: ids and stages still are.

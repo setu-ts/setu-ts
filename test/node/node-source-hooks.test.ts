@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { installedForImporter, resolve } from '../node-source-hooks.ts';
+import { installedForImporter, resolve } from '../../scripts/lib/source-hooks.ts';
+
+// Exercise the moved --import entry as well as its resolution logic.
+await import('../../scripts/lib/source-register.ts');
 import { tempDir } from '../node-helpers.ts';
 
 /** A `next` that records the deferral instead of resolving anything. */
@@ -25,8 +28,9 @@ describe('the test source redirect', () => {
     try {
       const parent = pathToFileURL(join(project, 'src', 'config.ts')).href;
       expect(installedForImporter(parent)).toBe(true);
-      expect((await resolve('@setu-ts/kernel', { parentURL: parent }, deferred)).url)
-        .toBe('deferred:@setu-ts/kernel');
+      expect((await resolve('@setu-ts/kernel', { parentURL: parent }, deferred)).url).toBe(
+        'deferred:@setu-ts/kernel',
+      );
     } finally {
       await rm(root, { recursive: true });
     }
@@ -39,8 +43,9 @@ describe('the test source redirect', () => {
     const { root, project } = await fixture();
     try {
       const parent = pathToFileURL(join(project, 'src', 'config.ts')).href;
-      expect((await resolve('@setu-ts/runtime', { parentURL: parent }, deferred)).url)
-        .toBe('deferred:@setu-ts/runtime');
+      expect((await resolve('@setu-ts/runtime', { parentURL: parent }, deferred)).url).toBe(
+        'deferred:@setu-ts/runtime',
+      );
     } finally {
       await rm(root, { recursive: true });
     }
@@ -52,8 +57,9 @@ describe('the test source redirect', () => {
       expect(installedForImporter(pathToFileURL(join(bare, 'a.ts')).href)).toBe(false);
       const repo = pathToFileURL(join(process.cwd(), 'packages/cli/src/cli.ts')).href;
       expect(installedForImporter(repo)).toBe(false);
-      expect((await resolve('@setu-ts/kernel', { parentURL: repo }, deferred)).url)
-        .toContain('/packages/kernel/src/');
+      expect((await resolve('@setu-ts/kernel', { parentURL: repo }, deferred)).url).toContain(
+        '/packages/kernel/src/',
+      );
     } finally {
       await rm(root, { recursive: true });
     }

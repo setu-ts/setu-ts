@@ -1,7 +1,24 @@
-// deno-lint-ignore-file no-console -- interactive example entry point.
-import { createGrpcApp } from './src/app.ts';
+/* eslint-disable no-console -- an example entry reports its address and shutdown failures. */
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { createApp } from './setu.config.ts';
 
-const port = Number(Deno.args[0] ?? 5000);
-const app = createGrpcApp();
+const runtime = createRuntimeServices();
+const port = Number(process.argv[2] ?? 5000);
+const app = createApp();
+
 await app.start({ port });
-console.log(`gRPC example HTTP health endpoint: http://localhost:${port}/health`);
+console.log(`gRPC example listening on http://localhost:${port}`);
+
+// Without a handler, SIGTERM ends the process before `app.stop()` can run its shutdown hooks.
+// `onSignal` is absent where no signal can be caught (Windows). See docs/deployment.md.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void app
+      .stop()
+      .then(() => runtime.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        runtime.exit(1);
+      });
+  });
+}

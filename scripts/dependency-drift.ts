@@ -1,15 +1,14 @@
-// deno-lint-ignore-file no-console -- this CI script emits a human-readable drift report.
+/* eslint-disable no-console -- this CI script emits a human-readable drift report. */
 /**
- * Compares the committed and freshly resolved Deno lockfiles.
- *
- * The comparison is deliberately on `specifiers`, not raw lockfile text: a
- * reviewer needs the package and old/new resolved version, while integrity or
- * transitive-object reordering is supporting evidence rather than attribution.
+ * Compares package versions in the committed and freshly resolved pnpm lockfiles.
  */
+
+import { readFile } from 'node:fs/promises';
+import { parsePnpmLock } from './lib/pnpm-lock.ts';
 
 /** The lockfile subset needed to attribute a range resolution. */
 export interface IDriftLockfile {
-  readonly specifiers: Readonly<Record<string, string>>;
+  readonly packages?: Readonly<Record<string, unknown>>;
 }
 
 /** One changed direct resolution, identified by its original specifier. */
@@ -21,13 +20,13 @@ export interface IDependencyDrift {
 }
 
 /**
- * Extracts a displayable registry package name from a Deno specifier.
+ * Extracts a package name from a pnpm resolved-package key.
  *
- * @param specifier - `npm:` or `jsr:` specifier carrying a version range.
+ * @param specifier - Package name followed by its exact version.
  * @returns Package name, or the original specifier for non-registry imports.
  */
 export function packageNameOf(specifier: string): string {
-  const match = /^(?:npm|jsr):((?:@[^/]+\/)?[^@/]+)@/.exec(specifier);
+  const match = /^((?:@[^/]+\/)?[^@/]+)@/.exec(specifier);
   return match?.[1] ?? specifier;
 }
 
@@ -42,22 +41,26 @@ export function findDependencyDrift(
   committed: IDriftLockfile,
   fresh: IDriftLockfile,
 ): readonly IDependencyDrift[] {
-  const specifiers = new Set([
-    ...Object.keys(committed.specifiers),
-    ...Object.keys(fresh.specifiers),
-  ]);
+  const versions = (lock: IDriftLockfile): Map<string, string> => {
+    const byName = new Map<string, string[]>();
+    for (const key of Object.keys(lock.packages ?? {}).sort()) {
+      const name = packageNameOf(key);
+      const entries = byName.get(name) ?? [];
+      entries.push(key.slice(name.length + 1));
+      byName.set(name, entries);
+    }
+    return new Map([...byName].map(([name, entries]) => [name, entries.join(', ')]));
+  };
+  const before = versions(committed);
+  const after = versions(fresh);
+  const specifiers = new Set([...before.keys(), ...after.keys()]);
 
-  return [...specifiers]
-    .sort()
-    .flatMap((specifier): IDependencyDrift[] => {
-      const previous = committed.specifiers[specifier] ?? null;
-      const current = fresh.specifiers[specifier] ?? null;
-      // Deno lockfiles are additive. A specifier present only in the committed
-      // lockfile may simply be stale, so its absence from a fresh graph is not
-      // upstream drift and must not bury the real moved-package report.
-      if (current === null || previous === current) return [];
-      return [{ specifier, packageName: packageNameOf(specifier), previous, current }];
-    });
+  return [...specifiers].sort().flatMap((specifier): IDependencyDrift[] => {
+    const previous = before.get(specifier) ?? null;
+    const current = after.get(specifier) ?? null;
+    if (previous === current) return [];
+    return [{ specifier, packageName: specifier, previous, current }];
+  });
 }
 
 /**
@@ -68,12 +71,13 @@ export function findDependencyDrift(
  */
 export function formatDependencyDrift(changes: readonly IDependencyDrift[]): string {
   if (changes.length === 0) {
-    return '## Dependency drift\n\nNo direct dependency resolution changed.\n';
+    return '## Dependency drift\n\nNo dependency resolution changed.\n';
   }
 
-  const rows = changes.map((change) =>
-    `| \`${change.packageName}\` | \`${change.specifier}\` | ` +
-    `\`${change.previous ?? 'not locked'}\` | \`${change.current ?? 'removed'}\` |`
+  const rows = changes.map(
+    (change) =>
+      `| \`${change.packageName}\` | \`${change.specifier}\` | ` +
+      `\`${change.previous ?? 'not locked'}\` | \`${change.current ?? 'removed'}\` |`,
   );
   return [
     '## Dependency drift',
@@ -92,7 +96,7 @@ export function formatDependencyDrift(changes: readonly IDependencyDrift[]): str
  * @returns Parsed lockfile specifier resolutions.
  */
 async function readLockfile(path: string): Promise<IDriftLockfile> {
-  return JSON.parse(await Deno.readTextFile(path)) as IDriftLockfile;
+  return parsePnpmLock(await readFile(path, 'utf8'));
 }
 
 /**
@@ -100,8 +104,10 @@ async function readLockfile(path: string): Promise<IDriftLockfile> {
  *
  * @returns Process exit status for the command-line caller.
  */
-async function main(): Promise<number> {
-  const [committedPath, freshPath] = Deno.args;
+export async function runDependencyDriftMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const [committedPath, freshPath] = args;
   if (committedPath === undefined || freshPath === undefined) {
     console.error('usage: dependency-drift.ts <committed-lock> <fresh-lock>');
     return 2;
@@ -114,6 +120,4 @@ async function main(): Promise<number> {
   return 0;
 }
 
-if (import.meta.main) {
-  Deno.exit(await main());
-}
+if (import.meta.main) process.exitCode = await runDependencyDriftMain();

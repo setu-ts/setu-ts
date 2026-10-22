@@ -121,14 +121,12 @@ describe('ConsulProvider — response mapping', () => {
 
   it('skips entries with no port and no resolvable host', () => {
     const { provider } = setup();
-    expect(provider.mapEntries(
-      [
-        { Service: { Service: 'billing' } },
-        { Service: { Service: 'billing', Port: 8080 } },
-        {},
-      ],
-      'billing',
-    )).toEqual([]);
+    expect(
+      provider.mapEntries(
+        [{ Service: { Service: 'billing' } }, { Service: { Service: 'billing', Port: 8080 } }, {}],
+        'billing',
+      ),
+    ).toEqual([]);
   });
 
   it('falls back to the requested name when the entry omits one', () => {
@@ -237,9 +235,7 @@ describe('ConsulProvider — self registration', () => {
     const { provider } = setup({}, http);
 
     await provider.deregisterSelf(registration);
-    expect(http.calls[0].url).toBe(
-      'http://consul:8500/v1/agent/service/deregister/orders-1',
-    );
+    expect(http.calls[0].url).toBe('http://consul:8500/v1/agent/service/deregister/orders-1');
     expect(http.calls[0].init?.method).toBe('PUT');
   });
 

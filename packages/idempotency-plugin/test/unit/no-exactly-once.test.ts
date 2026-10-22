@@ -23,7 +23,7 @@ function filesUnder(dir: string): string[] {
 describe('the "exactly once" prohibition (M109a §0, §6)', () => {
   it('appears in no src file', () => {
     const offenders = filesUnder('packages/idempotency-plugin/src').filter((path) =>
-      FORBIDDEN.test(nodeFsSync.readFileSync(path, 'utf8'))
+      FORBIDDEN.test(nodeFsSync.readFileSync(path, 'utf8')),
     );
     expect(offenders).toEqual([]);
   });

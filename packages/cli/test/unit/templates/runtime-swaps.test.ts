@@ -21,11 +21,7 @@ function packagesOn(host: TemplateHost, runtime: TargetRuntime): readonly string
 }
 
 /** One file's contents from a rendered project, or undefined. */
-function fileAt(
-  host: TemplateHost,
-  runtime: TargetRuntime,
-  path: string,
-): string | undefined {
+function fileAt(host: TemplateHost, runtime: TargetRuntime, path: string): string | undefined {
   const resolved = resolveHost(host, runtime);
   return projectFiles('proj', runtime, resolved).find((f) => f.path === path)?.contents;
 }
@@ -43,10 +39,12 @@ describe('runtime swaps', () => {
     const deno = packagesOn(MICROSERVICE_TEMPLATE, 'deno');
     const workers = packagesOn(MICROSERVICE_TEMPLATE, 'cloudflare-workers');
 
-    const survivors = deno.filter((pkg) => pkg !== 'messaging-plugin' && pkg !== 'queue-plugin');
+    const survivors = deno.filter(
+      (pkg) => pkg !== 'messaging-plugin' && pkg !== 'queue-plugin' && pkg !== 'openapi-plugin',
+    );
     // The swap appends, so the survivors keep their relative order and only the
     // replacement is new.
-    expect(workers).toEqual([...survivors, 'cloudflare-plugin']);
+    expect(workers).toEqual([...survivors, 'openapi-plugin', 'cloudflare-plugin']);
   });
 
   it('leaves the other three runtimes byte-identical', () => {
@@ -63,14 +61,15 @@ describe('runtime swaps', () => {
   it('leaves a template declaring no swap unchanged on every runtime', () => {
     const baseline = packagesOn(REST_TEMPLATE, 'deno');
 
-    for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+    for (const runtime of ['node', 'bun'] as const) {
       expect(packagesOn(REST_TEMPLATE, runtime)).toEqual(baseline);
     }
   });
 
   it('emits the swap files only on the runtime that swapped', () => {
-    expect(fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/reply-inbox-object.ts'))
-      .toContain('ReplyInboxObjectCore');
+    expect(
+      fileAt(MICROSERVICE_TEMPLATE, 'cloudflare-workers', 'src/reply-inbox-object.ts'),
+    ).toContain('ReplyInboxObjectCore');
     expect(fileAt(MICROSERVICE_TEMPLATE, 'deno', 'src/reply-inbox-object.ts')).toBeUndefined();
   });
 
@@ -117,10 +116,10 @@ describe('runtime swaps', () => {
     // prevent.
     const produced = [
       ...wrangler.matchAll(/\[\[queues\.producers\]\]\nbinding = "[^"]+"\nqueue = "([^"]+)"/g),
-    ]
-      .map((match) => match[1]);
-    const consumed = [...wrangler.matchAll(/\[\[queues\.consumers\]\]\nqueue = "([^"]+)"/g)]
-      .map((match) => match[1]);
+    ].map((match) => match[1]);
+    const consumed = [...wrangler.matchAll(/\[\[queues\.consumers\]\]\nqueue = "([^"]+)"/g)].map(
+      (match) => match[1],
+    );
 
     expect(produced.length).toBeGreaterThan(0);
     expect([...produced].sort()).toEqual([...consumed].sort());

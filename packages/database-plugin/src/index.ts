@@ -26,6 +26,9 @@ export type {
   DatabaseAdapterOptions,
   DatabaseAdapterType,
   DatabaseConnectionOptions,
+  DatabaseReadinessOptions,
+  IMigrationLedger,
+  MigrationLedgerOptions,
   DatabasePluginOptions,
   DatabasePoolCapacity,
   DrizzleAdapterOptions,
@@ -51,6 +54,12 @@ export type {
   PrismaDatabaseOptions,
   PrismaSqlProvider,
 } from './interfaces/index.ts';
+
+export {
+  createMigrationLedger,
+  MIGRATION_LEDGER_ENTITY,
+  MigrationLedgerError,
+} from './migrations/migration-ledger.ts';
 
 // Mongo structural types the `'mongodb'` arm carries (injected-client seam),
 // including the collection-level shapes the client's members reference so the
@@ -101,6 +110,8 @@ export {
   CosmosConcurrentModificationError,
   CosmosTransactionScopeError,
   DatabaseUnavailableError,
+  DatabaseTimeoutError,
+  UnknownPayloadFieldError,
   MongoTransactionUnavailableError,
   SerializationConflictError,
   UnsupportedFilterOperatorError,

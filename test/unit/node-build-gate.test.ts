@@ -5,9 +5,14 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
+  workersBundleDriver,
+  workersBundleEntry,
+  workersBundleMembers,
+  workersBundleOptions,
   classifyLeg,
   decideOutcome,
   type LegResult,
@@ -33,15 +38,17 @@ describe('workspaceProtocolSpecifiers', () => {
   });
 
   it('accepts the rewritten form pnpm pack produces', () => {
-    expect(workspaceProtocolSpecifiers({ dependencies: { '@setu-ts/common': '^0.8.0' } }))
-      .toEqual([]);
+    expect(workspaceProtocolSpecifiers({ dependencies: { '@setu-ts/common': '^0.8.0' } })).toEqual(
+      [],
+    );
   });
 
   it('tolerates a non-object manifest and non-object or non-string fields', () => {
     expect(workspaceProtocolSpecifiers(null)).toEqual([]);
     expect(workspaceProtocolSpecifiers('x')).toEqual([]);
-    expect(workspaceProtocolSpecifiers({ dependencies: 'nope', peerDependencies: { a: 1 } }))
-      .toEqual([]);
+    expect(
+      workspaceProtocolSpecifiers({ dependencies: 'nope', peerDependencies: { a: 1 } }),
+    ).toEqual([]);
   });
 });
 
@@ -105,7 +112,7 @@ describe('classifyLeg', () => {
 describe('the CI job runs the gate strictly (M111a §3.10)', () => {
   /** The `node-build` job's block of `.github/workflows/ci.yml`. */
   async function nodeBuildJob(): Promise<string> {
-    const workflow = await Deno.readTextFile('.github/workflows/ci.yml');
+    const workflow = await readFile('.github/workflows/ci.yml', 'utf8');
     const start = workflow.indexOf('\n  node-build:\n');
     expect(start).toBeGreaterThan(-1);
     const next = workflow.slice(start + 1).search(/\n {2}[a-z-]+:\n/);
@@ -113,7 +120,7 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
   }
 
   it('passes --require-all, so a missing runtime fails instead of skipping', async () => {
-    expect(await nodeBuildJob()).toContain('run: deno task check:node-build --require-all');
+    expect(await nodeBuildJob()).toContain('run: pnpm run check:node-build --require-all');
   });
 
   it('installs every runtime a leg needs, and drift-checks the manifests', async () => {
@@ -121,12 +128,65 @@ describe('the CI job runs the gate strictly (M111a §3.10)', () => {
     expect(job).toContain('uses: actions/setup-node@v4');
     expect(job).toContain('uses: oven-sh/setup-bun@v2');
     expect(job).toContain('run: corepack enable');
-    // TypeScript reads its watch variables at load, so the drift check needs env access,
-    // scoped to those names rather than granted wholesale.
-    const drift = job.match(
-      /run: deno run --allow-read (--allow-env=\S+) scripts\/node-manifests\.ts --check/,
+    // The manifest drift check runs under Node (M111e3); Deno is not set up in this job.
+    expect(job).toMatch(/^ +run: node scripts\/node-manifests\.ts --check$/m);
+    expect(job).not.toContain('setup-deno');
+  });
+});
+
+// ── M113d §3.4 — the Workers bundle leg ──────────────────────────────────────
+
+describe('workersBundleMembers (M113d §3.4)', () => {
+  it('keeps every library member and excludes the two executables', () => {
+    const members = [
+      'packages/common',
+      'packages/cli',
+      'packages/create',
+      'packages/cloudflare-plugin',
+      'packages/starters/full-stack-starter',
+    ];
+    expect(workersBundleMembers(members)).toEqual([
+      'packages/common',
+      'packages/cloudflare-plugin',
+      'packages/starters/full-stack-starter',
+    ]);
+  });
+});
+
+describe('workersBundleEntry (M113d §3.4)', () => {
+  it('imports every named member barrel, one side-effect import per line', () => {
+    const entry = workersBundleEntry(['@setu-ts/common', '@setu-ts/kernel']);
+    expect(entry).toBe("import '@setu-ts/common';\nimport '@setu-ts/kernel';\n");
+  });
+
+  it('produces an empty entry for an empty member list', () => {
+    expect(workersBundleEntry([])).toBe('\n');
+  });
+});
+
+describe('workersBundleOptions (M113d §3.4)', () => {
+  it('carries Wrangler resolution: workerd conditions, neutral platform, two externals', () => {
+    expect(workersBundleOptions()).toEqual({
+      format: 'esm',
+      platform: 'neutral',
+      conditions: ['workerd', 'worker', 'browser'],
+      mainFields: ['browser', 'module', 'main'],
+      external: ['node:*', 'cloudflare:*'],
+      preserveSymlinks: true,
+    });
+  });
+});
+
+describe('workersBundleDriver (M113d §3.4)', () => {
+  it('imports esbuild by the given URL and passes every option through', () => {
+    const driver = workersBundleDriver('file:///repo/node_modules/esbuild/lib/main.js');
+    expect(driver).toContain(
+      'import { build } from "file:///repo/node_modules/esbuild/lib/main.js";',
     );
-    expect(drift).not.toBeNull();
-    expect(drift![1]).toContain('TSC_WATCHFILE');
+    expect(driver).toContain("entryPoints: ['worker-entry.mjs'],");
+    expect(driver).toContain('  bundle: true,');
+    for (const [key, value] of Object.entries(workersBundleOptions())) {
+      expect(driver).toContain(`  ${key}: ${JSON.stringify(value)},`);
+    }
   });
 });

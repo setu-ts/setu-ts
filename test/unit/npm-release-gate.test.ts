@@ -1,5 +1,5 @@
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   distTagFor,
   npmSupportsTrustedPublishing,
@@ -15,9 +15,11 @@ import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
  * manifest, never written as a literal: the release bump leaves test trees
  * alone, so a literal here goes stale at every cut (it did at v0.9.0).
  */
-const WORKSPACE_VERSION = (JSON.parse(
-  await Deno.readTextFile(new URL('../../packages/kernel/package.json', import.meta.url)),
-) as { version: string }).version;
+const WORKSPACE_VERSION = (
+  JSON.parse(
+    await readFile(new URL('../../packages/kernel/package.json', import.meta.url), 'utf8'),
+  ) as { version: string }
+).version;
 
 const valid = {
   name: '@setu-ts/kernel',
@@ -25,10 +27,38 @@ const valid = {
   repository: { url: REPOSITORY_URL },
   publishConfig: { access: 'public' },
   license: 'MIT',
-  files: ['dist', 'src'],
+  files: ['dist', 'src', 'AGENT_CARD.md'],
   dependencies: { '@setu-ts/common': '^0.8.0' },
 };
 describe('npm release rules', () => {
+  it('stops before registry lookup when the actual library archive excludes its card', async () => {
+    let lookedUp = false;
+    await expect(
+      runNpmPublish({
+        dryRun: true,
+        inCi: false,
+        command: (cmd, args) => {
+          if (args[0] === '--version') return Promise.resolve('11.16.0');
+          if (args[0] === 'pack') return Promise.resolve('packed.tgz');
+          if (cmd === 'tar' && args[0] === '-xzOf')
+            return Promise.resolve(
+              JSON.stringify({
+                ...valid,
+                name: '@setu-ts/common',
+                version: WORKSPACE_VERSION,
+                dependencies: {},
+              }),
+            );
+          return Promise.resolve('');
+        },
+        fetchImpl: () => {
+          lookedUp = true;
+          return Promise.resolve(new Response(null, { status: 404 }));
+        },
+      }),
+    ).rejects.toThrow('packed library tarball is missing AGENT_CARD.md');
+    expect(lookedUp).toBe(false);
+  });
   it('accepts a valid packed manifest and source workspace ranges', () => {
     expect(packedManifestProblems(valid, '0.8.0')).toEqual([]);
     expect(
@@ -40,24 +70,23 @@ describe('npm release rules', () => {
     ).toEqual([]);
   });
   it('refuses each broken field, including every shipped dependency field', () => {
-    for (
-      const bad of [
-        null,
-        [],
-        { ...valid, name: 'outside' },
-        { ...valid, version: '0.7.0' },
-        { ...valid, repository: null },
-        { ...valid, publishConfig: {} },
-        { ...valid, license: '' },
-        { ...valid, license: 1 },
-        { ...valid, files: ['dist'] },
-        { ...valid, files: undefined },
-        ...['dependencies', 'peerDependencies', 'optionalDependencies'].flatMap((field) => [
-          { ...valid, [field]: { '@setu-ts/common': '^0.7.0' } },
-          { ...valid, [field]: { external: 'workspace:^' } },
-        ]),
-      ]
-    ) expect(packedManifestProblems(bad, '0.8.0').length).toBeGreaterThan(0);
+    for (const bad of [
+      null,
+      [],
+      { ...valid, name: 'outside' },
+      { ...valid, version: '0.7.0' },
+      { ...valid, repository: null },
+      { ...valid, publishConfig: {} },
+      { ...valid, license: '' },
+      { ...valid, license: 1 },
+      { ...valid, files: ['dist'] },
+      { ...valid, files: undefined },
+      ...['dependencies', 'peerDependencies', 'optionalDependencies'].flatMap((field) => [
+        { ...valid, [field]: { '@setu-ts/common': '^0.7.0' } },
+        { ...valid, [field]: { external: 'workspace:^' } },
+      ]),
+    ])
+      expect(packedManifestProblems(bad, '0.8.0').length).toBeGreaterThan(0);
     expect(packedManifestProblems({ ...valid, dependencies: null }, '0.8.0')).toEqual([]);
     expect(packedManifestProblems(valid, '0.8.0', true)).toContain(
       'dependencies: @setu-ts/common must equal workspace:^',
@@ -65,9 +94,13 @@ describe('npm release rules', () => {
   });
   it('uses own registry versions and explicit release tags', () => {
     expect(packumentHasVersion({ versions: { '0.8.0': {} } }, '0.8.0')).toBe(true);
-    for (
-      const packument of [null, {}, { versions: [] }, { versions: Object.create({ '0.8.0': {} }) }]
-    ) expect(packumentHasVersion(packument, '0.8.0')).toBe(false);
+    for (const packument of [
+      null,
+      {},
+      { versions: [] },
+      { versions: Object.create({ '0.8.0': {} }) },
+    ])
+      expect(packumentHasVersion(packument, '0.8.0')).toBe(false);
     expect(distTagFor('0.8.0')).toBe('latest');
     expect(distTagFor('0.9.0-beta.1')).toBe('next');
     expect(distTagFor('0.9.0+build-test')).toBe('latest');
@@ -94,7 +127,8 @@ describe('npm release rules', () => {
           return 'packed.tgz';
         }
         if (cmd === 'tar') {
-          const source = JSON.parse(await Deno.readTextFile(`${dir}/package.json`));
+          if (args[0] === '-tzf') return 'package/AGENT_CARD.md\n';
+          const source = JSON.parse(await readFile(`${dir}/package.json`, 'utf8'));
           for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
             for (const name of Object.keys(source[field] ?? {})) {
               if (name.startsWith('@setu-ts/')) source[field][name] = `^${WORKSPACE_VERSION}`;
@@ -118,7 +152,7 @@ describe('npm release rules', () => {
     });
     expect(events).toEqual(
       PUBLISHED_PACKAGES.flatMap((dir) =>
-        ['pack', 'check', 'lookup', 'publish'].map((step) => `${step}:${dir}`)
+        ['pack', 'check', 'lookup', 'publish'].map((step) => `${step}:${dir}`),
       ),
     );
   });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { RedisQueue, validateClient } from '../../src/adapters/redis-queue.ts';
 import { FakeRedisClient } from '../fixtures/fake-ioredis-client.ts';
 
@@ -155,9 +155,9 @@ describe('RedisQueue', () => {
 
     it('throws when not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.ack('test', '1'),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.ack('test', '1')).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('ack emits ZREM processing + HDEL', async () => {
@@ -370,9 +370,9 @@ describe('RedisQueue', () => {
 
     it('throws when not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.deadLetter('test', '1', Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.deadLetter('test', '1', Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('deadLetter emits ZREM processing + ZADD dead', async () => {
@@ -420,16 +420,16 @@ describe('RedisQueue', () => {
 
     it('throws when fetchRecurringDue not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.fetchRecurringDue(Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.fetchRecurringDue(Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('throws when advanceRecurring not connected', async () => {
       const notConnectedQueue = new RedisQueue();
-      await expect(
-        notConnectedQueue.advanceRecurring('r1', Date.now()),
-      ).rejects.toThrow('RedisQueue is not connected');
+      await expect(notConnectedQueue.advanceRecurring('r1', Date.now())).rejects.toThrow(
+        'RedisQueue is not connected',
+      );
     });
 
     it('storeRecurring stores in recurring hashes', async () => {
@@ -499,8 +499,19 @@ describe('RedisQueue', () => {
 
   describe('guarded real-import', () => {
     it('connect() rejects with bad URL (enters loadIoredis)', async () => {
-      const queue = new RedisQueue({ url: 'redis://localhost:9999' });
-      await expect(queue.connect()).rejects.toThrow();
+      // Built with no reporter: the real ioredis client must still carry an
+      // 'error' listener, or it prints "[ioredis] Unhandled error event".
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const queue = new RedisQueue({ url: 'redis://localhost:9999' });
+        await expect(queue.connect()).rejects.toThrow();
+        await queue.disconnect().catch(() => {});
+        expect(
+          consoleError.mock.calls.filter((call) => String(call[0]).startsWith('[ioredis]')),
+        ).toEqual([]);
+      } finally {
+        consoleError.mockRestore();
+      }
     });
   });
 
@@ -532,5 +543,29 @@ describe('RedisQueue', () => {
       // Should not throw even without connect
       await expect(queue.disconnect()).resolves.toBeUndefined();
     });
+  });
+});
+
+describe('RedisQueue — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisQueue } = await import('../../src/adapters/redis-queue.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const queue = new RedisQueue();
+      let caught: unknown;
+      try {
+        await queue.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
   });
 });

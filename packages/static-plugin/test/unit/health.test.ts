@@ -4,13 +4,11 @@ describe('static-plugin health indicator', () => {
   it('should report up when root is a directory', async () => {
     const fs = {
       stat: () =>
-        Promise.resolve(
-          { isFile: false, isDirectory: true, size: 0 } as {
-            isFile: boolean;
-            isDirectory: boolean;
-            size: number;
-          },
-        ),
+        Promise.resolve({ isFile: false, isDirectory: true, size: 0 } as {
+          isFile: boolean;
+          isDirectory: boolean;
+          size: number;
+        }),
     };
 
     const healthFn = async () => {

@@ -36,11 +36,14 @@ async function perTenant(relay: { publishLimit?: number } = {}) {
   });
   service.activate({
     kind: 'per-tenant',
-    stores: new Map([['acme', acme.store], ['globex', globex.store]]),
+    stores: new Map([
+      ['acme', acme.store],
+      ['globex', globex.store],
+    ]),
   });
   const write = (tenant: { db: typeof acme.db }, n: number, tenantId?: string) =>
     tenant.db.transaction((uow) =>
-      service.write(uow, orderPlaced, { n }, tenantId === undefined ? {} : { tenantId })
+      service.write(uow, orderPlaced, { n }, tenantId === undefined ? {} : { tenantId }),
     );
   return { acme, globex, service, broker, write, clock };
 }

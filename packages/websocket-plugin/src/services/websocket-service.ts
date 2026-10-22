@@ -195,27 +195,29 @@ export class WebSocketService implements IWebSocketService {
     this.#backplane = backplane;
     this.#behaviors = [...(behaviors ?? [])];
     this.#rooms = new RoomRegistry(
-      backplane === undefined ? undefined : (name, data, exceptId): void => {
-        const payload = encodeFrameData(data);
-        // Assembled rather than spread so `exactOptionalPropertyTypes` never
-        // sees an explicit `undefined` on an optional field.
-        const frame: RealtimeFrame = {
-          kind: 'ws-room',
-          origin: backplane.origin,
-          name,
-          data: payload.data,
-          ...(payload.binary === true ? { binary: true } : {}),
-          ...(exceptId === undefined ? {} : { exceptId }),
-        };
-        // Fire-and-forget: a transport failure must never make a local
-        // broadcast throw for the application that issued it.
-        void backplane.publish(frame).catch((error: unknown) => {
-          this.#logger?.warn('websocket: backplane publish failed', {
-            room: name,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        });
-      },
+      backplane === undefined
+        ? undefined
+        : (name, data, exceptId): void => {
+            const payload = encodeFrameData(data);
+            // Assembled rather than spread so `exactOptionalPropertyTypes` never
+            // sees an explicit `undefined` on an optional field.
+            const frame: RealtimeFrame = {
+              kind: 'ws-room',
+              origin: backplane.origin,
+              name,
+              data: payload.data,
+              ...(payload.binary === true ? { binary: true } : {}),
+              ...(exceptId === undefined ? {} : { exceptId }),
+            };
+            // Fire-and-forget: a transport failure must never make a local
+            // broadcast throw for the application that issued it.
+            void backplane.publish(frame).catch((error: unknown) => {
+              this.#logger?.warn('websocket: backplane publish failed', {
+                room: name,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
+          },
       // A local member has just joined, so this replica must be able to
       // RECEIVE — and `subscribe()` alone does not open a transport.
       () => this.#openBackplane(),
@@ -295,10 +297,7 @@ export class WebSocketService implements IWebSocketService {
    * @returns The decision, or `null` when this is not a WebSocket route
    * @since 0.3.0
    */
-  routeUpgrade(
-    request: Request,
-    principal?: IPrincipal,
-  ): Promise<WebSocketUpgradeDecision | null> {
+  routeUpgrade(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null> {
     return this.#routeReported(request, principal);
   }
 
@@ -428,10 +427,7 @@ export class WebSocketService implements IWebSocketService {
    *   `context.user`
    * @returns The decision, or `null` when this is not a WebSocket route
    */
-  async #route(
-    request: Request,
-    principal?: IPrincipal,
-  ): Promise<WebSocketUpgradeDecision | null> {
+  async #route(request: Request, principal?: IPrincipal): Promise<WebSocketUpgradeDecision | null> {
     // Upgrade detection lives here rather than in the caller. Before M70a the
     // adapter's `UpgradeRouterStore` filtered non-upgrade requests out before
     // consulting, and `WsRouteTable.match` keys on PATH ALONE — so without this
@@ -545,10 +541,7 @@ export class WebSocketService implements IWebSocketService {
   /**
    * Builds the per-connection sink the adapter drives.
    */
-  #createSink(
-    context: WebSocketConnectionContext,
-    route: WsRoute,
-  ): WebSocketEventSink {
+  #createSink(context: WebSocketConnectionContext, route: WsRoute): WebSocketEventSink {
     const { handlers } = route;
     let conn: WebSocketConnection | null = null;
 
@@ -688,10 +681,7 @@ export class WebSocketService implements IWebSocketService {
         closing.markClosed();
         this.#connections.delete(closing);
         this.#rooms.evict(closing);
-        realtimeObserverOf(closing)?.observe(
-          'close',
-          !errored && event.code !== CLOSE_ABNORMAL,
-        );
+        realtimeObserverOf(closing)?.observe('close', !errored && event.code !== CLOSE_ABNORMAL);
         invoke(handlers.onClose, closing, event);
       },
 

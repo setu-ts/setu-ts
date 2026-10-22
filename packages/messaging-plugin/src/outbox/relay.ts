@@ -7,12 +7,23 @@
  * whole sweep (`sweepDeadlineMs`, on the monotonic clock). A row starts only
  * while the deadline leaves room for its publish AND its status write.
  *
+ * The deadline bounds the sweep, EXCEPT that the status write settling an
+ * already-invoked publish runs to its own `storeTimeoutMs` even when a pause
+ * has exhausted the budget: the publish happened, and recording its outcome
+ * is that row's work. A sweep that overran by a pause can therefore outlive
+ * `sweepDeadlineMs` by at most one `storeTimeoutMs`; the drain on shutdown
+ * waits for the in-flight sweep, so its bound grows by the same amount.
+ *
  * Every status write is a conditional transition (the store writes only from
  * the expected status). A rejected or expired store call ends the sweep with
  * the row's key blocked, so no later row of that key is published before the
- * next lap re-reads the still-`pending` row. Once the outbox is closing, a
- * publish failure writes nothing — a failure the application's own shutdown
- * caused is never counted against `maxAttempts`.
+ * next lap re-reads the still-`pending` row. A settlement write that answers
+ * after its bound is still observed: the relay blocks the key and books the
+ * sweep failure when the bound wins, and the store's eventual answer records
+ * its overlap (or is swallowed, when it is the same failure) through one
+ * shared observation. Once the outbox is closing, a publish failure writes
+ * nothing — a failure the application's own shutdown caused is never counted
+ * against `maxAttempts`.
  *
  * @module
  */
@@ -43,12 +54,7 @@ const MAX_LAST_ERROR = 1024;
  * @internal
  */
 export type StoreSweepEnd =
-  | 'lap-complete'
-  | 'scan-limit'
-  | 'publish-limit'
-  | 'deadline'
-  | 'store-failure'
-  | 'closing';
+  'lap-complete' | 'scan-limit' | 'publish-limit' | 'deadline' | 'store-failure' | 'closing';
 
 /**
  * What a sweep reports as it goes — the hooks the outbox service records for
@@ -229,24 +235,132 @@ function publish(ctx: RelayContext, record: OutboxRecord, row: DecodedOutboxRow)
   return ctx.telemetry.withSpan(`outbox relay ${row.topic}`, send, spanOptionsFor(record));
 }
 
-/** Applies what a `markSent` answered after a successful publish. */
-function onMarkSent(
+/**
+ * Runs a settlement write under its own `storeTimeoutMs` bound — not
+ * `min(storeTimeoutMs, remaining)` — and always invokes the call. The write
+ * settles a publish that was already invoked, so it is that row's work even
+ * when a pause has exhausted the sweep budget.
+ *
+ * The store's own promise is kept: when the bound wins the race, the caller
+ * still observes the store's eventual answer (or swallows its eventual
+ * rejection) through it.
+ *
+ * @internal
+ * @param ctx - The sweep's shared context
+ * @param what - Names the call in the expiry error
+ * @param run - The call
+ * @returns The bounded promise and the store's own promise
+ */
+function boundedSettle<T>(
   ctx: RelayContext,
-  lap: OutboxLap,
-  key: string | undefined,
+  what: string,
+  run: () => Promise<T>,
+): { readonly bounded: Promise<T>; readonly store: Promise<T> } {
+  const store = Promise.resolve().then(run);
+  return {
+    bounded: withDeadline(() => store, {
+      timeoutMs: ctx.options.storeTimeoutMs,
+      onTimeout: () => new RelayCallTimeoutError(what),
+      timing: resolveProbeTiming(ctx.runtime),
+    }),
+    store,
+  };
+}
+
+/**
+ * What one settlement answer does to the observer and, in time only, to the
+ * lap and the budget.
+ *
+ * @internal
+ */
+interface SettlementObservation {
+  /** `true` on the late continuation: the lap and the budget are untouched. */
+  readonly late: boolean;
+  /** In time only: the lap a claim-lost or failed answer blocks. */
+  readonly lap?: OutboxLap;
+  readonly key?: string;
+  /** The topic a `markFailure` answer reports through `poisoned`. */
+  readonly topic?: string;
+  /** Whether the `markFailure` write carried `status: 'failed'`. */
+  readonly madeFailed?: boolean;
+}
+
+/**
+ * Records what a settlement write answered — the ONE function the in-time and
+ * the late paths both call, so the two cannot disagree about what an answer
+ * means:
+ *
+ * | write       | answer                       | records            | in time also          |
+ * | ----------- | ---------------------------- | ------------------ | --------------------- |
+ * | `markSent`  | `not-pending` / `sent`       | `duplicate`        | —                     |
+ * | `markSent`  | `claim-lost`                 | `claim-lost`       | block the key         |
+ * | `markSent`  | `not-pending` / `failed`     | —                  | block the key         |
+ * | `markFailure` | `not-pending` / `sent`     | `duplicate`        | —                     |
+ * | `markFailure` | `claim-lost`               | `claim-lost`       | —                     |
+ * | `markFailure` | `applied`, wrote `failed`  | `poisoned(topic)` | `budget.poisoned` + 1 |
+ * | both writes | `applied` (other), `missing` | —                  | —                     |
+ *
+ * A late answer arrives after the sweep ended: it never touches the lap or
+ * the budget, it is dropped when the outbox is closing, and a throwing
+ * custom observer cannot surface as an unhandled rejection.
+ */
+function observeSettlement(
+  ctx: RelayContext,
+  which: 'markSent' | 'markFailure',
   transition: OutboxTransition,
+  observation: SettlementObservation,
 ): void {
+  if (observation.late && ctx.isClosing()) return;
+  const observe = (record: () => void): void => {
+    if (observation.late) {
+      try {
+        record();
+      } catch {
+        // A throwing observer must not surface as an unhandled rejection:
+        // the sweep is over.
+      }
+    } else {
+      record();
+    }
+  };
   if (transition.outcome === 'claim-lost') {
-    ctx.observer.overlap('claim-lost');
-    if (key !== undefined) lap.block(key);
+    observe(() => ctx.observer.overlap('claim-lost'));
+    // Only a markSent blocks the key in time: the failure path already
+    // blocked it before the markFailure write started.
+    if (
+      which === 'markSent' &&
+      !observation.late &&
+      observation.key !== undefined &&
+      observation.lap !== undefined
+    ) {
+      observation.lap.block(observation.key);
+    }
     return;
   }
-  if (transition.outcome !== 'not-pending') return;
-  if (transition.status === 'sent') {
-    ctx.observer.overlap('duplicate');
-  } else if (transition.status === 'failed' && key !== undefined) {
+  if (transition.outcome === 'not-pending' && transition.status === 'sent') {
+    // `markSent`: the row was already sent; `markFailure`: this relay's
+    // publish was invoked and the row is sent — a copy may have duplicated.
+    observe(() => ctx.observer.overlap('duplicate'));
+    return;
+  }
+  if (
+    !observation.late &&
+    transition.outcome === 'not-pending' &&
+    transition.status === 'failed' &&
+    observation.key !== undefined &&
+    observation.lap !== undefined
+  ) {
     // Another relay failed it meanwhile: it now blocks its key.
-    lap.block(key);
+    observation.lap.block(observation.key);
+  }
+  if (
+    which === 'markFailure' &&
+    observation.madeFailed === true &&
+    transition.outcome === 'applied'
+  ) {
+    if (!observation.late) ctx.budget.poisoned += 1;
+    const topic = observation.topic;
+    if (topic !== undefined) observe(() => ctx.observer.poisoned(topic));
   }
 }
 
@@ -260,9 +374,8 @@ async function examine(
   record: OutboxRecord,
 ): Promise<StoreSweepEnd | undefined> {
   const { options, budget, runtime } = ctx;
-  const key = record.orderingKey !== undefined
-    ? blockKey(record.tenantId, record.orderingKey)
-    : undefined;
+  const key =
+    record.orderingKey !== undefined ? blockKey(record.tenantId, record.orderingKey) : undefined;
   if (key !== undefined) {
     if (lap.isBlocked(key)) return undefined;
     if (lap.capReached) {
@@ -283,19 +396,17 @@ async function examine(
     if (key !== undefined) lap.block(key);
     return undefined;
   }
-  const decoded = claim === undefined
-    ? { ok: false as const }
-    : decodeOutboxRecord(record, options.maxEnvelopeBytes);
+  const decoded =
+    claim === undefined
+      ? { ok: false as const }
+      : decodeOutboxRecord(record, options.maxEnvelopeBytes);
   if (claim === undefined || !decoded.ok) {
     budget.attempted += 1;
     if (key !== undefined) lap.block(key);
     let transition: OutboxTransition;
     try {
-      transition = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'markInvalid',
-        () => store.markInvalid(record.id, now),
+      transition = await bounded(ctx, options.storeTimeoutMs, 'markInvalid', () =>
+        store.markInvalid(record.id, now),
       );
     } catch {
       return 'store-failure';
@@ -310,11 +421,8 @@ async function examine(
   const leaseUntil = runtime.now() + options.claimLeaseMs;
   let acquired: OutboxTransition;
   try {
-    acquired = await bounded(
-      ctx,
-      options.storeTimeoutMs,
-      'claim',
-      () => store.claim(record.id, { claimVersion: claim.claimVersion, leaseUntil }),
+    acquired = await bounded(ctx, options.storeTimeoutMs, 'claim', () =>
+      store.claim(record.id, { claimVersion: claim.claimVersion, leaseUntil }),
     );
   } catch {
     if (key !== undefined) lap.block(key);
@@ -322,16 +430,18 @@ async function examine(
   }
   if (acquired.outcome !== 'applied') {
     if (
-      key !== undefined && (acquired.outcome === 'claim-lost' ||
+      key !== undefined &&
+      (acquired.outcome === 'claim-lost' ||
         (acquired.outcome === 'not-pending' && acquired.status === 'failed'))
-    ) lap.block(key);
+    )
+      lap.block(key);
     return undefined;
   }
   const claimVersion = claim.claimVersion + 1;
   budget.attempted += 1;
   if (
     runtime.now() + options.publishTimeoutMs + options.storeTimeoutMs + options.maxClockSkewMs >
-      leaseUntil
+    leaseUntil
   ) {
     if (key !== undefined) lap.block(key);
     ctx.observer.overlap('fenced');
@@ -339,14 +449,15 @@ async function examine(
   }
 
   const { topic } = decoded.row;
+  // Set inside the bound `run` closure, which the budget refuses to invoke at
+  // `remaining <= 0`: true exactly when the publish was actually invoked.
+  let publishInvoked = false;
   let failure: { readonly error: unknown } | undefined;
   try {
-    await bounded(
-      ctx,
-      options.publishTimeoutMs,
-      'publish',
-      () => publish(ctx, record, decoded.row),
-    );
+    await bounded(ctx, options.publishTimeoutMs, 'publish', () => {
+      publishInvoked = true;
+      return publish(ctx, record, decoded.row);
+    });
   } catch (error) {
     failure = { error };
   }
@@ -354,61 +465,87 @@ async function examine(
   if (failure === undefined) {
     budget.published += 1;
     ctx.observer.published(topic);
+    const settle = boundedSettle(ctx, 'markSent', () =>
+      store.markSent(record.id, {
+        claimVersion,
+        settledAt: runtime.now(),
+        sentBy: `${ctx.instanceId}/${ctx.origin}`,
+        deleteNow: options.retainSentMs === 0,
+      }),
+    );
     let transition: OutboxTransition;
     try {
-      transition = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'markSent',
-        () =>
-          store.markSent(record.id, {
-            claimVersion,
-            settledAt: runtime.now(),
-            sentBy: `${ctx.instanceId}/${ctx.origin}`,
-            deleteNow: options.retainSentMs === 0,
-          }),
-      );
-    } catch {
+      transition = await settle.bounded;
+    } catch (error) {
       // Published but not marked: block the key so no later row of it is
       // published before the next lap re-reads this still-pending row.
       if (key !== undefined) lap.block(key);
+      if (error instanceof RelayCallTimeoutError) {
+        // The bound expired and the store's answer is still on its way:
+        // observe it when it arrives. A late rejection is the same failure,
+        // already booked.
+        settle.store.then(
+          (late) => observeSettlement(ctx, 'markSent', late, { late: true }),
+          () => {},
+        );
+      }
       return 'store-failure';
     }
-    onMarkSent(ctx, lap, key, transition);
+    observeSettlement(ctx, 'markSent', transition, {
+      late: false,
+      lap,
+      ...(key !== undefined ? { key } : {}),
+    });
     return undefined;
   }
 
   if (key !== undefined) lap.block(key);
   // A failure while the application stops writes nothing: it is not the row's.
   if (ctx.isClosing()) return 'closing';
+  // The budget refused the publish before it ran (a pause emptied it): that is
+  // the sweep's deadline, not the row's failure — no attempt, no failure
+  // count, no write. The claim expires and the next lap retries the row.
+  if (!publishInvoked) return 'deadline';
   budget.failures += 1;
   ctx.observer.publishFailed(topic);
   const attempts = attemptsOf(record) + 1;
   const status = attempts >= options.maxAttempts ? 'failed' : 'pending';
   const backoff = Math.min(options.baseBackoffMs * 2 ** (attempts - 1), options.maxBackoffMs);
+  const markFailure = (): Promise<OutboxTransition> =>
+    store.markFailure(record.id, {
+      claimVersion,
+      attempts,
+      lastError: lastErrorOf(failure.error),
+      availableAt: now + backoff,
+      status,
+    });
+  // The publish ran: the failure is that row's work, so the write runs under
+  // its own bound even when a pause exhausted the sweep budget.
+  const settle = boundedSettle(ctx, 'markFailure', markFailure);
   let transition: OutboxTransition;
   try {
-    transition = await bounded(
-      ctx,
-      options.storeTimeoutMs,
-      'markFailure',
-      () =>
-        store.markFailure(record.id, {
-          claimVersion,
-          attempts,
-          lastError: lastErrorOf(failure.error),
-          availableAt: now + backoff,
-          status,
-        }),
-    );
-  } catch {
+    transition = await settle.bounded;
+  } catch (error) {
+    if (error instanceof RelayCallTimeoutError) {
+      settle.store.then(
+        (late) =>
+          observeSettlement(ctx, 'markFailure', late, {
+            late: true,
+            topic,
+            madeFailed: status === 'failed',
+          }),
+        () => {},
+      );
+    }
     return 'store-failure';
   }
-  if (transition.outcome === 'claim-lost') ctx.observer.overlap('claim-lost');
-  if (transition.outcome === 'applied' && status === 'failed') {
-    budget.poisoned += 1;
-    ctx.observer.poisoned(topic);
-  }
+  observeSettlement(ctx, 'markFailure', transition, {
+    late: false,
+    lap,
+    ...(key !== undefined ? { key } : {}),
+    topic,
+    madeFailed: status === 'failed',
+  });
   return failure.error instanceof RelayCallTimeoutError ? 'deadline' : undefined;
 }
 
@@ -435,11 +572,8 @@ export async function sweepStore(
     if (stop !== undefined) return stop;
     let failed;
     try {
-      failed = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'failedKeys',
-        () => store.failedKeys(options.maxFailedScan),
+      failed = await bounded(ctx, options.storeTimeoutMs, 'failedKeys', () =>
+        store.failedKeys(options.maxFailedScan),
       );
     } catch {
       return 'store-failure';
@@ -454,11 +588,8 @@ export async function sweepStore(
     let page: readonly OutboxRecord[];
     const after = lap.cursor;
     try {
-      page = await bounded(
-        ctx,
-        options.storeTimeoutMs,
-        'scanPending',
-        () => store.scanPending(after, limit),
+      page = await bounded(ctx, options.storeTimeoutMs, 'scanPending', () =>
+        store.scanPending(after, limit),
       );
     } catch {
       return 'store-failure';

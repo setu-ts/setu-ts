@@ -62,12 +62,14 @@ describe('WebSocket frame behaviours (M86 §3.7)', () => {
   it('a behaviour observes the ingress envelope and the handler still runs', async () => {
     const envelopes: IngressContext[] = [];
     const options: WebSocketPluginOptions = {
-      behaviors: [{
-        handle(ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
-          envelopes.push(ctx);
-          return next();
+      behaviors: [
+        {
+          handle(ctx: IngressContext, next: () => Promise<void>): void | Promise<void> {
+            envelopes.push(ctx);
+            return next();
+          },
         },
-      }],
+      ],
     };
     const app = createApplication({ plugins: [RuntimePlugin(), WebSocketPlugin(options)] });
     await app.start();
@@ -93,9 +95,7 @@ describe('WebSocket frame behaviours (M86 §3.7)', () => {
     // Exact envelope shape: kind names the ingress, name is the ROUTE PATH,
     // payload is the raw frame — and nothing else (no fabricated attempt,
     // no headers channel on this arm).
-    expect(envelopes).toEqual([
-      { kind: 'websocket', name: '/ws/echo', payload: 'hello' },
-    ]);
+    expect(envelopes).toEqual([{ kind: 'websocket', name: '/ws/echo', payload: 'hello' }]);
     expect(received).toBe('hello');
     expect(messageConn).toBe(openConn);
     await app.stop();

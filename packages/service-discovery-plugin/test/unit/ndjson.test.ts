@@ -59,9 +59,10 @@ describe('readJsonLines', () => {
   it('stops once the signal aborts mid-stream', async () => {
     const controller = new AbortController();
     const out: unknown[] = [];
-    for await (
-      const value of readJsonLines(streamOf(['{"a":1}\n', '{"a":2}\n']), controller.signal)
-    ) {
+    for await (const value of readJsonLines(
+      streamOf(['{"a":1}\n', '{"a":2}\n']),
+      controller.signal,
+    )) {
       out.push(value);
       controller.abort();
     }

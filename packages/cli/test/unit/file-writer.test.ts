@@ -5,6 +5,7 @@ import {
   assertInsideProject,
   dirName,
   findExisting,
+  reportDryRunPlan,
   firstDuplicatePath,
   interruptedRunRetryHint,
   joinPath,
@@ -14,30 +15,58 @@ import {
 } from '../../src/utils/file-writer.ts';
 
 describe('firstDuplicatePath', () => {
+  it('reports dry-run create, managed update, unchanged and collision without writes', async () => {
+    const fs = createFakeFs({ '/update': 'old', '/same': 'same', '/collision': 'mine' });
+    const out: string[] = [];
+    const err: string[] = [];
+    const deps = {
+      fs,
+      log: (line: string) => out.push(line),
+      error: (line: string) => err.push(line),
+    };
+    const files = [
+      { path: '/new', contents: 'new' },
+      { path: '/update', contents: 'next', managed: true },
+      { path: '/same', contents: 'same', managed: true },
+    ];
+    expect(await reportDryRunPlan(deps, files)).toBe(0);
+    expect(out).toEqual(['would create /new', 'would update /update', 'unchanged /same']);
+    expect(await reportDryRunPlan(deps, [{ path: '/collision', contents: 'next' }])).toBe(1);
+    expect(err).toEqual(['WOULD REFUSE: /collision already exists']);
+    expect(out).toEqual(['would create /new', 'would update /update', 'unchanged /same']);
+    expect(fs.writes).toEqual([]);
+    expect(fs.read('/collision')).toBe('mine');
+  });
   // The overwrite check probes the filesystem, so it cannot see a path planned
   // twice within one plan — both would be written and the last would win.
   it('finds a path planned twice', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '{}' },
-      { path: 'main.ts', contents: '' },
-      { path: 'deno.json', contents: 'overwrites the framework manifest' },
-    ])).toBe('deno.json');
+    expect(
+      firstDuplicatePath([
+        { path: 'deno.json', contents: '{}' },
+        { path: 'main.ts', contents: '' },
+        { path: 'deno.json', contents: 'overwrites the framework manifest' },
+      ]),
+    ).toBe('deno.json');
   });
 
   it('returns the FIRST duplicate when there are several', () => {
-    expect(firstDuplicatePath([
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-      { path: 'a', contents: '' },
-      { path: 'b', contents: '' },
-    ])).toBe('a');
+    expect(
+      firstDuplicatePath([
+        { path: 'a', contents: '' },
+        { path: 'b', contents: '' },
+        { path: 'a', contents: '' },
+        { path: 'b', contents: '' },
+      ]),
+    ).toBe('a');
   });
 
   it('returns undefined for a distinct plan', () => {
-    expect(firstDuplicatePath([
-      { path: 'deno.json', contents: '' },
-      { path: 'main.ts', contents: '' },
-    ])).toBeUndefined();
+    expect(
+      firstDuplicatePath([
+        { path: 'deno.json', contents: '' },
+        { path: 'main.ts', contents: '' },
+      ]),
+    ).toBeUndefined();
   });
 
   it('returns undefined for an empty plan', () => {
@@ -172,23 +201,26 @@ describe('findExisting', () => {
 
   it('propagates an unreadable target instead of treating it as absent', async () => {
     const fs = createFakeFs({ private: 'keep' });
-    await expect(findExisting({
-      ...fs,
-      stat: () => Promise.reject(new Error('permission denied')),
-    }, [{ path: 'private', contents: 'new' }])).rejects.toThrow('permission denied');
+    await expect(
+      findExisting(
+        {
+          ...fs,
+          stat: () => Promise.reject(new Error('permission denied')),
+        },
+        [{ path: 'private', contents: 'new' }],
+      ),
+    ).rejects.toThrow('permission denied');
   });
 });
 
 describe('interruptedRunRetryHint', () => {
   it('offers cleanup only when every collision is inside the directory the run would create', () => {
-    expect(interruptedRunRetryHint(
-      ['/work/app/deno.json', '/work/app/src/main.ts'],
-      '/work/app',
-    )).toContain('delete /work/app');
-    expect(interruptedRunRetryHint(
-      ['/work/app/deno.json', '/work/keep.txt'],
-      '/work/app',
-    )).toBeUndefined();
+    expect(
+      interruptedRunRetryHint(['/work/app/deno.json', '/work/app/src/main.ts'], '/work/app'),
+    ).toContain('delete /work/app');
+    expect(
+      interruptedRunRetryHint(['/work/app/deno.json', '/work/keep.txt'], '/work/app'),
+    ).toBeUndefined();
     expect(interruptedRunRetryHint([], '/work/app')).toBeUndefined();
   });
 });
@@ -197,11 +229,15 @@ describe('writeFiles', () => {
   it('classifies created, updated, and unchanged files', async () => {
     const fs = createFakeFs({ 'updated.ts': 'before', 'same.ts': 'same' });
     expect(
-      await writeFiles(fs, [
-        { path: 'created.ts', contents: 'new' },
-        { path: 'updated.ts', contents: 'after' },
-        { path: 'same.ts', contents: 'same' },
-      ], { root: '/' }),
+      await writeFiles(
+        fs,
+        [
+          { path: 'created.ts', contents: 'new' },
+          { path: 'updated.ts', contents: 'after' },
+          { path: 'same.ts', contents: 'same' },
+        ],
+        { root: '/' },
+      ),
     ).toEqual([
       { path: 'created.ts', outcome: 'created' },
       { path: 'updated.ts', outcome: 'updated' },
@@ -210,10 +246,14 @@ describe('writeFiles', () => {
   });
   it('writes every file in order', async () => {
     const fs = createFakeFs();
-    await writeFiles(fs, [
-      { path: 'src/a.ts', contents: 'A' },
-      { path: 'src/b.ts', contents: 'B' },
-    ], { root: '/' });
+    await writeFiles(
+      fs,
+      [
+        { path: 'src/a.ts', contents: 'A' },
+        { path: 'src/b.ts', contents: 'B' },
+      ],
+      { root: '/' },
+    );
     expect(fs.writes).toEqual(['src/a.ts', 'src/b.ts']);
     expect(fs.read('src/a.ts')).toBe('A');
     expect(fs.read('src/b.ts')).toBe('B');
@@ -229,11 +269,15 @@ describe('writeFiles', () => {
         return fs.mkdir(path, options);
       },
     };
-    await writeFiles(spy, [
-      { path: 'src/services/a.ts', contents: 'A' },
-      { path: 'src/services/b.ts', contents: 'B' },
-      { path: 'src/controllers/c.ts', contents: 'C' },
-    ], { root: '/' });
+    await writeFiles(
+      spy,
+      [
+        { path: 'src/services/a.ts', contents: 'A' },
+        { path: 'src/services/b.ts', contents: 'B' },
+        { path: 'src/controllers/c.ts', contents: 'C' },
+      ],
+      { root: '/' },
+    );
     expect(fs.mkdirs).toEqual(['src', 'src/services', 'src/controllers']);
     expect(recursive).toBe(false);
   });
@@ -251,8 +295,9 @@ describe('writeFiles', () => {
       ...fs,
       writeFile: () => Promise.reject(new Error('disk full')),
     };
-    await expect(writeFiles(failing, [{ path: 'a.ts', contents: 'A' }], { root: '/' }))
-      .rejects.toThrow('disk full');
+    await expect(
+      writeFiles(failing, [{ path: 'a.ts', contents: 'A' }], { root: '/' }),
+    ).rejects.toThrow('disk full');
   });
 });
 
@@ -295,7 +340,7 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
   it('refuses a dangling link instead of treating it as absent', async () => {
     const dangling: IFileSystem = {
       ...base,
-      readdir: (path) => path === '/p' ? Promise.resolve(['a.ts', 'ghost']) : base.readdir(path),
+      readdir: (path) => (path === '/p' ? Promise.resolve(['a.ts', 'ghost']) : base.readdir(path)),
     };
     await expect(assertInsideProject(dangling, '/p', '/p/ghost')).rejects.toThrow(
       'link to something that does not exist',
@@ -335,10 +380,108 @@ describe('assertInsideProject (M101f re-audit N9/N10)', () => {
           : fs.stat(path),
     };
     await expect(
-      writeFiles(linked, [{ path: '/p/a.ts', contents: 'A' }, { path: '/p/b.ts', contents: 'B' }], {
-        root: '/p',
-      }),
+      writeFiles(
+        linked,
+        [
+          { path: '/p/a.ts', contents: 'A' },
+          { path: '/p/b.ts', contents: 'B' },
+        ],
+        {
+          root: '/p',
+        },
+      ),
     ).rejects.toBeInstanceOf(PathEscapesProjectError);
     expect(fs.writes).toEqual([]);
+  });
+});
+
+describe('bounded read of an existing file (L1 audit)', () => {
+  // The jobs barrel is a CLI-owned path a schematic regenerates. The fake's
+  // `stat` reports the planted path's kind and size, standing in for a
+  // committed link to `/dev/zero` or a planted special file.
+  const barrel = '/p/src/jobs/index.ts';
+
+  /** Reports one planted path's metadata instead of the fake's regular file. */
+  function planted(
+    fs: ReturnType<typeof createFakeFs>,
+    metadata: { readonly isFile: boolean; readonly size: number },
+  ): IFileSystem {
+    return {
+      ...fs,
+      stat: (path) =>
+        path === barrel
+          ? Promise.resolve({ isFile: metadata.isFile, isDirectory: false, size: metadata.size })
+          : fs.stat(path),
+    };
+  }
+
+  it('refuses a dry run when a managed path is not a regular file, writing nothing', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    await expect(
+      reportDryRunPlan(
+        { fs: planted(fs, { isFile: false, size: 0 }), log: () => {}, error: () => {} },
+        [{ path: barrel, contents: 'new', managed: true }],
+      ),
+    ).rejects.toThrow('is not a regular file');
+    expect(fs.writes).toEqual([]);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a write when a managed path is not a regular file, leaving no partial files', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    await expect(
+      writeFiles(
+        planted(fs, { isFile: false, size: 0 }),
+        [
+          { path: barrel, contents: 'new', managed: true },
+          { path: '/p/src/jobs/nightly.ts', contents: 'job' },
+        ],
+        { root: '/p' },
+      ),
+    ).rejects.toThrow('is not a regular file');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/p/src/jobs/nightly.ts')).toBe(false);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('refuses a dry run and a write when a managed path exceeds 1 MiB', async () => {
+    const fs = createFakeFs({ [barrel]: 'old' });
+    const oversized = planted(fs, { isFile: true, size: 2 * 1024 * 1024 });
+    await expect(
+      reportDryRunPlan({ fs: oversized, log: () => {}, error: () => {} }, [
+        { path: barrel, contents: 'new', managed: true },
+      ]),
+    ).rejects.toThrow('is 2097152 bytes, larger than the 1 MiB');
+    expect(fs.writes).toEqual([]);
+    await expect(
+      writeFiles(oversized, [{ path: barrel, contents: 'new', managed: true }], { root: '/p' }),
+    ).rejects.toThrow('is 2097152 bytes, larger than the 1 MiB');
+    expect(fs.writes).toEqual([]);
+    expect(fs.read(barrel)).toBe('old');
+  });
+
+  it('still classifies and rewrites an ordinary managed file under the cap', async () => {
+    const fs = createFakeFs({ [barrel]: 'old barrel', '/p/src/jobs/same.ts': 'same' });
+    const log: string[] = [];
+    const code = await reportDryRunPlan({ fs, log: (line) => log.push(line), error: () => {} }, [
+      { path: barrel, contents: 'new barrel', managed: true },
+      { path: '/p/src/jobs/same.ts', contents: 'same', managed: true },
+    ]);
+    expect(code).toBe(0);
+    expect(log).toEqual(['would update /p/src/jobs/index.ts', 'unchanged /p/src/jobs/same.ts']);
+    const outcomes = await writeFiles(
+      fs,
+      [
+        { path: barrel, contents: 'new barrel', managed: true },
+        { path: '/p/src/jobs/same.ts', contents: 'same', managed: true },
+      ],
+      { root: '/p' },
+    );
+    expect(outcomes).toEqual([
+      { path: barrel, outcome: 'updated' },
+      { path: '/p/src/jobs/same.ts', outcome: 'unchanged' },
+    ]);
+    expect(fs.read(barrel)).toBe('new barrel');
+    expect(fs.read('/p/src/jobs/same.ts')).toBe('same');
   });
 });

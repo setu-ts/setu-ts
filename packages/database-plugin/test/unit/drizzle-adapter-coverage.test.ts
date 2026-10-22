@@ -30,9 +30,8 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   beforeEach(() => {
     fakeDb = createFakeDrizzleInstance();
     adapter = new DrizzleAdapter({
-      drizzleInstance: createDrizzleDatabase(
-        fakeDb,
-        (database, work) => database.transaction(work),
+      drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+        database.transaction(work),
       ),
       drizzleTables: tables,
     });
@@ -146,18 +145,13 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await txDs.create({ id: 'tx1', name: 'InTx' });
       await txn.commit();
 
-      const mainDs = createDrizzleDataSource(
-        fakeDb,
-        'user',
-        tables,
-        {
-          eq: () => ({}),
-          and: () => ({}),
-          asc: () => ({}),
-          desc: () => ({}),
-          count: () => ({ op: 'count' }),
-        },
-      );
+      const mainDs = createDrizzleDataSource(fakeDb, 'user', tables, {
+        eq: () => ({}),
+        and: () => ({}),
+        asc: () => ({}),
+        desc: () => ({}),
+        count: () => ({ op: 'count' }),
+      });
       const found = await mainDs.findById('tx1');
       expect(found).not.toBeNull();
     });
@@ -215,9 +209,8 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
 
     it('validates drizzleTables entries', async () => {
       const badAdapter = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          fakeDb,
-          (database, work) => database.transaction(work),
+        drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+          database.transaction(work),
         ),
         drizzleTables: { bad: null },
       });
@@ -231,9 +224,8 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
       };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          bad,
-          (configured, work) => configured.transaction(work),
+        drizzleInstance: createDrizzleDatabase(bad, (configured, work) =>
+          configured.transaction(work),
         ),
         drizzleTables: tables,
       });
@@ -246,9 +238,8 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         transaction: <T>(work: (transaction: object) => Promise<T>): Promise<T> => work({}),
       };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          bad,
-          (configured, work) => configured.transaction(work),
+        drizzleInstance: createDrizzleDatabase(bad, (configured, work) =>
+          configured.transaction(work),
         ),
         drizzleTables: tables,
       });
@@ -272,9 +263,8 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
           await work(sqliteShaped),
       };
       const a = new DrizzleAdapter({
-        drizzleInstance: createDrizzleDatabase(
-          sqliteShaped,
-          (configured, work) => configured.transaction(work),
+        drizzleInstance: createDrizzleDatabase(sqliteShaped, (configured, work) =>
+          configured.transaction(work),
         ),
         drizzleTables: tables,
       });
@@ -333,9 +323,9 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
         desc: () => ({}),
         count: () => ({ op: 'count' }),
       };
-      expect(
-        () => createDrizzleDataSource(fakeDb, 'nonexistent', tables, ops),
-      ).toThrow('Unknown entity');
+      expect(() => createDrizzleDataSource(fakeDb, 'nonexistent', tables, ops)).toThrow(
+        'Unknown entity',
+      );
     });
   });
 
@@ -376,18 +366,19 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
   describe('connect with missing table registry', () => {
     it('rejects an omitted or empty drizzleTables registry before reporting ready', async () => {
       for (const drizzleTables of [undefined, {}] as const) {
-        const options = drizzleTables === undefined
-          ? {
-            drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
-              database.transaction(work)),
-          }
-          : {
-            drizzleInstance: createDrizzleDatabase(
-              fakeDb,
-              (database, work) => database.transaction(work),
-            ),
-            drizzleTables,
-          };
+        const options =
+          drizzleTables === undefined
+            ? {
+                drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+                  database.transaction(work),
+                ),
+              }
+            : {
+                drizzleInstance: createDrizzleDatabase(fakeDb, (database, work) =>
+                  database.transaction(work),
+                ),
+                drizzleTables,
+              };
         const a = new DrizzleAdapter(options);
         await expect(a.connect()).rejects.toThrow('requires options.drizzleTables');
         expect(a.isReady()).toBe(false);
@@ -447,7 +438,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ where: { nickname: 'x' } }))).rejects.toThrow(
-        "Drizzle table 'user' has no 'nickname' column",
+        'Drizzle table \'user\' has no "nickname" column',
       );
     });
 
@@ -455,7 +446,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ orderBy: { nickname: 'asc' } }))).rejects.toThrow(
-        "has no 'nickname' column",
+        'has no "nickname" column',
       );
     });
 
@@ -463,7 +454,7 @@ describe('DrizzleAdapter — CRUD data-source coverage', () => {
       await adapter.connect();
       const ds = createDrizzleDataSource(fakeDb, 'user', tables, ops);
       await expect(ds.findAll(normalizeQuery({ select: ['nickname'] }))).rejects.toThrow(
-        "has no 'nickname' column",
+        'has no "nickname" column',
       );
     });
 

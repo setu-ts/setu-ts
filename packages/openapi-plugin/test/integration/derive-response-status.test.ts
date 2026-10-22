@@ -90,7 +90,7 @@ async function specFrom(
   await app.start();
   try {
     const res = await app.fetch(new Request('http://localhost/openapi.json'));
-    return await res.json() as OpenApiDocument;
+    return (await res.json()) as OpenApiDocument;
   } finally {
     await app.stop();
   }
@@ -189,16 +189,15 @@ describe('derived response status through a real application', () => {
       plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'P', version: '1.0.0' })],
     });
     app.router.post('/things', {
-      handler: withResponseMetadata(
-        (ctx) => ctx.response.status(201).json({ id: 1 }),
-        { status: 201 },
-      ),
+      handler: withResponseMetadata((ctx) => ctx.response.status(201).json({ id: 1 }), {
+        status: 201,
+      }),
     });
     app.router.get('/things', { handler: (ctx) => ctx.response.json([]) });
     await app.start();
     try {
       const res = await app.fetch(new Request('http://localhost/openapi.json'));
-      const spec = await res.json() as OpenApiDocument;
+      const spec = (await res.json()) as OpenApiDocument;
 
       expect(spec.paths['/things']?.post?.responses).toEqual({
         '201': { description: 'Resource created' },

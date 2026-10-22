@@ -105,7 +105,10 @@ function normalize(secret: string | readonly string[]): readonly string[] {
  * can be rotated through the environment without a code change.
  */
 function normalizeEnv(value: string): readonly string[] {
-  return value.split(',').map((part) => part.trim()).filter((part) => part !== '');
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '');
 }
 
 /** Rejects an empty list or any member below the minimum length. */

@@ -37,9 +37,8 @@ async function page(acceptLanguage: string, name: string): Promise<string> {
       LocalizationPlugin({ supportedLocales: ['en', 'de', 'fr'], catalogues: CATALOGUES }),
     ],
   });
-  app.router.get(
-    '/',
-    (ctx) => renderView(ctx, Greeting, { greeting: localizerFor(ctx).t('greeting', { name }) }),
+  app.router.get('/', (ctx) =>
+    renderView(ctx, Greeting, { greeting: localizerFor(ctx).t('greeting', { name }) }),
   );
   const response = await app.fetch(
     new Request('http://localhost/', { headers: { 'accept-language': acceptLanguage } }),

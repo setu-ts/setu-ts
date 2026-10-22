@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Unit tests for PrismaAdapter using a fake Prisma client.
  *
@@ -92,11 +93,9 @@ describe('PrismaAdapter', () => {
     });
 
     it('rejects missing prismaClient with a generated-client requirement', async () => {
-      const noClientAdapter = new PrismaAdapter(
-        {
-          url: 'postgresql://localhost/test',
-        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
-      );
+      const noClientAdapter = new PrismaAdapter({
+        url: 'postgresql://localhost/test',
+      } as import('../../src/interfaces/index.ts').PrismaAdapterOptions);
       await expect(noClientAdapter.connect()).rejects.toThrow('requires options.prismaClient');
     });
 
@@ -136,8 +135,9 @@ describe('PrismaAdapter', () => {
       });
       await sqliteAdapter.connect();
 
-      await expect(sqliteAdapter.beginTransaction({ isolation: 'read-committed' }))
-        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+      await expect(
+        sqliteAdapter.beginTransaction({ isolation: 'read-committed' }),
+      ).rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
       const sqliteTransaction = await sqliteAdapter.beginTransaction({ isolation: 'serializable' });
       await sqliteTransaction.commit();
 
@@ -145,8 +145,9 @@ describe('PrismaAdapter', () => {
         prismaClient: createFakePrismaClient({ activeProvider: 'mongodb' }),
       });
       await mongoAdapter.connect();
-      await expect(mongoAdapter.beginTransaction({ isolation: 'serializable' }))
-        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+      await expect(
+        mongoAdapter.beginTransaction({ isolation: 'serializable' }),
+      ).rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
     });
 
     it('refuses requested isolation when the provider cannot be determined', async () => {
@@ -155,8 +156,9 @@ describe('PrismaAdapter', () => {
       });
       await unknownProviderAdapter.connect();
 
-      await expect(unknownProviderAdapter.beginTransaction({ isolation: 'serializable' }))
-        .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+      await expect(
+        unknownProviderAdapter.beginTransaction({ isolation: 'serializable' }),
+      ).rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
     });
 
     it('commit resolves', async () => {
@@ -269,10 +271,7 @@ describe('PrismaAdapter', () => {
 
       const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
       expect(call?.args.where).toEqual({
-        AND: [
-          { role: 'admin' },
-          { OR: [{ name: { contains: 'Ali' } }, { id: { in: ['u3'] } }] },
-        ],
+        AND: [{ role: 'admin' }, { OR: [{ name: { contains: 'Ali' } }, { id: { in: ['u3'] } }] }],
       });
     });
 
@@ -308,12 +307,15 @@ describe('PrismaAdapter', () => {
 
     it('counts through a portable expression conjoined with equality', async () => {
       fakeClient.recordedCalls.length = 0;
-      await ds.count({ role: 'admin' }, {
-        type: 'comparison',
-        field: 'name',
-        operator: 'contains',
-        value: 'Ali',
-      });
+      await ds.count(
+        { role: 'admin' },
+        {
+          type: 'comparison',
+          field: 'name',
+          operator: 'contains',
+          value: 'Ali',
+        },
+      );
 
       const call = fakeClient.recordedCalls.find((entry) => entry.action === 'count');
       expect(call?.args.where).toEqual({
@@ -335,10 +337,7 @@ describe('PrismaAdapter', () => {
 
       const call = fakeClient.recordedCalls.find((entry) => entry.action === 'findMany');
       expect(call?.args.where).toEqual({
-        OR: [
-          { deletedAt: null },
-          { deletedAt: { in: ['2026-01-01'] } },
-        ],
+        OR: [{ deletedAt: null }, { deletedAt: { in: ['2026-01-01'] } }],
       });
     });
 
@@ -493,7 +492,7 @@ describe('PrismaAdapter', () => {
           query({
             filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'x' },
           }),
-        )
+        ),
       ).toThrow(UnsupportedFilterOperatorError);
     });
 
@@ -522,7 +521,7 @@ describe('PrismaAdapter', () => {
           query({
             filter: { type: 'comparison', field: 'name', operator: 'contains', value: 'x' },
           }),
-        )
+        ),
       ).toThrow(/provider/);
     });
 
@@ -571,15 +570,11 @@ describe('PrismaAdapter', () => {
       await adapter.connect();
       const ds = adapter.createDataSourceForEntity('User');
       // Without compositeKeyName, composite keys are refused by name.
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('composite-key');
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('prisma');
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow('composite-key');
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow('prisma');
     });
 
     /**
@@ -594,14 +589,12 @@ describe('PrismaAdapter', () => {
     async function compoundNameSource(
       client: ReturnType<typeof createFakePrismaClient>,
     ): Promise<ReturnType<PrismaAdapter['createDataSourceForEntity']>> {
-      const compAdapter = new PrismaAdapter(
-        {
-          prismaClient: client,
-          entities: {
-            User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
-          },
-        } as import('../../src/interfaces/index.ts').PrismaAdapterOptions,
-      );
+      const compAdapter = new PrismaAdapter({
+        prismaClient: client,
+        entities: {
+          User: { compositeKeyName: 'tenantId_userId', keyColumns: ['tenantId', 'userId'] },
+        },
+      } as import('../../src/interfaces/index.ts').PrismaAdapterOptions);
       await compAdapter.connect();
       return compAdapter.createDataSourceForEntity('User');
     }
@@ -646,53 +639,45 @@ describe('PrismaAdapter', () => {
     it('refuses composite findById by name with UnsupportedQueryFeatureError', async () => {
       await adapter.connect();
       const ds = adapter.createDataSourceForEntity('User');
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('composite-key');
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('prisma');
-      await expect(
-        ds.findById({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('compositeKeyName');
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow('composite-key');
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow('prisma');
+      await expect(ds.findById({ tenantId: 't1', userId: 7 })).rejects.toThrow('compositeKeyName');
     });
 
     it('refuses composite update by name with UnsupportedQueryFeatureError', async () => {
       await adapter.connect();
       const ds = adapter.createDataSourceForEntity('User');
-      await expect(
-        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
-      await expect(
-        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
-      ).rejects.toThrow('composite-key');
-      await expect(
-        ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' }),
-      ).rejects.toThrow('prisma');
+      await expect(ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' })).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' })).rejects.toThrow(
+        'composite-key',
+      );
+      await expect(ds.update({ tenantId: 't1', userId: 7 }, { name: 'X' })).rejects.toThrow(
+        'prisma',
+      );
     });
 
     it('refuses composite delete by name with UnsupportedQueryFeatureError', async () => {
       await adapter.connect();
       const ds = adapter.createDataSourceForEntity('User');
-      await expect(
-        ds.delete({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
-      await expect(
-        ds.delete({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('composite-key');
-      await expect(
-        ds.delete({ tenantId: 't1', userId: 7 }),
-      ).rejects.toThrow('prisma');
+      await expect(ds.delete({ tenantId: 't1', userId: 7 })).rejects.toThrow(
+        UnsupportedQueryFeatureError,
+      );
+      await expect(ds.delete({ tenantId: 't1', userId: 7 })).rejects.toThrow('composite-key');
+      await expect(ds.delete({ tenantId: 't1', userId: 7 })).rejects.toThrow('prisma');
     });
   });
 
   describe('findPage — keyset cursor pagination (§3.8)', () => {
     /** Build the sort fingerprint in the format every minted cursor carries. */
     function fingerprintOf(orderBy: Record<string, string>): string {
-      return Object.entries(orderBy).map(([field, dir]) => `${field}:${dir}`).join(',');
+      return Object.entries(orderBy)
+        .map(([field, dir]) => `${field}:${dir}`)
+        .join(',');
     }
 
     it('pages against the recorded arguments: take is limit+1 and no skip is sent', async () => {
@@ -921,7 +906,7 @@ describe('PrismaAdapter', () => {
           select: [],
           cursor: 'not-base64!!!',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('rejects by name when the cursor fingerprint does not match the sort', async () => {
@@ -949,7 +934,7 @@ describe('PrismaAdapter', () => {
           select: [],
           cursor: first.nextCursor ?? '',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('refuses a non-zero offset beside a cursor at findPage (§3.10)', async () => {
@@ -1100,11 +1085,12 @@ describe('Prisma key handling — M79 review regressions', () => {
       let threwSynchronously = false;
       let rejected = false;
       try {
-        const call = method === 'update'
-          ? source.update({ tenantId: 't1' }, { role: 'x' })
-          : method === 'delete'
-          ? source.delete({ tenantId: 't1' })
-          : source.findById({ tenantId: 't1' });
+        const call =
+          method === 'update'
+            ? source.update({ tenantId: 't1' }, { role: 'x' })
+            : method === 'delete'
+              ? source.delete({ tenantId: 't1' })
+              : source.findById({ tenantId: 't1' });
         await call.catch(() => {
           rejected = true;
         });
@@ -1171,7 +1157,7 @@ it('refuses a nested JSON path on an unspecified connector by name', async () =>
   expect(() =>
     ds.findAll(
       query({ filter: { type: 'comparison', field: ['data', 'key'], operator: 'eq', value: 'x' } }),
-    )
+    ),
   ).toThrow(/unknown/);
   expect(client.recordedCalls.filter((call) => call.action === 'findMany')).toEqual([]);
   await adapter.disconnect();

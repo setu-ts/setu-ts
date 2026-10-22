@@ -77,8 +77,7 @@ const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] 
  * artifact only when it exports every symbol the barrel names — dropping it would
  * unwire the service instead of testing it.
  */
-const CAPABILITY_INJECTING_SERVICE =
-  `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
+const CAPABILITY_INJECTING_SERVICE = `import { Inject, Injectable } from '@setu-ts/decorator-plugin';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IConfig } from '@setu-ts/common';
 
@@ -206,8 +205,8 @@ await bus.publish({
 // reports it — the observer above proves the bus itself delivered.
 out['eventDelivered'] = seen.length === 1;
 out['eventSubscriptions'] =
-  (JSON.parse(health.body) as { checks?: Record<string, { data?: { handlers?: number } }> })
-    .checks?.events?.data?.handlers ?? 0;
+  (await services.get<import('@setu-ts/common').IHealthService>(CAPABILITIES.HEALTH).check())
+    .checks.events?.data?.handlers ?? 0;
 `;
 
 /**
@@ -250,7 +249,7 @@ export interface EvtPayload {
 export const seen: string[] = [];
 
 /** Decorated event subscriber, registered through the ingress barrel. */
-export class EvtIngress {
+export class EvtEventHandlerIngress {
   @OnEvent(EVT_EVENT)
   async handle(event: IDomainEvent<EvtPayload>): Promise<void> {
     seen.push('event:' + event.data.id);
@@ -278,7 +277,7 @@ export interface JobJobData {
 export const jobSeen: string[] = [];
 
 /** Decorated queue processor, registered through the ingress barrel. */
-export class JobIngress {
+export class JobJobIngress {
   @Processor(JOB_JOB)
   async process(job: IJob<JobJobData>): Promise<void> {
     jobSeen.push(job.data.id);
@@ -296,12 +295,12 @@ export class JobIngress {
  */
 const CLASS_MICROSERVICE_PROBE = `
 const cqrs = services.get<import('@setu-ts/common').ICqrsFacade>(CAPABILITIES.CQRS);
-const { CMD_COMMAND } = await import('./src/ingress/cmd.ingress.ts');
-const { QRY_QUERY } = await import('./src/ingress/qry.ingress.ts');
+const { CMD_COMMAND } = await import('./src/ingress/cmd-command-handler.ingress.ts');
+const { QRY_QUERY } = await import('./src/ingress/qry-query-handler.ingress.ts');
 out['commandResult'] = await cqrs.commandBus.execute({ type: CMD_COMMAND, data: { id: 'c-1' } });
 out['queryResult'] = await cqrs.queryBus.execute({ type: QRY_QUERY, data: { id: 'q-1' } });
 
-const { EVT_EVENT, seen } = await import('./src/ingress/evt.ingress.ts');
+const { EVT_EVENT, seen } = await import('./src/ingress/evt-event-handler.ingress.ts');
 const bus = services.get<import('@setu-ts/common').IEventBus>(CAPABILITIES.EVENTS);
 await bus.publish({
   type: EVT_EVENT,
@@ -321,7 +320,7 @@ out['eventDeliveredTo'] = seen;
 // worker loop (default poll interval 1000ms). An imperative queue.process()
 // would shadow the decorated processor (last-wins), so the file is rewritten
 // to record, as the event handler was.
-const { JOB_JOB, jobSeen } = await import('./src/ingress/job.ingress.ts');
+const { JOB_JOB, jobSeen } = await import('./src/ingress/job-job.ingress.ts');
 const queue = services.get<import('@setu-ts/common').IQueue>(CAPABILITIES.QUEUE);
 await queue.add(JOB_JOB, { id: 'j-1' });
 for (let i = 0; i < 100 && jobSeen.length === 0; i++) {
@@ -392,6 +391,71 @@ describe('generated artifacts are wired — end to end', () => {
     await nodeFs.rm(root, { recursive: true });
   });
 
+  it('the eight added default providers compile and boot', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'added'])).toBe(0);
+    const project = `${root}/added`;
+    for (const plugin of [
+      'worker-pool',
+      'secrets',
+      'storage',
+      'audit',
+      'mail',
+      'resilience',
+      'view',
+      'idempotency',
+    ]) {
+      expect(await run(['add', plugin, '--dir', project]), err.join('\n')).toBe(0);
+    }
+    await useWorkspacePackages(project);
+    const checked = await runProcess(denoBinary(), {
+      args: ['check', '--config', `${project}/deno.json`, `${project}/setu.config.ts`],
+    });
+    expect(checked.code, new TextDecoder().decode(checked.stderr)).toBe(0);
+    const result = await bootAndProbe(
+      project,
+      `import { createApp } from './setu.config.ts';
+const app = createApp();
+await app.start();
+console.log('__PROBE_RESULT__' + JSON.stringify({ booted: true }));
+await app.stop();
+`,
+    );
+    expect(result['booted']).toBe(true);
+  });
+
+  it('a generated functional job runs through the microservice queue seam', async () => {
+    expect(await run(['new', '--runtime', 'deno', 'jobs', '--template', 'microservice'])).toBe(0);
+    const project = `${root}/jobs`;
+    expect(await run(['g', 'job', 'widget', '--dir', project])).toBe(0);
+    const path = `${project}/src/jobs/widget.job.ts`;
+    const generated = await nodeFs.readFile(path, 'utf8');
+    await nodeFs.writeFile(
+      path,
+      generated.replace('await Promise.resolve(job.data.id);', 'seen.push(job.data.id);') +
+        '\nexport const seen: string[] = [];\n',
+    );
+    await useWorkspacePackages(project);
+    const result = await bootAndProbe(
+      project,
+      `import { CAPABILITIES } from '@setu-ts/common';
+import type { IQueue } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+import { WIDGET_JOB, seen } from './src/jobs/widget.job.ts';
+const app = createApp();
+await app.start();
+try {
+  await app.services.get<IQueue>(CAPABILITIES.QUEUE).add(WIDGET_JOB, { id: 'delivered' });
+  const runtime = app.services.get<import('@setu-ts/common').IRuntimeServices>(CAPABILITIES.RUNTIME);
+  for (let attempt = 0; attempt < 100 && seen.length === 0; attempt++) {
+    await new Promise<void>((resolve) => runtime.setTimeout(resolve, 20));
+  }
+  console.log('__PROBE_RESULT__' + JSON.stringify({ seen }));
+} finally { await app.stop(); }
+`,
+    );
+    expect(result['seen']).toEqual(['delivered']);
+  });
+
   // The no-template host. AI_GUIDELINES promise "no feature requires decorators", and
   // this is the project shape that has none — so it is the one where the promise is
   // either true or merely documented.
@@ -451,10 +515,19 @@ describe('generated artifacts are wired — end to end', () => {
         );
       }
 
+      if (!classBased) {
+        expect(
+          await nodeFs.readFile(`${project}/src/modules/widget-mod/widget-mod.routes.ts`, 'utf8'),
+        ).toContain('registerWidgetModRoutes');
+        expect(await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8')).toContain(
+          'registerWidgetModModule',
+        );
+      }
       await useWorkspacePackages(project);
-      const probe = PROBE
-        .replace('__CLASS__', classBased ? CLASS_PROBE : '')
-        .replace('__CQRS__', cqrs ? CQRS_PROBE : '');
+      const probe = PROBE.replace('__CLASS__', classBased ? CLASS_PROBE : '').replace(
+        '__CQRS__',
+        cqrs ? CQRS_PROBE : '',
+      );
       const result = await bootAndProbe(project, probe);
 
       // The generated route module was called with `app.router` from `createApp()`.
@@ -516,9 +589,7 @@ describe('generated artifacts are wired — end to end', () => {
         '--style',
         'class-based',
       ]),
-    ).toBe(
-      0,
-    );
+    ).toBe(0);
     const project = `${root}/shop`;
 
     const wanted = [...ARTIFACTS, ...CLASS_BASED_ONLY, ...CLASS_MICROSERVICE_INGRESS];
@@ -536,13 +607,14 @@ describe('generated artifacts are wired — end to end', () => {
     // The event and job handlers are rewritten to record their deliveries, as the
     // scratch probe did — a publish that reaches nothing would be indistinguishable
     // from one that does.
-    await nodeFs.writeFile(`${project}/src/ingress/evt.ingress.ts`, RECORDING_EVENT);
-    await nodeFs.writeFile(`${project}/src/ingress/job.ingress.ts`, RECORDING_JOB);
+    await nodeFs.writeFile(`${project}/src/ingress/evt-event-handler.ingress.ts`, RECORDING_EVENT);
+    await nodeFs.writeFile(`${project}/src/ingress/job-job.ingress.ts`, RECORDING_JOB);
 
     await useWorkspacePackages(project);
-    const probe = PROBE
-      .replace('__CLASS__', CLASS_PROBE)
-      .replace('__CQRS__', CLASS_MICROSERVICE_PROBE);
+    const probe = PROBE.replace('__CLASS__', CLASS_PROBE).replace(
+      '__CQRS__',
+      CLASS_MICROSERVICE_PROBE,
+    );
     const result = await bootAndProbe(project, probe);
 
     // The HTTP and DI results the class-based arm already asserts.
@@ -603,10 +675,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
       await nodeFs.mkdir(`${project}/src/middleware`, { recursive: true });
-      await nodeFs.writeFile(
-        `${project}/src/middleware/audit-log.middleware.ts`,
-        OLD_MIDDLEWARE,
-      );
+      await nodeFs.writeFile(`${project}/src/middleware/audit-log.middleware.ts`, OLD_MIDDLEWARE);
 
       err = [];
       expect(await run(['g', 'middleware', 'request-id', '--dir', project])).toBe(0);
@@ -643,8 +712,7 @@ export function auditLogMiddleware(): MiddlewareFunction {
     // The developer's edit, exactly as the generated factory's JSDoc documents it:
     // the factory takes \`services\`, resolves the event bus, and builds the class
     // with it — the dependency the argument-less \`handle()\` cannot reach.
-    const EDITED_FACTORY =
-      `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
+    const EDITED_FACTORY = `import type { CqrsCommand, ICommandHandler, IEventBus, IServiceRegistry } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 
 /** Type name the command bus routes on. */
@@ -719,10 +787,7 @@ await app.stop();
 
       // Generate the command handler, then the developer edits its factory.
       expect(await run(['g', 'command-handler', 'widget', '--dir', project])).toBe(0);
-      await nodeFs.writeFile(
-        `${project}/src/cqrs/widget.command-handler.ts`,
-        EDITED_FACTORY,
-      );
+      await nodeFs.writeFile(`${project}/src/cqrs/widget.command-handler.ts`, EDITED_FACTORY);
 
       // The regression X2-2 records: an UNRELATED generate. The barrel is managed and
       // regenerated, but the artifact — and the developer's factory edit — must survive.

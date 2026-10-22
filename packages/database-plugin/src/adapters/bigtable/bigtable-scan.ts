@@ -113,9 +113,10 @@ function assertSupportedOrderBy(
 ): void {
   const entries = Object.entries(orderBy);
   if (entries.length === 0) return;
-  const natural = entries.length === target.keyFields.length &&
-    entries.every(([field, direction], index) =>
-      field === target.keyFields[index] && direction === 'asc'
+  const natural =
+    entries.length === target.keyFields.length &&
+    entries.every(
+      ([field, direction], index) => field === target.keyFields[index] && direction === 'asc',
     );
   if (natural) return;
   throw new UnsupportedQueryFeatureError(
@@ -300,8 +301,8 @@ function deriveRowSet(target: BigtableTarget, comparisons: readonly FilterCompar
       if (rendered.every((segment): segment is string => segment !== null)) {
         const keys = [
           ...new Set(
-            rendered.map((segment) =>
-              target.prefix + [...segments, segment].join(target.separator)
+            rendered.map(
+              (segment) => target.prefix + [...segments, segment].join(target.separator),
             ),
           ),
         ];
@@ -310,15 +311,17 @@ function deriveRowSet(target: BigtableTarget, comparisons: readonly FilterCompar
     }
   }
 
-  const prefix = pinned === 0
-    ? target.prefix
-    : target.prefix + segments.join(target.separator) + target.separator;
+  const prefix =
+    pinned === 0
+      ? target.prefix
+      : target.prefix + segments.join(target.separator) + target.separator;
   if (prefix === '') return { empty: false };
   const end = prefixSuccessor(prefix);
   return {
-    range: end === undefined
-      ? { start: { value: prefix, inclusive: true } }
-      : { start: { value: prefix, inclusive: true }, end: { value: end, inclusive: false } },
+    range:
+      end === undefined
+        ? { start: { value: prefix, inclusive: true } }
+        : { start: { value: prefix, inclusive: true }, end: { value: end, inclusive: false } },
     empty: false,
   };
 }
@@ -342,9 +345,8 @@ function applyCursor(rowSet: RowSet, after: string): RowSet {
   // The cursor only ever moves the lower bound FORWARD: a cursor behind the
   // derived range would otherwise widen the scan back to rows the key
   // constraints already excluded.
-  const lower = range.start !== undefined && compareRowKeys(range.start.value, after) > 0
-    ? range.start
-    : start;
+  const lower =
+    range.start !== undefined && compareRowKeys(range.start.value, after) > 0 ? range.start : start;
   return {
     range: range.end === undefined ? { start: lower } : { start: lower, end: range.end },
     empty: false,
@@ -366,11 +368,7 @@ function applyCursor(rowSet: RowSet, after: string): RowSet {
  * @param value - The expected value
  * @returns The test chain, or `null` when the field is not a usable qualifier
  */
-function valueTest(
-  target: BigtableTarget,
-  field: string,
-  value: unknown,
-): BigtableFilter[] | null {
+function valueTest(target: BigtableTarget, field: string, value: unknown): BigtableFilter[] | null {
   const address = tryColumnAddress(target, field);
   if (address === null) return null;
   const encoded = encodeCellValue(value, target.valueEncoding);
@@ -473,9 +471,11 @@ function foldConditions(
 ): BigtableFilter | undefined {
   let pass: readonly BigtableFilter[] = innermost;
   for (let index = tests.length - 1; index >= 0; index -= 1) {
-    pass = [{
-      condition: { test: tests[index], pass: pass.length === 0 ? [{ all: true }] : pass },
-    }];
+    pass = [
+      {
+        condition: { test: tests[index], pass: pass.length === 0 ? [{ all: true }] : pass },
+      },
+    ];
   }
   if (pass.length === 0) return undefined;
   return pass.length === 1 ? pass[0] : { chain: pass };
@@ -518,28 +518,35 @@ export function planBigtableScan(
     if (test !== null) tests.push(test);
   }
 
-  const innermost: BigtableFilter[] = options.stripValues === true
-    ? [{ value: { strip: true } }]
-    : (() => {
-      const qualifiers = projectionQualifiers(target, query, options.projectConstraints === true);
-      if (qualifiers === null) return [];
-      // Interleaved with a one-cell arm, NOT emitted bare. A filter that
-      // removes every cell of a row removes the ROW — the service does not
-      // answer with an empty row (measured) — so a projection naming columns a
-      // given row happens not to carry would silently drop it. That is
-      // unreachable for a row this adapter wrote, whose key field is always a
-      // cell, and entirely reachable for a table written elsewhere. The extra
-      // arm costs at most one cell per row, which the caller's own `select`
-      // then discards.
-      return [{
-        interleave: [[{ column: qualifiers }], [{ row: { cellLimit: 1 } }]],
-      }];
-    })();
+  const innermost: BigtableFilter[] =
+    options.stripValues === true
+      ? [{ value: { strip: true } }]
+      : (() => {
+          const qualifiers = projectionQualifiers(
+            target,
+            query,
+            options.projectConstraints === true,
+          );
+          if (qualifiers === null) return [];
+          // Interleaved with a one-cell arm, NOT emitted bare. A filter that
+          // removes every cell of a row removes the ROW — the service does not
+          // answer with an empty row (measured) — so a projection naming columns a
+          // given row happens not to carry would silently drop it. That is
+          // unreachable for a row this adapter wrote, whose key field is always a
+          // cell, and entirely reachable for a table written elsewhere. The extra
+          // arm costs at most one cell per row, which the caller's own `select`
+          // then discards.
+          return [
+            {
+              interleave: [[{ column: qualifiers }], [{ row: { cellLimit: 1 } }]],
+            },
+          ];
+        })();
 
   // The limit is pushed down only when EVERY scanned row is a match, so a
   // short answer cannot be mistaken for a filtered-out row.
-  const serverLimited = query.limit > 0 && Object.keys(query.where).length === 0 &&
-    query.filter === undefined;
+  const serverLimited =
+    query.limit > 0 && Object.keys(query.where).length === 0 && query.filter === undefined;
 
   const filter = foldConditions(tests, innermost);
   const read: BigtableReadOptions = {

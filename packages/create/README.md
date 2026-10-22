@@ -24,7 +24,7 @@ The project targets Node by default; pass `--runtime deno`, `--runtime bun` or
 | ------------ | -------- |
 | `createArgs` | function |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Public API

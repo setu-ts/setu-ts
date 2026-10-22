@@ -19,8 +19,9 @@ describe('planRootNodeModulesDir', () => {
         managed: true,
       },
     });
-    expect(planRootNodeModulesDir('{"nodeModulesDir":"auto"}', 'web', 'node_modules/\n').kind)
-      .toBe('unchanged');
+    expect(planRootNodeModulesDir('{"nodeModulesDir":"auto"}', 'web', 'node_modules/\n').kind).toBe(
+      'unchanged',
+    );
   });
 
   it('plans the ignore append alongside the manifest merge', () => {

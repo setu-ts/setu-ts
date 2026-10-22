@@ -40,9 +40,9 @@ describe('findNameConflict', () => {
     it('refuses a route whose name a domain module already mounts', () => {
       // Modules arrive through a separate scan, because a module is a directory holding
       // two specific files rather than one suffixed file.
-      expect(
-        findNameConflict('route', 'widget', WITH_DECORATORS, {}, ['widget'])?.claimedBy,
-      ).toBe('the module of the same name');
+      expect(findNameConflict('route', 'widget', WITH_DECORATORS, {}, ['widget'])?.claimedBy).toBe(
+        'the module of the same name',
+      );
     });
 
     it('refuses a module whose name a controller already mounts', () => {
@@ -76,16 +76,23 @@ describe('findNameConflict', () => {
     it('allows a second artifact of the same schematic', () => {
       // A repeat `setu g route widget` is the ordinary overwrite refusal, which reports
       // the file rather than a name clash — reporting both would be misleading.
-      expect(findNameConflict('route', 'widget', WITH_DECORATORS, { route: ['widget'] }, []))
-        .toBeUndefined();
+      expect(
+        findNameConflict('route', 'widget', WITH_DECORATORS, { route: ['widget'] }, []),
+      ).toBeUndefined();
     });
 
     it('allows a family in no collision group', () => {
       expect(
-        findNameConflict('metric', 'widget', WITH_DECORATORS, {
-          controller: ['widget'],
-          service: ['widget'],
-        }, ['widget']),
+        findNameConflict(
+          'metric',
+          'widget',
+          WITH_DECORATORS,
+          {
+            controller: ['widget'],
+            service: ['widget'],
+          },
+          ['widget'],
+        ),
       ).toBeUndefined();
     });
 
@@ -98,9 +105,7 @@ describe('findNameConflict', () => {
     // The injection-token group is genuinely decorator-only: a functional service is a
     // plain function registered under no token, so there is nothing to collide over.
     it('allows a service/module token clash in a project without decorator-plugin', () => {
-      expect(
-        findNameConflict('service', 'widget', new Set(), {}, ['widget']),
-      ).toBeUndefined();
+      expect(findNameConflict('service', 'widget', new Set(), {}, ['widget'])).toBeUndefined();
     });
   });
 
@@ -119,9 +124,15 @@ describe('findNameConflict', () => {
     const FUNCTIONAL: ReadonlySet<string> = new Set(['runtime']);
 
     it('refuses a controller whose name a route already mounts', () => {
-      const conflict = findNameConflict('controller', 'widget', FUNCTIONAL, {
-        route: ['widget'],
-      }, []);
+      const conflict = findNameConflict(
+        'controller',
+        'widget',
+        FUNCTIONAL,
+        {
+          route: ['widget'],
+        },
+        [],
+      );
 
       expect(conflict?.claimedBy).toBe('the route of the same name');
       expect(conflict?.resource).toBe('the HTTP path /widget');
@@ -133,17 +144,16 @@ describe('findNameConflict', () => {
     it('refuses a route whose name a controller already mounts', () => {
       // Symmetric, so the order the developer generates in cannot leave a pair unguarded.
       expect(
-        findNameConflict('route', 'widget', FUNCTIONAL, { controller: ['widget'] }, [])
-          ?.claimedBy,
+        findNameConflict('route', 'widget', FUNCTIONAL, { controller: ['widget'] }, [])?.claimedBy,
       ).toBe('the controller of the same name');
     });
 
     it('refuses a controller whose name a domain module already mounts', () => {
       // `module` is ungated since M65, and its functional arm emits a route module into
       // the same merged directory.
-      expect(
-        findNameConflict('controller', 'widget', FUNCTIONAL, {}, ['widget'])?.claimedBy,
-      ).toBe('the module of the same name');
+      expect(findNameConflict('controller', 'widget', FUNCTIONAL, {}, ['widget'])?.claimedBy).toBe(
+        'the module of the same name',
+      );
     });
 
     it('still allows a distinct name', () => {
@@ -163,6 +173,12 @@ describe('findNameConflict', () => {
   });
 
   describe('what it must NOT refuse (continued)', () => {
+    it('reports the actual HTTP path for a route/controller collision inside a feature', () => {
+      expect(
+        findNameConflict('controller', 'summary', new Set(), { route: ['summary'] }, [], 'invoices')
+          ?.resource,
+      ).toBe('the HTTP path /invoices/summary');
+    });
     it('allows a family whose scan reported nothing', () => {
       expect(findNameConflict('route', 'widget', WITH_DECORATORS, {}, [])).toBeUndefined();
     });

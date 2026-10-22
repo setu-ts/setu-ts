@@ -266,9 +266,10 @@ describe('CqrsPlugin', () => {
   describe('Health Indicator', () => {
     it('should register health indicator with correct name', async () => {
       const plugin = CqrsPlugin();
-      const healthRegistrations: Array<
-        { name: string; fn: () => Promise<{ status: string; data?: unknown }> }
-      > = [];
+      const healthRegistrations: Array<{
+        name: string;
+        fn: () => Promise<{ status: string; data?: unknown }>;
+      }> = [];
 
       const ctx: IPluginContext = {
         services: {

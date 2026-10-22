@@ -56,11 +56,7 @@ class RecordingBroker implements IMessageBroker {
     return Promise.resolve({ unsubscribe: () => Promise.resolve() });
   }
 
-  request<TReq, TRes>(
-    _topic: string,
-    _message: TReq,
-    _options?: RequestOptions,
-  ): Promise<TRes> {
+  request<TReq, TRes>(_topic: string, _message: TReq, _options?: RequestOptions): Promise<TRes> {
     return Promise.reject(new Error('request is not exercised by this suite'));
   }
 
@@ -104,12 +100,18 @@ describe('publishIntegrationEvent', () => {
   it('carries the causal metadata it is given onto the envelope', async () => {
     const broker = new RecordingBroker();
 
-    await publishIntegrationEvent(runtime, broker, definition, { orderId: 'o-1' }, {
-      correlationId: 'root-1',
-      causationId: 'e-0',
-      aggregateId: 'order-1',
-      aggregateVersion: 3,
-    });
+    await publishIntegrationEvent(
+      runtime,
+      broker,
+      definition,
+      { orderId: 'o-1' },
+      {
+        correlationId: 'root-1',
+        causationId: 'e-0',
+        aggregateId: 'order-1',
+        aggregateVersion: 3,
+      },
+    );
 
     const message = broker.published[0].message as Record<string, unknown>;
     expect(message['correlationId']).toBe('root-1');
@@ -121,9 +123,15 @@ describe('publishIntegrationEvent', () => {
   it('omits absent metadata fields rather than writing undefined', async () => {
     const broker = new RecordingBroker();
 
-    await publishIntegrationEvent(runtime, broker, definition, { orderId: 'o-1' }, {
-      correlationId: 'root-1',
-    });
+    await publishIntegrationEvent(
+      runtime,
+      broker,
+      definition,
+      { orderId: 'o-1' },
+      {
+        correlationId: 'root-1',
+      },
+    );
 
     const message = broker.published[0].message as Record<string, unknown>;
     expect(message['correlationId']).toBe('root-1');
@@ -198,9 +206,15 @@ describe('publishIntegrationEvent', () => {
     });
 
     const fromSelector = new RecordingBroker();
-    await publishIntegrationEvent(runtime, fromSelector, withSelector, { orderId: 'o-1' }, {
-      aggregateId: 'agg-9',
-    });
+    await publishIntegrationEvent(
+      runtime,
+      fromSelector,
+      withSelector,
+      { orderId: 'o-1' },
+      {
+        aggregateId: 'agg-9',
+      },
+    );
     expect(fromSelector.published[0].options?.orderingKey).toBe('agg-9');
 
     const callerWins = new RecordingBroker();
@@ -242,8 +256,9 @@ describe('publishIntegrationEvent', () => {
     });
     const broker = new RecordingBroker();
 
-    await expect(publishIntegrationEvent(runtime, broker, throwing, { orderId: 'o-1' })).rejects
-      .toThrow('selector boom');
+    await expect(
+      publishIntegrationEvent(runtime, broker, throwing, { orderId: 'o-1' }),
+    ).rejects.toThrow('selector boom');
     expect(broker.published).toHaveLength(0);
   });
 
@@ -278,8 +293,9 @@ describe('publishIntegrationEvent', () => {
     });
     const broker = new RecordingBroker();
 
-    await expect(publishIntegrationEvent(runtime, broker, invalid, { orderId: 'o-1' })).rejects
-      .toThrow(RangeError);
+    await expect(
+      publishIntegrationEvent(runtime, broker, invalid, { orderId: 'o-1' }),
+    ).rejects.toThrow(RangeError);
     expect(broker.published).toHaveLength(0);
   });
 

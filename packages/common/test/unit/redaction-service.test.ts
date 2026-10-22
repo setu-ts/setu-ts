@@ -59,10 +59,7 @@ describe('createRedactionService', () => {
   });
 
   it('matches pathological globstar patterns without changing their result', () => {
-    const matcher = createFieldMatcher(
-      { '**.data.**.data.**.data.**.missing': 'secret' },
-      true,
-    );
+    const matcher = createFieldMatcher({ '**.data.**.data.**.data.**.missing': 'secret' }, true);
 
     expect(matcher(Array.from({ length: 32 }, () => 'data').join('.'))).toBeUndefined();
   });
@@ -150,9 +147,9 @@ describe('createRedactionService', () => {
       defaultRedactor: () => 'default-level',
     });
 
-    expect(
-      service.redactRecord({ user: { email: 'jane@example.com', name: 'Jane' } }),
-    ).toEqual({ user: { email: '************.com', name: 'class-level' } });
+    expect(service.redactRecord({ user: { email: 'jane@example.com', name: 'Jane' } })).toEqual({
+      user: { email: '************.com', name: 'class-level' },
+    });
   });
 
   it('selects redactors by the documented precedence (field, class, default, erase)', () => {

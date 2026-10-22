@@ -35,13 +35,7 @@ async function signForPort(
   return await signFields(
     subtle,
     key,
-    requestMacFields(
-      TEST_SESSION_ID,
-      instance,
-      String(sequence),
-      `127.0.0.1:${port}`,
-      target,
-    ),
+    requestMacFields(TEST_SESSION_ID, instance, String(sequence), `127.0.0.1:${port}`, target),
   );
 }
 
@@ -50,9 +44,10 @@ async function signForPort(
  *
  * @returns The running app, its port, and the plugin instance
  */
-async function startApp(
-  options?: { readonly ttlMs?: number; readonly maxSessionLifetimeMs?: number },
-): Promise<{
+async function startApp(options?: {
+  readonly ttlMs?: number;
+  readonly maxSessionLifetimeMs?: number;
+}): Promise<{
   app: ReturnType<typeof createApplication>;
   port: number;
   plugin: { revoke(): Promise<void> };
@@ -82,10 +77,12 @@ function signedRaw(
   mac: string,
   instance?: string,
 ): string {
-  return `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+  return (
+    `GET ${target} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
     `X-Setu-Session: ${TEST_SESSION_ID}\r\nX-Setu-Sequence: ${sequence}\r\n` +
     (instance === undefined ? '' : `X-Setu-Instance: ${instance}\r\n`) +
-    `X-Setu-Mac: ${mac}\r\n\r\n`;
+    `X-Setu-Mac: ${mac}\r\n\r\n`
+  );
 }
 
 /**
@@ -128,26 +125,17 @@ describe('Security — hostile raw requests over a real socket', () => {
       // No credentials at all.
       [`GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`, 400],
       // A browser context — any Origin, including the string null.
-      [
-        `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: null\r\n\r\n`,
-        400,
-      ],
+      [`GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: null\r\n\r\n`, 400],
       [
         `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nOrigin: http://evil.example\r\n\r\n`,
         400,
       ],
       // DNS-rebinding / wrong authority.
-      [
-        `GET /v1/status HTTP/1.1\r\nHost: attacker.example:${port}\r\n\r\n`,
-        400,
-      ],
+      [`GET /v1/status HTTP/1.1\r\nHost: attacker.example:${port}\r\n\r\n`, 400],
       // Write methods.
       [`POST /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`, 400],
       // A request declaring a body.
-      [
-        `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 5\r\n\r\nhello`,
-        400,
-      ],
+      [`GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Length: 5\r\n\r\nhello`, 400],
       // Chunked framing.
       [
         `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nTransfer-Encoding: chunked\r\n\r\n`,
@@ -192,7 +180,8 @@ describe('Security — hostile raw requests over a real socket', () => {
     let sequence = 1;
     for (const header of forwarding) {
       const mac = await signForPort(crypto.subtle, key, port, '/v1/status', sequence);
-      const raw = `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
+      const raw =
+        `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n` +
         `X-Setu-Session: ${TEST_SESSION_ID}\r\nX-Setu-Sequence: ${sequence}\r\n` +
         `X-Setu-Instance: \r\nX-Setu-Mac: ${mac}\r\n${header}\r\n\r\n`;
       const response = await rawRequest(port, raw);
@@ -231,10 +220,7 @@ describe('Security — hostile raw requests over a real socket', () => {
     const replay = await rawRequest(port, request(TEST_SESSION_ID, mac));
     expect(replay.status).toEqual(401);
     // A different session id: refused before crypto.
-    const wrongSession = await rawRequest(
-      port,
-      request('b'.repeat(32), mac),
-    );
+    const wrongSession = await rawRequest(port, request('b'.repeat(32), mac));
     expect(wrongSession.status).toEqual(401);
     await app.stop();
   });
@@ -263,14 +249,7 @@ describe('Security — hostile raw requests over a real socket', () => {
       false,
       ['sign'],
     );
-    const wrongKeyMac = await signForPort(
-      crypto.subtle,
-      wrongKey,
-      port,
-      '/v1/renew',
-      3,
-      instance,
-    );
+    const wrongKeyMac = await signForPort(crypto.subtle, wrongKey, port, '/v1/renew', 3, instance);
     expect(
       (await rawRequest(port, signedRaw(port, '/v1/renew', 3, wrongKeyMac, instance))).status,
     ).toEqual(401);
@@ -285,10 +264,8 @@ describe('Security — hostile raw requests over a real socket', () => {
       wrongInstance,
     );
     expect(
-      (await rawRequest(
-        port,
-        signedRaw(port, '/v1/renew', 3, wrongInstanceMac, wrongInstance),
-      )).status,
+      (await rawRequest(port, signedRaw(port, '/v1/renew', 3, wrongInstanceMac, wrongInstance)))
+        .status,
     ).toEqual(401);
 
     const finalMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 4, instance);
@@ -297,8 +274,9 @@ describe('Security — hostile raw requests over a real socket', () => {
     ).toEqual(200);
 
     await plugin.revoke();
-    await expect(rawRequest(port, signedRaw(port, '/v1/renew', 4, finalMac, instance))).rejects
-      .toThrow();
+    await expect(
+      rawRequest(port, signedRaw(port, '/v1/renew', 4, finalMac, instance)),
+    ).rejects.toThrow();
     await app.stop();
   });
 
@@ -313,15 +291,17 @@ describe('Security — hostile raw requests over a real socket', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
     const renewMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 2, instance);
     // Positive control: a renewal inside the cap is served.
-    expect((await rawRequest(port, signedRaw(port, '/v1/renew', 2, renewMac, instance))).status)
-      .toEqual(200);
+    expect(
+      (await rawRequest(port, signedRaw(port, '/v1/renew', 2, renewMac, instance))).status,
+    ).toEqual(200);
 
     // Past the 400 ms cap the expiry timer has dropped the key and closed
     // the port: the next connection is refused, not answered.
     await new Promise((resolve) => setTimeout(resolve, 400));
     const lateMac = await signForPort(crypto.subtle, key, port, '/v1/renew', 3, instance);
-    await expect(rawRequest(port, signedRaw(port, '/v1/renew', 3, lateMac, instance))).rejects
-      .toThrow();
+    await expect(
+      rawRequest(port, signedRaw(port, '/v1/renew', 3, lateMac, instance)),
+    ).rejects.toThrow();
     await app.stop();
   });
 

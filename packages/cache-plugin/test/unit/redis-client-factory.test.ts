@@ -76,8 +76,9 @@ describe('resolveCommandTimeoutMs (M101a V8-5)', () => {
   for (const [label, value] of refused) {
     it(`refuses ${label} at construction, without echoing it`, () => {
       expect(() => new RedisStore('p:', { commandTimeoutMs: value as number })).toThrow(RangeError);
-      expect(() => CachePlugin({ store: 'redis', options: { commandTimeoutMs: value as number } }))
-        .toThrow(RangeError);
+      expect(() =>
+        CachePlugin({ store: 'redis', options: { commandTimeoutMs: value as number } }),
+      ).toThrow(RangeError);
       let message = '';
       try {
         resolveCommandTimeoutMs(value as number);
@@ -90,8 +91,9 @@ describe('resolveCommandTimeoutMs (M101a V8-5)', () => {
   }
 
   it('ignores the option for a non-redis backend', () => {
-    expect(() => CachePlugin({ store: 'memory', options: { commandTimeoutMs: Number.NaN } })).not
-      .toThrow();
+    expect(() =>
+      CachePlugin({ store: 'memory', options: { commandTimeoutMs: Number.NaN } }),
+    ).not.toThrow();
   });
 
   it('never applies the bound to an injected client', async () => {

@@ -109,8 +109,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     // `NaN` (what `Number(env.X)` yields for an unset variable) would otherwise
     // reach ioredis and silently disable the bound this option exists for.
     if (
-      typeof commandTimeoutMs !== 'number' || !Number.isFinite(commandTimeoutMs) ||
-      commandTimeoutMs < 0 || commandTimeoutMs > MAX_REDIS_COMMAND_TIMEOUT_MS
+      typeof commandTimeoutMs !== 'number' ||
+      !Number.isFinite(commandTimeoutMs) ||
+      commandTimeoutMs < 0 ||
+      commandTimeoutMs > MAX_REDIS_COMMAND_TIMEOUT_MS
     ) {
       // Fixed and value-free: the refused value is never echoed (it may be a
       // mis-assigned secret) and never converted, so no caller code runs here.
@@ -145,7 +147,7 @@ export class RedisBackplane implements IRealtimeBackplane {
    * SUBSCRIBE rejected with
    */
   async connect(): Promise<void> {
-    const attempt = this.#opening ??= this.#open();
+    const attempt = (this.#opening ??= this.#open());
     try {
       await attempt;
     } catch (error) {
@@ -182,17 +184,14 @@ export class RedisBackplane implements IRealtimeBackplane {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
     } else {
-      const module = this.#options.module ?? await loadRedisModule();
+      const module = this.#options.module ?? (await loadRedisModule());
       const url = this.#options.url as string;
       owned = true;
-      const clientOptions = this.#commandTimeoutMs === 0
-        ? {}
-        : { commandTimeout: this.#commandTimeoutMs };
+      const clientOptions =
+        this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
       const reporter = this.#options.connectionErrorReporter;
       publisher = module.create(url, clientOptions);
-      if (reporter !== undefined) {
-        attachConnectionErrorReporter(publisher, reporter);
-      }
+      attachConnectionErrorReporter(publisher, reporter);
       try {
         subscriber = module.create(url, clientOptions);
       } catch (error) {
@@ -203,9 +202,7 @@ export class RedisBackplane implements IRealtimeBackplane {
       }
       // One reporter for both: the pair fails together, so an outage's
       // identical errors from the two connections de-duplicate into one warn.
-      if (reporter !== undefined) {
-        attachConnectionErrorReporter(subscriber, reporter);
-      }
+      attachConnectionErrorReporter(subscriber, reporter);
     }
 
     const listener = (channel: string, message: string): void => {

@@ -1,13 +1,12 @@
 # Setu-TS — Session Instructions
 
-Plugin-first enterprise backend framework, published to **JSR** under `@setu-ts` and consumable from
-Node/Bun via JSR npm compatibility. Package tests run on Node 24 with pnpm and Vitest. Deno 2
-workspaces retain repository scripts, root tests, and the named native-adapter test lane until
-M111e.
+Plugin-first enterprise backend framework, published to **npm** under `@setu-ts`, with Node, Deno
+and Bun supported as runtimes. Package and root tooling tests run on Node 24 with pnpm and Vitest.
+Repository scripts run on Node; the named native-adapter lane retains Deno proofs.
 
 The React Router SSR plugin (M44) uses Vite on the Node/npm toolchain for application frontend
 builds. Vite is an app-level, build-time `devDependency`; it is never imported by a plugin and never
-appears in any JSR-published package's dependency graph (see AI_GUIDELINES §12.2).
+appears in any published package's dependency graph (see AI_GUIDELINES §12.2).
 
 ## Starting a new milestone — READ THESE FIRST (mandatory)
 
@@ -66,7 +65,7 @@ Only after that, begin. And: any change to a package's `src/index.ts` exports re
 ## Writing a milestone plan (`plans/*.md`) — checks the plan must survive
 
 **Start from the template and lint it.** Copy `plans/TEMPLATE.md` to
-`plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run `deno task check:plan`. It
+`plans/milestone-<N>-<desc>.md`, fill every `<FILL: …>`, and run `pnpm run check:plan`. It
 mechanically enforces the structure — required sections present (including the "Contracts verified
 from SOURCE" and "Exported surface — every symbol names its consumer" tables), no unfilled
 placeholders, no undecided-alternative markers left in a design decision, and only the one canonical
@@ -94,11 +93,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   additionally needs one guarded REAL-import test (logger-plugin pino / M9 discovery precedent),
   with the branching around the import unit-tested via an injection seam.
 - **Check external-package facts against reality, not memory.** The exact npm specifier of the
-  RUNTIME package (`npm:@prisma/client` — `npm:prisma` is the CLI and the plan had it wrong), and
-  whether the library's API actually fits the contract being implemented (Prisma has only
-  callback-style `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging
-  that is a design decision, not an implementation detail). A plan naming a lazy import must state
-  exactly what it loads, when it can succeed, and the error when it cannot.
+  RUNTIME package (`@prisma/client` — `prisma` is the CLI and the plan had it wrong), and whether
+  the library's API actually fits the contract being implemented (Prisma has only callback-style
+  `$transaction` with a ~5s default timeout — no imperative begin/commit; bridging that is a design
+  decision, not an implementation detail). A plan naming a lazy import must state exactly what it
+  loads, when it can succeed, and the error when it cannot.
 - **Invented tokens and names must pass the committed grammar and the kernel's constraints.** Run
   every new capability token against `createCapabilityToken` in `packages/common/src/tokens.ts`
   (lowercase kebab-case, dot namespacing — colons are ILLEGAL), and for any plugin registrable more
@@ -245,8 +244,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 - **Milestone 19** (`packages/metrics-plugin` — Prometheus metrics collection: MetricsPlugin
   registering `IMetricsService` under `CAPABILITIES.METRICS`; counter/gauge/histogram/summary
   instruments over a shared `MetricBase`; zero-dependency Prometheus text 0.0.4 renderer +
-  `GET
-  /metrics`; four built-in HTTP collectors wired as `MetricsMiddleware` at priority 20
+  `GET /metrics`; four built-in HTTP collectors wired as `MetricsMiddleware` at priority 20
   (outermost, so it observes all ingress and the final status; corrected the ARCHITECTURE §10
   table); `try/finally` record path so a thrown request never leaks the active-requests gauge;
   `IMetricsService` + `ICounter`/`IGauge`/`IHistogram`/`ISummary` + `MetricOptions` added to
@@ -284,8 +282,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   simultaneously — OTLP/HTTP receiver on `:4318`, `memory_limiter` + `batch`, and
   `datadog`/`otlphttp`(New Relic)/`azuremonitor` exporters on one `traces` pipeline; credentials via
   `${env:...}`; requires the `otelcol-contrib` distribution; validated with
-  `otelcol-contrib
-  validate`. Plus an operator guide (`docs/telemetry-collector-fanout.md`). M39
+  `otelcol-contrib validate`. Plus an operator guide (`docs/telemetry-collector-fanout.md`). M39
   owns compose/k8s and references this config; M38 links the guide. No `common` change, no
   capability token) — complete (PR #51)
 - **Milestone 25** (`packages/secrets-plugin` — SecretsPlugin registering an `ISecretManager` under
@@ -418,8 +415,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   posts to `/v1/projects/{projectId}/messages:send` with an OAuth2 bearer token minted from a
   service account: an internal `ServiceAccountTokenSource` signs an RS256 JWT assertion with
   `runtime.subtle` (same route as M16's `JwtService`;
-  `importKey('pkcs8', …,
-  { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' })`), exchanges it at
+  `importKey('pkcs8', …, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' })`), exchanges it at
   `oauth2.googleapis.com/token` over the existing `INotificationHttp` seam, and caches both the
   imported key and the token until 60 s before expiry — so a send costs one request in the steady
   state. Zero npm dependencies, Workers-portable. `FcmProviderOptions.serverKey` is **replaced, not
@@ -546,8 +542,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   now calls the task; (2) it also lacked `--allow-net`, needed by the already-published check, which
   `--dry-run` SKIPS, so a green dry run proves nothing about a real run; (3) no package was linked
   to the GitHub repo, which tokenless OIDC requires and token publishing does not — hence `alpha.1`
-  never hit it. `deno task
-  release:link-repos` links all 36 through the API. Do NOT read
+  never hit it. `deno task release:link-repos` links all 36 through the API. Do NOT read
   `githubRepository: null` on already-published packages as evidence the link is optional; those
   were published with a token. **Six packages went live with no visible README** (`cli`,
   `feature-flags-plugin`, `multi-tenancy-plugin`, `openapi-plugin`, `queue-plugin`,
@@ -806,8 +801,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   into a user's project, so the CLI owns the file layout and the starter owns the plugin composition
   the generated `setu.config.ts` calls. The deliverable that distinguishes this from
   `create-react-router` is the REMOVAL: a conventional RR app's
-  `lib/{session,csrf,sse,kv,
-  service-logger}.server.ts` and its `config/services.server.ts`
+  `lib/{session,csrf,sse,kv, service-logger}.server.ts` and its `config/services.server.ts`
   module-level caches are the session/SSE/secrets/logger capabilities plus the kernel registry, and
   a test pins that none of them is emitted. Session reaches loaders through an **app-declared**
   `RouterContextKey` — `getSession` takes an `IRequestContext` a loader never sees, while
@@ -1040,10 +1034,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   guard is known to discriminate. The app's basic type-check and GraphQL smoke check are run by
   `deno task check:apps`; the npm-client interop suite remains manual because CI does not install
   its extra clients) — complete (PR #117)
+
 - **Milestone 52** (`packages/cloudflare-plugin` — the platform the framework could _serve_ on but
   not _reach_:
-  `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\|
-  cloudflare:workers" packages/*/src`
+  `grep -rn "waitUntil\|KVNamespace\|D1Database\|R2Bucket\|DurableObject\| cloudflare:workers" packages/*/src`
   returned NOTHING, and `cf-runtime.ts` defaulted its env source to `{}` while
   `createRuntimeServices` called the platform factory with no arguments — so `runtime.env` was
   **empty** on Workers and `ConfigPlugin` plus the secrets `EnvProvider` read nothing there.
@@ -1392,8 +1386,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   measurement, and the answer was neither of the two options the ROADMAP framed.** Both assumed the
   real Vite build needs a Node toolchain — so the choice was "commit a `ServerBuild` fixture" or
   "add Node/npm to CI". Deno's own npm support runs the identical build:
-  `deno install
-  --allow-scripts` took **4 s** and the build **0.6 s** against a project scaffolded
+  `deno install --allow-scripts` took **4 s** and the build **0.6 s** against a project scaffolded
   by the CLI and repointed at the workspace, after which the app served SSR HTML and completed a
   CSRF-protected login. So the smoke performs the **real** build, CI gains no `setup-node` step, no
   fixture is committed, and `full-stack` is deliberately **not** in `ALLOW_SKIP` — with
@@ -1504,8 +1497,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   three were restored with branch tests appended instead. Then the headline deliverable turned out
   to be **dead on two of three runtimes**: Node's default `mods.fs` is `node:fs/promises`, which
   exports NO `createReadStream` (probed, not assumed), so every call threw
-  `Failed to create read
-  stream`; and Bun declared `createReadStream` in `BunModules.fs` but
+  `Failed to create read stream`; and Bun declared `createReadStream` in `BunModules.fs` but
   `buildBunHost` neither imported nor returned it, so every call threw
   `not supported on this Bun version`. Both survived because every unit test INJECTED a host
   supplying what the default host lacked — the M37b ioredis and M53 `zrangebyscore` root cause
@@ -1526,8 +1518,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the test that claimed to cover it ignored its argument entirely; `handler/resolve-path.ts` was
   dead — no `src` importer, absent from the barrel — and encoded the OPPOSITE of two shipped
   decisions (a bare `startsWith` prefix strip matching `/assetstest.txt`, and a fallback with no
-  `Accept:
-  text/html` guard), so wiring it up later would have reintroduced both; and
+  `Accept: text/html` guard), so wiring it up later would have reintroduced both; and
   `IStaticFiles.serve` was `(ctx: unknown) => Promise<unknown>` with the implementation casting,
   leaving the capability's only method untyped. **Interrupted downloads also never resumed**: the
   ETag was always weak, and `If-Range` MUST be ignored for a weak validator (RFC 9110 §13.1.5), so a
@@ -1671,6 +1662,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `g controller`'s output shape changing is a **behaviour change to already-published generated
   output** — CHANGELOG carries the migration note, and it belongs in the next alpha's release notes)
   — complete (PR #139)
+
 - **Milestone 60** (`packages/cli` + `cqrs-plugin` + `events-plugin` + `metrics-plugin` — generated
   code that is wired. `setu generate` emitted fourteen artifacts and exactly ONE reached a
   registration site (the M58 module barrel); the other thirteen compiled and did nothing. Eleven now
@@ -1748,6 +1740,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   regenerated barrel). Fixing it dropped `seam-spec.ts` to 95.7% branch on an unreachable `?? ''`
   fallback, removed rather than tested since the arm is dead. All changed `src` files at **100%**
   branch/function/line) — complete (PR #141)
+
 - **Milestone 61** (`packages/cli` — decorators and DI as real choices in the generator.
   AI_GUIDELINES' "5 Optional Rules" state that decorators are optional, DI is optional, and that
   **"everything has a programmatic API — no feature requires decorators or reflection"**; the
@@ -1840,6 +1833,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   fail. Four other negative controls were each observed failing and reverted: removing the
   `withDiPlugin` dedupe, emptying the minimal host's seams, dropping the refusal's alternative line,
   and suppressing the full-stack `di` emission) — complete (PR #142)
+
 - **Milestone 38** (`docs/*` + `scripts/*` + `test/*` — documentation hub and tooling) — the
   documentation milestone: nine curated guides under [`docs/`](docs/) (getting-started,
   plugin-architecture, plugins, programmatic-api, decorators, custom-plugins, migration-nestjs,
@@ -1852,23 +1846,23 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   while keeping ten clean packages permanently clean, a Markdown documentation gate
   ([`scripts/check-docs.ts`](scripts/check-docs.ts)) with structural package-catalog validation,
   generated-API-link and cross-file-anchor validation, and a dedicated per-file script-coverage gate
-  ([`scripts/script-coverage.ts`](scripts/script-coverage.ts)) enforcing ≥90% branch/function/line
-  on both documentation scripts. The snippet gate mechanically type-checks committed fixtures
-  representing all nine guides plus the architecture registry example, with a negative control
-  proving the compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6
-  service-registry examples (CAPABILITIES constants, no nonexistent `lazy` option,
-  `registerFactory()` for lazy construction) and §16 testing claim (Deno full suite; Node/Bun
-  published-artifact compat). No package source, manifest export, capability token, or plugin option
-  changed. Developed on a branch cut before M56–M61, so `origin/main` was merged in before the final
-  verification pass and the guides were re-checked against the merged tree — RFC 9457 (M56), derived
-  OpenAPI security (M57), and the `module` schematic plus the M60/M61 CLI wiring all postdate the
-  guides' first draft. Verification then found the guides still taught the DEPRECATED `'rfc7807'`
-  alias in three files while `PUBLIC_API.md` called it deprecated (every gate passed — the alias
-  still exists, so every fence compiled), a phantom `## HttpClient` section documenting a
-  `@setu-ts/http-client-plugin` that exists nowhere in source, and two drift gates that could not
-  detect their own drift because they matched a bare substring rather than a link. Also: the
-  `PUBLIC_API.md` section anchors now name their package, which is a **breaking change for external
-  deep links** (`#storage` → `#storage-setu-tsstorage-plugin`) — complete (PR #143)
+  (`scripts/script-coverage.ts`, retired in M111e2) enforcing ≥90% branch/function/line on both
+  documentation scripts. The snippet gate mechanically type-checks committed fixtures representing
+  all nine guides plus the architecture registry example, with a negative control proving the
+  compiler rejects the banned `app.get()` family. Corrected ARCHITECTURE §6 service-registry
+  examples (CAPABILITIES constants, no nonexistent `lazy` option, `registerFactory()` for lazy
+  construction) and §16 testing claim (Deno full suite; Node/Bun published-artifact compat). No
+  package source, manifest export, capability token, or plugin option changed. Developed on a branch
+  cut before M56–M61, so `origin/main` was merged in before the final verification pass and the
+  guides were re-checked against the merged tree — RFC 9457 (M56), derived OpenAPI security (M57),
+  and the `module` schematic plus the M60/M61 CLI wiring all postdate the guides' first draft.
+  Verification then found the guides still taught the DEPRECATED `'rfc7807'` alias in three files
+  while `PUBLIC_API.md` called it deprecated (every gate passed — the alias still exists, so every
+  fence compiled), a phantom `## HttpClient` section documenting a `@setu-ts/http-client-plugin`
+  that exists nowhere in source, and two drift gates that could not detect their own drift because
+  they matched a bare substring rather than a link. Also: the `PUBLIC_API.md` section anchors now
+  name their package, which is a **breaking change for external deep links** (`#storage` →
+  `#storage-setu-tsstorage-plugin`) — complete (PR #143)
 - **Milestone 62** (`packages/cli` — monorepo support: more than one deployable service in a
   repository. The CLI had no workspace concept at all, so a second service meant
   `setu new other --dir .` — a fully independent project with its own manifest, its own lockfile,
@@ -1887,8 +1881,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   member's `imports` MERGE with the root's rather than replacing them, a member's `compilerOptions`
   are honored (so a decorated class in a member compiles), a member needs no `name`/`version`, and
   `nodeModulesDir` is **refused** in a member
-  (`"nodeModulesDir" field can only be specified in the
-  workspace root deno.json file`) — which is
+  (`"nodeModulesDir" field can only be specified in the workspace root deno.json file`) — which is
   why `--template full-stack` is refused as a member with a reason rather than out of caution.
   Framework pins live in each MEMBER's `deno.json` and NOT at the root, because `detectPlugins`
   reads one directory's manifest and never walks up: root-only pins would make every gated schematic
@@ -1932,6 +1925,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the registry `Map` lookup IS the unknown-name test, and keeping both left a permanently
   unreachable branch. No barrel change, so no public export moved. All new `src` files at **100%**
   branch/function/line) — complete (PR #144)
+
 - **Milestone 59** (`packages/cloudflare-plugin` + `packages/cli` — Workers-native messaging, the
   last edge capability gap. `cloudflare-plugin` already served `QUEUE`, `CACHE`, `STORAGE`,
   `DATABASE` and `REALTIME_BACKPLANE`; `CAPABILITIES.MESSAGING` was the one token it could not,
@@ -2007,8 +2001,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   near-copies, so the ROADMAP's "Dockerfiles for each example" was corrected), a
   `Dockerfile.compiled` `deno compile` → distroless variant, a Compose stack, a Helm chart as the
   single authored source with **rendered manifests committed** beside it, and
-  `deno task
-  check:deploy`. **No `packages/` source, no capability token, no export changed.**
+  `deno task check:deploy`. **No `packages/` source, no capability token, no export changed.**
 
   **Three ROADMAP claims did not survive measurement.** `scratch` is **impossible** — `ldd` on the
   compiled binary shows it dynamically linked against glibc, so `distroless/cc-debian12` is the
@@ -2035,8 +2028,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 
   **Four more defects were caught only by a real cluster, each after all four gates were green.**
   (1) `runAsNonRoot: true` **refuses a non-numeric image user** — `USER deno` gives
-  `container has runAsNonRoot and image has non-numeric user (deno), cannot verify user is
-  non-root`,
+  `container has runAsNonRoot and image has non-numeric user (deno), cannot verify user is non-root`,
   and Docker resolves the name happily, so it fails ONLY under Kubernetes; both images now declare
   numeric UIDs (1000, 65532). (2) An `emptyDir` at `/deno-dir` **masks the build-time module
   cache**, so every pod re-resolves from jsr.io at startup and dies with
@@ -2070,6 +2062,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   spawn; its decidable logic is exported and unit-tested instead. **Not verified against a managed
   cloud cluster** — CI holds no cloud credentials; the proof is a real local kind cluster) —
   complete (PR #149)
+
 - **Milestone 63** (`packages/cli` — scaffold repairs) — complete (PR #153). Four defects found by
   building a three-service monorepo on the PUBLISHED `0.1.0-alpha.7` packages against real
   PostgreSQL, every one of which passed all four gates, both publish gates, and the coverage bar.
@@ -2203,6 +2196,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the fix narrows the diagnostic rather than disabling it. An empty-list arm added with it dropped
   the file to 50% branch and was DELETED rather than tested: this barrel is never scaffolded, only
   rendered by the schematic, which always passes the name being generated) — complete (PR #155).
+
 - **Milestone 66** (`packages/database-plugin` — executable Prisma v7 and Drizzle adapters) —
   complete (PR #156). `PrismaAdapter` no longer constructs a client: Prisma v7 generates into an
   application-selected output path a JSR package cannot locate, and the removed lazy import passed
@@ -2235,6 +2229,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   gained the three genuinely uncovered branches found while checking it — missing-column rejection
   for `where`/`orderBy`/`select`, and the multi-condition `and()` combination, which no test had
   ever exercised — taking `drizzle-adapter.ts` from 94.0 to 96.4 branch.
+
 - **Milestone 67** (`packages/cli` + `packages/starters/rest-starter` + `packages/config-plugin` —
   scaffold defaults and workspace ergonomics: the five alpha.7 findings that each cost a hand-edit.
   **D5** a `full-stack` workspace member got a generated `src/discovery/services.ts` that nothing
@@ -2287,6 +2282,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it, so a Workers member cannot exist and the branch would have been unreachable — it is a comment
   saying so instead. Six negative controls were each observed failing and reverted) — complete (PR
   #157)
+
 - **Milestone 68** (contract gaps: `common` + `kernel` + `auth-plugin` + `database-plugin` +
   `cloudflare-plugin` — the four alpha.7 smoke findings that touch committed contracts). **S5:** a
   portable `FilterExpression` tree in `common` (`eq`/`contains`/`gt`/`gte`/`lt`/`lte`/`in`, composed
@@ -2347,6 +2343,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   during implementation and the repair is worth keeping in mind: it had been passing because `rbac`
   was missing, NOT because `jwt.secret` was, so making `rbac` optional is what exposed that the
   control had never tested its own claim — complete (PR #158)
+
 - **Milestone 69** (`packages/database-plugin` — typed Drizzle query seam).
   `createDrizzleDatabase(drizzleDb, transactionBridge)` now creates an opaque package-owned
   typed/runtime configuration and distinct `getDrizzleDatabase(service, configured)` /
@@ -2387,6 +2384,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   that case through the public two-argument constructor. All three now have tests naming the failure
   they guard, taking `drizzle-query.ts`, `drizzle-database.ts` and `unit-of-work.ts` to 100%
   branch/function/line — complete (PR #162)
+
 - **Milestone 70h** (`packages/cli` + `packages/common` + `packages/runtime` — the CLI scaffold
   batch of the alpha.8 smoke programme: **23 register rows** closed on one branch, because they
   share one shape — **a generated file sits outside every check path the generated project actually
@@ -2423,10 +2421,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   with `onSignal` — a `--runtime node` project resolves `@setu-ts/runtime` from the published npm
   mirror and npm has no import-map equivalent for `useWorkspacePackages` to repoint. The control
   fails **6 unit steps** instead (byte-identity across targets, and
-  `reaches no runtime-specific
-  API` for each of deno/node/bun), which is the honest site, since
-  what B1 changes is the emitted source rather than the Deno run of it. And the plan asserted the
-  boot gate "asserts membership too" — it did not: removing a template from `BOOTABLE` made its
+  `reaches no runtime-specific API` for each of deno/node/bun), which is the honest site, since what
+  B1 changes is the emitted source rather than the Deno run of it. And the plan asserted the boot
+  gate "asserts membership too" — it did not: removing a template from `BOOTABLE` made its
   build-and-boot assertions VANISH rather than fail, a one-word edit leaving the whole gate green
   while covering strictly less. That assertion now exists (the M37c `ALLOW_SKIP` precedent).
   Dropping `full-stack` happens to trip `deno check` (the `as const` narrows an equality into an
@@ -2502,6 +2499,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 
   All changed `src` files ≥90% branch/function/line, every file added during review at 100%) —
   complete (PR #166)
+
 - **Milestone 70a** (`common` + `kernel` + `runtime` + `grpc-plugin` + `websocket-plugin` — the
   pipeline bypass, first of the M70 alpha-8 defect closeout. `setUpgradeRouter`/`setRpcHandler` were
   consulted **inside the HTTP adapter, before** the request was mapped and entered the kernel
@@ -2592,6 +2590,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   catch-all still serves every other path; a root-mounted gRPC service leaves ordinary routes alone
   while still serving its own procedures; and the drain answers `503` on both protocols. Six
   negative controls were each observed failing and reverted) — complete (PR #167)
+
 - **Milestone 70b** (`cache-plugin` + `multi-tenancy-plugin` + `session-plugin` +
   `database-plugin` + `exceptions` + `feature-flags-plugin` + `common` — tenant isolation and data
   exposure). **Security.** Five rows in one branch, all with the same shape: a capability that was
@@ -2697,6 +2696,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   labels. Writing the coverage test for the reporter surfaced a fixture bug the type checker caught:
   `{ ...base }` on a class copies fields and DROPS every prototype method. All `src` files at 100%
   branch/function/line except `task-pool.ts` (98.8/100/100)) — complete (PR #170)
+
 - **Milestone 45c** (`packages/worker-pool-plugin` — service-wide worker pool sizing) — complete (PR
   #433). `maxWorkers` bounds the sum of lazy module pools, with reserved asynchronous hand-over,
   idle eviction and priority for modules without a slot. Both construction paths validate the bound;
@@ -2758,14 +2758,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   exported factory and the seam barrels reference it with no `new`; a pre-existing generated
   artifact that exports no factory is skipped and reported (add that export, or delete the file and
   regenerate — renaming a class to the factory's name emits a class constructor where the option
-  wants an instance or a function, so it does NOT compile). `DiPlugin({ autoRegister:
-  true })` in
+  wants an instance or a function, so it does NOT compile). `DiPlugin({ autoRegister: true })` in
   the `class-based` template (E3), the `ServiceScope` docs corrected (E5), and `apps/cqrs` converted
   to the new arm. E3 is proven by a BOOTED probe rather than by the emitted string: the class-based
   `seam-probe` host injects `CAPABILITIES.CONFIG` into a generated `@Injectable` and resolves it
   through the container, and reverting to a bare `DiPlugin()` fails it with
-  `No provider registered
-  for DI token 'config'` — the register's own E3 signature. **Breaking for
+  `No provider registered for DI token 'config'` — the register's own E3 signature. **Breaking for
   already-published generated output** — the generated barrel no longer constructs with `new X()`,
   so a pre-existing artifact stops registering until the two-line factory export is added. All `src`
   files ≥90% branch/function/line) — complete (PR #173)
@@ -2774,9 +2772,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   a fake, and because every test injects, the `?? <the real thing>` fallback was the one line no
   suite ran. **X11-1:** the SDK's default transport stored the bare global `fetch` and called it
   with the client as receiver, so a browser's first request died with
-  `TypeError:
-  Illegal invocation`; the default now resolves `globalThis.fetch` at call time with
-  the global as receiver (an injected `fetch` still wins). **X7-3:** the grpc-plugin's
+  `TypeError: Illegal invocation`; the default now resolves `globalThis.fetch` at call time with the
+  global as receiver (an injected `fetch` still wins). **X7-3:** the grpc-plugin's
   Connect/Protobuf-ES specifiers reached `import()` through a constant map that JSR's static
   npm-compat rewrite cannot reach, so the published artifact shipped `npm:` verbatim and could not
   load on Node or Bun — the default importer now calls four literal `import('npm:…')` expressions,
@@ -2872,6 +2869,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   run fails with `RequestTimeoutError`, contradicting the doc's "repeated runs never share state"),
   so the container is restarted between runs. Both suites now pass under the project's own
   permission model — 7 steps, verified in this worktree.) — complete (PR #175)
+
 - **Milestone 70j** (`packages/database-plugin` — database adapter correctness) — complete (PR
   #177). Six register rows with one shape: an adapter reporting success while doing something other
   than what its contract says. **X12-2** `IDatabaseService.query()` could not work at all on the
@@ -2934,6 +2932,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   using `.catch()` — the M52b/M52c class — so the check now returns its error and the adapter
   rejects with it. The X12-2 negative control reproduced the register's message verbatim across five
   tests, and the `count`-filter control failed both new steps.
+
 - **Milestone 70k** (`storage-plugin` + `queue-plugin` + `worker-pool-plugin` + `common` +
   `runtime` + `cli` + `cloudflare-plugin` — storage, queue and worker operability). Eight X8 rows
   with one shape: the capability does the work and then cannot tell an operator what it did. **The
@@ -3043,6 +3042,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   deliverable was unwritten — now four cases beside M55's `readStream` precedent. The storage
   barrel's type exports were pinned at compile time for the same reason M56 gives: dropping one left
   every runtime assertion in that file green — complete (PR #178)
+
 - **Milestone 70i** (`packages/grpc-plugin` + `packages/graphql-plugin` +
   `packages/websocket-plugin` — gRPC and GraphQL viability. The ROADMAP deferred an explicit
   **repair-versus-withdraw** decision for `grpc-plugin` to this milestone; the answer is **REPAIR,
@@ -3243,6 +3243,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it is not an X11 row and is left unowned rather than quietly widened into scope.
 
   Developed in an isolated worktree, in parallel with M70l) — complete (PR #181)
+
 - **Milestone 70l** (`cli` + `scheduler-plugin` + `messaging-plugin` + `metrics-plugin` +
   `cloudflare-plugin` — deployment and operations: nine register rows that share one shape, **the
   framework is correct on one machine and stops being correct once containerised, scaled, or
@@ -3332,6 +3333,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   can gate, the emitted text; the register's kind measurements are not re-run here. Developed on a
   branch cut before M70m, so `origin/main` was merged in and the gates re-run against the merged
   tree before hand-off) — complete (PR #182)
+
 - **Milestone 70n** (`decorator-plugin` + `validation-plugin` + `common` + `kernel` + `testing` +
   `static-plugin` + `auth-plugin` + `session-plugin` + `audit-plugin` + `react-router-plugin` +
   `realtime-backplane-plugin` + `sse-plugin` + `starters` — decorators, validation, and the alpha.8
@@ -3389,6 +3391,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `report-2024-01-15.pdf` would be cached for a year — the doc was sharpened rather than the regex,
   since base64url hashes legitimately contain `-`), and a "ten brokers" count that is seven) —
   complete (PR #183)
+
 - **Milestone 71** (`kernel` + `common` + state-key consumers — kernel and contract boundary
   hardening): the application registry seals after `runBootstrap()` while child registries remain
   request-mutable; startup overrides log at `info` and successful unregisters at `warn`; request
@@ -3487,6 +3490,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   Doc corrections shipped alongside: the stale claims in `common` and `ARCHITECTURE.md` that an
   upgrade bypasses the middleware pipeline (pre-M70a behaviour), and a `PUBLIC_API.md` line still
   describing gRPC as using the deprecated `IHttpAdapter.setRpcHandler?` seam) — complete (PR #197)
+
 - **Milestone 74** (`packages/common` + `packages/websocket-plugin` + `packages/sse-plugin` —
   realtime registry reads and the SSE contract. Two committed contracts could only be read by
   writing to them, and a third advertised a guarantee its own type did not hold. `room(name)` and
@@ -3544,6 +3548,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `publish` with one, because the backplane publisher builds its frame with `JSON.stringify(msg)`
   outside any `try`. Developed in an isolated worktree off `main`, in parallel with M73, which it
   does not depend on) — complete (PR #196)
+
 - **Milestone 75** (`packages/common` + `packages/telemetry-plugin` + `packages/messaging-plugin` —
   broker trace propagation. **The ROADMAP's premise did not survive source-checking, and correcting
   it was half the milestone.** It said `MessageMetadata.headers` "is declared and no broker
@@ -3615,6 +3620,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `TelemetryPlugin` from its JSDoc so the block documented the new function instead (the M70m
   stacked-docblock defect), caught by the M38 ratchet — which the previous commit had left failing
   at 769 against a 752 baseline) — complete (PR #201)
+
 - **Milestone 76** (`decorator-plugin` + `openapi-plugin` + `starters/rest-starter` + `cli` +
   `apps/di-decorators` + docs — TC39 standard decorators, retiring `experimentalDecorators`. Every
   shipped decorator was the LEGACY form, and Deno deprecates the option the whole surface rests on,
@@ -3682,8 +3688,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   **All eight declaration sites lose the option**, not the four the ROADMAP named: the three package
   manifests, `apps/di-decorators`, both CLI template stamps, the generated Node `tsconfig.json`, and
   `test/fixtures/snippets/deno.json` — the last found only because it gated every guide fence.
-  `deno
-  task lint` now runs the whole repo with no deprecation warning. Nothing is added back: a
+  `deno task lint` now runs the whole repo with no deprecation warning. Nothing is added back: a
   template needing no compiler option declares none, because an option nothing reads is noise. (An
   earlier revision justified this by "declaring ANY compiler option replaces Deno's default set (M63
   D3)" — that mechanism is false and was corrected in M90h; see the M63 entry. The conclusion stands
@@ -3699,6 +3704,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   surfaced. Also fixed two pre-existing defects found in passing: a garbled doc paragraph at the
   tsconfig emitter, and a **duplicate `### Changed` heading in the CHANGELOG's `Unreleased`
   section** — the exact defect the alpha.9 release caught once already) — complete (PR #200)
+
 - **Milestone 77** (`scripts` + `test` + documentation rules — executable prose assertions):
   `check:docs` now runs a rendered-claim gate over Markdown, including `.roo`. An `assert:js` marker
   precedes a two-column `Expression` / JSON `Value` table; each document is evaluated in a separate
@@ -3799,6 +3805,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   than silent: a coverage fix for `dynamo-mapping.ts`, which sat at **84.2% line** — below the
   absolute bar, new since alpha.10, so 0.2.0 would have been its first publish (the blank-identifier
   refusal was untested; now 100/100/100) — and the `release:verify` CI step above.
+
 - **Milestone 78** — native MongoDB backend for `database-plugin`, including the `'mongodb'`
   configuration arm, native query translation, ObjectId mapping, injected-client seam, and real
   driver CI coverage — complete (PR #208).
@@ -3916,8 +3923,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   supplied as a query option is ignored there — tested because it is the obvious explanation. The
   claim is scoped to the tested backend rather than asserted of Cosmos generally; a page without a
   stable sort is not a page in any case. M79's keyset predicate compiles natively
-  (`(rank > @p0) OR (rank = @p0
-  AND id > @p1)`) and returns exactly the rows after the cursor, so
+  (`(rank > @p0) OR (rank = @p0 AND id > @p1)`) and returns exactly the rows after the cursor, so
   the cursor member gets its third consumer through a different mechanism — and the six adapters
   cannot drift about what "the next page" means. And the package is `database-plugin` alone, not "a
   new package if the probe says the NoSQL API needs one".
@@ -3960,6 +3966,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   guarded suite is local-only — the emulator image is 2.5 GB, the same reason the Pub/Sub and
   Service Bus suites are — with the `docker run` and the health line in the package README) —
   complete (PR #220)
+
 - **Milestone 82** (`packages/database-plugin` — Cloud Bigtable backend, the wide-column half of the
   gap M78 named and only half closed. **Bigtable inverts the DynamoDB problem**, which is why it is
   a milestone rather than a footnote to M80: its row key is a single lexicographically-sorted
@@ -4035,6 +4042,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (the `CosmosTransaction` precedent; it reaches an application only as `IAdapterTransaction`) and
   `BigtableSdkModule` — because `deno doc --lint` showed both leaking a private type, and neither
   had a public consumer) — complete (PR #222)
+
 - **Milestone 87** (`packages/common` + `packages/kernel` + `packages/runtime` — request-path
   performance. The framework retained **~34%** of the throughput of the router it is built on:
   41,437 rps on `/json` against bare Hono's ~124k, benchmarked with bombardier against NestJS on
@@ -4098,6 +4106,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `sealRequestIdentity` at **0.545 µs/req**, whose fix moves accessors to a prototype and so changes
   `Object.keys(request)` against M71's shipped behaviour — a semantics decision, not a perf one) —
   complete (PR #227)
+
 - **Milestone 88** (`packages/common` + `packages/kernel` + `packages/runtime` — response-path
   performance): terminal JSON/text/HTML/byte/redirect responses defer the framework `Headers` object
   until an observer needs the documented live `snapshot.headers` view. The shared mapper consumes a
@@ -4154,8 +4163,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   traffic starve `maxConnections`, verified to fail. The `websocket-plugin` README's primary usage
   section still taught the `IPlugin` wrapper as "the only form that works inside a CLI-scaffolded
   project", which this milestone's own e2e exists to falsify, and carried the
-  `conn.data.get(...) as
-  string` cast the milestone had corrected in the `common` JSDoc.
+  `conn.data.get(...) as string` cast the milestone had corrected in the `common` JSDoc.
   `WebSocketUpgradeGuard` and `WebSocketGuardDecision` were absent from `PUBLIC_API.md`'s WebSocket
   export row, and two assertions were vacuous. Verified beyond the gates by a driver application
   composed only from plugin options and bound to a real socket: a raw RFC 6455 handshake reads `401`
@@ -4163,6 +4171,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   messaging short-circuit is observed preventing its handler, and all four envelope shapes are read
   off the wire — `websocket` carrying neither `attempt` nor `headers`, `messaging` carrying
   `headers: {}` and no `attempt`, `queue`/`scheduler` carrying `attempt: 1`) — complete (PR #228)
+
 - **Release `v0.3.0`** — on `release/v0.3.0`, published 2026-09-03 (PR #229, tag at the merge commit
   `cfcc7077`; CI published it, one green `Publish to JSR` job — the sixth first-try success in a
   row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
@@ -4244,12 +4253,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   counter-argument itself, that introducing release tooling immediately before a prepared release is
   risk traded against a manual bump that is auditable and already covered by `release:verify` — so
   if built, build it early in a cycle, never at cut time.
+
 - **Milestone 89b** (`common` + `exceptions` + `database-plugin` + `auth-plugin` — caller errors
   that read as server faults. Two findings with one shape: a condition the CALLER caused, carrying
   an accurate and actionable message, delivered to that caller as a masked
   `500 Internal Server Error` with the message reachable only in the log. Both now answer
-  **`501 Not
-  Implemented`** (maintainer decision, 2026-09-03), which is what forces one status
+  **`501 Not Implemented`** (maintainer decision, 2026-09-03), which is what forces one status
   decision rather than two that drift.
 
   **The mechanism is a symbol-keyed brand in `common`** — `HTTP_STATUS_HINT`, `HttpStatusHint`,
@@ -4271,9 +4280,8 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   construction is extracted to one `buildErrorFromInit` both call, pinned by a test asserting
   byte-identical bodies across all three formats. (3) §3.4 claimed all three refusals "already
   carry" structured fields; `UnsupportedRawQueryError` carried none, so it gains a
-  `readonly
-  adapter` and a breaking `(adapter, message)` constructor — without it the one refusal
-  a developer meets while switching backends could not name which backend refused. (4) The response
+  `readonly adapter` and a breaking `(adapter, message)` constructor — without it the one refusal a
+  developer meets while switching backends could not name which backend refused. (4) The response
   status was written from the NORMALIZED error, which masking preserves but a hint does not, so a
   hinted response would have carried a `501` body under a `500` status line; `logError` reported the
   same value, leaving an operator correlating a log line with a response hunting a `500` no client
@@ -4298,12 +4306,12 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 
   **Both findings were reproduced through a real kernel application before anything was changed**,
   and the M68 test that covered X18-2 was **asserting the defect**
-  (`expect(response.statusCode)
-  .toBe(500)`) — it is now the regression guard, extended to all
-  four authorization guards, because the defect was a property of the shared capability resolution
-  rather than of one guard. Two unit fixtures were contract-violating doubles whose fake registry
-  omitted `has`, which `IServiceRegistry` requires; they reported the absent-capability path for a
-  registry that had the service) — complete (PR #236)
+  (`expect(response.statusCode) .toBe(500)`) — it is now the regression guard, extended to all four
+  authorization guards, because the defect was a property of the shared capability resolution rather
+  than of one guard. Two unit fixtures were contract-violating doubles whose fake registry omitted
+  `has`, which `IServiceRegistry` requires; they reported the absent-capability path for a registry
+  that had the service) — complete (PR #236)
+
 - **Milestone 89c** (`messaging-plugin` + `common` + `multi-tenancy-plugin` — the `0.3.0` ingress
   surface, closing the last two smoke findings). **X16-1:** `InMemoryBroker.publish` now resolves on
   dispatch HAND-OFF, not handler completion — the measured deadlock (a plugin awaiting a
@@ -4386,6 +4394,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   marker — the v0.3.0 lesson, where a marker shielded live guidance — they now read
   "pre-derivation", which cannot go stale. Every marker in the tree was re-audited; all four shield
   genuinely historical text, with the live sentences above them.
+
 - **Milestone 90a** (`common` + `auth-plugin` + `http-security-plugin` + `runtime` +
   `graphql-plugin` + `logger-plugin` + `metrics-plugin` + `kernel` — abuse control that actually
   protects. Six X32 findings with one shape: each limiter is correct on the path its tests exercise
@@ -4425,8 +4434,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   BEFORE retaining a chunk, and CANCELS the source on refusal rather than abandoning it (an
   abandoned stream keeps a connection draining — the M70k descriptor-leak class). Absent, the
   uncapped branch keeps `arrayBuffer()` verbatim, so an application setting no limit runs the
-  previous code exactly. `411
-  Length Required` was rejected: it refuses every legitimate streaming
+  previous code exactly. `411 Length Required` was rejected: it refuses every legitimate streaming
   upload as the price. **Two knobs for one concern, and the docs say which is load-bearing** — the
   mapping runs before any plugin and `mapWebRequestToFrameworkRequest` receives a `Request` and
   nothing else, so no channel exists; a reader who sets only `maxBodySize` keeps today's behaviour
@@ -4490,6 +4498,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `defaultRateLimitKey`'s JSDoc (C3) still recommended bare `trustProxy` as remedy #1 — the
   configuration X32-3 shows is attacker-controlled. The review also corrected an inaccuracy in its
   OWN fix, whose comment overstated what the `try` covered) — complete (PR #247)
+
 - **Milestone 90b** (`packages/secrets-plugin` + `packages/cache-plugin` +
   `packages/realtime-backplane-plugin` + `packages/messaging-plugin` + `packages/health-plugin` +
   `packages/queue-plugin` + `packages/database-plugin` — health that tells the truth, bounded) —
@@ -4699,6 +4708,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   **refuted by measurement**: 496 on `main` and 496 on the branch, because the ratchet lints every
   package entrypoint TOGETHER, where `SpanContext` is public from `common`'s barrel; linting the
   telemetry barrel alone reports three diagnostics that the gate never sees) — complete (PR #260)
+
 - **Release `v0.5.0`** — on `release/v0.5.0`, published 2026-09-09 (PR #265, tag at the merge commit
   `c9f41a93`; CI published it, one green `Publish to JSR` job — the eighth first-try success in a
   row). **47 packages**, list unchanged since alpha.8, so no first-time publisher and neither
@@ -4749,8 +4759,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   release PR, which the weekly Dependency drift workflow exists to review separately. Rewritten in
   place they already agree, so `deno check` accepts all 15 byte-identically. And the src grep must
   match the SPECIFIER, never the bare version: `@since` tags legitimately name every release ever
-  shipped (1001 at `0.1.0`, 734 at `0.2.0`), so `grep -rn '<old-version>'
-  packages/*/src` was
+  shipped (1001 at `0.1.0`, 734 at `0.2.0`), so `grep -rn '<old-version>' packages/*/src` was
   already unfollowable at v0.3.0 and trains a reader to skim past the one line that matters. **Never
   bump an `@since` tag.**
 
@@ -4859,8 +4868,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   resolves the engine once at `register()` through a new `optionalDependencies` edge, and a rendered
   route with no provider fails at `register()` naming both remedies — a deliberate divergence from
   the `@ValidateBody` warn arm, with the reason in the JSDoc. The free
-  `renderView(ctx, component,
-  props)` funnels both entry points through the same engine and
+  `renderView(ctx, component, props)` funnels both entry points through the same engine and
   `IResponse.html` write, pinned byte-identical under a non-default configuration. Rendered output
   is a buffered primitive string; the two awaits plus `String(...)` in `normalizeRendered` are each
   load-bearing (the type-checker hides all three defects), and a pending `<Suspense>` boundary is
@@ -5006,6 +5014,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   than fixed: §6's test table named `test/unit/csrf-token-field.test.ts` and the cases landed in
   `test/unit/csrf/csrf.test.ts` — equivalent coverage, a better home beside the other CSRF tests,
   and moving them would be churn against an archived plan) — complete (PR #322)
+
 - **Milestone 95d** (`docs/` + `packages/common` + `packages/view-plugin` + `scripts/` —
   documentation that survives contact: four findings where the code is correct and a reader
   following the documentation still ends up wrong; the only letter carrying gate work. **Row 1
@@ -5128,10 +5137,9 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `'Response'`.
 
   **The option had to be threaded through THREE places** —
-  `OpenApiPluginOptions extends
-  OpenApiGeneratorOptions`, so it type-checks on the plugin whether
-  or not it reaches the generator, which is the M70i dropped-argument class; the negative control
-  that drops the threading fails exactly the `deriveResponseStatus: false` case while every other
+  `OpenApiPluginOptions extends OpenApiGeneratorOptions`, so it type-checks on the plugin whether or
+  not it reaches the generator, which is the M70i dropped-argument class; the negative control that
+  drops the threading fails exactly the `deriveResponseStatus: false` case while every other
   assertion stays green. Six negative controls in all were each observed failing and reverted, and
   the second records an honest nuance: swapping `Symbol.for` for `Symbol()` fails ONLY the
   cross-copy unit test, because both plugins share one `common` instance in-process — which is
@@ -5155,6 +5163,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   it edits sit where `main` left them — `metadata-store.ts` 99.0, `openapi-generator.ts` 98.4 and
   `decorator-plugin.ts` 98.4/100/99.0, whose only uncovered lines are the pre-existing
   `replayCustomDecorators` skip and the `autoDiscover` error loop) — complete (PR #328)
+
 - **Milestone 99c** (`packages/sdk` + `packages/kernel` — two first-party components that must
   agree, and do not) — complete (PR #353). **The package list is corrected from the three the
   ROADMAP row was opened with** (the M70b/M70g/M70k/M90a precedent): `openapi-plugin` is the
@@ -5398,8 +5407,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   against the design review's no-allocation budget) was accepted — complete (PR #375).
 - **Milestone 98k** (`packages/scheduler-plugin` + `packages/common` + `packages/diagnostics-plugin`
   — scheduler execution observations):
-  `SchedulerPlugin({ diagnostics: { enabled: true, alias,
-  jobs } })` records each approved job's
+  `SchedulerPlugin({ diagnostics: { enabled: true, alias, jobs } })` records each approved job's
   local timer fires (contended / lock-failed / dispatched, with wall-clock lateness
   `max(0, actualStart - intendedFire)`) and each handler attempt (started, succeeded, failed,
   retries) through a private-field collector (set in a static block) attached to the plugin's own
@@ -5708,10 +5716,10 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   the 10 s bound covered only the wait, not the disconnect under a pending JoinGroup (N1: 45 s, 64
   s). The broker now owns crash restarts (`restartOnFailure` always declines and schedules its own),
   and a join outlasting the bound is disconnected the moment it settles rather than under it:
-  measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered, exit
-  0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where kafkajs
-  reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the maintainer
-  waived a fifth round — complete (PR #404).
+  measured on Kafka 4.0, `app.stop()` 10.0 s in both N1 cases and every N2 window, 0 delivered,
+  exit 0. Round 4 (on `ab9598e6`) found that fix taking `initialRetryTime: 0` literally where
+  kafkajs reads `|| 300` — 1393 restarts in a 20 s outage, now 64, fixed on `d015a9b4`; the
+  maintainer waived a fifth round — complete (PR #404).
 - **Milestone 103** (`packages/localization-plugin` (new), `packages/common`,
   `packages/cache-plugin`, `packages/cloudflare-plugin`, `packages/testing`, and one `packages/cli`
   claim-table line — localization): `LocalizationPlugin` registers an `ILocalizer` under the new
@@ -5993,8 +6001,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   outbox relay fencing and multi-relay sweeping): every row a relay publishes is a row it holds a
   claim on — a per-row lease taken by an M105 conditional write on a `claimVersion` that only
   increases, checked again before the publish
-  (`now + publishTimeoutMs + storeTimeoutMs +
-  maxClockSkewMs ≤ leaseUntil`) and required by every
+  (`now + publishTimeoutMs + storeTimeoutMs + maxClockSkewMs ≤ leaseUntil`) and required by every
   status write, so a relay paused past its lease publishes nothing and any number of relays drain
   one outbox without double-sending, keeping per-key first-publish order by blocking a key behind a
   row claimed elsewhere. One mechanism on every supported backend: the ROADMAP's `SKIP LOCKED` and
@@ -6190,8 +6197,449 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   real use: its task could run `git` only, so it rewrote 186 files and died with `NotCapable` before
   regenerating manifests, and it rewrote history in archived plans and a colocated test fixture. Two
   tests pinned `0.8.0` as a literal, which the bump correctly leaves alone, and failed.
-- **Next milestone** — publish `v0.9.0` (placeholders, trust, OIDC tag), then M104, the `v0.9.0`
-  client-brief run; see ROADMAP.md.
+- **Milestone 111e1** (repository tooling — Prettier and ESLint replace `deno fmt` and `deno lint`):
+  `deno task fmt`/`fmt:check`/`lint` keep their names and now run Prettier and ESLint, so every
+  workflow and pin naming them stays true; the five SDK client fixtures keep a `deno fmt --check`,
+  the generator's output target. The 1,775-file reformat is its own commit in
+  `.git-blame-ignore-revs`. A committed codemod converted all 427 `deno-lint-ignore` directives,
+  found from a real parse after a bare scanner missed 107. ESLint then found 70 problems deno did
+  not report, including seven `@ts-ignore` comments that suppressed nothing and four errors now
+  carrying their `cause`. **Three Codex review rounds and the Node suite found what the gates did
+  not.** typescript-eslint's preset silently drops about fifteen rules deno enforced, restored;
+  `.js`/`.mjs` are parsed by `espree` because nothing type-checks them; and Prettier's embedded
+  formatting rewrote `html`/`gql` template contents in code and Markdown fences, changing rendered
+  output while `prettier --debug-check` reported no AST change — embedded formatting is off, nine
+  files restored, and a test guards it. A parity test plants each carried rule's violation —
+  complete (PR #455)
+- **Milestone 111e2** (repository tooling — scripts and root tests on Node): every `scripts/*.ts`
+  runs under plain `node` through one subprocess helper (`scripts/lib/run.ts`); root tests run in
+  the Vitest `tooling` member, whose per-file thresholds replace `script-coverage.ts` over the same
+  frozen inventory plus the new helpers; `check` is `tsc` over package sources, package tests,
+  scripts and root tests (the Deno-lane files stay checked by `deno test`); the JSDoc ratchet runs
+  on TypeDoc 0.28.20; README export tables and the fence compiler use the TypeScript compiler API;
+  and the two documentation sandboxes run under `node --permission`. Every `deno task` name still
+  works, forwarding to `pnpm run`. Implemented by Codex (the first milestone of that trial); the
+  review found ten places where the plan did not match the source, each fixed and recorded in the
+  plan's §11. The ratchet is scoped to what `deno doc --lint` enforced: TypeDoc's 554 warnings
+  include 317 on anonymous object-type members, so the baseline is 237 and the clean set grew from
+  10 to 31 packages. Prose claims import the package they describe, as Deno's loader allowed, so the
+  sandbox reads package sources and `node_modules` only — granting the whole repository was tried
+  and rejected because it exposes `.git` and `.env`. `run()` first detached every child, which would
+  have let Ctrl+C orphan a long test run; it now detaches only to enforce a deadline. Two README
+  tables change, both correcting `deno doc` output. Four Deno users pass to M111e3. The round-1
+  security audit found F1–F2, fixed in `c5c6faaa`; round 2 found one Low, fixed afterwards and NOT
+  re-audited — complete (PR #458)
+- **Milestone 111e3** (repository tooling — CI, examples and website on Node and pnpm; root
+  `deno.json` and `deno.lock` removed): `pnpm-workspace.yaml` is the one authored workspace list,
+  read through `scripts/lib/workspace.ts`; every command is `pnpm run <name>`, with
+  `pnpm run test:tooling` for the root suite. The Deno lane runs from a generated
+  `test/deno-lane/lane.config.json` (per-member permission sets) and a committed lane lock, in its
+  own "Deno runtime lane" CI job; the main job is renamed "Format / Lint / Check / Test", and Deno
+  is installed only where it is the subject. The 17 apps join the pnpm workspace and run through
+  `tsx` with generated `tsconfig.json` paths; `apps/compiled-binary` is a Node SEA; the images are
+  `node:24-alpine` (268–289 MB) and a SEA on distroless (211 MB); the website is a standalone pnpm
+  project and the API reference is TypeDoc HTML. Implemented by Codex until its usage limit, then
+  taken over; opencode did the governing-document command blocks, and its one false justification
+  (root tests "retain `@std`") was corrected. **A cold clone outside the repository found what the
+  warm tree hid**: the generated root `package.json` still carried a `workspaces` list, which pnpm
+  ignores and Deno adopts as a workspace root, so every Deno project the CLI e2e scaffolds under
+  `.tmp/` failed to resolve (61 tests). It is removed, leaving one list, and `check-node-build.ts`,
+  an eighth reader the plan missed, reads the workspace helper. The same run exposed CI defects no
+  local gate could: the node-build job checked manifests before installing, and the browser test
+  handed Chromium a relative `TMPDIR` that only existed in a warm checkout. TypeDoc rendered the
+  README as the API index, and its 475 KB logo failed the website's Lighthouse budget (0.75); the
+  index now lists modules (0.94–0.95). The `cli` lane permission set given `net: true` fails no lane
+  test, so that scoping is not guarded; dropping `DENO_NO_PACKAGE_JSON` fails earlier than the plan
+  predicted (the first frozen `deno check`) — complete (PR #459)
+- **Milestone 111f** (governing documents, docs and `scripts/` — the JSR sunset): every repository
+  instruction names a `pnpm run` script that exists, now that M111e3 removed the root `deno.json`.
+  `scripts/toolchain-prose.ts`, run by `check:docs`, refuses `deno task`, `jsr:@setu-ts/`,
+  `@jsr/setu-ts__`, `jsr.io/@setu-ts` and "Deno-first" outside history and a categorized allowlist
+  that ratchets (an unused entry fails). It also refuses a repository-only `deno task`, a bare
+  `deno add`/`jsr add` of `@setu-ts/…` (both resolve from JSR), a `pnpm run` naming a missing
+  script, and `deno lint`/`doc`/`audit` in the governing files. The three bare `deno add` README
+  lines, the website's two JSR install lines and the starters' jsr.io links now point at npm.
+  `set-jsr-metadata.ts` walks only the 49 packages on JSR (it would have 404ed on three) and sends a
+  description derived by `jsrSunsetDescription` — the npm pointer, cut to JSR's 250-byte limit —
+  leaving the shared npm descriptions unchanged; applying it is the maintainer's post-merge step,
+  documented in `docs/releasing.md`. Nothing new is published to JSR and the packages are not
+  archived. Implemented by Codex; its five plan corrections are recorded in the plan. Review found
+  three doc claims the source contradicted (a scaffolded project's test told to run the repository
+  script, and two type-assertion comments still naming `deno test`), all fixed; three negative
+  controls re-run against the real gate each failed on the rule they plant — complete (PR #460)
+- **Milestone 113a** (`packages/messaging-plugin` — brokers that report healthy while down, and
+  publishes with no bound; V9-35, V9-36, V9-37, V9-3): Kafka and Pub/Sub reachability is a real
+  round trip cached 5 s and bounded 2 s — Kafka `describeCluster()` on a dedicated client with a 1.5
+  s request timeout (kafkajs's default 30 s made a stopped broker look hung), Pub/Sub `getTopics`
+  with `gaxOpts` (without them both pause and stop hung). Stopped reads `down`; paused reads
+  `'unknown'` per the existing rule, whose readiness meaning M113b owns. Kafka and Pub/Sub gain
+  `publishTimeoutMs` (default 15 s, shared resolver with RabbitMQ); lazy NATS reconnects forever
+  through a validated `reconnect` option, refused beside an injected client. **V9-3 was redesigned
+  after the first pass**: Codex found kafkajs `admin.setOffsets` runs a temporary consumer costing
+  ~5 s per new group (every reply inbox is one). A new group now captures its watermarks at
+  `subscribe()`, advertises them in group-join metadata through a round-robin wrapper, and on its
+  first join seeks uncommitted partitions to the members' minimum — measured on real Kafka: 0/4
+  delivered with no handling, 4/4 in 12/12 trials, `subscribe()` ~5–60 ms, and 6/6 for two members
+  starting together where own-offset seeks lost 3/6 (the Spring Kafka `onPartitionsAssigned`
+  pattern). Implemented by Codex in two passes; review fixed a producer left connected when the
+  probe admin failed and a failed group-admin connect memoized for the broker's life. The
+  join-metadata seek reads offsets other group members write; the committed-tree security audit ran
+  two fresh-context rounds. Round 2 failed on R2-F4 (Low): the docs claimed a member that can join
+  can already commit, false under split group/topic ACLs. The docs now state that case, that the
+  lowering is unlogged, and the group-ACL remedy; re-accepted and NOT re-audited, at the
+  maintainer's direction — complete (PR #462).
+- **Milestone 113b** (`service-discovery-plugin` + `health-plugin` docs + `scheduler-plugin` +
+  `cache-plugin` + `session-plugin` + `auth-plugin` + `messaging-plugin` +
+  `realtime-backplane-plugin` + `worker-pool-plugin` + `static-plugin` + `feature-flags-plugin` +
+  `common` + `database-plugin` — readiness that does not describe the dependency; V9-2, V9-19,
+  V9-32, V9-44): Kubernetes and Consul discovery probes are called as methods, so a working backend
+  no longer fails every replica's `/ready`. The `/ready` rule stays (maintainer decision,
+  2026-10-16): `degraded` means "take this replica out of rotation", and seven indicators whose
+  `degraded` contradicted it — inbox parked rows, outbox reasons, backplane fan-out, worker-pool on
+  Workers, static-files without a file system, stale auth key sets, a stale feature-flag snapshot —
+  now report `up` with the condition in `data`. The scheduler indicator reports its lock backend's
+  reachability through an optional tri-state `IDistributedLock.isHealthy?`; status stays lifecycle,
+  since a shared lock outage stops fires, not serving. Redis cache (and cache-backed session) and
+  rate-limit outages answer `503` through `CacheStoreUnavailableError`/
+  `RateLimitStoreUnavailableError` over one measured `isConnectionFault` in `common`, and the
+  rate-limit client gains `commandTimeoutMs`. V9-68 and the discovery stale-cache case move to
+  M113o. Implemented by Codex, which stopped on a plan contradiction (§3.3 typed the lock probe
+  `Promise<boolean>` while requiring "unknown"); opencode's read-only sweep found three stale doc
+  and comment sites — complete (PR #463)
+- **Milestone 113c** (`queue-plugin` + `runtime` + `common` + `messaging-plugin`, plus one call-site
+  line in five Redis-backed plugins — connections and jobs that never recover, and a shutdown with
+  no bound; V9-18, V9-64, V9-71, V9-76, V9-31): `RabbitMqQueue` reconnects after a broker fault
+  through `ReconnectSupervisor`, now exported from `common` (moved from `messaging-plugin`,
+  unchanged), with full-jitter backoff on the runtime's timers. Every RabbitMQ delivery carries a
+  `runtime.uuid()` claim token, so a settlement from before a reconnect rejects with the internal
+  `StaleClaimError` instead of acking the redelivered message. The Redis queue gains a renewed
+  delivery lease (`visibilityTimeoutMs`, default 30 s, renewed every third, refused below 1000 ms)
+  measured on the server's `TIME`, so a job whose worker died is reclaimed. Its claim tokens come
+  from `INCR`. A reclaim counts as an attempt, and an over-budget job goes to `onFailed`, then dead,
+  without running. A client without `eval` keeps the old behaviour and logs one warning. `keyPrefix`
+  (default `queue:`) namespaces every Redis key. No prefix may be a string prefix of another on one
+  Redis, which is documented rather than enforced (maintainer decision).
+  `QueueProcessorDefinition.processor` is a method, so typed processors compile in declarative
+  lists. On Deno, `close()` waits for the first of `server.shutdown()` and a 1000 ms grace, so
+  `onClose` hooks run with requests still in flight. Shutdown is not cancelled. Folded in at the
+  maintainer's direction: since #378, a Redis client built without a reporter had no `'error'`
+  listener and printed `[ioredis] Unhandled error event` on every failed attempt.
+  `attachConnectionErrorReporter`'s reporter is now optional and defaults to dropping listeners,
+  applied at all eight call sites. Verified against real Redis 7 and RabbitMQ 4 (7 driver checks).
+  The design security review is plan §10. Its post-implementation findings S4 (a lease too short to
+  renew) and S8 (the console fix) are fixed. S3 is documented, and S5 and S6 are accepted. The
+  committed-tree audit ran two fresh-context rounds. Round 1 failed on a Medium: an over-budget
+  job's `onFailed` ran unrenewed, so a callback slower than the lease was reclaimed and re-notified
+  forever and the job never reached the dead set. It also failed on four Lows: no RabbitMQ connect
+  bound, due jobs selected by Redis `TIME` so app clock skew moved delays (the plan's recorded "no
+  worse" deviation was wrong for a single replica), a refusal message saying 0 disables the bound,
+  and a non-object RabbitMQ body stranding the batch. Round 2 confirmed all five fixed and found two
+  Lows in those fixes: a refused dead-queue move stranded the batch again, and the connect bound was
+  amqplib's idle timeout, which a trickling peer outlasts. Both were fixed afterwards and NOT
+  re-audited, at the maintainer's direction — complete (PR #466)
+- **Milestone 113d** (`common` + `react-router-plugin` + `cloudflare-plugin` + `cli` + the loaders
+  of 14 published packages — Workers builds and the edge cache; V9-1, V9-23, V9-4): a Worker
+  importing any Setu-TS package builds whether or not its optional peers are installed. Every bare
+  `import()` in `packages/*/src` is awaited inside the `try` of a same-function `try`/`catch`, whose
+  `catch` throws the new `OptionalDependencyUnavailableError`; the audit's `findUnguardedImports`
+  refuses every other shape, and a `check:node-build` leg bundles all 50 library members with
+  Wrangler's resolution from a directory outside the repository (inside it, a hoisted optional peer
+  such as `graphql` would satisfy the bundle). The rule was set by measurement, against the plan:
+  esbuild tolerates the import only as the operand of `await` (or a `.catch` target, which the rule
+  still refuses for one shape); `const p = import('x')`, `return import('x')` and
+  `Promise.all([import('x')])` fail the build inside a `try`. The edge cache awaits its write when
+  `CloudflarePlugin` has no `waitUntil` host, which warns once on Workers; every generated Workers
+  factory takes `waitUntil` second; `ReactRouterPluginOptions` becomes a union with a `serverBuild`
+  module arm (breaking for implementors who extend it); and the full-stack Workers template, which
+  built but could not start, passes its server build from the entry and gains `.dev.vars` plus
+  `[assets]`/`[build]`. Implemented by Zoo code until it looped, then taken over. Review fixed the
+  audit's rule, the bundle leg's isolation, a `setu add cloudflare` line that did not compile in a
+  `rest` project (its parameter is `_waitUntil`; the command now says to rename it), stray
+  indentation in the generated entry, a wrong config path and a false "the entry already passes it"
+  in the upgrade guide, and overstated package counts. A new e2e builds four Workers templates and
+  boots `rest` (printed and hostless wirings) and `full-stack` on real workerd; not verified against
+  a deployed Worker. The design security review approved D1/D2 fixes (the write-failure log names
+  the path, not the cache key); the committed-tree audit failed on one Low (F1, a custom cache's
+  rejection message reaching the log), fixed by logging the error class only and NOT re-audited, at
+  the maintainer's direction — complete (PR #465)
+- **Milestone 113e** (`packages/auth-plugin` + `packages/session-plugin` — identity and session
+  semantics a client cannot predict; V9-28, V9-27, V9-46, V9-50; every option the recommended one,
+  maintainer decision 2026-10-17). Scoped checks are decided by grants alone: a principal's own
+  `roles` and `permissions` (including `'*'`) count in no scope unless
+  `scopedRbac.principalAuthorityIsGlobal: true`, the pre-0.10.0 answer. The opt-in covers
+  permissions too, because `#holdsDirectly` let a token `'*'` pass every scoped permission check,
+  and the unscoped guards are unchanged. Form CSRF skips `Authorization: Bearer <token>` by default
+  (`csrf.exemptBearer: false` restores the refusal), through one `isCsrfExempt` both
+  `csrfFormMiddleware` and `verifyCsrfToken` call. `Basic` is never exempt, because browsers re-send
+  it. On the store strategy a session holding only the CSRF token and the tenant binding is sealed
+  into the cookie under a `held: 'cookie'` marker and writes no row, so 200 anonymous form views
+  write 0 rows instead of 200 (measured on a real Redis, 200 with the rule disabled). Promotion to
+  the store happens on the first other key, and demotion deletes the row so an id-only replay
+  restores nothing. `PasswordHasher` defaults to 600,000 iterations (79 ms vs 15 ms on Node), with
+  `PasswordHasherOptions.iterations` (100,000–10,000,000) and `needsRehash`. A deployed Worker's
+  reported 100,000 limit is documented and unverified; local workerd accepts 600,000. The security
+  audit failed round 1 on two Lows — the docs' bearer justification was false under path-scoped CORS
+  (now documented as trusting every origin CORS lets send `Authorization` with credentials), and a
+  non-boolean `exemptBearer` failed open (now refused) — and observed that fixation without
+  `regenerate()` was only reduced, so promotion now rotates the session id; round 2 passed on
+  `46acb5dd`. CodeRabbit then raised the bearer boundary as Major, and a framework survey found no
+  framework exempting on a bare header (Django REST Framework enforces CSRF only when session auth
+  succeeded), so the exemption became credential-based: strategies declare `credential`, the auth
+  middleware records it under `CREDENTIAL_SOURCE_STATE_KEY`, and form CSRF moves from priority 275
+  to 325. Rounds 3 and 4 narrowed it twice more: a bearer request is exempt only when it restored no
+  session (L3, an attacker's own valid token beside the victim's cookie), and such a request gets no
+  browser session committed (L4, session planting). The L4 fix was not re-audited, at the
+  maintainer's direction — complete (PR #467)
+- **Milestone 113f** (`packages/exceptions` + `packages/logger-plugin` +
+  `packages/database-plugin` + `packages/health-plugin` + `packages/openapi-plugin` +
+  `packages/common` + `packages/runtime` + `packages/kernel` + `packages/cli` — what reaches logs
+  and public endpoints; V9-45, V9-47, V9-43, V9-80, V9-82, V9-41, V9-49): a Drizzle query error
+  keeps its SQL and loses its bound values in message, multiline stack header and `params`, and a
+  SQLSTATE class 22 cause (whose PostgreSQL message quotes the input) is rebuilt from its code;
+  errors from the typed builder and raw driver calls are not scrubbed (documented). Health endpoints
+  answer `{ status, timestamp, checks }` with status only unless `HealthPlugin({ details: true })`
+  (breaking). `errorHandler` logs a handled error once, at `warn` below 500 and `error` otherwise;
+  the request logger stops logging `request failed` and reports the served status through the new
+  optional `IErrorResponder.statusFor?`, one rule shared with the serving path. With no logger,
+  handled 5xx and kernel unhandled errors write one JSON line through the new optional
+  `IRuntimeServices.reportError?` (stderr; `console.error` on Workers). `excludePaths` accepts
+  `PathPattern[]`. Swagger UI is self-hosted from the optional peer `swagger-ui-dist` by default
+  (breaking), with `assets: 'cdn'` pinned to 5.33.3 under SHA-384 SRI (hashes recomputed from the
+  real tarball) and a validated `{ baseUrl }`; generated projects declare the package and opt out of
+  Scarf's install-time analytics, and Workers projects select the CDN. Implemented by Codex, which
+  stopped once on a plan error the real driver exposed (Drizzle's stack header is multiline).
+  Verification's behavioural driver (46 checks, real Drizzle, real swagger-ui- dist, real stderr;
+  three negative controls discriminating) found the scrub throwing on a frozen wrapper, a double
+  newline in the Workers sink and a dead label in the kernel's sink record, all fixed. The design
+  security review is plan §10, recorded after implementation. The committed-tree audit ran two
+  fresh-context rounds: round 1 found four Lows (a `baseUrl` a browser resolves to another host,
+  class 22 messages leaking values, overstated scrub docs, undisclosed Scarf analytics), round 2 two
+  more (a throwing driver accessor making the scrub the fault, no Scarf opt-out at an npm workspace
+  root). All six are fixed; the round-2 fixes were NOT re-audited, at the maintainer's direction —
+  complete (PR #468)
+- **Milestone 113j** (`packages/messaging-plugin` + `packages/database-plugin` + `scripts/` + docs —
+  outbox and inbox signals; V9-20, V9-21, V9-22 and V9-10's `npm:zod` half). A relay paused past its
+  lease republished a row another relay had sent and reported nothing, because the late `markSent`
+  answer lost the race to its deadline and was booked as a store failure. Settlement writes for a
+  publish that actually ran now use their own `storeTimeoutMs` bound, ignoring an exhausted sweep
+  budget, and a late answer still records `duplicate`, `claim-lost` or `poisoned` through the one
+  `observeSettlement` both paths call. A publish the budget refused ends the sweep `'deadline'` with
+  no attempt counted. `InboxRowStateError` and `OutboxRowStateError` carry 400/404/409 status hints
+  with fixed details, and `OutboxRowStateError` gains `'invalid-id'` (breaking for an exhaustive
+  `switch`). Every stale `npm:` specifier in committed docs is corrected, the fence engine stops
+  rewriting them, and `check:docs` refuses one through rules P7 (quoted import) and P8 (any other
+  reference). The implementation was a trial of opencode on a local Qwen 27B: about 4 h 23 min over
+  two runs, stuck once on pause-test event ordering that needed an outside diagnosis, then stopped
+  before its gates and finished by Claude. Security audit round 1 failed on one Low (the P7/P8 scan
+  was quadratic, ~18 s for a 1 MiB line); round 2 passed on `4220698a`. The three observations it
+  raised — a budget-refused publish counted as a failure, a row id quoted in a store error, and a
+  cubic continued-line join in the same gate — were fixed afterwards and not re-audited, at the
+  maintainer's direction — complete (PR #469)
+- **Milestone 113g** (`packages/database-plugin` + `packages/common` + `packages/cloudflare-plugin`
+  — database calls and errors under faults and edge inputs; V9-25, V9-26, V9-33, V9-34, V9-48): an
+  `update`/`updateWhere` payload changing a primary key is refused with `PrimaryKeyChangeError`
+  (`400`) on all eight data sources through one `assertPrimaryKeyUnchanged` in `common`, checked and
+  written from one payload snapshot (a getter can no longer show the check one key and the write
+  another); measured on real Prisma 7.10, the row used to move. A bad client cursor answers
+  `InvalidCursorError` (`400`, a fixed detail naming no adapter), and on Drizzle and Prisma so does
+  a well-formed cursor whose value the database refuses by type (`22P02`/`22003`/`22007`/`22008`, or
+  Prisma's validation error). Drizzle refuses a missing key column when the repository is created
+  and an unknown payload field with `UnknownPayloadFieldError` (`400`, the maintainer's call over
+  the planned masked `500`). Both node-postgres connect timeouts answer `503`, and `query_timeout`
+  firing answers `504` through `DatabaseTimeoutError`, whose contract says a write's outcome is
+  unknown; the plugin adds no deadline of its own. Measured on a paused PostgreSQL 16: about 1 s
+  each, and about twice the bound inside a transaction because the `ROLLBACK` waits behind the hung
+  statement. Implemented by Codex, whose second run was cut short by its usage limit and finished by
+  Claude; opencode wrote the docs, and five of its seven driver-timeout names were invented or
+  misnamed until checked against the installed types. The committed-tree audit ran three
+  fresh-context Claude rounds (none by Codex, at the maintainer's direction). Round 1 found client
+  text quoted back by PostgreSQL classified as a timeout or outage (also true of the M90f pool
+  anchor), a raw field name in a log message, and Drizzle's own `enableRLS` passing as a column;
+  round 2 found the SQLite unique anchor matching client text the same way. Round 3 found a server
+  data fault on a later page read as a bad cursor, an M113f scrub that a frame-shaped bound value
+  survived, and a `TypeError` the round-2 name helper introduced; all are fixed and NOT re-audited,
+  at the maintainer's direction — complete (PR #470)
+- **Milestone 113m** (`packages/scheduler-plugin` + `packages/auth-plugin` — time the framework does
+  not honour; V9-63, V9-70): scheduler `delay`, `every`, `cron` and retry backoff honour long waits
+  in chunks of at most 2147483647 ms, checking the wall clock on every wake so jobs never run before
+  they are due; no upper delay or interval limit. Async registration rejects non-finite or negative
+  `delayMs`/`retry.delay`, and non-finite or non-positive `intervalMs`, with `RangeError`; zero
+  delay and retry delay remain accepted. First-party `JwtService.verify` uses fractional seconds
+  without clock tolerance, rejecting at `exp` and before `nbf`; outside-issuer verification rejects
+  at `exp + clockToleranceSec`, with its not-before check unchanged. Migration: fix invalid
+  scheduler values and refresh tokens before `exp` — complete (PR #471)
+- **Milestone 113n** (`packages/http-security-plugin` + `packages/runtime` + `packages/common` +
+  `packages/kernel` + `packages/session-plugin` + `packages/react-router-plugin` — security behind a
+  reverse proxy; V9-65, V9-66, plus the RFC 7239 `Forwarded` header, `Secure` cookies and public
+  URLs, placed here by the maintainer): the Node, Deno and Bun adapters set `IRequest.ip` from the
+  socket peer, normalizing the `::ffff:` form all three report on a dual-stack listener, and
+  `trustedProxies` treats the peer as the last link, so a direct client forging `X-Forwarded-For`
+  keeps its own address. `ipSecurityMiddleware` resolves one trusted request origin from
+  `X-Forwarded-*` or `Forwarded` (`forwardedHeader`, one family only) and publishes it for the
+  `common` accessors `requestOriginOf`/`publicRequestUrl`; CSRF accepts it and a zero-config
+  `X-Forwarded-Proto` candidate, the session cookie gains `secure: 'auto'`, and the React Router
+  bridge hands loaders the public URL. `InjectRequest.ip` carries a peer through `inject()`.
+  Breaking in behaviour: unauthenticated rate-limit keys become per peer. Implemented by Codex,
+  which stopped once on a type the plan had wrong (`remoteAddress?: string | undefined`). Review
+  found a malformed `Forwarded` header from a direct client erasing its identity; it now contributes
+  no hops and the peer is still checked. The security audit ran three fresh-context rounds. Round 1
+  failed on no design review (now plan §10) and four findings: the zero-config CSRF candidate let
+  any credentialed CORS origin pass by sending `X-Forwarded-Host` with its own host (High, since
+  scripts can set that header and the CORS middleware echoes it), leftmost/`proxyHops`/peerless
+  modes published a client-chosen origin (Medium; `secure: 'auto'` then dropped `Secure`), a
+  too-loose host check, and a peer fallback. Round 2 found the same CSRF bypass through the
+  published origin behind a pass-through proxy (High) and a trusted proxy with no header resolving
+  itself. CSRF now consults no forwarded candidate when `Sec-Fetch-Site` is present and not
+  `same-origin`, only `trustedProxies` with a trusted peer publishes an origin, and hosts follow a
+  DNS/IPv6 grammar. Round 3 passed on `6f6b2014`; its default-port observation was fixed afterwards
+  and not re-audited, at the maintainer's direction — complete (PR #473)
+- **Milestone 113o** (`database-plugin` + `cli` + `service-discovery-plugin` — schema-aware and
+  stale-cache readiness; V9-68 and the discovery stale-cache case): `createMigrationLedger` records
+  applied migrations in an application-owned `setu_migrations` entity over the repository surface,
+  and `DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } })` compares it with what the
+  build expects — a missing migration reads `degraded` (`/ready` 503, `/health` 200), an unreadable
+  ledger `down`, and names a newer build applied leave the status alone so old replicas stay ready
+  during a rolling deploy. The generated `run.ts` boots the app with no port, hands each migration
+  the database, skips applied ones and records each after it succeeds; on Workers it emits no entry
+  block, since a `tsx` process holds no bindings. A memory-adapter ledger is process-local. A
+  discovery backend outage with a warm cache now reports `up`, keeping the condition in `data`.
+  Implemented by Codex, which measured a duplicate `record` rejecting with `DuplicateKeyError` on
+  memory, Drizzle/PostgreSQL, a MongoDB replica set and DynamoDB Local. Review split the runner's
+  error so a migration that ran but whose ledger row failed says so. The committed-tree security
+  audit (design review recorded as plan §10) failed round 1 on four Lows: discovery `up` is
+  process-wide while the docs promised a warm cache serves every name, readiness options were
+  re-read after validation (now a frozen copy), the Deno runner header said `-A` for a runner that
+  boots the whole app, and two §10 residuals were not stated in the docs. The fixes were not
+  re-audited, at the maintainer's direction — complete (PR #475)
+- **Milestone 113k** (`packages/sdk` + docs in `idempotency-plugin`, `http-security-plugin`,
+  `database-plugin` — the idempotency key from client to server; V9-14, V9-15, V9-16): every
+  generated operation takes an optional trailing `request?: OperationRequestOptions`
+  (`idempotencyKey`, `signal`), forwarded by two conditional spreads so a JavaScript caller's extra
+  properties never reach `client.request`; the name is claimed like the other SDK imports. Writing
+  the plan's probes found two pre-existing generator defects the new parameter would widen — a path
+  parameter named `client` shadowed the factory's client, and one named `opts` emitted a duplicate
+  parameter; an operation named `client` was `TS2300` — so path parameters named `client`/`opts`/
+  `request` and an operation named `client` gain a `_` prefix through one `pathArgumentName` used at
+  all three path-parameter sites. The CORS example allows `idempotency-key` and exposes
+  `idempotent-replayed`, run by a kernel-app test that also pins the README literal; the tier-C DDL
+  and Drizzle mapping are in the database-plugin README, pinned to the SQL fixtures; the idempotency
+  README gains "From a browser", the `ttlMs` range, the `ioredis` step and corrected guarantee-2 and
+  purge-race text. Implemented by Codex (no plan contradiction; six negative controls failed as
+  intended), docs by opencode on the local model in a separate worktree. The design security review
+  is plan §10. The fresh-context committed-tree audit passed round 1 on `c859bbef` with no security
+  finding; its observations were fixed afterwards: the docs' claim that every rename only touched
+  non-compiling documents was false for `request` and `opts`, and a path parameter or operation
+  named `encodeURIComponent` (pre-existing) shadowed the global every generated path calls, so it
+  joins both rename sets — complete (PR #476)
+- **Milestone 113h** (`cli` + `runtime` + `kernel` — generated output that is wrong; V9-8, V9-17,
+  V9-38, V9-39, V9-9, V9-11, V9-42, V9-67, V9-81, on one `fix/` branch): `setu generate` reports a
+  decorator barrel `setu.config.ts` does not reference (naming the starter's `decorators` arm in a
+  starter-composed project) and the generated comments stop claiming the wiring; NATS scaffolds emit
+  `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`; `setu adopt` records probe support from
+  the project's dependencies, moves a single-segment dotenv pair with a member `.gitignore`, and
+  rewrites the entry the CLI actually emits; workspace `.gitignore`/`.dockerignore` keep dotenv
+  files out of git and images; a Workers full-stack scaffold declares Node types and its `check`
+  builds first; `.react-router/` is ignored; `setu add websocket` writes `ws` on Node and a failed
+  Node handshake is reported once per distinct error through the new
+  `HttpAdapterOptions.reportError`; the kernel logs `Server listening` and scaffolds turn request
+  logging on with probe paths excluded. `logger-plugin` needed no source change. Implemented by
+  opencode on `opencode/deepseek-v4.1-flash-free` (the maintainer's choice for this milestone),
+  whose first pass made a test fit instead of fixing V9-9 (a fresh Workers scaffold still failed its
+  own `check`) and left generated files failing their own format check; both fixed. The security
+  audit ran four rounds: three fresh Claude agents, then Codex for round 4 at the maintainer's
+  direction for this session. Round 1 found a High — `adopt` moved `.env` out from under an anchored
+  root `/.env` rule, so `git add -A` staged it — plus a `.dockerignore` comment overclaiming
+  coverage and a quadratic regex; rounds 2–4 found Lows in the fixes (a failed conversion left files
+  moved with no rollback; a member `.gitignore` read through a link to `/dev/zero`; dry runs that
+  promised a clean plan the real run refused). All are fixed; the last (move destinations outside
+  the dry-run preflight) was NOT re-audited, at the maintainer's direction. Trap recorded: an
+  `opencode run` session kept editing through opencode's background service after its client had
+  exited — complete (PR #477)
+- **Milestone 113i** (`cli` — CLI commands whose refusals and guidance mislead; V9-5, V9-12, V9-13,
+  V9-30, V9-40, V9-60, V9-61, V9-62, V9-75, on one `fix/` branch): the devtool runtime refusal takes
+  a required `context` of `'scaffold'` or `'enable'`, so its remedy names the situation it is in —
+  the shared first sentence now ends "could never start its diagnostics connector," the scaffold
+  remedy keeps "Scaffold without --devtool, or create the project with --runtime deno.", and the
+  enable remedy says the devtool can only be enabled on a Deno project, with no "scaffold" wording.
+  The addable catalogue gains `view`, `localization` and `idempotency` (their `…-plugin` packages),
+  so the help line "The full specifier works too" is true of the published framework packages, while
+  `setu add diagnostics` refuses with "`@setu-ts/diagnostics-plugin` is installed and wired by
+  `setu devtool enable`." and exits 2. `setu add` inserts the bare plugin call into `setu.config.ts`
+  for the eight zero-configuration packages — `worker-pool-plugin`, `secrets-plugin`,
+  `storage-plugin`, `audit-plugin`, `mail-plugin`, `resilience-plugin`, `view-plugin`,
+  `idempotency-plugin` — exactly as it does for `cache`, and prints the exact wiring line for the
+  two that need a user choice (telemetry, localization) instead of inserting. The `--dry-run` of
+  `generate`, `new`, `library` and `generate app` classifies the files first and prints
+  `WOULD REFUSE: <path> already exists`, exiting 1 on a collision, the `adopt` wording and exit
+  code. The five class-based ingress schematics write `src/ingress/<kebab>-<kind>.ingress.ts` with
+  `<Pascal><Kind>Ingress`, every other symbol keeps its plain name, and existing
+  `src/ingress/<name>.ingress.ts` files keep scanning and stay registered. A jobs seam makes a
+  functional `g job` wire its exported `create<Pascal>JobProcessor` through the managed
+  `src/jobs/index.ts` barrel to `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` when
+  `queue-plugin` is installed (a class-based `g job` is refused without it), the seam is not scanned
+  without `queue-plugin` so standalone `src/jobs/*.job.ts` files get no skip report, and the stale
+  registry premise that `QueuePluginOptions` has no `processors` option is rewritten. Generated
+  files, `Next:` lines and messages for a project whose runtime the command has already resolved
+  render the pinned `npx @setu-ts/cli@<VERSION>` / `bunx @setu-ts/cli@<VERSION>` /
+  `deno run -A npm:@setu-ts/cli@<VERSION>` form for that runtime. Usage, help and remedies without a
+  resolved runtime retain `setu` (`PROGRAM_NAME`); Deno-only devtool guidance uses the pinned Deno
+  invocation. The CLI docs and the schematic tables in `packages/cli/README.md`, `docs/cli.md` and
+  `PUBLIC_API.md` state that rollback covers SIGINT (Ctrl+C) and a caught error only, and match the
+  source. Implemented by Codex, which stopped twice on gaps in the plan (a shared refusal sentence
+  that said "scaffolded", and seams surviving the Workers swap that removes `QueuePlugin`); a Codex
+  review then found a brace in a broker URL crashing `g app`, a dry run reading paths it would
+  refuse, and two missed unpinned instructions. The security audit, run by the planning session at
+  the maintainer's direction (not independent; design review recorded after implementation as plan
+  §10), found a CLI-owned file linked to `/dev/zero` hanging `g job` and its dry run — read by both
+  the writer and the artifact scanner, the latter since M70g — fixed by reading only regular files
+  under 1 MiB; re-audit passed — complete (PR #479)
+- **Milestone 114** (`packages/cli` + `packages/validation-plugin` + `packages/common` +
+  `packages/decorator-plugin` — self-contained feature modules; V9-79): a functional
+  `setu generate module` writes one folder (service, routes, `<name>.schemas.ts`, a unit test and a
+  real-socket e2e) registered through `src/modules/index.ts`; `--module` places a service, route,
+  controller or schema inside a module; functional modules are scanned for name conflicts and barrel
+  wiring; the `rest` sample moves to `src/modules/greeting/`; every socket target gets
+  `test/e2e/app.e2e.test.ts` and a separate `test:e2e` task. In `validation-plugin` the validator is
+  its own typed reader (`validateBody(S).value(ctx)`), `{ forms: true }` validates urlencoded and
+  multipart bodies with the same schema, and a body-validated route answers `415` for a non-JSON
+  media type before reading the body (breaking, CHANGELOG'd). The helpers' per-request validator
+  rebuild was replaced by a per-service cache after the performance budget missed: `/vh` went from
+  −8.3% (p = 0.001) to −5.1% (p = 0.118), accepted by the maintainer. Security audit round 3 passed
+  on `c3c57069`; a scoped round 4 on `13edb024` (the cache and the `exportsSymbol` regex escape)
+  passed with no findings — complete (PR #480)
+- **Milestone 113l** (documentation that does not match the code, or is missing; twenty V9 rows):
+  documented telemetry/storage peers and startup refusals, runtime test runners, locale headers and
+  formatter limits, worker hand-over sizing, repository/audit/health/OpenAPI/TOTP contracts,
+  principal-based tenancy, construction-time config, backup/restore, verified inbound webhooks,
+  tier-C scheduling, environment secrets and Node/standalone deployment. New fences compile;
+  integration tests pin the documented compositions. No package source changed — complete (PR #483).
+- **V9-77** (`secrets-plugin` — environment secrets fall back to config, 0.10.0): `EnvProvider`
+  reads environment strings first, then string values from the optional CONFIG capability.
+  `options.configFallback` defaults to true, is validated at construction for the env provider, and
+  can disable the fallback. Unit and real-kernel ConfigPlugin tests cover ordering, schema
+  stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR #485).
+- **`@ApiOperation` operation ids** (`common` + `decorator-plugin` + `openapi-plugin` — declared
+  OpenAPI metadata reaches the document, 0.10.0): optional `RouteSchema.operationId`/`description`,
+  forwarded from `@ApiOperation`; a declared id is used verbatim and reserved before derived ids by
+  one internal helper shared with an `onBootstrap` route scan, and a blank or duplicate declared id
+  fails `start()` with the new `OperationIdError` — complete (PR #487).
+- **Milestone 116** (`packages/cli` + every published library package + `scripts/` — agent briefs):
+  `setu agents` writes a marker-delimited section into `AGENTS.md` naming the project's installed
+  and not-installed Setu-TS packages, the add-a-listed-package rule and the path to each installed
+  package's `AGENT_CARD.md`; in a workspace it writes the root and every member, and `--check`
+  refuses a missing or stale section. Every published library ships a task-shaped card (at most 2560
+  bytes, fences type-checked, identifiers checked against exports) behind four root gates. Measured
+  with coding agents on three tasks × 3 runs: 9/9 hidden tests at 1.38M input tokens per run, 1.08×
+  pilot variant F (its hand-made brief) and inside the plan's 1.2× bar. The security audit ran six
+  fresh-context rounds over every caller-, workspace- and package-controlled string reaching
+  `AGENTS.md` or the terminal, and over the file writes. Later rounds moved every CLI write to a
+  read-only snapshot plus an owner-only temp file renamed over the target (no existing inode is
+  written through; owner, group and `0o777` bits kept, read-only targets refused), and made
+  `setu agents` refuse a workspace whose directories another user owns or that contains a symlink
+  (git's `safe.directory` rule). Round 6 passed with nothing open; its one correctness observation
+  was fixed afterwards and not re-audited. Residuals: same-uid processes, Windows (no ownership
+  check) and standalone parents resolved by name — complete (PR #484)
+- **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
   findings) and **Part 11, X46–X51** (8 more), the exercise block built for the seven milestones
@@ -6342,8 +6790,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   (real loopback consumer exercise, subprocess-tested, credentials stay in memory) and protocol
   fixtures with independently computed Web Crypto vectors — complete (PR #347).
 - **Milestone 98c** (`packages/cli` — devtool scaffolding): `setu new --devtool`,
-  `setu generate app
-  <name> --devtool`, and `setu devtool enable [member]` share one planner that
+  `setu generate app <name> --devtool`, and `setu devtool enable [member]` share one planner that
   emits the M98b composition — a `main.dev.ts` the production graph never imports, `dev`/`check`
   tasks, and a `WorkspaceMember.devtoolPort` walked by `allocatePort` and moved by
   `ports --reallocate`. The emitted factory takes the devtool composition as its SECOND parameter on
@@ -6403,6 +6850,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   package import renders in the `import type { … }` form, and every generated Deno workspace's root
   `dev` task carries the scoped `--allow-env` grant whether or not the devtool is enabled. Each fix
   carries a test verified to fail without it — complete (PR #352).
+
 - **Milestone 99a** (`packages/logger-plugin` + `packages/common` + `packages/messaging-plugin` — a
   control that reports safe for what it does not cover): default LoggerPlugin redaction now masks
   Fetch-normalized `authorization` headers on both console and Pino transports while preserving
@@ -6420,17 +6868,18 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
 ## Verification (run before declaring any work done)
 
 ```bash
-deno task fmt:check
-deno task lint
-deno task check
-deno task test
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run test:tooling
 ```
 
-These Deno checks cover formatting, lint, types, and the root tooling suite. Package changes also
-require `pnpm test` and `pnpm test:coverage` on Node 24, plus `deno task test:deno-lane` for the
-retained Deno runtime proofs. `deno task test:coverage` measures root tooling. Every measured source
-file must reach 90% branch/function/line; Node, Deno-lane, and root-script gates enforce their bars
-with nonzero exits. Read the per-file tables as evidence.
+These are the Node formatting, lint, type and root tooling gates. Package changes also require
+`pnpm test` and `pnpm test:coverage` on Node 24, plus `pnpm run test:deno-lane` for the retained
+Deno runtime proofs. `pnpm run test:tooling:coverage` measures root tooling. Every measured source
+file must reach 90% branch/function/line. Root scripts and root tests share the `tooling` Vitest
+coverage report; its per-file thresholds enforce the bar with a nonzero exit. The named Deno lane
+enforces its own bar. Read the per-file tables as evidence.
 
 For the edit loop, `pnpm test:coverage <members…>` measures those members and the Node tooling
 target. Each member owns its source coverage, so a targeted failure is authoritative. A milestone
@@ -6452,8 +6901,8 @@ for is unobservable under a blanket grant.
 see a publish-blocking defect.**
 
 ```bash
-deno task release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
-deno task release:verify <version>  # versions, source workspace ranges, metadata, release contracts
+pnpm run release:publish --dry-run  # pack, packed-manifest rules, npm lookup and publish dry run
+pnpm run release:verify <version>  # versions, source workspace ranges, metadata, release contracts
 ```
 
 M51 shipped three separate defects that every one of the four gates and the per-file coverage bar
@@ -6491,20 +6940,22 @@ because nothing defined what one was.
 ## Common pitfalls (these fail the gates)
 
 - `exactOptionalPropertyTypes` is on: never assign `undefined` to an optional property — omit it.
-- The `verbatim-module-syntax` lint rule requires `import type { … }` for type-only imports.
+- The ESLint `@typescript-eslint/consistent-type-imports` rule requires `import type { … }` for
+  type-only imports.
 - `no-console` applies everywhere except `packages/cli` and `scripts/` (scripts use
-  `// deno-lint-ignore-file no-console` with a reason).
+  `/* eslint-disable no-console -- reason */`).
 - Unused variables fail lint — delete them; do not underscore-prefix.
-- Run `deno fmt` before `deno task fmt:check`; it also reformats markdown — never hand-wrap tables.
+- Run `pnpm run fmt` before `pnpm run fmt:check`; it also reformats markdown — never hand-wrap
+  tables.
 - Coverage is per file, across branch, function, and line. The Node runner uses Vitest V8
-  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses
-  `scripts/script-coverage.ts`. Inspect all three tables before claiming completion.
+  thresholds; Deno-only sources use the named Deno-lane gate; root tooling uses the `tooling`
+  member's Vitest thresholds over the frozen script inventory. Inspect the reports before claiming
+  completion.
 - Use web-standard APIs in contracts (`Headers`, `SubtleCrypto`); runtime-specific shapes live
   behind `IRuntimeServices` only.
-- `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). NOTE: `deno lint`'s `no-eval`
-  catches `eval()` but NOT `new Function()` — the gates will not flag it, so this is on you. To load
-  Node builtins in `packages/runtime`, use static `node:` imports (Deno/Node/Bun all support them),
-  never a smuggled `require`.
+- `eval` and `new Function()` are forbidden (AI_GUIDELINES §13.5). ESLint enforces `no-eval` and a
+  restricted-syntax rule for the Function constructor. To load Node builtins in `packages/runtime`,
+  use static `node:` imports (Deno/Node/Bun all support them), never a smuggled `require`.
 - **Never mix clocks.** `ctx.startTime` is `runtime.hrtime()` — a MONOTONIC reading
   (`performance.now()`, ms since an arbitrary origin), NOT a wall-clock epoch. Compute a request
   duration as `runtime.hrtime() - ctx.startTime` (both monotonic). `Date.now() - ctx.startTime`
@@ -6512,12 +6963,20 @@ because nothing defined what one was.
   EVERY request (and tripping every slow-request threshold). Also: `Date.now()` is a runtime API —
   outside `packages/runtime`, get time only via `IRuntimeServices` (`runtime.now()` /
   `runtime.hrtime()`). The gates do NOT flag `Date.now()`, so this is on you.
-- **A lazily-loaded optional dep must ACTUALLY load.** Use a real `await import('npm:<pkg>')` (or a
-  client/factory injected through plugin options, AI_GUIDELINES §12.2) — never a `globalThis.__x`
-  hook that only tests populate. A global-hook "loader" throws in production even when the package
-  IS installed, because nothing ever imports it: that is a non-functional shim, not a lazy import.
-  If a real `import()` forces the construction path to be async, make it async (`register()` may
-  return a `Promise`); do not fake a sync constructor with a global.
+- **A lazily-loaded optional dep must ACTUALLY load.** Use a real `await import('<pkg>')` with a
+  literal bare package name (or a client/factory injected through plugin options, AI_GUIDELINES
+  §12.2) — never a `globalThis.__x` hook that only tests populate. A global-hook "loader" throws in
+  production even when the package IS installed, because nothing ever imports it: that is a
+  non-functional shim, not a lazy import. If a real `import()` forces the construction path to be
+  async, make it async (`register()` may return a `Promise`); do not fake a sync constructor with a
+  global. **And the literal import is AWAITED inside the `try` block of a `try`/`catch` in the SAME
+  function** (`mod = await import('ioredis')`, M113d): Wrangler bundles Workers with esbuild, which
+  resolves a bare string-literal `import()` at build time, so an unguarded import fails every Worker
+  that imports the package — even one that never loads the driver — and an unawaited import fails it
+  even inside the `try` (measured: `const p = import('x')` and `Promise.all([import('x')])` both
+  do). The `catch` throws `OptionalDependencyUnavailableError` (or the package's own named load
+  error carrying it as `cause`); the M113d audit (`findUnguardedImports`) refuses the unguarded
+  shape.
 
 ## Self-review checklist (bugs that slipped through before — check every time)
 
@@ -6579,7 +7038,7 @@ because nothing defined what one was.
   external dependency, at least ONE test must exercise the REAL load/import path (guard/skip it when
   the dep is absent) so a stubbed-out fake is never the only path the suite ever runs.
 - **Docs must match behavior — a green gate does not verify a claim.** JSDoc, comments, and
-  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `npm:pino`" on a
+  PUBLIC_API.md must describe what the code actually does. "Lazily imported via `pino`" on a
   function that never imports pino, or "@throws if X cannot be loaded from npm" when it throws
   because it never tries, are lies that pass every gate. When you touch a doc claim, confirm the
   code path it describes actually executes. **And when a comment or doc claims a SET — these inputs
@@ -6623,14 +7082,14 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   and show the data returns. An implementation variant that cannot run against its real backend is
   driven with an injected fake that records calls — if the calls never arrive, the deliverable is
   not delivered. Checking a ROADMAP box is a behavioral claim, not a files-exist claim.
-- **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.**
-  `deno coverage` colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
+- **Read coverage ANSI-stripped, per file, after EVERY change — including deletions.** The Vitest
+  coverage table colorizes output; naive parsing misreads the numbers (a `[33m` prefix turned 75.9
   into a false "OK"). Pipe through `sed 's/\x1b\[[0-9;]*m//g'` and confirm every changed `src` file
-  is ≥90% on branch, function, AND line. The task's exit code is NOT the check — it exits 0 with a
-  file under the bar; the per-file table is. Deleting or rewriting a test can drop an UNRELATED file
-  below the bar, and the aggregate will hide it — re-check per file after refactors and deletions,
-  not just additions. A file that lands exactly at 90 has no margin — prefer a couple of points of
-  headroom.
+  is ≥90% on branch, function, AND line. Vitest enforces per-file thresholds with a nonzero exit;
+  still read the table to verify the measured files and coverage dimensions. Deleting or rewriting a
+  test can drop an UNRELATED file below the bar, and the aggregate will hide it — re-check per file
+  after refactors and deletions, not just additions. A file that lands exactly at 90 has no margin —
+  prefer a couple of points of headroom.
 - **Grep for constructs the gates don't catch**:
   `grep -rn "new Function\|eval(\| require(\|as any\|@ts-ignore\|Date.now()\|globalThis.__" packages/<pkg>/src`
   — must be empty (comments excepted). `Date.now()` outside `packages/runtime` is a runtime-API /
@@ -6643,8 +7102,8 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   somewhere other than its declaration and assignment; (3) diff each spec-named output (RFC 7807,
   NestJS, OpenAPI) field-by-field against its PUBLIC_API.md example; (4) if a behavior has two entry
   points, confirm one test drives BOTH under a non-default configuration.
-- **Run the two publish gates on the committed tree.** `deno task release:publish --dry-run` and
-  `deno task release:verify <version>` — see the Verification section for the three M51 defects that
+- **Run the two publish gates on the committed tree.** `pnpm run release:publish --dry-run` and
+  `pnpm run release:verify <version>` — see the Verification section for the three M51 defects that
   every other gate passed over. A milestone whose package cannot publish is not done, and CI's
   `npm publish dry-run` job will say so on the PR after you have handed it back.
 - **Report the evidence.** When handing back, paste the ANSI-stripped per-file coverage table, the
@@ -6680,13 +7139,13 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   maintainer's call. All other prompts/notes are scratchpad only and never committed (see the
   plan-cleanup rule in "Before reporting a task done").
 - Package tests use `describe`, `it`, hooks, and `expect` from `vitest` in
-  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` uses `@std/testing/bdd` and
-  `@std/expect` until M111e. Deno-only package proofs use the same Vitest-shaped files through the
-  Deno-lane import-map shim. Write in the runner style appropriate to that location from the first
-  line; `Deno.test` remains banned.
+  `test/{unit,integration,e2e}/` and run on Node 24. Root `test/` also imports `vitest` and runs in
+  the `tooling` member. Deno-only proofs use the same Vitest-shaped files through the Deno-lane
+  import-map shim. Write in the runner style appropriate to that location from the first line;
+  `Deno.test` remains banned.
 - No plugin imports another plugin — communicate via `ctx.services.get<T>(CAPABILITIES.X)`.
 - Heavy deps (Prisma, Redis clients, …) are never hard dependencies: injected via options or lazy
-  `npm:` imports (AI_GUIDELINES §12.2).
+  bare-package imports (AI_GUIDELINES §12.2).
 - **Two long-lived branches; PRs target `develop` except release and hotfix PRs, which target
   `main`.** `develop` is where milestones, fixes and docs integrate. `main` is the repository's
   DEFAULT branch, so a `gh pr create` without `--base` targets it — always pass `--base develop` (or
@@ -6702,12 +7161,11 @@ Passing gates is necessary but NOT sufficient — these misses all passed the ga
   next one goes on `hotfix/[issue]-[description]` cut from `main`, PRs into `main`, ships as a patch
   release, and back-merges the same way.
 - **Every new task starts in a new worktree** —
-  `git worktree add -b <branch>
-  .claude/worktrees/<name> origin/develop` (`origin/main` for a
+  `git worktree add -b <branch> .claude/worktrees/<name> origin/develop` (`origin/main` for a
   hotfix), then work only inside it. The main checkout stays on `develop` and is never edited; a
   resumed task continues in the worktree that already holds its branch (`git worktree list`).
-  `.claude/` is gitignored and invisible to `deno fmt`/`deno lint`; never put a worktree in `/tmp`
-  or beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
+  `.claude/` is gitignored and invisible to Prettier and ESLint; never put a worktree in `/tmp` or
+  beside the repository. Remove it with `git worktree remove` once its PR merges. AI_GUIDELINES
   §15.4 is canonical.
 - Branches: one `feat/[milestone]-[description]` per milestone — all of that milestone's work and
   fixes stay on it until it merges; `fix/[issue]-[description]` is only for defects in

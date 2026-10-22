@@ -69,9 +69,7 @@
       "enabled": true,
       "protocol": "saml",
       "frontchannelLogout": false,
-      "redirectUris": [
-        "http://localhost/auth/keycloak-saml/acs"
-      ],
+      "redirectUris": ["http://localhost/auth/keycloak-saml/acs"],
       "attributes": {
         "saml_assertion_consumer_url_post": "http://localhost/auth/keycloak-saml/acs",
         "saml.assertion.signature": "true",

@@ -33,13 +33,15 @@ function fakeRequest(): IRequest {
 
 describe('isWebSocketUpgradeRequest', () => {
   it('accepts the canonical upgrade headers', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'Upgrade' })))
-      .toBe(true);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'Upgrade' })),
+    ).toBe(true);
   });
 
   it('is case-insensitive and tolerates surrounding whitespace', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: '  WebSocket ', connection: 'UPGRADE' })))
-      .toBe(true);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: '  WebSocket ', connection: 'UPGRADE' })),
+    ).toBe(true);
   });
 
   it('accepts a comma-separated Connection list, as proxies send', () => {
@@ -55,8 +57,9 @@ describe('isWebSocketUpgradeRequest', () => {
   });
 
   it('rejects an Upgrade header naming another protocol', () => {
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'h2c', connection: 'Upgrade' })))
-      .toBe(false);
+    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'h2c', connection: 'Upgrade' }))).toBe(
+      false,
+    );
   });
 
   it('rejects a request with no Connection header', () => {
@@ -66,8 +69,9 @@ describe('isWebSocketUpgradeRequest', () => {
   it('rejects a Connection value that merely CONTAINS "upgrade"', () => {
     // The distinction a substring match would lose. `no-upgrade` is not the
     // `upgrade` token, and RFC 6455 §4.2.1 asks for the token.
-    expect(isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'no-upgrade' })))
-      .toBe(false);
+    expect(
+      isWebSocketUpgradeRequest(headers({ upgrade: 'websocket', connection: 'no-upgrade' })),
+    ).toBe(false);
   });
 });
 

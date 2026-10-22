@@ -115,9 +115,9 @@ export function createTerminalPrompter(
         const match = choices.find((choice) => choice.value === answer);
         if (match !== undefined) return { kind: 'answer', value: match.value };
         print(
-          `"${escapeName(answer)}" is not one of: ${
-            choices.map((choice) => choice.value).join(', ')
-          }.`,
+          `"${escapeName(answer)}" is not one of: ${choices
+            .map((choice) => choice.value)
+            .join(', ')}.`,
         );
       }
     },

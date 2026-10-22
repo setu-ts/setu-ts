@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
 import { describe, expect, it } from 'vitest';
 
 import type { HandlerResult, IRequestContext, ITenant } from '@setu-ts/common';
@@ -245,7 +245,7 @@ function fakeContext(opts: {
       headers: new Headers(),
       ...(opts.tenant !== undefined ? { tenant: opts.tenant } : {}),
       ...(opts.locale !== undefined ? { locale: opts.locale } : {}),
-      json: async <T = unknown>() => ({} as T),
+      json: async <T = unknown>() => ({}) as T,
       text: async () => '',
       bytes: async () => new Uint8Array(0),
     },

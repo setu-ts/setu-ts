@@ -54,9 +54,7 @@ export function validateConfig(
 
   // Require the parsed output to be a non-null, non-array object.
   if (parsed === null || parsed === undefined) {
-    throw new Error(
-      'Configuration validation failed: schema output must be a non-null object.',
-    );
+    throw new Error('Configuration validation failed: schema output must be a non-null object.');
   }
 
   if (Array.isArray(parsed)) {
@@ -67,9 +65,7 @@ export function validateConfig(
   }
 
   if (typeof parsed !== 'object') {
-    throw new Error(
-      'Configuration validation failed: schema output must be an object.',
-    );
+    throw new Error('Configuration validation failed: schema output must be an object.');
   }
 
   // Convert to a plain record (Zod returns the exact shape, which is an object).

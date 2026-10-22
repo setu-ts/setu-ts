@@ -138,8 +138,11 @@ won on this request. `Vary: Cookie` is correct and has a real cost: most CDNs tr
 effectively uncacheable. If you want edge caching, set `middleware: { cookie: false }` and let users
 choose through the query parameter or a path instead.
 
-`Content-Language` carries the final locale, written after the handler returns, unless the handler
-set its own. An error response gets none — its body is the error handler's.
+`Content-Language` carries the final locale after `next()` resolves, unless already set. A
+non-throwing refusal inside priority 45 carries it too: a guard's `401`/`403`, a route middleware
+calling `respondWithError`, or the catalogue route's `404`. A thrown error skips that write when
+`errorHandler` is outside priority 45, as its documentation instructs. A refusal before priority 45
+(such as the required-tenant rejection at 40) never enters locale middleware and carries none.
 
 ## Caching
 
@@ -272,6 +275,17 @@ store that. Set `cacheControl: 'public, max-age=3600'` when no session cookie re
 
 ## Formatting
 
+Numbers use `Intl.NumberFormat(locale)` defaults; dates use `Intl.DateTimeFormat(locale)` defaults
+plus the configured `timeZone`. There is no currency, percent, `dateStyle` or per-placeholder
+option. Format those values with `Intl` yourself and pass the resulting string:
+
+```typescript
+import { format } from '@setu-ts/localization-plugin/format';
+
+const price = new Intl.NumberFormat('de', { style: 'currency', currency: 'EUR' }).format(19.95);
+const label = format('Total: {price}', { price }, 'de');
+```
+
 `{name}` is replaced by `values[name]`: a number with `Intl.NumberFormat`, a `Date` with
 `Intl.DateTimeFormat`, a string verbatim, `null`/`undefined` as nothing. A placeholder with no value
 is left as written.
@@ -341,7 +355,7 @@ locale and the catalogue source. It is always `up`: after `register()` there is 
 | `FormatOptions`       | interface |
 | `FormatValues`        | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

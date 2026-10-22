@@ -497,6 +497,7 @@ ctx.decorators.register('MyDecorator', async (metadata, target) => {
 type RuntimeSignal = 'SIGTERM' | 'SIGINT';
 
 interface IRuntimeServices {
+  reportError?(record: Readonly<Record<string, unknown>>): void;
   platform(): RuntimePlatform;
   version(): string;
   hostname(): string;
@@ -517,6 +518,11 @@ interface IRuntimeServices {
   onSignal?(signal: RuntimeSignal, handler: () => void): void;
 }
 ```
+
+`reportError` is the optional last-resort error sink: one JSON line to stderr, or the platform log
+channel on Workers. Serialization and write failures never escape. The kernel uses it for unhandled
+errors and `errorHandler` for handled 5xx, only when no logger is registered; handled 4xx stays
+silent without a logger.
 
 `onSignal` registers a graceful-shutdown handler, so application code never needs a runtime's own
 signal API. It is **optional in two directions**, and both matter: Cloudflare Workers omits it

@@ -40,9 +40,10 @@ export function ResiliencePlugin(options?: ResiliencePluginOptions): IPlugin {
     priority: 500,
 
     register(ctx) {
-      const service = options === undefined
-        ? new ResilienceService(ctx.runtime)
-        : new ResilienceService(ctx.runtime, options);
+      const service =
+        options === undefined
+          ? new ResilienceService(ctx.runtime)
+          : new ResilienceService(ctx.runtime, options);
       ctx.services.register<IResilienceService>('resilience', service);
     },
   };

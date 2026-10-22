@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for DenoHttpAdapter — uses a fake DenoServeHost.
  *
@@ -12,6 +12,27 @@ import {
   isDenoHttpServerHandle,
 } from '../../src/adapters/deno/deno-http-adapter.ts';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Deno socket peer', () => {
+  it('reads info.remoteAddr.hostname and accepts a one-argument host', async () => {
+    const handle = new DenoHttpServerHandle({
+      serve: () => ({ shutdown: () => Promise.resolve() }),
+    });
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const fetch = handle.createFetchHandler();
+    for (const info of [undefined, {}, { remoteAddr: {} }]) {
+      await fetch(new Request('http://localhost/'), info);
+      expect(peer).toBeUndefined();
+    }
+    await fetch(new Request('http://localhost/'), { remoteAddr: { hostname: '::ffff:10.1.2.3' } });
+    expect(peer).toBe('10.1.2.3');
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host
@@ -57,7 +78,7 @@ describe('deno-http-adapter | setHandler/fetch', () => {
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -92,7 +113,7 @@ describe('deno-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -113,12 +134,43 @@ describe('deno-http-adapter | listen', () => {
 // ---------------------------------------------------------------------------
 
 describe('deno-http-adapter | close', () => {
+  it('waits for the 1000 ms grace while shutdown is pending and observes a later rejection', async () => {
+    const shutdown = Promise.withResolvers<void>();
+    const handle = new DenoHttpServerHandle({
+      serve: () => ({ shutdown: () => shutdown.promise }),
+    });
+    handle.server = { shutdown: () => shutdown.promise };
+    const adapter = new DenoHttpAdapter();
+    const started = performance.now();
+    await adapter.close(handle);
+    expect(performance.now() - started).toBeGreaterThanOrEqual(900);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(handle.server).toBe(null);
+    shutdown.reject(new Error('shutdown failed'));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+  });
+
+  it('returns promptly when shutdown rejects or resolves before the grace', async () => {
+    for (const rejects of [false, true]) {
+      const adapter = new DenoHttpAdapter({
+        serve: () => ({
+          shutdown: () =>
+            rejects ? Promise.reject(new Error('shutdown failed')) : Promise.resolve(),
+        }),
+      });
+      const handle = await adapter.listen(3000);
+      const started = performance.now();
+      await adapter.close(handle);
+      expect(performance.now() - started).toBeLessThan(500);
+    }
+  });
+
   it('calls server.shutdown on valid handle', async () => {
     let shutdownCalled = false;
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -128,7 +180,7 @@ describe('deno-http-adapter | close', () => {
     const handle = await adapter.listen(3000);
 
     (handle as DenoHttpServerHandle).server = {
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       shutdown: async () => {
         shutdownCalled = true;
       },
@@ -142,7 +194,7 @@ describe('deno-http-adapter | close', () => {
     const { host } = createFakeHost();
     const adapter = new DenoHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),

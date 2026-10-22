@@ -123,10 +123,7 @@ describe('GraphQL subscriptions integration', () => {
         method: 'POST',
         url: '/graphql',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify([
-          { query: '{ hello }' },
-          { query: '{ hello }' },
-        ]),
+        body: JSON.stringify([{ query: '{ hello }' }, { query: '{ hello }' }]),
       });
 
       expect(res.statusCode).toBe(200);

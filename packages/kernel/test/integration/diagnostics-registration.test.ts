@@ -42,8 +42,8 @@ describe('diagnostics registration projection', () => {
     expect(snapshot.edges.some((edge) => edge.kind === 'requires')).toBe(true);
     expect(snapshot.edges.some((edge) => edge.kind === 'consumes')).toBe(true);
     expect(snapshot.edges.some((edge) => edge.kind === 'owns')).toBe(true);
-    const storeCapability = snapshot.nodes.find((node) =>
-      node.label === 'store' && node.kind === 'capability'
+    const storeCapability = snapshot.nodes.find(
+      (node) => node.label === 'store' && node.kind === 'capability',
     );
     expect(storeCapability?.registered).toBe(true);
     // An unsatisfied `consumes` still projects its declared edge.
@@ -82,8 +82,8 @@ describe('diagnostics registration projection', () => {
     const route = snapshot.nodes.find((node) => node.label === '/users');
     expect(route?.method).toBe('GET');
     // Route middleware stages carry only id and position — no function names.
-    const stages = snapshot.nodes.filter((node) =>
-      node.kind === 'middleware' && node.position !== undefined
+    const stages = snapshot.nodes.filter(
+      (node) => node.kind === 'middleware' && node.position !== undefined,
     );
     expect(stages.length).toBe(1);
     expect(stages[0]!.label).toBeUndefined();
@@ -112,9 +112,11 @@ describe('diagnostics registration projection', () => {
     // exercises the single-candidate fast path.
     await app.inject({ method: 'GET', url: '/things/7' });
     await app.inject({ method: 'GET', url: '/other' });
-    const handlerEvents = app.diagnostics!.read(0, 128).events.filter(
-      (event) => event.kind === 'handler' && event.stage === 'handler' && event.nodeId !== null,
-    );
+    const handlerEvents = app
+      .diagnostics!.read(0, 128)
+      .events.filter(
+        (event) => event.kind === 'handler' && event.stage === 'handler' && event.nodeId !== null,
+      );
     expect(handlerEvents.length).toBe(2);
     // Each request named the route node its match actually selected.
     expect(handlerEvents[0]!.nodeId).not.toBe(handlerEvents[1]!.nodeId);
@@ -244,15 +246,18 @@ describe('diagnostics registration — composition time', () => {
     const routeIds = new Set(
       snapshot.nodes.filter((node) => node.kind === 'route').map((node) => node.id),
     );
-    const ownedRoutes = snapshot.edges.filter((edge) =>
-      edge.kind === 'owns' && routeIds.has(edge.to)
+    const ownedRoutes = snapshot.edges.filter(
+      (edge) => edge.kind === 'owns' && routeIds.has(edge.to),
     );
     expect(ownedRoutes.length).toEqual(1);
     const owned = snapshot.nodes.find((node) => node.id === ownedRoutes[0].to);
     expect(owned?.label).toEqual('/from-plugin');
 
     // And every one of them still serves.
-    for (const [path, body] of [['/', '{"hello":1}'], ['/generated', '{"gen":1}']] as const) {
+    for (const [path, body] of [
+      ['/', '{"hello":1}'],
+      ['/generated', '{"gen":1}'],
+    ] as const) {
       const response = await app.inject({ method: 'GET', url: `http://localhost${path}` });
       expect(response.statusCode).toEqual(200);
       expect(response.body).toEqual(body);

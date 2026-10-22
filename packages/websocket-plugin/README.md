@@ -25,11 +25,16 @@ the cost of all of that.
 | Deno               | `Deno.upgradeWebSocket`                           | the `fetch` path   | none             |
 | Cloudflare Workers | `new WebSocketPair()` + a 101 response            | the `fetch` path   | none             |
 | Bun                | `server.upgrade` + serve-time `websocket`         | `listen()` only    | none             |
-| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `npm:ws@^8`      |
+| Node               | the raw `upgrade` event on the `node:http` server | `listen()` only    | `ws`             |
 
 On Node, install `ws` (`npm install ws` / `deno add npm:ws`). It is an **optional** dependency
 loaded lazily on the first accepted upgrade, so a plain HTTP application never pulls it in; if it is
 missing when an upgrade arrives you get a clear error naming the install command.
+`setu add websocket` writes that peer into `package.json` on a Node project, and re-running it
+repairs a project where it is missing. When `RuntimePlugin` registers the application, a failed Node
+handshake is also reported through `HttpAdapterOptions.reportError` — once per distinct message,
+never once per upgrade — so a missing `ws` is visible in the log instead of only as a refused
+socket.
 
 Because Bun's `server.upgrade` needs the `Server` instance and its handlers must be supplied at
 `Bun.serve()` time, and Node's upgrades never touch `fetch` at all, WebSockets on those two runtimes
@@ -63,23 +68,25 @@ export default createApplication({
     WebSocketPlugin({
       heartbeatMs: 30_000,
       idleTimeoutMs: 90_000,
-      routes: [{
-        path: '/ws/chat',
-        handlers: {
-          onOpen: (conn, { query }) => {
-            conn.data.set('room', query.room ?? 'lobby');
+      routes: [
+        {
+          path: '/ws/chat',
+          handlers: {
+            onOpen: (conn, { query }) => {
+              conn.data.set('room', query.room ?? 'lobby');
+            },
+            onMessage: (conn, data) => {
+              const room = conn.data.get('room');
+              if (typeof room === 'string') {
+                // Resolve the service from a factory entry when you need it here.
+                conn.send(data);
+              }
+            },
           },
-          onMessage: (conn, data) => {
-            const room = conn.data.get('room');
-            if (typeof room === 'string') {
-              // Resolve the service from a factory entry when you need it here.
-              conn.send(data);
-            }
-          },
+          // Refuse the upgrade before the handshake, for this route only.
+          options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
         },
-        // Refuse the upgrade before the handshake, for this route only.
-        options: { guards: [({ headers }) => headers.has('authorization') || { status: 401 }] },
-      }],
+      ],
     }),
   ],
 });
@@ -150,10 +157,7 @@ import { WebSocketPlugin } from '@setu-ts/websocket-plugin';
 import { CAPABILITIES, type IWebSocketService } from '@setu-ts/common';
 
 const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 }),
-  ],
+  plugins: [RuntimePlugin(), WebSocketPlugin({ heartbeatMs: 30_000, idleTimeoutMs: 90_000 })],
 });
 await app.start({ port: 3000 });
 
@@ -302,6 +306,7 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
     return ctx.response.json({ present: ws.peek(`board:${board}`)?.size ?? 0 });
   });
   ```
+
 - **Rooms are in-process by default.** `broadcast` skips closed members and drops them, and a room
   that empties is discarded, so a churning connection set does not grow memory. Behind more than one
   replica, register a backplane — see [Scaling beyond one replica](#scaling-beyond-one-replica).
@@ -430,7 +435,7 @@ Registers a `websocket` health indicator reporting `{ available, connections, ro
 | `WebSocketUpgradeRouter`     | type      |
 | `WsRouteMatch`               | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

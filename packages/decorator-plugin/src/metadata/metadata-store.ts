@@ -68,6 +68,11 @@ export interface RouteSchemaMetadata {
   query?: unknown;
   /** Path parameter schema. */
   params?: unknown;
+  /**
+   * `true` when `@ValidateBody(schema, { forms: true })` opted the body
+   * validator into urlencoded and multipart bodies; absent otherwise.
+   */
+  bodyForms?: boolean;
 }
 
 /**
@@ -165,30 +170,30 @@ export interface ModuleMetadata {
 /** Metadata captured by a non-HTTP ingress decorator. */
 export type IngressMetadata =
   | {
-    readonly kind: 'queue';
-    readonly handler: string;
-    readonly name: string;
-    readonly options?: ProcessOptions;
-  }
+      readonly kind: 'queue';
+      readonly handler: string;
+      readonly name: string;
+      readonly options?: ProcessOptions;
+    }
   | {
-    readonly kind: 'scheduler-cron';
-    readonly handler: string;
-    readonly expression: string;
-    readonly options?: ScheduleOptions;
-  }
+      readonly kind: 'scheduler-cron';
+      readonly handler: string;
+      readonly expression: string;
+      readonly options?: ScheduleOptions;
+    }
   | {
-    readonly kind: 'scheduler-every';
-    readonly handler: string;
-    readonly intervalMs: number;
-    readonly options?: ScheduleOptions;
-  }
+      readonly kind: 'scheduler-every';
+      readonly handler: string;
+      readonly intervalMs: number;
+      readonly options?: ScheduleOptions;
+    }
   | { readonly kind: 'event'; readonly handler: string; readonly type: string }
   | {
-    readonly kind: 'messaging';
-    readonly handler: string;
-    readonly topic: string;
-    readonly options?: SubscribeOptions;
-  }
+      readonly kind: 'messaging';
+      readonly handler: string;
+      readonly topic: string;
+      readonly options?: SubscribeOptions;
+    }
   | { readonly kind: 'gateway'; readonly path: string }
   | { readonly kind: 'websocket-open'; readonly handler: string }
   | { readonly kind: 'websocket-message'; readonly handler: string }
@@ -196,15 +201,15 @@ export type IngressMetadata =
   | { readonly kind: 'command'; readonly handler: string; readonly type: string }
   | { readonly kind: 'query'; readonly handler: string; readonly type: string }
   | {
-    readonly kind: 'ingress-behaviors';
-    readonly handler: string;
-    readonly behaviors: readonly IIngressBehavior[];
-  }
+      readonly kind: 'ingress-behaviors';
+      readonly handler: string;
+      readonly behaviors: readonly IIngressBehavior[];
+    }
   | {
-    readonly kind: 'pipeline-behaviors';
-    readonly handler: string;
-    readonly behaviors: readonly IPipelineBehavior[];
-  };
+      readonly kind: 'pipeline-behaviors';
+      readonly handler: string;
+      readonly behaviors: readonly IPipelineBehavior[];
+    };
 
 /**
  * One response header declared by `@ResponseHeader(name, value)`.
@@ -507,28 +512,28 @@ export class MetadataStore implements IMetadataStore {
       ...(partial.version !== undefined
         ? { version: partial.version }
         : existing.version !== undefined
-        ? { version: existing.version }
-        : {}),
+          ? { version: existing.version }
+          : {}),
       ...(partial.roles !== undefined
         ? { roles: partial.roles }
         : existing.roles !== undefined
-        ? { roles: existing.roles }
-        : {}),
+          ? { roles: existing.roles }
+          : {}),
       ...(partial.permissions !== undefined
         ? { permissions: partial.permissions }
         : existing.permissions !== undefined
-        ? { permissions: existing.permissions }
-        : {}),
+          ? { permissions: existing.permissions }
+          : {}),
       ...(partial.scopedRoles !== undefined
         ? { scopedRoles: partial.scopedRoles }
         : existing.scopedRoles !== undefined
-        ? { scopedRoles: existing.scopedRoles }
-        : {}),
+          ? { scopedRoles: existing.scopedRoles }
+          : {}),
       ...(partial.scopedPermissions !== undefined
         ? { scopedPermissions: partial.scopedPermissions }
         : existing.scopedPermissions !== undefined
-        ? { scopedPermissions: existing.scopedPermissions }
-        : {}),
+          ? { scopedPermissions: existing.scopedPermissions }
+          : {}),
     };
     this._controllers.set(target, merged);
   }
@@ -794,12 +799,7 @@ export class MetadataStore implements IMetadataStore {
    * @param method - The HTTP method
    * @param path - The route path
    */
-  addRouteBinding(
-    target: Constructor,
-    handler: string,
-    method: HttpMethod,
-    path: string,
-  ): void {
+  addRouteBinding(target: Constructor, handler: string, method: HttpMethod, path: string): void {
     const meta = this.getOrCreateMethod(target, handler);
     meta.bindings.push({ method, path });
   }
@@ -812,11 +812,7 @@ export class MetadataStore implements IMetadataStore {
    * @param handler - The method name
    * @param mutate - A function that mutates the accumulator
    */
-  mutateMethod(
-    target: Constructor,
-    handler: string,
-    mutate: (meta: MethodMeta) => void,
-  ): void {
+  mutateMethod(target: Constructor, handler: string, mutate: (meta: MethodMeta) => void): void {
     const meta = this.getOrCreateMethod(target, handler);
     mutate(meta);
   }

@@ -32,6 +32,37 @@
  * @module
  */
 import { withHttpStatusHint } from '@setu-ts/common';
+import { renderDiagnosticName } from './errors/diagnostic-name.ts';
+
+/**
+ * A write names a field absent from the entity's schema. No write was sent.
+ * Diagnostics name the entity and field; the HTTP detail discloses neither.
+ *
+ * @example
+ * ```typescript
+ * if (error instanceof UnknownPayloadFieldError) {
+ *   // Pick the resource's known fields before submitting the payload again.
+ * }
+ * ```
+ * @since 0.10.0
+ */
+export class UnknownPayloadFieldError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'UnknownPayloadFieldError';
+
+  /**
+   * @param entity - The addressed entity
+   * @param field - The unknown payload field
+   */
+  constructor(entity: string, field: string) {
+    super(`Entity '${entity}' has no payload field ${renderDiagnosticName(field)}.`);
+    withHttpStatusHint(this, {
+      status: 400,
+      title: 'Bad Request',
+      detail: 'The request names a field this resource does not have.',
+    });
+  }
+}
 
 /**
  * The status every caller-safe refusal in this module is answered with.
@@ -52,12 +83,14 @@ export class UnsupportedIsolationLevelError extends Error {
   override readonly name = 'UnsupportedIsolationLevelError';
 
   /** Creates a named, caller-safe isolation refusal. */
-  constructor(readonly adapter: string, readonly level: string) {
+  constructor(
+    readonly adapter: string,
+    readonly level: string,
+  ) {
     super(`The '${adapter}' database adapter does not support '${level}' transaction isolation.`);
     withHttpStatusHint(this, {
       ...NOT_IMPLEMENTED,
-      detail:
-        `Transaction isolation '${level}' is not supported by the '${adapter}' database adapter.`,
+      detail: `Transaction isolation '${level}' is not supported by the '${adapter}' database adapter.`,
     });
   }
 }
@@ -70,7 +103,7 @@ export class UnsupportedIsolationLevelError extends Error {
  * This class is shared by two kinds of refusal, which is why the brand is not
  * unconditional (M89b code review, Qodo finding 3). A caller-caused refusal
  * describes the query or payload the application just sent — its sort, its
- * cursor, its key, a value the backend cannot represent — and `501` is honest:
+ * pagination capability, its key, a value the backend cannot represent — and `501` is honest:
  * the backend does not implement what was asked for, permanently.
  *
  * The values deliberately absent describe the **deployment**, not the request:
@@ -172,9 +205,10 @@ export class UnsupportedFilterOperatorError extends Error {
     this.connector = connector;
     withHttpStatusHint(this, {
       ...NOT_IMPLEMENTED,
-      detail: connector === undefined
-        ? `Filter operator '${operator}' is not supported by the active database connector.`
-        : `Filter operator '${operator}' is not supported on the '${connector}' connector.`,
+      detail:
+        connector === undefined
+          ? `Filter operator '${operator}' is not supported by the active database connector.`
+          : `Filter operator '${operator}' is not supported on the '${connector}' connector.`,
     });
   }
 }
@@ -575,6 +609,37 @@ export class DatabaseUnavailableError extends Error {
     withHttpStatusHint(this, {
       ...UNAVAILABLE,
       detail: 'The database is temporarily unavailable. The request was not applied.',
+    });
+  }
+}
+
+/**
+ * The database did not answer within the driver's call bound (`504`).
+ * The outcome of a write is **unknown**: the statement may have run.
+ * Any retry must be idempotent. The scrubbed driver error is retained as cause.
+ *
+ * @example
+ * ```typescript
+ * if (error instanceof DatabaseTimeoutError) {
+ *   // Reconcile the write's outcome before retrying without an idempotency key.
+ * }
+ * ```
+ * @since 0.10.0
+ */
+export class DatabaseTimeoutError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'DatabaseTimeoutError';
+
+  /**
+   * @param message - The diagnostic, never served
+   * @param options - The scrubbed driver error as cause
+   */
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    withHttpStatusHint(this, {
+      status: 504,
+      title: 'Gateway Timeout',
+      detail: 'The database did not answer in time.',
     });
   }
 }

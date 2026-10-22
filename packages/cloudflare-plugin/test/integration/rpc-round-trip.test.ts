@@ -65,8 +65,8 @@ async function deliver(
   consumer: WorkersBroker,
   producer: FakeQueueProducer,
 ): Promise<readonly FakeQueueMessage[]> {
-  const messages = producer.sends.map((send, index) =>
-    new FakeQueueMessage(`m${index}`, send.body)
+  const messages = producer.sends.map(
+    (send, index) => new FakeQueueMessage(`m${index}`, send.body),
   );
   (producer.sends as unknown[]).length = 0;
   await consumer.dispatch(new FakeQueueBatch('messages', messages));
@@ -202,13 +202,16 @@ describe('brokered request-reply over Cloudflare Queues and a Durable Object', (
     const reply = caller.request<number, number>('sum', 1);
     await flush();
 
-    const messages = producer.sends.map((send, index) =>
-      new FakeQueueMessage(`m${index}`, send.body)
+    const messages = producer.sends.map(
+      (send, index) => new FakeQueueMessage(`m${index}`, send.body),
     );
     // The same message delivered twice — the platform's at-least-once contract.
     await consumer.dispatch(new FakeQueueBatch('messages', messages));
     await consumer.dispatch(
-      new FakeQueueBatch('messages', messages.map((m) => new FakeQueueMessage(m.id, m.body))),
+      new FakeQueueBatch(
+        'messages',
+        messages.map((m) => new FakeQueueMessage(m.id, m.body)),
+      ),
     );
 
     expect(await reply).toBe(2);

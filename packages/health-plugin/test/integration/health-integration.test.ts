@@ -40,7 +40,7 @@ function contributingPlugin(name: string, status: HealthStatus): IPlugin {
 
 async function boot(...contributors: IPlugin[]) {
   const app = createApplication({
-    plugins: [RuntimePlugin(), HealthPlugin(), ...contributors],
+    plugins: [RuntimePlugin(), HealthPlugin({ details: true }), ...contributors],
   });
   await app.start();
   return app;
@@ -213,16 +213,19 @@ describe('HealthPlugin integration (through the real kernel)', () => {
       const source = app.services.get<IHealthDiagnosticsSource>(CAPABILITIES.HEALTH_DIAGNOSTICS);
       const verdicts = () =>
         Object.fromEntries(
-          source.snapshot('instance').observations.map((o) => [
-            o.indicatorAlias,
-            o.state === 'reported' ? `reported:${o.status}` : o.state,
-          ]),
+          source
+            .snapshot('instance')
+            .observations.map((o) => [
+              o.indicatorAlias,
+              o.state === 'reported' ? `reported:${o.status}` : o.state,
+            ]),
         );
       // `onBootstrap` starts one scheduled cycle immediately.
       await new Promise((resolve) => setTimeout(resolve, 50));
       const scheduled = verdicts();
-      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled'))
-        .toBe(true);
+      expect(source.snapshot('instance').observations.every((o) => o.origin === 'scheduled')).toBe(
+        true,
+      );
       const ready = await app.inject({ method: 'GET', url: 'http://localhost/ready' });
       expect(ready.statusCode).toBe(503);
       expect(scheduled).toEqual(expected);
@@ -246,4 +249,23 @@ describe('HealthPlugin integration (through the real kernel)', () => {
       await app.stop();
     }
   });
+});
+
+it('pins degraded as /ready 503 and /health 200', async () => {
+  const app = await boot(contributingPlugin('replica', 'degraded'));
+  try {
+    for (const [url, status] of [
+      ['/ready', 503],
+      ['/health', 200],
+    ] as const) {
+      const result = await app.inject({ method: 'GET', url });
+      expect(result.statusCode).toBe(status);
+      expect(result.json<HealthReport>().checks.replica).toMatchObject({
+        status: 'degraded',
+        data: { probe: 'replica' },
+      });
+    }
+  } finally {
+    await app.stop();
+  }
 });

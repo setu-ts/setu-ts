@@ -17,7 +17,9 @@
  * @module
  */
 
-/** Test-file roots, matching what `deno task test` passed positionally. */
+import { readdir, readFile } from 'node:fs/promises';
+
+/** Package and root test-file roots used by the suite classifier. */
 export const ROOTS = ['packages', 'test'] as const;
 
 /**
@@ -73,8 +75,9 @@ export function isolationReason(path: string, source: string): string | null {
   // resource, which surfaces as a timeout in whichever suite is least patient.
   // `Deno.Command` also covers every suite that drives `docker`.
   if (
-    /Deno\.Command|node:child_process|\bspawnProcess\(|\brunProcess\(|\brun\(process\.execPath/
-      .test(source)
+    /Deno\.Command|node:child_process|\bspawnProcess\(|\brunProcess\(|\brun\(process\.execPath/.test(
+      source,
+    )
   ) {
     return 'spawns a subprocess';
   }
@@ -114,8 +117,8 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'coverage', 'build', 'dist']);
  * and the difference is load-bearing in both directions. `git ls-files` names
  * files that may not EXIST — an unstaged `rm` or `mv` leaves an index entry
  * whose read throws, and since this runs before the suite it took down
- * `deno task test` entirely with a bare `NotFound`. And it omits UNTRACKED
- * files, which `deno test` still enumerates: a new suite written but not yet
+ * the legacy Deno runner entirely with a bare `NotFound`. And it omits UNTRACKED
+ * files, which the filesystem-based runner still enumerates: a new suite written but not yet
  * staged was therefore classified by neither phase and ran in parallel
  * regardless of what it touched, which also made this module's own claim that a
  * suite is "isolated the moment it is written" false until it was staged.
@@ -128,12 +131,12 @@ const SKIP_DIRECTORIES = new Set(['node_modules', 'coverage', 'build', 'dist']);
 export async function discoverTestFiles(): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (directory: string): Promise<void> => {
-    for await (const entry of Deno.readDir(directory)) {
+    for await (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.name.startsWith('.') || SKIP_DIRECTORIES.has(entry.name)) continue;
       const path = `${directory}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         await walk(path);
-      } else if (entry.isFile && TEST_FILE.test(entry.name)) {
+      } else if (entry.isFile() && TEST_FILE.test(entry.name)) {
         found.push(path);
       }
     }
@@ -151,12 +154,12 @@ export async function discoverTestFiles(): Promise<readonly string[]> {
  * @returns The partition
  */
 export async function partitionTests(files?: readonly string[]): Promise<TestPartition> {
-  const paths = files ?? await discoverTestFiles();
+  const paths = files ?? (await discoverTestFiles());
   const isolated: string[] = [];
   const hermetic: string[] = [];
   const reasons = new Map<string, string>();
   for (const path of paths) {
-    const reason = isolationReason(path, await Deno.readTextFile(path));
+    const reason = isolationReason(path, await readFile(path, 'utf8'));
     if (reason === null) {
       hermetic.push(path);
     } else {

@@ -80,9 +80,13 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
   it('publish → subscribe round trip over real AMQP', async () => {
     await withBroker(async (broker) => {
       const received: { id: number }[] = [];
-      await broker.subscribe<{ id: number }>(ROUNDTRIP_TOPIC, (message) => {
-        received.push(message);
-      }, { queue: SUBSCRIPTION });
+      await broker.subscribe<{ id: number }>(
+        ROUNDTRIP_TOPIC,
+        (message) => {
+          received.push(message);
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       await broker.publish(ROUNDTRIP_TOPIC, { id: 42 });
       await until(() => received.length > 0);
@@ -97,20 +101,19 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
     // proof of the adapter read the fakes cannot decide.
     await withBroker(async (broker) => {
       const seen: MessageMetadata[] = [];
-      await broker.subscribe(ROUNDTRIP_TOPIC, (_message, metadata) => {
-        seen.push(metadata);
-      }, { queue: SUBSCRIPTION });
+      await broker.subscribe(
+        ROUNDTRIP_TOPIC,
+        (_message, metadata) => {
+          seen.push(metadata);
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       await broker.publish(ROUNDTRIP_TOPIC, { id: 1 });
       await until(() => seen.length > 0);
 
       const metadata = seen[0]!;
-      expect(Object.keys(metadata).sort()).toEqual([
-        'headers',
-        'messageId',
-        'timestamp',
-        'topic',
-      ]);
+      expect(Object.keys(metadata).sort()).toEqual(['headers', 'messageId', 'timestamp', 'topic']);
       expect((metadata.messageId ?? '').length).toBeGreaterThan(0);
       expect(metadata.timestamp).toBeInstanceOf(Date);
       expect(metadata.timestamp!.getTime()).not.toBeNaN();
@@ -120,10 +123,14 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
   it('abandons a message whose handler throws, and the broker redelivers it', async () => {
     await withBroker(async (broker) => {
       let deliveries = 0;
-      await broker.subscribe<{ id: number }>(ABANDON_TOPIC, () => {
-        deliveries++;
-        if (deliveries === 1) throw new Error('first delivery fails');
-      }, { queue: SUBSCRIPTION });
+      await broker.subscribe<{ id: number }>(
+        ABANDON_TOPIC,
+        () => {
+          deliveries++;
+          if (deliveries === 1) throw new Error('first delivery fails');
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       await broker.publish(ABANDON_TOPIC, { id: 7 });
       // An abandon releases the lock immediately, so a second delivery proves
@@ -137,9 +144,13 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
   it('closing a subscription releases its receiver against a live connection', async () => {
     await withBroker(async (broker) => {
       const received: { id: number }[] = [];
-      const subscription = await broker.subscribe<{ id: number }>(CLOSE_TOPIC, (message) => {
-        received.push(message);
-      }, { queue: SUBSCRIPTION });
+      const subscription = await broker.subscribe<{ id: number }>(
+        CLOSE_TOPIC,
+        (message) => {
+          received.push(message);
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       await broker.publish(CLOSE_TOPIC, { id: 1 });
       await until(() => received.length > 0);
@@ -152,9 +163,13 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
       // Re-subscribe on the SAME subscription: if the released link were left
       // wedged, this second receiver would never deliver.
       const second: { id: number }[] = [];
-      await broker.subscribe<{ id: number }>(CLOSE_TOPIC, (message) => {
-        second.push(message);
-      }, { queue: SUBSCRIPTION });
+      await broker.subscribe<{ id: number }>(
+        CLOSE_TOPIC,
+        (message) => {
+          second.push(message);
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       await broker.publish(CLOSE_TOPIC, { id: 2 });
       await until(() => second.length > 0);
@@ -194,9 +209,13 @@ describe('ServiceBusBroker — Service Bus emulator E2E', { skip: !connectionStr
     // process. A unique id per run keeps a rerun inside the window honest.
     await withBroker(async (broker) => {
       const received: { id: string }[] = [];
-      await broker.subscribe<{ id: string }>(DEDUP_TOPIC, (message) => {
-        received.push(message);
-      }, { queue: SUBSCRIPTION });
+      await broker.subscribe<{ id: string }>(
+        DEDUP_TOPIC,
+        (message) => {
+          received.push(message);
+        },
+        { queue: SUBSCRIPTION },
+      );
 
       const suffix = crypto.randomUUID().slice(0, 8);
       const first = `dedup-${suffix}`;

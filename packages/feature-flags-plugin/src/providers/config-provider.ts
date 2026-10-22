@@ -24,7 +24,7 @@ import { evaluateFlag } from '../evaluation/flag-evaluator.ts';
  * @since 0.1.0
  */
 export class ConfigProvider implements FlagProvider {
-  readonly type: 'config' = 'config';
+  readonly type = 'config' as const;
 
   private readonly _flags: Readonly<Record<string, FlagDefinition>>;
 

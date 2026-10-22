@@ -247,11 +247,7 @@ async function json(response: Response): Promise<Record<string, unknown>> {
 }
 
 /** The 6-digit code `secretText` produces for `step`, on the app's clock. */
-async function codeForStep(
-  harness: MfaHarness,
-  secretText: string,
-  step: number,
-): Promise<string> {
+async function codeForStep(harness: MfaHarness, secretText: string, step: number): Promise<string> {
   return (await computeTotpCode(harness.runtime.subtle, decodeBase32(secretText), step)).slice(-6);
 }
 
@@ -265,9 +261,7 @@ async function enrolConfirmAndCodes(
   harness: MfaHarness,
   jar: CookieJar,
 ): Promise<{ secret: string; codes: string[] }> {
-  const login = await json(
-    await jar.fetch(harness.app, '/password-login', { method: 'POST' }),
-  );
+  const login = await json(await jar.fetch(harness.app, '/password-login', { method: 'POST' }));
   expect(login.outcome).toBe('second-factor-required');
   const enrol = await json(await jar.fetch(harness.app, '/mfa/enrol', { method: 'POST' }));
   const secret = enrol.secret as string;
@@ -283,11 +277,7 @@ async function enrolConfirmAndCodes(
   return { secret, codes: confirm.codes as string[] };
 }
 
-async function complete(
-  harness: MfaHarness,
-  jar: CookieJar,
-  code: string,
-): Promise<unknown> {
+async function complete(harness: MfaHarness, jar: CookieJar, code: string): Promise<unknown> {
   const response = await jar.fetch(harness.app, '/mfa/complete', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -311,9 +301,9 @@ describe('auth-session MFA', () => {
     const secret = await enrolAndConfirm(harness, jar);
     const confirmedAt = totpCounter(harness.runtime.now());
     await jar.fetch(harness.app, '/password-login', { method: 'POST' });
-    expect(
-      await complete(harness, jar, await codeForStep(harness, secret, confirmedAt + 1)),
-    ).toBe('signed-in');
+    expect(await complete(harness, jar, await codeForStep(harness, secret, confirmedAt + 1))).toBe(
+      'signed-in',
+    );
     expect((await jar.fetch(harness.app, '/protected')).status).toBe(200);
   });
 

@@ -7,14 +7,17 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { mkdir, mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   auditPackageSources,
   findComputedImports,
   findPrefixedSpecifiers,
+  findUnguardedImports,
   scanImportEdges,
 } from '../../scripts/npm-specifier-audit.ts';
+import ts from 'typescript';
 
 describe('findComputedImports — literal arguments are accepted', () => {
   it('accepts a single-quoted literal', () => {
@@ -22,9 +25,9 @@ describe('findComputedImports — literal arguments are accepted', () => {
   });
 
   it('accepts a bare npm: literal (the @connectrpc/connect shape)', () => {
-    expect(
-      findComputedImports("const m = await import('npm:@connectrpc/connect');"),
-    ).toHaveLength(0);
+    expect(findComputedImports("const m = await import('npm:@connectrpc/connect');")).toHaveLength(
+      0,
+    );
   });
 
   it('accepts a double-quoted literal', () => {
@@ -163,11 +166,11 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
    * walker silently skipped while still reporting a healthy file count.
    */
   async function createTree(): Promise<string> {
-    const root = await Deno.makeTempDir({ prefix: 'setu-audit-' });
-    await Deno.mkdir(`${root}/flat/src`, { recursive: true });
-    await Deno.writeTextFile(`${root}/flat/src/a.ts`, "await import('npm:ok@1');\n");
-    await Deno.mkdir(`${root}/group/nested/src/deep`, { recursive: true });
-    await Deno.writeTextFile(`${root}/group/nested/src/deep/b.ts`, 'export const b = 1;\n');
+    const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
+    await mkdir(`${root}/flat/src`, { recursive: true });
+    await writeFile(`${root}/flat/src/a.ts`, "await import('npm:ok@1');\n");
+    await mkdir(`${root}/group/nested/src/deep`, { recursive: true });
+    await writeFile(`${root}/group/nested/src/deep/b.ts`, 'export const b = 1;\n');
     return root;
   }
 
@@ -180,14 +183,14 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.filesVisited).toBe(2);
       expect(result.findings).toEqual([]);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('refuses a computed import in a deeply nested src tree', async () => {
     const root = await createTree();
     try {
-      await Deno.writeTextFile(
+      await writeFile(
         `${root}/group/nested/src/deep/b.ts`,
         'const load = (spec: string) => import(spec);\nexport const l = load;\n',
       );
@@ -195,15 +198,15 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.findings).toHaveLength(1);
       expect(result.findings[0].file).toBe(`${root}/group/nested/src/deep/b.ts`);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('never audits a vendored node_modules tree', async () => {
     const root = await createTree();
     try {
-      await Deno.mkdir(`${root}/flat/node_modules/dep/src`, { recursive: true });
-      await Deno.writeTextFile(
+      await mkdir(`${root}/flat/node_modules/dep/src`, { recursive: true });
+      await writeFile(
         `${root}/flat/node_modules/dep/src/vendor.ts`,
         'const load = (spec: string) => import(spec);\nexport const l = load;\n',
       );
@@ -214,7 +217,7 @@ describe('auditPackageSources — which src trees the walker reaches', () => {
       expect(result.filesVisited).toBe(2);
       expect(result.findings).toEqual([]);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
@@ -261,8 +264,9 @@ describe('findPrefixedSpecifiers — npm:/jsr: import specifiers are refused (M1
   });
 
   it('accepts the bare form every rewritten site now uses', () => {
-    expect(findPrefixedSpecifiers("const m = await import('pino');\nimport { Hono } from 'hono';"))
-      .toEqual([]);
+    expect(
+      findPrefixedSpecifiers("const m = await import('pino');\nimport { Hono } from 'hono';"),
+    ).toEqual([]);
   });
 
   it('exempts template text emitted into a generated project', () => {
@@ -324,12 +328,158 @@ describe('scanImportEdges — import positions and modes', () => {
     // The shape that made service-bus-broker.ts lose its import(): a template
     // literal followed by a real import must still yield that import.
     const source = "const t = `x`;\nconst m = await import('@azure/service-bus');";
-    expect(scanImportEdges(source, 'f.ts').map((e) => e.specifier)).toEqual([
-      '@azure/service-bus',
-    ]);
+    expect(scanImportEdges(source, 'f.ts').map((e) => e.specifier)).toEqual(['@azure/service-bus']);
   });
 
   it('yields no edge for an interpolated template specifier', () => {
     expect(scanImportEdges('const m = await import(`${base}/x`);', 'f.ts')).toEqual([]);
+  });
+});
+
+// ── M113d §3.2 — the guarded-import rule ─────────────────────────────────────
+
+/** A function whose `try` block holds `body`, with a catch that wraps the error. */
+function inTry(body: string): string {
+  return [
+    'async function load(flag?: boolean) {',
+    '  try {',
+    `    ${body}`,
+    '  } catch (error) {',
+    "    throw new Error('unavailable', { cause: error });",
+    '  }',
+    '}',
+  ].join('\n');
+}
+
+// Every case below mirrors an esbuild 0.28.2 bundle of the same body with the
+// package absent: the accepted shapes bundled, the refused ones failed with
+// "Could not resolve" (measured 2026-10-17, M113d §3.2).
+describe('findUnguardedImports — an AWAITED import in a same-function try guards', () => {
+  it.each([
+    ['an assignment', "let mod; mod = await import('ioredis'); return mod;"],
+    ['a return', "return await import('@aws-sdk/client-dynamodb');"],
+    ['a cast over the awaited import', "return (await import('mongodb')) as unknown as { a: 1 };"],
+    ['an assertion inside the await', "return await (import('mongodb') as Promise<unknown>);"],
+    ['a call argument', "return String(await import('ioredis'));"],
+    ['an object property', "return { mod: await import('ioredis') };"],
+    ['an array element', "return [await import('ioredis')];"],
+    ['a conditional branch', "return flag ? await import('ioredis') : null;"],
+  ])('accepts the import awaited in %s', (_name, body) => {
+    expect(findUnguardedImports(inTry(body))).toEqual([]);
+  });
+
+  it('accepts an async arrow whose body is the try', () => {
+    const source = [
+      'const load = async () => {',
+      '  try {',
+      "    return await import('@aws-sdk/client-dynamodb');",
+      '  } catch (error) {',
+      "    throw new Error('unavailable', { cause: error });",
+      '  }',
+      '};',
+    ].join('\n');
+    expect(findUnguardedImports(source)).toEqual([]);
+  });
+});
+
+describe('findUnguardedImports — shapes the rule refuses', () => {
+  it('refuses a bare import with no try at all', () => {
+    const source = "async function load() { return (await import('mongodb')).MongoClient; }";
+    const hits = findUnguardedImports(source);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].line).toBe(1);
+    expect(hits[0].snippet).toContain("import('mongodb')");
+  });
+
+  it.each([
+    ['as a variable initializer', "const p = import('ioredis'); return await p;", 1],
+    ['as a bare return', "return import('ioredis');", 1],
+    [
+      'inside Promise.all([...])',
+      "return await Promise.all([import('@aws-sdk/client-s3'), import('@aws-sdk/s3-request-presigner')]);",
+      2,
+    ],
+    ['inside an awaited array literal', "return await [import('ioredis')];", 1],
+    ['as an object property', "const o = { m: import('ioredis') }; return await o.m;", 1],
+  ])('refuses an UNAWAITED import %s inside a same-function try', (_name, body, count) => {
+    expect(findUnguardedImports(inTry(body))).toHaveLength(count);
+  });
+
+  it('refuses an awaited .catch() chain (esbuild tolerates it; the rule keeps one shape)', () => {
+    const body = "return await import('ioredis').catch((e: unknown) => { throw e; });";
+    expect(findUnguardedImports(inTry(body))).toHaveLength(1);
+  });
+
+  it('refuses an import inside the try of an ENCLOSING function', () => {
+    const source = [
+      'async function outer() {',
+      '  try {',
+      '    const inner = async () => {',
+      "      return await import('ioredis');",
+      '    };',
+      '    return await inner();',
+      '  } catch {',
+      '    return null;',
+      '  }',
+      '}',
+    ].join('\n');
+    expect(findUnguardedImports(source)).toHaveLength(1);
+  });
+
+  it('refuses an import inside the finally block', () => {
+    const source = [
+      'async function load() {',
+      '  try {',
+      '    return 1;',
+      '  } finally {',
+      "    await import('ioredis');",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(findUnguardedImports(source)).toHaveLength(1);
+  });
+
+  it('refuses an import inside the catch block', () => {
+    const source = [
+      'async function load() {',
+      '  try {',
+      '    return 1;',
+      '  } catch {',
+      "    return await import('ioredis');",
+      '  }',
+      '}',
+    ].join('\n');
+    expect(findUnguardedImports(source)).toHaveLength(1);
+  });
+
+  it('refuses a top-level import outside any function', () => {
+    const source = "const mod = await import('mongodb');";
+    expect(findUnguardedImports(source)).toHaveLength(1);
+  });
+});
+
+describe('findUnguardedImports — exemptions and non-imports', () => {
+  it('exempts node: and @setu-ts/* specifiers', () => {
+    const source = [
+      "await import('node:fs/promises');",
+      "await import('@setu-ts/common');",
+      "await import('./relative.js');",
+      "await import('cloudflare:workers');",
+    ].join('\n');
+    expect(findUnguardedImports(source)).toEqual([]);
+  });
+
+  it('exempts a type-position typeof import and a non-literal argument', () => {
+    const source = [
+      "type Mod = typeof import('mongodb');",
+      'const spec = "mongodb";',
+      'await import(spec);',
+    ].join('\n');
+    expect(findUnguardedImports(source)).toEqual([]);
+  });
+
+  it('exempts a scoped package only when it is @setu-ts/*, and reads .tsx', () => {
+    const source = "const x = () => import('@aws-sdk/client-dynamodb');";
+    expect(findUnguardedImports(source, ts.ScriptKind.TSX)).toHaveLength(1);
   });
 });

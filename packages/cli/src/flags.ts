@@ -136,6 +136,7 @@ const NEW: ICommandFlagSpec = spec(
     'y',
     'dir',
     'dry-run',
+    'agents',
   ],
   // Read ONLY to be refused with their own guidance: `--di` points at
   // `--template class-based` (M65), `--depends-on` points at `generate app`.
@@ -145,12 +146,11 @@ const NEW: ICommandFlagSpec = spec(
 );
 
 /** `setu generate` for a schematic: the schematic word plus one name. */
-const GENERATE: ICommandFlagSpec = spec(
-  'generate',
-  ['dir', 'dry-run', 'runtime'],
-  [],
-  { fixed: 2, taken: 1, noun: 'one name' },
-);
+const GENERATE: ICommandFlagSpec = spec('generate', ['dir', 'dry-run', 'runtime', 'module'], [], {
+  fixed: 2,
+  taken: 1,
+  noun: 'one name',
+});
 
 /** `setu generate custom <schematic-name> <name>`: two names after the verb. */
 const GENERATE_CUSTOM: ICommandFlagSpec = spec(
@@ -197,13 +197,19 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  */
 const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
 
+/** Opt-in agent brief creation and read-only freshness checking. */
+const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+
 /** `setu adopt`: takes no positionals at all — `--name` and `--port` are flags. */
-const ADOPT: ICommandFlagSpec = spec(
-  'adopt',
-  ['name', 'port', 'dir', 'dry-run'],
-  [],
-  { fixed: 1, taken: 0, noun: 'no arguments' },
-);
+const ADOPT: ICommandFlagSpec = spec('adopt', ['name', 'port', 'dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
 
 /**
  * `setu devtool enable [member]`: the member name is OPTIONAL — required inside
@@ -212,21 +218,16 @@ const ADOPT: ICommandFlagSpec = spec(
  * `enable` reaches the command's own usage refusal, like the non-`ports`
  * `workspace` arm.
  */
-const DEVTOOL_ENABLE: ICommandFlagSpec = spec(
-  'devtool',
-  ['devtool-port', 'dir', 'dry-run'],
-  [],
-  { fixed: 2, taken: 1, noun: 'at most one member name' },
-);
+const DEVTOOL_ENABLE: ICommandFlagSpec = spec('devtool', ['devtool-port', 'dir', 'dry-run'], [], {
+  fixed: 2,
+  taken: 1,
+  noun: 'at most one member name',
+});
 
 /** `setu workspace ports --reallocate`: `ports` is the last word it reads. */
 const WORKSPACE_PORTS: ICommandFlagSpec = spec(
   'workspace ports',
-  [
-    'reallocate',
-    'dir',
-    'dry-run',
-  ],
+  ['reallocate', 'dir', 'dry-run'],
   [],
   { fixed: 2, taken: 0, noun: 'no arguments beyond ports' },
 );
@@ -288,6 +289,8 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'agents':
+      return AGENTS;
     case 'devtool':
       return DEVTOOL_ENABLE;
     case 'adopt':
@@ -317,6 +320,7 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [GENERATE_APP.label, GENERATE_APP.documented],
   [GENERATE_LIBRARY.label, GENERATE_LIBRARY.documented],
   [ADD.label, ADD.documented],
+  [AGENTS.label, AGENTS.documented],
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],
@@ -425,8 +429,10 @@ export function unknownOptionMessage(
   allowed: readonly string[],
 ): string {
   const suggestion = suggestFlag(flag, allowed);
-  return `Unknown option \`--${escapeName(flag)}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
-    (suggestion === undefined ? '' : ` Did you mean \`--${suggestion}\`?`);
+  return (
+    `Unknown option \`--${escapeName(flag)}\` for \`${PROGRAM_NAME} ${commandLabel}\`.` +
+    (suggestion === undefined ? '' : ` Did you mean \`--${suggestion}\`?`)
+  );
 }
 
 /**
@@ -466,11 +472,7 @@ export function builtInFlagRefusal(
  * @param got - The arguments supplied beyond the command's fixed words
  * @returns The message for the error sink
  */
-export function extraPositionalsMessage(
-  label: string,
-  noun: string,
-  got: number,
-): string {
+export function extraPositionalsMessage(label: string, noun: string, got: number): string {
   return `${PROGRAM_NAME} ${label} takes ${noun}; got ${got}.`;
 }
 

@@ -30,20 +30,22 @@ export async function setupStrategy(
     scheme?: string;
   } = {},
 ) {
-  const key = options.keys?.[0] ?? await generateTestKey('RS256', 'k1');
+  const key = options.keys?.[0] ?? (await generateTestKey('RS256', 'k1'));
   const keys = options.keys ?? [key];
   const runtime = createFakeRuntime(NOW);
   let jwks = options.jwks ?? (() => ({ body: { keys: keys.map((k) => k.jwk) } }));
   const fake = createFakeHttp({ [JWKS]: () => jwks() });
   const refusals: string[] = [];
-  const [compiled] = compileIssuers([{
-    name: 'idp',
-    issuer: ISS,
-    audience: 'api',
-    keys: { jwksUri: JWKS },
-    toPrincipal: (claims) => ({ id: String(claims.sub) }),
-    ...options.issuer,
-  }]);
+  const [compiled] = compileIssuers([
+    {
+      name: 'idp',
+      issuer: ISS,
+      audience: 'api',
+      keys: { jwksUri: JWKS },
+      toPrincipal: (claims) => ({ id: String(claims.sub) }),
+      ...options.issuer,
+    },
+  ]);
   const keySet = new IssuerKeySet(compiled, runtime, fake.http, () => {});
   const strategy = new IssuerStrategy({
     bindings: [{ issuer: compiled, keySet }],

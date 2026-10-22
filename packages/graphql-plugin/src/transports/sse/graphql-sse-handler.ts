@@ -86,27 +86,41 @@ async function handleSseRequest(
     if (refusal !== null) {
       response.status(refusal.status);
       response.header('Content-Type', 'application/json');
-      return response.send(encoder.encode(JSON.stringify({
-        errors: [{ message: refusal.message, extensions: { code: refusal.code } }],
-      })));
+      return response.send(
+        encoder.encode(
+          JSON.stringify({
+            errors: [{ message: refusal.message, extensions: { code: refusal.code } }],
+          }),
+        ),
+      );
     }
     response.status(400);
     response.header('Content-Type', 'application/json');
-    return response.send(encoder.encode(JSON.stringify({
-      errors: [{ message: 'Invalid JSON body', extensions: { code: 'INVALID_JSON' } }],
-    })));
+    return response.send(
+      encoder.encode(
+        JSON.stringify({
+          errors: [{ message: 'Invalid JSON body', extensions: { code: 'INVALID_JSON' } }],
+        }),
+      ),
+    );
   }
 
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     response.status(400);
     response.header('Content-Type', 'application/json');
     const encoder = new TextEncoder();
-    return response.send(encoder.encode(JSON.stringify({
-      errors: [{
-        message: 'Request body must be a JSON object',
-        extensions: { code: 'BAD_REQUEST' },
-      }],
-    })));
+    return response.send(
+      encoder.encode(
+        JSON.stringify({
+          errors: [
+            {
+              message: 'Request body must be a JSON object',
+              extensions: { code: 'BAD_REQUEST' },
+            },
+          ],
+        }),
+      ),
+    );
   }
 
   const obj = body as Record<string, unknown>;
@@ -119,7 +133,9 @@ async function handleSseRequest(
     params.operationName = obj.operationName;
   }
   if (
-    typeof obj.variables === 'object' && obj.variables !== null && !Array.isArray(obj.variables)
+    typeof obj.variables === 'object' &&
+    obj.variables !== null &&
+    !Array.isArray(obj.variables)
   ) {
     params.variables = obj.variables as Record<string, unknown>;
   }
@@ -132,9 +148,13 @@ async function handleSseRequest(
     response.status(400);
     response.header('Content-Type', 'application/json');
     const encoder = new TextEncoder();
-    return response.send(encoder.encode(JSON.stringify({
-      errors: [{ message: 'Query is required', extensions: { code: 'BAD_REQUEST' } }],
-    })));
+    return response.send(
+      encoder.encode(
+        JSON.stringify({
+          errors: [{ message: 'Query is required', extensions: { code: 'BAD_REQUEST' } }],
+        }),
+      ),
+    );
   }
 
   // Resolve APQ before subscribe — C6: resolve unconditionally so the
@@ -176,9 +196,13 @@ async function handleSseGet(
     response.status(400);
     response.header('Content-Type', 'application/json');
     const encoder = new TextEncoder();
-    return response.send(encoder.encode(JSON.stringify({
-      errors: [{ message: 'Query parameter is required', extensions: { code: 'BAD_REQUEST' } }],
-    })));
+    return response.send(
+      encoder.encode(
+        JSON.stringify({
+          errors: [{ message: 'Query parameter is required', extensions: { code: 'BAD_REQUEST' } }],
+        }),
+      ),
+    );
   }
 
   const params: GraphqlRequestParams = { query };
@@ -310,14 +334,15 @@ async function pumpStream(
   heartbeatMs: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const heartbeatTimer = heartbeatMs > 0
-    ? runtime.setInterval(() => {
-      if (signal?.aborted || controller.closed) {
-        return;
-      }
-      controller.enqueue(encodeSseComment());
-    }, heartbeatMs)
-    : null;
+  const heartbeatTimer =
+    heartbeatMs > 0
+      ? runtime.setInterval(() => {
+          if (signal?.aborted || controller.closed) {
+            return;
+          }
+          controller.enqueue(encodeSseComment());
+        }, heartbeatMs)
+      : null;
 
   // Release the source exactly once, and never let that release escape.
   //
@@ -351,9 +376,8 @@ async function pumpStream(
 
   try {
     const iterator = stream[Symbol.asyncIterator]();
-    iteratorReturn = typeof iterator.return === 'function'
-      ? iterator.return.bind(iterator)
-      : undefined;
+    iteratorReturn =
+      typeof iterator.return === 'function' ? iterator.return.bind(iterator) : undefined;
     while (true) {
       if (signal?.aborted || controller.closed) {
         break;
@@ -371,12 +395,16 @@ async function pumpStream(
     // so reaching here means the iterator itself misbehaved. The message is
     // deliberately generic rather than `err.message`, which would publish
     // internals the HTTP path masks.
-    controller.enqueue(encodeSseEvent({
-      errors: [{
-        message: 'Internal server error',
-        extensions: { code: 'INTERNAL_SERVER_ERROR' },
-      }],
-    }));
+    controller.enqueue(
+      encodeSseEvent({
+        errors: [
+          {
+            message: 'Internal server error',
+            extensions: { code: 'INTERNAL_SERVER_ERROR' },
+          },
+        ],
+      }),
+    );
     controller.enqueue(encodeSseComplete());
     controller.close();
   } finally {

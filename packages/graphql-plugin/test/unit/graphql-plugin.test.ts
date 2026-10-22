@@ -76,26 +76,24 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: (token: string) => {
+            registeredToken = token;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: (token: string) => {
-              registeredToken = token;
-            },
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(registeredToken).toBe('graphql');
     });
@@ -108,26 +106,24 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: (path: string) => {
+            postPath = path;
           },
-          router: {
-            post: (path: string) => {
-              postPath = path;
-            },
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(postPath).toBe('/graphql');
     });
@@ -141,26 +137,24 @@ describe('GraphqlPlugin', () => {
         path: '/api/graphql',
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: (path: string) => {
+            postPath = path;
           },
-          router: {
-            post: (path: string) => {
-              postPath = path;
-            },
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(postPath).toBe('/api/graphql');
     });
@@ -173,26 +167,24 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: (_name: string, _check: () => Promise<{ status: string }>) => {
+            healthRegistered = true;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: (_name: string, _check: () => Promise<{ status: string }>) => {
-              healthRegistered = true;
-            },
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(healthRegistered).toBe(true);
     });
@@ -205,26 +197,24 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {
-              logged = true;
-            },
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {
+            logged = true;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(logged).toBe(true);
     });
@@ -247,21 +237,19 @@ describe('GraphqlPlugin', () => {
 
       let registeredService: unknown;
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: (msg: string, err?: unknown) => errorCalls.push({ msg, err }),
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: (msg: string, err?: unknown) => errorCalls.push({ msg, err }),
+        },
+        router: { post: () => {}, get: () => {} },
+        services: {
+          register: (_token: string, service: unknown) => {
+            registeredService = service;
           },
-          router: { post: () => {}, get: () => {} },
-          services: {
-            register: (_token: string, service: unknown) => {
-              registeredService = service;
-            },
-          },
-          health: { register: () => {} },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+        health: { register: () => {} },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       const service = registeredService as {
         execute(params: { query: string }): Promise<{ result: { errors?: unknown[] } }>;
@@ -288,29 +276,30 @@ describe('GraphqlPlugin', () => {
       const registered: Array<[string, unknown]> = [];
       const routes: Array<[string, string]> = [];
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
-          },
-          router: {
-            post: (p: string) => routes.push(['post', p]),
-            get: (p: string) => routes.push(['get', p]),
-          },
-          services: {
-            register: (token: string, service: unknown) => registered.push([token, service]),
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: (p: string) => routes.push(['post', p]),
+          get: (p: string) => routes.push(['get', p]),
+        },
+        services: {
+          register: (token: string, service: unknown) => registered.push([token, service]),
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(registered.length).toBe(1);
       expect(registered[0]![0]).toBe(CAPABILITIES.GRAPHQL);
       expect((registered[0]![1] as { endpoint: string }).endpoint).toBe('/api/graphql');
-      expect(routes).toEqual([['post', '/api/graphql'], ['get', '/api/graphql']]);
+      expect(routes).toEqual([
+        ['post', '/api/graphql'],
+        ['get', '/api/graphql'],
+      ]);
     });
 
     it('handles schema build error', async () => {
@@ -322,24 +311,22 @@ describe('GraphqlPlugin', () => {
       let errorCaught = false;
 
       try {
-        await plugin.register(
-          {
-            logger: {
-              info: () => {},
-              error: () => {},
-            },
-            router: {
-              post: () => {},
-              get: () => {},
-            },
-            services: {
-              register: () => {},
-            },
-            health: {
-              register: () => {},
-            },
-          } as unknown as Parameters<typeof plugin.register>[0],
-        );
+        await plugin.register({
+          logger: {
+            info: () => {},
+            error: () => {},
+          },
+          router: {
+            post: () => {},
+            get: () => {},
+          },
+          services: {
+            register: () => {},
+          },
+          health: {
+            register: () => {},
+          },
+        } as unknown as Parameters<typeof plugin.register>[0]);
       } catch {
         errorCaught = true;
       }
@@ -357,24 +344,22 @@ describe('GraphqlPlugin', () => {
       let errorCaught = false;
 
       try {
-        await plugin.register(
-          {
-            logger: {
-              info: () => {},
-              error: () => {},
-            },
-            router: {
-              post: () => {},
-              get: () => {},
-            },
-            services: {
-              register: () => {},
-            },
-            health: {
-              register: () => {},
-            },
-          } as unknown as Parameters<typeof plugin.register>[0],
-        );
+        await plugin.register({
+          logger: {
+            info: () => {},
+            error: () => {},
+          },
+          router: {
+            post: () => {},
+            get: () => {},
+          },
+          services: {
+            register: () => {},
+          },
+          health: {
+            register: () => {},
+          },
+        } as unknown as Parameters<typeof plugin.register>[0]);
       } catch {
         errorCaught = true;
       }
@@ -397,28 +382,26 @@ describe('GraphqlPlugin', () => {
         documentCacheSize: 500,
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: (path: string) => {
+            postPath = path;
           },
-          router: {
-            post: (path: string) => {
-              postPath = path;
-            },
-            get: (path: string) => {
-              getPath = path;
-            },
+          get: (path: string) => {
+            getPath = path;
           },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       expect(postPath).toBe('/custom/graphql');
       expect(getPath).toBe('/custom/graphql');
@@ -432,20 +415,18 @@ describe('GraphqlPlugin', () => {
 
       const registered: Array<[string, unknown]> = [];
 
-      await plugin.register(
-        {
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: (token: string, service: unknown) => registered.push([token, service]),
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+      await plugin.register({
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: (token: string, service: unknown) => registered.push([token, service]),
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // `logger` is an optional dependency: the service must still register, and
       // must still execute, with no logger anywhere in the context.
@@ -465,29 +446,24 @@ describe('GraphqlPlugin', () => {
         path: '/graphql',
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: (_name: string, callback: () => Promise<{ status: string; data: unknown }>) => {
+            healthCallback = callback;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: (
-              _name: string,
-              callback: () => Promise<{ status: string; data: unknown }>,
-            ) => {
-              healthCallback = callback;
-            },
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // Execute the health callback
       const healthResult = await healthCallback!();
@@ -508,21 +484,19 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: mockLogger,
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+      await plugin.register({
+        logger: mockLogger,
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // The logger wrapper should have been created and the info call should have been made
       expect(infoCalls.length).toBeGreaterThan(0);
@@ -545,21 +519,19 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: mockLogger,
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+      await plugin.register({
+        logger: mockLogger,
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // The handlerLogger info wrapper is invoked when the plugin logs registration
       expect(handlerInfoCalls.length).toBeGreaterThan(0);
@@ -574,29 +546,24 @@ describe('GraphqlPlugin', () => {
         path: '/test-graphql',
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: (_name: string, callback: () => Promise<{ status: string; data: unknown }>) => {
+            capturedCallback = callback;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: (
-              _name: string,
-              callback: () => Promise<{ status: string; data: unknown }>,
-            ) => {
-              capturedCallback = callback;
-            },
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // Invoke the health callback and verify it returns correct data
       expect(capturedCallback).toBeDefined();
@@ -617,29 +584,24 @@ describe('GraphqlPlugin', () => {
         path: '/api/graphql',
       });
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: (_name: string, callback: () => Promise<{ status: string; data: unknown }>) => {
+            capturedCallback = callback;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: (
-              _name: string,
-              callback: () => Promise<{ status: string; data: unknown }>,
-            ) => {
-              capturedCallback = callback;
-            },
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // Execute the health callback to exercise the arrow function
       const result = await capturedCallback!();
@@ -667,21 +629,19 @@ describe('GraphqlPlugin', () => {
 
       // This should throw during schema building, which exercises the error logger
       await expect(
-        plugin.register(
-          {
-            logger: mockLogger,
-            router: {
-              post: () => {},
-              get: () => {},
-            },
-            services: {
-              register: () => {},
-            },
-            health: {
-              register: () => {},
-            },
-          } as unknown as Parameters<typeof plugin.register>[0],
-        ),
+        plugin.register({
+          logger: mockLogger,
+          router: {
+            post: () => {},
+            get: () => {},
+          },
+          services: {
+            register: () => {},
+          },
+          health: {
+            register: () => {},
+          },
+        } as unknown as Parameters<typeof plugin.register>[0]),
       ).rejects.toThrow();
 
       // The error wrapper should have been called
@@ -694,11 +654,13 @@ describe('GraphqlPlugin', () => {
       const fakeModule = {
         parse: (_src: string) => ({
           kind: 'Document',
-          definitions: [{
-            kind: 'OperationDefinition',
-            operation: 'query',
-            selectionSet: { kind: 'SelectionSet', selections: [] },
-          }],
+          definitions: [
+            {
+              kind: 'OperationDefinition',
+              operation: 'query',
+              selectionSet: { kind: 'SelectionSet', selections: [] },
+            },
+          ],
         }),
         validate: () => [],
         execute: (args: { schema: unknown }) => {
@@ -736,26 +698,24 @@ describe('GraphqlPlugin', () => {
 
       let registeredService: unknown;
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: (_token: string, service: unknown) => {
+            registeredService = service;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: (_token: string, service: unknown) => {
-              registeredService = service;
-            },
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // The code-first arm must execute against the schema the application
       // handed over, untouched.
@@ -778,11 +738,13 @@ describe('GraphqlPlugin', () => {
           calls.push('parse');
           return {
             kind: 'Document',
-            definitions: [{
-              kind: 'OperationDefinition',
-              operation: 'query',
-              selectionSet: { kind: 'SelectionSet', selections: [] },
-            }],
+            definitions: [
+              {
+                kind: 'OperationDefinition',
+                operation: 'query',
+                selectionSet: { kind: 'SelectionSet', selections: [] },
+              },
+            ],
           };
         },
         validate: () => {
@@ -839,26 +801,24 @@ describe('GraphqlPlugin', () => {
 
       let registeredService: unknown;
 
-      await plugin.register(
-        {
-          logger: {
-            info: () => {},
-            error: () => {},
+      await plugin.register({
+        logger: {
+          info: () => {},
+          error: () => {},
+        },
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: (_token: string, service: unknown) => {
+            registeredService = service;
           },
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: (_token: string, service: unknown) => {
-              registeredService = service;
-            },
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // The injected module built the schema (had the loader run instead, this
       // fake's methods would never be reached).
@@ -891,21 +851,19 @@ describe('GraphqlPlugin', () => {
         resolvers: { Query: { hello: () => 'world' } },
       });
 
-      await plugin.register(
-        {
-          logger: mockLogger,
-          router: {
-            post: () => {},
-            get: () => {},
-          },
-          services: {
-            register: () => {},
-          },
-          health: {
-            register: () => {},
-          },
-        } as unknown as Parameters<typeof plugin.register>[0],
-      );
+      await plugin.register({
+        logger: mockLogger,
+        router: {
+          post: () => {},
+          get: () => {},
+        },
+        services: {
+          register: () => {},
+        },
+        health: {
+          register: () => {},
+        },
+      } as unknown as Parameters<typeof plugin.register>[0]);
 
       // The handlerLogger is created during registration
       // Verify it was created properly

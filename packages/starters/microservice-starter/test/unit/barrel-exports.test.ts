@@ -8,10 +8,7 @@ describe('microservice-starter / barrel exports', () => {
   it('exports exactly createMicroserviceApp and buildMicroservicePlugins', () => {
     const exportedNames = Object.keys(microserviceStarter);
     expect(new Set(exportedNames)).toEqual(
-      new Set([
-        'createMicroserviceApp',
-        'buildMicroservicePlugins',
-      ]),
+      new Set(['createMicroserviceApp', 'buildMicroservicePlugins']),
     );
   });
 

@@ -111,21 +111,27 @@ describe('outbound HTTP protocol — snapshot reader', () => {
       () => Object.defineProperty(ready(), 'state', { get: () => 'ready', enumerable: true }),
     ],
     ['a custom prototype', () => Object.assign(Object.create({ x: 1 }), ready())],
-    ['a class instance', () =>
-      new (class {
-        state = 'ready';
-        alias = 'payments';
-        coverage = 'owned-instance';
-        records = [];
-      })()],
+    [
+      'a class instance',
+      () =>
+        new (class {
+          state = 'ready';
+          alias = 'payments';
+          coverage = 'owned-instance';
+          records = [];
+        })(),
+    ],
     ['an extra key', () => ({ ...ready(), dropped: 0 })],
     ['a symbol key', () => ({ ...ready(), [Symbol('x')]: 1 })],
-    ['a throwing proxy', () =>
-      new Proxy(ready(), {
-        ownKeys: () => {
-          throw new Error('trap');
-        },
-      })],
+    [
+      'a throwing proxy',
+      () =>
+        new Proxy(ready(), {
+          ownKeys: () => {
+            throw new Error('trap');
+          },
+        }),
+    ],
     ['two records', () => ready({ records: [record(), record()] })],
     [
       'a record with an extra key',
@@ -319,9 +325,11 @@ describe('outbound HTTP protocol — target and manifest', () => {
 });
 
 /** Decodes a handler response. */
-function inspect(
-  response: IResponse,
-): { status: number; body: Record<string, unknown>; text: string } {
+function inspect(response: IResponse): {
+  status: number;
+  body: Record<string, unknown>;
+  text: string;
+} {
   const snapshot = response.snapshot();
   const text = new TextDecoder().decode(snapshot.body as Uint8Array);
   return { status: snapshot.status, body: JSON.parse(text), text };
@@ -372,21 +380,23 @@ async function request(
 ): Promise<IResponse> {
   const sequence = parts.sequence ?? 1;
   const instance = parts.instance ?? TEST_INSTANCE_ID;
-  const mac = parts.mac ??
-    await signRequest(crypto.subtle, key, '/v1/outbound-http', sequence, instance);
-  return await handler(fakeRequest({
-    ...(parts.method !== undefined ? { method: parts.method } : {}),
-    url: `http://${HOST}/v1/outbound-http`,
-    headers: {
-      host: parts.host ?? HOST,
-      'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
-      'x-setu-sequence': String(sequence),
-      'x-setu-instance': instance,
-      'x-setu-mac': mac,
-      ...(parts.origin !== undefined ? { origin: parts.origin } : {}),
-      ...(parts.forwarded === true ? { 'x-forwarded-for': '10.0.0.1' } : {}),
-    },
-  }));
+  const mac =
+    parts.mac ?? (await signRequest(crypto.subtle, key, '/v1/outbound-http', sequence, instance));
+  return await handler(
+    fakeRequest({
+      ...(parts.method !== undefined ? { method: parts.method } : {}),
+      url: `http://${HOST}/v1/outbound-http`,
+      headers: {
+        host: parts.host ?? HOST,
+        'x-setu-session': parts.sessionId ?? TEST_SESSION_ID,
+        'x-setu-sequence': String(sequence),
+        'x-setu-instance': instance,
+        'x-setu-mac': mac,
+        ...(parts.origin !== undefined ? { origin: parts.origin } : {}),
+        ...(parts.forwarded === true ? { 'x-forwarded-for': '10.0.0.1' } : {}),
+      },
+    }),
+  );
 }
 
 describe('connector — GET /v1/outbound-http', () => {

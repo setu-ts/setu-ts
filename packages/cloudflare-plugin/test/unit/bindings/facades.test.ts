@@ -84,8 +84,9 @@ describe('isQueueProducer', () => {
   });
 
   it('rejects a KV namespace, the likeliest wrangler.toml mix-up', () => {
-    expect(isQueueProducer({ get: () => {}, put: () => {}, delete: () => {}, list: () => {} }))
-      .toBe(false);
+    expect(
+      isQueueProducer({ get: () => {}, put: () => {}, delete: () => {}, list: () => {} }),
+    ).toBe(false);
   });
 
   it('rejects a partial producer, which would fail on the first sendBatch', () => {

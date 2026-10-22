@@ -11,6 +11,8 @@ import { listSeamSpecs } from '../../../src/seams/registry.ts';
 import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
 import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
+import { scanModuleArtifacts } from '../../../src/utils/module-scanner.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 /** A file stat, shaped as the real runtime adapters report one. */
 const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
@@ -35,7 +37,8 @@ const MIDDLEWARE = seamSpecFor('middleware')!;
  * @returns Source declaring each required export
  */
 function wellFormed(spec: SeamSpec, name: string): string {
-  return spec.importSymbols(deriveNames(name))
+  return spec
+    .importSymbols(deriveNames(name))
     .map((symbol) => `export const ${symbol} = 1;`)
     .join('\n');
 }
@@ -57,7 +60,7 @@ function fsWith(
 ): IFileSystem {
   const { stats = {}, sources = {}, spec = ROUTES } = options;
   return {
-    readdir: () => entries instanceof Error ? Promise.reject(entries) : Promise.resolve(entries),
+    readdir: () => (entries instanceof Error ? Promise.reject(entries) : Promise.resolve(entries)),
     stat: (path: string) => {
       const entry = path.slice(path.lastIndexOf('/') + 1);
       const result = stats[entry];
@@ -81,6 +84,50 @@ function fsWith(
 }
 
 describe('readArtifactNames', () => {
+  it('refuses hostile artifact names in flat and module families, never importing them', async () => {
+    const hostile = ["q'y", 'Bad_Name', '9lives', 'x\nforged', 'x\u001b[31m'];
+    for (const name of hostile) {
+      const flat = await readArtifactNames(fsWith([`${name}.routes.ts`]), '/app', ROUTES);
+      expect(flat.names).toEqual([]);
+      expect(flat.skipped.map((skip) => skip.path)).toEqual([`${ROUTES.dir}/${name}.routes.ts`]);
+      expect(flat.adopted).toEqual([]);
+    }
+    const fs = createFakeFs(
+      Object.fromEntries(
+        hostile.map((name) => [
+          `/app/src/modules/orders/${name}.routes.ts`,
+          wellFormed(ROUTES, name),
+        ]),
+      ),
+    );
+    const scoped = await scanModuleArtifacts(fs, '/app', 'orders');
+    expect(scoped.artifacts['route']).toEqual([]);
+    expect(scoped.skipped).toHaveLength(hostile.length);
+    expect(ROUTES.renderBarrel(scoped.artifacts)).not.toContain("q'y");
+  });
+  // A CLI-owned path is predictable, so a repository can commit a link or a special
+  // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
+  // artifact is opened unless stat reports a regular file under the cap.
+  it('never opens a barrel or artifact that is not a regular file under the cap', async () => {
+    const base = fsWith(['user.routes.ts', 'huge.routes.ts'], {
+      stats: {
+        'index.ts': { isFile: false, isDirectory: false, size: 0 },
+        'huge.routes.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+      },
+    });
+    const opened: string[] = [];
+    const fs: IFileSystem = {
+      ...base,
+      readFile: (path: string) => {
+        opened.push(path.slice(path.lastIndexOf('/') + 1));
+        return base.readFile(path);
+      },
+    };
+    const scan = await readArtifactNames(fs, '/app', ROUTES);
+    expect(scan.names).toEqual(['user']);
+    expect(opened).toEqual(['user.routes.ts']);
+  });
+
   it('returns names sorted, with the suffix stripped', async () => {
     // Enumeration order is filesystem-defined; the sort is what makes the regenerated
     // barrel byte-identical between two machines holding the same artifacts.
@@ -129,11 +176,7 @@ describe('readArtifactNames', () => {
   });
 
   it('excludes a bare suffix, which would derive an empty symbol name', async () => {
-    const scan = await readArtifactNames(
-      fsWith(['.routes.ts', 'user.routes.ts']),
-      '/app',
-      ROUTES,
-    );
+    const scan = await readArtifactNames(fsWith(['.routes.ts', 'user.routes.ts']), '/app', ROUTES);
     expect(scan.names).toEqual(['user']);
   });
 
@@ -188,10 +231,12 @@ describe('readArtifactNames', () => {
       );
 
       expect(scan.names).toEqual(['request-id']);
-      expect(scan.skipped).toEqual([{
-        path: 'src/middleware/audit-log.middleware.ts',
-        missing: ['AUDIT_LOG_MIDDLEWARE_PRIORITY'],
-      }]);
+      expect(scan.skipped).toEqual([
+        {
+          path: 'src/middleware/audit-log.middleware.ts',
+          missing: ['AUDIT_LOG_MIDDLEWARE_PRIORITY'],
+        },
+      ]);
     });
 
     it('reports every missing symbol, not just the first', async () => {
@@ -204,10 +249,7 @@ describe('readArtifactNames', () => {
         MIDDLEWARE,
       );
 
-      expect(scan.skipped[0]?.missing).toEqual([
-        'ORDERS_MIDDLEWARE_PRIORITY',
-        'ordersMiddleware',
-      ]);
+      expect(scan.skipped[0]?.missing).toEqual(['ORDERS_MIDDLEWARE_PRIORITY', 'ordersMiddleware']);
     });
 
     it('skips an OLD-shape CQRS artifact (class only, no factory) and admits a new one', async () => {
@@ -276,7 +318,9 @@ describe('scanArtifacts', () => {
   it('keys every wired family, even the ones with no artifacts', async () => {
     const scan = await scanArtifacts(fsWith(MISSING), '/app', listSeamSpecs());
     expect(Object.keys(scan.artifacts).sort()).toEqual(
-      listSeamSpecs().map((s) => s.schematic).sort(),
+      listSeamSpecs()
+        .map((s) => s.schematic)
+        .sort(),
     );
     for (const names of Object.values(scan.artifacts)) expect(names).toEqual([]);
     expect(scan.skipped).toEqual([]);

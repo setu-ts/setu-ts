@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- interface requires Promise return types
+/* eslint-disable require-await -- interface requires Promise return types */
 /**
  * In-memory cache store with LRU eviction and per-entry TTL.
  *

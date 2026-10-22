@@ -5,9 +5,9 @@ A React Router 8 framework-mode application served by a Setu-TS application, com
 `setu new --template full-stack`.
 
 ```bash
-deno task start   # builds the frontend, then serves on http://localhost:3000
-deno task smoke   # what CI runs
-deno task test    # the removal claim, asserted
+pnpm --dir apps/full-stack run start   # builds the frontend, then serves on http://localhost:3000
+pnpm --dir apps/full-stack run smoke   # what CI runs
+pnpm --dir apps/full-stack run test    # the removal claim, asserted
 ```
 
 ## What the smoke check proves
@@ -46,55 +46,28 @@ the outside world; a model is plain data shared with the browser.
 
 ## Toolchain
 
-The frontend build is the one documented exception to this repository's Deno-only toolchain
-(AI_GUIDELINES §12.2): React Router builds through Vite on the npm package ecosystem. It does
-**not** require a Node toolchain — `deno task build` runs
-`deno install --allow-scripts --min-dep-age 0` followed by the `@react-router/dev` CLI under Deno's
-own npm support. The minimum-age exception prevents a fresh CI runner from rejecting an
-otherwise-resolved, just-published transitive platform package. CI needs no `setup-node` step and
-this example is deliberately **not** in `ALLOW_SKIP`. Its proof runs on every pull request.
+The repository uses Node 24 and pnpm. The `build` script runs React Router's Vite build; `start` and
+`smoke` both build first. Install dependencies at the repository root with
+`pnpm install --frozen-lockfile`. Frontend tooling stays in the app's dependencies, outside the
+published framework dependency graph (AI_GUIDELINES §12.2).
 
-Two consequences worth knowing:
+`build/`, `.react-router/` and `node_modules/` are generated and ignored by repository formatting
+and linting. The app's `check` script uses its generated `tsconfig.json`, which includes the `app/`
+TypeScript and TSX files. `pnpm run check:apps` runs that check, then the smoke and test scripts.
+Vite's build strips types; the TypeScript check is separate.
 
-- `build/`, `node_modules/` and `deno.lock` here are generated and gitignored, and `build/` is in
-  the root `deno.json` `exclude` so `fmt`, `lint` and `check` never walk bundled output.
-- `deno.json` sets `"nodeModulesDir": "auto"`. It is load-bearing, and CI is the only thing that
-  proves it: because this example carries a `package.json`, Deno resolves npm specifiers from
-  `node_modules` rather than its global cache — and `check:apps` type-checks an app **before** it
-  runs the smoke, which is what creates `node_modules` here. On a cold checkout
-  `deno check main.ts
-  smoke.ts` therefore failed with
-  `Could not find a matching package for 'npm:ws@^8.18.0'`, because the app's import graph reaches
-  plugins that lazily import npm drivers. `auto` lets Deno install what a check needs, so the order
-  stops mattering. A local run hides this completely once `node_modules` exists.
-- `smoke.ts` ends with an explicit `Deno.exit(0)`. Importing `react-dom/server` under Deno leaves
-  the process alive after the application has stopped — measured by importing it alone in an
-  otherwise empty script — while `deno test`'s op and resource sanitizers report nothing leaked, so
-  it is not a handle this example or the framework owns. A failed assertion still throws and exits
-  non-zero before reaching that line.
+## Browser verification
 
-## What the gate does not cover
-
-The `app/` tree is type-checked by this example's own `check:app` task
-(`deno check app/**/*.ts app/**/*.tsx`), which the `test` task runs and `check:apps` therefore
-executes. That task exists because neither of the obvious candidates covers those files: the gate's
-`deno check` entry points are fixed at `main.ts` and `smoke.ts`, which reach six app modules and
-none of the `.tsx`, and `vite build` does not type-check at all — rolldown strips types without
-checking them, so a pure type error builds green.
-
-The dedicated `deno task check:browser` gate at the repository root builds and tests this example
-and a fresh CLI full-stack scaffold in real Chromium. It checks SSR, hydration, asset delivery,
+The dedicated `pnpm run check:browser` gate at the repository root builds and tests this example and
+a fresh CLI full-stack scaffold in real Chromium. It checks SSR, hydration, asset delivery,
 link/Form transitions, HttpOnly cookies and native no-JavaScript login. Aborting the client entry
 proves transition checks fail while SSR still renders; removing a referenced asset proves the asset
 check names the missing bundle.
 
-Install the pinned browser with `deno run -A npm:playwright@1.63.0 install chromium`. A missing
-browser exits 77 locally and fails in CI, which installs Chromium in its dedicated job. The gate
-locates the browser through Playwright's own resolution, so `PLAYWRIGHT_BROWSERS_PATH`,
-`XDG_CACHE_HOME` and `LOCALAPPDATA` are honored; the task grants read access to the Linux and macOS
-default caches only, and a cache elsewhere fails with the exact `--allow-read` to rerun with rather
-than being reported as missing. Ordinary tests do not launch a browser. Set `PORT` to choose the
-application's listening port (default 3000).
+Install the pinned browser with `pnpm --dir apps/full-stack exec playwright install chromium`. A
+missing browser exits 77 locally and fails in CI, which installs Chromium in its dedicated job. The
+harness resolves Playwright's browser cache, including `PLAYWRIGHT_BROWSERS_PATH`. Ordinary tests do
+not launch a browser. Set `PORT` to choose the listening port (default 3000).
 
 The full-stack configuration selects `Referrer-Policy: same-origin` so native form posts retain
 their origin for React Router's action check. Cross-origin referrers remain suppressed; both session
@@ -105,7 +78,7 @@ CSRF and React Router origin verification remain active.
 On Workers the `assetsDir` option is omitted: there is no filesystem, so the framework registers no
 asset route at all and the platform's static-asset binding serves them. Scaffolding the same
 template with `--runtime cloudflare-workers` emits exactly that difference, and the CLI's own
-end-to-end test pins it. This example targets Deno, which is what `check:apps` runs.
+end-to-end test pins it. This example runs on Node through `check:apps`.
 
 ## Session secret
 

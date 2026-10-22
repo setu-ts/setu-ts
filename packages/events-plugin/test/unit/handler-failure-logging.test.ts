@@ -88,7 +88,7 @@ describe('EventsPlugin — handler failure logging (X2-5)', () => {
         group: () => {},
         listRoutes: () => [],
       },
-      config: { get: () => {}, getOrThrow: () => ({} as never), has: () => false },
+      config: { get: () => {}, getOrThrow: () => ({}) as never, has: () => false },
       environment: { validate: () => {} },
       health: { register: () => {} },
       metrics: { register: () => {} },

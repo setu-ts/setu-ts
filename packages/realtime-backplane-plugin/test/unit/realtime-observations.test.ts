@@ -179,7 +179,7 @@ describe('RealtimeBackplanePlugin realtime observations (M98l)', () => {
         transport: 'memory',
         localNotice: false,
         diagnostics: { enabled: true, alias: 'x'.repeat(65) },
-      })
+      }),
     ).toThrow('1 to 64 UTF-8 bytes');
   });
 

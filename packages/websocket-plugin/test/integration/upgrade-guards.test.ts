@@ -36,9 +36,13 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
     await app.start();
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-    ws.route('/ws/locked', { onMessage: () => {} }, {
-      guards: [() => ({ status: 401 })],
-    });
+    ws.route(
+      '/ws/locked',
+      { onMessage: () => {} },
+      {
+        guards: [() => ({ status: 401 })],
+      },
+    );
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/locked'));
 
@@ -53,25 +57,29 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     const ran: string[] = [];
-    ws.route('/ws/ordered', { onMessage: () => {} }, {
-      guards: [
-        (context) => {
-          ran.push('first');
-          void context;
-          return true;
-        },
-        (context) => {
-          ran.push('second');
-          void context;
-          return { status: 403 };
-        },
-        (context) => {
-          ran.push('third');
-          void context;
-          return true;
-        },
-      ],
-    });
+    ws.route(
+      '/ws/ordered',
+      { onMessage: () => {} },
+      {
+        guards: [
+          (context) => {
+            ran.push('first');
+            void context;
+            return true;
+          },
+          (context) => {
+            ran.push('second');
+            void context;
+            return { status: 403 };
+          },
+          (context) => {
+            ran.push('third');
+            void context;
+            return true;
+          },
+        ],
+      },
+    );
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/ordered'));
 
@@ -89,18 +97,22 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     const ran: string[] = [];
-    ws.route('/ws/short', { onMessage: () => {} }, {
-      guards: [
-        () => {
-          ran.push('first');
-          return { status: 429 };
-        },
-        () => {
-          ran.push('second');
-          return true;
-        },
-      ],
-    });
+    ws.route(
+      '/ws/short',
+      { onMessage: () => {} },
+      {
+        guards: [
+          () => {
+            ran.push('first');
+            return { status: 429 };
+          },
+          () => {
+            ran.push('second');
+            return true;
+          },
+        ],
+      },
+    );
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/short'));
 
@@ -115,15 +127,19 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     let guardRan = false;
-    ws.route('/ws/open', { onMessage: () => {} }, {
-      guards: [
-        (context: WebSocketConnectionContext): Promise<true> => {
-          guardRan = true;
-          void context;
-          return Promise.resolve(true);
-        },
-      ],
-    });
+    ws.route(
+      '/ws/open',
+      { onMessage: () => {} },
+      {
+        guards: [
+          (context: WebSocketConnectionContext): Promise<true> => {
+            guardRan = true;
+            void context;
+            return Promise.resolve(true);
+          },
+        ],
+      },
+    );
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/open'));
 
@@ -138,14 +154,18 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     const guardedFor: string[] = [];
-    ws.route('/ws/a', { onMessage: () => {} }, {
-      guards: [
-        (context) => {
-          guardedFor.push(context.path);
-          return true;
-        },
-      ],
-    });
+    ws.route(
+      '/ws/a',
+      { onMessage: () => {} },
+      {
+        guards: [
+          (context) => {
+            guardedFor.push(context.path);
+            return true;
+          },
+        ],
+      },
+    );
     ws.route('/ws/b', { onMessage: () => {} });
 
     const a = await app.fetch(wireUpgradeRequest('http://localhost/ws/a'));
@@ -166,14 +186,18 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     let seen: WebSocketConnectionContext | undefined;
-    ws.route('/ws/ctx', { onMessage: () => {} }, {
-      guards: [
-        (context) => {
-          seen = context;
-          return true;
-        },
-      ],
-    });
+    ws.route(
+      '/ws/ctx',
+      { onMessage: () => {} },
+      {
+        guards: [
+          (context) => {
+            seen = context;
+            return true;
+          },
+        ],
+      },
+    );
 
     const request = upgradeRequest('http://localhost/ws/ctx?room=lobby', {
       authorization: 'Bearer token-1',
@@ -191,11 +215,13 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
 
   it('a declarative routes-arm entry can carry guards through its options', async () => {
     const options: WebSocketPluginOptions = {
-      routes: [{
-        path: '/ws/declared-locked',
-        handlers: { onMessage: () => {} },
-        options: { guards: [() => ({ status: 403 })] },
-      }],
+      routes: [
+        {
+          path: '/ws/declared-locked',
+          handlers: { onMessage: () => {} },
+          options: { guards: [() => ({ status: 403 })] },
+        },
+      ],
     };
     const app = createApplication({ plugins: [RuntimePlugin(), WebSocketPlugin(options)] });
     await app.start();
@@ -241,13 +267,17 @@ describe('WebSocket upgrade guards (M86 §3.6)', () => {
     await app.start();
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
-    ws.route('/ws/broken', { onMessage: () => {} }, {
-      guards: [
-        () => {
-          throw new Error('guard blew up');
-        },
-      ],
-    });
+    ws.route(
+      '/ws/broken',
+      { onMessage: () => {} },
+      {
+        guards: [
+          () => {
+            throw new Error('guard blew up');
+          },
+        ],
+      },
+    );
 
     const response = await app.fetch(wireUpgradeRequest('http://localhost/ws/broken'));
 

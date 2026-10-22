@@ -49,9 +49,10 @@ describe('keyValues', () => {
   });
 
   it('projects a composite record onto columns in order', () => {
-    expect(
-      keyValues({ tenantId: 't1', userId: 7 }, ['tenantId', 'userId'], 'findById'),
-    ).toEqual(['t1', 7]);
+    expect(keyValues({ tenantId: 't1', userId: 7 }, ['tenantId', 'userId'], 'findById')).toEqual([
+      't1',
+      7,
+    ]);
   });
 
   it('refuses a record missing a column, naming the column', () => {
@@ -68,8 +69,6 @@ describe('keyValues', () => {
   });
 
   it('accepts a composite record that has all required columns', () => {
-    expect(
-      keyValues({ a: 'x', b: 1 }, ['a', 'b'], 'update'),
-    ).toEqual(['x', 1]);
+    expect(keyValues({ a: 'x', b: 1 }, ['a', 'b'], 'update')).toEqual(['x', 1]);
   });
 });

@@ -167,9 +167,13 @@ describe('Queue observations e2e (M98f canary)', () => {
       const memory = app.services.get<IQueue>('queue');
       const cloud = app.services.get<IQueue>('queue.cloud');
       const ids = [
-        await memory.add('email.send', { secret: PAYLOAD_CANARY }, {
-          headers: { traceparent: HEADER_CANARY },
-        }),
+        await memory.add(
+          'email.send',
+          { secret: PAYLOAD_CANARY },
+          {
+            headers: { traceparent: HEADER_CANARY },
+          },
+        ),
         await memory.add('image.resize', { secret: PAYLOAD_CANARY }, { maxAttempts: 1 }),
         await memory.add('image.resize', { secret: PAYLOAD_CANARY }, { maxAttempts: 2 }),
         await cloud.add('report.build', { secret: PAYLOAD_CANARY }),
@@ -192,9 +196,7 @@ describe('Queue observations e2e (M98f canary)', () => {
         await new Promise((resolve) => setTimeout(resolve, 100));
         batch = await client.queues(0);
       }
-      const sources = app.services.getAll<IQueueDiagnosticsSource>(
-        CAPABILITIES.QUEUE_DIAGNOSTICS,
-      );
+      const sources = app.services.getAll<IQueueDiagnosticsSource>(CAPABILITIES.QUEUE_DIAGNOSTICS);
       const sourceBatches = sources.map((source) => source.read(0));
       client.close();
 
@@ -204,14 +206,17 @@ describe('Queue observations e2e (M98f canary)', () => {
         ['q1', 'web-worker', 'ready'],
         ['q2', 'cloud-worker', 'ready'],
       ]);
-      const summary = batch.events.map((e) => [e.sourceId, e.queueAlias, e.outcome, e.settlement])
+      const summary = batch.events
+        .map((e) => [e.sourceId, e.queueAlias, e.outcome, e.settlement])
         .sort();
-      expect(summary).toEqual([
-        ['q1', 'emails', 'completed', 'acknowledged'],
-        ['q1', 'images', 'retryable-error', 'requeued'],
-        ['q1', 'images', 'terminal-error', 'dead-lettered'],
-        ['q2', 'reports', 'completed', 'unknown'],
-      ].sort());
+      expect(summary).toEqual(
+        [
+          ['q1', 'emails', 'completed', 'acknowledged'],
+          ['q1', 'images', 'retryable-error', 'requeued'],
+          ['q1', 'images', 'terminal-error', 'dead-lettered'],
+          ['q2', 'reports', 'completed', 'unknown'],
+        ].sort(),
+      );
       expect(batch.depths.map((d) => [d.sourceId, d.queueAlias, d.scope])).toEqual([
         ['q1', 'emails', 'process-local'],
         ['q1', 'images', 'process-local'],

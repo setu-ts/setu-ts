@@ -19,9 +19,11 @@ import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 import { ResiliencePlugin } from '@setu-ts/resilience-plugin';
 import { CAPABILITIES, type IResilienceService } from '@setu-ts/common';
 
-app.register(ResiliencePlugin({
-  defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
-}));
+app.register(
+  ResiliencePlugin({
+    defaultRetry: { limit: 3, delay: 100, backoff: 'exponential' },
+  }),
+);
 
 const resilience = app.services.get<IResilienceService>(CAPABILITIES.RESILIENCE);
 
@@ -82,7 +84,7 @@ itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the 
 | `TimeoutError`            | class     |
 | `ResiliencePluginOptions` | interface |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

@@ -29,6 +29,7 @@ import type {
   RouteDefinition,
   RouteHandler,
   RouteSchema,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
@@ -258,9 +259,8 @@ function registerInContainer(
   }
   const inject = meta?.inject;
   const optional = effectiveOptional(target, inject);
-  const opts: ProviderOptions | undefined = meta?.scope !== undefined
-    ? { scope: meta.scope }
-    : undefined;
+  const opts: ProviderOptions | undefined =
+    meta?.scope !== undefined ? { scope: meta.scope } : undefined;
   if (optional.size > 0 && inject !== undefined) {
     const factory: FactoryProvider<unknown> = {
       useFactory: (): unknown =>
@@ -519,9 +519,11 @@ function appendIdempotencyMiddleware(
   const method = route.method.toUpperCase();
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
     throw new Error(
-      `${
-        routeLabel(target, route, fullPath)
-      } is decorated with @Idempotent, but ${method} is a safe ` +
+      `${routeLabel(
+        target,
+        route,
+        fullPath,
+      )} is decorated with @Idempotent, but ${method} is a safe ` +
         'method; idempotency keys apply to unsafe methods only.',
     );
   }
@@ -536,10 +538,7 @@ function appendIdempotencyMiddleware(
 }
 
 /** Composes the post-authorization route middleware (class then method). */
-function composeMiddleware(
-  ctrl: ControllerMetadata,
-  route: RouteMetadata,
-): MiddlewareFunction[] {
+function composeMiddleware(ctrl: ControllerMetadata, route: RouteMetadata): MiddlewareFunction[] {
   return [
     ...ctrl.interceptors,
     ...route.interceptors,
@@ -551,10 +550,7 @@ function composeMiddleware(
 }
 
 /** Composes guards, which deliberately precede declarative authorization. */
-function composeGuards(
-  ctrl: ControllerMetadata,
-  route: RouteMetadata,
-): MiddlewareFunction[] {
+function composeGuards(ctrl: ControllerMetadata, route: RouteMetadata): MiddlewareFunction[] {
   return [...ctrl.guards, ...route.guards];
 }
 
@@ -608,6 +604,8 @@ function buildRouteSchema(
   const schema = route.schema;
   const tags = [...ctrl.tags, ...(route.openapi?.tags ?? [])];
   const summary = route.openapi?.summary;
+  const operationId = route.openapi?.operationId;
+  const description = route.openapi?.description;
   const response = buildResponseSchemas(route);
   const hasSchema = schema !== undefined;
   const hasTags = tags.length > 0;
@@ -615,11 +613,18 @@ function buildRouteSchema(
   // A `@RequirePolicy` whose ability requires a signed-in principal is enforcement too,
   // independent of `enforceRoles` (M110a §3.10): its branded middleware derives
   // the requirement, so the public marker would contradict it.
-  const isPublic = route.isPublic === true && !requiresPolicyPrincipal && (
-    !enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined)
-  );
+  const isPublic =
+    route.isPublic === true &&
+    !requiresPolicyPrincipal &&
+    (!enforceRoles || (restrictions.roles === undefined && restrictions.permissions === undefined));
   if (
-    !hasSchema && !hasTags && summary === undefined && response === undefined && !isPublic
+    !hasSchema &&
+    !hasTags &&
+    summary === undefined &&
+    operationId === undefined &&
+    description === undefined &&
+    response === undefined &&
+    !isPublic
   ) {
     return undefined;
   }
@@ -629,6 +634,8 @@ function buildRouteSchema(
     ...(schema?.params !== undefined ? { params: schema.params } : {}),
     ...(hasTags ? { tags } : {}),
     ...(summary !== undefined ? { summary } : {}),
+    ...(operationId !== undefined ? { operationId } : {}),
+    ...(description !== undefined ? { description } : {}),
     ...(response !== undefined ? { response } : {}),
     ...(isPublic ? { security: [] } : {}),
   };
@@ -645,6 +652,8 @@ const DECORATOR_SCHEMA_TARGETS = ['body', 'query', 'params'] as const;
 interface SchemaTarget {
   readonly target: ValidationTarget;
   readonly schema: unknown;
+  /** Present only for a body validator opted into form bodies. */
+  readonly options?: ValidationMiddlewareOptions;
 }
 
 /**
@@ -660,7 +669,11 @@ function enforcedTargets(route: RouteMetadata): SchemaTarget[] {
   for (const target of DECORATOR_SCHEMA_TARGETS) {
     const s = schema[target];
     if (s !== undefined) {
-      out.push({ target, schema: s });
+      out.push(
+        target === 'body' && schema.bodyForms === true
+          ? { target, schema: s, options: { forms: true } }
+          : { target, schema: s },
+      );
     }
   }
   return out;
@@ -690,7 +703,8 @@ function warnUnenforcedRestrictions(
       handler: route.handler,
       ...(roles !== undefined ? { roles: [...roles] } : {}),
       ...(permissions !== undefined ? { permissions: [...permissions] } : {}),
-      hint: 'Register an authorization provider under CAPABILITIES.AUTHORIZATION (e.g. ' +
+      hint:
+        'Register an authorization provider under CAPABILITIES.AUTHORIZATION (e.g. ' +
         'AuthPlugin with rbac) to enforce them, or set enforceRoles: false on ' +
         'DecoratorPlugin to keep the metadata description-only.',
     },
@@ -761,7 +775,8 @@ function warnUnenforcedSchemas(
       controller: className(controller),
       handler: route.handler,
       targets: targets.map((t) => t.target),
-      hint: 'Register ValidationPlugin (or another CAPABILITIES.VALIDATION provider) to enforce ' +
+      hint:
+        'Register ValidationPlugin (or another CAPABILITIES.VALIDATION provider) to enforce ' +
         'them, or set enforceSchemas: false on DecoratorPlugin to silence this warning.',
     },
   );
@@ -789,8 +804,14 @@ function appendValidationMiddleware(
     warnUnenforcedSchemas(ctx, controller, route, targets);
     return;
   }
-  for (const { target, schema } of targets) {
-    middleware.push(validation.middleware(schema, target));
+  for (const { target, schema, options } of targets) {
+    // The third argument is passed only when set, so a provider implementing the
+    // two-parameter form of the contract sees exactly the call it always did.
+    middleware.push(
+      options === undefined
+        ? validation.middleware(schema, target)
+        : validation.middleware(schema, target, options),
+    );
   }
 }
 
@@ -847,16 +868,13 @@ function warnControllersWithoutMetadata(
   }
   for (const target of controllers) {
     if (!metadataStore.hasController(target)) {
-      ctx.logger.warn(
-        'Controller has no @Controller metadata and registers no routes',
-        {
-          controller: className(target),
-          hint:
-            'Add @Controller(), or check that the application and DecoratorPlugin resolve to the ' +
-            'same @setu-ts/decorator-plugin copy — decorators write to the metadata store of the ' +
-            'copy that defines them.',
-        },
-      );
+      ctx.logger.warn('Controller has no @Controller metadata and registers no routes', {
+        controller: className(target),
+        hint:
+          'Add @Controller(), or check that the application and DecoratorPlugin resolve to the ' +
+          'same @setu-ts/decorator-plugin copy — decorators write to the metadata store of the ' +
+          'copy that defines them.',
+      });
     }
   }
 }
@@ -913,7 +931,8 @@ function warnCrossFamilyMisregistration(
         'Class is listed in `ingress` and carries HTTP route metadata but is not registered as a controller; its routes are not registered',
         {
           controller: className(target),
-          hint: "List the class in `controllers` (or a `@Module`'s `controllers`) as well to " +
+          hint:
+            "List the class in `controllers` (or a `@Module`'s `controllers`) as well to " +
             'register its routes, or remove the HTTP route decorators.',
         },
       );
@@ -940,19 +959,17 @@ function warnUnresolvableParameters(
     return;
   }
   for (const param of findUnresolvableParameters(route.params)) {
-    ctx.logger.warn(
-      'Decorated parameter cannot be resolved and will be undefined',
-      {
-        controller: className(target),
-        handler: route.handler,
-        parameterIndex: param.index,
-        customType: param.customType ?? '(none)',
-        hint: 'Register a resolver with registerParameterResolver() for this custom type. ' +
-          'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
-          'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
-          'registration.',
-      },
-    );
+    ctx.logger.warn('Decorated parameter cannot be resolved and will be undefined', {
+      controller: className(target),
+      handler: route.handler,
+      parameterIndex: param.index,
+      customType: param.customType ?? '(none)',
+      hint:
+        'Register a resolver with registerParameterResolver() for this custom type. ' +
+        'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
+        'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
+        'registration.',
+    });
   }
 }
 
@@ -981,9 +998,10 @@ function registerController(
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
     warnUnresolvableParameters(ctx, target, route);
-    const render = route.view !== undefined
-      ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
-      : undefined;
+    const render =
+      route.view !== undefined
+        ? { view: route.view, engine: requireViewEngine(viewEngine, target, route, fullPath) }
+        : undefined;
     const shaping = validateResponseShaping(route, routeLabel(target, route, fullPath));
     const handler = createHandler(instance, route.handler, route.params, render, shaping);
     const middleware = composeGuards(ctrlMeta, route);
@@ -1092,28 +1110,29 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
     // Real dependency edges (not priority luck): a REPLACEMENT provider
     // registered at a higher priority number still lands before this plugin,
     // so the register-time resolution of all three capabilities sees it.
-    optionalDependencies: ingress.length === 0
-      ? [
-        CAPABILITIES.VALIDATION,
-        CAPABILITIES.AUTHORIZATION,
-        CAPABILITIES.AUTHORIZATION_POLICIES,
-        CAPABILITIES.VIEW,
-        CAPABILITIES.IDEMPOTENCY,
-      ]
-      : [
-        CAPABILITIES.VALIDATION,
-        CAPABILITIES.AUTHORIZATION,
-        CAPABILITIES.AUTHORIZATION_POLICIES,
-        CAPABILITIES.VIEW,
-        CAPABILITIES.IDEMPOTENCY,
-        CAPABILITIES.QUEUE,
-        CAPABILITIES.SCHEDULER,
-        CAPABILITIES.EVENTS,
-        CAPABILITIES.MESSAGING,
-        CAPABILITIES.WEBSOCKET,
-        CAPABILITIES.COMMAND_BUS,
-        CAPABILITIES.QUERY_BUS,
-      ],
+    optionalDependencies:
+      ingress.length === 0
+        ? [
+            CAPABILITIES.VALIDATION,
+            CAPABILITIES.AUTHORIZATION,
+            CAPABILITIES.AUTHORIZATION_POLICIES,
+            CAPABILITIES.VIEW,
+            CAPABILITIES.IDEMPOTENCY,
+          ]
+        : [
+            CAPABILITIES.VALIDATION,
+            CAPABILITIES.AUTHORIZATION,
+            CAPABILITIES.AUTHORIZATION_POLICIES,
+            CAPABILITIES.VIEW,
+            CAPABILITIES.IDEMPOTENCY,
+            CAPABILITIES.QUEUE,
+            CAPABILITIES.SCHEDULER,
+            CAPABILITIES.EVENTS,
+            CAPABILITIES.MESSAGING,
+            CAPABILITIES.WEBSOCKET,
+            CAPABILITIES.COMMAND_BUS,
+            CAPABILITIES.QUERY_BUS,
+          ],
     priority: PLUGIN_PRIORITY.LOW,
 
     async register(ctx: IPluginContext): Promise<void> {

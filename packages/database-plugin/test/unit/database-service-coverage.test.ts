@@ -283,9 +283,11 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
         { logQueries: true },
         { debug: () => {} },
       );
-      const wrapped = (logging.getRepository('Extra') as unknown as {
-        _dataSource: { describeShape?: () => string };
-      })._dataSource;
+      const wrapped = (
+        logging.getRepository('Extra') as unknown as {
+          _dataSource: { describeShape?: () => string };
+        }
+      )._dataSource;
 
       expect(typeof wrapped.describeShape).toBe('function');
       expect(wrapped.describeShape?.()).toBe('adapter-specific extra');
@@ -334,9 +336,11 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       expect((await repo.findById('x1'))?.qty).toBe(4);
       expect(await repo.count()).toBe(1);
 
-      const wrapped = (repo as unknown as {
-        _dataSource: { describeShape?: () => string };
-      })._dataSource;
+      const wrapped = (
+        repo as unknown as {
+          _dataSource: { describeShape?: () => string };
+        }
+      )._dataSource;
       // The prototype-only extra is not carried — documented, not accidental.
       expect(wrapped.describeShape).toBeUndefined();
       // And it is still callable on the instance itself, which is what proves
@@ -352,9 +356,8 @@ describe('DatabaseService — CRUD read-back and logging coverage', () => {
       // transaction-scoped query object would hand a caller a native builder
       // bound to a transaction that has already settled, so it is refused by
       // name rather than returned.
-      const configured = createDrizzleDatabase(
-        createFakeDrizzleInstance(),
-        (database, work) => database.transaction(work),
+      const configured = createDrizzleDatabase(createFakeDrizzleInstance(), (database, work) =>
+        database.transaction(work),
       );
       const misreporting = {
         ...(adapter as unknown as Record<string, unknown>),

@@ -24,18 +24,22 @@ import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plug
 import { createFlagGuard, FeatureFlagsPlugin } from '@setu-ts/feature-flags-plugin';
 import { CAPABILITIES, type IFeatureFlags } from '@setu-ts/common';
 
-app.register(FeatureFlagsPlugin({
-  provider: 'config',
-  options: {
-    flags: {
-      'new-checkout': { enabled: false, users: ['user-1', 'user-2'] },
-      'dark-mode': { enabled: true, percentage: 25 },
+app.register(
+  FeatureFlagsPlugin({
+    provider: 'config',
+    options: {
+      flags: {
+        'new-checkout': { enabled: false, users: ['user-1', 'user-2'] },
+        'dark-mode': { enabled: true, percentage: 25 },
+      },
     },
-  },
-}));
+  }),
+);
 
 const flags = app.services.get<IFeatureFlags>(CAPABILITIES.FEATURE_FLAGS);
-if (flags.isEnabled('new-checkout', { userId: 'user-1' })) { /* … */ }
+if (flags.isEnabled('new-checkout', { userId: 'user-1' })) {
+  /* … */
+}
 
 // Route guard — short-circuits without calling next()
 app.router.get('/beta', {
@@ -141,10 +145,16 @@ carries no such caveat — it awaits the SDK and is the accurate entry point whe
 | `FeatureFlagsPluginOptions`   | type      |
 | `FlagProviderType`            | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#feature-flags-setu-tsfeature-flags-plugin).
+
+## Readiness and dependency outages (M113b)
+
+A failed provider keeps `feature-flags` `up` with `data.healthy: false` and `data.detail` when
+available. `/ready` stays 200 while the last good snapshot serves. Alert on `data.healthy` instead
+of the overall health status.

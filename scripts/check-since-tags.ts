@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * The `@since` gate: every tag is checked against the version that SHIPPED the
  * symbol it sits on — from JSR through 0.8.x, and npm tarball sources thereafter.
@@ -33,7 +33,7 @@
  * {@linkcode lineStandIn}.
  *
  * A network failure is NOT an exit 77 here. `check:docs` is an `&&` chain of
- * `deno run` invocations, so any non-zero status fails the task — 77
+ * `node` invocations, so any non-zero status fails the task — 77
  * included — and a transient registry outage would fail the documentation
  * job and block release PRs. Instead every unreachable fetch is reported on
  * stderr and the run exits 0; and so that silence is never mistaken for a
@@ -42,6 +42,11 @@
  *
  * @module
  */
+
+import { workspaceMembers } from './lib/workspace.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile as readSourceFile } from 'node:fs/promises';
+import { isNotFound } from './lib/run.ts';
 
 import { gunzipBounded, readTar } from './tar-read.ts';
 
@@ -79,10 +84,7 @@ export interface SinceSkip {
 }
 
 /** Why a tag failed. */
-export type SinceFindingKind =
-  | 'file-absent'
-  | 'symbol-absent'
-  | 'version-absent';
+export type SinceFindingKind = 'file-absent' | 'symbol-absent' | 'version-absent';
 
 /** A tag whose claim the registry disproves. */
 export interface SinceFinding {
@@ -496,20 +498,18 @@ function modulePathFor(member: string, file: string): string {
  * @param member - The workspace member path
  * @returns `.ts` paths, sorted
  */
-export async function defaultListSourceFiles(
-  member: string,
-): Promise<readonly string[]> {
+export async function defaultListSourceFiles(member: string): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (dir: string): Promise<void> => {
-    let entries: Deno.DirEntry[];
+    let entries: Dirent[];
     try {
-      entries = await Array.fromAsync(Deno.readDir(dir));
+      entries = await await readdir(dir, { withFileTypes: true });
     } catch (error) {
-      if (error instanceof Deno.errors.NotFound) return;
+      if (isNotFound(error)) return;
       throw error;
     }
     for (const entry of entries) {
-      if (entry.isDirectory) await walk(`${dir}/${entry.name}`);
+      if (entry.isDirectory()) await walk(`${dir}/${entry.name}`);
       else if (entry.name.endsWith('.ts')) found.push(`${dir}/${entry.name}`);
     }
   };
@@ -531,12 +531,20 @@ export async function defaultListSourceFiles(
 export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult> {
   const registryBase = options.registryBase ?? DEFAULT_REGISTRY_BASE;
   const npmRegistryBase = options.npmRegistryBase ?? 'https://registry.npmjs.org';
-  const fetchImpl = options.fetchImpl ?? ((url: string) => fetch(url));
-  const readFile = options.readFile ?? ((path: string) => Deno.readTextFile(path));
+  const fetchImpl = options.fetchImpl ?? ((url: string) => fetch(url, { redirect: 'error' }));
+  const fetchRegistry: FetchLike = (url) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || !['jsr.io', 'registry.npmjs.org'].includes(parsed.host)) {
+      throw new Error(`registry URL is outside the allowed hosts: ${parsed.host}`);
+    }
+    return fetchImpl(url);
+  };
+  const readFile = options.readFile ?? ((path: string) => readSourceFile(path, 'utf8'));
   const listSourceFiles = options.listSourceFiles ?? defaultListSourceFiles;
-  const manifest: WorkspaceManifest = options.manifest ??
-    JSON.parse(await readFile('deno.json')) as WorkspaceManifest;
-  const members = (manifest.workspace ?? []).map(normalizeMember);
+  const members =
+    options.manifest === undefined
+      ? await workspaceMembers('.', readFile)
+      : (options.manifest.workspace ?? []).map(normalizeMember);
 
   const findings: SinceFinding[] = [];
   const skipped: SinceSkip[] = [];
@@ -546,10 +554,12 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
   const metaCache = new Map<
     string,
     Promise<
-      { readonly kind: 'ok'; readonly versions: readonly string[] } | {
-        readonly kind: 'unreachable';
-        readonly reason: string;
-      } | { readonly kind: 'unpublished' }
+      | { readonly kind: 'ok'; readonly versions: readonly string[] }
+      | {
+          readonly kind: 'unreachable';
+          readonly reason: string;
+        }
+      | { readonly kind: 'unpublished' }
     >
   >();
 
@@ -560,7 +570,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     if (cached !== undefined) return cached;
     const pending = (async () => {
       try {
-        const response = await fetchImpl(
+        const response = await fetchRegistry(
           npm
             ? `${npmRegistryBase}/${packageName.replace('/', '%2f')}`
             : `${registryBase}/${packageName}/meta.json`,
@@ -593,7 +603,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     if (cached !== undefined) return cached;
     const pending = (async () => {
       try {
-        const response = await fetchImpl(url);
+        const response = await fetchRegistry(url);
         if (response.ok) return await response.text();
         // As above: only 404 is absence. Reading a 429 or a 5xx as an absent
         // file would raise a `file-absent` FINDING and exit 1, failing the
@@ -620,7 +630,7 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
     let pending = tarCache.get(url);
     if (pending === undefined) {
       pending = (async () => {
-        const response = await fetchImpl(url);
+        const response = await fetchRegistry(url);
         if (response.status === 404) return null;
         if (!response.ok) throw new Error(`npm tarball HTTP ${response.status}`);
         if (response.arrayBuffer === undefined) {
@@ -702,7 +712,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
               line: tag.line,
               version: tag.version,
               kind: 'version-absent',
-              message: `${packageName} has no ${tag.version} — the tag names a version that ` +
+              message:
+                `${packageName} has no ${tag.version} — the tag names a version that ` +
                 `was never published, and is older than one that was, so it can never appear. ` +
                 `Name the release that ships the symbol.`,
             });
@@ -711,16 +722,17 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
         }
         // When the line shipped only as prereleases, the message names both
         // the claimed version and the release actually read.
-        const checkedLabel = checked === tag.version
-          ? tag.version
-          : `${checked} (the last release of the ${tag.version} line)`;
+        const checkedLabel =
+          checked === tag.version
+            ? tag.version
+            : `${checked} (the last release of the ${tag.version} line)`;
         let content: string | null;
         try {
           content = npm
             ? await npmFileFor(packageName, checked, modulePathFor(member, file))
             : await fileFor(
-              registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
-            );
+                registryFileUrl(registryBase, packageName, checked, modulePathFor(member, file)),
+              );
         } catch (error) {
           pushSkip(tag, String(error));
           continue;
@@ -731,7 +743,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
             line: tag.line,
             version: tag.version,
             kind: 'file-absent',
-            message: `${packageName}@${checkedLabel} does not contain ` +
+            message:
+              `${packageName}@${checkedLabel} does not contain ` +
               `${modulePathFor(member, file)} — the tag names a release that does not ` +
               `ship the file the symbol lives in.`,
           });
@@ -746,7 +759,8 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
           line: tag.line,
           version: tag.version,
           kind: 'symbol-absent',
-          message: `${tag.symbol} is absent from ${packageName}@${checkedLabel}'s ` +
+          message:
+            `${tag.symbol} is absent from ${packageName}@${checkedLabel}'s ` +
             `${modulePathFor(member, file)} — the tag names a release that does not ` +
             `ship the symbol it sits on.`,
         });
@@ -757,12 +771,11 @@ export async function run(options: SinceRunOptions = {}): Promise<SinceRunResult
   return { findings, skipped, verified };
 }
 
-if (import.meta.main) {
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runSinceMain(): Promise<number> {
   const { findings, skipped, verified } = await run();
   for (const skip of skipped) {
-    console.error(
-      `  skipped ${skip.file}:${skip.line} (@since ${skip.version}) — ${skip.reason}`,
-    );
+    console.error(`  skipped ${skip.file}:${skip.line} (@since ${skip.version}) — ${skip.reason}`);
   }
   if (findings.length > 0) {
     console.error(
@@ -775,7 +788,10 @@ if (import.meta.main) {
           `    ${finding.message}\n`,
       );
     }
-    Deno.exit(1);
+    return 1;
   }
   console.log(`@since check passed: verified ${verified} tag(s) against the registry.`);
+  return 0;
 }
+
+if (import.meta.main) process.exitCode = await runSinceMain();

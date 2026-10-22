@@ -107,10 +107,12 @@ describe('sessionMiddleware', () => {
     const { middleware } = await makeMiddleware();
     const { ctx, response } = makeContext();
 
-    await expect(middleware(ctx, () => {
-      (ctx.state.get(SESSION_STATE_KEY) as ISession).set('a', 1);
-      return Promise.reject(new Error('handler blew up'));
-    })).rejects.toThrow('handler blew up');
+    await expect(
+      middleware(ctx, () => {
+        (ctx.state.get(SESSION_STATE_KEY) as ISession).set('a', 1);
+        return Promise.reject(new Error('handler blew up'));
+      }),
+    ).rejects.toThrow('handler blew up');
 
     // A failed request must not persist a half-applied mutation.
     expect(response.setCookies().length).toBe(0);
@@ -168,7 +170,10 @@ describe('sessionMiddleware', () => {
 
   it('publishes binding ON for the tenant-side compare only when tenantBinding is enabled', async () => {
     const service = (await makeMiddleware()).service;
-    for (const [tenantBinding, expected] of [[true, true], [false, undefined]] as const) {
+    for (const [tenantBinding, expected] of [
+      [true, true],
+      [false, undefined],
+    ] as const) {
       const { ctx } = makeContext();
       let seen: unknown = 'unset';
       await sessionMiddleware(service, tenantBinding)(ctx, () => {

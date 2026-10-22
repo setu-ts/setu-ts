@@ -43,26 +43,28 @@ describe('the observed column set', () => {
     // A sparse optional column appears on some rows and not others; treating
     // the first row as authoritative would reject a real column.
     const rows = [{ id: 'a' }, { id: 'b', deletedAt: 1 }];
-    expect(unknownColumnError('Product', rows, query({ select: ['deletedAt'] })))
-      .toBeUndefined();
+    expect(unknownColumnError('Product', rows, query({ select: ['deletedAt'] }))).toBeUndefined();
   });
 
   it('reports every observed column in the diagnostic', () => {
     const rows = [{ id: 'a' }, { id: 'b', deletedAt: 1 }];
-    expect(unknownColumnError('Product', rows, query({ select: ['sku'] }))?.message)
-      .toContain('Known columns: deletedAt, id.');
+    expect(unknownColumnError('Product', rows, query({ select: ['sku'] }))?.message).toContain(
+      'Known columns: "deletedAt", "id".',
+    );
   });
 });
 
 describe('unknownColumnError', () => {
   it('reports nothing when the query names no select or orderBy field', () => {
-    expect(unknownColumnError('Product', [{ id: 'p1' }], query({ where: { anything: 1 } })))
-      .toBeUndefined();
+    expect(
+      unknownColumnError('Product', [{ id: 'p1' }], query({ where: { anything: 1 } })),
+    ).toBeUndefined();
   });
 
   it('reports nothing when every named field is known', () => {
-    expect(unknownColumnError('Product', [{ id: 'p1' }], query({ select: ['id'] })))
-      .toBeUndefined();
+    expect(
+      unknownColumnError('Product', [{ id: 'p1' }], query({ select: ['id'] })),
+    ).toBeUndefined();
   });
 
   it('names the entity, the clause and the field it rejected', () => {
@@ -71,7 +73,7 @@ describe('unknownColumnError', () => {
       [{ id: 'p1', name: 'Bolt' }],
       query({ select: ['sku'] }),
     );
-    expect(error?.message).toContain("entity 'Product' has no 'sku' column for select.");
+    expect(error?.message).toContain('entity \'Product\' has no "sku" column for select.');
   });
 
   it('lists the columns it did observe, so the typo is visible', () => {
@@ -80,7 +82,7 @@ describe('unknownColumnError', () => {
       [{ id: 'p1', name: 'Bolt' }],
       query({ orderBy: { nme: 'asc' } }),
     );
-    expect(error?.message).toContain('Known columns: id, name.');
+    expect(error?.message).toContain('Known columns: "id", "name".');
   });
 
   it('returns rather than throws, so a Promise-returning caller can reject', () => {
@@ -110,14 +112,14 @@ describe('MemoryAdapter column validation', () => {
     const adapter = await seeded();
     await expect(
       adapter.createDataSource('Product').findAll(query({ select: ['id', 'sku'] })),
-    ).rejects.toThrow("has no 'sku' column for select");
+    ).rejects.toThrow('has no "sku" column for select');
   });
 
   it('orders by a known column', async () => {
     const adapter = await seeded();
-    const rows = await adapter.createDataSource('Product').findAll(
-      query({ orderBy: { qty: 'asc' } }),
-    );
+    const rows = await adapter
+      .createDataSource('Product')
+      .findAll(query({ orderBy: { qty: 'asc' } }));
     expect(rows.map((row) => row.id)).toEqual(['p2', 'p1']);
   });
 
@@ -125,7 +127,7 @@ describe('MemoryAdapter column validation', () => {
     const adapter = await seeded();
     await expect(
       adapter.createDataSource('Product').findAll(query({ orderBy: { sku: 'desc' } })),
-    ).rejects.toThrow("has no 'sku' column for orderBy");
+    ).rejects.toThrow('has no "sku" column for orderBy');
   });
 
   it('accepts a column carried by only some rows', async () => {
@@ -141,9 +143,9 @@ describe('MemoryAdapter column validation', () => {
   it('accepts any column against an empty store, where there is nothing to observe', async () => {
     const adapter = new MemoryAdapter();
     await adapter.connect();
-    const rows = await adapter.createDataSource('Product').findAll(
-      query({ select: ['whatever'], orderBy: { alsoWhatever: 'asc' } }),
-    );
+    const rows = await adapter
+      .createDataSource('Product')
+      .findAll(query({ select: ['whatever'], orderBy: { alsoWhatever: 'asc' } }));
     expect(rows).toEqual([]);
   });
 
@@ -152,9 +154,11 @@ describe('MemoryAdapter column validation', () => {
     const source = adapter.createDataSource('Product');
     expect(await source.findAll(query({ where: { sku: 'X' } }))).toEqual([]);
     expect(
-      await source.findAll(query({
-        filter: { type: 'comparison', field: 'sku', operator: 'eq', value: 'X' },
-      })),
+      await source.findAll(
+        query({
+          filter: { type: 'comparison', field: 'sku', operator: 'eq', value: 'X' },
+        }),
+      ),
     ).toEqual([]);
     expect(await source.count({ sku: 'X' })).toBe(0);
   });
@@ -165,7 +169,7 @@ describe('MemoryAdapter column validation', () => {
       const txn = await adapter.beginTransaction();
       await expect(
         txn.createDataSource('Product').findAll(query({ select: ['sku'] })),
-      ).rejects.toThrow("has no 'sku' column for select");
+      ).rejects.toThrow('has no "sku" column for select');
       await txn.rollback();
     });
 
@@ -174,7 +178,7 @@ describe('MemoryAdapter column validation', () => {
       const txn = await adapter.beginTransaction();
       await expect(
         txn.createDataSource('Product').findAll(query({ orderBy: { sku: 'asc' } })),
-      ).rejects.toThrow("has no 'sku' column for orderBy");
+      ).rejects.toThrow('has no "sku" column for orderBy');
       await txn.rollback();
     });
 

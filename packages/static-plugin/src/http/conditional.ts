@@ -75,9 +75,7 @@ export function shouldReturn304(options: ConditionalOptions): boolean {
     const normalizeForComparison = (tag: string): string =>
       tag.startsWith('W/"') ? `"${tag.slice(3, -1)}"` : tag;
     const normalizedComputed = normalizeForComparison(computedEtag);
-    return ifNoneMatchValues.some(
-      (v) => normalizeForComparison(v) === normalizedComputed,
-    );
+    return ifNoneMatchValues.some((v) => normalizeForComparison(v) === normalizedComputed);
   }
 
   // Reached only when If-None-Match is absent or ETags are disabled, so this

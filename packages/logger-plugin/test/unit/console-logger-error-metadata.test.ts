@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console
+/* eslint-disable no-console */
 /**
  * Unit test: `ConsoleLogger` normalizes a raw `Error` in metadata before
  * emission (X2-5), so it renders its `message` and `stack` rather than `{}`;
@@ -16,7 +16,7 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 function captureConsole<T>(fn: () => T): { output: string[]; result: T } {
   const output: string[] = [];
   const original = console.log;
-  // deno-lint-ignore no-explicit-any
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (console as any).log = (...args: unknown[]) => {
     output.push(args.map(String).join(' '));
   };

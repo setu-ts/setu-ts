@@ -63,9 +63,8 @@ export function RealtimeBackplanePlugin(
   // M98l: validated here, before any application exists. The `'custom'` arm
   // carries no `diagnostics` option: its transport is never observed.
   const diagnosticsOption = options.transport === 'custom' ? undefined : options.diagnostics;
-  const diagnosticsAlias = diagnosticsOption === undefined
-    ? null
-    : compileRealtimeDiagnosticsAlias(diagnosticsOption);
+  const diagnosticsAlias =
+    diagnosticsOption === undefined ? null : compileRealtimeDiagnosticsAlias(diagnosticsOption);
 
   return {
     name: PLUGIN_NAME,
@@ -97,16 +96,16 @@ export function RealtimeBackplanePlugin(
 
       // The redis arm's built connections report reconnect failures to the
       // logger (read at call time) unless the caller routed them elsewhere,
-      // rather than through ioredis's own console fallback.
+      // rather than being dropped.
       const resolved: RealtimeBackplanePluginOptions =
         options.transport === 'redis' && options.connectionErrorReporter === undefined
           ? {
-            ...options,
-            connectionErrorReporter: createConnectionErrorReporter({
-              source: 'realtime-backplane-plugin: redis transport',
-              logger: () => ctx.logger,
-            }),
-          }
+              ...options,
+              connectionErrorReporter: createConnectionErrorReporter({
+                source: 'realtime-backplane-plugin: redis transport',
+                logger: () => ctx.logger,
+              }),
+            }
           : options;
       const backplane = createBackplane(resolved, ctx.services, ctx.runtime.uuid());
 
@@ -134,15 +133,15 @@ export function RealtimeBackplanePlugin(
       );
 
       ctx.health.register('realtime-backplane', async (): Promise<HealthCheckResult> => {
-        // M70c: a fan-out failure is `degraded` (local delivery still works, so
-        // /ready keeps serving), never `down`. A transport that cannot probe
-        // (isHealthy absent) reports unknown reachability with an up status.
+        // Shared fan-out faults stay in data: determineStatusCode withdraws
+        // every non-up replica, while local request delivery still works.
+        // A transport without isHealthy reports unknown reachability.
         let reachable: boolean | 'unknown' = 'unknown';
         if (typeof backplane.isHealthy === 'function') {
           reachable = await backplane.isHealthy();
         }
         return {
-          status: reachable === false ? 'degraded' : 'up',
+          status: 'up',
           data: {
             transport: options.transport ?? 'memory',
             origin: backplane.origin,

@@ -128,20 +128,14 @@ export class TracedQueue implements IQueue {
     this.#queue.process<T>(
       name,
       (job: IJob<T>) =>
-        this.#telemetry.withSpan(
-          `process ${name}`,
-          async () => await processor(job),
-          {
-            kind: 'consumer',
-            attributes: {
-              ...attributesFor(name, 'process'),
-              'messaging.message.id': job.id,
-            },
-            parentContext: parseTraceparentToContext(
-              job.headers?.[TRACEPARENT_HEADER] ?? null,
-            ),
+        this.#telemetry.withSpan(`process ${name}`, async () => await processor(job), {
+          kind: 'consumer',
+          attributes: {
+            ...attributesFor(name, 'process'),
+            'messaging.message.id': job.id,
           },
-        ),
+          parentContext: parseTraceparentToContext(job.headers?.[TRACEPARENT_HEADER] ?? null),
+        }),
       options,
     );
   }

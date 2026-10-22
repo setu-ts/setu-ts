@@ -48,7 +48,10 @@ export interface DenoServeHost {
   serve(options: {
     port: number;
     hostname?: string;
-    fetch: (request: Request) => Response | Promise<Response>;
+    fetch: (
+      request: Request,
+      info?: { remoteAddr?: { hostname?: string } },
+    ) => Response | Promise<Response>;
     /**
      * Replaces `Deno.serve`'s own startup banner. Supplied by the local
      * diagnostics listener so its line names the devtool rather than
@@ -67,10 +70,7 @@ export interface DenoServeHost {
    * @param options - Handshake options; `protocol` echoes a negotiated subprotocol
    * @returns The server-side socket and the 101 response to return
    */
-  upgradeWebSocket?(
-    request: Request,
-    options?: { protocol?: string },
-  ): DenoWebSocketUpgrade;
+  upgradeWebSocket?(request: Request, options?: { protocol?: string }): DenoWebSocketUpgrade;
 }
 
 /**
@@ -107,9 +107,10 @@ export const defaultDenoServeHost: DenoServeHost = {
     return server as unknown as DenoServer;
   },
   upgradeWebSocket: (request, options) => {
-    const result = options?.protocol !== undefined
-      ? Deno.upgradeWebSocket(request, { protocol: options.protocol })
-      : Deno.upgradeWebSocket(request);
+    const result =
+      options?.protocol !== undefined
+        ? Deno.upgradeWebSocket(request, { protocol: options.protocol })
+        : Deno.upgradeWebSocket(request);
     return result as unknown as DenoWebSocketUpgrade;
   },
 };
@@ -181,9 +182,19 @@ export class DenoHttpServerHandle {
    * handshake. This ensures middleware (auth, metrics, security headers)
    * applies to upgrade requests uniformly.
    */
-  createFetchHandler(): (request: Request) => Response | Promise<Response> {
-    return (request: Request): Response | Promise<Response> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+  createFetchHandler(): (
+    request: Request,
+    info?: { remoteAddr?: { hostname?: string } },
+  ) => Response | Promise<Response> {
+    return (
+      request: Request,
+      info?: { remoteAddr?: { hostname?: string } },
+    ): Response | Promise<Response> => {
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        request,
+        this.#maxBodyBytes,
+        info?.remoteAddr?.hostname,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -217,10 +228,7 @@ export class DenoHttpServerHandle {
    * Performs the WebSocket handshake using the stored raw Request and the
    * upgrade intent written by the kernel terminal handler.
    */
-  #performUpgrade(
-    request: Request,
-    intent: WebSocketUpgradeIntent,
-  ): Response {
+  #performUpgrade(request: Request, intent: WebSocketUpgradeIntent): Response {
     const upgradeWebSocket = this.#host.upgradeWebSocket;
     if (upgradeWebSocket === undefined) {
       intent.sink.onClose({ code: ABNORMAL_CLOSURE, reason: 'Upgrade unsupported' });
@@ -290,7 +298,7 @@ export class DenoHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const fetchHandler = this.#handle.createFetchHandler();
     const server = this.#host.serve({
@@ -308,7 +316,20 @@ export class DenoHttpAdapter implements IHttpAdapter {
     }
 
     if (handle.server !== null) {
-      await handle.server.shutdown();
+      // Yield until the listener is released, but never let an in-flight
+      // request block the lifecycle hooks that can terminate its work.
+      const shutdown = handle.server.shutdown().catch(() => {});
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          shutdown,
+          new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 1000);
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+      }
       handle.server = null;
     }
     return Promise.resolve();

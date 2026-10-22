@@ -25,9 +25,82 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import { MessagingPlugin, PubSubSubscriptionBoundElsewhereError } from '../../src/index.ts';
+import { createNodeRuntimeServices } from '@setu-ts/runtime';
+import { GcpPubSubBroker } from '../../src/brokers/pubsub-broker.ts';
+import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 
 const emulatorHost = process.env['PUBSUB_EMULATOR_HOST'];
 const projectId = process.env['PUBSUB_PROJECT_ID'] ?? 'he-test';
+
+describe('M113a REAL Pub/Sub probe outage', { skip: !emulatorHost }, () => {
+  it('getTopics distinguishes pause from stop, bounds publish, and recovers', async () => {
+    const docker = async (args: string[]) => {
+      const result = await runProcess('docker', { args });
+      if (!result.success) throw new Error(new TextDecoder().decode(result.stderr));
+      return new TextDecoder().decode(result.stdout).trim();
+    };
+    const port = Number(new URL(`http://${emulatorHost}`).port || 8085);
+    const shard = process.env['SETU_CI_SHARD'];
+    const filters = shard
+      ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+      : ['--filter', `publish=${port}`];
+    const container = (await docker(['ps', '-q', ...filters])).split('\n')[0]!;
+    if (!container) throw new Error(`No emulator container publishing ${port}`);
+    const { PubSub } = await import('@google-cloud/pubsub');
+    const admin = new PubSub({ projectId });
+    const topic = `m113a-outage-${crypto.randomUUID()}`;
+    const broker = new GcpPubSubBroker(createNodeRuntimeServices(), new JsonSerializer(), {
+      projectId,
+      publishTimeoutMs: 350,
+    });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const fresh = async () => {
+      await wait(5100);
+      const start = performance.now();
+      const reachable = await broker.reachability();
+      expect(performance.now() - start).toBeLessThan(2500);
+      return reachable;
+    };
+    let paused = false;
+    try {
+      await admin.createTopic(topic);
+      await broker.connect();
+      expect(await broker.reachability()).toBe(true);
+      await docker(['pause', container]);
+      paused = true;
+      expect(await fresh()).toBeUndefined();
+      const start = performance.now();
+      await expect(broker.publish(topic, {})).rejects.toThrow(
+        '350 ms (publishTimeoutMs); it may still be delivered',
+      );
+      expect(performance.now() - start).toBeGreaterThanOrEqual(300);
+      expect(performance.now() - start).toBeLessThan(1500);
+      await docker(['unpause', container]);
+      paused = false;
+      expect(await fresh()).toBe(true);
+      await docker(['stop', container]);
+      expect(await fresh()).toBe(false);
+      await docker(['start', container]);
+      // The emulator needs a few seconds to bind its listener after restart.
+      const deadline = Date.now() + 45000;
+      let recovered: boolean | undefined;
+      do {
+        recovered = await fresh();
+      } while (recovered !== true && Date.now() < deadline);
+      expect(recovered).toBe(true);
+    } finally {
+      if (paused) await docker(['unpause', container]);
+      await docker(['start', container]);
+      await broker.disconnect();
+      await admin
+        .topic(topic)
+        .delete()
+        .catch(() => {});
+      await admin.close();
+    }
+  }, 100000);
+});
 
 /** Unique per run so repeated runs never share emulator state. */
 const runId = crypto.randomUUID().slice(0, 8);
@@ -43,22 +116,15 @@ const TOPIC_B = `orders-b-${runId}`;
 const TOPIC_TAKEN = `orders-taken-${runId}`;
 /** M106 §3.5: one orderingKey published ten times, delivered in order. */
 const ORDERING_TOPIC = `orders-ordered-${runId}`;
-const ALL_TOPICS = [
-  TOPIC,
-  REPLY_TOPIC,
-  RPC_CHANNEL,
-  TOPIC_A,
-  TOPIC_B,
-  TOPIC_TAKEN,
-  ORDERING_TOPIC,
-];
+const ALL_TOPICS = [TOPIC, REPLY_TOPIC, RPC_CHANNEL, TOPIC_A, TOPIC_B, TOPIC_TAKEN, ORDERING_TOPIC];
 /**
  * The per-topic default subscriptions this suite causes (M101b). Pub/Sub keeps
  * a subscription after its topic is deleted, so they are removed explicitly —
  * otherwise a long-lived emulator accumulates them across runs.
  */
-const DEFAULT_SUBSCRIPTIONS = [TOPIC_A, TOPIC_B, RPC_CHANNEL, TOPIC_TAKEN, ORDERING_TOPIC]
-  .map((topic) => `messaging-consumers.${topic}`);
+const DEFAULT_SUBSCRIPTIONS = [TOPIC_A, TOPIC_B, RPC_CHANNEL, TOPIC_TAKEN, ORDERING_TOPIC].map(
+  (topic) => `messaging-consumers.${topic}`,
+);
 
 /** Waits until `predicate` holds or the budget elapses. */
 async function until(predicate: () => boolean, budgetMs = 15000): Promise<void> {
@@ -69,7 +135,7 @@ async function until(predicate: () => boolean, budgetMs = 15000): Promise<void> 
 }
 
 describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, () => {
-  // deno-lint-ignore no-explicit-any -- the SDK's PubSub type is not imported here.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the SDK's PubSub type is not imported here.
   let admin: any;
 
   beforeAll(async () => {
@@ -111,9 +177,13 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
     const received: { id: number }[] = [];
-    await broker.subscribe<{ id: number }>(TOPIC, (message) => {
-      received.push(message);
-    }, { queue: `consumers-${runId}` });
+    await broker.subscribe<{ id: number }>(
+      TOPIC,
+      (message) => {
+        received.push(message);
+      },
+      { queue: `consumers-${runId}` },
+    );
 
     await broker.publish(TOPIC, { id: 42 });
     await until(() => received.length > 0);
@@ -137,9 +207,13 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
     const seen: MessageMetadata[] = [];
-    await broker.subscribe(TOPIC, (_message, metadata) => {
-      seen.push(metadata);
-    }, { queue: `meta-${runId}` });
+    await broker.subscribe(
+      TOPIC,
+      (_message, metadata) => {
+        seen.push(metadata);
+      },
+      { queue: `meta-${runId}` },
+    );
 
     await broker.publish(TOPIC, { id: 1 });
     await until(() => seen.length > 0);
@@ -147,12 +221,7 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
     await app.stop();
 
     const metadata = seen[0]!;
-    expect(Object.keys(metadata).sort()).toEqual([
-      'headers',
-      'messageId',
-      'timestamp',
-      'topic',
-    ]);
+    expect(Object.keys(metadata).sort()).toEqual(['headers', 'messageId', 'timestamp', 'topic']);
     expect(typeof metadata.messageId).toBe('string');
     expect((metadata.messageId ?? '').length).toBeGreaterThan(0);
     expect(metadata.timestamp).toBeInstanceOf(Date);
@@ -170,10 +239,14 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
     const broker = app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING);
 
     let deliveries = 0;
-    await broker.subscribe<{ id: number }>(TOPIC, () => {
-      deliveries++;
-      if (deliveries === 1) throw new Error('first delivery fails');
-    }, { queue: `nack-consumers-${runId}` });
+    await broker.subscribe<{ id: number }>(
+      TOPIC,
+      () => {
+        deliveries++;
+        if (deliveries === 1) throw new Error('first delivery fails');
+      },
+      { queue: `nack-consumers-${runId}` },
+    );
 
     await broker.publish(TOPIC, { id: 7 });
     // A nack returns the message immediately, so a second delivery proves the
@@ -208,16 +281,18 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
 
     // The inbox subscription exists on the reply topic while the broker is up.
     const [duringSubs] = await admin.topic(REPLY_TOPIC).getSubscriptions();
-    const inboxDuring = (duringSubs as { name: string }[])
-      .filter((s) => s.name.includes('rr-inbox-'));
+    const inboxDuring = (duringSubs as { name: string }[]).filter((s) =>
+      s.name.includes('rr-inbox-'),
+    );
     expect(inboxDuring.length).toBe(1);
 
     await app.stop();
 
     // …and disconnect deletes it, rather than leaving a durable resource behind.
     const [afterSubs] = await admin.topic(REPLY_TOPIC).getSubscriptions();
-    const inboxAfter = (afterSubs as { name: string }[])
-      .filter((s) => s.name.includes('rr-inbox-'));
+    const inboxAfter = (afterSubs as { name: string }[]).filter((s) =>
+      s.name.includes('rr-inbox-'),
+    );
     expect(inboxAfter.length).toBe(0);
   });
   it('two topics with default subscriptions and RPC in ONE application (M101b, V8-2)', async () => {
@@ -293,7 +368,10 @@ describe('GcpPubSubBroker — Pub/Sub emulator E2E', { skip: !emulatorHost }, ()
         }),
       ],
     });
-    const err = await app.start().then(() => null, (e: unknown) => e);
+    const err = await app.start().then(
+      () => null,
+      (e: unknown) => e,
+    );
     await app.stop().catch(() => {});
 
     expect(err).toBeInstanceOf(PubSubSubscriptionBoundElsewhereError);

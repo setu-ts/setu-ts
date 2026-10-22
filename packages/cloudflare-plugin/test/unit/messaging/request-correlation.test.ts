@@ -137,8 +137,9 @@ describe('RequestCorrelation', () => {
 
   it('drops a reply nothing is waiting for, as at-least-once delivery produces', () => {
     const correlation = new RequestCorrelation(new InertTimers());
-    expect(correlation.settle(encodeReplyEnvelope('never-sent', { ok: true, payload: 1 })))
-      .toBe(false);
+    expect(correlation.settle(encodeReplyEnvelope('never-sent', { ok: true, payload: 1 }))).toBe(
+      false,
+    );
   });
 
   it('settles only the request a reply correlates to', async () => {

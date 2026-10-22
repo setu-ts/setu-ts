@@ -8,8 +8,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { mkdir, mkdtemp, writeFile, readFile, rm, stat } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import {
   basePackageName,
   checkDecoratorSideEffects,
@@ -21,8 +22,11 @@ import {
   normalizeExports,
   renderDenoJson,
   renderPackageJson,
-  renderPnpmWorkspace,
+  renderLaneConfig,
   renderRootPackageJson,
+  renderAppsTsconfig,
+  renderAppTsconfig,
+  renderCheckTsconfig,
   runNodeManifests,
 } from '../../scripts/node-manifests.ts';
 
@@ -141,6 +145,19 @@ describe('classifyMember — the §3.1 classification table', () => {
 });
 
 describe('classifyMember — the committed overrides', () => {
+  it('adds declarations for packages used only by tests without creating a runtime dependency', () => {
+    for (const [dir, name, dependency, types] of [
+      ['packages/database-plugin', '@setu-ts/database-plugin', 'pg', '@types/pg'],
+      ['packages/idempotency-plugin', '@setu-ts/idempotency-plugin', 'pg', '@types/pg'],
+      ['packages/websocket-plugin', '@setu-ts/websocket-plugin', 'ws', '@types/ws'],
+    ]) {
+      const input = member(dir, name, { 'test/a.test.ts': `import client from '${dependency}';` });
+      const { classified, refusals } = classifyMember(input, new Map());
+      expect(refusals).toEqual([]);
+      expect(classified.devDependencies.has(types)).toBe(true);
+      expect(classified.dependencies.has(dependency)).toBe(false);
+    }
+  });
   const { classified, refusals } = classifyMember(RUNTIME, nameToDir);
 
   it('refuses nothing when every override finds its package', () => {
@@ -284,12 +301,22 @@ describe('the decorator-plugin sideEffects guard (§3.4 safeguard 2)', () => {
   });
 
   it('is enforced by generateWorkspace for the decorator-plugin member only', () => {
-    const decorated = member(dir, '@setu-ts/decorator-plugin', { 'src/index.ts': 'export {};' }, {
-      currentPackageJson: '{"sideEffects":false}',
-    });
-    const other = member('packages/other', '@setu-ts/common', { 'src/index.ts': 'export {};' }, {
-      currentPackageJson: '{"sideEffects":false}',
-    });
+    const decorated = member(
+      dir,
+      '@setu-ts/decorator-plugin',
+      { 'src/index.ts': 'export {};' },
+      {
+        currentPackageJson: '{"sideEffects":false}',
+      },
+    );
+    const other = member(
+      'packages/other',
+      '@setu-ts/common',
+      { 'src/index.ts': 'export {};' },
+      {
+        currentPackageJson: '{"sideEffects":false}',
+      },
+    );
     const refusals = generateWorkspace([decorated, other]).refusals;
     expect(refusals).toHaveLength(1);
     expect(refusals[0]).toContain(dir);
@@ -352,7 +379,8 @@ describe('renderDenoJson — splices only the imports block', () => {
   });
 
   it('replaces a stale bare alias and keeps a prefixed pin, sorted', () => {
-    const raw = '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
+    const raw =
+      '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
       '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n';
     expect(renderDenoJson(raw, aliases)).toBe(
       '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "hono": "npm:hono@^4.12.30",\n' +
@@ -377,14 +405,19 @@ describe('renderDenoJson — splices only the imports block', () => {
 });
 
 describe('generateWorkspace — rendered files', () => {
-  const kernel = member('packages/kernel', '@setu-ts/kernel', {
-    'src/index.ts': "import { x } from '@setu-ts/common';",
-  }, {
-    exports: [
-      { subpath: '.', source: './src/index.ts' },
-      { subpath: './worker', source: './src/worker/index.ts' },
-    ],
-  });
+  const kernel = member(
+    'packages/kernel',
+    '@setu-ts/kernel',
+    {
+      'src/index.ts': "import { x } from '@setu-ts/common';",
+    },
+    {
+      exports: [
+        { subpath: '.', source: './src/index.ts' },
+        { subpath: './worker', source: './src/worker/index.ts' },
+      ],
+    },
+  );
   const starter = member('packages/starters/rest-starter', '@setu-ts/rest-starter', {
     'src/index.ts': "import { k } from '@setu-ts/kernel';",
   });
@@ -412,9 +445,12 @@ describe('generateWorkspace — rendered files', () => {
       generateWorkspace([COMMON, kernel, RUNTIME, m]).files.get('packages/cache/package.json')!;
     expect(render(reversed)).toBe(render(forward));
     const pkg = JSON.parse(render(forward));
-    for (
-      const field of ['dependencies', 'peerDependencies', 'peerDependenciesMeta', 'devDependencies']
-    ) {
+    for (const field of [
+      'dependencies',
+      'peerDependencies',
+      'peerDependenciesMeta',
+      'devDependencies',
+    ]) {
       const keys = Object.keys(pkg[field]);
       expect(keys).toEqual([...keys].sort());
     }
@@ -434,8 +470,8 @@ describe('generateWorkspace — rendered files', () => {
       './worker': { types: './dist/worker/index.d.ts', default: './dist/worker/index.js' },
     });
     expect(pkg.type).toBe('module');
-    expect(pkg.engines).toEqual({ node: '>=22' });
-    expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
+    expect(pkg.engines).toEqual({ node: '^22.23.4 || ^24.22.1 || >=26.12.1' });
+    expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md']);
   });
 
   it('marks every peer optional', () => {
@@ -464,31 +500,71 @@ describe('generateWorkspace — rendered files', () => {
     }
   });
 
-  it('lists the same members in pnpm-workspace.yaml, the root workspaces and the solution', () => {
+  it('lists the members once, in pnpm-workspace.yaml, and in the solution', () => {
     const dirs = [
       'packages/common',
       'packages/kernel',
       'packages/runtime',
       'packages/starters/rest-starter',
     ];
-    expect(JSON.parse(files.get('package.json')!).workspaces).toEqual(dirs);
+    // No root `workspaces` field: pnpm reads pnpm-workspace.yaml, and Deno treats a
+    // package.json `workspaces` list as a workspace root, which captured every Deno
+    // project scaffolded under .tmp/ and broke its module resolution (M111e3).
+    expect(JSON.parse(files.get('package.json')!)).not.toHaveProperty('workspaces');
+    expect(files.has('pnpm-workspace.yaml')).toBe(false);
     expect(JSON.parse(files.get('tsconfig.json')!).references).toEqual(
       dirs.map((dir) => ({ path: `./${dir}` })),
     );
-    for (const dir of dirs) expect(files.get('pnpm-workspace.yaml')).toContain(`  - ${dir}\n`);
   });
 
-  it('denies the two install scripts pnpm 12 refuses to leave undecided', () => {
-    const yaml = renderPnpmWorkspace(['packages/a']);
-    expect(yaml).toContain('allowBuilds:\n  protobufjs: false\n  sse4_crc32: false\n');
-    expect(yaml).toContain('ignoreWorkspaceCycles: true\n');
+  it('keeps authored pnpm install policies', async () => {
+    const yaml = await readFile('pnpm-workspace.yaml', 'utf8');
+    expect(yaml).toContain('  protobufjs: false');
+    expect(yaml).toContain('  sse4_crc32: false');
+    expect(yaml).toContain('ignoreWorkspaceCycles: true');
+  });
+
+  it('generates a standalone lane with every export and preserved scopes', () => {
+    const lane = {
+      imports: { vitest: './vitest-shim.ts' },
+      scopes: { '../../test/': { vitest: './vitest-shim.ts' } },
+    };
+    const generated = JSON.parse(renderLaneConfig([COMMON, kernel], JSON.stringify(lane)));
+    expect(generated.nodeModulesDir).toBe('auto');
+    expect(generated.imports).toMatchObject({
+      vitest: './vitest-shim.ts',
+      '@setu-ts/common': './../../packages/common/src/index.ts',
+      '@setu-ts/kernel/worker': './../../packages/kernel/src/worker/index.ts',
+    });
+    expect(generated.scopes).toEqual(lane.scopes);
+    expect(generated.compilerOptions.strict).toBe(true);
+    expect(generated.compilerOptions.lib).toContain('deno.ns');
   });
 
   it('pins the package manager and the build tools at the root', () => {
-    const root = JSON.parse(renderRootPackageJson(['packages/a']));
+    const root = JSON.parse(renderRootPackageJson());
     expect(root.private).toBe(true);
     expect(root.packageManager).toBe('pnpm@12.11.2');
     expect(root.devDependencies.typescript).toBe('6.0.3');
+  });
+
+  it('carries the formatter and linter at the root, with their scripts', () => {
+    const root = JSON.parse(renderRootPackageJson());
+    expect(root.scripts).toMatchObject({
+      format: 'prettier --write .',
+      'format:check': 'prettier --check .',
+      lint: 'eslint .',
+    });
+    expect(root.devDependencies).toMatchObject({
+      prettier: '3.9.10',
+      eslint: '10.12.0',
+      '@eslint/js': '10.0.1',
+      '@eslint/compat': '2.1.1',
+      '@eslint-community/eslint-plugin-eslint-comments': '4.8.1',
+      'typescript-eslint': '8.71.2',
+      globals: '17.13.0',
+      espree: '11.2.0',
+    });
   });
 
   it('writes nothing when any member is refused, and refuses a duplicate name', () => {
@@ -507,10 +583,12 @@ describe('generateWorkspace — rendered files', () => {
 
 describe('small helpers', () => {
   it('normalizes the string and object export forms', () => {
-    expect(normalizeExports('./src/index.ts')).toEqual([{
-      subpath: '.',
-      source: './src/index.ts',
-    }]);
+    expect(normalizeExports('./src/index.ts')).toEqual([
+      {
+        subpath: '.',
+        source: './src/index.ts',
+      },
+    ]);
     expect(normalizeExports({ '.': './a.ts', './x': './x.ts' })).toEqual([
       { subpath: '.', source: './a.ts' },
       { subpath: './x', source: './x.ts' },
@@ -526,15 +604,19 @@ describe('small helpers', () => {
 
 describe('runNodeManifests — the I/O seam, against a throwaway workspace', () => {
   async function workspace(): Promise<string> {
-    const root = await Deno.makeTempDir({ dir: '.tmp', prefix: 'setu-node-manifests-' });
-    await Deno.writeTextFile(`${root}/deno.json`, '{"workspace":["./packages/a"]}');
-    await Deno.writeTextFile(`${root}/LICENSE`, 'test license\n');
-    await Deno.mkdir(`${root}/packages/a/src`, { recursive: true });
-    await Deno.writeTextFile(
+    const root = await await mkdir('.tmp', { recursive: true }).then(() => mkdtemp('.tmp/test-'));
+    await writeFile(`${root}/pnpm-workspace.yaml`, 'packages:\n  - packages/a\n  - apps/*\n');
+    await mkdir(`${root}/test/deno-lane`, { recursive: true });
+    await writeFile(`${root}/test/deno-lane/deno.json`, '{"imports":{},"scopes":{}}');
+    await writeFile(`${root}/LICENSE`, 'test license\n');
+    await mkdir(`${root}/apps/minimal`, { recursive: true });
+    await writeFile(`${root}/apps/minimal/package.json`, '{}');
+    await mkdir(`${root}/packages/a/src`, { recursive: true });
+    await writeFile(
       `${root}/packages/a/deno.json`,
       '{"name":"@setu-ts/common","version":"0.8.0","exports":"./src/index.ts"}',
     );
-    await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
+    await writeFile(`${root}/packages/a/src/index.ts`, "import { Hono } from 'hono';");
     return root;
   }
 
@@ -548,34 +630,127 @@ describe('runNodeManifests — the I/O seam, against a throwaway workspace', () 
       expect(await runNodeManifests(['--check'], root)).toBe(1);
       expect(await runNodeManifests(['--write'], root)).toBe(0);
       expect(await runNodeManifests(['--check'], root)).toBe(0);
-      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'drift');
+      for (const path of ['tsconfig.apps.json', 'apps/minimal/tsconfig.json']) {
+        const original = await readFile(`${root}/${path}`, 'utf8');
+        await writeFile(`${root}/${path}`, '{}');
+        expect(await runNodeManifests(['--check'], root)).toBe(1);
+        await writeFile(`${root}/${path}`, original);
+      }
+      await writeFile(`${root}/packages/a/LICENSE`, 'drift');
       expect(await runNodeManifests(['--check'], root)).toBe(1);
-      await Deno.writeTextFile(`${root}/packages/a/LICENSE`, 'test license\n');
+      await writeFile(`${root}/packages/a/LICENSE`, 'test license\n');
       const path = `${root}/packages/a/package.json`;
-      const pkg = JSON.parse(await Deno.readTextFile(path));
+      const pkg = JSON.parse(await readFile(path, 'utf8'));
       expect(pkg.dependencies).toEqual({ hono: '^4.12.30' });
-      const deno = JSON.parse(await Deno.readTextFile(`${root}/packages/a/deno.json`));
+      const deno = JSON.parse(await readFile(`${root}/packages/a/deno.json`, 'utf8'));
       expect(deno.imports).toEqual({ hono: 'npm:hono@^4.12.30' });
-      await Deno.writeTextFile(path, JSON.stringify({ ...pkg, version: '9.9.9' }));
+      await writeFile(path, JSON.stringify({ ...pkg, version: '9.9.9' }));
       expect(await runNodeManifests(['--check'], root)).toBe(1);
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
     }
   });
 
   it('exits 1 on a refusal before writing anything', async () => {
     const root = await workspace();
     try {
-      await Deno.writeTextFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
+      await writeFile(`${root}/packages/a/src/index.ts`, "import x from 'left-pad';");
       expect(await runNodeManifests(['--write'], root)).toBe(1);
-      await expect(Deno.stat(`${root}/packages/a/package.json`)).rejects.toThrow();
+      await expect(stat(`${root}/packages/a/package.json`)).rejects.toThrow();
     } finally {
-      await Deno.remove(root, { recursive: true });
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('refuses a workspace entry without its member manifest', async () => {
+    const root = await workspace();
+    try {
+      await rm(`${root}/packages/a/deno.json`);
+      await expect(runNodeManifests(['--check'], root)).rejects.toThrow(
+        'packages/a: no parsable deno.json',
+      );
+    } finally {
+      await rm(root, { recursive: true });
+    }
+  });
+
+  it('reports removed exports as lane config drift', async () => {
+    const root = await workspace();
+    try {
+      await runNodeManifests(['--write'], root);
+      const path = `${root}/packages/a/deno.json`;
+      const manifest = JSON.parse(await readFile(path, 'utf8'));
+      delete manifest.exports;
+      await writeFile(path, JSON.stringify(manifest));
+      expect(await runNodeManifests(['--check'], root)).toBe(1);
+    } finally {
+      await rm(root, { recursive: true });
     }
   });
 
   it('agrees with the committed tree', async () => {
     expect(await runNodeManifests(['--check'])).toBe(0);
+  });
+
+  it('copies each lane member permission set verbatim without widening loopback grants', async () => {
+    const config = JSON.parse(await readFile('test/deno-lane/lane.config.json', 'utf8'));
+    const names = [
+      'cli',
+      'diagnostics-plugin',
+      'realtime-backplane-plugin',
+      'runtime',
+      'websocket-plugin',
+    ];
+    expect(Object.keys(config.permissions).sort()).toEqual(names);
+    for (const name of names) {
+      const manifest = JSON.parse(await readFile(`packages/${name}/deno.json`, 'utf8'));
+      expect(config.permissions[name]).toEqual(manifest.test.permissions);
+    }
+    expect(config.permissions.cli.net).toEqual(['127.0.0.1']);
+    expect(config.permissions.runtime.net).toBe(true);
+  });
+});
+
+describe('app type-check configurations', () => {
+  it('shares source aliases and uses the plan-prescribed non-emitting Node options', () => {
+    const apps = JSON.parse(renderAppsTsconfig());
+    const check = JSON.parse(renderCheckTsconfig());
+    expect(apps.extends).toBe('./tsconfig.base.json');
+    expect(apps.compilerOptions).toEqual({
+      noEmit: true,
+      composite: false,
+      declaration: false,
+      declarationMap: false,
+      isolatedDeclarations: false,
+      allowImportingTsExtensions: true,
+      rewriteRelativeImportExtensions: false,
+      typeRoots: ['./node_modules/@types', './packages/runtime/node_modules/@types'],
+      types: ['node', 'deno'],
+      paths: check.compilerOptions.paths,
+    });
+  });
+
+  it('replaces the complete alias map only for the React full-stack app', () => {
+    const minimal = JSON.parse(renderAppTsconfig('apps/minimal'));
+    expect(minimal).toEqual({
+      extends: '../../tsconfig.apps.json',
+      include: ['**/*.ts', '**/*.tsx'],
+    });
+    const full = JSON.parse(renderAppTsconfig('apps/full-stack'));
+    expect(full.extends).toBe(minimal.extends);
+    expect(full.include).toEqual([...minimal.include, 'node_modules/vite/client.d.ts']);
+    expect(full.compilerOptions.jsx).toBe('react-jsx');
+    const { '~/*': alias, ...paths } = full.compilerOptions.paths;
+    expect(alias).toEqual(['./app/*']);
+    const root = JSON.parse(renderAppsTsconfig()).compilerOptions.paths;
+    expect(paths).toEqual(
+      Object.fromEntries(
+        Object.entries(root).map(([key, values]) => [
+          key,
+          (values as string[]).map((value) => '../../' + value.slice(2)),
+        ]),
+      ),
+    );
   });
 });
 
@@ -585,23 +760,22 @@ describe('npm publish metadata', () => {
     const generated = generateWorkspace(inputs, 'license bytes');
     for (const input of inputs) {
       const pkg = JSON.parse(generated.files.get(`${input.dir}/package.json`)!);
-      for (
-        const field of [
-          'description',
-          'repository',
-          'homepage',
-          'bugs',
-          'publishConfig',
-          'sideEffects',
-        ]
-      ) expect(Object.hasOwn(pkg, field)).toBe(true);
+      for (const field of [
+        'description',
+        'repository',
+        'homepage',
+        'bugs',
+        'publishConfig',
+        'sideEffects',
+      ])
+        expect(Object.hasOwn(pkg, field)).toBe(true);
       expect(pkg.repository).toEqual({
         type: 'git',
         url: 'git+https://github.com/setu-ts/setu-ts.git',
         directory: input.dir,
       });
       expect(pkg.publishConfig).toEqual({ access: 'public' });
-      expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE']);
+      expect(pkg.files).toEqual(['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md']);
       expect(generated.files.get(`${input.dir}/LICENSE`)).toBe('license bytes');
       expect(pkg.sideEffects).toEqual(
         input === COMMON ? false : ['./dist/metadata/symbol-metadata.js'],

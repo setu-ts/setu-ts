@@ -1,17 +1,18 @@
 /**
  * Request/response logging middleware — logs every incoming request and its
- * outgoing response, with slow-request detection and error capture.
+ * outgoing response, with slow-request detection and thrown-error status prediction.
  *
  * @module
  */
 import type {
   ILogger,
+  IErrorResponder,
   IRequestContext,
   IRuntimeServices,
   MiddlewareFunction,
   PathPattern,
 } from '@setu-ts/common';
-import { CAPABILITIES, createPathMatcher } from '@setu-ts/common';
+import { CAPABILITIES, createPathMatcher, ERROR_RESPONDER_STATE_KEY } from '@setu-ts/common';
 
 import { NoopLogger } from '../loggers/noop-logger.ts';
 
@@ -50,12 +51,9 @@ const DEFAULT_SLOW_THRESHOLD = 5000;
  * @returns The middleware function
  * @since 0.1.0
  */
-export function createRequestLoggerMiddleware(
-  options?: RequestLoggerOptions,
-): MiddlewareFunction {
+export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): MiddlewareFunction {
   const threshold = options?.slowRequestThreshold ?? DEFAULT_SLOW_THRESHOLD;
-  // Partitioned once at registration. For an all-string list — which is every
-  // list this option has ever been given — the matcher is the same `Set.has`
+  // Partitioned once at registration. All-string lists keep the `Set.has`
   // lookup this middleware performed inline before M90a.
   const isExcluded = createPathMatcher(options?.excludePaths ?? []);
 
@@ -77,18 +75,19 @@ export function createRequestLoggerMiddleware(
 
     const start = ctx.startTime;
     let errored = false;
+    let errorStatus: number | undefined;
     try {
       await next();
     } catch (err) {
       errored = true;
-      const message = err instanceof Error ? err.message : String(err);
-      const stack = err instanceof Error ? err.stack : undefined;
-      requestLogger.error('request failed', { error: message, stack });
+      const responder = ctx.state.get(ERROR_RESPONDER_STATE_KEY) as IErrorResponder | undefined;
+      errorStatus = responder?.statusFor?.(err) ?? 500;
       throw err;
     } finally {
       const duration = runtime.hrtime() - start;
-      // Determine the response status if the kernel exposes it.
-      const status = readStatus(ctx);
+      // On a throw, errorHandler serves only after this finally has unwound.
+      // Its pure rule predicts that response while the snapshot is still 200.
+      const status = errorStatus ?? readStatus(ctx);
       requestLogger.info('request completed', {
         status,
         duration,

@@ -1,26 +1,24 @@
-// deno-lint-ignore-file no-console -- interactive example entry point.
-import { createRestExampleApp } from './src/app.ts';
+/* eslint-disable no-console -- an example entry reports its address and shutdown failures. */
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { createApp } from './setu.config.ts';
 
-const port = Number(Deno.args[0] ?? 3000);
-const app = createRestExampleApp();
+const runtime = createRuntimeServices();
+const port = Number(process.argv[2] ?? 3000);
+const app = createApp();
+
 await app.start({ port });
-console.log(`REST API listening at http://localhost:${port}`);
+console.log(`REST API listening on http://localhost:${port}`);
 
-// Graceful shutdown. Deno's default SIGTERM action ends the process immediately, so without this
-// listener `app.stop()` never runs under Kubernetes and every onStopping/onShutdown hook is
-// skipped. The framework does not install this for you — see docs/deployment.md.
-if (Deno.build.os !== 'windows') {
-  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    Deno.addSignalListener(signal, () => {
-      // .catch is not optional: a rejecting onShutdown hook (a database that fails to
-      // disconnect, a broker close that times out) makes stop() reject, and without this the
-      // process dies with "Uncaught (in promise)" instead of reporting why.
-      void app.stop()
-        .then(() => Deno.exit(0))
-        .catch((error: unknown) => {
-          console.error('Graceful shutdown failed:', error);
-          Deno.exit(1);
-        });
-    });
-  }
+// Without a handler, SIGTERM ends the process before `app.stop()` can run its shutdown hooks.
+// `onSignal` is absent where no signal can be caught (Windows). See docs/deployment.md.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void app
+      .stop()
+      .then(() => runtime.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        runtime.exit(1);
+      });
+  });
 }

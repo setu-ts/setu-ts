@@ -33,7 +33,7 @@ const T2: ScopeRef = { type: 'tenant', id: 't2' };
 
 function registry(service: IDatabaseService): IServiceRegistry {
   return {
-    get: (token: string) => token === CAPABILITIES.DATABASE ? service : undefined,
+    get: (token: string) => (token === CAPABILITIES.DATABASE ? service : undefined),
   } as unknown as IServiceRegistry;
 }
 
@@ -81,36 +81,41 @@ async function contract(service: IDatabaseService): Promise<void> {
     ],
   );
   // Two scopes in the chain.
-  expect(sort(await grants.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [T1, T2] }, live)))
-    .toEqual([
-      { role: 'approver', scope: T1 },
-      { role: 'owner', scope: T2 },
-      { role: 'viewer', scope: null },
-    ]);
+  expect(
+    sort(await grants.grantsFor({ id: 'u1' }, { kind: 'chain', scopes: [T1, T2] }, live)),
+  ).toEqual([
+    { role: 'approver', scope: T1 },
+    { role: 'owner', scope: T2 },
+    { role: 'viewer', scope: null },
+  ]);
   // Every grant of the subject, and none of another's.
   expect((await grants.grantsFor({ id: 'u1' }, { kind: 'all' }, live)).length).toBe(4);
   expect(await grants.grantsFor({ id: 'nobody' }, { kind: 'all' }, live)).toEqual([]);
   // An operator-looking scope id is a value: it matches only that literal id.
   expect(
     sort(
-      await grants.grantsFor({ id: 'u1' }, {
-        kind: 'chain',
-        scopes: [{ type: 'tenant', id: '$where' }],
-      }, live),
+      await grants.grantsFor(
+        { id: 'u1' },
+        {
+          kind: 'chain',
+          scopes: [{ type: 'tenant', id: '$where' }],
+        },
+        live,
+      ),
     ),
-  )
-    .toEqual([
-      { role: 'trap', scope: { type: 'tenant', id: '$where' } },
-      { role: 'viewer', scope: null },
-    ]);
+  ).toEqual([
+    { role: 'trap', scope: { type: 'tenant', id: '$where' } },
+    { role: 'viewer', scope: null },
+  ]);
   // An operator-looking SUBJECT is a value too.
   expect(await grants.grantsFor({ id: '{"$ne":null}' }, { kind: 'all' }, live)).toEqual([]);
 
   // Custom roles: one batched query, grouped, scopes kept apart.
   const defined = await roles.rolesFor([T1, T2], live);
   const byScope = (scope: ScopeRef) =>
-    defined.find((entry) => entry.scope.id === scope.id && entry.role === 'regional')?.permissions
-      .slice()
+    defined
+      .find((entry) => entry.scope.id === scope.id && entry.role === 'regional')
+      ?.permissions.slice()
       .sort();
   expect(byScope(T1)).toEqual(['invoices:approve', 'invoices:read']);
   expect(byScope(T2)).toEqual(['invoices:read']);

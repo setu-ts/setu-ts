@@ -41,10 +41,7 @@ function malformedToken(payload: unknown): string {
  * eq/gt/lt comparisons over string-named fields, so this covers its whole
  * output grammar.
  */
-function matches(
-  row: Record<string, string | number>,
-  expr: FilterExpression,
-): boolean {
+function matches(row: Record<string, string | number>, expr: FilterExpression): boolean {
   if (expr.type !== 'comparison') {
     return expr.type === 'or'
       ? expr.filters.some((child) => matches(row, child))
@@ -110,11 +107,13 @@ describe('encodeCursor / decodeCursor round-trip', () => {
 
   it('restores Date values while preserving numbers and strings', () => {
     const createdAt = new Date('2026-06-01T00:00:00.123Z');
-    const decoded = decodeCursor(encodeCursor({
-      orderedValues: [createdAt, 42, 'event-1'],
-      keyValues: [createdAt, 42, 'event-1'],
-      sortFingerprint: 'createdAt:desc,id:asc',
-    }));
+    const decoded = decodeCursor(
+      encodeCursor({
+        orderedValues: [createdAt, 42, 'event-1'],
+        keyValues: [createdAt, 42, 'event-1'],
+        sortFingerprint: 'createdAt:desc,id:asc',
+      }),
+    );
 
     expect(decoded).not.toBeNull();
     const orderedDate = decoded!.orderedValues[0];
@@ -251,8 +250,9 @@ describe('encodeCursor / decodeCursor round-trip', () => {
   });
 
   it('returns null for a JSON object missing keyValues', () => {
-    expect(decodeCursor(malformedToken({ orderedValues: [1], sortFingerprint: 'x:asc' })))
-      .toBeNull();
+    expect(
+      decodeCursor(malformedToken({ orderedValues: [1], sortFingerprint: 'x:asc' })),
+    ).toBeNull();
   });
 
   it('returns null for a JSON object missing sortFingerprint', () => {
@@ -279,51 +279,75 @@ describe('encodeCursor / decodeCursor round-trip', () => {
    * coerced value would silently change which rows a keyset page selects.
    */
   it('returns null for a boolean inside orderedValues', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [true],
-      keyValues: [1],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [true],
+          keyValues: [1],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for a null inside keyValues', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [1],
-      keyValues: [null],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [1],
+          keyValues: [null],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for an object that is not the reserved Date tag', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [{ t: 'X', v: '2026-01-01T00:00:00.000Z' }],
-      keyValues: [1],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [{ t: 'X', v: '2026-01-01T00:00:00.000Z' }],
+          keyValues: [1],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for a Date tag whose value is not a string', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [{ t: 'D', v: 42 }],
-      keyValues: [1],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [{ t: 'D', v: 42 }],
+          keyValues: [1],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for a Date tag carrying extra keys', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [{ t: 'D', v: '2026-01-01T00:00:00.000Z', extra: 1 }],
-      keyValues: [1],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [{ t: 'D', v: '2026-01-01T00:00:00.000Z', extra: 1 }],
+          keyValues: [1],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   it('returns null for a Date tag carrying an unparseable date', () => {
-    expect(decodeCursor(malformedToken({
-      orderedValues: [{ t: 'D', v: 'not-a-date' }],
-      keyValues: [1],
-      sortFingerprint: 'x:asc',
-    }))).toBeNull();
+    expect(
+      decodeCursor(
+        malformedToken({
+          orderedValues: [{ t: 'D', v: 'not-a-date' }],
+          keyValues: [1],
+          sortFingerprint: 'x:asc',
+        }),
+      ),
+    ).toBeNull();
   });
 
   /**
@@ -521,7 +545,9 @@ describe('cursor.ts defensive edge cases', () => {
     // in the middle should be handled without crashing (the decode loop
     // breaks on '=').
     const token = btoa('{"orderedValues":[1],"keyValues":[1],"sortFingerprint":"x"}')
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
     // Normal round-trip still works.
     const d = decodeCursor(token);
     expect(d).not.toBeNull();
@@ -627,8 +653,9 @@ describe('mintNextCursor refuses a value that cannot survive the wire', () => {
   });
 
   it('mints nothing for a terminal or empty page', () => {
-    expect(mintNextCursor([{ id: 'u1', score: 1 }], orderBy, ['id'], fingerprint, false))
-      .toBeNull();
+    expect(
+      mintNextCursor([{ id: 'u1', score: 1 }], orderBy, ['id'], fingerprint, false),
+    ).toBeNull();
     expect(mintNextCursor([], orderBy, ['id'], fingerprint, true)).toBeNull();
   });
 });
@@ -643,20 +670,20 @@ describe('encodeCursor validates on the public path (outside-diff review, M79)',
    * `RangeError: Invalid time value` naming neither the cursor nor the value.
    */
   it('refuses a non-finite number, naming the value', () => {
-    for (
-      const [label, value] of [['NaN', NaN], ['Infinity', Infinity], [
-        '-Infinity',
-        -Infinity,
-      ]] as const
-    ) {
+    for (const [label, value] of [
+      ['NaN', NaN],
+      ['Infinity', Infinity],
+      ['-Infinity', -Infinity],
+    ] as const) {
       expect(
         () => encodeCursor({ orderedValues: [value], keyValues: ['u1'], sortFingerprint: 's:asc' }),
         label,
       ).toThrow(new RegExp(`cannot encode ${label.replace('-', '\\-')} into a cursor`));
     }
     // The key position is guarded by the same helper.
-    expect(() => encodeCursor({ orderedValues: ['a'], keyValues: [NaN], sortFingerprint: 's:asc' }))
-      .toThrow(/cannot encode NaN/);
+    expect(() =>
+      encodeCursor({ orderedValues: ['a'], keyValues: [NaN], sortFingerprint: 's:asc' }),
+    ).toThrow(/cannot encode NaN/);
   });
 
   it('refuses an invalid Date rather than throwing RangeError from toISOString', () => {
@@ -665,7 +692,7 @@ describe('encodeCursor validates on the public path (outside-diff review, M79)',
         orderedValues: [new Date('nope')],
         keyValues: ['u1'],
         sortFingerprint: 's:asc',
-      })
+      }),
     ).toThrow(/cannot encode an invalid Date/);
   });
 

@@ -52,7 +52,10 @@ function refusingMetrics(refuse: (name: string) => boolean): IMetricsService {
   };
 }
 
-function makePool(metrics: IMetricsService, report: (error: Error) => void): {
+function makePool(
+  metrics: IMetricsService,
+  report: (error: Error) => void,
+): {
   pool: TaskPool;
   host: FakeHost;
 } {
@@ -156,7 +159,9 @@ describe('TaskPool — a failing metrics backend cannot break the pool', () => {
     // fault and its own bug — but it must not cost the caller its result.
     try {
       host.handles[0].replyOk('worker-result');
-    } catch { /* the reporter's throw, asserted by the settlement below */ }
+    } catch {
+      /* the reporter's throw, asserted by the settlement below */
+    }
 
     await expect(promise).resolves.toBe('worker-result');
   });
@@ -200,7 +205,10 @@ describe('TaskPool — a failing metrics backend cannot break the pool', () => {
 
   it('should keep the pool serving after a metrics outage', async () => {
     const { report } = recordReports();
-    const { pool, host } = makePool(refusingMetrics(() => true), report);
+    const { pool, host } = makePool(
+      refusingMetrics(() => true),
+      report,
+    );
 
     const first = pool.run('one');
     host.handles[0].emitReady();

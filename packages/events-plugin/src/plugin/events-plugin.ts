@@ -74,9 +74,8 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   // construction, so an invalid option refuses before any application
   // exists. `null` when `diagnostics` is absent — the inert, disabled source
   // is registered instead, and dispatch stays byte-identical.
-  const diagnosticsPolicy = opts.diagnostics === undefined
-    ? null
-    : compileEventsDiagnosticsPolicy(opts.diagnostics);
+  const diagnosticsPolicy =
+    opts.diagnostics === undefined ? null : compileEventsDiagnosticsPolicy(opts.diagnostics);
 
   // Split the two arms once, at plugin construction. Instances keep their
   // `register()` timing (byte-identical to the pre-factory behaviour);
@@ -96,7 +95,9 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
   const factories = handlers
     .map((entry, index) => ({ entry, index }))
     .filter(
-      (slot): slot is {
+      (
+        slot,
+      ): slot is {
         entry: {
           readonly type: string;
           readonly handler: RegistryFactory<IEventHandler<unknown>>;
@@ -112,7 +113,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
     provides: [CAPABILITIES.EVENTS],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     async register(ctx: IPluginContext): Promise<void> {
       // Resolve optional logger.
       const logger = ctx.services.has('logger') ? ctx.services.get<ILogger>('logger') : undefined;
@@ -152,9 +153,10 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // the runtime's monotonic clock. Attachment goes through the internal
       // WeakMap helper — the bus constructor signature is unchanged, and an
       // application-constructed bus is never observed.
-      const collector = diagnosticsPolicy === null
-        ? null
-        : new EventObservationCollector(diagnosticsPolicy, ctx.runtime);
+      const collector =
+        diagnosticsPolicy === null
+          ? null
+          : new EventObservationCollector(diagnosticsPolicy, ctx.runtime);
       attachEventObserver(bus, collector);
 
       // Register the bus under CAPABILITIES.EVENTS.
@@ -166,11 +168,9 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // cannot collide with each other. An unconfigured instance contributes
       // the inert `disabled` source, which observes nothing.
       const source: IEventDiagnosticsSource = collector ?? createDisabledEventSource();
-      ctx.services.register<IEventDiagnosticsSource>(
-        CAPABILITIES.EVENTS_DIAGNOSTICS,
-        source,
-        { multi: true },
-      );
+      ctx.services.register<IEventDiagnosticsSource>(CAPABILITIES.EVENTS_DIAGNOSTICS, source, {
+        multi: true,
+      });
 
       // Subscribe the declaratively-supplied handler INSTANCES, through the
       // SAME `subscribeHandler` a caller would use by hand — so the option and
@@ -197,7 +197,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       });
 
       // Register health indicator.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.health.register('events', async () => ({
         status: 'up' as const,
         data: { handlers: bus.subscriptionCount },
@@ -207,7 +207,7 @@ export function EventsPlugin(options?: EventsPluginOptions): IPlugin {
       // observation is discarded, then state is cleared — exactly the plan's
       // "close detaches first, then clears" order. Detaching the observer
       // makes the bus's hot path a single failing WeakMap probe again.
-      // deno-lint-ignore require-await
+      // eslint-disable-next-line require-await
       ctx.lifecycle.onClose(async () => {
         attachEventObserver(bus, null);
         collector?.close();

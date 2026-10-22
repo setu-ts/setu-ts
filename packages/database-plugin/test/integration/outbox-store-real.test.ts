@@ -5,7 +5,7 @@
  *   committed DDL fixture is applied to a throwaway schema, the `IOutboxStore`
  *   contract runs against it, a business row and an outbox row commit or roll
  *   back together, and `verify()` refuses a schema without the table.
- * - **MongoDB standalone** (`MONGODB_URI` — a standalone `mongo:8` in CI):
+ * - **MongoDB standalone** (`MONGODB_URI` — a standalone `mongo:7` in CI):
  *   `verify()` refuses with the REPLICA-SET reason specifically. The variable
  *   must name a standalone server; against a replica set this test fails, which
  *   is the signal that it does not.
@@ -51,16 +51,18 @@ async function postgres(withTable: boolean): Promise<PostgresHarness> {
   };
 }
 
-describeOutboxStoreContract('database bridge over real PostgreSQL (Drizzle)', async (): Promise<
-  OutboxStoreUnderTest
-> => {
-  const { service, dispose } = await postgres(true);
-  return {
-    store: new DatabaseOutboxStore(service, 'Outbox'),
-    inTransaction: (work) => service.transaction((uow) => work(uow)),
-    dispose,
-  };
-}, skipPostgres);
+describeOutboxStoreContract(
+  'database bridge over real PostgreSQL (Drizzle)',
+  async (): Promise<OutboxStoreUnderTest> => {
+    const { service, dispose } = await postgres(true);
+    return {
+      store: new DatabaseOutboxStore(service, 'Outbox'),
+      inTransaction: (work) => service.transaction((uow) => work(uow)),
+      dispose,
+    };
+  },
+  skipPostgres,
+);
 
 describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () => {
   it('claims versions across int32 and safe-integer boundaries without losing precision', async () => {
@@ -69,12 +71,15 @@ describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () 
       const store = new DatabaseOutboxStore(service, 'Outbox');
       for (const [seq, version] of [2_147_483_647, Number.MAX_SAFE_INTEGER - 1].entries()) {
         await service.transaction((uow) =>
-          store.append(uow, record(seq + 1, { claimVersion: version }))
+          store.append(uow, record(seq + 1, { claimVersion: version })),
         );
-        expect(await store.claim(`row-${seq + 1}`, { claimVersion: version, leaseUntil: 9000 }))
-          .toEqual({ outcome: 'applied' });
-        expect(await service.getRepository('Outbox').findById(`row-${seq + 1}`))
-          .toMatchObject({ claimVersion: version + 1, leaseUntil: 9000 });
+        expect(
+          await store.claim(`row-${seq + 1}`, { claimVersion: version, leaseUntil: 9000 }),
+        ).toEqual({ outcome: 'applied' });
+        expect(await service.getRepository('Outbox').findById(`row-${seq + 1}`)).toMatchObject({
+          claimVersion: version + 1,
+          leaseUntil: 9000,
+        });
       }
     } finally {
       await dispose();
@@ -85,8 +90,9 @@ describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () 
     const { service, dispose } = await postgres(true);
     try {
       await service.query('ALTER TABLE setu_outbox DROP COLUMN claim_version');
-      await expect(new DatabaseOutboxStore(service, 'Outbox').verify()).rejects
-        .toMatchObject({ reason: 'entity-unavailable' });
+      await expect(new DatabaseOutboxStore(service, 'Outbox').verify()).rejects.toMatchObject({
+        reason: 'entity-unavailable',
+      });
     } finally {
       await dispose();
     }
@@ -116,15 +122,18 @@ describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () 
         await uow.getRepository('Order').create({ id: 'o1', total: 10 });
         await store.append(uow, record(1));
       });
-      const failed = await service.transaction(async (uow) => {
-        await uow.getRepository('Order').create({ id: 'o2', total: 20 });
-        await store.append(uow, record(2));
-        throw new Error('business rule');
-      }).catch((e: unknown) => e);
+      const failed = await service
+        .transaction(async (uow) => {
+          await uow.getRepository('Order').create({ id: 'o2', total: 20 });
+          await store.append(uow, record(2));
+          throw new Error('business rule');
+        })
+        .catch((e: unknown) => e);
 
       expect((failed as Error).message).toBe('business rule');
-      expect((await service.getRepository<{ id: string }>('Order').findAll()).map((r) => r.id))
-        .toEqual(['o1']);
+      expect(
+        (await service.getRepository<{ id: string }>('Order').findAll()).map((r) => r.id),
+      ).toEqual(['o1']);
       expect((await store.scanPending(undefined, 10)).map((r) => r.id)).toEqual(['row-1']);
     } finally {
       await dispose();
@@ -136,9 +145,9 @@ describe('DatabaseOutboxStore over real PostgreSQL', { skip: skipPostgres }, () 
     const missing = await postgres(false);
     try {
       await new DatabaseOutboxStore(ready.service, 'Outbox').verify();
-      const refusal = await new DatabaseOutboxStore(missing.service, 'Outbox').verify().catch((
-        e: unknown,
-      ) => e);
+      const refusal = await new DatabaseOutboxStore(missing.service, 'Outbox')
+        .verify()
+        .catch((e: unknown) => e);
       expect(refusal).toBeInstanceOf(OutboxStoreUnavailableError);
       expect((refusal as OutboxStoreUnavailableError).reason).toBe('entity-unavailable');
       expect((refusal as Error).cause).toBeInstanceOf(Error);
@@ -159,9 +168,9 @@ describe('DatabaseOutboxStore over a standalone MongoDB', { skip: skipMongo }, (
     await adapter.connect();
     try {
       const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'mongodb');
-      const refusal = await new DatabaseOutboxStore(service, 'Outbox').verify().catch((
-        e: unknown,
-      ) => e);
+      const refusal = await new DatabaseOutboxStore(service, 'Outbox')
+        .verify()
+        .catch((e: unknown) => e);
 
       expect(refusal).toBeInstanceOf(OutboxStoreUnavailableError);
       expect((refusal as OutboxStoreUnavailableError).reason).toBe('mongodb-replica-set');

@@ -90,9 +90,7 @@ function readDerInteger(
   // An empty value (a malformed or out-of-bounds encoding) and a scalar
   // longer than a P-256 coordinate are both refusals.
   let result: { value: Uint8Array; consumed: number } | null = null;
-  if (
-    length !== null && inBounds && value.length >= 1 && value.length <= P256_SCALAR_BYTES
-  ) {
+  if (length !== null && inBounds && value.length >= 1 && value.length <= P256_SCALAR_BYTES) {
     result = { value, consumed: 1 + length.consumed + length.length };
   }
   return result;
@@ -166,9 +164,10 @@ export async function verifyPasskeySignature(
       false,
       ['verify'],
     );
-    const params = algorithm === 'ES256'
-      ? { name: 'ECDSA', hash: 'SHA-256' }
-      : { name: algorithm === 'RS256' ? 'RSASSA-PKCS1-v1_5' : 'Ed25519' };
+    const params =
+      algorithm === 'ES256'
+        ? { name: 'ECDSA', hash: 'SHA-256' }
+        : { name: algorithm === 'RS256' ? 'RSASSA-PKCS1-v1_5' : 'Ed25519' };
     return await runtime.subtle.verify(
       params,
       key,

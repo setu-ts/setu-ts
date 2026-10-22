@@ -31,13 +31,15 @@ interface Wired {
   servicesMap: Map<string, unknown>;
 }
 
-function createWiredContext(opts: {
-  hasWebsocket?: boolean;
-  wsAvailable?: boolean;
-  hasRuntime?: boolean;
-  hasCache?: boolean;
-  withLifecycle?: boolean;
-} = {}): Wired {
+function createWiredContext(
+  opts: {
+    hasWebsocket?: boolean;
+    wsAvailable?: boolean;
+    hasRuntime?: boolean;
+    hasCache?: boolean;
+    withLifecycle?: boolean;
+  } = {},
+): Wired {
   const routes: Array<[string, RouteHandler]> = [];
   const wsRoutes: Array<{ path: string; options: Record<string, unknown> }> = [];
   const onCloseCallbacks: Array<() => void> = [];
@@ -53,10 +55,9 @@ function createWiredContext(opts: {
 
   if (opts.hasWebsocket !== false) servicesMap.set(CAPABILITIES.WEBSOCKET, wsService);
   if (opts.hasRuntime !== false) {
-    servicesMap.set(
-      CAPABILITIES.RUNTIME,
-      { subtle: globalThis.crypto.subtle } as unknown as IRuntimeServices,
-    );
+    servicesMap.set(CAPABILITIES.RUNTIME, {
+      subtle: globalThis.crypto.subtle,
+    } as unknown as IRuntimeServices);
   }
   if (opts.hasCache) servicesMap.set(CAPABILITIES.CACHE, {} as unknown as ICacheStore);
 
@@ -89,10 +90,10 @@ function createWiredContext(opts: {
     },
     ...(opts.withLifecycle !== false
       ? {
-        lifecycle: {
-          onClose: (cb: () => void) => onCloseCallbacks.push(cb),
-        } as unknown as ILifecycleApi,
-      }
+          lifecycle: {
+            onClose: (cb: () => void) => onCloseCallbacks.push(cb),
+          } as unknown as ILifecycleApi,
+        }
       : {}),
   } as unknown as IPluginContext;
   wired.ctx = ctx;

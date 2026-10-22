@@ -49,8 +49,9 @@ describe('deadline enforcement and actual registration', () => {
     ran++;
   });
   it('enforces deadlines and preserves callback errors', async () => {
-    await expect(translateTest('hung', { timeout: 1 }, () => new Promise(() => {})).fn()).rejects
-      .toThrow('timed out');
+    await expect(
+      translateTest('hung', { timeout: 1 }, () => new Promise(() => {})).fn(),
+    ).rejects.toThrow('timed out');
     const failure = new Error('callback failure');
     await expect(
       translateTest('failed', { timeout: 100 }, () => {

@@ -5,8 +5,7 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import { versionSiteProblems } from '../../scripts/version-sites.ts';
 
 const DIR = 'packages/kernel';
@@ -59,7 +58,8 @@ describe('versionSiteProblems', () => {
   });
 
   it('reports a src/version.ts with no recognizable literal', () => {
-    expect(versionSiteProblems(DIR, '0.9.0', MANIFEST, 'export const VERSION = "0.9.0";'))
-      .toEqual(['packages/kernel: src/version.ts carries no recognizable VERSION literal']);
+    expect(versionSiteProblems(DIR, '0.9.0', MANIFEST, 'export const VERSION = "0.9.0";')).toEqual([
+      'packages/kernel: src/version.ts carries no recognizable VERSION literal',
+    ]);
   });
 });

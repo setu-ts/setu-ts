@@ -10,10 +10,7 @@ import { cacheMiddleware, CachePlugin } from '../../src/index.ts';
 describe('Cache integration (through real kernel app.inject)', () => {
   it('named multi-instance cache registers under distinct token', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        CachePlugin({ name: 'session' }),
-      ],
+      plugins: [RuntimePlugin(), CachePlugin({ name: 'session' })],
     });
 
     await app.start();
@@ -24,10 +21,7 @@ describe('Cache integration (through real kernel app.inject)', () => {
 
   it('default cache registers under CAPABILITIES.CACHE', async () => {
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        CachePlugin(),
-      ],
+      plugins: [RuntimePlugin(), CachePlugin()],
     });
 
     await app.start();

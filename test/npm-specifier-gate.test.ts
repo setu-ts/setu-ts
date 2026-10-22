@@ -9,8 +9,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readdir } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 import { auditPackageSources } from '../scripts/npm-specifier-audit.ts';
 
 /**
@@ -20,12 +21,16 @@ import { auditPackageSources } from '../scripts/npm-specifier-audit.ts';
  */
 async function countTsFilesUnderSrc(dir: string, inSrc = false): Promise<number> {
   let count = 0;
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       if (entry.name === 'node_modules') continue;
       count += await countTsFilesUnderSrc(path, inSrc || entry.name === 'src');
-    } else if (inSrc && entry.isFile && entry.name.endsWith('.ts')) {
+    } else if (
+      inSrc &&
+      entry.isFile() &&
+      (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))
+    ) {
       count++;
     }
   }
@@ -41,6 +46,11 @@ describe('npm-specifier gate (whole packages/ tree)', () => {
   it('finds no npm:/jsr:-prefixed import specifier in packages/*/src (M111a §3.8)', async () => {
     const result = await auditPackageSources('packages');
     expect(result.prefixed).toEqual([]);
+  });
+
+  it('finds no unguarded bare import() in packages/*/src (M113d §3.2)', async () => {
+    const result = await auditPackageSources('packages');
+    expect(result.unguarded).toEqual([]);
   });
 
   it('visited a non-zero number of source files (walker is not vacuous)', async () => {

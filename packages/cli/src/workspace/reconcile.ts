@@ -48,14 +48,17 @@ export function describeReconcileFailure(
 ): string {
   const path = joinPath(MEMBERS_DIR, failure.member);
   if (failure.reason === 'unreadable') {
-    return `Member "${escapeName(failure.member)}" is in ${WORKSPACE_MANIFEST} but ${
-      escapeName(path)
-    } cannot be ` +
-      `inspected. Fix its access permissions, then run this again.`;
+    return (
+      `Member "${escapeName(failure.member)}" is in ${WORKSPACE_MANIFEST} but ${escapeName(
+        path,
+      )} cannot be ` + `inspected. Fix its access permissions, then run this again.`
+    );
   }
-  return `Member "${escapeName(failure.member)}" is in ${WORKSPACE_MANIFEST} but ${
-    escapeName(path)
-  } does not exist. ` +
+  return (
+    `Member "${escapeName(failure.member)}" is in ${WORKSPACE_MANIFEST} but ${escapeName(
+      path,
+    )} does not exist. ` +
     `Remove its entry (and its dependsOn references) from the manifest, or restore the ` +
-    `directory, then run this again.`;
+    `directory, then run this again.`
+  );
 }

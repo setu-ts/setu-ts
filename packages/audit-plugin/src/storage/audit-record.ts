@@ -63,10 +63,7 @@ export function freezeAuditRecord(record: StoredAuditEntry): StoredAuditEntry {
  * the {@linkcode AuditQuery}. Omitted fields are unconstrained. Absent
  * `resourceId`/`userId` never match a set value.
  */
-export function matchAuditQuery(
-  entry: StoredAuditEntry,
-  criteria: AuditQuery,
-): boolean {
+export function matchAuditQuery(entry: StoredAuditEntry, criteria: AuditQuery): boolean {
   if (criteria.action !== undefined && entry.action !== criteria.action) {
     return false;
   }
@@ -140,9 +137,10 @@ export function fromAuditRow(row: Record<string, unknown>): StoredAuditEntry {
     before: typeof row.before === 'string' ? JSON.parse(row.before) : undefined,
     after: typeof row.after === 'string' ? JSON.parse(row.after) : undefined,
     metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) : undefined,
-    resourceId: row.resource_id !== null && row.resource_id !== undefined
-      ? String(row.resource_id)
-      : undefined,
+    resourceId:
+      row.resource_id !== null && row.resource_id !== undefined
+        ? String(row.resource_id)
+        : undefined,
     userId: row.user_id !== null && row.user_id !== undefined ? String(row.user_id) : undefined,
     id: String(row.id),
     timestamp: Number(row.timestamp),

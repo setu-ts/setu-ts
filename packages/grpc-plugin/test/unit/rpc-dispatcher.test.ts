@@ -126,9 +126,7 @@ describe('dispatchRequest', () => {
     // At the root, "unknown procedure" is indistinguishable from "ordinary
     // application route" — 404-ing would take the whole application down.
     const map = mapWith('/pkg.Svc/Method');
-    expect(
-      await dispatchRequest(new Request('http://x/users'), map, ''),
-    ).toBeNull();
+    expect(await dispatchRequest(new Request('http://x/users'), map, '')).toBeNull();
 
     const hit = await dispatchRequest(
       new Request('http://x/pkg.Svc/Method', { method: 'POST' }),
@@ -186,15 +184,13 @@ describe('dispatchRequest — native gRPC refusal (M70i §3.3)', () => {
 
   it('lets Connect and gRPC-Web content types reach the handler', async () => {
     const map = mapWith('/pkg.Svc/Method');
-    for (
-      const contentType of [
-        'application/connect+json',
-        'application/connect+proto',
-        'application/grpc-web+json',
-        'application/grpc-web+proto',
-        'application/json',
-      ]
-    ) {
+    for (const contentType of [
+      'application/connect+json',
+      'application/connect+proto',
+      'application/grpc-web+json',
+      'application/grpc-web+proto',
+      'application/json',
+    ]) {
       const response = await dispatchRequest(
         new Request('http://x/pkg.Svc/Method', {
           method: 'POST',

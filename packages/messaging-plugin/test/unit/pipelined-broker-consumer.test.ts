@@ -13,9 +13,10 @@ import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 
 /** Records every enveloped delivery and returns a live subscription. */
 function fakeBroker() {
-  const handlers:
-    ((message: unknown, metadata: { headers?: Record<string, string> }) => void | Promise<void>)[] =
-      [];
+  const handlers: ((
+    message: unknown,
+    metadata: { headers?: Record<string, string> },
+  ) => void | Promise<void>)[] = [];
   const broker = {
     connect: () => Promise.resolve(),
     disconnect: () => Promise.resolve(),

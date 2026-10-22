@@ -63,9 +63,9 @@ interface ServerReflectionResponse {
     | { case: 'listServicesResponse'; value: { service: { name: string }[] } }
     | { case: 'fileDescriptorResponse'; value: { fileDescriptorProto: Uint8Array[] } }
     | {
-      case: 'allExtensionNumbersResponse';
-      value: { baseTypeName: string; extensionNumber: number[] };
-    }
+        case: 'allExtensionNumbersResponse';
+        value: { baseTypeName: string; extensionNumber: number[] };
+      }
     | { case: 'errorResponse'; value: { errorCode: number; errorMessage: string } };
 }
 
@@ -176,9 +176,7 @@ export function answerReflectionRequest(
  *
  * @param registry - The reflection index built at router-build time.
  */
-export function createReflectionService(
-  registry: ReflectionRegistry,
-): Record<string, unknown> {
+export function createReflectionService(registry: ReflectionRegistry): Record<string, unknown> {
   return {
     async *serverReflectionInfo(
       requests: AsyncIterable<ServerReflectionRequest>,

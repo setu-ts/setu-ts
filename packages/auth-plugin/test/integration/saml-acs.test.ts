@@ -353,11 +353,12 @@ describe('SAML ACS (real node-saml)', () => {
   });
 
   it('answers 403 when toPrincipal refuses or throws', async () => {
-    for (
-      const toPrincipal of [() => null, () => {
+    for (const toPrincipal of [
+      () => null,
+      () => {
         throw new Error('quoting a claim');
-      }]
-    ) {
+      },
+    ]) {
       harness = await buildSamlApp(key, { provider: { toPrincipal } });
       const jar = new MultiCookieJar();
       const requestId = await startLogin(harness, jar);

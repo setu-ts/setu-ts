@@ -76,12 +76,10 @@ function buildStreamService(
   resolveLogger?: (() => ILogger | undefined) | undefined,
 ): FakeConnectRuntime {
   const file = fakeFile('example/stream.proto');
-  const definition = fakeService(
-    'example.Stream',
-    ['ServerStream', 'BidiStream'],
-    file,
-    { ServerStream: 'serverStream', BidiStream: 'bidiStream' },
-  );
+  const definition = fakeService('example.Stream', ['ServerStream', 'BidiStream'], file, {
+    ServerStream: 'serverStream',
+    BidiStream: 'bidiStream',
+  });
   const runtime = createFakeConnectRuntime({ services: [definition] });
   buildConnectRouter({
     connectRuntime: runtime,
@@ -549,14 +547,11 @@ describe('gRPC handler wrapper — callable thenables and throwing `then` getter
     // count: awaiting a thenable rejects either way, but only assimilation
     // attaches the rejection handler that logs.
     const handlerError = new Error('callable thenable rejected');
-    const callableThenable = Object.assign(
-      () => undefined,
-      {
-        then(_resolve: (v: unknown) => void, reject: (e: unknown) => void) {
-          queueMicrotask(() => reject(handlerError));
-        },
+    const callableThenable = Object.assign(() => undefined, {
+      then(_resolve: (v: unknown) => void, reject: (e: unknown) => void) {
+        queueMicrotask(() => reject(handlerError));
       },
-    );
+    });
     const { logger, errors } = makeCapturingLogger();
     const runtime = buildStreamService(
       {
@@ -618,14 +613,17 @@ describe('gRPC handler wrapper — callable thenables and throwing `then` getter
 
 it('supplies iterator cancellation fallbacks when the producer has no cleanup methods', async () => {
   const { logger, errors } = makeCapturingLogger();
-  const runtime = buildStreamService({
-    serverStream: () => ({
-      [Symbol.asyncIterator]: () => ({
-        next: () => Promise.resolve({ done: true, value: undefined }),
+  const runtime = buildStreamService(
+    {
+      serverStream: () => ({
+        [Symbol.asyncIterator]: () => ({
+          next: () => Promise.resolve({ done: true, value: undefined }),
+        }),
       }),
-    }),
-    bidiStream: 42,
-  }, () => logger);
+      bidiStream: 42,
+    },
+    () => logger,
+  );
   const implementation = runtime.registered[0]!.implementation;
   const stream = (implementation['serverStream'] as () => AsyncIterable<unknown>)();
   const iterator = stream[Symbol.asyncIterator]();

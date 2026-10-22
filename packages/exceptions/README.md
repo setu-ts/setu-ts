@@ -30,6 +30,14 @@ app.router.get('/users/:id', async (ctx) => {
 
 ## Options
 
+Caught errors produce one diagnostic: `warn` for a served status below 500, `error` otherwise. The
+request logger records completion rather than a second failure diagnostic. With no registered
+logger, handled 5xx goes to `IRuntimeServices.reportError`, the runtime's last-resort JSON stderr
+sink (Workers uses its platform log channel); handled 4xx stays silent. `logErrors: false` disables
+both paths. The responder's optional, pure `statusFor(error)` lets request logging predict this
+middleware's status without reporting a clamp twice. A custom `respond` hook's different status is
+not reflected in request completion logs.
+
 `errorHandler(options?)` takes:
 
 | Option               | Type                                                                                                            | Default     | Description                                                                                                              |
@@ -170,7 +178,7 @@ problem type identified by `https://setu-ts.dev/errors/validation` — the same 
 | `ErrorFormat`           | type      |
 | `ErrorHandlerFormatter` | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

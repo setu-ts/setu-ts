@@ -26,9 +26,7 @@ describe('Secrets integration (through a real kernel app)', () => {
       await expect(secrets.get('nope')).rejects.toThrow('Secret not found');
 
       // The env provider is read-only: rotate surfaces the documented throw.
-      await expect(secrets.rotate('integration/db/password', 'x')).rejects.toThrow(
-        'read-only',
-      );
+      await expect(secrets.rotate('integration/db/password', 'x')).rejects.toThrow('read-only');
 
       await app.stop();
     } finally {

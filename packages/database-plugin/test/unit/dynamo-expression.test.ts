@@ -241,12 +241,15 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
   it("converts a Date in an ordered comparison under the declared 'iso' encoding", () => {
     // §1A F6: ISO-8601 strings sort chronologically, so the range compares
     // correctly against the stored strings.
-    const { expression, attributes } = render({
-      type: 'comparison',
-      field: 'createdAt',
-      operator: 'gt',
-      value: DATE,
-    }, { createdAt: 'iso' });
+    const { expression, attributes } = render(
+      {
+        type: 'comparison',
+        field: 'createdAt',
+        operator: 'gt',
+        value: DATE,
+      },
+      { createdAt: 'iso' },
+    );
     expect(expression).toBe('#n0 > :v0');
     expect(attributes).toStrictEqual({
       ExpressionAttributeNames: { '#n0': 'createdAt' },
@@ -255,12 +258,15 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
   });
 
   it("converts a Date under the declared 'epochMs' encoding", () => {
-    const { expression, attributes } = render({
-      type: 'comparison',
-      field: 'createdAt',
-      operator: 'lte',
-      value: DATE,
-    }, { createdAt: 'epochMs' });
+    const { expression, attributes } = render(
+      {
+        type: 'comparison',
+        field: 'createdAt',
+        operator: 'lte',
+        value: DATE,
+      },
+      { createdAt: 'epochMs' },
+    );
     expect(expression).toBe('#n0 <= :v0');
     expect(attributes).toStrictEqual({
       ExpressionAttributeNames: { '#n0': 'createdAt' },
@@ -269,12 +275,15 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
   });
 
   it('converts a Date in an eq comparison under the declared encoding too', () => {
-    const { expression, attributes } = render({
-      type: 'comparison',
-      field: 'createdAt',
-      operator: 'eq',
-      value: DATE,
-    }, { createdAt: 'iso' });
+    const { expression, attributes } = render(
+      {
+        type: 'comparison',
+        field: 'createdAt',
+        operator: 'eq',
+        value: DATE,
+      },
+      { createdAt: 'iso' },
+    );
     expect(expression).toBe('#n0 = :v0');
     expect(attributes).toStrictEqual({
       ExpressionAttributeNames: { '#n0': 'createdAt' },
@@ -287,7 +296,7 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
     // stored timestamp is encoded — it refuses, naming the attribute and the
     // `dateAttributes` option that fixes it.
     const refusal = refusalOf(() =>
-      render({ type: 'comparison', field: 'createdAt', operator: 'gte', value: DATE })
+      render({ type: 'comparison', field: 'createdAt', operator: 'gte', value: DATE }),
     );
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
     const error = refusal as UnsupportedQueryFeatureError;
@@ -299,7 +308,7 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
 
   it('refuses a Date eq the same way — the refusal is arm-independent', () => {
     const refusal = refusalOf(() =>
-      render({ type: 'comparison', field: 'createdAt', operator: 'eq', value: DATE })
+      render({ type: 'comparison', field: 'createdAt', operator: 'eq', value: DATE }),
     );
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
   });
@@ -314,7 +323,7 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
         field: ['profile', 'joinedAt'],
         operator: 'lt',
         value: DATE,
-      })
+      }),
     );
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
     expect((refusal as UnsupportedQueryFeatureError).message).toContain('profile.joinedAt');
@@ -327,19 +336,22 @@ describe('translateDynamoFilter — Date values (§3.14)', () => {
         field: 'createdAt',
         operator: 'in',
         value: [DATE, DATE],
-      })
+      }),
     );
     expect(refusal).toBeInstanceOf(UnsupportedQueryFeatureError);
     expect((refusal as UnsupportedQueryFeatureError).message).toContain('createdAt');
   });
 
   it('converts Date elements of an in list under the declared encoding', () => {
-    const { expression, attributes } = render({
-      type: 'comparison',
-      field: 'checkpoints',
-      operator: 'in',
-      value: [DATE, DATE],
-    }, { checkpoints: 'epochMs' });
+    const { expression, attributes } = render(
+      {
+        type: 'comparison',
+        field: 'checkpoints',
+        operator: 'in',
+        value: [DATE, DATE],
+      },
+      { checkpoints: 'epochMs' },
+    );
     expect(expression).toBe('#n0 IN (:v0, :v1)');
     expect(attributes).toStrictEqual({
       ExpressionAttributeNames: { '#n0': 'checkpoints' },

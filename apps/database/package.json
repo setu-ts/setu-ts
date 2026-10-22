@@ -1,0 +1,22 @@
+{
+  "name": "setu-ts-example-database",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.20.6",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/database-plugin": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "start": "tsx main.ts",
+    "smoke": "tsx smoke.ts",
+    "check": "tsc -p tsconfig.json --noEmit"
+  }
+}

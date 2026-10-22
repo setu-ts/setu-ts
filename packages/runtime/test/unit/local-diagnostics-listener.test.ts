@@ -69,9 +69,9 @@ describe('Local diagnostics listener — platform gate', () => {
   it('refuses every listen on non-Deno platforms before any bind', async () => {
     for (const platform of ['node', 'bun', 'cloudflare-workers'] as const) {
       const factory = createLocalDiagnosticsListenerFactory(platform);
-      await expect(
-        factory.listen({ port: 4919, handler: echoHandler }),
-      ).rejects.toThrow(UNSUPPORTED_TRANSPORT_ERROR);
+      await expect(factory.listen({ port: 4919, handler: echoHandler })).rejects.toThrow(
+        UNSUPPORTED_TRANSPORT_ERROR,
+      );
       // closeActive on the unsupported factory is a no-op.
       await factory.closeActive();
     }
@@ -84,9 +84,9 @@ describe('Local diagnostics listener — Deno factory', () => {
     const factory = createLocalDiagnosticsListenerFactory('deno', host);
     const listener = await factory.listen({ port: 4919, handler: echoHandler });
     expect(calls).toEqual([{ port: 4919, hostname: '127.0.0.1' }]);
-    await expect(
-      factory.listen({ port: 4920, handler: echoHandler }),
-    ).rejects.toThrow(LISTENER_ALREADY_ACTIVE_ERROR);
+    await expect(factory.listen({ port: 4920, handler: echoHandler })).rejects.toThrow(
+      LISTENER_ALREADY_ACTIVE_ERROR,
+    );
     await listener.close();
     expect(servers.length).toEqual(1);
   });
@@ -147,11 +147,11 @@ describe('Local diagnostics listener — Deno factory', () => {
     expect((seen as unknown as IRequest).path).toEqual('/v1/status');
     // A framed request never reaches the handler and answers the fixed
     // anonymous refusal.
-    const refused = await fetches[0](
+    const refused = (await fetches[0](
       new Request('http://127.0.0.1:4919/v1/status', {
         headers: { 'content-length': '5' },
       }),
-    ) as Response;
+    )) as Response;
     expect(refused.status).toEqual(400);
     const parsed = JSON.parse(await refused.text()) as Record<string, unknown>;
     expect(parsed).toEqual({ version: 1, error: 'invalid-request' });
@@ -165,9 +165,7 @@ describe('Local diagnostics listener — Deno factory', () => {
         throw new Error('secret internal detail');
       },
     });
-    const failed = await fetches[1](
-      new Request('http://127.0.0.1:4920/v1/status'),
-    ) as Response;
+    const failed = (await fetches[1](new Request('http://127.0.0.1:4920/v1/status'))) as Response;
     expect(failed.status).toEqual(503);
     const failureBody = JSON.parse(await failed.text()) as Record<string, unknown>;
     expect(failureBody).toEqual({ version: 1, error: 'unavailable' });
@@ -210,9 +208,7 @@ describe('Local diagnostics listener — native framing', () => {
     duplicated.headers.set('x-setu-session', `${'a'.repeat(32)}, ${'a'.repeat(32)}`);
     const refusal = nativeFramingRefusal(duplicated);
     expect(refusal?.status).toEqual(400);
-    expect((refusal?.headers.get('content-type') ?? '').includes('application/json')).toBe(
-      true,
-    );
+    expect((refusal?.headers.get('content-type') ?? '').includes('application/json')).toBe(true);
   });
 });
 

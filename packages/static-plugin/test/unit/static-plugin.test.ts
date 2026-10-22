@@ -126,14 +126,15 @@ describe('StaticPlugin', () => {
     const plugin = StaticPlugin({ root: '/tmp/static' });
     plugin.register(ctx);
 
-    const healthFn = healthRegister.calls()[0][1] as () => Promise<
-      { status: string; detail: string }
-    >;
+    const healthFn = healthRegister.calls()[0][1] as () => Promise<{
+      status: string;
+      data: { fs: boolean; detail: string };
+    }>;
     const result = await healthFn();
 
     expect(result).toEqual({
-      status: 'degraded',
-      detail: 'no file system on this runtime',
+      status: 'up',
+      data: { fs: false, detail: 'no file system on this runtime' },
     });
   });
 

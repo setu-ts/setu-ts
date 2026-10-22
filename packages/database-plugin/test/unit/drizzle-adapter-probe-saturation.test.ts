@@ -13,7 +13,7 @@ import { pgTable, text } from 'drizzle-orm/pg-core';
 import type { DatabasePoolCapacity } from '../../src/interfaces/index.ts';
 import { DrizzleAdapter } from '../../src/adapters/drizzle/drizzle-adapter.ts';
 import { createDrizzleDatabase, DatabaseService } from '../../src/index.ts';
-import { isPoolExhaustion } from '../../src/errors/classify.ts';
+import { isUnansweredConnect } from '../../src/errors/classify.ts';
 import {
   DRIZZLE_QUERY_HANDLE,
   type DrizzleQueryHandleProvider,
@@ -46,9 +46,8 @@ function makeAdapter(
     return respond(sql);
   });
   const adapter = new DrizzleAdapter({
-    drizzleInstance: createDrizzleDatabase(
-      database,
-      (instance, work) => instance.transaction(work),
+    drizzleInstance: createDrizzleDatabase(database, (instance, work) =>
+      instance.transaction(work),
     ),
     drizzleTables: { Tenant: tenants },
     ...(poolStats !== undefined && { poolStats }),
@@ -102,7 +101,7 @@ describe('DrizzleAdapter probe under pool saturation (M101a V8-3)', () => {
       (error: unknown) => error,
     );
     expect(rejection).toBeInstanceOf(Error);
-    expect(isPoolExhaustion(rejection)).toBe(true);
+    expect(isUnansweredConnect(rejection)).toBe(true);
   });
 
   it('rethrows exhaustion wrapped in a cause chain', async () => {
@@ -114,7 +113,7 @@ describe('DrizzleAdapter probe under pool saturation (M101a V8-3)', () => {
       () => undefined,
       (error: unknown) => error,
     );
-    expect(isPoolExhaustion(rejection)).toBe(true);
+    expect(isUnansweredConnect(rejection)).toBe(true);
   });
 
   it('still answers false for a refused connection, so an outage reads as a fact', async () => {
@@ -143,7 +142,7 @@ describe('DrizzleAdapter probe under pool saturation (M101a V8-3)', () => {
   });
 });
 
-describe('isPoolExhaustion', () => {
+describe('isUnansweredConnect', () => {
   const cases: ReadonlyArray<readonly [string, unknown, boolean]> = [
     ['the anchor itself', new Error(POOL_TIMEOUT), true],
     ['the anchor one cause deep', new Error('outer', { cause: new Error(POOL_TIMEOUT) }), true],
@@ -153,14 +152,14 @@ describe('isPoolExhaustion', () => {
   ];
   for (const [label, value, expected] of cases) {
     it(`${expected ? 'matches' : 'does not match'} ${label}`, () => {
-      expect(isPoolExhaustion(value)).toBe(expected);
+      expect(isUnansweredConnect(value)).toBe(expected);
     });
   }
 
   it('terminates on a cyclic cause chain', () => {
     const cyclic = new Error('loop') as Error & { cause?: unknown };
     cyclic.cause = cyclic;
-    expect(isPoolExhaustion(cyclic)).toBe(false);
+    expect(isUnansweredConnect(cyclic)).toBe(false);
   });
 });
 
@@ -301,3 +300,17 @@ describe('QueryProgressTracker', () => {
     expect(tracker.progressedWithin(20_000)).toBe(true);
   });
 });
+
+for (const message of ['Connection terminated due to connection timeout', 'Query read timeout']) {
+  it(`reports unanswered ${message} as undefined`, async () => {
+    const { adapter } = makeAdapter(() => Promise.reject(new Error(message)));
+    await adapter.connect();
+    await expect(adapter.isHealthy!()).rejects.toThrow();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'drizzle',
+    );
+    expect(await service.reachability()).toBeUndefined();
+  });
+}

@@ -2,7 +2,7 @@
  * Auto-generated SDK client. Do not edit manually.
  */
 
-import type { ClientResponse, IHttpClient } from '../../src/index.ts';
+import type { ClientResponse, IHttpClient, OperationRequestOptions } from '../../src/index.ts';
 
 export type User = {
   'id': string;
@@ -30,20 +30,36 @@ export interface UpdateNoteArgs {
 }
 
 export interface Api {
-  pingService(opts?: PingServiceArgs): Promise<ClientResponse<void>>;
-  getUserById(id: string): Promise<ClientResponse<User>>;
-  searchEverything(opts?: SearchEverythingArgs): Promise<ClientResponse<string[]>>;
+  pingService(
+    opts?: PingServiceArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>>;
+  getUserById(id: string, request?: OperationRequestOptions): Promise<ClientResponse<User>>;
+  searchEverything(
+    opts?: SearchEverythingArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<string[]>>;
   downloadFileMetadata(
     tenantId: string,
     fileId: string,
+    request?: OperationRequestOptions,
   ): Promise<ClientResponse<Record<string, unknown>>>;
-  createReport(opts: CreateReportArgs): Promise<ClientResponse<User>>;
-  updateNote(opts?: UpdateNoteArgs): Promise<ClientResponse<void>>;
+  createReport(
+    opts: CreateReportArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User>>;
+  updateNote(
+    opts?: UpdateNoteArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>>;
 }
 
 export function createApi(client: IHttpClient): Api {
   /** pingService */
-  function pingService(opts?: PingServiceArgs): Promise<ClientResponse<void>> {
+  function pingService(
+    opts?: PingServiceArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>> {
     return client.request<void>({
       method: 'GET',
       path: 'ping',
@@ -57,19 +73,29 @@ export function createApi(client: IHttpClient): Api {
         }
         return headers;
       })(),
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   /** getUserById */
-  function getUserById(id: string): Promise<ClientResponse<User>> {
+  function getUserById(
+    id: string,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User>> {
     return client.request<User>({
       method: 'GET',
       path: `users/${encodeURIComponent(id)}`,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   /** searchEverything */
-  function searchEverything(opts?: SearchEverythingArgs): Promise<ClientResponse<string[]>> {
+  function searchEverything(
+    opts?: SearchEverythingArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<string[]>> {
     return client.request<string[]>({
       method: 'GET',
       path: 'search',
@@ -81,6 +107,8 @@ export function createApi(client: IHttpClient): Api {
         }
         return headers;
       })(),
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
@@ -88,29 +116,42 @@ export function createApi(client: IHttpClient): Api {
   function downloadFileMetadata(
     tenantId: string,
     fileId: string,
+    request?: OperationRequestOptions,
   ): Promise<ClientResponse<Record<string, unknown>>> {
     return client.request<Record<string, unknown>>({
       method: 'GET',
       path: `tenants/${encodeURIComponent(tenantId)}/files/${encodeURIComponent(fileId)}.json`,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   /** createReport */
-  function createReport(opts: CreateReportArgs): Promise<ClientResponse<User>> {
+  function createReport(
+    opts: CreateReportArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<User>> {
     return client.request<User>({
       method: 'POST',
       path: 'reports',
       query: { 'format': opts.format },
       json: opts.body,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 
   /** updateNote */
-  function updateNote(opts?: UpdateNoteArgs): Promise<ClientResponse<void>> {
+  function updateNote(
+    opts?: UpdateNoteArgs,
+    request?: OperationRequestOptions,
+  ): Promise<ClientResponse<void>> {
     return client.request<void>({
       method: 'PATCH',
       path: 'notes',
       json: opts?.body,
+      ...(request?.idempotencyKey === undefined ? {} : { idempotencyKey: request.idempotencyKey }),
+      ...(request?.signal === undefined ? {} : { signal: request.signal }),
     });
   }
 

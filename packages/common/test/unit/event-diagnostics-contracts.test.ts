@@ -64,13 +64,7 @@ describe('M98j common contracts', () => {
 
   it('a conforming source answers a snapshot with exactly the committed keys', () => {
     const snap = source().snapshot();
-    expect(Object.keys(snap).sort()).toEqual([
-      'alias',
-      'coverage',
-      'dropped',
-      'records',
-      'state',
-    ]);
+    expect(Object.keys(snap).sort()).toEqual(['alias', 'coverage', 'dropped', 'records', 'state']);
     expect(Object.keys(snap.records[0]!).sort()).toEqual([
       'ageMs',
       'alias',
@@ -112,12 +106,12 @@ describe('M98j common contracts', () => {
       snapshot: () =>
         closed
           ? {
-            state: 'disabled',
-            alias: null,
-            coverage: 'owned-instance',
-            records: [],
-            dropped: 0,
-          }
+              state: 'disabled',
+              alias: null,
+              coverage: 'owned-instance',
+              records: [],
+              dropped: 0,
+            }
           : snapshot(),
     };
     expect(closing.snapshot().state).toEqual('ready');

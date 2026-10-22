@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Unit tests for the Cosmos keyset page: the one-extra-row probe, the
  * projection widening and narrowing, and the three refusals.
@@ -11,7 +12,6 @@ import { encodeCursor, sortFingerprint } from '@setu-ts/common';
 import { createCosmosDataSource } from '../../src/adapters/cosmos/cosmos-data-source.ts';
 import { resolveCosmosTarget } from '../../src/adapters/cosmos/cosmos-mapping.ts';
 import { PartitionKeyResolver } from '../../src/adapters/cosmos/cosmos-partition-key.ts';
-import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 import { createFakeCosmosClient } from '../fixtures/fake-cosmos-client.ts';
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -42,11 +42,13 @@ function makeSource(rows: Record<string, unknown>[][]) {
 
 describe('findPage', () => {
   it('fetches one extra row and mints a cursor when a further page exists', async () => {
-    const { source, fake } = makeSource([[
-      { id: 'a', rank: 1 },
-      { id: 'b', rank: 1 },
-      { id: 'c', rank: 2 },
-    ]]);
+    const { source, fake } = makeSource([
+      [
+        { id: 'a', rank: 1 },
+        { id: 'b', rank: 1 },
+        { id: 'c', rank: 2 },
+      ],
+    ]);
     const page = await source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 2 }));
     expect(page?.rows.map((row) => row['id'])).toEqual(['a', 'b']);
     expect(page?.nextCursor).not.toBeNull();
@@ -64,8 +66,7 @@ describe('findPage', () => {
   it('orders by the key column as a tiebreaker, so tied sort values cannot repeat', async () => {
     const { source, fake } = makeSource([[{ id: 'a', rank: 1 }]]);
     await source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 5 }));
-    expect(fake.recorder.queries[0]?.query)
-      .toContain('ORDER BY c["rank"] ASC, c["id"] ASC');
+    expect(fake.recorder.queries[0]?.query).toContain('ORDER BY c["rank"] ASC, c["id"] ASC');
   });
 
   it('widens the projection to the key and ordered columns, then narrows it back', async () => {
@@ -73,26 +74,32 @@ describe('findPage', () => {
     const page = await source.findPage?.(
       query({ orderBy: { rank: 'asc' }, limit: 5, select: ['name'] }),
     );
-    expect(fake.recorder.queries[0]?.query)
-      .toBe(
-        'SELECT c["name"], c["id"], c["rank"] FROM c ORDER BY c["rank"] ASC, c["id"] ASC OFFSET @p0 LIMIT @p1',
-      );
+    expect(fake.recorder.queries[0]?.query).toBe(
+      'SELECT c["name"], c["id"], c["rank"] FROM c ORDER BY c["rank"] ASC, c["id"] ASC OFFSET @p0 LIMIT @p1',
+    );
     // The caller asked for `name` alone and gets exactly that.
     expect(page?.rows).toEqual([{ name: 'n' }]);
   });
 
   it('conjoins the keyset predicate with the caller filter on a later page', async () => {
-    const first = makeSource([[{ id: 'a', rank: 1 }, { id: 'b', rank: 1 }]]);
+    const first = makeSource([
+      [
+        { id: 'a', rank: 1 },
+        { id: 'b', rank: 1 },
+      ],
+    ]);
     const page = await first.source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1 }));
     const cursor = page?.nextCursor as string;
 
     const second = makeSource([[]]);
-    await second.source.findPage?.(query({
-      orderBy: { rank: 'asc' },
-      limit: 1,
-      cursor,
-      filter: { type: 'comparison', field: 'tenantId', operator: 'eq', value: 't1' },
-    }));
+    await second.source.findPage?.(
+      query({
+        orderBy: { rank: 'asc' },
+        limit: 1,
+        cursor,
+        filter: { type: 'comparison', field: 'tenantId', operator: 'eq', value: 't1' },
+      }),
+    );
     const emitted = second.fake.recorder.queries[0]?.query as string;
     expect(emitted).toContain('c["tenantId"] = ');
     expect(emitted).toContain('c["rank"] > ');
@@ -102,8 +109,7 @@ describe('findPage', () => {
     const { source } = makeSource([[]]);
     await expect(
       source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1, cursor: 'not-a-cursor' })),
-    )
-      .rejects.toThrow(UnsupportedQueryFeatureError);
+    ).rejects.toThrow(InvalidCursorError);
   });
 
   it('refuses a cursor minted under a different sort', async () => {
@@ -113,12 +119,18 @@ describe('findPage', () => {
       keyValues: ['a'],
       sortFingerprint: sortFingerprint({ other: 'desc' }),
     });
-    await expect(source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1, cursor: foreign })))
-      .rejects.toThrow(/fingerprint mismatch/);
+    await expect(
+      source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1, cursor: foreign })),
+    ).rejects.toThrow(/fingerprint mismatch/);
   });
 
   it('refuses an offset presented alongside a cursor', async () => {
-    const { source } = makeSource([[{ id: 'a', rank: 1 }, { id: 'b', rank: 1 }]]);
+    const { source } = makeSource([
+      [
+        { id: 'a', rank: 1 },
+        { id: 'b', rank: 1 },
+      ],
+    ]);
     const page = await source.findPage?.(query({ orderBy: { rank: 'asc' }, limit: 1 }));
     await expect(
       source.findPage?.(

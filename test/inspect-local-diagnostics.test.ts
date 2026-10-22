@@ -3,14 +3,14 @@
  * DTOs, revoke, prove reads are refused, and prove the application still
  * serves — WITHOUT ever printing the session ID/key or environment.
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 
 describe('inspect-local-diagnostics demo', () => {
   it('runs the loopback consumer exercise end-to-end and leaks no credential', async () => {
     const command = new Deno.Command(Deno.execPath(), {
       args: [
         'run',
+        '--config=test/deno-lane/lane.config.json',
         '--allow-read',
         '--allow-env',
         '--allow-net=127.0.0.1',
@@ -25,7 +25,10 @@ describe('inspect-local-diagnostics demo', () => {
     expect(code).toEqual(0);
     // Deno.serve prints its startup banner to stderr; that is the only
     // line stderr may carry (it names the port, never a credential).
-    const errorLines = errors.trim().split('\n').filter((line) => line.length > 0);
+    const errorLines = errors
+      .trim()
+      .split('\n')
+      .filter((line) => line.length > 0);
     expect(errorLines.length).toBeLessThanOrEqual(1);
     for (const line of errorLines) {
       expect(line).toMatch(/^Listening on http:\/\/127\.0\.0\.1:\d+\/$/);

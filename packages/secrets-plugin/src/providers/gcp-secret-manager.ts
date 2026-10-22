@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { IGcpSecretsClient, SecretProvider } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -24,9 +25,7 @@ interface GcpAccessResponse {
 export interface GcpSdkModule {
   SecretManagerServiceClient: new (options?: Record<string, unknown>) => {
     accessSecretVersion(request: { name: string }): Promise<[GcpAccessResponse]>;
-    addSecretVersion(
-      request: { parent: string; payload: { data: Uint8Array } },
-    ): Promise<unknown>;
+    addSecretVersion(request: { parent: string; payload: { data: Uint8Array } }): Promise<unknown>;
   };
 }
 
@@ -66,8 +65,11 @@ export function validateGcpClient(client: unknown): client is IGcpSecretsClient 
 
 /** Reports whether a caught error is a gRPC NOT_FOUND. */
 export function isGcpNotFound(error: unknown): boolean {
-  return typeof error === 'object' && error !== null &&
-    (error as { code?: unknown }).code === GRPC_NOT_FOUND;
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === GRPC_NOT_FOUND
+  );
 }
 
 /**
@@ -93,9 +95,7 @@ export function adaptGcpModule(
   if (projectId === undefined || projectId === '') {
     throw new Error('GcpSecretManagerProvider requires options.projectId');
   }
-  const client = new mod.SecretManagerServiceClient(
-    buildGcpClientOptions(options.endpoint),
-  );
+  const client = new mod.SecretManagerServiceClient(buildGcpClientOptions(options.endpoint));
   return {
     async accessSecretVersion(name: string): Promise<string | null> {
       try {
@@ -160,7 +160,11 @@ function buildGcpClientOptions(endpoint?: string): Record<string, unknown> | und
  * @throws {Error} If `@google-cloud/secret-manager` cannot be resolved
  */
 export async function loadGcpModule(): Promise<GcpSdkModule> {
-  return await import('@google-cloud/secret-manager') as unknown as GcpSdkModule;
+  try {
+    return (await import('@google-cloud/secret-manager')) as unknown as GcpSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@google-cloud/secret-manager', { cause: error });
+  }
 }
 
 /**

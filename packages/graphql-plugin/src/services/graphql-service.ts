@@ -79,10 +79,7 @@ async function* maskStream(
       yield maskErrors(value, options) as GraphqlExecutionResult;
     }
   } catch (e) {
-    yield maskErrors(
-      { errors: [toInternalError(e)] },
-      options,
-    ) as GraphqlExecutionResult;
+    yield maskErrors({ errors: [toInternalError(e)] }, options) as GraphqlExecutionResult;
   } finally {
     await iterator.return?.();
   }
@@ -184,9 +181,7 @@ export class GraphqlService implements IGraphqlService {
     return this.#documentCache.size;
   }
 
-  #buildContextValue(
-    context: GraphqlOperationContext,
-  ): GraphqlContextInput {
+  #buildContextValue(context: GraphqlOperationContext): GraphqlContextInput {
     // C4: `??` binds tighter than `?:`, so the original expression parsed as
     // `(requestContext?.services ?? connection) ? serviceRegistry : {}`.
     // Fix precedence so HTTP uses request-scoped services and WS uses the

@@ -2,10 +2,10 @@
  * Compile-time and runtime contract tests for the M109a idempotency port,
  * service contract, option types and capability token (§3.2, §3.19).
  *
- * The type-level rows are decided by `deno task check`: a dropped member, a
+ * The type-level rows are decided by `pnpm run check`: a dropped member, a
  * widened union, or an option accepted without a topic/job list stops this file
  * compiling. The runtime assertions keep it failing loudly under
- * `deno task test` as well.
+ * `pnpm run test` as well.
  *
  * @module
  */
@@ -70,7 +70,7 @@ describe('IIdempotencyStore contract (M109a §3.2)', () => {
     // @ts-expect-error `claimed` requires `takeover`
     const bad: IdempotencyClaimResult = { outcome: 'claimed' };
     // The directive is the compile-time assertion; this keeps the file failing
-    // loudly under `deno task test` too.
+    // loudly under `pnpm run test` too.
     expect(bad).toBeDefined();
   });
 });

@@ -5,7 +5,7 @@
  */
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
-import { REST_SHOWCASE, REST_SHOWCASE_FILES } from './rest-showcase.ts';
+import { REST_SHOWCASE, REST_SHOWCASE_FILES, restShowcaseFiles } from './rest-showcase.ts';
 import { CLASS_BASED_SHOWCASE_EXAMPLE, GREETING_ROUTES } from './class-based-showcase.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
@@ -35,7 +35,18 @@ export const REST_PLUGINS: readonly Wiring[] = [
   // literal here as well would be a second source of truth that `--env-file`
   // silently overrides.
   { pkg: 'config-plugin', symbol: 'ConfigPlugin' },
-  { pkg: 'logger-plugin', symbol: 'LoggerPlugin' },
+  // Request logging is opted into by the scaffold, not by the plugin's default:
+  // the probe paths are excluded so a kubelet's `/live`, `/ready`, `/health` and
+  // a scrape's `/metrics` do not write a line per poll.
+  {
+    pkg: 'logger-plugin',
+    symbol: 'LoggerPlugin',
+    // Pre-wrapped at the indentation the config renderer places an array entry
+    // (six spaces) so the emitted call is exactly what `deno fmt` produces: the
+    // one-line form is 103 characters against the generated `lineWidth: 100`,
+    // so a fresh scaffold failed its own `deno fmt --check` (M113h §3.9).
+    args: "{\n        requestLogging: true,\n        excludePaths: ['/live', '/ready', '/health', '/metrics'],\n      }",
+  },
   // `errorFormat: 'rfc9457'` makes a validation failure answer in the same
   // Problem Details shape the `errorHandler` below emits for thrown errors
   // (C3): before this, the two disagreed on format in a scaffolded project.
@@ -82,12 +93,21 @@ export const REST_RECIPE: TemplateRecipe = {
   plugins: REST_PLUGINS,
   middleware: REST_MIDDLEWARE,
   manifest: FUNCTIONAL_MODULE_MANIFEST,
+  runtimeSwaps: {
+    'cloudflare-workers': {
+      removePackages: ['openapi-plugin'],
+      addPlugins: [
+        { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
+      ],
+    },
+  },
   showcase: {
     // The functional showcase reaches its plain service by a direct import,
     // exactly as the functional generators do.
     functional: {
       files: REST_SHOWCASE_FILES,
-      seeded: { controller: [REST_SHOWCASE], service: [REST_SHOWCASE] },
+      filesForRuntime: restShowcaseFiles,
+      seeded: { modules: [REST_SHOWCASE] },
       routes: GREETING_ROUTES,
     },
     // The class-based showcase is a decorated controller and an injected

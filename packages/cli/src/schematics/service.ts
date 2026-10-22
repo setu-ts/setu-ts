@@ -12,9 +12,12 @@
  * project, where it works today.
  *
  * Both modes emit a barrel, and the difference matters: the class one is the
- * registration `setu.config.ts` passes to `DecoratorPlugin`, while the functional one
- * is a convenience re-export nothing imports for you. The functional barrel is also
- * what makes the scan admit these files — see `seams/services.ts`.
+ * registration `setu.config.ts` passes to `DecoratorPlugin` — inline as
+ * `DecoratorPlugin({ services: [...APP_SERVICES] })`, or through a starter's
+ * `decorators: { services: … }` arm — while the functional one is a convenience
+ * re-export nothing imports for you. `setu generate` reports when the class
+ * barrel is written but `setu.config.ts` references neither form, so the barrel
+ * alone is never claimed to be wired.
  *
  * @module
  */
@@ -36,7 +39,7 @@ import { generatorMode } from '../utils/generator-mode.ts';
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
  */
-function renderFunctionalService(names: DerivedNames): string {
+function renderFunctionalService(names: DerivedNames, module?: string): string {
   return `/**
  * ${names.pascal} domain service.
  *
@@ -45,8 +48,7 @@ function renderFunctionalService(names: DerivedNames): string {
  * context as its explicit capability injector rather than constructor injection.
  *
  * Nothing registers this for you — a plain function has no framework registration
- * site. \`src/services/index.ts\` re-exports it as a convenience, so a consumer can
- * import from one path rather than from each module.
+ * site. ${module === undefined ? '`src/services/index.ts` re-exports it as a convenience.' : `Import it from './${names.kebab}.service.ts' in a sibling route.`}
  *
  * @returns A placeholder value
  */
@@ -66,15 +68,31 @@ export function ${functionalServiceSymbol(names)}(): string {
  * @param names - Naming forms derived from the user's input
  * @returns The file contents
  */
-function renderInjectableService(names: DerivedNames): string {
+function renderInjectableService(names: DerivedNames, module?: string): string {
+  if (module !== undefined) {
+    return `import { Injectable } from '@setu-ts/decorator-plugin';
+
+/** Add this provider to ${module}.module.ts and inject '${serviceSeamToken(`${module}.${names.kebab}`)}'. */
+@Injectable({ token: '${serviceSeamToken(`${module}.${names.kebab}`)}' })
+export class ${names.pascal}Service {
+  /** Replace with the service's real behavior. */
+  describe(): string {
+    return '${names.kebab}';
+  }
+}
+`;
+  }
   return `import { Injectable } from '@setu-ts/decorator-plugin';
 
 /**
  * ${names.pascal} domain service.
  *
- * Registered through the \`${APP_SERVICES_EXPORT}\` barrel in \`src/services/index.ts\`,
- * which \`setu.config.ts\` passes to \`DecoratorPlugin\` — so this class needs no further
- * wiring. Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
+ * Registered through the \`${APP_SERVICES_EXPORT}\` barrel in \`src/services/index.ts\`:
+ * \`setu.config.ts\` passes it as
+ * \`DecoratorPlugin({ services: [...${APP_SERVICES_EXPORT}] })\`, or a starter does
+ * through its \`decorators: { services: … }\` arm. \`setu generate\` reports when the
+ * config references neither, so this class is never claimed wired without it.
+ * Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
  * constructor parameter, which works whether or not a container is registered.
  *
  * Resolving it BY HAND depends on the composition, because the two paths register
@@ -86,9 +104,9 @@ function renderInjectableService(names: DerivedNames): string {
  * - with \`DiPlugin\` (the \`--template class-based\` composition): the class is registered
  *   as a PROVIDER on the container and is NOT in the kernel registry, so
  *   \`services.get(...)\` throws. Resolve through the container —
- *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${
-    serviceSeamToken(names.kebab)
-  }')\` — and \`scope\` is honored.
+ *   \`services.get<IContainer>(CAPABILITIES.DI_CONTAINER).resolve('${serviceSeamToken(
+   names.kebab,
+ )}')\` — and \`scope\` is honored.
  */
 @Injectable({ token: '${serviceSeamToken(names.kebab)}' })
 export class ${names.pascal}Service {
@@ -118,14 +136,18 @@ export function generateService(
 ): readonly GeneratedFile[] {
   const classBased = generatorMode(options.plugins) === 'class-based';
   const service: GeneratedFile = {
-    path: `src/services/${names.kebab}.service.ts`,
-    contents: classBased ? renderInjectableService(names) : renderFunctionalService(names),
+    path: `${options.targetModule === undefined ? 'src/services' : `src/modules/${options.targetModule}`}/${names.kebab}.service.ts`,
+    contents: classBased
+      ? renderInjectableService(names, options.targetModule)
+      : renderFunctionalService(names, options.targetModule),
   };
+  if (options.targetModule !== undefined) return [service];
 
   // Both modes emit the barrel, but they are not the same barrel. The class one is a
-  // REGISTRATION: `setu.config.ts` imports `APP_SERVICES` and hands it to
-  // `DecoratorPlugin`. The functional one is a convenience re-export that nothing
-  // imports for you — there is no plugin option taking a list of functions.
+  // REGISTRATION for `DecoratorPlugin({ services })` or a starter's `decorators` arm —
+  // and `setu generate` reports when the config references it from neither. The
+  // functional one is a convenience re-export that nothing imports for you — there is
+  // no plugin option taking a list of functions.
   const spec = classBased ? SERVICES_SEAM : FUNCTIONAL_SERVICES_SEAM;
 
   return [

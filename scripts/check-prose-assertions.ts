@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * Executable prose-assertion gate.
  *
@@ -9,6 +9,11 @@
  *
  * @module
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { SANDBOX_IMPORTS, sandboxReadFlags } from './lib/sandbox.ts';
+import { type Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 
 /** Marker placed in a comment block immediately before a claim table. */
 export const MARKER = 'assert:js';
@@ -34,8 +39,7 @@ export interface Claim {
 
 /** The sandbox's result for one claim. */
 export type ClaimResult =
-  | { readonly ok: true; readonly value: unknown }
-  | { readonly ok: false; readonly error: string };
+  { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string };
 
 /** A failed or unverified assertion in a document. */
 export interface Finding {
@@ -142,7 +146,8 @@ export function parseClaimTable(block: ClaimBlock): readonly Claim[] {
     throw new Error('must start with an Expression and Value header');
   }
   if (
-    separator === null || separator.length !== 2 ||
+    separator === null ||
+    separator.length !== 2 ||
     !separator.every((cell) => /^:?-+:?$/.test(cell))
   ) {
     throw new Error('must contain a two-column Markdown table separator');
@@ -176,14 +181,19 @@ export function parseClaimTable(block: ClaimBlock): readonly Claim[] {
  * @returns TypeScript source that emits one JSON line per expression
  */
 export function buildProgram(claims: readonly Claim[]): string {
-  return claims.map((claim) =>
-    `try {
-  const value = (${claim.expression});
-  console.log(JSON.stringify({ ok: true, value }));
-} catch (error) {
-  console.log(JSON.stringify({ ok: false, error: error instanceof Error ? error.name + ': ' + error.message : String(error) }));
-}`
-  ).join('\n');
+  return `import { constants, createContext, runInContext } from 'node:vm';
+const context = createContext({ JSON, Math, Number, String, Array, Object, Boolean });
+for (const expression of ${JSON.stringify(claims.map((claim) => claim.expression))}) {
+  try {
+    const value = await runInContext('(async () => (' + expression + '))()', context, {
+      importModuleDynamically: constants.USE_MAIN_CONTEXT_DEFAULT_LOADER,
+    });
+    console.log(JSON.stringify({ ok: true, value }));
+  } catch (error) {
+    const code = typeof error === 'object' && error !== null && 'code' in error ? '[' + String(error.code) + '] ' : '';
+    console.log(JSON.stringify({ ok: false, error: code + String(error) }));
+  }
+}`;
 }
 
 /**
@@ -217,7 +227,10 @@ export function parseResults(stdout: string, expected: number): readonly ClaimRe
 }
 
 /**
- * Evaluates a document's claims in a no-permissions Deno subprocess.
+ * Evaluates a document's claims in a Node permission-model subprocess that may read
+ * only what importing a workspace package needs (so a claim can import the package
+ * it describes, as Deno's loader allowed), with an empty environment and no write
+ * or child-process access.
  *
  * @param claims - Claims in one document
  * @param timeoutMs - Maximum time permitted for the complete batch
@@ -227,45 +240,37 @@ export async function evaluateClaims(
   claims: readonly Claim[],
   timeoutMs: number = DEFAULT_TIMEOUT_MS,
 ): Promise<readonly ClaimResult[] | null> {
-  const child = new Deno.Command('deno', {
-    args: ['run', '--no-prompt', '--ext=ts', '-'],
-    stdin: 'piped',
-    stdout: 'piped',
-    stderr: 'piped',
-  }).spawn();
-  const outputPromise = child.output();
-  const writer = child.stdin.getWriter();
+  // A tracked symlink escaping the grants refuses the run outright rather than
+  // reading as one unevaluated document.
+  const readFlags = await sandboxReadFlags(process.cwd());
   try {
-    await writer.write(new TextEncoder().encode(buildProgram(claims)));
-    await writer.close();
+    const output = await runProcess(
+      process.execPath,
+      [
+        '--permission',
+        ...readFlags,
+        ...SANDBOX_IMPORTS,
+        '--no-warnings',
+        '--input-type=module-typescript',
+        '-',
+      ],
+      { env: {}, stdin: buildProgram(claims), timeoutMs },
+    );
+    return output.code === 0 ? parseResults(output.stdout, claims.length) : null;
   } catch {
     return null;
   }
-
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const output = await Promise.race([
-    outputPromise,
-    new Promise<null>((resolve) => {
-      timeoutId = setTimeout(() => resolve(null), timeoutMs);
-    }),
-  ]);
-  if (timeoutId !== undefined) clearTimeout(timeoutId);
-  if (output === null) {
-    child.kill('SIGKILL');
-    await outputPromise;
-    return null;
-  }
-  if (!output.success) return null;
-  return parseResults(new TextDecoder().decode(output.stdout), claims.length);
 }
 
 function jsonValuesEqual(left: unknown, right: unknown): boolean {
   if (left === right) return true;
   if (Array.isArray(left) || Array.isArray(right)) {
-    return Array.isArray(left) && Array.isArray(right) &&
-      left.length === right.length && left.every((value, index) =>
-        jsonValuesEqual(value, right[index])
-      );
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => jsonValuesEqual(value, right[index]))
+    );
   }
   if (typeof left !== 'object' || left === null || typeof right !== 'object' || right === null) {
     return false;
@@ -273,10 +278,13 @@ function jsonValuesEqual(left: unknown, right: unknown): boolean {
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
   const leftKeys = Object.keys(leftRecord);
-  return leftKeys.length === Object.keys(rightRecord).length &&
-    leftKeys.every((key) =>
-      Object.hasOwn(rightRecord, key) && jsonValuesEqual(leftRecord[key], rightRecord[key])
-    );
+  return (
+    leftKeys.length === Object.keys(rightRecord).length &&
+    leftKeys.every(
+      (key) =>
+        Object.hasOwn(rightRecord, key) && jsonValuesEqual(leftRecord[key], rightRecord[key]),
+    )
+  );
 }
 
 /**
@@ -297,9 +305,9 @@ export function compareClaim(claim: Claim, result: ClaimResult | undefined): Fin
     return {
       line: claim.line,
       file: '',
-      message: `Expected ${JSON.stringify(claim.expected)}, received ${
-        JSON.stringify(result.value)
-      }.`,
+      message: `Expected ${JSON.stringify(claim.expected)}, received ${JSON.stringify(
+        result.value,
+      )}.`,
     };
   }
   return null;
@@ -359,17 +367,18 @@ export async function checkDocument(
 export async function collectMarkdown(root: string): Promise<readonly string[]> {
   const found: string[] = [];
   const walk = async (directory: string): Promise<void> => {
-    let entries: Deno.DirEntry[];
+    let entries: Dirent[];
     try {
       entries = [];
-      for await (const entry of Deno.readDir(directory)) entries.push(entry);
+      for await (const entry of await readdir(directory, { withFileTypes: true }))
+        entries.push(entry);
     } catch {
       return;
     }
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name) || entry.name.startsWith('.')) continue;
       const path = directory === '.' ? entry.name : `${directory}/${entry.name}`;
-      if (entry.isDirectory) {
+      if (entry.isDirectory()) {
         if (directory !== '.') await walk(path);
       } else if (entry.name.endsWith('.md')) {
         found.push(path);
@@ -388,24 +397,28 @@ export async function collectMarkdown(root: string): Promise<readonly string[]> 
  */
 export async function run(args: readonly string[]): Promise<readonly Finding[]> {
   const timeoutArgument = args.find((argument) => argument.startsWith('--timeout='));
-  const timeoutMs = timeoutArgument === undefined
-    ? DEFAULT_TIMEOUT_MS
-    : Number(timeoutArgument.slice('--timeout='.length));
+  const timeoutMs =
+    timeoutArgument === undefined
+      ? DEFAULT_TIMEOUT_MS
+      : Number(timeoutArgument.slice('--timeout='.length));
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
-    return [{
-      file: 'arguments',
-      line: 1,
-      message: 'The --timeout value must be a positive number of milliseconds.',
-    }];
+    return [
+      {
+        file: 'arguments',
+        line: 1,
+        message: 'The --timeout value must be a positive number of milliseconds.',
+      },
+    ];
   }
   const argumentsFiles = args.filter((argument) => !argument.startsWith('--'));
-  const files = argumentsFiles.length > 0
-    ? argumentsFiles
-    : [...new Set((await Promise.all(SCAN_ROOTS.map(collectMarkdown))).flat())].sort();
+  const files =
+    argumentsFiles.length > 0
+      ? argumentsFiles
+      : [...new Set((await Promise.all(SCAN_ROOTS.map(collectMarkdown))).flat())].sort();
   const findings: Finding[] = [];
   for (const file of files) {
     try {
-      findings.push(...await checkDocument(file, await Deno.readTextFile(file), timeoutMs));
+      findings.push(...(await checkDocument(file, await readFile(file, 'utf8'), timeoutMs)));
     } catch (error) {
       findings.push({
         file,
@@ -417,11 +430,18 @@ export async function run(args: readonly string[]): Promise<readonly Finding[]> 
   return findings;
 }
 
-if (import.meta.main) {
-  const findings = await run(Deno.args);
-  if (findings.length === 0) Deno.exit(0);
+/** Repository entry point; returns a status without exiting its caller. */
+export async function runProseMain(
+  args: readonly string[] = process.argv.slice(2),
+): Promise<number> {
+  const findings = await run(args);
+  if (findings.length === 0) {
+    return 0;
+  }
   for (const finding of findings) {
     console.error(`${finding.file}:${finding.line}: ${finding.message}`);
   }
-  Deno.exit(1);
+  return 1;
 }
+
+if (import.meta.main) process.exitCode = await runProseMain();

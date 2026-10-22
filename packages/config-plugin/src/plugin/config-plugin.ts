@@ -61,9 +61,8 @@ const PLUGIN_NAME = 'config-plugin';
 export function ConfigPlugin(options?: ConfigPluginOptions): IPlugin {
   // Compile once, at construction: an invalid diagnostics option refuses
   // before any application exists, never mid-startup.
-  const diagnosticsPolicy = options?.diagnostics === undefined
-    ? null
-    : compileConfigDiagnosticsPolicy(options.diagnostics);
+  const diagnosticsPolicy =
+    options?.diagnostics === undefined ? null : compileConfigDiagnosticsPolicy(options.diagnostics);
 
   return {
     name: PLUGIN_NAME,

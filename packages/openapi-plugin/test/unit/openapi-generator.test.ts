@@ -474,9 +474,7 @@ describe('OpenApiGenerator', () => {
       // M70m/X11-6: a hoisted component is named from the site that first
       // reached it — here the GET route, which is listed first — rather than
       // the meaningless `Schema1`. Exactly one component, not one per site.
-      expect(Object.keys(result.components?.schemas ?? {})).toEqual([
-        'GetUsersByIdResponse200',
-      ]);
+      expect(Object.keys(result.components?.schemas ?? {})).toEqual(['GetUsersByIdResponse200']);
     });
 
     it('should use $ref for deduplicated schemas', () => {
@@ -526,16 +524,16 @@ describe('OpenApiGenerator', () => {
       // including the first. Before this the first use was inlined and never
       // rewritten, so one shape appeared in two forms in one document.
       const ref = { $ref: '#/components/schemas/PostUsersBody' };
-      const responseSchema = result.paths['/users/{id}']?.get?.responses['200']?.content
-        ?.['application/json']?.schema;
+      const responseSchema =
+        result.paths['/users/{id}']?.get?.responses['200']?.content?.['application/json']?.schema;
       expect(responseSchema).toEqual(ref);
 
-      const bodySchema = result.paths['/users']?.post?.requestBody?.content['application/json']
-        ?.schema;
+      const bodySchema =
+        result.paths['/users']?.post?.requestBody?.content['application/json']?.schema;
       expect(bodySchema).toEqual(ref);
 
-      const createdSchema = result.paths['/users']?.post?.responses['201']?.content
-        ?.['application/json']?.schema;
+      const createdSchema =
+        result.paths['/users']?.post?.responses['201']?.content?.['application/json']?.schema;
       expect(createdSchema).toEqual(ref);
 
       // Exactly one component, not one per site.

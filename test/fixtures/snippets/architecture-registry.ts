@@ -46,9 +46,7 @@ const registryPlugin: IPlugin = {
     // Lookup uses the same CAPABILITIES constant.
     const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
     if (ctx.services.has(CAPABILITIES.NOTIFICATION)) {
-      const notifiers = ctx.services.getAll<INotifier>(
-        CAPABILITIES.NOTIFICATION,
-      );
+      const notifiers = ctx.services.getAll<INotifier>(CAPABILITIES.NOTIFICATION);
       void notifiers;
     }
     void cache;

@@ -239,8 +239,7 @@ export type IdempotencyKeySource =
 
 /** How an HTTP request is fingerprinted. The function's result is re-hashed. */
 export type IdempotencyFingerprintSource =
-  | 'request'
-  | ((ctx: IRequestContext) => string | Promise<string>);
+  'request' | ((ctx: IRequestContext) => string | Promise<string>);
 
 export interface IdempotentRouteOptions {
   /** Default `{ header: 'Idempotency-Key' }`. */
@@ -270,15 +269,11 @@ export interface IdempotentRouteOptions {
 // ── Ingress options ─────────────────────────────────────────────────────────
 /** Where an ingress work item's key comes from. */
 export type IngressIdempotencyKeySource =
-  | 'auto'
-  | 'job-id'
-  | 'deduplication-header'
-  | ((ctx: IngressContext) => string | undefined);
+  'auto' | 'job-id' | 'deduplication-header' | ((ctx: IngressContext) => string | undefined);
 
 /** How an ingress work item is fingerprinted. The function's result is re-hashed. */
 export type IngressIdempotencyFingerprintSource =
-  | 'payload'
-  | ((ctx: IngressContext) => string | Promise<string>);
+  'payload' | ((ctx: IngressContext) => string | Promise<string>);
 
 export interface IdempotentIngressCommonOptions {
   /** Default `'auto'`: a queue job's id; a message's `x-setu-deduplication-id` header. */
@@ -296,13 +291,13 @@ export interface IdempotentIngressCommonOptions {
 /** At least one of `topics` and `jobNames` is required; anything not listed passes through. */
 export type IdempotentIngressOptions =
   | (IdempotentIngressCommonOptions & {
-    readonly topics: readonly string[];
-    readonly jobNames?: readonly string[];
-  })
+      readonly topics: readonly string[];
+      readonly jobNames?: readonly string[];
+    })
   | (IdempotentIngressCommonOptions & {
-    readonly topics?: readonly string[];
-    readonly jobNames: readonly string[];
-  });
+      readonly topics?: readonly string[];
+      readonly jobNames: readonly string[];
+    });
 
 // ── Service ─────────────────────────────────────────────────────────────────
 export interface IIdempotencyService {
@@ -365,9 +360,8 @@ Every type above is exported from `common/src/index.ts`, INCLUDING `IdempotentIn
     (grammar `^[a-z0-9][a-z0-9._-]{0,63}$`, refused otherwise); `keyPrefix` default
     `'setu:idempotency:'` (1–64 characters, each `0x21`–`0x7E`).
   - Record value: JSON
-    `{ "s": "p"|"c", "t": token, "f": fingerprint, "l": "<leaseUntil ms>", "r":
-    record }`; `l`
-    is a STRING.
+    `{ "s": "p"|"c", "t": token, "f": fingerprint, "l": "<leaseUntil ms>", "r": record }`; `l` is a
+    STRING.
   - Three scripts, sent as `client.eval(script, 1, storeKey, ...args)`; no value is ever
     concatenated into script text:
 
@@ -444,15 +438,13 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
   calls `client.quit()`.
 - Injected arm `{ type: 'redis', namespace, client, keyPrefix? }`: validated structurally (`eval`,
   `ping`, `quit`, `call` are functions, else
-  `IdempotencyConfigurationError('store.client', 'redis idempotency store: the injected
-    client needs eval, ping, quit and call')`);
+  `IdempotencyConfigurationError('store.client', 'redis idempotency store: the injected   client needs eval, ping, quit and call')`);
   no listener attached; `connect()` NOT called; `disconnect()` does NOT quit it (the application
   owns it).
 - **Eviction-policy check**, in `store.connect()` for both arms, after the connection:
   `client.call('CONFIG', 'GET', 'maxmemory-policy')`. If it resolves to an array whose second
   element is a string other than `'noeviction'`, log `warn`
-  `'redis idempotency store: maxmemory-policy
-    is <policy>; completed records can be evicted, which allows a duplicate'`
+  `'redis idempotency store: maxmemory-policy   is <policy>; completed records can be evicted, which allows a duplicate'`
   with `{ policy }`. If the call rejects (managed Redis commonly disables `CONFIG`), or the reply
   has another shape, log nothing and continue. The logger is the plugin's thunk passed in (§3.14).
 - `isHealthy()` = `(await client.ping()) === 'PONG'`; a rejection is `false`.
@@ -550,9 +542,8 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
      - rejects → `release`; a `release` rejection or `'lost'` is logged (`warn` for `'lost'`,
        `error` for a rejection) and NEVER replaces the original error; rethrow the ORIGINAL.
      - resolves → `complete(key, token, '', ttlMs)`; `'lost'` → `warn`
-       `'idempotency lease lapsed
-       before completion; the work may have run twice'`; a
-       rejection → `error`; neither is thrown.
+       `'idempotency lease lapsed before completion; the work may have run twice'`; a rejection →
+       `error`; neither is thrown.
 - **What the caller sees when `complete`/`release` fails on ingress:** the handler's outcome,
   always. A successful handler is acknowledged even if `complete` failed; the record stays
   in-progress until its lease lapses, so a redelivery inside the lease is refused `in-progress` and
@@ -578,8 +569,7 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
     logging). Status 200–499 otherwise → `complete` with the §3.10 record. A status below 200 is
     released (never recorded).
   - `complete` → `'lost'`: `warn`
-    `'idempotency lease lapsed before completion; the work may have run
-    twice'` `{ namespace }`.
+    `'idempotency lease lapsed before completion; the work may have run twice'` `{ namespace }`.
     `complete` rejection: `error`. Neither thrown.
 - **What the caller sees when `complete`/`release` fails on HTTP:** the response the handler already
   produced, unchanged. After a failed `complete` the record stays in-progress: a retry inside the
@@ -593,9 +583,8 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
 - **Decision:**
   - **Call-time shape validation** (`validateRouteOptionShape(options): void`, internal in
     `core/options.ts`): each field ALONE — types, integer ranges (§3.13), string grammars, the `key`
-    arm's shape, `replayHeaders` entries (valid header name via `new Headers().set(name,
-    'x')`,
-    not on the DENY list), `redaction` is a `RedactionPolicy`-shaped object or has a `redactRecord`
+    arm's shape, `replayHeaders` entries (valid header name via `new Headers().set(name, 'x')`, not
+    on the DENY list), `redaction` is a `RedactionPolicy`-shaped object or has a `redactRecord`
     function. Throws `IdempotencyConfigurationError` naming the field, never its value.
   - **Resolution** (`resolveRouteOptions(options, defaults): ResolvedRouteOptions`, called by
     `IIdempotencyService.middleware`): merges plugin defaults, then checks cross-field rules —
@@ -603,8 +592,7 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
     `IdempotencyConfigurationError`.
   - `idempotent(options?)` (free function): runs the shape validation at the CALL. Returns a
     `MiddlewareFunction` whose closure owns a
-    `WeakMap<IIdempotencyService, MiddlewareFunction |
-    IdempotencyConfigurationError>` CREATED
+    `WeakMap<IIdempotencyService, MiddlewareFunction | IdempotencyConfigurationError>` CREATED
     INSIDE THIS CALL (never module-level). Per request:
     - `ctx.services.has(CAPABILITIES.IDEMPOTENCY)` false → throw
       `IdempotencyConfigurationError('idempotent(): no CAPABILITIES.IDEMPOTENCY provider is registered — add IdempotencyPlugin() to the application')`.
@@ -612,8 +600,7 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
       middleware → delegate; cached error → throw it; neither → call `service.middleware(options)`
       inside try: success caches and delegates; an `IdempotencyConfigurationError` is cached, logged
       ONCE at `error` through the registry's `CAPABILITIES.LOGGER` when present
-      (`{ error:
-      message }`), and thrown — `errorHandler` maps it to 500 (it carries no status
+      (`{ error: message }`), and thrown — `errorHandler` maps it to 500 (it carries no status
       hint). Later requests rethrow the cached error without logging again (`errorHandler`'s own
       per-request logging is separate).
   - Placement for `idempotent()` is the application's: README and JSDoc say "list it LAST in the
@@ -647,8 +634,7 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
 
 - **Decision:**
   - Record JSON (v1):
-    `{ "v": 1, "s": <status>, "h": [[name, value], ...], "b": { "data": string,
-    "binary"?: true } | null }`;
+    `{ "v": 1, "s": <status>, "h": [[name, value], ...], "b": { "data": string, "binary"?: true } | null }`;
     `b` = `encodeFrameData(body)`.
   - Default ALLOW list: `content-type`, `content-encoding`, `content-location`, `location`,
     `cache-control`, `etag`, `last-modified`, `expires`, `vary`, plus `replayHeaders` (lower-cased).
@@ -679,9 +665,8 @@ interface IBuiltRedisIdempotencyClient extends IRedisIdempotencyClient {
       passes `new Headers().set(name, value)` without throwing and contains no CR/LF;
     - `b` is `null` or `{ data: string, binary?: true }`; the decoded body's byte length ≤ the
       route's current `maxResponseBytes`. Any violation returns an `IdempotencyRecordError`
-      (internal class, `name =
-    'IdempotencyRecordError'`, message names the failed rule, never
-      the content). The middleware logs it at `error` and answers 503; nothing is replayed.
+      (internal class, `name = 'IdempotencyRecordError'`, message names the failed rule, never the
+      content). The middleware logs it at `error` and answers 503; nothing is replayed.
   - Replay: `ctx.response.status(s)`; each header via `ctx.response.header(name, value)`;
     `ctx.response.header('Idempotent-Replayed', 'true')`; return `ctx.response.send(bytes)` (a text
     body UTF-8 encoded) or `ctx.response.send()` when `b` is `null`. The original response is not
@@ -762,18 +747,15 @@ schedule; the same rule applies to their redelivery delay × attempts.
   - Lifecycle state `'pending' | 'connected' | 'closed'`, starting `'pending'`.
   - `register(ctx)`: `store = resolveStore(config, reporter, logger)`;
     `await store.connect(ctx.runtime)`; state → `'connected'`; immediately
-    `ctx.lifecycle.onClose(async () => { state = 'closed'; await
-    store.disconnect?.(); })`;
+    `ctx.lifecycle.onClose(async () => { state = 'closed'; await store.disconnect?.(); })`;
     construct
-    `IdempotencyService({ store, runtime: ctx.runtime, logger:
-    () => ctx.logger, defaults })`;
+    `IdempotencyService({ store, runtime: ctx.runtime, logger: () => ctx.logger, defaults })`;
     register under `CAPABILITIES.IDEMPOTENCY`; register the indicator.
   - Health `idempotency` — lifecycle truth first, for EVERY store arm:
     - state ≠ `'connected'` → `{ status: 'down', data: { store: store.name, state } }`;
     - no `isHealthy` → `{ status: 'up', data: { store: store.name, reachable: 'unknown' } }`;
     - else
-      `createCachedProbe({ probe: () => store.isHealthy!.call(store), ttlMs: 5000, timeoutMs:
-      2000, ...resolveProbeTiming(ctx.runtime) })`
+      `createCachedProbe({ probe: () => store.isHealthy!.call(store), ttlMs: 5000, timeoutMs: 2000, ...resolveProbeTiming(ctx.runtime) })`
       → `up`/`down` with `reachable: boolean`.
   - The logger is read at call time through the thunk.
 - **Test home:** `test/unit/idempotency-plugin.test.ts`, `test/unit/indicator.test.ts`.
@@ -782,11 +764,9 @@ schedule; the same rule applies to their redelivery delay × attempts.
 
 - **Decision:**
   - `IdempotencyObjectCore` — constructor
-    `(state: IIdempotencyObjectState, options?:
-    IdempotencyObjectCoreOptions)`; `options.now`
+    `(state: IIdempotencyObjectState, options?: IdempotencyObjectCoreOptions)`; `options.now`
     defaults to `Date.now` (the documented §4.2 deviation, `distributed-lock-object.ts:28-38`,
-    restated in the JSDoc). `fetch(request:
-    Request): Promise<Response>` routes `POST /claim`,
+    restated in the JSDoc). `fetch(request: Request): Promise<Response>` routes `POST /claim`,
     `/complete`, `/release`; anything else `404`. `alarm(): Promise<void>`.
   - Exported facade (the published `IDurableObjectStorage` is NOT widened):
 
@@ -805,8 +785,7 @@ export interface IdempotencyObjectCoreOptions {
 ```
 
 - One object per store key; one storage entry `'idempotency:record'` =
-  `{ s: 'p'|'c', t?: string,
-    f: string, l: number, e: number, r?: string }` (`l`, `e` epoch ms).
+  `{ s: 'p'|'c', t?: string,   f: string, l: number, e: number, r?: string }` (`l`, `e` epoch ms).
 - Request bodies: `/claim` `{ token: string, fingerprint: string, leaseMs: number, ttlMs: number }`,
   `/complete` `{ token: string, record: string, ttlMs: number }`, `/release` `{ token: string }`.
   Each handler parses and validates its body FIRST (types, integers ≥ 1); invalid → `400` with no
@@ -816,14 +795,12 @@ export interface IdempotencyObjectCoreOptions {
 - **Alarm, precisely:** `setAlarm(e)` is called after the `put` of a NEW claim, of a TAKEOVER, and
   of a COMPLETE — never after `release`. `release` deletes the record and leaves any alarm armed;
   `alarm()` then finds no record and returns (a no-op). `alarm()`: read; absent → return;
-  `e <=
-    now` → `delete`; else `setAlarm(e)`. A claim treats `e <= now` as absent.
+  `e <=   now` → `delete`; else `setAlarm(e)`. A claim treats `e <= now` as absent.
 - Responses: `/claim` → `{ outcome, takeover?, record? }`; `/complete`, `/release` →
   `{ result: 'settled' | 'lost' }`. The core never stores capacity state (`capacity-exceeded` is
   memory-only).
 - `DurableObjectIdempotencyStore implements IIdempotencyStore` — constructor
-  `(namespaceBinding:
-    unknown, options: DurableObjectIdempotencyStoreOptions)`:
+  `(namespaceBinding:   unknown, options: DurableObjectIdempotencyStoreOptions)`:
 
 ```ts
 export interface DurableObjectIdempotencyStoreOptions {
@@ -1044,8 +1021,7 @@ gains an optional constructor parameter.
 `registerController`.
 
 `@setu-ts/cloudflare-plugin`: `DurableObjectIdempotencyStore` (consumer:
-`IdempotencyPlugin({ store:
-{ type: 'custom', store } })` in a Worker),
+`IdempotencyPlugin({ store: { type: 'custom', store } })` in a Worker),
 `DurableObjectIdempotencyStoreOptions`, `IdempotencyObjectCore` (consumer: the application's
 exported DO class), `IdempotencyObjectCoreOptions`, `IIdempotencyObjectState` (the core's
 constructor parameter type).
@@ -1061,26 +1037,26 @@ state-key constant, `createRedisIdempotencyClient`.
 ```ts
 export type IdempotencyStoreConfig =
   | {
-    readonly type: 'memory';
-    readonly maxEntries?: number;
-    readonly maxEntriesPerScope?: number;
-    readonly maxBytes?: number;
-  }
+      readonly type: 'memory';
+      readonly maxEntries?: number;
+      readonly maxEntriesPerScope?: number;
+      readonly maxBytes?: number;
+    }
   | {
-    readonly type: 'redis';
-    readonly namespace: string;
-    readonly url: string;
-    readonly client?: never;
-    readonly commandTimeoutMs?: number;
-    readonly keyPrefix?: string;
-  }
+      readonly type: 'redis';
+      readonly namespace: string;
+      readonly url: string;
+      readonly client?: never;
+      readonly commandTimeoutMs?: number;
+      readonly keyPrefix?: string;
+    }
   | {
-    readonly type: 'redis';
-    readonly namespace: string;
-    readonly client: IRedisIdempotencyClient;
-    readonly url?: never;
-    readonly keyPrefix?: string;
-  }
+      readonly type: 'redis';
+      readonly namespace: string;
+      readonly client: IRedisIdempotencyClient;
+      readonly url?: never;
+      readonly keyPrefix?: string;
+    }
   | { readonly type: 'custom'; readonly store: IIdempotencyStore };
 
 export interface IdempotencyPluginOptions {
@@ -1121,8 +1097,7 @@ Route and ingress options: §3.2 (each field's default stated there); every fiel
 
 `packages/idempotency-plugin` (new; `deno.json`: `name`, `version` = the workspace version (`0.8.0`
 today), `license: "MIT"`, `exports: "./src/index.ts"`,
-`imports: { "@setu-ts/common":
-"jsr:@setu-ts/common@^<same>" }`, test permissions `read: true`,
+`imports: { "@setu-ts/common": "jsr:@setu-ts/common@^<same>" }`, test permissions `read: true`,
 `import: true`, `env: true`, `sys: ["hostname"]`, `net: ["127.0.0.1:6379", "localhost:6379"]`):
 
 | File                                 | Purpose                                                                                                                                                                                                                                                                                       |
@@ -1171,8 +1146,7 @@ Repository: root `deno.json` workspace entry (after `./packages/diagnostics-plug
 `docs/health-indicators.md` (row `idempotency`, classification `live-state` — lifecycle state plus a
 store probe); `docs/plugins.md` (catalog section; runtimes Deno/Node/Bun ✅, Workers ✅ for HTTP
 with the Durable Object store); root `README.md` (row, counts); `ARCHITECTURE.md` (node,
-`common -->
-idempotency` edge, responsibility row); `PUBLIC_API.md` (Idempotency section; `common`
+`common --> idempotency` edge, responsibility row); `PUBLIC_API.md` (Idempotency section; `common`
 rows incl. `IngressContext.consumer`; decorator-plugin and cloudflare-plugin rows; the §3.13
 retry-span rule); `CHANGELOG.md` (`Unreleased` → `Added`, one entry per package; note that the first
 publish needs `release:create-packages` and `release:link-repos`); `ROADMAP.md` (§2 corrections,
@@ -1234,8 +1208,7 @@ class):
 | `test/unit/barrel-exports.test.ts` (extend)        | `index.ts`                                                | `Idempotent`                                                                                                                                                                                                                                                                                                              |
 
 `packages/cloudflare-plugin` (`test/do-fakes.ts`: `FakeDurableObjectStorage` gains
-`alarmAt: number |
-null` and `setAlarm(ms)` recording calls; `FakeDurableObjectNamespace` gains kind
+`alarmAt: number | null` and `setAlarm(ms)` recording calls; `FakeDurableObjectNamespace` gains kind
 `'idempotency'` constructing `IdempotencyObjectCore` with `{ now: () => this.now() }` through the
 SAME per-object gate):
 

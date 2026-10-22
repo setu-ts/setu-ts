@@ -11,16 +11,7 @@ import { VirtualAuthenticator } from '../fixtures/virtual-authenticator.ts';
 describe('derToRawSignature', () => {
   it('converts a valid DER signature to the raw r‖s form', () => {
     // SEQUENCE { INTEGER 1, INTEGER 2 }
-    const der = new Uint8Array([
-      0x30,
-      0x06,
-      0x02,
-      0x01,
-      0x01,
-      0x02,
-      0x01,
-      0x02,
-    ]);
+    const der = new Uint8Array([0x30, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02]);
     const raw = derToRawSignature(der);
     expect(raw).not.toBeNull();
     expect(raw?.length).toBe(64);
@@ -31,18 +22,7 @@ describe('derToRawSignature', () => {
 
   it('strips the sign-bit leading zero and left-pads each scalar', () => {
     // r = 0x80 (needs a leading 0x00 in DER), s = 0xFF
-    const der = new Uint8Array([
-      0x30,
-      0x08,
-      0x02,
-      0x02,
-      0x00,
-      0x80,
-      0x02,
-      0x02,
-      0x00,
-      0xff,
-    ]);
+    const der = new Uint8Array([0x30, 0x08, 0x02, 0x02, 0x00, 0x80, 0x02, 0x02, 0x00, 0xff]);
     const raw = derToRawSignature(der);
     expect(raw).not.toBeNull();
     expect(raw?.[31]).toBe(0x80);
@@ -52,22 +32,13 @@ describe('derToRawSignature', () => {
   });
 
   it('refuses a non-SEQUENCE input', () => {
-    expect(derToRawSignature(new Uint8Array([0x31, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02])))
-      .toBeNull();
+    expect(
+      derToRawSignature(new Uint8Array([0x31, 0x06, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02])),
+    ).toBeNull();
   });
 
   it('refuses a wrong body length', () => {
-    const der = new Uint8Array([
-      0x30,
-      0x07,
-      0x02,
-      0x01,
-      0x01,
-      0x02,
-      0x01,
-      0x02,
-      0x00,
-    ]);
+    const der = new Uint8Array([0x30, 0x07, 0x02, 0x01, 0x01, 0x02, 0x01, 0x02, 0x00]);
     expect(derToRawSignature(der)).toBeNull();
   });
 
@@ -77,16 +48,7 @@ describe('derToRawSignature', () => {
   });
 
   it('refuses a non-INTEGER element', () => {
-    const der = new Uint8Array([
-      0x30,
-      0x06,
-      0x04,
-      0x01,
-      0x01,
-      0x02,
-      0x01,
-      0x02,
-    ]);
+    const der = new Uint8Array([0x30, 0x06, 0x04, 0x01, 0x01, 0x02, 0x01, 0x02]);
     expect(derToRawSignature(der)).toBeNull();
   });
 });
@@ -106,13 +68,7 @@ describe('verifyPasskeySignature', () => {
     const rawSignature = derToRawSignature(derSignature);
     expect(rawSignature).not.toBeNull();
     const jwk = await authenticator.publicKeyJwk();
-    const verified = await verifyPasskeySignature(
-      runtime,
-      'ES256',
-      jwk,
-      signed,
-      rawSignature!,
-    );
+    const verified = await verifyPasskeySignature(runtime, 'ES256', jwk, signed, rawSignature!);
     expect(verified).toBe(true);
   });
 

@@ -37,21 +37,17 @@ describe('jsonPathString', () => {
     // A wrong escape reads a DIFFERENT field instead of failing, which is the
     // silent-divergence class this package keeps closing — so every one of
     // these is refused by name.
-    for (
-      const bad of [
-        'city"]. $.other',
-        "it's",
-        'a.b',
-        'a[0]',
-        '$root',
-        'with space',
-        '1leading',
-        '',
-      ]
-    ) {
-      expect(() => jsonPathString(['profile', bad]), bad).toThrow(
-        /not a plain JSON key/,
-      );
+    for (const bad of [
+      'city"]. $.other',
+      "it's",
+      'a.b',
+      'a[0]',
+      '$root',
+      'with space',
+      '1leading',
+      '',
+    ]) {
+      expect(() => jsonPathString(['profile', bad]), bad).toThrow(/not a plain JSON key/);
     }
   });
 });

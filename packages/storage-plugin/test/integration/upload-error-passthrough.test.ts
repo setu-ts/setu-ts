@@ -20,7 +20,8 @@ import { createUploadMiddleware } from '../../src/index.ts';
 
 /** A well-formed single-file multipart body. */
 const BOUNDARY = '----setu-test-boundary';
-const MULTIPART_BODY = `--${BOUNDARY}\r\n` +
+const MULTIPART_BODY =
+  `--${BOUNDARY}\r\n` +
   `Content-Disposition: form-data; name="file"; filename="a.txt"\r\n` +
   `Content-Type: text/plain\r\n\r\n` +
   `hello\r\n` +

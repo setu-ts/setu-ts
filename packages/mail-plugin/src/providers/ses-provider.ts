@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISesClient, MailProvider, OutgoingMail } from '../interfaces/index.ts';
 import { hasMethods } from './shape.ts';
 
@@ -72,7 +73,11 @@ export function adaptSesModule(mod: SesSdkModule, options: SesProviderOptions): 
  * @throws {Error} If `@aws-sdk/client-sesv2` cannot be resolved
  */
 export async function loadSesModule(): Promise<SesSdkModule> {
-  return await import('@aws-sdk/client-sesv2') as unknown as SesSdkModule;
+  try {
+    return (await import('@aws-sdk/client-sesv2')) as unknown as SesSdkModule;
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sesv2', { cause: error });
+  }
 }
 
 /** Maps an {@linkcode OutgoingMail} to a `SendEmailCommand` input. */

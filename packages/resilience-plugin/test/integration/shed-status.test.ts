@@ -53,10 +53,9 @@ function boot(): ReturnType<typeof createApplication> {
       let claimed = 0;
       openGate = gate.resolve;
       allBulkheadClaims = claims.promise;
-      const bulkheaded = resilience.wrap(
-        () => gate.promise.then(() => ({ served: true })),
-        { bulkhead: { maxConcurrent: 2, maxQueue: 2 } },
-      );
+      const bulkheaded = resilience.wrap(() => gate.promise.then(() => ({ served: true })), {
+        bulkhead: { maxConcurrent: 2, maxQueue: 2 },
+      });
 
       ctx.router.get('/bulkhead', {
         handler: async (reqCtx: IRequestContext): Promise<HandlerResult> => {
@@ -100,9 +99,8 @@ describe('load-shedding answers its contract status (X32-7)', () => {
       // Fired, not awaited: each handler claims synchronously (run, queue,
       // or shed) and the two admitted calls block on the gate. The explicit
       // barrier proves all ten claims occurred before capacity is released.
-      const pending = Array.from(
-        { length: 10 },
-        () => app.inject({ method: 'GET', url: 'http://localhost/bulkhead' }),
+      const pending = Array.from({ length: 10 }, () =>
+        app.inject({ method: 'GET', url: 'http://localhost/bulkhead' }),
       );
       await allBulkheadClaims;
       openGate?.();

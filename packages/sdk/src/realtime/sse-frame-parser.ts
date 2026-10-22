@@ -55,9 +55,8 @@ export class SseFrameParser {
       if (this.#buffer[terminator] === '\r' && terminator === this.#buffer.length - 1) break;
 
       const line = this.#buffer.slice(0, terminator);
-      const width = this.#buffer[terminator] === '\r' && this.#buffer[terminator + 1] === '\n'
-        ? 2
-        : 1;
+      const width =
+        this.#buffer[terminator] === '\r' && this.#buffer[terminator + 1] === '\n' ? 2 : 1;
       this.#buffer = this.#buffer.slice(terminator + width);
       this.#consumeLine(line, frames);
       terminator = findLineTerminator(this.#buffer);

@@ -486,10 +486,10 @@ describe('Application integration', () => {
           name: 'contrib',
           version: '1.0.0',
           register(ctx) {
-            ctx.metrics.register(
-              'http_requests_total',
-              { type: 'counter', help: 'requests' } as never,
-            );
+            ctx.metrics.register('http_requests_total', {
+              type: 'counter',
+              help: 'requests',
+            } as never);
             ctx.openapi.addSchema('User', { type: 'object' });
             ctx.cli.register('my:cmd', () => {});
             ctx.decorators.register('MyDec', () => {});
@@ -593,13 +593,7 @@ describe('Application integration', () => {
     await app.start();
     // plugin-a's onRegister must run before plugin-b registers (during the
     // owning plugin's registration), and every onRegister must precede onInit.
-    expect(events).toEqual([
-      'register:a',
-      'onRegister:a',
-      'register:b',
-      'onRegister:b',
-      'onInit',
-    ]);
+    expect(events).toEqual(['register:a', 'onRegister:a', 'register:b', 'onRegister:b', 'onInit']);
     await app.stop();
   });
 
@@ -741,9 +735,7 @@ describe('Application review fixes', () => {
           version: '1.0.0',
           register(ctx) {
             ctx.router.get('/secret', {
-              middleware: [
-                (c, _next) => c.response.status(401).json({ error: 'Unauthorized' }),
-              ],
+              middleware: [(c, _next) => c.response.status(401).json({ error: 'Unauthorized' })],
               handler: (c) => {
                 handlerRan = true;
                 return c.response.json({ ok: true });
@@ -844,9 +836,11 @@ describe('Application review fixes', () => {
               return c.response.status(503).json({ error: 'Maintenance' });
             });
             ctx.router.get('/r', {
-              middleware: [(_c, _next) => {
-                order.push('route-mw');
-              }],
+              middleware: [
+                (_c, _next) => {
+                  order.push('route-mw');
+                },
+              ],
               handler: (c) => {
                 order.push('handler');
                 return c.response.json({ ok: true });
@@ -1598,9 +1592,7 @@ describe('Application review fixes', () => {
       ],
     });
     await expect(app.start()).rejects.toThrow('flaky');
-    await expect(app.start()).rejects.toThrow(
-      'Cannot retry start() after plugins have registered',
-    );
+    await expect(app.start()).rejects.toThrow('Cannot retry start() after plugins have registered');
     await expect(app.start()).rejects.toThrow('Create a new application instead.');
     // The refusal happens before anything runs again.
     expect(registrations).toBe(1);
@@ -1614,21 +1606,21 @@ describe('Application review fixes', () => {
     let failOnce = true;
     const real = runtimePlugin();
     const app = createApplication({
-      plugins: [{
-        ...real,
-        register(ctx: IPluginContext) {
-          if (failOnce) {
-            failOnce = false;
-            throw new Error('bad runtime options');
-          }
-          return real.register(ctx);
+      plugins: [
+        {
+          ...real,
+          register(ctx: IPluginContext) {
+            if (failOnce) {
+              failOnce = false;
+              throw new Error('bad runtime options');
+            }
+            return real.register(ctx);
+          },
         },
-      }],
+      ],
     });
     await expect(app.start()).rejects.toThrow('bad runtime options');
-    await expect(app.start()).rejects.toThrow(
-      'Cannot retry start() after plugins have registered',
-    );
+    await expect(app.start()).rejects.toThrow('Cannot retry start() after plugins have registered');
   });
 
   it('refuses a retry after a failure past bootstrap, once the registry is sealed', async () => {
@@ -1651,9 +1643,7 @@ describe('Application review fixes', () => {
     // sealed the registry.
     await expect(app.start({ port: 0 })).rejects.toThrow("no 'http-adapter' capability");
     expect(bootstraps).toBe(1);
-    await expect(app.start()).rejects.toThrow(
-      'Cannot retry start() after plugins have registered',
-    );
+    await expect(app.start()).rejects.toThrow('Cannot retry start() after plugins have registered');
     expect(bootstraps).toBe(1);
   });
 
@@ -1997,7 +1987,8 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
             ctx.router.get('/bytes', (rctx) =>
               rctx.response
                 .header('content-type', 'application/json')
-                .send(new TextEncoder().encode('{"ok":true}')));
+                .send(new TextEncoder().encode('{"ok":true}')),
+            );
           },
         },
       ],
@@ -2025,7 +2016,8 @@ describe('unsatisfied consumed-capability startup diagnostic', () => {
                     controller.close();
                   },
                 }),
-              ));
+              ),
+            );
           },
         },
       ],
@@ -2058,26 +2050,28 @@ it('exposes only registered lazy context capabilities during enumeration', async
   const seen: string[] = [];
   const app = createApplication({
     diagnostics: {},
-    plugins: [{
-      name: 'contexts',
-      version: '1.0.0',
-      provides: [CAPABILITIES.RUNTIME, CAPABILITIES.METADATA_STORE, CAPABILITIES.DI_CONTAINER],
-      register(ctx) {
-        expect('metadata' in ctx).toBe(false);
-        expect(Object.getOwnPropertyDescriptor(ctx, 'metadata')).toBeUndefined();
-        expect('environment' in ctx).toBe(true);
-        ctx.services.registerFactory(CAPABILITIES.RUNTIME, () => fake.runtime);
-        const metadata = {};
-        const container = {};
-        ctx.services.register(CAPABILITIES.METADATA_STORE, metadata);
-        ctx.services.register(CAPABILITIES.DI_CONTAINER, container);
-        expect(ctx.metadata).toBe(metadata);
-        expect(ctx.container).toBe(container);
-        expect(Object.getOwnPropertyDescriptor(ctx, 'runtime')?.value).toBe(fake.runtime);
-        expect(Object.getOwnPropertyDescriptor(ctx, 'missing')).toBeUndefined();
-        seen.push(...Object.keys(ctx));
+    plugins: [
+      {
+        name: 'contexts',
+        version: '1.0.0',
+        provides: [CAPABILITIES.RUNTIME, CAPABILITIES.METADATA_STORE, CAPABILITIES.DI_CONTAINER],
+        register(ctx) {
+          expect('metadata' in ctx).toBe(false);
+          expect(Object.getOwnPropertyDescriptor(ctx, 'metadata')).toBeUndefined();
+          expect('environment' in ctx).toBe(true);
+          ctx.services.registerFactory(CAPABILITIES.RUNTIME, () => fake.runtime);
+          const metadata = {};
+          const container = {};
+          ctx.services.register(CAPABILITIES.METADATA_STORE, metadata);
+          ctx.services.register(CAPABILITIES.DI_CONTAINER, container);
+          expect(ctx.metadata).toBe(metadata);
+          expect(ctx.container).toBe(container);
+          expect(Object.getOwnPropertyDescriptor(ctx, 'runtime')?.value).toBe(fake.runtime);
+          expect(Object.getOwnPropertyDescriptor(ctx, 'missing')).toBeUndefined();
+          seen.push(...Object.keys(ctx));
+        },
       },
-    }],
+    ],
   });
   await app.start();
   expect(seen).toContain('metadata');
@@ -2089,13 +2083,16 @@ it('exposes only registered lazy context capabilities during enumeration', async
 it('validates true and false environment flags and refuses another boolean spelling', async () => {
   for (const value of ['true', 'false', 'yes']) {
     const app = createApplication({
-      plugins: [runtimePlugin({ FLAG: value }), {
-        name: 'flags',
-        version: '1.0.0',
-        register(ctx) {
-          ctx.environment.validate({ FLAG: { type: 'boolean' } });
+      plugins: [
+        runtimePlugin({ FLAG: value }),
+        {
+          name: 'flags',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.environment.validate({ FLAG: { type: 'boolean' } });
+          },
         },
-      }],
+      ],
     });
     if (value === 'yes') await expect(app.start()).rejects.toThrow('expected boolean');
     else {

@@ -42,7 +42,7 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
-import { startOverlay } from '../fixtures/node-project.ts';
+import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -54,6 +54,12 @@ const fs: IFileSystem = runtime.fs!;
 // was the one the boot gate skipped. It now emits `install`/`build` and `start`
 // depends on `build`, so it belongs here.
 const BOOTABLE = ['rest', 'microservice', 'class-based', 'full-stack'] as const;
+const DOCS_PATHS = [
+  '/docs',
+  '/docs/swagger-ui.css',
+  '/docs/swagger-ui-bundle.js',
+  '/docs/swagger-ui-standalone-preset.js',
+] as const;
 
 /**
  * Every host a scaffold can produce, including the no-template one.
@@ -73,17 +79,11 @@ const HOSTS: readonly (readonly [label: string, args: readonly string[]])[] = [
   ['rest on workers', ['--template', 'rest', '--runtime', 'cloudflare-workers']],
   // The one that failed: its Cloudflare wiring is the longest emitted plugin
   // call, and it emits a Durable Object class of its own.
-  [
-    'microservice on workers',
-    ['--template', 'microservice', '--runtime', 'cloudflare-workers'],
-  ],
+  ['microservice on workers', ['--template', 'microservice', '--runtime', 'cloudflare-workers']],
   // The styled host: the same microservice recipe composed with the decorator
   // and DI pair. A `HOSTS` entry alone only reaches `fmt` and `lint` — the boot
   // gets its own case in `BOOTABLE_STYLED` below.
-  [
-    'microservice class-based',
-    ['--template', 'microservice', '--style', 'class-based'],
-  ],
+  ['microservice class-based', ['--template', 'microservice', '--style', 'class-based']],
   [
     'microservice class-based on workers',
     ['--template', 'microservice', '--style', 'class-based', '--runtime', 'cloudflare-workers'],
@@ -316,11 +316,112 @@ describe('a scaffolded project is formatted and lints clean', () => {
 async function advertisedPaths(project: string): Promise<string[]> {
   const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
   const section = readme.split('## What it serves')[1]?.split('\n## ')[0] ?? '';
-  return [...section.matchAll(/^- `([^`]+)`/gm)]
-    .map((match) => (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'));
+  return [...section.matchAll(/^- `([^`]+)`/gm)].map((match) =>
+    (match[1] as string).replaceAll(/:[a-z]+/g, 'Setu'),
+  );
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  it('runs two generated migrations twice in one serving app and reflects the ledger in /ready', async () => {
+    expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    expect(await run(['add', 'database', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'one', '--dir', project])).toBe(0);
+    expect(await run(['g', 'migration', 'two', '--dir', project])).toBe(0);
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    expect(config).toContain('...GENERATED_PLUGINS,');
+    await nodeFs.writeFile(
+      configPath,
+      "import { MIGRATION_NAMES } from './src/migrations/index.ts';\n" +
+        "import { DatabasePlugin } from '@setu-ts/database-plugin';\n" +
+        config.replace(
+          '      ...GENERATED_PLUGINS,',
+          '      DatabasePlugin({ readiness: { migrations: MIGRATION_NAMES } }),\n      ...GENERATED_PLUGINS,',
+        ),
+    );
+    await useWorkspacePackages(project);
+    await nodeFs.writeFile(
+      `${project}/migration-proof.ts`,
+      `
+import { CAPABILITIES } from '@setu-ts/common';
+import { createMigrationLedger } from '@setu-ts/database-plugin';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+import { createApp } from './setu.config.ts';
+import { runMigrations } from './src/migrations/run.ts';
+import { MIGRATION_NAMES } from './src/migrations/index.ts';
+const app = await createApp();
+try {
+  await app.start();
+  const ready = () => app.inject({ method: 'GET', url: 'http://127.0.0.1/ready' });
+  if ((await ready()).statusCode !== 503) throw new Error('pending must be unready');
+  const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+  const ledger = createMigrationLedger(database);
+  await runMigrations('up', { database, ledger });
+  await runMigrations('up', { database, ledger });
+  if (JSON.stringify(await ledger.applied()) !== JSON.stringify(MIGRATION_NAMES)) throw new Error('history differs');
+  await new Promise((resolve) => setTimeout(resolve, 5100));
+  if ((await ready()).statusCode !== 200) throw new Error('current must be ready');
+} finally { await app.stop(); }
+`,
+    );
+    const formatted = await denoRun(project, ['fmt']);
+    expect(formatted.code, formatted.output).toBe(0);
+    const linted = await denoRun(project, ['lint']);
+    expect(linted.code, linted.output).toBe(0);
+    const checked = await denoRun(project, ['check', 'migration-proof.ts']);
+    expect(checked.code, checked.output).toBe(0);
+    const proof = await denoRun(project, [
+      'run',
+      '-A',
+      '--node-modules-dir=none',
+      'migration-proof.ts',
+    ]);
+    expect(proof.code, proof.output).toBe(0);
+    expect(proof.output.match(/^up /gm)).toHaveLength(2);
+  });
+
+  it('boots a Node REST scaffold with self-hosted Swagger assets', async () => {
+    expect(await run(['new', '--runtime', 'node', 'shop', '--template', 'rest'])).toBe(0);
+    const project = `${root}/shop`;
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const readme = await nodeFs.readFile(`${project}/README.md`, 'utf8');
+      const command = readme
+        .split('\n')
+        .find((line) => /^npx @setu-ts\/cli@\S+ generate service billing$/.test(line));
+      expect(command).toBeDefined();
+      const [executable, ...args] = command!.split(' ');
+      const generated = await runIn(project, executable!, args, overlay);
+      expect(generated.code, generated.output).toBe(0);
+      expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
+        'billing',
+      );
+      const booted = await withNodeServer(project, async (origin) => {
+        const statuses: number[] = [];
+        // `/health` is requested too, so the log assertions below can prove the
+        // scaffold's configured exclusion actually suppresses its line.
+        for (const path of [...DOCS_PATHS, '/health']) {
+          statuses.push((await fetch(`${origin}${path}`)).status);
+        }
+        return statuses;
+      });
+      expect(booted.result, booted.output).toEqual([200, 200, 200, 200, 200]);
+      // M113h §3.9: Node used to boot silently. The kernel announces the bound
+      // port, the opt-in request logger reports a normal request, and the
+      // generated `excludePaths` keeps a probe's line out of the log.
+      expect(booted.output).toContain('Server listening');
+      expect(booted.output).toContain('"msg":"request completed"');
+      expect(booted.output).toContain('"path":"/"');
+      expect(booted.output).not.toContain('"/health"');
+    } finally {
+      await overlay.close();
+    }
+    // An npm install plus a Node boot: the 30 s default timed out on CI, so this
+    // takes the budget the other npm-installing e2e cases use.
+  }, 900_000);
   // Membership is asserted, not just iterated. Removing a template from
   // `BOOTABLE` makes its build-and-boot assertions VANISH rather than fail, so
   // the whole gate stays green while covering strictly less — a one-word edit
@@ -371,7 +472,9 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       // any install, since for `full-stack` this task now runs `deno install`.
       const tested = await denoRunRetry(project, ['task', 'test']);
       expect(tested.code, tested.output).toBe(0);
-      expect(tested.output).toContain('1 passed');
+      expect(tested.output).toMatch(/\b[1-9]\d* passed/);
+      const e2e = await denoRunRetry(project, ['task', 'test:e2e']);
+      expect(e2e.code, e2e.output).toBe(0);
 
       // Every path the README's "What it serves" section lists must answer,
       // so the section cannot advertise a route the project does not serve.
@@ -381,6 +484,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
       expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
       const paths = [
         ...new Set([
+          ...DOCS_PATHS,
           '/health',
           '/ready',
           '/metrics',
@@ -389,6 +493,7 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
         ]),
       ];
       const result = await bootWithGeneratedPermissions(project, paths);
+      for (const path of DOCS_PATHS) expect(result.statuses[path], result.output).toBe(200);
       for (const path of advertised) {
         // `fetch` follows redirects, so a page behind sign-in lands on the
         // sign-in form and answers 200 as well.
@@ -427,7 +532,8 @@ describe('a scaffolded project serves its own advertised endpoints', () => {
     // fail at the actual testing-package boundary, not just a text assertion.
     await nodeFs.writeFile(
       configPath,
-      config.replace('): IKernelApplication {', '): IApplication {')
+      config
+        .replace('): IKernelApplication {', '): IApplication {')
         .replace(/type IKernelApplication,\s*/g, '')
         .replace(
           "import type { IPlugin } from '@setu-ts/common';",
@@ -480,8 +586,9 @@ describe('a scaffolded Workers project retries a failed boot and never leaks the
   // generated entry must answer a generic 503 while reporting to the platform
   // logs, and a later request must re-attempt boot.
   it('answers 503 without the stack, and the next request re-attempts boot', async () => {
-    expect(await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']))
-      .toBe(0);
+    expect(
+      await run(['new', 'shop', '--template', 'rest', '--runtime', 'cloudflare-workers']),
+    ).toBe(0);
     const project = `${root}/shop`;
     await useWorkspacePackages(project);
 
@@ -797,7 +904,10 @@ describe('a scaffolded full-stack project type-checks its own routes', () => {
  * @returns The name=value pairs, joined
  */
 function cookiesOf(response: Response): string {
-  return response.headers.getSetCookie().map((cookie) => cookie.split(';', 1)[0]).join('; ');
+  return response.headers
+    .getSetCookie()
+    .map((cookie) => cookie.split(';', 1)[0])
+    .join('; ');
 }
 
 describe('a scaffolded full-stack project runs both middleware layers', () => {
@@ -806,72 +916,79 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
   // generated middleware, but a full-stack project needs a real React Router build
   // first, and the scaffold shipped no route middleware at all. This drives both
   // through the generated project's own entry, under its own permissions.
-  it('applies kernel middleware to every request and route middleware to its route', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
-    const project = `${root}/shop`;
-    // The kernel layer, exactly as a developer adds it.
-    expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
-    await useWorkspacePackages(project);
+  //
+  // Skipped in CI at the maintainer's direction: the install, React Router
+  // build and boot overran the 30 s test limit on a CI runner (PR #462) while
+  // passing on a re-run. It still runs locally.
+  it.skipIf(process.env['CI'] === 'true')(
+    'applies kernel middleware to every request and route middleware to its route',
+    async () => {
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      // The kernel layer, exactly as a developer adds it.
+      expect(await run(['g', 'middleware', 'audit', '--dir', project])).toBe(0);
+      await useWorkspacePackages(project);
 
-    const built = await runProcess(denoBinary(), {
-      args: ['task', 'build'],
-      cwd: project,
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
-
-    const { result, output } = await withGeneratedServer(project, async (origin) => {
-      // `manual`, so the route middleware's redirect is observed rather than followed.
-      const get = (path: string, cookie?: string) =>
-        fetch(`${origin}${path}`, {
-          redirect: 'manual',
-          ...(cookie === undefined ? {} : { headers: { cookie } }),
-        });
-
-      const health = await get('/health');
-      await health.body?.cancel();
-      const landing = await get('/');
-      await landing.body?.cancel();
-      const anonymous = await get('/products');
-      await anonymous.body?.cancel();
-
-      const loginPage = await get('/login');
-      const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';
-      const submitted = await fetch(`${origin}/login`, {
-        method: 'POST',
-        redirect: 'manual',
-        headers: {
-          cookie: cookiesOf(loginPage),
-          'content-type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({ _csrf: token, email: 'ada@example.com', password: 'x' }),
+      const built = await runProcess(denoBinary(), {
+        args: ['task', 'build'],
+        cwd: project,
+        stdout: 'piped',
+        stderr: 'piped',
       });
-      await submitted.body?.cancel();
-      const signedIn = await get('/products', cookiesOf(submitted));
+      expect(built.code, new TextDecoder().decode(built.stderr)).toBe(0);
 
-      return {
-        audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
-        landing: landing.status,
-        anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
-        submitted: submitted.status,
-        signedIn: { status: signedIn.status, body: await signedIn.text() },
-      };
-    });
+      const { result, output } = await withGeneratedServer(project, async (origin) => {
+        // `manual`, so the route middleware's redirect is observed rather than followed.
+        const get = (path: string, cookie?: string) =>
+          fetch(`${origin}${path}`, {
+            redirect: 'manual',
+            ...(cookie === undefined ? {} : { headers: { cookie } }),
+          });
 
-    // Kernel layer: on a non-SSR route, an SSR page, a route-middleware redirect and
-    // a rendered page alike — it wraps everything the application serves.
-    expect(result.audit, output).toEqual(['true', 'true', 'true', 'true']);
-    // Route layer: `/` shares the layout but is not guarded…
-    expect(result.landing).toBe(200);
-    // …while `/products` sends an anonymous visitor to sign in, before its loader runs.
-    expect(result.anonymous).toEqual({ status: 302, location: '/login' });
-    expect(result.submitted).toBe(302);
-    // Signed in, the loader reads the user the route middleware put on the context.
-    expect(result.signedIn.status).toBe(200);
-    expect(result.signedIn.body).toContain('Signed in as');
-    expect(result.signedIn.body).toContain('ada@example.com');
-  });
+        const health = await get('/health');
+        await health.body?.cancel();
+        const landing = await get('/');
+        await landing.body?.cancel();
+        const anonymous = await get('/products');
+        await anonymous.body?.cancel();
+
+        const loginPage = await get('/login');
+        const token = /name="_csrf"\s+value="([^"]+)"/.exec(await loginPage.text())?.[1] ?? '';
+        const submitted = await fetch(`${origin}/login`, {
+          method: 'POST',
+          redirect: 'manual',
+          headers: {
+            cookie: cookiesOf(loginPage),
+            'content-type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams({ _csrf: token, email: 'ada@example.com', password: 'x' }),
+        });
+        await submitted.body?.cancel();
+        const signedIn = await get('/products', cookiesOf(submitted));
+
+        return {
+          audit: [health, landing, anonymous, signedIn].map((r) => r.headers.get('x-audit')),
+          landing: landing.status,
+          anonymous: { status: anonymous.status, location: anonymous.headers.get('location') },
+          submitted: submitted.status,
+          signedIn: { status: signedIn.status, body: await signedIn.text() },
+        };
+      });
+
+      // Kernel layer: on a non-SSR route, an SSR page, a route-middleware redirect and
+      // a rendered page alike — it wraps everything the application serves.
+      expect(result.audit, output).toEqual(['true', 'true', 'true', 'true']);
+      // Route layer: `/` shares the layout but is not guarded…
+      expect(result.landing).toBe(200);
+      // …while `/products` sends an anonymous visitor to sign in, before its loader runs.
+      expect(result.anonymous).toEqual({ status: 302, location: '/login' });
+      expect(result.submitted).toBe(302);
+      // Signed in, the loader reads the user the route middleware put on the context.
+      expect(result.signedIn.status).toBe(200);
+      expect(result.signedIn.body).toContain('Signed in as');
+      expect(result.signedIn.body).toContain('ada@example.com');
+    },
+  );
 });
 
 describe('a scaffolded full-stack project serves route edits in development', () => {

@@ -66,21 +66,23 @@ async function buildApp(csrf?: CsrfComposition): Promise<IKernelApplication> {
       }),
       AuthPlugin({
         signIn: {
-          providers: [{
-            kind: 'saml',
-            name: NAME,
-            entityId: 'https://sp.setu.test',
-            idp: {
-              entityId: REALM,
-              ssoUrl: `${REALM}/protocol/saml`,
-              certs: [await realmCert()],
+          providers: [
+            {
+              kind: 'saml',
+              name: NAME,
+              entityId: 'https://sp.setu.test',
+              idp: {
+                entityId: REALM,
+                ssoUrl: `${REALM}/protocol/saml`,
+                certs: [await realmCert()],
+              },
+              acsUrl: `http://localhost/auth/${NAME}/acs`,
+              toPrincipal: (profile) => ({
+                id: `keycloak-saml:${profile.nameID}`,
+                claims: { email: profile.attributes.email },
+              }),
             },
-            acsUrl: `http://localhost/auth/${NAME}/acs`,
-            toPrincipal: (profile) => ({
-              id: `keycloak-saml:${profile.nameID}`,
-              claims: { email: profile.attributes.email },
-            }),
-          }],
+          ],
         },
       }),
     ],

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { loadConsoleExporter } from '../../src/exporters/console-exporter.ts';
 
 describe('loadConsoleExporter', () => {
@@ -25,6 +25,29 @@ describe('loadConsoleExporter', () => {
         // The error message should be informative
         expect(error.message.length).toBeGreaterThan(0);
       }
+    }
+  });
+});
+
+describe('loadConsoleExporter — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the package is absent', async () => {
+    const { loadConsoleExporter } = await import('../../src/exporters/console-exporter.ts');
+    vi.doMock('@opentelemetry/sdk-trace-base', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadConsoleExporter();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@opentelemetry/sdk-trace-base');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@opentelemetry/sdk-trace-base');
     }
   });
 });

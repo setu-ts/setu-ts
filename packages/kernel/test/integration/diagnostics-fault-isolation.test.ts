@@ -162,8 +162,8 @@ describe('diagnostics fault isolation', () => {
     await app.start();
     await expect(app.stop()).rejects.toThrow('close hook failure');
     // The failure state is value-free: no error text in any readable surface.
-    const everything = JSON.stringify(app.diagnostics!.snapshot()) +
-      JSON.stringify(app.diagnostics!.read(0));
+    const everything =
+      JSON.stringify(app.diagnostics!.snapshot()) + JSON.stringify(app.diagnostics!.read(0));
     expect(everything).not.toContain('close hook failure');
     expect(everything).toContain('"shutdown-failed"');
     // A second stop() returns the SAME cached rejection — idempotent, but

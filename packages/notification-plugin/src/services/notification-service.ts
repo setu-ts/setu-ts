@@ -145,7 +145,7 @@ export class NotificationService implements INotifier {
     return outcomes.map((o): ChannelSendResult =>
       o.ok
         ? { channel: o.channel, ok: true }
-        : { channel: o.channel, ok: false, error: serializeError(o.error) }
+        : { channel: o.channel, ok: false, error: serializeError(o.error) },
     );
   }
 }

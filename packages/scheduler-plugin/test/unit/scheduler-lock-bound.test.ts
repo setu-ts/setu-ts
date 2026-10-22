@@ -215,13 +215,11 @@ describe('SchedulerService acquire bound (M101a V8-24)', () => {
     await service.disconnect();
   });
 
-  for (
-    const [site, key] of [
-      ['fire slot', SLOT_KEY],
-      ['handler mutex', MUTEX_KEY],
-      ['delay slot', DELAY_KEY],
-    ] as const
-  ) {
+  for (const [site, key] of [
+    ['fire slot', SLOT_KEY],
+    ['handler mutex', MUTEX_KEY],
+    ['delay slot', DELAY_KEY],
+  ] as const) {
     it(`releases a token the abandoned ${site} acquire returns after the bound`, async () => {
       const runtime = new FakeRuntime();
       const control = controllableLock(runtime, key);
@@ -294,10 +292,12 @@ describe('SchedulerService acquire bound (M101a V8-24)', () => {
     await flush();
 
     const abandoned = errors.filter((e) => e.msg.includes('abandoned lock'));
-    expect(abandoned).toEqual([{
-      msg: "Job 'tick': could not release an abandoned lock",
-      meta: { error: 'release-canary' },
-    }]);
+    expect(abandoned).toEqual([
+      {
+        msg: "Job 'tick': could not release an abandoned lock",
+        meta: { error: 'release-canary' },
+      },
+    ]);
     await service.disconnect();
   });
 

@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 /**
  * Unit tests for MemoryAdapter.
  *
@@ -17,7 +18,7 @@ import { DuplicateKeyError, httpStatusHintOf } from '@setu-ts/common';
 import { MemoryAdapter } from '../../src/adapters/memory/memory-adapter.ts';
 import type { IAdapterTransaction } from '@setu-ts/common';
 import type { DataSource } from '../../src/repositories/base-repository.ts';
-import { UnsupportedQueryFeatureError, UnsupportedRawQueryError } from '../../src/errors.ts';
+import { UnsupportedRawQueryError } from '../../src/errors.ts';
 
 describe('MemoryAdapter', () => {
   let adapter: MemoryAdapter;
@@ -306,12 +307,15 @@ describe('MemoryAdapter', () => {
       });
       expect(matched.map((r) => r.name)).toEqual(['Alice']);
       expect(
-        await ds.count({}, {
-          type: 'comparison',
-          field: 'name',
-          operator: 'contains',
-          value: 'li',
-        }),
+        await ds.count(
+          {},
+          {
+            type: 'comparison',
+            field: 'name',
+            operator: 'contains',
+            value: 'li',
+          },
+        ),
       ).toBe(1);
       await txn.rollback();
     });
@@ -468,7 +472,7 @@ describe('MemoryAdapter', () => {
           select: [],
           cursor: 'not-base64!!!',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('rejects by name when the cursor fingerprint does not match the sort', async () => {
@@ -498,7 +502,7 @@ describe('MemoryAdapter', () => {
           select: [],
           cursor: first.nextCursor ?? '',
         }),
-      ).rejects.toThrow(UnsupportedQueryFeatureError);
+      ).rejects.toThrow(InvalidCursorError);
     });
 
     it('conjoins the caller filter with the keyset predicate while walking', async () => {

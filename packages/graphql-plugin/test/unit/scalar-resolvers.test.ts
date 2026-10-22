@@ -30,12 +30,12 @@ const createFakeRuntime = (): GraphqlRuntime =>
       const hasScalar = scalarMatch !== null;
       const scalarType = hasScalar
         ? {
-          name: scalarMatch[1],
-          kind: 'SCALAR',
-          serialize: () => 'default',
-          parseValue: () => 'default',
-          parseLiteral: () => null,
-        }
+            name: scalarMatch[1],
+            kind: 'SCALAR',
+            serialize: () => 'default',
+            parseValue: () => 'default',
+            parseLiteral: () => null,
+          }
         : null;
 
       // Extract Query fields from schema string (e.g. "type Query { hello: String }")

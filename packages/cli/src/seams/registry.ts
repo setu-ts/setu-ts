@@ -7,7 +7,7 @@
  * the same list. A family cannot therefore acquire a barrel no config imports, or an
  * import no barrel exports.
  *
- * Three schematics are deliberately ABSENT, and their absence is the milestone's
+ * Two schematics are deliberately ABSENT, and their absence is the milestone's
  * finding rather than an omission:
  *
  * - **`guard`** — a guard's positions are per route (`RouteDefinition.middleware`,
@@ -15,10 +15,6 @@
  *   alternative is the global pipeline, and the emitted guard answers `401` when
  *   `ctx.request.user` is absent — registering it globally would 401 `/health`,
  *   `/metrics` and `/`, turning a generated file into an outage.
- * - **`job`** — the emitted function is transport-agnostic by design. Registering it
- *   as a queue processor starts a worker loop polling for a job name nothing
- *   enqueues; scheduling it needs a cron expression the artifact does not carry.
- *   `QueuePluginOptions` has no `processors` option either.
  * - **`migration`** — nothing in the framework reads migration files. No plugin
  *   anywhere in this repository calls `ctx.cli.register`, so `setu db:migrate` does
  *   not exist; there is no site to wire into.
@@ -26,13 +22,17 @@
  *   That stays exactly true after D5, and the distinction is worth stating
  *   because the schematic now emits a barrel and a runner of its own. Those are
  *   **project-local**: `src/migrations/run.ts` is the generated project's file,
- *   run directly (`deno run -A src/migrations/run.ts`), and no `setu.config.ts`
+ *   run directly (`deno run --allow-net --allow-env --allow-read --allow-sys src/migrations/run.ts`), and no `setu.config.ts`
  *   imports it and no plugin option consumes it. It is deliberately NOT wired to
  *   a `db:migrate` task: a task every scaffold advertises would fail with a
  *   module-not-found in the great majority of projects, which never generate a
  *   migration at all. A framework seam is a registration site the
  *   framework reads; this is a script the developer runs. Making `migration` a
  *   `SeamSpec` would put a barrel into `setu.config.ts` that nothing reads.
+ *
+ * Functional jobs with QueuePlugin use its processors option. Each processor polls
+ * only its own job name, the same trade the decorated ingress processor makes.
+ * Without QueuePlugin a job stays a standalone function, with no jobs seam to scan.
  *
  * @module
  */
@@ -47,6 +47,7 @@ import {
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
 import { INGRESS_SEAM } from './ingress.ts';
+import { JOBS_SEAM } from './jobs.ts';
 import { FUNCTIONAL_HEALTH_SEAM, HEALTH_SEAM } from './health.ts';
 import { METRICS_SEAM } from './metrics.ts';
 import { MIDDLEWARE_SEAM } from './middleware.ts';
@@ -74,6 +75,7 @@ const SEAM_REGISTRY: ReadonlyMap<string, SeamSpec> = new Map<string, SeamSpec>([
   [QUERY_HANDLER_SEAM.schematic, QUERY_HANDLER_SEAM],
   [EVENTS_SEAM.schematic, EVENTS_SEAM],
   [INGRESS_SEAM.schematic, INGRESS_SEAM],
+  [JOBS_SEAM.schematic, JOBS_SEAM],
 ]);
 
 /**
@@ -103,10 +105,7 @@ export function listSeamSpecs(): readonly SeamSpec[] {
  * @param mode - The target's generator mode
  * @returns The specs, with each family in that mode's shape
  */
-function withHostShapes(
-  specs: readonly SeamSpec[],
-  mode: GeneratorMode,
-): readonly SeamSpec[] {
+function withHostShapes(specs: readonly SeamSpec[], mode: GeneratorMode): readonly SeamSpec[] {
   if (mode === 'class-based') return specs;
   const functional = new Map<string, SeamSpec>([
     [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
@@ -116,9 +115,9 @@ function withHostShapes(
     // scaffold time, not only when an artifact is admitted (A2).
     [FUNCTIONAL_HEALTH_SEAM.schematic, FUNCTIONAL_HEALTH_SEAM],
   ]);
-  return specs.filter((spec) => spec !== INGRESS_SEAM).map((spec) =>
-    functional.get(spec.schematic) ?? spec
-  );
+  return specs
+    .filter((spec) => spec !== INGRESS_SEAM)
+    .map((spec) => functional.get(spec.schematic) ?? spec);
 }
 
 /**
@@ -137,10 +136,12 @@ function withHostShapes(
  */
 export function scanSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec[] {
   const mode = generatorMode(installed);
-  const withHost = withHostShapes(listSeamSpecs(), mode);
+  const withHost = withHostShapes(listSeamSpecs(), mode).filter(
+    (spec) => spec !== JOBS_SEAM || (mode !== 'class-based' && installed.has('queue-plugin')),
+  );
   if (mode === 'class-based') return withHost;
   return withHost.map((spec) =>
-    spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec
+    spec.schematic === SERVICES_SEAM.schematic ? FUNCTIONAL_SERVICES_SEAM : spec,
   );
 }
 
@@ -169,9 +170,15 @@ export function hostSeamSpecs(installed: ReadonlySet<string>): readonly SeamSpec
   // dead surface no class-based schematic writes — and any handler placed there
   // would be registered twice (`seams/ingress.ts`). This is the mirror of
   // `withHostShapes` dropping `INGRESS_SEAM` in functional mode.
-  const classBasedIngress = mode === 'class-based'
-    ? new Set([COMMAND_HANDLER_SEAM.schematic, QUERY_HANDLER_SEAM.schematic, EVENTS_SEAM.schematic])
-    : new Set<string>();
+  const classBasedIngress =
+    mode === 'class-based'
+      ? new Set([
+          COMMAND_HANDLER_SEAM.schematic,
+          QUERY_HANDLER_SEAM.schematic,
+          EVENTS_SEAM.schematic,
+          JOBS_SEAM.schematic,
+        ])
+      : new Set<string>();
   return shaped
     .filter((spec) => !classBasedIngress.has(spec.schematic))
     .filter((spec) => spec.requiresPlugin === undefined || installed.has(spec.requiresPlugin));

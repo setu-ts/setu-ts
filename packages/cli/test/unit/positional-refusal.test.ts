@@ -259,10 +259,7 @@ describe('valid arities still succeed', () => {
 
   it('generate library takes the verb and one name', async () => {
     const h = harness({ seed: WORKSPACE_SEED });
-    expect(
-      await h.run(['generate', 'library', 'shared', '--dry-run']),
-      h.err.text(),
-    ).toBe(0);
+    expect(await h.run(['generate', 'library', 'shared', '--dry-run']), h.err.text()).toBe(0);
     expect(h.err.text()).not.toContain('takes');
   });
 

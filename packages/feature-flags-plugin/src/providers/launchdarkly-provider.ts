@@ -38,9 +38,8 @@ const DEFAULT_INIT_TIMEOUT_SECONDS = 5;
  */
 export function toLaunchDarklyContext(context?: FlagContext): LaunchDarklyContext {
   const key = context?.userId ?? ANONYMOUS_KEY;
-  const base: LaunchDarklyContext = context?.userId === undefined
-    ? { kind: 'user', key, anonymous: true }
-    : { kind: 'user', key };
+  const base: LaunchDarklyContext =
+    context?.userId === undefined ? { kind: 'user', key, anonymous: true } : { kind: 'user', key };
   const attributes = context?.attributes;
   if (attributes === undefined) {
     return base;
@@ -190,7 +189,7 @@ export class LaunchDarklyProvider implements FlagProvider {
     // return early, resolve successfully, and leave every evaluation stuck on
     // the fallback. The kernel follows the same rollback rule for a failed
     // application start.
-    this.#client = this.#config.client ?? await this.#buildClient();
+    this.#client = this.#config.client ?? (await this.#buildClient());
     this.#started = true;
 
     try {
@@ -254,9 +253,10 @@ export class LaunchDarklyProvider implements FlagProvider {
           'when no options.client is injected',
       );
     }
-    const module = this.#config.module === undefined
-      ? await loadLaunchDarklyModule()
-      : adaptLaunchDarklyModule(this.#config.module);
+    const module =
+      this.#config.module === undefined
+        ? await loadLaunchDarklyModule()
+        : adaptLaunchDarklyModule(this.#config.module);
     return module.init(sdkKey, this.#config.ldOptions);
   }
 

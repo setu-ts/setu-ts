@@ -18,9 +18,7 @@ import { allRows, ENTITY, memoryService, storeOver } from '../../fixtures/idempo
 
 /** The error the real `mongodb` driver raises inside a transaction on a standalone server. */
 function mongoStandaloneError(): Error {
-  const error = new Error(
-    'Transaction numbers are only allowed on a replica set member or mongos',
-  );
+  const error = new Error('Transaction numbers are only allowed on a replica set member or mongos');
   error.name = 'MongoServerError';
   Object.assign(error, { code: 20, codeName: 'IllegalOperation' });
   return error;
@@ -58,12 +56,10 @@ describe('DatabaseIdempotencyStore.verify', () => {
   it('refuses a shipped Cosmos or Bigtable adapter handed to the custom arm, by class', async () => {
     const memory = new MemoryAdapter();
     await memory.connect();
-    for (
-      const [prototype, reason] of [
-        [CosmosAdapter.prototype, 'cosmos-unsupported'],
-        [BigtableAdapter.prototype, 'bigtable-unsupported'],
-      ] as const
-    ) {
+    for (const [prototype, reason] of [
+      [CosmosAdapter.prototype, 'cosmos-unsupported'],
+      [BigtableAdapter.prototype, 'bigtable-unsupported'],
+    ] as const) {
       const adapter = Object.create(prototype) as CosmosAdapter;
       const service = new DatabaseService(adapter, (e) => memory.createDataSource(e), 'custom');
       expect((await refusalOf(service)).reason).toBe(reason);

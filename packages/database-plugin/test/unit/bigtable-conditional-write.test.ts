@@ -14,9 +14,14 @@ describe('Bigtable newest-cell conditional writes', () => {
         expect('condition' in condition).toBe(true);
         if (!('condition' in condition)) throw new Error('missing condition');
         const encoded = `${typeof value === 'number' ? 'n' : 's'}:${value}`;
-        expect(condition.condition.test).toEqual([{ family: 'cf' }, { column: [field] }, {
-          row: { cellLimit: 1 },
-        }, { value: { start: encoded, end: encoded } }]);
+        expect(condition.condition.test).toEqual([
+          { family: 'cf' },
+          { column: [field] },
+          {
+            row: { cellLimit: 1 },
+          },
+          { value: { start: encoded, end: encoded } },
+        ]);
         chain = [...condition.condition.pass!];
       }
       expect(chain).toEqual([{ all: true }]);
@@ -29,12 +34,14 @@ describe('Bigtable newest-cell conditional writes', () => {
     store.seed('User', 'a', { cf: { id: 's:a', role: 's:owner', name: 's:old' } });
     store.seed('User', 'a', { cf: { role: 's:other', name: 's:new' } });
     expect(await source.findById('a')).toMatchObject({ role: 'other', name: 'new' });
-    expect(await source.updateWhere!('a', { role: 'owner', name: 'old' }, { name: 'bad' }))
-      .toBeNull();
+    expect(
+      await source.updateWhere!('a', { role: 'owner', name: 'old' }, { name: 'bad' }),
+    ).toBeNull();
     expect(await source.deleteWhere!('a', { role: 'owner', name: 'old' })).toBe(false);
     expect(await source.findById('a')).toMatchObject({ role: 'other', name: 'new' });
-    expect(await source.updateWhere!('a', { role: 'other', name: 'new' }, { name: 'applied' }))
-      .toMatchObject({ name: 'applied' });
+    expect(
+      await source.updateWhere!('a', { role: 'other', name: 'new' }, { name: 'applied' }),
+    ).toMatchObject({ name: 'applied' });
     expect(await source.deleteWhere!('a', { name: 'applied' })).toBe(true);
   });
   it('answers not matched for an unaddressable column without an RPC', async () => {

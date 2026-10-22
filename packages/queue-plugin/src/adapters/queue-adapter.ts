@@ -33,6 +33,15 @@ export interface QueueDepths {
  */
 export interface QueueAdapter {
   /**
+   * Optional renewed delivery lease. Absent when the backend cannot renew.
+   * `extend` returns false when the claim no longer belongs to this delivery.
+   */
+  readonly claimRenewal?: {
+    readonly intervalMs: number;
+    extend(name: string, id: string, claimToken: string): Promise<boolean>;
+  };
+
+  /**
    * Why this backend cannot use a job name, or `null` when it can. Optional:
    * an adapter with no naming limit omits it. `QueueService` calls it when a
    * processor or recurring job is registered, so a name the backend will
@@ -113,14 +122,15 @@ export interface QueueAdapter {
   enqueue<T>(job: StoredJob<T>): Promise<void>;
 
   /**
-   * Reserves up to `limit` jobs that are due (availableAtMs <= nowMs).
+   * Reserves up to `limit` due jobs. Redis scripts use server time; adapters
+   * without a server clock compare availableAtMs to nowMs.
    *
    * CLAIMS jobs: moves them from ready set to processing set.
    * A reserved job is not returned by subsequent reserve calls.
    *
    * @param name - Job name
    * @param limit - Maximum jobs to reserve
-   * @param nowMs - Current timestamp in ms
+   * @param nowMs - Caller timestamp in ms, used when there is no server clock
    * @returns The reserved jobs
    * @throws {Error} If the adapter is not connected
    * @since 0.1.0

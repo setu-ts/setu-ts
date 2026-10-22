@@ -172,10 +172,7 @@ export function rawToDer(raw: Uint8Array): Uint8Array {
 }
 
 /** Builds the COSE key bytes for the authenticator's public key. */
-export function coseKeyBytes(
-  algorithm: AuthenticatorAlgorithm,
-  jwk: JsonWebKey,
-): Uint8Array {
+export function coseKeyBytes(algorithm: AuthenticatorAlgorithm, jwk: JsonWebKey): Uint8Array {
   const decode = (value: string): Uint8Array => fromBase64Url(value);
   if (algorithm === 'ES256') {
     return encodeMap([
@@ -357,8 +354,8 @@ export class VirtualAuthenticator {
       this.#algorithm === 'ES256'
         ? { name: 'ECDSA', hash: 'SHA-256' }
         : this.#algorithm === 'RS256'
-        ? { name: 'RSASSA-PKCS1-v1_5' }
-        : { name: 'Ed25519' },
+          ? { name: 'RSASSA-PKCS1-v1_5' }
+          : { name: 'Ed25519' },
       this.#keyPair.privateKey,
       data as BufferSource,
     );
@@ -461,8 +458,7 @@ export class VirtualAuthenticator {
       uv: options.uv ?? true,
       ...(options.up === undefined ? {} : { up: options.up }),
     });
-    const signed = options.signOver ??
-      concat(authData, await sha256(clientDataBytes));
+    const signed = options.signOver ?? concat(authData, await sha256(clientDataBytes));
     const signature = options.signatureOverride ?? (await this.sign(signed));
     const response: Record<string, unknown> = {
       clientDataJSON: clientDataJson,
@@ -507,10 +503,9 @@ async function generateKeyPair(algorithm: AuthenticatorAlgorithm): Promise<Crypt
     );
     return pair as CryptoKeyPair;
   }
-  const pair = await globalThis.crypto.subtle.generateKey(
-    { name: 'Ed25519' },
-    true,
-    ['sign', 'verify'],
-  );
+  const pair = await globalThis.crypto.subtle.generateKey({ name: 'Ed25519' }, true, [
+    'sign',
+    'verify',
+  ]);
   return pair as unknown as CryptoKeyPair;
 }

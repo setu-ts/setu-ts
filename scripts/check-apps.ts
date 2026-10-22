@@ -1,18 +1,24 @@
-// deno-lint-ignore-file no-console -- this CI script reports progress and skips.
-/** Checks every standalone application and runs its mandatory smoke task. */
+/** Checks every workspace application and runs its mandatory smoke script. */
+import { isNotFound, run as runProcess } from './lib/run.ts';
+import { readFile, readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { workspaceApps } from './lib/workspace.ts';
+/* eslint-disable no-console -- this CI script reports progress and skips. */
 
 const SKIP_EXIT_CODE = 77;
 
 interface AppConfig {
-  readonly tasks?: Record<string, string>;
+  readonly scripts?: Record<string, string>;
 }
 
 export type SmokeOutcome = 'passed' | 'skipped' | 'failed';
 
 /** Classifies a smoke command result so skip handling is explicit and testable. */
-export function classifySmokeExitCode(
-  status: Deno.CommandStatus,
-): SmokeOutcome {
+export function classifySmokeExitCode(status: {
+  code: number;
+  success: boolean;
+  signal?: string | null;
+}): SmokeOutcome {
   if (status.code === SKIP_EXIT_CODE) return 'skipped';
   return status.success ? 'passed' : 'failed';
 }
@@ -34,66 +40,43 @@ export function unexpectedSkips(
 }
 
 /**
- * Returns the task an app must run BEFORE it is type-checked, or `null`.
- *
- * An app carrying a `package.json` makes Deno resolve `npm:` specifiers from
- * `node_modules` rather than from its global cache. The type check runs first
- * in this script, so on a COLD checkout it runs against an empty directory and
- * fails with `Could not find a matching package for 'npm:ws@^8.18.0'` — the
- * specifier being whatever the app's import graph reaches first through the
- * framework's lazily-imported optional drivers, none of which belong in the
- * example's own `package.json`. Every local run passes once `node_modules`
- * exists from any earlier build, so only a cold runner sees it (M37c hit this
- * on the first CI run after four clean local gate passes).
- *
- * The app's own `install` task is what creates that directory, and it is
- * DECLARED, so this script never has to guess a package manager or a flag.
- * `test/apps-gate.test.ts` pins that an app carrying a `package.json` declares
- * one, because without it this returns `null` and the ordering bug is back.
- */
-export function prerequisiteTask(
-  tasks: Readonly<Record<string, string>> | undefined,
-): string | null {
-  return tasks?.install === undefined ? null : 'install';
-}
-
-/**
  * Returns a human-readable message for a malformed application directory, or
  * `null` when the error should be rethrown.
  */
-export function malformedAppDirMessage(
-  directory: string,
-  error: unknown,
-): string | null {
-  if (error instanceof Deno.errors.NotFound) {
-    return `${directory}: missing deno.json — malformed application directory`;
+export function malformedAppDirMessage(directory: string, error: unknown): string | null {
+  if (isNotFound(error)) {
+    return `${directory}: missing package.json — malformed application directory`;
   }
   if (error instanceof SyntaxError) {
-    return `${directory}: deno.json is not valid JSON — malformed application directory`;
+    return `${directory}: package.json is not valid JSON — malformed application directory`;
   }
   return null;
 }
 
 async function readAppConfig(path: string): Promise<AppConfig> {
-  return JSON.parse(await Deno.readTextFile(path)) as AppConfig;
+  return JSON.parse(await readFile(path, 'utf8')) as AppConfig;
 }
 
 async function run(
   command: readonly string[],
   cwd: string,
-): Promise<Deno.CommandStatus> {
-  return await new Deno.Command(command[0], {
-    args: [...command.slice(1)],
-    cwd,
-    stdout: 'inherit',
-    stderr: 'inherit',
-  }).output();
+): Promise<{ code: number; success: boolean }> {
+  // An app resolves @setu-ts/* to workspace source through its generated
+  // tsconfig.json paths, which tsx applies itself; no import hook is added here.
+  const result = await runProcess(command[0]!, command.slice(1), { cwd, inherit: true });
+  return { code: result.code, success: result.code === 0 };
 }
 
-async function checkApps(): Promise<boolean> {
+/** Check every app sequentially; injectable process runner exercises failure/skip wiring. */
+export async function checkApps(
+  root = '.',
+  runCommand = run,
+  allowRaw = process.env['ALLOW_SKIP'],
+): Promise<boolean> {
+  const enrolled = await workspaceApps(root);
   const appDirectories: string[] = [];
-  for await (const entry of Deno.readDir('apps')) {
-    if (entry.isDirectory) {
+  for await (const entry of await readdir(`${root}/apps`, { withFileTypes: true })) {
+    if (entry.isDirectory()) {
       appDirectories.push(entry.name);
     }
   }
@@ -102,11 +85,11 @@ async function checkApps(): Promise<boolean> {
   const skipped: string[] = [];
   let failed = false;
   for (const directory of appDirectories) {
-    const cwd = `apps/${directory}`;
+    const cwd = resolve(root, `apps/${directory}`);
 
     let config: AppConfig;
     try {
-      config = await readAppConfig(`${cwd}/deno.json`);
+      config = await readAppConfig(`${cwd}/package.json`);
     } catch (error) {
       const msg = malformedAppDirMessage(directory, error);
       if (msg !== null) {
@@ -117,56 +100,38 @@ async function checkApps(): Promise<boolean> {
       throw error;
     }
 
-    if (!config.tasks?.start || !config.tasks.smoke) {
-      console.error(
-        `${directory}: every example must declare start and smoke tasks.`,
-      );
+    if (!config.scripts?.start || !config.scripts.smoke) {
+      console.error(`${directory}: every example must declare start and smoke tasks.`);
       failed = true;
       continue;
     }
 
-    const entryPoints = ['main.ts', 'smoke.ts'];
-    try {
-      await Deno.stat(`${cwd}/worker.ts`);
-      entryPoints.push('worker.ts');
-    } catch (error) {
-      if (!(error instanceof Deno.errors.NotFound)) {
-        throw error;
-      }
-    }
-
-    const prerequisite = prerequisiteTask(config.tasks);
-    if (prerequisite !== null) {
-      console.log(`\n==> ${directory}: ${prerequisite}`);
-      const prepared = await run(['deno', 'task', prerequisite], cwd);
-      if (!prepared.success) {
-        failed = true;
-        continue;
-      }
+    if (!enrolled.some((app) => app === `apps/${directory}`)) {
+      console.error(`${directory}: package.json is not a workspace application.`);
+      failed = true;
+      continue;
     }
 
     console.log(`\n==> ${directory}: type checking`);
-    const checked = await run(['deno', 'check', ...entryPoints], cwd);
+    const checked = await runCommand(['pnpm', 'run', 'check'], cwd);
     if (!checked.success) {
       failed = true;
       continue;
     }
 
     console.log(`==> ${directory}: smoke`);
-    const smoked = await run(['deno', 'task', 'smoke'], cwd);
+    const smoked = await runCommand(['pnpm', 'run', 'smoke'], cwd);
     const outcome = classifySmokeExitCode(smoked);
     if (outcome === 'skipped') {
       skipped.push(directory);
-      console.warn(
-        `${directory}: smoke skipped (external prerequisite unavailable).`,
-      );
+      console.warn(`${directory}: smoke skipped (external prerequisite unavailable).`);
     } else if (outcome === 'failed') {
       failed = true;
     }
 
-    if (config.tasks.test !== undefined) {
+    if (config.scripts.test !== undefined) {
       console.log(`==> ${directory}: test`);
-      const tested = await run(['deno', 'task', 'test'], cwd);
+      const tested = await runCommand(['pnpm', 'run', 'test'], cwd);
       if (!tested.success) {
         failed = true;
       }
@@ -179,14 +144,14 @@ async function checkApps(): Promise<boolean> {
   }
 
   // ALLOW_SKIP enforcement
-  const allowRaw = Deno.env.get('ALLOW_SKIP');
   if (allowRaw !== undefined) {
-    const allowList = allowRaw.split(',').map((s) => s.trim()).filter(Boolean);
+    const allowList = allowRaw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const unexpected = unexpectedSkips(skipped, allowList);
     if (unexpected.length > 0) {
-      console.error(
-        `Unexpected skips (not in ALLOW_SKIP=${allowRaw}): ${unexpected.join(', ')}`,
-      );
+      console.error(`Unexpected skips (not in ALLOW_SKIP=${allowRaw}): ${unexpected.join(', ')}`);
       failed = true;
     }
   }
@@ -194,6 +159,6 @@ async function checkApps(): Promise<boolean> {
   return failed;
 }
 
-if (import.meta.main && await checkApps()) {
-  Deno.exit(1);
+if (import.meta.main && (await checkApps())) {
+  process.exitCode = 1;
 }

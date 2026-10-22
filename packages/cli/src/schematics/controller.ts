@@ -19,6 +19,8 @@ import {
 import { seamNames } from '../seams/seam-spec.ts';
 import { generatorMode } from '../utils/generator-mode.ts';
 import { renderHttpModule } from './http-module.ts';
+import { renderFunctionalModuleIndex } from '../seams/modules.ts';
+import { deriveNames } from '../utils/names.ts';
 
 /**
  * Renders the decorated controller class.
@@ -26,7 +28,27 @@ import { renderHttpModule } from './http-module.ts';
  * @param names - Naming forms derived from the user's input
  * @returns The module contents
  */
-function renderControllerClass(names: DerivedNames): string {
+function renderControllerClass(names: DerivedNames, module?: string): string {
+  if (module !== undefined) {
+    return `import { Body, Controller, Ctx, Get, Params, Post } from '@setu-ts/decorator-plugin';
+import type { IRequestContext } from '@setu-ts/common';
+
+/** Add this controller to ${module}.module.ts. */
+@Controller('/${module}/${names.kebab}')
+export class ${names.pascal}Controller {
+  @Get('/')
+  list(): { readonly items: readonly Record<string, unknown>[] } {
+    return { items: [] };
+  }
+
+  @Post('/')
+  @Params(Body<Record<string, unknown>>(), Ctx())
+  create(body: Record<string, unknown>, ctx: IRequestContext): unknown {
+    return ctx.response.status(201).json({ created: body });
+  }
+}
+`;
+  }
   return `import { Body, Controller, Ctx, Get, Params, Post } from '@setu-ts/decorator-plugin';
 import type { IRequestContext } from '@setu-ts/common';
 
@@ -34,8 +56,11 @@ import type { IRequestContext } from '@setu-ts/common';
  * HTTP controller for the ${names.kebab} resource.
  *
  * Registered through the \`${APP_CONTROLLERS_EXPORT}\` barrel in
- * \`${HTTP_SEAM_DIR}/index.ts\`, which \`setu.config.ts\` passes to \`DecoratorPlugin\` —
- * so this class needs no further wiring.
+ * \`${HTTP_SEAM_DIR}/index.ts\`: \`setu.config.ts\` passes it as
+ * \`DecoratorPlugin({ controllers: [...${APP_CONTROLLERS_EXPORT}] })\`, or a starter
+ * does through its \`decorators: { controllers: … }\` arm. \`setu generate\` reports
+ * when the config references neither, so this class is never claimed wired
+ * without it.
  *
  * A decorated handler receives ONLY the arguments its \`@Params(...)\` names, in
  * that order: the plugin builds the argument list from that declaration alone
@@ -92,6 +117,29 @@ export function generateController(
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
   const classBased = generatorMode(options.plugins) === 'class-based';
+  if (options.targetModule !== undefined) {
+    const dir = `src/modules/${options.targetModule}`;
+    return [
+      {
+        path: `${dir}/${names.kebab}.controller.ts`,
+        contents: classBased
+          ? renderControllerClass(names, options.targetModule)
+          : renderHttpModule(names, 'controller', options.targetModule),
+      },
+      ...(classBased
+        ? []
+        : [
+            {
+              path: `${dir}/index.ts`,
+              managed: true,
+              contents: renderFunctionalModuleIndex(deriveNames(options.targetModule), {
+                controller: seamNames(options.moduleArtifacts, 'controller', names.kebab),
+                route: seamNames(options.moduleArtifacts, 'route'),
+              }),
+            },
+          ]),
+    ];
+  }
   const seam = classBased ? CONTROLLERS_SEAM : FUNCTIONAL_CONTROLLERS_SEAM;
 
   return [

@@ -69,7 +69,8 @@ describe('@Public contributes no middleware (§3.7)', () => {
     expect(isAuthorizationMiddleware(mw[0])).toBe(true);
     // The effective runtime restriction omits `security: []`, allowing the
     // authorization middleware's M57 brand to derive the truthful requirement.
-    expect((asRouteDef(routes[0].route).schema as { security?: unknown } | undefined)?.security)
-      .toBeUndefined();
+    expect(
+      (asRouteDef(routes[0].route).schema as { security?: unknown } | undefined)?.security,
+    ).toBeUndefined();
   });
 });

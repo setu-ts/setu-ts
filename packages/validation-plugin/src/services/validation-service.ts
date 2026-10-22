@@ -15,11 +15,13 @@ import type {
   IValidationService,
   MiddlewareFunction,
   ValidationIssue,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
 
 import type { ValidationErrorFormatter } from '../formatters/error-formatter.ts';
-import { createValidationMiddleware } from '../middleware/validation-middleware.ts';
+import { registerServiceMiddleware } from '../middleware/validator-reader.ts';
+import { buildValidationMiddleware } from '../middleware/validation-middleware.ts';
 
 /**
  * Minimal structural interface matching a subset of Zod's schema API.
@@ -36,20 +38,18 @@ interface SafeParseSchema {
    * @param data - The value to validate
    * @returns An object with a `success` discriminant
    */
-  safeParse(
-    data: unknown,
-  ):
+  safeParse(data: unknown):
     | { success: true; data: unknown }
     | {
-      success: false;
-      error: {
-        /**
-         * Validator-specific issue array. Each element is expected to carry
-         * at least a `message` and optionally a `path` and `code`.
-         */
-        issues: readonly SafeParseIssue[];
+        success: false;
+        error: {
+          /**
+           * Validator-specific issue array. Each element is expected to carry
+           * at least a `message` and optionally a `path` and `code`.
+           */
+          issues: readonly SafeParseIssue[];
+        };
       };
-    };
 }
 
 /**
@@ -82,7 +82,13 @@ export class ValidationService implements IValidationService {
   constructor(
     private readonly formatter: ValidationErrorFormatter,
     private readonly schemaPolicy: SchemaPolicy = {},
-  ) {}
+  ) {
+    if (this.middleware === ValidationService.prototype.middleware) {
+      registerServiceMiddleware(this, (schema, target, token, options) =>
+        this.buildMiddleware(schema, target, token, options),
+      );
+    }
+  }
 
   /**
    * Validate `data` against the given schema.
@@ -121,17 +127,31 @@ export class ValidationService implements IValidationService {
    *
    * @param schema - The schema (Zod schema by default)
    * @param target - Which request part to validate
+   * @param options - Per-validator options; `forms: true` also validates form bodies
    * @returns The validation middleware
    */
-  middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction {
-    // Applied once here, at middleware-construction (registration) time, so
-    // both entry points — `service.middleware(...)` and the `validateBody(...)`
-    // family, which delegate to it — honor the configured policy identically.
-    return createValidationMiddleware(
+  middleware(
+    schema: unknown,
+    target: ValidationTarget,
+    options?: ValidationMiddlewareOptions,
+  ): MiddlewareFunction {
+    return this.buildMiddleware(schema, target, {}, options);
+  }
+
+  /** Applies policy once per middleware construction for the service and helper paths. */
+  private buildMiddleware(
+    schema: unknown,
+    target: ValidationTarget,
+    token: object = {},
+    options?: ValidationMiddlewareOptions,
+  ): MiddlewareFunction {
+    return buildValidationMiddleware(
       applySchemaPolicy(schema, this.schemaPolicy),
       target,
       this,
       this.formatter,
+      token,
+      options,
     );
   }
 }
@@ -218,7 +238,5 @@ function safeParseSchema(
     return { success: false, error: { issues: result.error.issues } };
   }
 
-  throw new TypeError(
-    'Schema must expose a `safeParse` method (Zod-compatible).',
-  );
+  throw new TypeError('Schema must expose a `safeParse` method (Zod-compatible).');
 }

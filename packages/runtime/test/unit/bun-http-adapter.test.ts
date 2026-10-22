@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for BunHttpAdapter — uses a fake BunServeHost.
  *
@@ -12,6 +12,35 @@ import {
   isBunHttpServerHandle,
 } from '../../src/adapters/bun/bun-http-adapter.ts';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Bun socket peer', () => {
+  it('reads requestIP with the server receiver and tolerates null or absence', async () => {
+    const handle = new BunHttpServerHandle();
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const callback = handle.createServeCallback();
+    for (const server of [{ stop() {} }, { stop() {}, requestIP: () => null }]) {
+      await callback(new Request('http://localhost/'), server);
+      expect(peer).toBeUndefined();
+    }
+    const server = {
+      stop() {},
+      requestIP(request: Request) {
+        expect(this).toBe(server);
+        expect(request.url).toBe('http://localhost/');
+        return { address: '::ffff:10.1.2.3' };
+      },
+    };
+    await callback(new Request('http://localhost/'), server);
+    expect(peer).toBe('10.1.2.3');
+    await handle.createFetchHandler()(new Request('http://localhost/'));
+    expect(peer).toBeUndefined();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host
@@ -22,19 +51,13 @@ function createFakeHost(): {
   recorded: {
     port?: number;
     hostname?: string;
-    fetch?: (
-      r: Request,
-      server: BunServer,
-    ) => Response | undefined | Promise<Response | undefined>;
+    fetch?: (r: Request, server: BunServer) => Response | undefined | Promise<Response | undefined>;
   };
 } {
   const recorded: {
     port?: number;
     hostname?: string;
-    fetch?: (
-      r: Request,
-      server: BunServer,
-    ) => Response | undefined | Promise<Response | undefined>;
+    fetch?: (r: Request, server: BunServer) => Response | undefined | Promise<Response | undefined>;
   } = {};
 
   const host: BunServeHost = {
@@ -63,7 +86,7 @@ describe('bun-http-adapter | setHandler/fetch', () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -98,7 +121,7 @@ describe('bun-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -117,7 +140,7 @@ describe('bun-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -140,7 +163,7 @@ describe('bun-http-adapter | close', () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -163,7 +186,7 @@ describe('bun-http-adapter | close', () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -186,7 +209,7 @@ describe('bun-http-adapter | close with invalid handle', () => {
     const { host } = createFakeHost();
     const adapter = new BunHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),

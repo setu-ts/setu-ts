@@ -44,7 +44,11 @@ async function docker(args: string[]): Promise<string> {
 }
 
 async function containerIdForPort(port: number): Promise<string> {
-  const ids = (await docker(['ps', '-q', '--filter', `publish=${port}`])).trim();
+  const shard = process.env['SETU_CI_SHARD'];
+  const filters = shard
+    ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+    : ['--filter', `publish=${port}`];
+  const ids = (await docker(['ps', '-q', ...filters])).trim();
   if (ids === '') throw new Error(`no container publishing port ${port}`);
   return ids.split('\n')[0];
 }
@@ -108,9 +112,7 @@ describe('REAL Redis cache outage (M101a V8-5)', { skip: redisUrl === undefined 
       expect(refused.statusCode).toBe(500);
       expect(elapsed).toBeLessThan(BOUND_MS * 3);
 
-      const [source] = app.services.getAll<ICacheDiagnosticsSource>(
-        CAPABILITIES.CACHE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<ICacheDiagnosticsSource>(CAPABILITIES.CACHE_DIAGNOSTICS);
       const get = source.snapshot().records.find((record) => record.operation === 'get');
       expect(get).toMatchObject({ count: 2, succeeded: 1, failed: 1 });
 

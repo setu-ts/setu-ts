@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder, type FakeFs } from '../fixtures/fake-fs.ts';
 import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
+import { VERSION } from '../../src/version.ts';
 import { createTerminalPrompter } from '../../src/prompt.ts';
 import { listTemplates } from '../../src/templates/registry.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
@@ -36,6 +37,13 @@ function harness(seed: Readonly<Record<string, string>> = {}, portAvailable?: Po
 // The guard itself is unit-tested in `file-writer.test.ts`, where it lives.
 // This is the invariant it protects, driven through the real command.
 describe('the duplicate-path guard', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness({ '/work/app/main.ts': 'mine' });
+    expect(await h.run(['app', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /work/app/main.ts already exists');
+    expect(h.fs.writes).toEqual([]);
+    expect(h.fs.read('/work/app/main.ts')).toBe('mine');
+  });
   it('reports no duplicate for any built-in template on any runtime', async () => {
     // The invariant the guard protects: a template's own files must never
     // collide with the fixed project files, for any target.
@@ -140,12 +148,10 @@ describe('a template with a frontend build, on an npm target', () => {
   // The next-step hint and the README both tell a new user to run `start`.
   // Without a build first it crashed on a fresh project with "Failed to load
   // React Router server build", because the server bundle did not exist yet.
-  for (
-    const [runtime, build, entry] of [
-      ['node', 'npm run build', 'tsx main.ts'],
-      ['bun', 'bun run build', 'bun run main.ts'],
-    ] as const
-  ) {
+  for (const [runtime, build, entry] of [
+    ['node', 'npm run build', 'tsx main.ts'],
+    ['bun', 'bun run build', 'bun run main.ts'],
+  ] as const) {
     it(`builds before start on ${runtime}, as it already does before test`, async () => {
       const h = harness();
       expect(await h.run(['app', '--runtime', runtime, '--template', 'full-stack'])).toBe(0);
@@ -241,16 +247,14 @@ describe('runNewCommand', () => {
   it('creates a node project under the working directory by default', async () => {
     const h = harness();
     expect(await h.run(['my-app'])).toBe(0);
-    for (
-      const file of [
-        'package.json',
-        'tsconfig.json',
-        'main.ts',
-        'setu.config.ts',
-        'README.md',
-        '.gitignore',
-      ]
-    ) {
+    for (const file of [
+      'package.json',
+      'tsconfig.json',
+      'main.ts',
+      'setu.config.ts',
+      'README.md',
+      '.gitignore',
+    ]) {
       expect(h.fs.has(`/work/my-app/${file}`)).toBe(true);
     }
     expect(h.fs.has('/work/my-app/deno.json')).toBe(false);
@@ -278,9 +282,7 @@ describe('runNewCommand', () => {
       // The devtool composition is the SECOND parameter on every target
       // (M98c): `setu commands` passes its discovery env as the FIRST
       // argument, so a first-parameter extra would capture that proxy.
-      expect(
-        h.fs.read('/work/app/setu.config.ts'),
-      ).toContain(
+      expect(h.fs.read('/work/app/setu.config.ts')).toContain(
         'export function createApp(\n  _env?: Readonly<Record<string, unknown>>,\n' +
           '  devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },\n' +
           '): IKernelApplication {',
@@ -371,17 +373,15 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['shop', '--template', 'full-stack']);
 
-      for (
-        const file of [
-          'app/routes.ts',
-          'app/root.tsx',
-          'app/lib/context-keys.server.ts',
-          'app/lib/load-context.ts',
-          'app/features/products/products.server.ts',
-          'vite.config.ts',
-          'react-router.config.ts',
-        ]
-      ) {
+      for (const file of [
+        'app/routes.ts',
+        'app/root.tsx',
+        'app/lib/context-keys.server.ts',
+        'app/lib/load-context.ts',
+        'app/features/products/products.server.ts',
+        'vite.config.ts',
+        'react-router.config.ts',
+      ]) {
         expect(h.fs.has(`/work/shop/${file}`)).toBe(true);
       }
     });
@@ -401,12 +401,31 @@ describe('runNewCommand', () => {
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('const booted = acquire(env);');
-      expect(entry).toContain('createApp(env)');
+      // M113d §3.8: the sink is imported and passed on every project; §3.10:
+      // the starter factory also receives the compiled server build module.
+      expect(entry).toContain('createApp(env, waitUntil, undefined, { serverBuild })');
+      expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
+      expect(entry).toContain("import * as serverBuild from '../build/server/index.js';");
       expect(config).toContain('env?: Readonly<Record<string, unknown>>');
       expect(config).toContain('{ env }');
       expect(config).not.toContain('envFilePath');
       expect(h.fs.has('/work/shop/.env')).toBe(false);
       expect(h.fs.has('/work/shop/.env.example')).toBe(false);
+      // The local variables render `.dev.vars` on Workers (M113d §3.10).
+      expect(h.fs.has('/work/shop/.dev.vars')).toBe(true);
+      expect(h.fs.has('/work/shop/.dev.vars.example')).toBe(true);
+      expect(h.fs.read('/work/shop/.dev.vars')).toContain(
+        'SESSION_SECRET=dev-only-insecure-session-secret-change-me',
+      );
+      expect(h.fs.read('/work/shop/.gitignore')).toContain('.dev.vars');
+      // M113d §10 D2: assets bypass the application's middleware, and both
+      // places a developer reads say so.
+      expect(h.fs.read('/work/shop/wrangler.toml')).toContain(
+        "the application's middleware never sees that request: no security headers, no",
+      );
+      expect(h.fs.read('/work/shop/README.md')).toContain(
+        "skip the application's middleware: no security headers and no authentication",
+      );
     });
 
     it('uses Workers bindings instead of a requested dotenv file', async () => {
@@ -449,7 +468,9 @@ describe('runNewCommand', () => {
 
       expect(entry).toContain('async fetch(request: Request, env: Record<string, unknown>)');
       expect(entry).toContain('const booted = acquire(env);');
-      expect(entry).toContain('createApp(env)');
+      expect(entry).toContain('createApp(env, waitUntil)');
+      // M113d §3.8: the platform sink is imported and passed on every project.
+      expect(entry).toContain("import { waitUntil } from 'cloudflare:workers';");
       // The devtool parameter is the second one on every target (M98c), so
       // the env parameter keeps its default and the signature wraps.
       expect(config).toContain(
@@ -528,22 +549,26 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['app', '--template', 'rest'])).toBe(0);
       const config = h.fs.read('/work/app/setu.config.ts');
-      for (
-        const symbol of [
-          'RuntimePlugin',
-          'LoggerPlugin',
-          'ValidationPlugin',
-          'HttpSecurityPlugin',
-          'OpenApiPlugin',
-        ]
-      ) {
-        if (symbol !== 'ValidationPlugin') {
+      for (const symbol of [
+        'RuntimePlugin',
+        'LoggerPlugin',
+        'ValidationPlugin',
+        'HttpSecurityPlugin',
+        'OpenApiPlugin',
+      ]) {
+        if (symbol !== 'ValidationPlugin' && symbol !== 'LoggerPlugin') {
           expect(config).toContain(`${symbol}()`);
         }
       }
       // M70f (C3): validation answers in the same Problem Details shape the
       // `errorHandler` emits for thrown errors, so it is NOT argument-free.
       expect(config).toContain("ValidationPlugin({ errorFormat: 'rfc9457' })");
+      // M113h §3.9: the scaffold opts in to request logging, excluding the probe
+      // and scrape paths so a kubelet does not write a line per poll. The file
+      // has been through Prettier, so the call is wrapped.
+      expect(config).toContain('LoggerPlugin({');
+      expect(config).toContain('requestLogging: true');
+      expect(config).toContain("excludePaths: ['/live', '/ready', '/health', '/metrics'],");
       expect(config).toContain("ConfigPlugin({ envFilePath: '.env', envFileOptional: true })");
       // Three plugins take a generated-artifact seam, so they are NOT argument-free.
       // Asserted by their actual call so a dropped seam shows up here rather than only
@@ -603,17 +628,15 @@ describe('runNewCommand', () => {
       const h = harness();
       expect(await h.run(['bare'])).toBe(0);
       const config = h.fs.read('/work/bare/setu.config.ts');
-      for (
-        const absent of [
-          'APP_CONTROLLERS',
-          'APP_SERVICES',
-          'HEALTH_INDICATORS',
-          'CUSTOM_METRICS',
-          'COMMAND_HANDLERS',
-          'EVENT_HANDLERS',
-          'MODULE_CONTROLLERS',
-        ]
-      ) {
+      for (const absent of [
+        'APP_CONTROLLERS',
+        'APP_SERVICES',
+        'HEALTH_INDICATORS',
+        'CUSTOM_METRICS',
+        'COMMAND_HANDLERS',
+        'EVENT_HANDLERS',
+        'MODULE_CONTROLLERS',
+      ]) {
         expect(config).not.toContain(absent);
       }
       // The HTTP barrel IS emitted — `controller` is ungated since E8, so a
@@ -621,8 +644,9 @@ describe('runNewCommand', () => {
       // carry is the CLASS-shaped registration: no APP_CONTROLLERS above, and
       // no import of `@setu-ts/decorator-plugin` anywhere.
       expect(h.fs.has('/work/bare/src/controllers/index.ts')).toBe(true);
-      expect(h.fs.read('/work/bare/src/controllers/index.ts'))
-        .toContain('export function registerGeneratedRoutes');
+      expect(h.fs.read('/work/bare/src/controllers/index.ts')).toContain(
+        'export function registerGeneratedRoutes',
+      );
       expect(config).not.toContain('decorator-plugin');
       expect(h.fs.has('/work/bare/src/cqrs/index.ts')).toBe(false);
     });
@@ -693,9 +717,8 @@ describe('runNewCommand', () => {
       for (const symbol of ['ConfigPlugin', 'OpenApiPlugin', 'errorHandler']) {
         expect(microConfig).toContain(symbol);
       }
-      for (
-        const symbol of ['MessagingPlugin', 'QueuePlugin', 'ResiliencePlugin', 'TelemetryPlugin']
-      ) {
+      expect(microConfig).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
+      for (const symbol of ['MessagingPlugin', 'ResiliencePlugin', 'TelemetryPlugin']) {
         expect(microConfig).toContain(`${symbol}()`);
         expect(rest.fs.read('/work/app/setu.config.ts')).not.toContain(symbol);
       }
@@ -720,8 +743,9 @@ describe('runNewCommand', () => {
 
     it('scaffolds microservice on cloudflare-workers, swapping in the platform plugin', async () => {
       const h = harness();
-      expect(await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']))
-        .toBe(0);
+      expect(
+        await h.run(['app', '--template', 'microservice', '--runtime', 'cloudflare-workers']),
+      ).toBe(0);
 
       // The capabilities survive the swap; only their provider changes.
       const config = h.fs.read('/work/app/setu.config.ts');
@@ -768,9 +792,7 @@ describe('runNewCommand', () => {
       const h = harness();
       await h.run(['app', '--runtime', 'deno']);
       const manifest = JSON.parse(h.fs.read('/work/app/deno.json'));
-      expect(manifest.imports['@setu-ts/kernel']).toMatch(
-        /^npm:@setu-ts\/kernel@\^/,
-      );
+      expect(manifest.imports['@setu-ts/kernel']).toMatch(/^npm:@setu-ts\/kernel@\^/);
       expect(manifest.tasks.start).toContain('main.ts');
     });
 
@@ -825,7 +847,11 @@ describe('runNewCommand', () => {
         const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
         expect(pkg.devDependencies?.['@std/expect']).toBeUndefined();
         expect(pkg.devDependencies?.['@std/testing']).toBeUndefined();
-        expect(pkg.scripts.test).toBe(runtime === 'bun' ? 'bun test' : 'tsx --test');
+        expect(pkg.scripts.test).toBe(
+          runtime === 'bun'
+            ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
+            : "tsx --test '**/!(*.e2e).test.ts'",
+        );
         expect(pkg.scripts.build).toBeUndefined();
         expect(pkg.scripts.start).toBeDefined();
       });
@@ -1179,6 +1205,16 @@ describe('--workspace', () => {
     expect(manifest.workspaces).toEqual(['apps/*', 'libs/*']);
   });
 
+  it('opts the npm workspace root out of Scarf analytics (M113f audit R2-F6)', async () => {
+    const h = harness();
+    await h.run(['acme', '--workspace']);
+    const manifest = JSON.parse(h.fs.read('/work/acme/package.json')) as {
+      scarfSettings?: unknown;
+    };
+    // Scarf reads the root at INIT_CWD and ignores a member's own setting.
+    expect(manifest.scarfSettings).toEqual({ enabled: false });
+  });
+
   it('records the default base port', async () => {
     const h = harness();
     await h.run(['acme', '--workspace']);
@@ -1239,7 +1275,9 @@ describe('--workspace', () => {
       const h = harness();
       expect(await h.run(['acme', '--workspace', '--runtime', 'cloudflare-workers'])).toBe(2);
       expect(h.err.text()).toContain('own deploy unit');
-      expect(h.err.text()).toContain('setu new acme --runtime cloudflare-workers');
+      expect(h.err.text()).toContain(
+        `npx @setu-ts/cli@${VERSION} new acme --runtime cloudflare-workers`,
+      );
       expect(h.fs.writes).toEqual([]);
     });
 
@@ -1270,12 +1308,10 @@ describe('--workspace', () => {
     // and a trailing `--port` both arrive as the boolean `true`. Testing for a
     // string value would let the number the user typed vanish in silence — the
     // exact class this milestone refuses everywhere else.
-    for (
-      const [label, argv] of [
-        ['a negative number', ['acme', '--workspace', '--port', '-1']],
-        ['no value at all', ['acme', '--workspace', '--port']],
-      ] as const
-    ) {
+    for (const [label, argv] of [
+      ['a negative number', ['acme', '--workspace', '--port', '-1']],
+      ['no value at all', ['acme', '--workspace', '--port']],
+    ] as const) {
       it(`refuses --port with ${label}`, async () => {
         const h = harness();
         expect(await h.run([...argv])).toBe(2);
@@ -1461,9 +1497,9 @@ describe('the interactive seam on setu new', () => {
     expect(await yes.run(['svc', '--template', 'microservice', '--yes'])).toBe(0);
 
     const pathsOf = (h: Harness) =>
-      h.fs.writes.map((path) => [path, h.fs.read(path)] as const).sort(([a], [b]) =>
-        a < b ? -1 : 1
-      );
+      h.fs.writes
+        .map((path) => [path, h.fs.read(path)] as const)
+        .sort(([a], [b]) => (a < b ? -1 : 1));
     expect(pathsOf(yes)).toEqual(pathsOf(plain));
   });
 
@@ -1527,13 +1563,17 @@ describe('the interactive seam on setu new', () => {
       cwd: '/work',
       log: () => {},
       error: () => {},
-      ask: createTerminalPrompter(() => true, () => Promise.resolve(''), () => {}),
+      ask: createTerminalPrompter(
+        () => true,
+        () => Promise.resolve(''),
+        () => {},
+      ),
     });
     expect(code).toBe(0);
     const yes = harness();
     expect(await yes.run(['svc', '--yes'])).toBe(0);
     const pathsOf = (fs: FakeFs) =>
-      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => a < b ? -1 : 1);
+      fs.writes.map((path) => [path, fs.read(path)] as const).sort(([a], [b]) => (a < b ? -1 : 1));
     expect(pathsOf(enter)).toEqual(pathsOf(yes.fs));
   });
 

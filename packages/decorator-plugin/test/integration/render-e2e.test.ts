@@ -86,11 +86,7 @@ describe('a rendered route end to end, in both registration orders', () => {
 
   it('boots and serves with ViewPlugin registered before DecoratorPlugin', async () => {
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        ViewPlugin(),
-        DecoratorPlugin({ controllers: [PagesController] }),
-      ],
+      plugins: [RuntimePlugin(), ViewPlugin(), DecoratorPlugin({ controllers: [PagesController] })],
     });
 
     const response = await inject(app, '/pages/users');
@@ -105,11 +101,7 @@ describe('a rendered route end to end, in both registration orders', () => {
     // `Circular plugin dependency detected` at start(), and the rendered
     // route must still reach the engine.
     const app = await createTestApp({
-      plugins: [
-        RuntimePlugin(),
-        DecoratorPlugin({ controllers: [PagesController] }),
-        ViewPlugin(),
-      ],
+      plugins: [RuntimePlugin(), DecoratorPlugin({ controllers: [PagesController] }), ViewPlugin()],
     });
 
     const response = await inject(app, '/pages/users');

@@ -19,6 +19,7 @@ import { createFakeBigtableClient, FakeBigtableStore } from './fake-bigtable-cli
 import { createD1DataSource } from '../../../cloudflare-plugin/src/database/d1-data-source.ts';
 import { SqliteD1 } from '../../../cloudflare-plugin/test/d1-fakes.ts';
 
+import { createDynamoDataSource } from '../../src/adapters/dynamo/dynamo-data-source.ts';
 import { dynamoFixture } from './conditional-dynamo.ts';
 
 /** The fake Drizzle expression grammar, evaluated by the recording instance. */
@@ -33,9 +34,16 @@ export const operators: DrizzleOperators = {
 export const sources: readonly {
   name: string;
   unknown: 'throws' | 'not-matched';
-  make: () => IDataSource;
+  make: (calls?: string[]) => IDataSource;
 }[] = [
-  { name: 'dynamodb', unknown: 'not-matched', make: () => dynamoFixture().source },
+  {
+    name: 'dynamodb',
+    unknown: 'not-matched',
+    make: (calls) =>
+      createDynamoDataSource(observe(dynamoFixture().client, calls), 'User', {
+        User: { partitionKey: 'id' },
+      }),
+  },
   {
     name: 'memory',
     unknown: 'not-matched',
@@ -44,7 +52,7 @@ export const sources: readonly {
   {
     name: 'prisma',
     unknown: 'throws',
-    make: () => {
+    make: (calls) => {
       const client = createFakePrismaClient();
       // Prisma has a schema: an unknown field is validation failure, not P2025.
       const validate = (where: Record<string, unknown>): void => {
@@ -70,31 +78,37 @@ export const sources: readonly {
         validate(args.where);
         return await remove(args);
       };
-      return createPrismaDataSource(client, 'User');
+      return createPrismaDataSource(observe(client, calls), 'User');
     },
   },
   {
     name: 'drizzle',
     unknown: 'throws',
-    make: () =>
-      createDrizzleDataSource(createFakeDrizzleInstance(), 'user', {
-        user: createFakeDrizzleTable('user'),
-      }, operators),
+    make: (calls) =>
+      createDrizzleDataSource(
+        observe(createFakeDrizzleInstance(), calls),
+        'user',
+        {
+          user: createFakeDrizzleTable('user'),
+        },
+        operators,
+      ),
   },
   {
     name: 'mongodb',
     unknown: 'not-matched',
-    make: () => createMongoDataSource(new FakeMongoClient(), 'db', 'User', undefined),
+    make: (calls) =>
+      createMongoDataSource(observe(new FakeMongoClient(), calls), 'db', 'User', undefined),
   },
   {
     name: 'cosmos',
     unknown: 'not-matched',
-    make: () => {
+    make: (calls) => {
       const database = createFakeCosmosClient({
         containers: { User: { partitionKeyPaths: ['/id'] } },
       }).client.database('db');
       return createCosmosDataSource({
-        database,
+        database: observe(database, calls),
         target: resolveCosmosTarget('User', undefined),
         partitionKeys: new PartitionKeyResolver(database),
       });
@@ -103,18 +117,43 @@ export const sources: readonly {
   {
     name: 'bigtable',
     unknown: 'not-matched',
-    make: () => {
+    make: (calls) => {
       const table = createFakeBigtableClient(new FakeBigtableStore()).instance('i').table('User');
-      return createBigtableDataSource(table, resolveBigtableTarget('User', undefined));
+      return createBigtableDataSource(
+        observe(table, calls),
+        resolveBigtableTarget('User', undefined),
+      );
     },
   },
   {
     name: 'd1',
     unknown: 'throws',
-    make: () =>
+    make: (calls) =>
       createD1DataSource(
-        new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
+        observe(
+          new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
+          calls,
+        ),
         { table: 'users', primaryKey: ['id'] },
       ),
   },
 ];
+
+/** Record actual native facade calls; promise results and row data are not proxied. */
+function observe<T extends object>(target: T, calls: string[] | undefined): T {
+  if (calls === undefined) return target;
+  return new Proxy(target, {
+    get(object, property) {
+      const value: unknown = Reflect.get(object, property, object);
+      if (typeof value === 'function')
+        return (...args: unknown[]): unknown => {
+          calls.push(String(property));
+          const result: unknown = Reflect.apply(value, object, args);
+          return typeof result === 'object' && result !== null && !(result instanceof Promise)
+            ? observe(result, calls)
+            : result;
+        };
+      return typeof value === 'object' && value !== null ? observe(value, calls) : value;
+    },
+  });
+}

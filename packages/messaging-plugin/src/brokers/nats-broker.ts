@@ -9,12 +9,13 @@ import type {
   SubscribeOptions,
 } from '@setu-ts/common';
 import type { IRuntimeServices } from '@setu-ts/common';
+import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { createTopicInbox } from './inbox.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
-import { ReconnectSupervisor } from './reconnect.ts';
+import { ReconnectSupervisor } from '@setu-ts/common';
 import type { INatsConnection, INatsHeaders, NatsOptions } from '../interfaces/index.ts';
 import {
   JetStreamStreamError,
@@ -65,8 +66,11 @@ function isConsumerExistsError(err: unknown): boolean {
  * @throws {Error} If the nats package cannot be resolved
  */
 async function loadNats(): Promise<typeof import('nats')> {
-  const mod = await import('nats');
-  return mod;
+  try {
+    return await import('nats');
+  } catch (error) {
+    throw new OptionalDependencyUnavailableError('nats', { cause: error });
+  }
 }
 
 /**
@@ -115,6 +119,7 @@ interface ResolvedNatsClient {
  */
 async function resolveClient(
   url: string,
+  reconnect: ReturnType<typeof resolveNatsReconnect>,
   injectedClient?: INatsConnection,
 ): Promise<ResolvedNatsClient> {
   if (injectedClient !== undefined) {
@@ -127,11 +132,40 @@ async function resolveClient(
     return { connection: injectedClient };
   }
   const nats = await loadNats();
-  const connection = await nats.connect({ servers: url });
+  const connection = await nats.connect({ servers: url, ...reconnect });
   return {
     connection: connection as unknown as INatsConnection,
     headersFactory: () => nats.headers() as unknown as INatsHeaders,
   };
+}
+
+/**
+ * Validates and resolves the lazy connection policy for plugin and broker construction.
+ * @param options - Connection and reconnect options
+ * @returns The nats.connect reconnect fields with defaults applied
+ * @throws {RangeError} For an invalid reconnect field
+ * @throws {TypeError} When reconnect is supplied with an injected connection
+ */
+export function resolveNatsReconnect(options: NatsOptions = {}): {
+  maxReconnectAttempts: number;
+  reconnectTimeWait: number;
+} {
+  if (options.client !== undefined && options.reconnect !== undefined) {
+    throw new TypeError('NatsBroker: reconnect has no effect with an injected client');
+  }
+  const maxReconnectAttempts = options.reconnect?.maxAttempts ?? -1;
+  const reconnectTimeWait = options.reconnect?.waitMs ?? 2000;
+  if (!Number.isInteger(maxReconnectAttempts) || maxReconnectAttempts < -1) {
+    throw new RangeError('NatsBroker: reconnect.maxAttempts must be an integer >= -1');
+  }
+  if (
+    !Number.isInteger(reconnectTimeWait) ||
+    reconnectTimeWait < 1 ||
+    reconnectTimeWait > 2147483647
+  ) {
+    throw new RangeError('NatsBroker: reconnect.waitMs must be an integer 1–2147483647');
+  }
+  return { maxReconnectAttempts, reconnectTimeWait };
 }
 
 /**
@@ -152,13 +186,15 @@ interface ActiveConsumer {
 function describePublishRefusal(topic: string, error: unknown): string {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === '503') {
-    return `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
+    return (
+      `NATS JetStream refused the message published to ${JSON.stringify(topic)}: no ` +
       "stream captures this subject. Add it to the stream's subjects " +
-      '(NatsOptions.streamSubjects when the broker creates the stream).';
+      '(NatsOptions.streamSubjects when the broker creates the stream).'
+    );
   }
-  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${
-    describeError(error)
-  }`;
+  return `NATS JetStream did not acknowledge the message published to ${JSON.stringify(topic)}: ${describeError(
+    error,
+  )}`;
 }
 
 /**
@@ -170,6 +206,7 @@ export class NatsBroker implements MessageBrokerAdapter {
   #runtime: IRuntimeServices;
   #serializer: ISerializer;
   #url: string;
+  #reconnect: ReturnType<typeof resolveNatsReconnect>;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
   #streamSubjects: readonly string[] | undefined;
@@ -194,11 +231,8 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @param serializer - Serializer for message payloads
    * @param options - NATS connection and configuration options
    */
-  constructor(
-    runtime: IRuntimeServices,
-    serializer: ISerializer,
-    options?: NatsOptions,
-  ) {
+  constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: NatsOptions) {
+    this.#reconnect = resolveNatsReconnect(options);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'nats://localhost:4222';
@@ -267,7 +301,7 @@ export class NatsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    const resolved = await resolveClient(this.#url, this.#injectedClient);
+    const resolved = await resolveClient(this.#url, this.#reconnect, this.#injectedClient);
     this.#connection = resolved.connection;
     // An explicitly supplied factory wins; the module's own is the fallback.
     this.#headersFactory ??= resolved.headersFactory;
@@ -726,9 +760,11 @@ export class NatsBroker implements MessageBrokerAdapter {
 
           const handlerResult = handler(deserialized, metadata);
           if (handlerResult instanceof Promise) {
-            handlerResult.then(() => {
-              msgTyped.ack();
-            }).catch(fail);
+            handlerResult
+              .then(() => {
+                msgTyped.ack();
+              })
+              .catch(fail);
           } else {
             msgTyped.ack();
           }

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { serializeError } from '@setu-ts/common';
 import {
   adaptDynamoSdkModule,
@@ -122,13 +122,15 @@ describe('DynamoDB client seam', () => {
 
     expect(client).toBe(injected);
     expect(
-      (await client.query({
-        TableName: 'orders',
-        KeyConditionExpression: '#pk = :pk',
-        ExpressionAttributeNames: { '#pk': 'tenantId' },
-        ExpressionAttributeValues: { ':pk': { S: 'tenant-1' } },
-        Select: 'COUNT',
-      })).Count,
+      (
+        await client.query({
+          TableName: 'orders',
+          KeyConditionExpression: '#pk = :pk',
+          ExpressionAttributeNames: { '#pk': 'tenantId' },
+          ExpressionAttributeValues: { ':pk': { S: 'tenant-1' } },
+          Select: 'COUNT',
+        })
+      ).Count,
     ).toBe(1);
     await client.scan({ TableName: 'orders' });
     await client.getItem({ TableName: 'orders', Key: { id: { S: 'order-1' } } });
@@ -190,6 +192,7 @@ describe('DynamoDB client seam', () => {
       DynamoDBClient: class extends FakeDynamoSdkClient {
         constructor(configuration: unknown) {
           super(configuration);
+          // eslint-disable-next-line @typescript-eslint/no-this-alias -- records the receiver under test
           nativeClient = this;
         }
       },
@@ -250,11 +253,14 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
   const credentials = { accessKeyId: 'a', secretAccessKey: 'b' };
 
   it('allows a loopback emulator over plaintext HTTP', () => {
-    for (
-      const endpoint of ['http://127.0.0.1:8000', 'http://localhost:8000', 'http://[::1]:8000']
-    ) {
-      expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint, credentials }))
-        .not.toThrow();
+    for (const endpoint of [
+      'http://127.0.0.1:8000',
+      'http://localhost:8000',
+      'http://[::1]:8000',
+    ]) {
+      expect(() =>
+        createLazyDynamoLoader({ region: 'us-east-1', endpoint, credentials }),
+      ).not.toThrow();
     }
   });
 
@@ -266,7 +272,7 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
         region: 'us-east-1',
         endpoint: 'http://dynamo.internal.example.com:8000',
         credentials,
-      })
+      }),
     ).toThrow(/plaintext HTTP endpoint on remote host/);
   });
 
@@ -288,7 +294,7 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
         region: 'us-east-1',
         endpoint: 'https://dynamo.example.com',
         credentials,
-      })
+      }),
     ).not.toThrow();
   });
 
@@ -297,10 +303,34 @@ describe('DynamoDB endpoint transport guard (CodeRabbit review)', () => {
     // environment, shared config or instance metadata, so an omitted bag
     // usually means "the SDK will find some" rather than "anonymous request",
     // and those ambient credentials would be signed over cleartext too.
-    expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://example.com' }))
-      .toThrow(/plaintext HTTP endpoint on remote host/);
+    expect(() =>
+      createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://example.com' }),
+    ).toThrow(/plaintext HTTP endpoint on remote host/);
     // Loopback stays allowed with or without credentials — the emulator case.
-    expect(() => createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://127.0.0.1:8000' }))
-      .not.toThrow();
+    expect(() =>
+      createLazyDynamoLoader({ region: 'us-east-1', endpoint: 'http://127.0.0.1:8000' }),
+    ).not.toThrow();
+  });
+});
+
+describe('createLazyDynamoLoader — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    vi.doMock('@aws-sdk/client-dynamodb', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await createLazyDynamoLoader({ region: 'us-east-1' }).load();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-dynamodb');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-dynamodb');
+    }
   });
 });

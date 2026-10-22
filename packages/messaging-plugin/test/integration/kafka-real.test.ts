@@ -14,6 +14,7 @@
  * path has ever had against a real broker.
  */
 import { describe, expect, it } from 'vitest';
+import type { ConsumerConfig } from 'kafkajs';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -25,13 +26,17 @@ import { KafkaTopicUnavailableError, MessagingPlugin } from '../../src/index.ts'
 const kafkaBrokers = process.env['KAFKA_BROKERS'];
 
 /** Polls a predicate until true or the deadline, without a fixed sleep. */
-async function waitFor(predicate: () => boolean, label: string, timeoutMs = 20_000): Promise<void> {
+async function waitFor(
+  predicate: () => boolean,
+  label: string | (() => string),
+  timeoutMs = 20_000,
+): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((r) => setTimeout(r, 50));
   }
-  throw new Error(`timeout waiting for ${label}`);
+  throw new Error(`timeout waiting for ${typeof label === 'function' ? label() : label}`);
 }
 
 /** A probe plugin capturing the registered broker for direct exercise. */
@@ -50,7 +55,99 @@ describe(
   'REAL Kafka broker (guarded on KAFKA_BROKERS)',
   { skip: kafkaBrokers === undefined },
   () => {
-    const brokers = (kafkaBrokers ?? '').split(',').map((b) => b.trim()).filter(Boolean);
+    const brokers = (kafkaBrokers ?? '')
+      .split(',')
+      .map((b) => b.trim())
+      .filter(Boolean);
+
+    it('delivers all messages between concurrent first starts of two members of a new group', async () => {
+      const { Kafka, logLevel } = await import('kafkajs');
+      const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+      const topic = `m113a.concurrent.${suffix}`;
+      const group = `m113a.concurrent.${suffix}`;
+      const kafka = new Kafka({
+        brokers,
+        clientId: 'm113a-concurrent-setup',
+        logLevel: logLevel.NOTHING,
+      });
+      const admin = kafka.admin();
+      const producer = kafka.producer();
+      const joinGate = Promise.withResolvers<void>();
+      const captured: IMessageBroker[] = [];
+      const apps = [0, 1].map(() =>
+        createApplication({
+          plugins: [
+            RuntimePlugin(),
+            MessagingPlugin({
+              broker: 'kafka',
+              client: {
+                producer: () => kafka.producer(),
+                admin: () => kafka.admin(),
+                consumer: (options: ConsumerConfig) => {
+                  const consumer = kafka.consumer(options);
+                  const run = consumer.run.bind(consumer);
+                  // Hold only the start of the real run: both subscribe snapshots must precede
+                  // the first join, even on the throwaway broker with zero rebalance delay.
+                  consumer.run = async (runOptions) => {
+                    await joinGate.promise;
+                    await run(runOptions);
+                  };
+                  return consumer;
+                },
+              },
+            }),
+            brokerProbe((broker) => captured.push(broker)),
+          ],
+        }),
+      );
+      try {
+        await admin.connect();
+        await admin.createTopics({
+          topics: [{ topic, numPartitions: 2, replicationFactor: 1 }],
+          waitForLeaders: true,
+        });
+        await producer.connect();
+        await producer.send({
+          topic,
+          messages: [0, 1].map((partition) => ({
+            partition,
+            value: JSON.stringify({ id: 'old' }),
+          })),
+        });
+        for (const app of apps) await app.start();
+        const received: string[] = [];
+        const handler = (message: { id: string }): void => {
+          received.push(message.id);
+        };
+        const aAt = performance.now();
+        await captured[0]!.subscribe(topic, handler, { queue: group });
+        const aMs = performance.now() - aAt;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const expected = Array.from({ length: 6 }, (_, i) => `message-${i}`);
+        await producer.send({
+          topic,
+          messages: expected.map((id, i) => ({ partition: i % 2, value: JSON.stringify({ id }) })),
+        });
+        const bAt = performance.now();
+        await captured[1]!.subscribe(topic, handler, { queue: group });
+        process.stdout.write(
+          `M113a concurrent subscribe-to-ready: A=${aMs.toFixed(2)} ms B=${(performance.now() - bAt).toFixed(2)} ms\n`,
+        );
+        joinGate.resolve();
+        await waitFor(
+          () => expected.every((id) => received.includes(id)),
+          () => `all six concurrent-start messages; received=${JSON.stringify(received)}`,
+          12000,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect(received.sort()).toEqual(expected);
+      } finally {
+        joinGate.resolve();
+        for (const app of apps) await app.stop();
+        await producer.disconnect();
+        await admin.disconnect();
+      }
+    });
 
     it('boots an application, round-trips a publish/subscribe, and completes one request/reply', async () => {
       const kafkajs = await import('kafkajs');
@@ -61,12 +158,7 @@ describe(
       // RPC rides the derived request channel (M14d) and the shared reply
       // topic, and Kafka auto-creation is not assumed: pre-create all three
       // wire topics out of band.
-      const topicsToCreate = [
-        topic,
-        rpcTopic,
-        `rr.req.${rpcTopic}`,
-        replyTopic,
-      ];
+      const topicsToCreate = [topic, rpcTopic, `rr.req.${rpcTopic}`, replyTopic];
 
       const adminKafka = new kafkajs.Kafka({ clientId: 'm90d-setup', brokers });
       const admin = adminKafka.admin();
@@ -98,33 +190,23 @@ describe(
         await app.start();
         expect(broker).toBeDefined();
 
-        // Publish/subscribe round trip. A fresh consumer group joins on the
-        // broker's rebalance schedule (~3 s observed) and, with
-        // `fromBeginning: false`, starts at the log end AT JOIN TIME — so a
-        // single publish issued before the join can sit below the start
-        // offset forever. That is standard Kafka consumer-group semantics, not
-        // a broker defect; the round trip therefore RETRIES the publish until
-        // delivery, bounded, rather than racing the rebalance.
+        // Pin the high watermark at subscribe time: no pre-subscribe replay,
+        // and a single immediate publish must arrive without waiting for a join.
+        await broker!.publish(topic, { id: -1 });
         const received: Array<{ id: number }> = [];
         let deliveredMetadata: MessageMetadata | undefined;
+        const subscribeAt = performance.now();
         await broker!.subscribe(topic, (message: { id: number }, metadata) => {
           received.push(message);
           deliveredMetadata = metadata;
         });
-        const published: Array<{ id: number }> = [];
-        for (let attempt = 1; attempt <= 8 && received.length === 0; attempt++) {
-          const payload = { id: attempt };
-          await broker!.publish(topic, payload);
-          published.push(payload);
-          await new Promise((r) => setTimeout(r, 2_000));
-        }
-        await waitFor(() => received.length > 0, 'Kafka delivery');
-        // Whatever the rebalance delivered must be a payload this test
-        // published, serialized and returned intact.
-        expect(
-          published.some((p) => p.id === received[0]?.id),
-          `delivered ${JSON.stringify(received[0])} vs published ${JSON.stringify(published)}`,
-        ).toBe(true);
+        process.stdout.write(
+          `M113a subscribe-to-ready: ${(performance.now() - subscribeAt).toFixed(2)} ms\n`,
+        );
+        await broker!.publish(topic, { id: 1 });
+        await waitFor(() => received.length > 0, 'Kafka immediate delivery');
+        await new Promise((r) => setTimeout(r, 300));
+        expect(received).toEqual([{ id: 1 }]);
 
         // The documented message identity is `partition:offset`, and the
         // partition comes from the OUTER eachMessage payload — real kafkajs
@@ -138,27 +220,15 @@ describe(
           `metadata ${JSON.stringify(deliveredMetadata)}`,
         ).toMatch(/^\d+:\d+$/);
 
-        // Request/reply round trip — implemented in M14d and never exercised
-        // against a real broker, because the broker could not boot. The same
-        // rebalance timing applies to the responder, so a request that races
-        // the join is retried.
-        await broker!.respond<{ n: number }, { doubled: number }>(
+        // First RPC after boot, without a join sleep or retries.
+        await broker!.respond<{ n: number }, { doubled: number }>(rpcTopic, (req) => ({
+          doubled: req.n * 2,
+        }));
+        const reply = await broker!.request<{ n: number }, { doubled: number }>(
           rpcTopic,
-          (req) => ({ doubled: req.n * 2 }),
+          { n: 21 },
+          { timeoutMs: 15000 },
         );
-        await new Promise((r) => setTimeout(r, 3_000)); // let the responder join
-        let reply: { doubled: number } | undefined;
-        for (let attempt = 0; attempt < 3 && reply === undefined; attempt++) {
-          try {
-            reply = await broker!.request<{ n: number }, { doubled: number }>(
-              rpcTopic,
-              { n: 21 },
-              { timeoutMs: 15_000 },
-            );
-          } catch (error) {
-            if (attempt === 2) throw error;
-          }
-        }
         expect(reply).toEqual({ doubled: 42 });
       } finally {
         await app.stop();
@@ -214,38 +284,21 @@ describe(
         // subscriptions on topics that did not exist a moment ago.
         await app.start();
 
-        // Same rebalance timing as above: retry each publish until delivered.
-        for (
-          let attempt = 1;
-          attempt <= 8 && (orders.length === 0 || payments.length === 0);
-          attempt++
-        ) {
-          if (orders.length === 0) await broker!.publish(ordersTopic, { id: attempt });
-          if (payments.length === 0) await broker!.publish(paymentsTopic, { id: 100 + attempt });
-          await new Promise((r) => setTimeout(r, 2_000));
-        }
+        // One immediate publish per newly initialized group; no retry can hide a loss.
+        await broker!.publish(ordersTopic, { id: 1 });
+        await broker!.publish(paymentsTopic, { id: 101 });
         await waitFor(() => orders.length > 0 && payments.length > 0, 'two-topic delivery');
-        // Each topic's handler sees only its own topic's messages.
-        expect(orders.every((m) => m.id < 100)).toBe(true);
-        expect(payments.every((m) => m.id > 100)).toBe(true);
+        expect(orders).toEqual([{ id: 1 }]);
+        expect(payments).toEqual([{ id: 101 }]);
 
-        await broker!.respond<{ n: number }, { doubled: number }>(
+        await broker!.respond<{ n: number }, { doubled: number }>(rpcTopic, (req) => ({
+          doubled: req.n * 2,
+        }));
+        const reply = await broker!.request<{ n: number }, { doubled: number }>(
           rpcTopic,
-          (req) => ({ doubled: req.n * 2 }),
+          { n: 21 },
+          { timeoutMs: 15000 },
         );
-        await new Promise((r) => setTimeout(r, 3_000)); // let the responder join
-        let reply: { doubled: number } | undefined;
-        for (let attempt = 0; attempt < 3 && reply === undefined; attempt++) {
-          try {
-            reply = await broker!.request<{ n: number }, { doubled: number }>(
-              rpcTopic,
-              { n: 21 },
-              { timeoutMs: 15_000 },
-            );
-          } catch (error) {
-            if (attempt === 2) throw error;
-          }
-        }
         expect(reply).toEqual({ doubled: 42 });
       } finally {
         await app.stop();
@@ -283,7 +336,10 @@ describe(
         ],
       });
 
-      const err = await app.start().then(() => null, (e: unknown) => e);
+      const err = await app.start().then(
+        () => null,
+        (e: unknown) => e,
+      );
       try {
         expect(err).toBeInstanceOf(KafkaTopicUnavailableError);
         const named = err as KafkaTopicUnavailableError;
@@ -334,12 +390,12 @@ describe(
       try {
         await app.start();
 
-        const before = highWatermarks(await admin.fetchTopicOffsets(topic) as TopicOffset[]);
+        const before = highWatermarks((await admin.fetchTopicOffsets(topic)) as TopicOffset[]);
         const N = 6;
         for (let i = 0; i < N; i++) {
           await broker!.publish(topic, { i }, { orderingKey: 'agg-1' });
         }
-        const keyed = await admin.fetchTopicOffsets(topic) as TopicOffset[];
+        const keyed = (await admin.fetchTopicOffsets(topic)) as TopicOffset[];
         const grown = keyed
           .map((o) => ({
             partition: o.partition,
@@ -356,7 +412,7 @@ describe(
         for (let i = 0; i < N; i++) {
           await broker!.publish(topic, { i });
         }
-        const unkeyed = await admin.fetchTopicOffsets(topic) as TopicOffset[];
+        const unkeyed = (await admin.fetchTopicOffsets(topic)) as TopicOffset[];
         const unkeyedTotal = unkeyed.reduce((sum, o) => sum + Number(o.high), 0);
         expect(unkeyedTotal - keyedTotal).toBe(N);
       } finally {
@@ -394,17 +450,21 @@ describe(
       let attempts = 0;
       try {
         await app.start();
-        await broker!.subscribe(topic, (message: { id: string }) => {
-          if (message.id === 'first') {
-            attempts++;
-            handled.push(`first-attempt-${attempts}`);
-            // Fail ONCE: the offset stays uncommitted, so kafkajs redelivers
-            // from this record and the partition stalls behind it.
-            if (attempts === 1) throw new Error('transient');
-            return;
-          }
-          handled.push(`second(${message.id})`);
-        }, { queue: groupId });
+        await broker!.subscribe(
+          topic,
+          (message: { id: string }) => {
+            if (message.id === 'first') {
+              attempts++;
+              handled.push(`first-attempt-${attempts}`);
+              // Fail ONCE: the offset stays uncommitted, so kafkajs redelivers
+              // from this record and the partition stalls behind it.
+              if (attempts === 1) throw new Error('transient');
+              return;
+            }
+            handled.push(`second(${message.id})`);
+          },
+          { queue: groupId },
+        );
 
         // Let the consumer group join before publishing (`fromBeginning: false`
         // starts at the log end at join time).

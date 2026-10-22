@@ -21,26 +21,31 @@ describe('allocatePort', () => {
     // The M101f F1 regression: a connector at basePort + 1000 must not drag
     // the next application up past it — walking `devtoolPort` as part of the
     // maximum put every later member inside the connector range.
-    const port = allocatePort(manifest([
-      { name: 'a', port: 3000, devtoolPort: 4000 },
-      { name: 'b', port: 3001 },
-    ]));
+    const port = allocatePort(
+      manifest([
+        { name: 'a', port: 3000, devtoolPort: 4000 },
+        { name: 'b', port: 3001 },
+      ]),
+    );
     expect(port).toBe(3002);
   });
 
   it('skips a candidate a connector already holds, so allocation never hands out a held port', () => {
     // An overlapping or hand-edited connector range can sit directly above the
     // application ports; the next application must step over it, not onto it.
-    const port = allocatePort(manifest([
-      { name: 'a', port: 3000, devtoolPort: 3001 },
-      { name: 'b', port: 3100, devtoolPort: 3101 },
-    ]));
+    const port = allocatePort(
+      manifest([
+        { name: 'a', port: 3000, devtoolPort: 3001 },
+        { name: 'b', port: 3100, devtoolPort: 3101 },
+      ]),
+    );
     expect(port).toBe(3102);
   });
 
   it('returns undefined when skipping connector ports exhausts the range', () => {
-    expect(allocatePort(manifest([{ name: 'a', port: 65534, devtoolPort: 65535 }])))
-      .toBeUndefined();
+    expect(
+      allocatePort(manifest([{ name: 'a', port: 65534, devtoolPort: 65535 }])),
+    ).toBeUndefined();
   });
 
   it('allocates the application port before the devtool port for the same member', () => {
@@ -52,7 +57,10 @@ describe('allocatePort', () => {
       basePort: 3000,
       transport: 'http',
       runtime: 'deno',
-      members: [{ name: 'a', port: 3000 }, { name: 'pending', port: 3001 }],
+      members: [
+        { name: 'a', port: 3000 },
+        { name: 'pending', port: 3001 },
+      ],
     };
     expect(allocatePort(pending)).toBe(3002);
   });

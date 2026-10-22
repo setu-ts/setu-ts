@@ -99,11 +99,7 @@ export function parseCookie(header: string | null | undefined): Record<string, s
  * ```
  * @since 0.2.0
  */
-export function serializeCookie(
-  name: string,
-  value: string,
-  attrs: CookieAttributes = {},
-): string {
+export function serializeCookie(name: string, value: string, attrs: CookieAttributes = {}): string {
   if (!COOKIE_NAME.test(name)) {
     throw new TypeError(
       `Invalid cookie name '${name}': must be a non-empty RFC 6265 token ` +

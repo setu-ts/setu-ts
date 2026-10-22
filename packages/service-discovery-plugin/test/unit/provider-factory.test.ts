@@ -134,17 +134,20 @@ describe('createProvider — kubernetes API server resolution', () => {
 
   it('throws when neither apiServer nor KUBERNETES_SERVICE_HOST is available', () => {
     const options = { provider: 'kubernetes', namespace: 'default', token: 't' } as const;
-    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime()))
-      .toThrow(DiscoveryUnavailableError);
-    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime()))
-      .toThrow('KUBERNETES_SERVICE_HOST');
+    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
+      DiscoveryUnavailableError,
+    );
+    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
+      'KUBERNETES_SERVICE_HOST',
+    );
   });
 
   it('throws when an empty KUBERNETES_SERVICE_HOST is set', () => {
     const runtime = createFakeRuntime({ env: { KUBERNETES_SERVICE_HOST: '' } });
     const options = { provider: 'kubernetes', namespace: 'default', token: 't' } as const;
-    expect(() => createProvider(options, resolveOptions(options), runtime))
-      .toThrow(DiscoveryUnavailableError);
+    expect(() => createProvider(options, resolveOptions(options), runtime)).toThrow(
+      DiscoveryUnavailableError,
+    );
   });
 
   it('throws when there is neither a token nor a file system to read one from', () => {
@@ -153,8 +156,9 @@ describe('createProvider — kubernetes API server resolution', () => {
       namespace: 'default',
       apiServer: 'https://api',
     } as const;
-    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime()))
-      .toThrow('IRuntimeServices.fs');
+    expect(() => createProvider(options, resolveOptions(options), createFakeRuntime())).toThrow(
+      'IRuntimeServices.fs',
+    );
   });
 
   it('accepts a file system in place of an explicit token', () => {
@@ -164,8 +168,9 @@ describe('createProvider — kubernetes API server resolution', () => {
       namespace: 'default',
       apiServer: 'https://api',
     } as const;
-    expect(createProvider(options, resolveOptions(options), runtime))
-      .toBeInstanceOf(KubernetesProvider);
+    expect(createProvider(options, resolveOptions(options), runtime)).toBeInstanceOf(
+      KubernetesProvider,
+    );
   });
 });
 
@@ -173,10 +178,12 @@ describe('createProvider — dns without a resolver', () => {
   it('throws naming Workers and the alternative arms', () => {
     const options = { provider: 'dns', mode: 'srv' } as const;
     const runtime = createFakeRuntime();
-    expect(() => createProvider(options, resolveOptions(options), runtime))
-      .toThrow(DiscoveryUnavailableError);
-    expect(() => createProvider(options, resolveOptions(options), runtime))
-      .toThrow('Cloudflare Workers');
+    expect(() => createProvider(options, resolveOptions(options), runtime)).toThrow(
+      DiscoveryUnavailableError,
+    );
+    expect(() => createProvider(options, resolveOptions(options), runtime)).toThrow(
+      'Cloudflare Workers',
+    );
   });
 
   it('threads the a-mode port through to the provider', async () => {
@@ -190,10 +197,13 @@ describe('createProvider — dns without a resolver', () => {
 
 describe('createProvider — optional options reach the provider', () => {
   it('threads the consul token, datacenter, and secure flag through', async () => {
-    const http = createFakeHttp([{
-      text: '[{"Node":{"Address":"10.0.0.9"},' +
-        '"Service":{"ID":"b1","Service":"billing","Port":8080}}]',
-    }]);
+    const http = createFakeHttp([
+      {
+        text:
+          '[{"Node":{"Address":"10.0.0.9"},' +
+          '"Service":{"ID":"b1","Service":"billing","Port":8080}}]',
+      },
+    ]);
     const options = {
       provider: 'consul',
       address: 'http://consul:8500',
@@ -212,10 +222,15 @@ describe('createProvider — optional options reach the provider', () => {
 
   it('threads the kubernetes portName and secure flag through', async () => {
     const body = JSON.stringify({
-      items: [{
-        endpoints: [{ addresses: ['10.1.0.1'] }],
-        ports: [{ name: 'http', port: 8080 }, { name: 'grpc', port: 9090 }],
-      }],
+      items: [
+        {
+          endpoints: [{ addresses: ['10.1.0.1'] }],
+          ports: [
+            { name: 'http', port: 8080 },
+            { name: 'grpc', port: 9090 },
+          ],
+        },
+      ],
     });
     const http = createFakeHttp([{ text: body }]);
     const options = {

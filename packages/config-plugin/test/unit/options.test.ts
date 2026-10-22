@@ -22,8 +22,14 @@ describe('ConfigDiagnosticsOptions | compilation', () => {
       keys: { PORT: 'port', HOST: 'host' },
       files: { '.env.local': 'dotenv-local', '.env': 'dotenv' },
     });
-    expect([...policy.aliasByKey]).toEqual([['PORT', 'port'], ['HOST', 'host']]);
-    expect([...policy.aliasByPath]).toEqual([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]);
+    expect([...policy.aliasByKey]).toEqual([
+      ['PORT', 'port'],
+      ['HOST', 'host'],
+    ]);
+    expect([...policy.aliasByPath]).toEqual([
+      ['.env.local', 'dotenv-local'],
+      ['.env', 'dotenv'],
+    ]);
   });
 
   it('compiles with no files map at all', () => {
@@ -32,26 +38,25 @@ describe('ConfigDiagnosticsOptions | compilation', () => {
   });
 
   it('refuses a non-object or a disabled flag with fixed messages', () => {
-    expect(() => compileConfigDiagnosticsPolicy(null as unknown as ConfigDiagnosticsOptions))
-      .toThrow(CONFIG_DIAGNOSTICS_ERRORS.badOptions);
+    expect(() =>
+      compileConfigDiagnosticsPolicy(null as unknown as ConfigDiagnosticsOptions),
+    ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.badOptions);
     expect(() =>
       compileConfigDiagnosticsPolicy({
         enabled: false,
         keys: {},
-      } as unknown as ConfigDiagnosticsOptions)
+      } as unknown as ConfigDiagnosticsOptions),
     ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.notEnabled);
     expect(() =>
       compileConfigDiagnosticsPolicy({
         enabled: true,
         keys: 'nope',
-      } as unknown as ConfigDiagnosticsOptions)
+      } as unknown as ConfigDiagnosticsOptions),
     ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.badKeys);
   });
 
   it('refuses more than 128 keys and more than eight files', () => {
-    const keys = Object.fromEntries(
-      Array.from({ length: 129 }, (_, i) => [`K${i}`, `k${i}`]),
-    );
+    const keys = Object.fromEntries(Array.from({ length: 129 }, (_, i) => [`K${i}`, `k${i}`]));
     expect(() => compileConfigDiagnosticsPolicy({ enabled: true, keys })).toThrow(
       CONFIG_DIAGNOSTICS_ERRORS.tooManyKeys,
     );
@@ -82,14 +87,15 @@ describe('ConfigDiagnosticsOptions | compilation', () => {
   });
 
   it('refuses duplicate aliases within each map', () => {
-    expect(() => compileConfigDiagnosticsPolicy({ enabled: true, keys: { A: 'same', B: 'same' } }))
-      .toThrow(CONFIG_DIAGNOSTICS_ERRORS.duplicateAlias);
+    expect(() =>
+      compileConfigDiagnosticsPolicy({ enabled: true, keys: { A: 'same', B: 'same' } }),
+    ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.duplicateAlias);
     expect(() =>
       compileConfigDiagnosticsPolicy({
         enabled: true,
         keys: { A: 'a' },
         files: { '.env.local': 'same', '.env': 'same' },
-      })
+      }),
     ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.duplicateAlias);
   });
 
@@ -98,14 +104,14 @@ describe('ConfigDiagnosticsOptions | compilation', () => {
       compileConfigDiagnosticsPolicy({
         enabled: true,
         keys: { KEY: 42 } as unknown as Record<string, string>,
-      })
+      }),
     ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.badKeys);
     expect(() =>
       compileConfigDiagnosticsPolicy({
         enabled: true,
         keys: {},
         files: { '.env': true } as unknown as Record<string, string>,
-      })
+      }),
     ).toThrow(CONFIG_DIAGNOSTICS_ERRORS.badFiles);
   });
 });

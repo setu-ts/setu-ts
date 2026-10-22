@@ -126,16 +126,20 @@ async function createTable(
         { AttributeName: partitionKey, KeyType: 'HASH' as const },
         ...(sortKey === undefined ? [] : [{ AttributeName: sortKey, KeyType: 'RANGE' as const }]),
       ],
-      ...(gsi === undefined ? {} : {
-        GlobalSecondaryIndexes: [{
-          IndexName: gsi.name,
-          KeySchema: [
-            { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
-            { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
-          ],
-          Projection: { ProjectionType: 'ALL' as const },
-        }],
-      }),
+      ...(gsi === undefined
+        ? {}
+        : {
+            GlobalSecondaryIndexes: [
+              {
+                IndexName: gsi.name,
+                KeySchema: [
+                  { AttributeName: gsi.partitionKey, KeyType: 'HASH' as const },
+                  { AttributeName: gsi.sortKey, KeyType: 'RANGE' as const },
+                ],
+                Projection: { ProjectionType: 'ALL' as const },
+              },
+            ],
+          }),
     }),
   );
   for (;;) {
@@ -149,12 +153,10 @@ async function connectedSource(
   entity: string,
   entityMapping: DynamoEntityMapping,
   maxPageFetches?: number,
-): Promise<
-  {
-    readonly adapter: DynamoAdapter;
-    readonly source: ReturnType<DynamoAdapter['createDataSource']>;
-  }
-> {
+): Promise<{
+  readonly adapter: DynamoAdapter;
+  readonly source: ReturnType<DynamoAdapter['createDataSource']>;
+}> {
   const adapter = adapterFor(entity, entityMapping, maxPageFetches);
   await adapter.connect();
   return { adapter, source: adapter.createDataSource(entity) };
@@ -299,45 +301,49 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     },
   );
 
-  it('walks sparse filtered pages in their exact [1, 0, 1, 0] server-page shape', {
-    skip: skipReal,
-  }, async () => {
-    const { adapter, source } = await connectedSource(
-      'Sparse',
-      mapping(tables.sparse, 'pk', 'sk'),
-      1,
-    );
-    try {
-      for (let number = 1; number <= 10; number += 1) {
-        await source.create({
-          pk: 'sparse',
-          sk: String(number).padStart(3, '0'),
-          visible: number === 1 || number === 8,
-        });
+  it(
+    'walks sparse filtered pages in their exact [1, 0, 1, 0] server-page shape',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const { adapter, source } = await connectedSource(
+        'Sparse',
+        mapping(tables.sparse, 'pk', 'sk'),
+        1,
+      );
+      try {
+        for (let number = 1; number <= 10; number += 1) {
+          await source.create({
+            pk: 'sparse',
+            sk: String(number).padStart(3, '0'),
+            visible: number === 1 || number === 8,
+          });
+        }
+        const sizes: number[] = [];
+        const ids: string[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = await findPage(
+            source,
+            query({
+              where: { pk: 'sparse' },
+              limit: 3,
+              ...(cursor === undefined ? {} : { cursor }),
+              filter: { type: 'comparison', field: 'visible', operator: 'eq', value: true },
+            }),
+          );
+          sizes.push(page.rows.length);
+          ids.push(...page.rows.map((row) => String(row.sk)));
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor !== undefined);
+        expect(sizes).toEqual([1, 0, 1, 0]);
+        expect(ids).toEqual(['001', '008']);
+      } finally {
+        await adapter.disconnect();
       }
-      const sizes: number[] = [];
-      const ids: string[] = [];
-      let cursor: string | undefined;
-      do {
-        const page = await findPage(
-          source,
-          query({
-            where: { pk: 'sparse' },
-            limit: 3,
-            ...(cursor === undefined ? {} : { cursor }),
-            filter: { type: 'comparison', field: 'visible', operator: 'eq', value: true },
-          }),
-        );
-        sizes.push(page.rows.length);
-        ids.push(...page.rows.map((row) => String(row.sk)));
-        cursor = page.nextCursor ?? undefined;
-      } while (cursor !== undefined);
-      expect(sizes).toEqual([1, 0, 1, 0]);
-      expect(ids).toEqual(['001', '008']);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 
   it(
     'keeps a stable complete order across equal GSI sort-key tie values',
@@ -378,122 +384,133 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     },
   );
 
+  it('retrieves an item collection using its mapped key columns', { skip: skipReal }, async () => {
+    const { adapter, source } = await connectedSource(
+      'Collection',
+      mapping(tables.collection, 'customerId', 'itemKey'),
+    );
+    try {
+      await source.create({ customerId: 'customer-1', itemKey: 'PROFILE', kind: 'profile' });
+      await source.create({ customerId: 'customer-1', itemKey: 'ORDER#001', kind: 'order' });
+      await source.create({ customerId: 'customer-1', itemKey: 'ORDER#002', kind: 'order' });
+      const rows = await source.findAll(
+        query({ where: { customerId: 'customer-1' }, orderBy: { itemKey: 'asc' } }),
+      );
+      expect(rows.map((row) => row.itemKey)).toEqual(['ORDER#001', 'ORDER#002', 'PROFILE']);
+      await expect(
+        source.findById({ customerId: 'customer-1', itemKey: 'PROFILE' }),
+      ).resolves.toMatchObject({ kind: 'profile' });
+    } finally {
+      await adapter.disconnect();
+    }
+  });
+
   it(
-    'retrieves an item collection using its mapped key columns',
-    { skip: skipReal },
+    'filters nested fields and declared dates while rejecting an undeclared date',
+    {
+      skip: skipReal,
+    },
     async () => {
       const { adapter, source } = await connectedSource(
-        'Collection',
-        mapping(tables.collection, 'customerId', 'itemKey'),
+        'Dates',
+        mapping(tables.dates, 'id', undefined, { dateAttributes: { createdAt: 'iso' } }),
       );
       try {
-        await source.create({ customerId: 'customer-1', itemKey: 'PROFILE', kind: 'profile' });
-        await source.create({ customerId: 'customer-1', itemKey: 'ORDER#001', kind: 'order' });
-        await source.create({ customerId: 'customer-1', itemKey: 'ORDER#002', kind: 'order' });
+        await source.create({
+          id: 'old',
+          profile: { address: { city: 'Pune' } },
+          createdAt: new Date('2024-01-01T00:00:00.000Z'),
+        });
+        await source.create({
+          id: 'new',
+          profile: { address: { city: 'Pune' } },
+          createdAt: new Date('2024-02-01T00:00:00.000Z'),
+        });
         const rows = await source.findAll(
-          query({ where: { customerId: 'customer-1' }, orderBy: { itemKey: 'asc' } }),
+          query({
+            filter: {
+              type: 'and',
+              filters: [
+                {
+                  type: 'comparison',
+                  field: ['profile', 'address', 'city'],
+                  operator: 'eq',
+                  value: 'Pune',
+                },
+                {
+                  type: 'comparison',
+                  field: 'createdAt',
+                  operator: 'gte',
+                  value: new Date('2024-01-15T00:00:00.000Z'),
+                },
+              ],
+            },
+          }),
         );
-        expect(rows.map((row) => row.itemKey)).toEqual(['ORDER#001', 'ORDER#002', 'PROFILE']);
-        await expect(source.findById({ customerId: 'customer-1', itemKey: 'PROFILE' })).resolves
-          .toMatchObject({ kind: 'profile' });
+        expect(rows.map((row) => row.id)).toEqual(['new']);
+        await expect(
+          source.findAll(
+            query({
+              filter: {
+                type: 'comparison',
+                field: 'undeclaredDate',
+                operator: 'gte',
+                value: new Date('2024-01-01T00:00:00.000Z'),
+              },
+            }),
+          ),
+        ).rejects.toThrow(/undeclaredDate/);
       } finally {
         await adapter.disconnect();
       }
     },
   );
 
-  it('filters nested fields and declared dates while rejecting an undeclared date', {
-    skip: skipReal,
-  }, async () => {
-    const { adapter, source } = await connectedSource(
-      'Dates',
-      mapping(tables.dates, 'id', undefined, { dateAttributes: { createdAt: 'iso' } }),
-    );
-    try {
-      await source.create({
-        id: 'old',
-        profile: { address: { city: 'Pune' } },
-        createdAt: new Date('2024-01-01T00:00:00.000Z'),
+  it(
+    'carries all four GSI and table key values through a two-page cursor walk',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const gsiMapping = mapping(tables.gsi, 'pk', 'sk', {
+        indexes: { byCustomer: { partitionKey: 'customerId', sortKey: 'createdAt' } },
       });
-      await source.create({
-        id: 'new',
-        profile: { address: { city: 'Pune' } },
-        createdAt: new Date('2024-02-01T00:00:00.000Z'),
-      });
-      const rows = await source.findAll(query({
-        filter: {
-          type: 'and',
-          filters: [
-            {
-              type: 'comparison',
-              field: ['profile', 'address', 'city'],
-              operator: 'eq',
-              value: 'Pune',
-            },
-            {
-              type: 'comparison',
-              field: 'createdAt',
-              operator: 'gte',
-              value: new Date('2024-01-15T00:00:00.000Z'),
-            },
-          ],
-        },
-      }));
-      expect(rows.map((row) => row.id)).toEqual(['new']);
-      await expect(source.findAll(query({
-        filter: {
-          type: 'comparison',
-          field: 'undeclaredDate',
-          operator: 'gte',
-          value: new Date('2024-01-01T00:00:00.000Z'),
-        },
-      }))).rejects.toThrow(/undeclaredDate/);
-    } finally {
-      await adapter.disconnect();
-    }
-  });
-
-  it('carries all four GSI and table key values through a two-page cursor walk', {
-    skip: skipReal,
-  }, async () => {
-    const gsiMapping = mapping(tables.gsi, 'pk', 'sk', {
-      indexes: { byCustomer: { partitionKey: 'customerId', sortKey: 'createdAt' } },
-    });
-    const { adapter, source } = await connectedSource('Gsi', gsiMapping, 1);
-    try {
-      for (let number = 1; number <= 4; number += 1) {
-        await source.create({
-          pk: `order-${number}`,
-          sk: `line-${number}`,
-          customerId: 'customer-1',
-          createdAt: `2024-01-0${number}T00:00:00.000Z`,
-        });
+      const { adapter, source } = await connectedSource('Gsi', gsiMapping, 1);
+      try {
+        for (let number = 1; number <= 4; number += 1) {
+          await source.create({
+            pk: `order-${number}`,
+            sk: `line-${number}`,
+            customerId: 'customer-1',
+            createdAt: `2024-01-0${number}T00:00:00.000Z`,
+          });
+        }
+        const first = await findPage(
+          source,
+          query({ where: { customerId: 'customer-1' }, orderBy: { createdAt: 'asc' }, limit: 3 }),
+        );
+        expect(first.rows).toHaveLength(3);
+        expect(first.nextCursor).not.toBeNull();
+        const decoded = decodeCursor(first.nextCursor!);
+        expect(decoded).not.toBeNull();
+        if (decoded === null) throw new Error('Expected a DynamoDB GSI cursor.');
+        expect(decoded.keyValues).toHaveLength(4);
+        const second = await findPage(
+          source,
+          query({
+            where: { customerId: 'customer-1' },
+            orderBy: { createdAt: 'asc' },
+            limit: 3,
+            cursor: first.nextCursor!,
+          }),
+        );
+        expect(second.rows).toHaveLength(1);
+        expect(second.nextCursor).toBeNull();
+      } finally {
+        await adapter.disconnect();
       }
-      const first = await findPage(
-        source,
-        query({ where: { customerId: 'customer-1' }, orderBy: { createdAt: 'asc' }, limit: 3 }),
-      );
-      expect(first.rows).toHaveLength(3);
-      expect(first.nextCursor).not.toBeNull();
-      const decoded = decodeCursor(first.nextCursor!);
-      expect(decoded).not.toBeNull();
-      if (decoded === null) throw new Error('Expected a DynamoDB GSI cursor.');
-      expect(decoded.keyValues).toHaveLength(4);
-      const second = await findPage(
-        source,
-        query({
-          where: { customerId: 'customer-1' },
-          orderBy: { createdAt: 'asc' },
-          limit: 3,
-          cursor: first.nextCursor!,
-        }),
-      );
-      expect(second.rows).toHaveLength(1);
-      expect(second.nextCursor).toBeNull();
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+    },
+  );
 
   it('counts through DynamoDB Local pages beyond one megabyte', { skip: skipReal }, async () => {
     const { adapter, source } = await connectedSource('Count', mapping(tables.count, 'pk', 'sk'));
@@ -508,102 +525,118 @@ describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
     }
   });
 
-  it('flushes deferred transaction writes on commit and sends none on rollback', {
-    skip: skipReal,
-  }, async () => {
-    const entityMapping = mapping(tables.transaction, 'id');
-    const adapter = adapterFor('Transaction', entityMapping);
-    await adapter.connect();
-    try {
-      const committed = await adapter.beginTransaction();
-      const committedSource = committed.createDataSource('Transaction');
-      await committedSource.create({ id: 'commit', value: 1 });
-      await committed.commit();
-      await expect(adapter.createDataSource('Transaction').findById('commit')).resolves
-        .toMatchObject({ value: 1 });
-      const rolledBack = await adapter.beginTransaction();
-      await rolledBack.createDataSource('Transaction').create({ id: 'rollback', value: 2 });
-      await rolledBack.rollback();
-      await expect(adapter.createDataSource('Transaction').findById('rollback')).resolves
-        .toBeNull();
-    } finally {
-      await adapter.disconnect();
-    }
-  });
+  it(
+    'flushes deferred transaction writes on commit and sends none on rollback',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const entityMapping = mapping(tables.transaction, 'id');
+      const adapter = adapterFor('Transaction', entityMapping);
+      await adapter.connect();
+      try {
+        const committed = await adapter.beginTransaction();
+        const committedSource = committed.createDataSource('Transaction');
+        await committedSource.create({ id: 'commit', value: 1 });
+        await committed.commit();
+        await expect(
+          adapter.createDataSource('Transaction').findById('commit'),
+        ).resolves.toMatchObject({ value: 1 });
+        const rolledBack = await adapter.beginTransaction();
+        await rolledBack.createDataSource('Transaction').create({ id: 'rollback', value: 2 });
+        await rolledBack.rollback();
+        await expect(
+          adapter.createDataSource('Transaction').findById('rollback'),
+        ).resolves.toBeNull();
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
 
-  it('a duplicate key reaches the caller as DuplicateKeyError, directly and at commit', {
-    skip: skipReal,
-  }, async () => {
-    const entityMapping = mapping(tables.transaction, 'id');
-    const adapter = adapterFor('Transaction', entityMapping);
-    await adapter.connect();
-    const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
-    try {
-      const repo = service.getRepository('Transaction');
-      await repo.create({ id: 'dup', value: 1 });
+  it(
+    'a duplicate key reaches the caller as DuplicateKeyError, directly and at commit',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const entityMapping = mapping(tables.transaction, 'id');
+      const adapter = adapterFor('Transaction', entityMapping);
+      await adapter.connect();
+      const service = new DatabaseService(adapter, (e) => adapter.createDataSource(e), 'dynamodb');
+      try {
+        const repo = service.getRepository('Transaction');
+        await repo.create({ id: 'dup', value: 1 });
 
-      const direct = await repo.create({ id: 'dup', value: 2 }).catch((e: unknown) => e);
-      expect(direct).toBeInstanceOf(DuplicateKeyError);
-      expect((direct as DuplicateKeyError).entity).toBe('Transaction');
-      expect(((direct as Error).cause as Error).name).toBe('ConditionalCheckFailedException');
+        const direct = await repo.create({ id: 'dup', value: 2 }).catch((e: unknown) => e);
+        expect(direct).toBeInstanceOf(DuplicateKeyError);
+        expect((direct as DuplicateKeyError).entity).toBe('Transaction');
+        expect(((direct as Error).cause as Error).name).toBe('ConditionalCheckFailedException');
 
-      // In a transaction the guard fails at TransactWriteItems, which DynamoDB
-      // reports as a cancellation with one reason per write.
-      const atCommit = await service.transaction(async (uow) => {
-        const scoped = uow.getRepository('Transaction');
-        await scoped.create({ id: 'dup-tx-fresh', value: 3 });
-        await scoped.create({ id: 'dup', value: 4 });
-      }).catch((e: unknown) => e);
-      expect(atCommit).toBeInstanceOf(DuplicateKeyError);
-      expect(((atCommit as Error).cause as Error).name).toBe('TransactionCanceledException');
-      // The transaction is atomic: the fresh write did not land either.
-      await expect(repo.findById('dup-tx-fresh')).resolves.toBeNull();
-      await expect(repo.findById('dup')).resolves.toMatchObject({ value: 1 });
-    } finally {
-      await service.close();
-    }
-  });
+        // In a transaction the guard fails at TransactWriteItems, which DynamoDB
+        // reports as a cancellation with one reason per write.
+        const atCommit = await service
+          .transaction(async (uow) => {
+            const scoped = uow.getRepository('Transaction');
+            await scoped.create({ id: 'dup-tx-fresh', value: 3 });
+            await scoped.create({ id: 'dup', value: 4 });
+          })
+          .catch((e: unknown) => e);
+        expect(atCommit).toBeInstanceOf(DuplicateKeyError);
+        expect(((atCommit as Error).cause as Error).name).toBe('TransactionCanceledException');
+        // The transaction is atomic: the fresh write did not land either.
+        await expect(repo.findById('dup-tx-fresh')).resolves.toBeNull();
+        await expect(repo.findById('dup')).resolves.toMatchObject({ value: 1 });
+      } finally {
+        await service.close();
+      }
+    },
+  );
 
-  it('reports Query and Scan choices through the public logQueries service seam', {
-    skip: skipReal,
-  }, async () => {
-    const logger = new CapturingLogger();
-    const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        loggerPlugin(logger),
-        DatabasePlugin({
-          type: 'dynamodb',
-          options: {
-            endpoint,
-            region,
-            credentials,
-            logQueries: true,
-            entities: { Logged: mapping(tables.logging, 'pk', 'sk') },
-          },
-        }),
-      ],
-    });
-    await app.start();
-    try {
-      const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-      const repository = database.getRepository<
-        { pk: string; sk: string; colour: string },
-        { pk: string; sk: string }
-      >('Logged');
-      await repository.create({ pk: 'one', sk: 'a', colour: 'blue' });
-      await repository.findAll({ where: { pk: 'one' } });
-      await repository.findAll({
-        filter: { type: 'comparison', field: 'colour', operator: 'eq', value: 'blue' },
+  it(
+    'reports Query and Scan choices through the public logQueries service seam',
+    {
+      skip: skipReal,
+    },
+    async () => {
+      const logger = new CapturingLogger();
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          loggerPlugin(logger),
+          DatabasePlugin({
+            type: 'dynamodb',
+            options: {
+              endpoint,
+              region,
+              credentials,
+              logQueries: true,
+              entities: { Logged: mapping(tables.logging, 'pk', 'sk') },
+            },
+          }),
+        ],
       });
-      const paths = logger.entries
-        .filter((entry) => entry.message === '[Logged] findAll')
-        .map((entry) => entry.metadata?.accessPath);
-      expect(paths).toEqual(['Query', 'Scan']);
-    } finally {
-      await app.stop();
-    }
-  });
+      await app.start();
+      try {
+        const database = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+        const repository = database.getRepository<
+          { pk: string; sk: string; colour: string },
+          { pk: string; sk: string }
+        >('Logged');
+        await repository.create({ pk: 'one', sk: 'a', colour: 'blue' });
+        await repository.findAll({ where: { pk: 'one' } });
+        await repository.findAll({
+          filter: { type: 'comparison', field: 'colour', operator: 'eq', value: 'blue' },
+        });
+        const paths = logger.entries
+          .filter((entry) => entry.message === '[Logged] findAll')
+          .map((entry) => entry.metadata?.accessPath);
+        expect(paths).toEqual(['Query', 'Scan']);
+      } finally {
+        await app.stop();
+      }
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -630,8 +663,13 @@ describe('DynamoAdapter — classified statuses (X35-2)', () => {
     await closed.connect();
     const service = new DatabaseService(closed, (e) => closed.createDataSource(e), 'dynamodb');
     try {
-      const error = await service.getRepository('Order').findAll({})
-        .then(() => undefined, (e: unknown) => e);
+      const error = await service
+        .getRepository('Order')
+        .findAll({})
+        .then(
+          () => undefined,
+          (e: unknown) => e,
+        );
       expect(error).toBeInstanceOf(DatabaseUnavailableError);
       // The SDK's own diagnostic — the errno string — survives as `cause`.
       expect((error as { cause?: { code?: string } }).cause?.code).toBe('ECONNREFUSED');

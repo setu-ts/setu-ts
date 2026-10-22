@@ -126,15 +126,17 @@ describe('GcsProvider — object attributes in the save options bag (X8-6)', () 
 
   it('should pass contentType and metadata to save', async () => {
     const { client, saves } = buildFakeGcs();
-    const file = (client.bucket() as {
-      file(name: string): {
-        save(
-          data: Uint8Array,
-          options: Record<string, unknown>,
-          cb: (error: Error | null) => void,
-        ): void;
-      };
-    }).file('avatars/ada.png');
+    const file = (
+      client.bucket() as {
+        file(name: string): {
+          save(
+            data: Uint8Array,
+            options: Record<string, unknown>,
+            cb: (error: Error | null) => void,
+          ): void;
+        };
+      }
+    ).file('avatars/ada.png');
 
     await new Promise<void>((resolve, reject) => {
       file.save(BYTES, { contentType: 'image/png', metadata: { owner: 'ada' } }, (error) => {

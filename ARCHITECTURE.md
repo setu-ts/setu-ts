@@ -972,9 +972,11 @@ Each runtime has its own implementation:
 - **BunHttpAdapter** — Uses `Bun.serve()`.
 - **CloudflareWorkersHttpAdapter** — Exports `fetch` only; `listen` throws.
 
-Because the mapping is web-standard, `IRequest.ip` is intentionally left unset — a web `Request`
-carries no client address (the pre-M23 Node adapter derived it from `socket.remoteAddress`).
-Consumers needing the client IP read a proxy header (`X-Forwarded-For` / `X-Real-IP`) in middleware.
+Node, Deno and Bun supply the socket peer to the shared mapping as `IRequest.ip` (M113n),
+normalizing IPv4-mapped IPv6. Workers and plain fetch calls have no peer. Behind a proxy the peer is
+the proxy; IP security checks it against `trustedProxies` before walking the forwarded chain, then
+publishes the client IP and public origin. Session cookies, CSRF and the React Router bridge read
+that origin through the common accessor.
 
 ### Why Only Runtime May Use Runtime-Specific APIs
 
@@ -1256,7 +1258,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                               |
 | **Public API**       | `LoggerPlugin()`; `ILogger`                                                                                 |
 | **Extension Points** | Custom logger implementation (override `logger` token); custom log formatters                               |
-| **Rules**            | Pino is optional (injected or lazy-loaded via `npm:` specifier); ConsoleLogger works on all runtimes        |
+| **Rules**            | Pino is optional (injected or lazy-loaded via a bare specifier); ConsoleLogger works on all runtimes        |
 
 #### @setu-ts/config-plugin
 
@@ -1300,7 +1302,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                         |
 | **Public API**       | `DatabasePlugin()`; `IDatabaseService`; `IRepository`; `IUnitOfWork`; Drizzle-specific `createDrizzleDatabase()`, `getDrizzleDatabase()`, and `getDrizzleTransaction()` |
 | **Extension Points** | Custom ORM adapter; custom repository; custom transaction strategy                                                                    |
-| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from `npm:`. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. Cloud Bigtable is the wide-column arm: it has no secondary index, so its row key — one lexicographically-sorted string composed from logical fields by the per-entity mapping — is the only ordering, and every non-key predicate is evaluated by the same portable evaluator the memory reference uses. |
+| **Rules**            | Applications inject Prisma clients and opaque configured Drizzle identities with explicit Promise-aware transaction bridges; only Drizzle operators are lazy-loaded from bare specifiers. Portable repository operations stay backend-neutral, while released raw `query()` and distinct typed outer/transaction Drizzle accessors are explicit backend-specific escape hatches. Memory remains the zero-dependency default. Cloud Bigtable is the wide-column arm: it has no secondary index, so its row key — one lexicographically-sorted string composed from logical fields by the per-entity mapping — is the only ordering, and every non-key predicate is evaluated by the same portable evaluator the memory reference uses. |
 
 #### @setu-ts/cache-plugin
 
@@ -1311,7 +1313,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`                                                                                                            |
 | **Public API**       | `CachePlugin()`, `CacheService`, `MemoryStore`, `RedisStore`, `NoopStore`, `cacheMiddleware`, types in `src/interfaces/index` |
 | **Extension Points** | Custom cache store (override `cache` token); custom key generators; named multi-cache instances                               |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory store default; `ICacheStore` has 5 methods    |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via a bare specifier); Memory store default; `ICacheStore` has 5 methods    |
 
 #### @setu-ts/events-plugin
 
@@ -1344,7 +1346,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                       |
 | **Public API**       | `MessagingPlugin()`; `EventsMessagingBridge()`; `InMemoryBroker`; `RedisStreamsBroker`; `RabbitMqBroker`; `NatsBroker`; `KafkaBroker`; `GcpPubSubBroker`; `ServiceBusBroker`; `JsonSerializer`; `IMessageBroker` (re-exported from `common`)        |
 | **Extension Points** | Custom broker adapter; custom serializers; custom SDK client injection; custom transport adapters                                                                                                                                                   |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime                |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via a bare specifier); in-memory broker default for testing; decoupled from events plugin; named instances via `name` option; cloud brokers require provider credentials at runtime                |
 
 #### @setu-ts/queue-plugin
 
@@ -1355,7 +1357,7 @@ graph TB
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                                                                                                      |
 | **Public API**       | `QueuePlugin()`; `MemoryQueue`; `RedisQueue`; `RabbitMqQueue`; `SqsQueue`; `SnsPublisher`; `IQueue` (re-exported from `common`)                                                                                                                                                                                                                                    |
 | **Extension Points** | Custom queue adapter via internal `QueueAdapter` seam; custom retry strategies; custom SQS transport injection                                                                                                                                                                                                                                                     |
-| **Rules**            | Redis client is optional (injected or lazy-loaded via `npm:` specifier); Memory queue for testing; RabbitMQ adapter (polling via basicGet, TTL+DLX for delays); SQS adapter via AWS SDK `@aws-sdk/client-sqs` (injected or lazy-loaded); SNS publisher via AWS SDK `@aws-sdk/client-sns` (injected or lazy-loaded); DLQ forwards original body then deletes source |
+| **Rules**            | Redis client is optional (injected or lazy-loaded via a bare specifier); Memory queue for testing; RabbitMQ adapter (polling via basicGet, TTL+DLX for delays); SQS adapter via AWS SDK `@aws-sdk/client-sqs` (injected or lazy-loaded); SNS publisher via AWS SDK `@aws-sdk/client-sns` (injected or lazy-loaded); DLQ forwards original body then deletes source |
 
 **Architecture Notes:** The `QueuePlugin` factory registers a `QueueService` implementing the
 `IQueue` contract under the `queue` capability token (or `queue.<name>` for named instances). The
@@ -1456,7 +1458,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                                                                                                                                                                                                                                                                                     |
 | **Public API**       | `TelemetryPlugin()`; `telemetryMiddleware`; `TELEMETRY_SPAN_KEY`; `NoopTelemetryService`; `InstrumentationsConfig`/`InstrumentationConfig`/`InstrumentationKind`/`SpanProcessorKind`                                                                                                                                                                                                              |
 | **Extension Points** | Custom exporters; injectable `tracerProviderFactory`; injectable per-instrumentation instances (`InstrumentationConfig.instrumentation`)                                                                                                                                                                                                                                                          |
-| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via `npm:` specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests; auto-instrumentation (M24b) is runtime-gated (Node-only kinds `http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`) and degrades to a documented no-op elsewhere; `spanProcessor: 'simple'` (default) or `'batch'` |
+| **Rules**            | OpenTelemetry SDK is optional (injected or lazy-loaded via a bare specifier); noop default when no exporter; middleware priority 30; `TracerProviderFactory` injection seam for tests; auto-instrumentation (M24b) is runtime-gated (Node-only kinds `http`/`fetch`/`ioredis`/`amqplib`/`kafkajs`) and degrades to a documented no-op elsewhere; `spanProcessor: 'simple'` (default) or `'batch'` |
 
 #### @setu-ts/secrets-plugin
 
@@ -1467,7 +1469,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                         |
 | **Public API**       | `SecretsPlugin()`; `ISecretManager`                                                                   |
 | **Extension Points** | Custom secret provider                                                                                |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); env provider for development |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via bare specifiers); env provider for development |
 
 #### @setu-ts/audit-plugin
 
@@ -1500,7 +1502,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                   |
 | **Public API**       | `StoragePlugin()`; `IStorage`                                                                                   |
 | **Extension Points** | Custom storage provider                                                                                         |
-| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via `npm:` specifiers); local and memory providers for testing |
+| **Rules**            | Cloud SDKs are optional (injected or lazy-loaded via bare specifiers); local and memory providers for testing |
 
 #### @setu-ts/mail-plugin
 
@@ -1511,7 +1513,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`; optionally the `view` capability (component templates, M102)                  |
 | **Public API**       | `MailPlugin()`; `IMailer`                                                                         |
 | **Extension Points** | Custom mail provider; component templates through `CAPABILITIES.VIEW`                            |
-| **Rules**            | Email SDKs are optional (injected or lazy-loaded via `npm:` specifiers); log provider for testing |
+| **Rules**            | Email SDKs are optional (injected or lazy-loaded via bare specifiers); log provider for testing |
 
 #### @setu-ts/notification-plugin
 
@@ -1522,7 +1524,7 @@ single topic and reuses the same inject-or-lazy `@aws-sdk/client-sns` SDK seam a
 | **Dependencies**     | `common`, `kernel`                                                             |
 | **Public API**       | `NotificationPlugin()`; `INotifier`                                            |
 | **Extension Points** | Custom notification channels                                                   |
-| **Rules**            | Channel providers are optional (injected or lazy-loaded via `npm:` specifiers) |
+| **Rules**            | Channel providers are optional (injected or lazy-loaded via bare specifiers) |
 
 #### @setu-ts/feature-flags-plugin
 
@@ -1616,7 +1618,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GraphqlPlugin()`; `IGraphqlService`                                                                                                    |
 | **Extension Points** | Custom schema; custom resolvers; custom scalar resolvers; custom document cache                                                         |
-| **Rules**            | `npm:graphql@^16` is inject-or-lazy; subscriptions require `CAPABILITIES.WEBSOCKET` or `CAPABILITIES.SSE` OPTIONALLY                   |
+| **Rules**            | `graphql` is inject-or-lazy; subscriptions require `CAPABILITIES.WEBSOCKET` or `CAPABILITIES.SSE` OPTIONALLY                   |
 
 #### @setu-ts/grpc-plugin
 
@@ -1627,7 +1629,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `GrpcPlugin()`; `IGrpcService`                                                                                                          |
 | **Extension Points** | Custom service definitions via embedded `FileDescriptorSet` constants                                                                   |
-| **Rules**            | Connect-ES + Protobuf-ES from `npm:`; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
+| **Rules**            | Connect-ES + Protobuf-ES from bare specifiers; detection is prefix-only; RPC dispatch runs in the kernel terminal handler after the middleware pipeline |
 
 #### @setu-ts/react-router-plugin
 
@@ -1759,7 +1761,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 | **Dependencies**     | `microservice-starter`, `cache-plugin`, `cqrs-plugin`, `storage-plugin`, `react-router-plugin`                                          |
 | **Public API**       | `createFullStackApp()`; `createFullStackAppFromConfig()`; `FullStackStarterOptions`                                                     |
 | **Extension Points** | `reactRouter`, `session`, `database` arms; config-driven composition via `ConfigPlugin`                                                 |
-| **Rules**            | Vite is an app-level build tool; `deno.json` compiler options must include `exactOptionalPropertyTypes`                                 |
+| **Rules**            | Vite is an app-level build tool; `tsconfig.base.json` enables `exactOptionalPropertyTypes`                                 |
 
 ---
 ````
@@ -1905,17 +1907,17 @@ last outbound).
 | 250      | SecurityHeadersMiddleware | Add security headers     |
 | 260      | SessionMiddleware         | Load/commit the session  |
 | 270      | CsrfMiddleware            | Origin/Referer check     |
-| 275      | CsrfFormMiddleware        | Synchronizer-token check |
 | 300      | AuthMiddleware            | Authenticate request     |
+| 325      | CsrfFormMiddleware        | Synchronizer-token check |
 | 350      | AuthorizationMiddleware   | Check permissions        |
 | 400      | ValidationMiddleware      | Validate request         |
 
 These priorities are conventional bands. Metrics (20), telemetry (30), tenant resolution (40),
-locale resolution (45), HTTP security (120–270), session (260/275), and authentication (300) are
-self-registered by their own plugins. The application (or a starter) adds the error handler and any
-application middleware. `AuthPluginOptions.middleware` can move authentication, exclude selected
-paths, or disable its global registration when the application attaches `authMiddleware()` per
-route.
+locale resolution (45), HTTP security (120–270), session (260), authentication (300), and form CSRF
+(325) are self-registered by their own plugins. The application (or a starter) adds the error
+handler and any application middleware. `AuthPluginOptions.middleware` can move authentication,
+exclude selected paths, or disable its global registration when the application attaches
+`authMiddleware()` per route.
 
 The session sits below authentication so an auth strategy can read it — `SessionStrategy`
 (configured by `AuthPluginOptions.session`) is that reader. It opens the cookie through
@@ -1924,8 +1926,10 @@ The session sits below authentication so an auth strategy can read it — `Sessi
 first. The session's commit phase (which runs after `next()` returns) therefore wraps everything
 inner. The two CSRF middlewares are different mechanisms rather than one feature configured twice:
 the stateless Origin/Referer check at 270 is cheap and runs first, so a request failing it never
-reaches token comparison at 275. Anything reading the session must be registered above 260, or the
-session accessor throws.
+reaches token comparison at 325. The form check sits after authentication (300) because its bearer
+exemption reads the credential source the authentication middleware records — only a request
+authenticated by a header-credential strategy is exempt. Anything reading the session must be
+registered above 260, or the session accessor throws.
 
 ### Registration
 
@@ -1936,7 +1940,9 @@ app.middleware.add(loggingMiddleware(), { priority: 50 });
 // Route-level middleware
 app.router.get('/users', {
   middleware: [requireAuth(), validationMiddleware()],
-  handler: async (ctx) => {/* ... */},
+  handler: async (ctx) => {
+    /* ... */
+  },
 });
 ```
 
@@ -2226,18 +2232,22 @@ via `Reflect.getMetadata()`. This ensures:
 The `DecoratorPlugin` can auto-discover decorated classes:
 
 ```typescript
-app.register(DecoratorPlugin({
-  autoDiscover: true,
-  controllersPath: './src/controllers',
-}));
+app.register(
+  DecoratorPlugin({
+    autoDiscover: true,
+    controllersPath: './src/controllers',
+  }),
+);
 ```
 
 Or classes can be registered explicitly:
 
 ```typescript
-app.register(DecoratorPlugin({
-  controllers: [UserController, OrderController],
-}));
+app.register(
+  DecoratorPlugin({
+    controllers: [UserController, OrderController],
+  }),
+);
 ```
 
 ---
@@ -2306,11 +2316,13 @@ application (or by a starter bundle) — the kernel ships zero features, includi
 ```typescript
 import { errorHandler } from '@setu-ts/exceptions';
 
-app.middleware.add(errorHandler({
-  format: 'rfc9457',
-  includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
-  logErrors: true,
-}));
+app.middleware.add(
+  errorHandler({
+    format: 'rfc9457',
+    includeStackTrace: config.get('NODE_ENV') === 'development', // via ConfigPlugin, never process.env
+    logErrors: true,
+  }),
+);
 ```
 
 For an application-owned response to a caught error, `respond` can return or resolve a result built
@@ -2334,8 +2346,7 @@ import `exceptions` (where every formatter lives), and the kernel and every midd
 an error all need the same contract. `errorHandler` builds an `IErrorResponder` from the formatter
 and content type it already resolved at factory time and publishes it in `ctx.state` **before**
 `next()`; any site inside the pipeline then calls
-`respondWithError(ctx, { status, title, detail?,
-details? })`, which delegates to the published
+`respondWithError(ctx, { status, title, detail?, details? })`, which delegates to the published
 responder and answers in the application's configured format. The one first-party site deliberately
 outside the seam is `validation-plugin`, which owns its own `errorFormat` option and formats
 validation failures itself; an application sets the two to the same format, as the CLI templates and
@@ -2599,8 +2610,7 @@ is in-process only and registers no listener.
 ### Health Observation Boundary (Milestone 98d)
 
 Health observations extend the M98a/M98b pattern to the health plugin.
-`HealthPlugin({
-diagnostics })` is OFF unless the option is passed, and an omitted option registers
+`HealthPlugin({ diagnostics })` is OFF unless the option is passed, and an omitted option registers
 only an inert, disabled source under `CAPABILITIES.HEALTH_DIAGNOSTICS` — no capture, no timer. When
 enabled, the boundary is again STRUCTURAL, not a filter over captured data: the collector is handed
 the already-produced `HealthCheckResult` from the health service's single evaluation (one callback
@@ -3129,18 +3139,30 @@ the supported backends, and each one owns migrations through its own CLI.
 import type { IAdapterTransaction, IDatabaseAdapter, IDataSource } from '@setu-ts/common';
 
 export class MyAdapter implements IDatabaseAdapter {
-  async connect(): Promise<void> {/* ... */}
-  async disconnect(): Promise<void> {/* ... */}
-  isReady(): boolean {/* ... */}
+  async connect(): Promise<void> {
+    /* ... */
+  }
+  async disconnect(): Promise<void> {
+    /* ... */
+  }
+  isReady(): boolean {
+    /* ... */
+  }
 
   // One data source per entity; it owns query evaluation end to end.
-  createDataSource(entity: string): IDataSource {/* ... */}
+  createDataSource(entity: string): IDataSource {
+    /* ... */
+  }
 
   // The handle also opens transaction-scoped data sources, which is what makes
   // a Unit of Work spanning several entities atomic.
-  async beginTransaction(): Promise<IAdapterTransaction> {/* ... */}
+  async beginTransaction(): Promise<IAdapterTransaction> {
+    /* ... */
+  }
 
-  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {/* ... */}
+  async rawQuery<T>(sql: string, params?: unknown[]): Promise<T[]> {
+    /* ... */
+  }
 }
 
 app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
@@ -3154,9 +3176,15 @@ app.register(DatabasePlugin({ type: 'custom', adapter: new MyAdapter() }));
 import { ICacheStore } from '@setu-ts/common';
 
 export class MyCacheStore implements ICacheStore {
-  async get<T>(key: string): Promise<T | null> {/* ... */}
-  async set<T>(key: string, value: T, ttl?: number): Promise<void> {/* ... */}
-  async delete(key: string): Promise<boolean> {/* ... */}
+  async get<T>(key: string): Promise<T | null> {
+    /* ... */
+  }
+  async set<T>(key: string, value: T, ttl?: number): Promise<void> {
+    /* ... */
+  }
+  async delete(key: string): Promise<boolean> {
+    /* ... */
+  }
   // ... implement all ICacheStore methods
 }
 ```
@@ -3169,10 +3197,18 @@ Transport adapters (message brokers, queue systems) follow the same pattern:
 import { IMessageBroker } from '@setu-ts/common';
 
 export class MyMessageBroker implements IMessageBroker {
-  async connect(): Promise<void> {/* ... */}
-  async disconnect(): Promise<void> {/* ... */}
-  async publish<T>(topic: string, message: T): Promise<void> {/* ... */}
-  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> {/* ... */}
+  async connect(): Promise<void> {
+    /* ... */
+  }
+  async disconnect(): Promise<void> {
+    /* ... */
+  }
+  async publish<T>(topic: string, message: T): Promise<void> {
+    /* ... */
+  }
+  async subscribe<T>(topic: string, handler: MessageHandler<T>): Promise<Subscription> {
+    /* ... */
+  }
 }
 ```
 
@@ -3333,11 +3369,18 @@ only the architectural constraints.
 
 ### 19.1 Images build from the repository root
 
-An application's `deno.json` maps only the packages it imports directly. `@setu-ts/common` reaches
-`@setu-ts/kernel` through the **root workspace**, so a container image must carry the root
-`deno.json` alongside `packages/`. Without it, Deno resolves the workspace member's `jsr:` specifier
-against the registry and the build fails outright. This is why the build context is the repository
-root rather than the application directory.
+An application is a member of the pnpm workspace and depends on `@setu-ts/*` as `workspace:^`. Only
+the root `pnpm-workspace.yaml` and `pnpm-lock.yaml` let a frozen install link those members, so a
+container image must carry both alongside `packages/`; without the lock,
+`pnpm install --frozen-lockfile` refuses to run. This is why the build context is the repository
+root rather than the application directory. The image then compiles the members it needs and copies
+the app out with `pnpm deploy --prod`, so it runs the packed framework (`dist/`) rather than
+workspace source.
+
+The no-shell variant is a Node single executable application on `distroless/cc-debian12`. It is 211
+MB — 4.7× the 44.9 MB Deno-compiled image it replaced — because it embeds the Node runtime; its
+reason to exist is the removed shell and package manager, not size. The binary links against glibc,
+so `distroless/cc` is the smallest base it runs on.
 
 ### 19.2 Health endpoints are the orchestration contract
 

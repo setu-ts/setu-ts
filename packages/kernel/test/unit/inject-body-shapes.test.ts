@@ -86,7 +86,7 @@ async function echo(body: InjectBody, headers?: Record<string, string>): Promise
 }
 
 // Every arm of the published union, asserted at COMPILE time. A row deleted
-// from `InjectRequest.body` fails `deno task check` on the matching line — the
+// from `InjectRequest.body` fails `pnpm run check` on the matching line — the
 // `echo()` calls below exercise the same arms at runtime, but a test helper can
 // always be re-typed, so the union's shape is pinned here independently.
 const _acceptsString: InjectBody = 'a=1';
@@ -119,7 +119,12 @@ describe('inject() carries each documented body shape', () => {
   });
 
   it('serialises a URLSearchParams with its own toString() and defaults urlencoded', async () => {
-    const echoed = await echo(new URLSearchParams([['a', '1'], ['b', '2']]));
+    const echoed = await echo(
+      new URLSearchParams([
+        ['a', '1'],
+        ['b', '2'],
+      ]),
+    );
     expect(echoed.body).toBe('a=1&b=2');
     expect(echoed.contentType).toBe('application/x-www-form-urlencoded');
   });
@@ -153,10 +158,9 @@ describe('inject() carries each documented body shape', () => {
   });
 
   it('lets an explicit header beat a typed Blob own type (M99c §3.4)', async () => {
-    const echoed = await echo(
-      new Blob([encoder.encode('x')], { type: 'image/png' }),
-      { 'content-type': 'multipart/form-data; boundary=m99c' },
-    );
+    const echoed = await echo(new Blob([encoder.encode('x')], { type: 'image/png' }), {
+      'content-type': 'multipart/form-data; boundary=m99c',
+    });
     expect(echoed.contentType).toBe('multipart/form-data; boundary=m99c');
   });
 
@@ -207,12 +211,14 @@ describe("inject() copies a byte body rather than aliasing the caller's", () => 
 describe('inject() refuses every shape outside the union — by name', () => {
   it('refuses a Date, which the old path silently stringified to "{}"', async () => {
     const app = await buildApp();
-    await expect(app.inject({
-      method: 'POST',
-      url: '/echo',
-      // @ts-expect-error M95c: the TYPE refuses a Date; this row drives the RUNTIME refusal a JavaScript caller reaches.
-      body: new Date(),
-    })).rejects.toThrow(/received Date/);
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/echo',
+        // @ts-expect-error M95c: the TYPE refuses a Date; this row drives the RUNTIME refusal a JavaScript caller reaches.
+        body: new Date(),
+      }),
+    ).rejects.toThrow(/received Date/);
   });
 
   it('refuses a class instance, naming its class', async () => {
@@ -220,32 +226,38 @@ describe('inject() refuses every shape outside the union — by name', () => {
       value = 1;
     }
     const app = await buildApp();
-    await expect(app.inject({
-      method: 'POST',
-      url: '/echo',
-      // @ts-expect-error M95c: the TYPE refuses a class instance; this row drives the RUNTIME refusal.
-      body: new Widget(),
-    })).rejects.toThrow(/received Widget/);
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/echo',
+        // @ts-expect-error M95c: the TYPE refuses a class instance; this row drives the RUNTIME refusal.
+        body: new Widget(),
+      }),
+    ).rejects.toThrow(/received Widget/);
   });
 
   it('refuses an array, which the old path destroyed as a JSON object', async () => {
     const app = await buildApp();
-    await expect(app.inject({
-      method: 'POST',
-      url: '/echo',
-      // @ts-expect-error M95c: the TYPE refuses an array; this row drives the RUNTIME refusal.
-      body: [1, 2, 3],
-    })).rejects.toThrow(TypeError);
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/echo',
+        // @ts-expect-error M95c: the TYPE refuses an array; this row drives the RUNTIME refusal.
+        body: [1, 2, 3],
+      }),
+    ).rejects.toThrow(TypeError);
   });
 
   it('refuses a bare number, closing the silent JSON.stringify path for primitives', async () => {
     const app = await buildApp();
-    await expect(app.inject({
-      method: 'POST',
-      url: '/echo',
-      // @ts-expect-error M95c: a number was never a documented body; the old path stringified it anyway.
-      body: 42,
-    })).rejects.toThrow(/received number/);
+    await expect(
+      app.inject({
+        method: 'POST',
+        url: '/echo',
+        // @ts-expect-error M95c: a number was never a documented body; the old path stringified it anyway.
+        body: 42,
+      }),
+    ).rejects.toThrow(/received number/);
   });
 });
 

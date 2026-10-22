@@ -23,19 +23,17 @@ describe('IssuerStrategy routing', () => {
 
   it('returns null for absent, wrong-scheme and malformed tokens', async () => {
     const t = await setupStrategy();
-    for (
-      const value of [
-        undefined,
-        '',
-        'Basic abc',
-        'Bearer',
-        'Bearer a b',
-        'Bearer a.b',
-        'Bearer a.b.c',
-        `Bearer x.${encodeBase64Url(new TextEncoder().encode('[1]'))}.c`,
-        `Bearer x.${encodeBase64Url(new TextEncoder().encode('{"iss":7}'))}.c`,
-      ]
-    ) {
+    for (const value of [
+      undefined,
+      '',
+      'Basic abc',
+      'Bearer',
+      'Bearer a b',
+      'Bearer a.b',
+      'Bearer a.b.c',
+      `Bearer x.${encodeBase64Url(new TextEncoder().encode('[1]'))}.c`,
+      `Bearer x.${encodeBase64Url(new TextEncoder().encode('{"iss":7}'))}.c`,
+    ]) {
       expect(await t.strategy.authenticate(request(value))).toBeNull();
     }
     expect(t.calls).toEqual([]);
@@ -193,8 +191,9 @@ describe('IssuerStrategy refusals', () => {
       }),
     ).toEqual(['verification-error']);
     const t = await setupStrategy({ issuer: { toPrincipal: () => null } });
-    expect(await t.strategy.authenticate(request(`Bearer ${await signToken(t.key, valid())}`)))
-      .toBeNull();
+    expect(
+      await t.strategy.authenticate(request(`Bearer ${await signToken(t.key, valid())}`)),
+    ).toBeNull();
   });
 
   it('hands toPrincipal a frozen copy of the full claims', async () => {

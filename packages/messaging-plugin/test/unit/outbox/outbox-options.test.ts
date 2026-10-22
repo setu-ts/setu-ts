@@ -101,8 +101,9 @@ describe('resolveOutboxOptions', () => {
     expect(() => resolveOutboxOptions({ store, relay: { pageSize: 10_001 } })).toThrow(
       'relay.pageSize',
     );
-    expect(() => resolveOutboxOptions({ store, relay: { baseBackoffMs: 500, maxBackoffMs: 499 } }))
-      .toThrow('relay.maxBackoffMs');
+    expect(() =>
+      resolveOutboxOptions({ store, relay: { baseBackoffMs: 500, maxBackoffMs: 499 } }),
+    ).toThrow('relay.maxBackoffMs');
   });
 
   it('refuses reserve equality and overflow naming all three options, and accepts headroom', () => {
@@ -111,7 +112,7 @@ describe('resolveOutboxOptions', () => {
         resolveOutboxOptions({
           store,
           relay: { sweepDeadlineMs, publishTimeoutMs: 5000, storeTimeoutMs: 5000 },
-        })
+        }),
       ).toThrow(
         'relay.publishTimeoutMs + 2 * relay.storeTimeoutMs must be less than relay.sweepDeadlineMs',
       );
@@ -125,9 +126,14 @@ describe('resolveOutboxOptions', () => {
   });
 
   it('pins lease and clock-skew ranges and the construction relation on both sides', () => {
-    for (const [claimLeaseMs, maxClockSkewMs] of [[3600001, 0], [30000, 60001], [0, 0]]) {
-      expect(() => resolveOutboxOptions({ store, relay: { claimLeaseMs, maxClockSkewMs } }))
-        .toThrow(RangeError);
+    for (const [claimLeaseMs, maxClockSkewMs] of [
+      [3600001, 0],
+      [30000, 60001],
+      [0, 0],
+    ]) {
+      expect(() =>
+        resolveOutboxOptions({ store, relay: { claimLeaseMs, maxClockSkewMs } }),
+      ).toThrow(RangeError);
     }
     expect(
       resolveOutboxOptions({
@@ -135,8 +141,9 @@ describe('resolveOutboxOptions', () => {
         relay: { claimLeaseMs: 3, maxClockSkewMs: 0, publishTimeoutMs: 1, storeTimeoutMs: 1 },
       }),
     ).toBeDefined();
-    expect(() => resolveOutboxOptions({ store, relay: { claimLeaseMs: 19999 } }))
-      .toThrow('relay.publishTimeoutMs + 2 * relay.storeTimeoutMs + relay.maxClockSkewMs');
+    expect(() => resolveOutboxOptions({ store, relay: { claimLeaseMs: 19999 } })).toThrow(
+      'relay.publishTimeoutMs + 2 * relay.storeTimeoutMs + relay.maxClockSkewMs',
+    );
     expect(resolveOutboxOptions({ store, relay: { claimLeaseMs: 20000 } }).claimLeaseMs).toBe(
       20000,
     );
@@ -147,8 +154,9 @@ describe('resolveOutboxOptions', () => {
   });
 
   it('refuses a non-boolean schedule and a non-function background', () => {
-    expect(() => resolveOutboxOptions({ store, relay: { schedule: 'yes' as unknown as boolean } }))
-      .toThrow('relay.schedule');
+    expect(() =>
+      resolveOutboxOptions({ store, relay: { schedule: 'yes' as unknown as boolean } }),
+    ).toThrow('relay.schedule');
     expect(() => resolveOutboxOptions({ store, background: 1 as unknown as () => void })).toThrow(
       'background',
     );
@@ -170,12 +178,14 @@ describe('resolveOutboxOptions', () => {
     if (resolved.stores.kind === 'per-tenant') {
       expect([...resolved.stores.entries.keys()]).toEqual(['acme', 'globex']);
     }
-    expect(() => resolveOutboxOptions({ stores: [] as unknown as Record<string, IOutboxStore> }))
-      .toThrow('keyed by tenant id');
+    expect(() =>
+      resolveOutboxOptions({ stores: [] as unknown as Record<string, IOutboxStore> }),
+    ).toThrow('keyed by tenant id');
     expect(() => resolveOutboxOptions({ stores: {} })).toThrow('at least one tenant');
     expect(() => resolveOutboxOptions({ stores: { ' bad': store } })).toThrow('valid tenant id');
-    expect(() => resolveOutboxOptions({ stores: { acme: 3 as unknown as IOutboxStore } }))
-      .toThrow('each stores entry');
+    expect(() => resolveOutboxOptions({ stores: { acme: 3 as unknown as IOutboxStore } })).toThrow(
+      'each stores entry',
+    );
   });
 });
 

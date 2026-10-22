@@ -1,7 +1,7 @@
 /**
  * Validation middleware — extracts data from the HTTP request, validates it
  * against a schema, and either continues the pipeline or short-circuits with
- * a 400 response.
+ * a 400 validation response or a 415 media-type refusal.
  *
  * Exports both the core factory {@linkcode createValidationMiddleware} and
  * convenience helpers {@linkcode validateBody}, {@linkcode validateQuery},
@@ -16,15 +16,26 @@ import type {
   IValidationService,
   MiddlewareFunction,
   ValidationIssue,
+  ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, validatedStateKey, withValidationMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  formEncodingOf,
+  httpStatusHintOf,
+  respondWithError,
+  validatedStateKey,
+  withValidationMetadata,
+} from '@setu-ts/common';
 
 import type {
   FormatValidationErrors,
   ValidationErrorFormatter,
 } from '../formatters/error-formatter.ts';
 import { rfc9457Formatter } from '../formatters/rfc9457-formatter.ts';
+import { formRecord } from './form-record.ts';
+import type { ValidatedOutput, ValidatorMiddleware } from './validator-reader.ts';
+import { bindValidatorReader, recordValidated, serviceMiddleware } from './validator-reader.ts';
 
 /**
  * The formatters whose bodies are Problem Details and therefore require the
@@ -44,8 +55,11 @@ const PROBLEM_JSON = 'application/problem+json';
 // Target extraction
 // ---------------------------------------------------------------------------
 
-/** Private sentinel for JSON parse failures — never leaks outside this module. */
-class JsonParseError extends Error {}
+/** Private sentinel for malformed or unsupported bodies — never leaks outside this module. */
+class BodyParseError extends Error {}
+
+/** A response already written by the body media-type check. */
+const BODY_REFUSED = Symbol('body-refused');
 
 /**
  * Extract raw data from the request based on the target.
@@ -53,18 +67,48 @@ class JsonParseError extends Error {}
  * @param ctx - The request context
  * @param target - Which request part to extract
  * @returns The extracted data
- * @throws {JsonParseError} When body JSON is invalid
+ * @throws {BodyParseError} When the body cannot be read
  */
 async function extractTarget(
   ctx: IRequestContext,
   target: ValidationTarget,
+  forms: boolean,
 ): Promise<unknown> {
   switch (target) {
     case 'body': {
+      const contentType = ctx.request.headers.get('content-type');
+      const mediaType = contentType?.split(';', 1)[0]?.trim();
+      if (
+        forms &&
+        /^\s*(?:multipart\/|application\/x-www-form-urlencoded)/i.test(contentType ?? '') &&
+        formEncodingOf(contentType) !== undefined
+      ) {
+        try {
+          const form = await ctx.request.formData?.();
+          if (form === undefined) throw new BodyParseError('Unsupported form body');
+          return formRecord(form);
+        } catch (error) {
+          const hint = httpStatusHintOf(error);
+          if (hint !== undefined && hint.status !== 400) throw error;
+          throw new BodyParseError('Unsupported form body');
+        }
+      }
+      if (!/^application\/(?:json|[^\s/;]+\+json)$/i.test(mediaType ?? '')) {
+        respondWithError(ctx, {
+          status: 415,
+          title: 'Unsupported Media Type',
+          detail: forms
+            ? 'Expected a JSON or form request body.'
+            : 'Expected a JSON request body (application/json).',
+        });
+        return BODY_REFUSED;
+      }
       try {
         return await ctx.request.json();
-      } catch {
-        throw new JsonParseError();
+      } catch (error) {
+        const hint = httpStatusHintOf(error);
+        if (hint !== undefined && hint.status !== 400) throw error;
+        throw new BodyParseError('Invalid JSON in request body');
       }
     }
 
@@ -98,7 +142,9 @@ async function extractTarget(
         let value = rawValue;
         try {
           value = decodeURIComponent(rawValue);
-        } catch { /* keep raw when malformed */ }
+        } catch {
+          /* keep raw when malformed */
+        }
         record[eqIndex === -1 ? trimmed : trimmed.slice(0, eqIndex)] = value;
       }
       return record;
@@ -125,14 +171,30 @@ async function extractTarget(
  * @param target - Which request part to validate (`'body'`, `'query'`, etc.)
  * @param service - The validation service to use
  * @param formatter - Error formatter (resolved once at registration time)
+ * @param options - Per-validator options; `forms: true` also validates
+ *   urlencoded and multipart bodies (body target only, off by default)
  * @returns A middleware function
  */
-export function createValidationMiddleware(
-  schema: unknown,
+export function createValidationMiddleware<S>(
+  schema: S,
   target: ValidationTarget,
   service: IValidationService,
   formatter: ValidationErrorFormatter,
-): MiddlewareFunction {
+  options?: ValidationMiddlewareOptions,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  return buildValidationMiddleware(schema, target, service, formatter, {}, options);
+}
+
+/** Internal builder shared by the service, direct factory and helper. */
+export function buildValidationMiddleware<S>(
+  schema: S,
+  target: ValidationTarget,
+  service: IValidationService,
+  formatter: ValidationErrorFormatter,
+  token: object = {},
+  options?: ValidationMiddlewareOptions,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  const forms = target === 'body' && options?.forms === true;
   // Resolved once at registration time: a Problem Details body must be served
   // as `application/problem+json` (RFC 9457 §3), not the `application/json`
   // that `response.json()` sets. Keyed off the RESOLVED formatter rather than
@@ -152,30 +214,38 @@ export function createValidationMiddleware(
   // because a helper resolves the service at REQUEST time inside its own
   // closure — so the closure a route actually carries is the helper's, not this
   // one.
-  return withValidationMetadata(async (ctx, next) => {
-    let rawData: unknown;
-    try {
-      rawData = await extractTarget(ctx, target);
-    } catch (e) {
-      if (e instanceof JsonParseError) {
-        const issues: readonly ValidationIssue[] = [
-          { path: '', message: 'Invalid JSON in request body' },
-        ];
-        return respond(ctx, formatter(issues, ctx), isProblemJson);
-      }
-      throw e;
-    }
+  return bindValidatorReader(
+    withValidationMetadata(
+      async (ctx, next) => {
+        let rawData: unknown;
+        try {
+          rawData = await extractTarget(ctx, target, forms);
+        } catch (e) {
+          if (e instanceof BodyParseError) {
+            const issues: readonly ValidationIssue[] = [{ path: '', message: e.message }];
+            return respond(ctx, formatter(issues, ctx), isProblemJson);
+          }
+          throw e;
+        }
 
-    const result = service.validate(schema, rawData);
+        if (rawData === BODY_REFUSED) return;
 
-    if (result.success) {
-      ctx.state.set(validatedStateKey(target), result.value);
-      await next();
-      return;
-    }
+        const result = service.validate(schema, rawData);
 
-    return respond(ctx, formatter(result.error, ctx), isProblemJson);
-  }, { target, schema });
+        if (result.success) {
+          ctx.state.set(validatedStateKey(target), result.value);
+          recordValidated(ctx, target, token, result.value);
+          await next();
+          return;
+        }
+
+        return respond(ctx, formatter(result.error, ctx), isProblemJson);
+      },
+      { target, schema },
+    ),
+    target,
+    token,
+  );
 }
 
 /**
@@ -200,10 +270,7 @@ function respond(
     return ctx.response.status(400).json(body);
   }
   const bytes = new TextEncoder().encode(JSON.stringify(body));
-  return ctx.response
-    .status(400)
-    .header('content-type', PROBLEM_JSON)
-    .send(bytes);
+  return ctx.response.status(400).header('content-type', PROBLEM_JSON).send(bytes);
 }
 
 // ---------------------------------------------------------------------------
@@ -216,11 +283,21 @@ function respond(
  * Delegates to the configured {@linkcode IValidationService} so the error
  * format matches the plugin registration (e.g. `'rfc9457'`).
  *
+ * The first-party service requires a JSON media type (`application/json` or
+ * `application/*+json`), or a form media type when `options.forms` is `true`.
+ * Unsupported or absent types answer 415 before the body is read. A replacement
+ * service owns its own media-type handling. Cookie-authenticated routes still
+ * need `csrfMiddleware` or `csrfFormMiddleware`, including opted-in form routes.
+ *
  * @param schema - The schema (must expose `safeParse`)
+ * @param options - `forms: true` also validates urlencoded and multipart bodies
  * @returns A middleware function
  */
-export function validateBody(schema: unknown): MiddlewareFunction {
-  return bindHelper('body', schema);
+export function validateBody<S>(
+  schema: S,
+  options?: ValidationMiddlewareOptions,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  return bindHelper('body', schema, options);
 }
 
 /**
@@ -232,7 +309,7 @@ export function validateBody(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateQuery(schema: unknown): MiddlewareFunction {
+export function validateQuery<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('query', schema);
 }
 
@@ -245,7 +322,7 @@ export function validateQuery(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateParams(schema: unknown): MiddlewareFunction {
+export function validateParams<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('params', schema);
 }
 
@@ -258,7 +335,7 @@ export function validateParams(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateHeaders(schema: unknown): MiddlewareFunction {
+export function validateHeaders<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('headers', schema);
 }
 
@@ -271,7 +348,7 @@ export function validateHeaders(schema: unknown): MiddlewareFunction {
  * @param schema - The schema (must expose `safeParse`)
  * @returns A middleware function
  */
-export function validateCookies(schema: unknown): MiddlewareFunction {
+export function validateCookies<S>(schema: S): ValidatorMiddleware<ValidatedOutput<S>> {
   return bindHelper('cookies', schema);
 }
 
@@ -286,14 +363,39 @@ export function validateCookies(schema: unknown): MiddlewareFunction {
  *
  * @param target - The validation target
  * @param schema - The schema to validate against
+ * @param options - Per-validator options, forwarded to the service
  * @returns A middleware function
  */
-function bindHelper(target: ValidationTarget, schema: unknown): MiddlewareFunction {
+function bindHelper<S>(
+  target: ValidationTarget,
+  schema: S,
+  options?: ValidationMiddlewareOptions,
+): ValidatorMiddleware<ValidatedOutput<S>> {
+  const token = {};
+  const cache = new WeakMap<
+    IValidationService,
+    { method: IValidationService['middleware']; built: MiddlewareFunction }
+  >();
   // Branded here as well as in `createValidationMiddleware`: this closure is
   // the one a route's `middleware` array holds, and the inner middleware it
-  // delegates to does not exist until the request runs.
-  return withValidationMetadata(async (ctx, next) => {
-    const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
-    await service.middleware(schema, target)(ctx, next);
-  }, { target, schema });
+  // delegates to is cached per resolved service and middleware method.
+  return bindValidatorReader(
+    withValidationMetadata(
+      async (ctx, next) => {
+        const service = ctx.services.get<IValidationService>(CAPABILITIES.VALIDATION);
+        let entry = cache.get(service);
+        if (entry === undefined || entry.method !== service.middleware) {
+          entry = {
+            method: service.middleware,
+            built: serviceMiddleware(service, schema, target, token, options),
+          };
+          cache.set(service, entry);
+        }
+        await entry.built(ctx, next);
+      },
+      { target, schema },
+    ),
+    target,
+    token,
+  );
 }

@@ -46,7 +46,7 @@ function customInstance(isHealthy?: () => Promise<boolean>): IRealtimeBackplane 
 }
 
 describe('RealtimeBackplanePlugin health indicator (M70c)', () => {
-  it('reports degraded — never down — when the transport is unreachable', async () => {
+  it('reports up with reachable false when the transport is unreachable', async () => {
     const harness = createContext();
     await RealtimeBackplanePlugin({
       transport: 'custom',
@@ -55,8 +55,8 @@ describe('RealtimeBackplanePlugin health indicator (M70c)', () => {
 
     const indicator = harness.health.get('realtime-backplane');
     const result = await indicator?.();
-    // Local delivery still works, so /ready keeps serving: degraded, not down.
-    expect(result?.status).toBe('degraded');
+    // Local delivery still works: keep reachability in data and readiness up.
+    expect(result?.status).toBe('up');
     expect(result?.data).toEqual({
       transport: 'custom',
       origin: 'custom-origin',

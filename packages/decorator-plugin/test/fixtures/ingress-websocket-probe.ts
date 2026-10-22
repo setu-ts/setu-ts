@@ -84,7 +84,7 @@ try {
   await opened(client);
   const reply = nextMessage(client);
   client.send('hello');
-  if (await reply !== 'echo:hello') {
+  if ((await reply) !== 'echo:hello') {
     throw new Error('The decorated gateway did not echo the frame.');
   }
   if (sockets.connectionCount !== 1) {

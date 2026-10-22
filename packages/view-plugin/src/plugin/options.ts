@@ -34,29 +34,29 @@ import type { IViewEngine } from '@setu-ts/common';
  */
 export type ViewPluginOptions =
   | {
-    /**
-     * Components are JSX functions (`hono/jsx`). The default.
-     *
-     * This names the AUTHORING mode, not a rendering strategy: every mode
-     * funnels through one engine, because escaping belongs to the rendering
-     * runtime (M92 §3.15) and there is nothing left to configure per mode.
-     * It is still declared so a reader can see which import a project's
-     * components use, and the `view` health indicator reports it.
-     */
-    readonly engine?: 'hono-jsx';
-  }
+      /**
+       * Components are JSX functions (`hono/jsx`). The default.
+       *
+       * This names the AUTHORING mode, not a rendering strategy: every mode
+       * funnels through one engine, because escaping belongs to the rendering
+       * runtime (M92 §3.15) and there is nothing left to configure per mode.
+       * It is still declared so a reader can see which import a project's
+       * components use, and the `view` health indicator reports it.
+       */
+      readonly engine?: 'hono-jsx';
+    }
   | {
-    /**
-     * Components are `html` tagged templates (`hono/html`), which need
-     * no `jsxImportSource` and so work in a plain `.ts` file. Renders
-     * identically to `'hono-jsx'` — see that member for why the mode is
-     * declared at all.
-     */
-    readonly engine: 'hono-html';
-  }
+      /**
+       * Components are `html` tagged templates (`hono/html`), which need
+       * no `jsxImportSource` and so work in a plain `.ts` file. Renders
+       * identically to `'hono-jsx'` — see that member for why the mode is
+       * declared at all.
+       */
+      readonly engine: 'hono-html';
+    }
   | {
-    /** Selects the caller-supplied engine. */
-    readonly engine: 'custom';
-    /** The application's own engine, registered verbatim. */
-    readonly view: IViewEngine;
-  };
+      /** Selects the caller-supplied engine. */
+      readonly engine: 'custom';
+      /** The application's own engine, registered verbatim. */
+      readonly view: IViewEngine;
+    };

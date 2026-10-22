@@ -1,25 +1,24 @@
-// deno-lint-ignore-file no-console
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { StaticPlugin } from '@setu-ts/static-plugin';
+/* eslint-disable no-console -- an example entry reports its address and shutdown failures. */
+import { createRuntimeServices } from '@setu-ts/runtime';
+import { createApp } from './setu.config.ts';
 
-const app = createApplication({
-  plugins: [
-    RuntimePlugin(),
-    StaticPlugin({
-      root: './public',
-      urlPrefix: '/',
-    }),
-  ],
-});
+const runtime = createRuntimeServices();
+const port = Number(process.argv[2] ?? 8000);
+const app = createApp();
 
-app.router.get('/health', (ctx) => {
-  return ctx.response.json({ status: 'ok' });
-});
-
-const port = Number(Deno.args[0] ?? 8000);
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error(`Invalid port '${Deno.args[0]}': expected an integer from 1 to 65535.`);
-}
 await app.start({ port });
-console.log(`Server running on http://localhost:${port}`);
+console.log(`Static site listening on http://localhost:${port}`);
+
+// Without a handler, SIGTERM ends the process before `app.stop()` can run its shutdown hooks.
+// `onSignal` is absent where no signal can be caught (Windows). See docs/deployment.md.
+for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+  runtime.onSignal?.(signal, () => {
+    void app
+      .stop()
+      .then(() => runtime.exit(0))
+      .catch((error: unknown) => {
+        console.error('Graceful shutdown failed:', error);
+        runtime.exit(1);
+      });
+  });
+}

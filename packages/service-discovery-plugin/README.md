@@ -113,19 +113,22 @@ means refusing healthy instances because unhealthy ones failed. Ejection removes
 while the call site stays open. They compose by re-picking inside the wrapped call:
 
 ```typescript
-const call = resilience.wrap(async () => {
-  const instance = await discovery.pick('billing');
-  if (instance === null) throw new Error('no billing instance');
-  try {
-    const response = await fetch(`http://${instance.host}:${instance.port}/invoices`);
-    discovery.report(instance, response.ok ? 'success' : 'failure');
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return await response.json();
-  } catch (error) {
-    discovery.report(instance, 'failure');
-    throw error;
-  }
-}, { retry: { maxAttempts: 3 } });
+const call = resilience.wrap(
+  async () => {
+    const instance = await discovery.pick('billing');
+    if (instance === null) throw new Error('no billing instance');
+    try {
+      const response = await fetch(`http://${instance.host}:${instance.port}/invoices`);
+      discovery.report(instance, response.ok ? 'success' : 'failure');
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.json();
+    } catch (error) {
+      discovery.report(instance, 'failure');
+      throw error;
+    }
+  },
+  { retry: { maxAttempts: 3 } },
+);
 ```
 
 `wrap` re-enters the function on every attempt, so each retry picks again and lands on a different
@@ -235,14 +238,13 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 - `everResolved` — `false` until the first successful provider read, so a backend that was never
   reached is `down`, not `up` (the X10-3 fix).
 - `degraded` — a refresh failed and a stale snapshot is being served.
-- `isHealthy()` — the provider's live reachability probe (Consul `GET /v1/status/leader`, Kubernetes
-  a `limit=1` EndpointSlice LIST).
+- `isHealthy()` — the provider's reachability probe (Consul `GET /v1/status/leader`, Kubernetes a
+  `limit=1` EndpointSlice LIST).
 
-| Status     | Meaning                                                              |
-| ---------- | -------------------------------------------------------------------- |
-| `up`       | The provider has resolved at least once and is reachable.            |
-| `degraded` | A stale cache is being served, or the backend just went unreachable. |
-| `down`     | The provider has never resolved and is unreachable.                  |
+| Status | Meaning                                                                                                                                                                              |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `up`   | The provider is reachable, or has resolved at least one service before. A name never cached still fails while the backend is down, so alert on `data.degraded` and `data.reachable`. |
+| `down` | The provider has never resolved and is unreachable.                                                                                                                                  |
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
@@ -288,5 +290,18 @@ MIT
 | `DnsProviderOptions`                | type      |
 | `ServiceDiscoveryPluginOptions`     | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
+
+## Readiness and dependency outages (M113b)
+
+Provider reachability probes are invoked as methods, retaining their receiver. Healthy Kubernetes
+and Consul providers therefore report reachable and allow `/ready` to return 200. Since M113o, a
+warm-cache outage also reports `up`, keeping serving replicas in rotation. `data.degraded` still
+signals a failed refresh serving stale data; `data.reachable` exposes backend reachability.
+
+The discovery service caches reachability for 5 s, coalesces concurrent reads, and bounds each probe
+at 2 s; a hung or rejecting probe reports `false`. Consul and Kubernetes probe requests carry an
+`AbortSignal` aborted after 2 s by runtime timers, cleared on completion. Health reads now issue at
+most one backend probe request per 5 s window per service instance. Before M113b, the detached
+provider call threw before I/O and issued none.

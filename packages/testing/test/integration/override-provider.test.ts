@@ -91,9 +91,11 @@ describe('overrideProvider with DiPlugin and DecoratorPlugin', () => {
   });
 
   it('refuses a mistyped token rather than testing the real provider', async () => {
-    await expect(createTestApp({
-      app: createApp(),
-      overrides: [overrideProvider('pricing-servce', { useValue: { price: () => 0 } })],
-    })).rejects.toThrow(/nothing in the application registers or injects/);
+    await expect(
+      createTestApp({
+        app: createApp(),
+        overrides: [overrideProvider('pricing-servce', { useValue: { price: () => 0 } })],
+      }),
+    ).rejects.toThrow(/nothing in the application registers or injects/);
   });
 });

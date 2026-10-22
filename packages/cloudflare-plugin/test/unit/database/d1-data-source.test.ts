@@ -1,3 +1,4 @@
+import { InvalidCursorError } from '@setu-ts/common';
 import { WorkersResponse } from '../../../../../test/node-helpers.ts';
 import { afterAll, beforeAll } from 'vitest';
 const nativeResponse = globalThis.Response;
@@ -127,8 +128,9 @@ describe('createD1DataSource — reads', () => {
       { name: 'cy' },
     ]);
     expect(await source.findAll(query({ where: { name: 'ada' } }))).toHaveLength(1);
-    expect(await source.findAll(query({ orderBy: { age: 'asc' }, limit: 1, offset: 1 })))
-      .toMatchObject([{ name: 'ada' }]);
+    expect(
+      await source.findAll(query({ orderBy: { age: 'asc' }, limit: 1, offset: 1 })),
+    ).toMatchObject([{ name: 'ada' }]);
   });
 
   // The two statements below are asserted verbatim in `d1-sql.test.ts`, but a
@@ -237,9 +239,9 @@ describe('createD1DataSource — composite keys', () => {
   it('throws when updating a composite key that does not exist', async () => {
     const db = await seededCompositeDb();
     const source = createD1DataSource(db, COMPOSITE_TARGET);
-    await expect(
-      source.update({ tenantId: 't9', orderId: 'o9' }, { status: 'x' }),
-    ).rejects.toThrow(/not found/);
+    await expect(source.update({ tenantId: 't9', orderId: 'o9' }, { status: 'x' })).rejects.toThrow(
+      /not found/,
+    );
   });
 
   it('deletes a row through a composite key and reports true', async () => {
@@ -258,18 +260,16 @@ describe('createD1DataSource — composite keys', () => {
   it('refuses a composite key missing a required column', async () => {
     const db = await seededCompositeDb();
     const source = createD1DataSource(db, COMPOSITE_TARGET);
-    await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(
-      CloudflareUnsupportedError,
-    );
+    await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(CloudflareUnsupportedError);
     await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(
       /missing required column 'orderId'/,
     );
-    await expect(
-      source.update({ tenantId: 't1' }, { status: 'x' }),
-    ).rejects.toThrow(CloudflareUnsupportedError);
-    await expect(
-      source.update({ tenantId: 't1' }, { status: 'x' }),
-    ).rejects.toThrow(/missing required column 'orderId'/);
+    await expect(source.update({ tenantId: 't1' }, { status: 'x' })).rejects.toThrow(
+      CloudflareUnsupportedError,
+    );
+    await expect(source.update({ tenantId: 't1' }, { status: 'x' })).rejects.toThrow(
+      /missing required column 'orderId'/,
+    );
     await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(CloudflareUnsupportedError);
     await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(
       /missing required column 'orderId'/,
@@ -323,12 +323,12 @@ describe('createD1TransactionDataSource — composite keys on the deferred-write
     await expect(source.findById({ tenantId: 't1' })).rejects.toThrow(
       /missing required column 'orderId'/,
     );
-    await expect(
-      source.update({ tenantId: 't1' }, { status: 'x' }),
-    ).rejects.toThrow(CloudflareUnsupportedError);
-    await expect(
-      source.update({ tenantId: 't1' }, { status: 'x' }),
-    ).rejects.toThrow(/missing required column 'orderId'/);
+    await expect(source.update({ tenantId: 't1' }, { status: 'x' })).rejects.toThrow(
+      CloudflareUnsupportedError,
+    );
+    await expect(source.update({ tenantId: 't1' }, { status: 'x' })).rejects.toThrow(
+      /missing required column 'orderId'/,
+    );
     await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(CloudflareUnsupportedError);
     await expect(source.delete({ tenantId: 't1' })).rejects.toThrow(
       /missing required column 'orderId'/,
@@ -386,16 +386,20 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     const source = createD1DataSource(db, PAGE_TARGET);
 
     const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 2 }));
-    const p2 = await source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }));
-    const p3 = await source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: p2.nextCursor as string,
-    }));
+    const p2 = await source.findPage!(
+      query({
+        orderBy: { score: 'asc' },
+        limit: 2,
+        cursor: p1.nextCursor as string,
+      }),
+    );
+    const p3 = await source.findPage!(
+      query({
+        orderBy: { score: 'asc' },
+        limit: 2,
+        cursor: p2.nextCursor as string,
+      }),
+    );
 
     expect(p1.rows.map((r) => r.id)).toEqual(['a', 'b']);
     expect(p2.rows.map((r) => r.id)).toEqual(['c', 'd']);
@@ -415,11 +419,13 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     const source = createD1DataSource(db, PAGE_TARGET);
 
     const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 3 }));
-    const p2 = await source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 3,
-      cursor: p1.nextCursor as string,
-    }));
+    const p2 = await source.findPage!(
+      query({
+        orderBy: { score: 'asc' },
+        limit: 3,
+        cursor: p1.nextCursor as string,
+      }),
+    );
 
     expect(p1.rows).toHaveLength(3);
     expect(p1.nextCursor).not.toBeNull();
@@ -437,11 +443,13 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     expect(p1.nextCursor).not.toBeNull();
 
     // Second page: assert on the statement the source actually sent.
-    const p2 = await source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }));
+    const p2 = await source.findPage!(
+      query({
+        orderBy: { score: 'asc' },
+        limit: 2,
+        cursor: p1.nextCursor as string,
+      }),
+    );
     const last = db.executed.at(-1)!;
     // The conjoined keyset predicate is a FilterExpression rendered as the
     // lexicographic "row after this one" comparison:
@@ -466,16 +474,24 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     const db = await seedTiedFixture();
     const source = createD1DataSource(db, PAGE_TARGET);
 
-    await expect(source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: '!!!notb64',
-    }))).rejects.toThrow(CloudflareUnsupportedError);
-    await expect(source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: '!!!notb64',
-    }))).rejects.toThrow(/malformed cursor token/);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'asc' },
+          limit: 2,
+          cursor: '!!!notb64',
+        }),
+      ),
+    ).rejects.toThrow(InvalidCursorError);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'asc' },
+          limit: 2,
+          cursor: '!!!notb64',
+        }),
+      ),
+    ).rejects.toThrow(/malformed cursor token/);
   });
 
   it('refuses a cross-sort walk: a cursor minted under one sort is not served under another', async () => {
@@ -491,16 +507,24 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     const p1 = await source.findPage!(query({ orderBy: { score: 'asc' }, limit: 2 }));
     expect(p1.nextCursor).not.toBeNull();
 
-    await expect(source.findPage!(query({
-      orderBy: { score: 'desc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }))).rejects.toThrow(CloudflareUnsupportedError);
-    await expect(source.findPage!(query({
-      orderBy: { score: 'desc' },
-      limit: 2,
-      cursor: p1.nextCursor as string,
-    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'desc' },
+          limit: 2,
+          cursor: p1.nextCursor as string,
+        }),
+      ),
+    ).rejects.toThrow(InvalidCursorError);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'desc' },
+          limit: 2,
+          cursor: p1.nextCursor as string,
+        }),
+      ),
+    ).rejects.toThrow(/cursor fingerprint mismatch/);
   });
 
   it('rejects a cursor whose fingerprint does not match the current sort by name', async () => {
@@ -512,27 +536,37 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
       keyValues: ['a'],
       sortFingerprint: 'score:desc,id:asc',
     });
-    await expect(source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: mismatched,
-    }))).rejects.toThrow(CloudflareUnsupportedError);
-    await expect(source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      cursor: mismatched,
-    }))).rejects.toThrow(/cursor fingerprint mismatch/);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'asc' },
+          limit: 2,
+          cursor: mismatched,
+        }),
+      ),
+    ).rejects.toThrow(InvalidCursorError);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'asc' },
+          limit: 2,
+          cursor: mismatched,
+        }),
+      ),
+    ).rejects.toThrow(/cursor fingerprint mismatch/);
   });
 
   it('strips the key columns from the returned rows when a projection is present', async () => {
     const db = await seedTiedFixture();
     const source = createD1DataSource(db, PAGE_TARGET);
 
-    const result = await source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      select: ['name'],
-    }));
+    const result = await source.findPage!(
+      query({
+        orderBy: { score: 'asc' },
+        limit: 2,
+        select: ['name'],
+      }),
+    );
 
     // The caller's projection is what comes back — `id` (a key column) and
     // `score` (the ordered field) are stripped from the returned rows.
@@ -551,16 +585,20 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
     const db = await seedTiedFixture();
     const source = createD1DataSource(db, PAGE_TARGET);
 
-    await expect(source.findPage!(query({
-      orderBy: { score: 'asc' },
-      limit: 2,
-      offset: 1,
-      cursor: encodeCursor({
-        orderedValues: [10],
-        keyValues: ['a'],
-        sortFingerprint: 'score:asc,id:asc',
-      }),
-    }))).rejects.toThrow(/offset=1 conflicts with cursor/);
+    await expect(
+      source.findPage!(
+        query({
+          orderBy: { score: 'asc' },
+          limit: 2,
+          offset: 1,
+          cursor: encodeCursor({
+            orderedValues: [10],
+            keyValues: ['a'],
+            sortFingerprint: 'score:asc,id:asc',
+          }),
+        }),
+      ),
+    ).rejects.toThrow(/offset=1 conflicts with cursor/);
   });
 
   it('finds a page from the transaction data source, honoring committed state', async () => {

@@ -42,7 +42,10 @@ async function offered(argv: readonly string[], answers: readonly (string | unde
   const queue = [...answers];
   const prompter: Prompter = {
     select(question: string, choices: readonly PromptChoice[]) {
-      menus.set(question, choices.map((choice) => choice.value));
+      menus.set(
+        question,
+        choices.map((choice) => choice.value),
+      );
       const answer = queue.shift();
       return Promise.resolve(
         answer === undefined
@@ -96,10 +99,7 @@ describe('resolveNewChoices', () => {
   });
 
   it('asks runtime and transport only for a workspace', async () => {
-    const { args, questions } = await resolve(
-      ['mono', '--workspace'],
-      ['deno', 'rabbitmq'],
-    );
+    const { args, questions } = await resolve(['mono', '--workspace'], ['deno', 'rabbitmq']);
     expect(questions).toEqual(['Runtime?', 'How should the workspace members reach each other?']);
     expect(args.flags['transport']).toBe('rabbitmq');
     expect(args.flags['broker']).toBeUndefined();
@@ -249,42 +249,50 @@ describe('resolveNewChoices', () => {
 
   it('stops asking immediately when a question is cancelled', async () => {
     const questions: string[] = [];
-    const result = await resolveNewChoices(parseArgs(['svc']), {
-      select(question) {
-        questions.push(question);
-        return Promise.resolve(
-          question === 'Template?' ? { kind: 'cancelled' } : { kind: 'answer', value: 'deno' },
-        );
+    const result = await resolveNewChoices(
+      parseArgs(['svc']),
+      {
+        select(question) {
+          questions.push(question);
+          return Promise.resolve(
+            question === 'Template?' ? { kind: 'cancelled' } : { kind: 'answer', value: 'deno' },
+          );
+        },
       },
-    }, () => {});
+      () => {},
+    );
     expect(result).toEqual({ kind: 'cancelled' });
     expect(questions).toEqual(['Runtime?', 'Template?']);
   });
 });
 
-for (
-  const question of [
-    'Runtime?',
-    'Code style?',
-    'Message broker?',
-    'Job queue?',
-    'How should the workspace members reach each other?',
-  ]
-) {
+for (const question of [
+  'Runtime?',
+  'Code style?',
+  'Message broker?',
+  'Job queue?',
+  'How should the workspace members reach each other?',
+]) {
   it(`stops at a cancelled ${question} prompt`, async () => {
     const asked: string[] = [];
     const argv = question.includes('workspace') ? ['svc', '--workspace'] : ['svc'];
-    const result = await resolveNewChoices(parseArgs(argv), {
-      select(current, choices) {
-        asked.push(current);
-        return Promise.resolve(
-          current === question ? { kind: 'cancelled' as const } : {
-            kind: 'answer' as const,
-            value: current === 'Template?' ? 'microservice' : choices[0]!.value,
-          },
-        );
+    const result = await resolveNewChoices(
+      parseArgs(argv),
+      {
+        select(current, choices) {
+          asked.push(current);
+          return Promise.resolve(
+            current === question
+              ? { kind: 'cancelled' as const }
+              : {
+                  kind: 'answer' as const,
+                  value: current === 'Template?' ? 'microservice' : choices[0]!.value,
+                },
+          );
+        },
       },
-    }, () => {});
+      () => {},
+    );
     expect(result).toEqual({ kind: 'cancelled' });
     expect(asked.at(-1)).toBe(question);
   });

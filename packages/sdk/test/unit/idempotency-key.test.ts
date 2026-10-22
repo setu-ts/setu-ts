@@ -91,8 +91,9 @@ describe('resolveClientIdempotencyOptions (M109b §3.8, §3.13)', () => {
     );
     expect(() => resolveClientIdempotencyOptions({ methods: ['not a token'] })).toThrow(RangeError);
     expect(() => resolveClientIdempotencyOptions({ header: 'not a token' })).toThrow(RangeError);
-    expect(() => resolveClientIdempotencyOptions({ generateKey: 'x' as unknown as () => string }))
-      .toThrow(TypeError);
+    expect(() =>
+      resolveClientIdempotencyOptions({ generateKey: 'x' as unknown as () => string }),
+    ).toThrow(TypeError);
   });
 });
 
@@ -105,9 +106,11 @@ describe('createClient idempotency wiring (M109b §3.8)', () => {
         fetch,
         timing: timing(),
         retry: { limit: 3, delay: 1, backoff: 'fixed' },
-        responseInterceptors: [() => {
-          throw thrown;
-        }],
+        responseInterceptors: [
+          () => {
+            throw thrown;
+          },
+        ],
       });
       let caught: unknown = Symbol('not thrown');
       try {
@@ -141,8 +144,9 @@ describe('createClient idempotency wiring (M109b §3.8)', () => {
       timing: timing(),
       retry: { limit: 3, delay: 1, backoff: 'fixed' },
     });
-    await expect(client.request({ method: 'POST', path: 'orders', idempotencyKey: 'mine' }))
-      .rejects.toBe(failure);
+    await expect(
+      client.request({ method: 'POST', path: 'orders', idempotencyKey: 'mine' }),
+    ).rejects.toBe(failure);
     expect(calls).toBe(1);
   });
 
@@ -190,7 +194,7 @@ describe('createClient idempotency wiring (M109b §3.8)', () => {
 
   it('refuses a static default header and a per-request conflict', async () => {
     expect(() =>
-      createClient({ baseUrl: 'http://x', headers: { 'Idempotency-Key': 'x' }, idempotency: {} })
+      createClient({ baseUrl: 'http://x', headers: { 'Idempotency-Key': 'x' }, idempotency: {} }),
     ).toThrow(/must not set 'Idempotency-Key'/);
 
     const { fetch, calls } = recordingFetch([200]);
@@ -258,10 +262,9 @@ describe('createClient idempotency wiring (M109b §3.8)', () => {
   });
 
   it('refuses an invalid key and header shape at createClient', () => {
-    expect(() => createClient({ baseUrl: 'http://x', idempotency: { header: 'bad header' } }))
-      .toThrow(
-        RangeError,
-      );
+    expect(() =>
+      createClient({ baseUrl: 'http://x', idempotency: { header: 'bad header' } }),
+    ).toThrow(RangeError);
     const { fetch } = recordingFetch([200]);
     const client = createClient({ baseUrl: 'http://x', fetch, timing: timing() });
     return expect(

@@ -24,6 +24,12 @@ export interface SessionSnapshot {
   readonly exp: number;
   /** Last-activity stamp as a wall-clock epoch in milliseconds. */
   readonly seen: number;
+  /**
+   * `'cookie'` on the store strategy when the cookie itself carries the
+   * payload because it holds only reserved keys (M113e, V9-46) — no store row
+   * exists for it. Absent otherwise.
+   */
+  readonly held?: 'cookie';
 }
 
 /**
@@ -43,20 +49,36 @@ export class Session implements ISession {
   #destroyed = false;
   #previousId: string | null = null;
   readonly #isNew: boolean;
+  readonly #storeHeld: boolean;
   readonly #uuid: () => string;
 
   /**
    * @param snapshot - Initial state
    * @param isNew - Whether this session was created rather than restored
    * @param uuid - Identifier source, from `IRuntimeServices.uuid`
+   * @param storeHeld - Whether it was restored from a store row
    */
-  constructor(snapshot: SessionSnapshot, isNew: boolean, uuid: () => string) {
+  constructor(
+    snapshot: SessionSnapshot,
+    isNew: boolean,
+    uuid: () => string,
+    storeHeld: boolean = false,
+  ) {
     this.#id = snapshot.id;
     this.#data = { ...snapshot.data };
     this.#exp = snapshot.exp;
     this.#seen = snapshot.seen;
     this.#isNew = isNew;
+    this.#storeHeld = storeHeld;
     this.#uuid = uuid;
+  }
+
+  /**
+   * Whether this session was restored from a store row, so a commit that moves
+   * it into the cookie knows to delete that row (M113e, V9-46).
+   */
+  get wasStoreHeld(): boolean {
+    return this.#storeHeld;
   }
 
   get id(): string {
@@ -165,6 +187,11 @@ export class Session implements ISession {
     this.#regenerated = true;
   }
 
+  /** Rotates a cookie-held id for promotion without recording a store row to revoke. */
+  rotateId(id: string): void {
+    this.#id = id;
+  }
+
   destroy(): void {
     this.#data = {};
     this.#destroyed = true;
@@ -217,6 +244,7 @@ export function createSession(now: number, maxAgeMs: number, uuid: () => string)
  * @param now - Current wall-clock time in milliseconds
  * @param uuid - Identifier source
  * @param idleTimeoutMs - Reject when the last-activity stamp is older than this
+ * @param storeHeld - Whether the payload came from a store row
  * @returns The restored session, or `null` when it must not be used
  * @since 0.2.0
  */
@@ -225,6 +253,7 @@ export function restoreSession(
   now: number,
   uuid: () => string,
   idleTimeoutMs?: number,
+  storeHeld: boolean = false,
 ): Session | null {
   if (snapshot.exp <= now) {
     return null;
@@ -232,7 +261,7 @@ export function restoreSession(
   if (idleTimeoutMs !== undefined && now - snapshot.seen > idleTimeoutMs) {
     return null;
   }
-  return new Session(snapshot, false, uuid);
+  return new Session(snapshot, false, uuid, storeHeld);
 }
 
 /**
@@ -261,7 +290,7 @@ export function parseSnapshot(json: string): SessionSnapshot | null {
   }
 
   const candidate = parsed as Record<string, unknown>;
-  const { id, exp, seen, data } = candidate;
+  const { id, exp, seen, data, held } = candidate;
 
   if (typeof id !== 'string' || id === '') {
     return null;
@@ -274,10 +303,17 @@ export function parseSnapshot(json: string): SessionSnapshot | null {
     return null;
   }
 
+  // The marker is inside the sealed plaintext, so a client cannot set it; any
+  // value other than the one this package writes is a format it does not know.
+  if (held !== undefined && held !== 'cookie') {
+    return null;
+  }
+
   return {
     id,
     data: (data ?? {}) as SessionData,
     exp: exp as number,
     seen: seen as number,
+    ...(held === 'cookie' ? { held } : {}),
   };
 }

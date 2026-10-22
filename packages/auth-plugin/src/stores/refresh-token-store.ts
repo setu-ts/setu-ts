@@ -31,15 +31,15 @@ export interface RefreshTokenRecord {
 /** Result of atomically rotating one refresh token into its successor. */
 export type IRefreshTokenRotation =
   | {
-    /** The presented record, live when its successor was stored. */
-    readonly record: RefreshTokenRecord;
-    readonly rotated: true;
-  }
+      /** The presented record, live when its successor was stored. */
+      readonly record: RefreshTokenRecord;
+      readonly rotated: true;
+    }
   | {
-    /** The presented record when it exists and has not expired, otherwise null. */
-    readonly record: RefreshTokenRecord | null;
-    readonly rotated: false;
-  };
+      /** The presented record when it exists and has not expired, otherwise null. */
+      readonly record: RefreshTokenRecord | null;
+      readonly rotated: false;
+    };
 
 /**
  * Store interface for refresh tokens.

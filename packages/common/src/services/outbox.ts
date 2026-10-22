@@ -130,29 +130,29 @@ export interface OutboxKey {
  */
 export type OutboxTransition =
   | {
-    /** The row had the expected status and was written. */
-    readonly outcome: 'applied';
-  }
+      /** The row had the expected status and was written. */
+      readonly outcome: 'applied';
+    }
   | {
-    /** No outbox row with that id exists (a row of another `kind` counts as missing). */
-    readonly outcome: 'missing';
-  }
+      /** No outbox row with that id exists (a row of another `kind` counts as missing). */
+      readonly outcome: 'missing';
+    }
   | {
-    /** `markSent` / `markFailure`: the row was not `pending`; nothing written. */
-    readonly outcome: 'not-pending';
-    /** The row's actual status. */
-    readonly status: Exclude<OutboxStatus, 'pending'>;
-  }
+      /** `markSent` / `markFailure`: the row was not `pending`; nothing written. */
+      readonly outcome: 'not-pending';
+      /** The row's actual status. */
+      readonly status: Exclude<OutboxStatus, 'pending'>;
+    }
   | {
-    /** The pending row has another claim version; nothing written. @since 0.9.0 */
-    readonly outcome: 'claim-lost';
-  }
+      /** The pending row has another claim version; nothing written. @since 0.9.0 */
+      readonly outcome: 'claim-lost';
+    }
   | {
-    /** `release`: the row was not `failed`; nothing written. */
-    readonly outcome: 'not-failed';
-    /** The row's actual status. */
-    readonly status: Exclude<OutboxStatus, 'failed'>;
-  };
+      /** `release`: the row was not `failed`; nothing written. */
+      readonly outcome: 'not-failed';
+      /** The row's actual status. */
+      readonly status: Exclude<OutboxStatus, 'failed'>;
+    };
 
 /**
  * Counts read by {@linkcode IOutboxStore.stats} for the outbox health

@@ -209,7 +209,7 @@ Every plugin must expose extension points:
 ### 3.7 Plugin Versioning
 
 - Plugins follow semantic versioning.
-- A plugin's `version` field must match the `version` in its `deno.json`.
+- A plugin's `version` field must match the `version` in its member `package.json`.
 - Breaking changes to a plugin's public API require a major version bump.
 
 ---
@@ -253,7 +253,7 @@ All runtime-specific operations must be abstracted:
 - CI runs every package test suite on Node 24 with Vitest and per-file V8 coverage thresholds.
 - Deno-only runtime and diagnostics-listener proofs run through the named Deno lane over the same
   converted test files. Deno remains a supported runtime.
-- The root `test/` suite and Deno repository scripts keep their Deno runner until M111e.
+- The root `test/` suite runs in the tooling Vitest member; repository scripts run on Node 24.
 - Node and Bun published-artifact compatibility remains separately verified by `compat/` and the
   Node build boot. Bun package-suite execution is a recorded smoke.
 - Runtime-specific tests retain explicit platform or environment guards; a skipped backend is
@@ -265,7 +265,8 @@ All runtime-specific operations must be abstracted:
 
 ### 5.1 Strict Mode
 
-- `strict: true` in the root `deno.json` `compilerOptions` (inherited by all workspace packages).
+- `strict: true` in the shared `tsconfig.base.json` `compilerOptions` (inherited by all workspace
+  packages).
 - `noImplicitAny: true`
 - `strictNullChecks: true`
 - `strictFunctionTypes: true`
@@ -370,9 +371,9 @@ Every package must include:
 
 - Package tests import `describe`, `it`, hooks, and `expect` from `vitest` and run through
   `pnpm test` on Node 24.
-- Root tests import `@std/testing/bdd` and `@std/expect` and run through `deno task test` until
-  M111e.
-- Deno-only package tests keep Vitest-shaped imports; `deno task test:deno-lane` maps those imports
+- Root tests import `vitest` and run in the `tooling` member through `pnpm run test:tooling`. The
+  named Deno-only root proof stays in the Deno lane.
+- Deno-only package tests keep Vitest-shaped imports; `pnpm run test:deno-lane` maps those imports
   to the small Deno BDD shim.
 - Use `@setu-ts/testing` for test utilities.
 - Use `app.inject()` for HTTP testing without a server.
@@ -416,9 +417,10 @@ Every package must include:
 ### 6.9 Suite Partitioning — What Runs Alone
 
 `pnpm test` runs each member in two ordered Vitest projects: shared-resource suites with file
-parallelism disabled, followed by the remaining suites in parallel. `deno task test` applies the
-same partition to root tests. [`scripts/test-partition.ts`](scripts/test-partition.ts) is the root
-runner; the classification lives in
+parallelism disabled, followed by the remaining suites in parallel. `pnpm run test:tooling` applies
+the same partition to root tests.
+[`scripts/codemods/node-test-config.ts`](scripts/codemods/node-test-config.ts) configures the
+`tooling` member; the classification lives in
 [`scripts/test-partition-rules.ts`](scripts/test-partition-rules.ts) and is DERIVED on every run —
 there is no list to maintain, and a new suite is classified the moment it is written.
 
@@ -499,8 +501,8 @@ export function createApplication(options?: ApplicationOptions): Application { .
 
 ### 7.4 Documentation Generation
 
-- API reference is auto-generated from JSDoc using `deno doc` (HTML output); JSR additionally
-  renders per-package docs automatically on publish.
+- API reference is generated from JSDoc using TypeDoc through `pnpm run docs:api`. npm renders the
+  package README; the website serves the generated API reference.
 - Generated docs live in `docs/api/`.
 - Documentation is rebuilt on every release.
 
@@ -517,8 +519,8 @@ export function createApplication(options?: ApplicationOptions): Application { .
 
 ### 8.1 Every Milestone Must Compile
 
-- A milestone is not complete until `deno task check` (type-checking all workspace packages)
-  succeeds with zero errors.
+- A milestone is not complete until `pnpm run check` (type-checking the sources and tests selected
+  by `tsconfig.check.json`) succeeds with zero errors.
 - TypeScript errors are blocking.
 - No `// @ts-ignore` or `// @ts-expect-error` without a justifiable reason documented in a comment.
 
@@ -531,10 +533,10 @@ export function createApplication(options?: ApplicationOptions): Application { .
 ### 8.3 Every Milestone Must Leave the Repository in a Working State
 
 - After completing a milestone, the repository must be fully functional.
-- `deno task check` must succeed.
-- `deno task test` must succeed.
-- `deno task lint` must succeed.
-- `deno task fmt:check` must succeed.
+- `pnpm run check` must succeed.
+- `pnpm run test` must succeed.
+- `pnpm run lint` must succeed.
+- `pnpm run fmt:check` must succeed.
 - All example applications must run.
 
 ### 8.4 One Package at a Time
@@ -553,10 +555,10 @@ export function createApplication(options?: ApplicationOptions): Application { .
 
 Before marking a milestone as complete, verify:
 
-- [ ] Package type-checks with `deno task check`
-- [ ] All tests pass with `deno task test`
-- [ ] Linting passes with `deno task lint`
-- [ ] Formatting passes with `deno task fmt:check`
+- [ ] Package type-checks with `pnpm run check`
+- [ ] All tests pass with `pnpm run test`
+- [ ] Linting passes with `pnpm run lint`
+- [ ] Formatting passes with `pnpm run fmt:check`
 - [ ] Test coverage is 90%+
 - [ ] All public APIs have JSDoc
 - [ ] README.md is written
@@ -777,7 +779,17 @@ A public API is any export from a package's `src/index.ts` file.
   - accept a **client instance injected via plugin options** (preferred — e.g.,
     `DatabasePlugin({ type: 'prisma', options: { prismaClient } })`), or
   - **lazily load** the driver via a dynamic `import()` whose argument is the LITERAL bare package
-    name (`import('ioredis')`), failing with a clear error if it is not installed.
+    name (`import('ioredis')`), failing with a clear error if it is not installed. The import MUST
+    be AWAITED inside the `try` block of a `try`/`catch` in the SAME function
+    (`mod = await import('ioredis')`, M113d): esbuild — which bundles a Cloudflare Worker inside
+    Wrangler — leaves only that shape as a runtime import and otherwise fails the application's
+    build on the first unresolvable specifier, even when the driver is never loaded. An unawaited
+    import (`const p = import('x')`, `return import('x')`, `Promise.all([import('x')])`) fails the
+    build even inside the `try`. The `catch` throws `OptionalDependencyUnavailableError`
+    (`@setu-ts/common`) with the original rejection as `cause`, or the package's own named load
+    error carrying it. A `catch` or `finally` block, a `.catch()` chain, or a `try` of an ENCLOSING
+    function does NOT satisfy the rule; the M113d source gate (`scripts/npm-specifier-audit.ts`,
+    `unguarded`) refuses each shape.
 - The framework never installs a database driver by default.
 - Users install the driver for the adapter they choose.
 - **Boundary-type compatibility.** When a public option accepts an application-created third-party
@@ -790,12 +802,13 @@ A public API is any export from a package's `src/index.ts` file.
   while Zod v4's public `toJSONSchema()` was available. A structural facade the framework itself
   declares is not an opaque boundary type; it is validated at the call site instead.
 - **Build-time app tooling is NOT a §12.2 dependency.** A frontend build tool (e.g. Vite for the
-  React Router SSR plugin, M44) is never imported by a plugin and never appears in a JSR package's
-  dependency graph. It lives in the consuming application's `devDependencies` and runs at build time
-  on the Node/npm toolchain; the plugin consumes only the built artifacts (plus the runtime library
-  via the lazy `import()` above). §12.2 governs drivers a plugin loads **at runtime** — a build tool
-  is loaded at neither runtime nor plugin-import time. A plugin MUST NOT import a build tool; the
-  frontend build is the application's responsibility, exactly as installing a database driver is.
+  React Router SSR plugin, M44) is never imported by a plugin and never appears in a published
+  package's dependency graph. It lives in the consuming application's `devDependencies` and runs at
+  build time on the Node/npm toolchain; the plugin consumes only the built artifacts (plus the
+  runtime library via the lazy `import()` above). §12.2 governs drivers a plugin loads **at
+  runtime** — a build tool is loaded at neither runtime nor plugin-import time. A plugin MUST NOT
+  import a build tool; the frontend build is the application's responsibility, exactly as installing
+  a database driver is.
 
 ### 12.3 No Dependency Cycles
 
@@ -810,7 +823,8 @@ A public API is any export from a package's `src/index.ts` file.
 
 ### 12.5 Security Auditing
 
-- `deno audit --level=high` must pass in CI with zero high-severity vulnerabilities.
+- `pnpm run audit` runs `pnpm audit --audit-level high` against the lockfile and must pass in CI
+  with zero high or critical vulnerabilities.
 - Dependencies are reviewed quarterly.
 - Unused dependencies are removed.
 
@@ -877,16 +891,17 @@ A public API is any export from a package's `src/index.ts` file.
 - Every package must be tree-shakeable.
 - Use ES module exports only.
 - No side effects at import time.
-- Declare subpath exports in each package's `deno.json` `exports` for granular imports (JSR's npm
-  transform emits the equivalent `package.json` exports map with `sideEffects: false`):
+- Declare subpath exports in the generated member `package.json` for granular imports.
+  `scripts/node-manifests.ts` emits the export map and `sideEffects` (normally `false`, with the
+  explicitly approved initializer and executable exceptions in §11.5):
 
 ```json
 {
   "exports": {
-    ".": "./src/index.ts",
-    "./plugin": "./src/plugin.ts",
-    "./services": "./src/services/index.ts",
-    "./adapters": "./src/adapters/index.ts"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
   }
 }
 ```
@@ -895,9 +910,10 @@ A public API is any export from a package's `src/index.ts` file.
 
 - Each package must be as small as possible.
 - Heavy dependencies (database drivers, broker clients, cloud SDKs) are never bundled or eagerly
-  imported — adapters load them via a dynamic `import()` of the LITERAL bare package name (§12.2;
-  `npm:`/`jsr:` specifiers in `src` are refused by the M111a audit), or accept a client instance
-  injected through plugin options.
+  imported — adapters load them via a dynamic `import()` of the LITERAL bare package name, awaited
+  inside the `try` block of a same-function `try`/`catch` (§12.2, as amended by M113d; `npm:`/`jsr:`
+  specifiers in `src` are refused by the M111a audit, and an unguarded bare import by the M113d
+  audit), or accept a client instance injected through plugin options.
 - Use feature detection to avoid bundling unused code.
 - Bundle size is monitored in CI.
 
@@ -981,7 +997,7 @@ shows it; if the branch exists but has no worktree, attach one with
 the same branch out twice.
 
 `.claude/` is gitignored, so a worktree there is invisible to `git status` in the main checkout and
-to `deno fmt`/`deno lint`. Never put one in `/tmp` or beside the repository. Remove it with
+to Prettier and ESLint. Never put one in `/tmp` or beside the repository. Remove it with
 `git worktree remove .claude/worktrees/<name>` once its PR has merged.
 
 ### 15.5 Atomic Commits
@@ -1173,19 +1189,19 @@ Any violation of these rules blocks the PR from merging. No exceptions.
 
 ### 17.2 Automated Enforcement
 
-| Rule                                           | Enforcement Tool                                                                            |
-| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| No `any`                                       | `deno lint` rule `no-explicit-any`                                                          |
-| No `eval`                                      | `deno lint` rule `no-eval`                                                                  |
-| No unused variables                            | `deno lint` rule `no-unused-vars` + `noUnusedLocals` in `compilerOptions`                   |
-| Strict TypeScript                              | Root `deno.json` `compilerOptions` with `strict: true`                                      |
-| Test coverage 90%+                             | Vitest per-file V8 thresholds, Deno-lane and root-script coverage checks in CI              |
-| No circular dependencies                       | `deno info --json` graph check (custom script) or `dependency-cruiser` via `npm:` specifier |
-| No security vulnerabilities                    | `deno audit --level=high` in CI                                                             |
-| Code formatting                                | `deno fmt`                                                                                  |
-| Code style                                     | `deno lint`                                                                                 |
-| Runtime-specific imports outside `runtime` pkg | Custom `deno lint` plugin rule / CI grep gate                                               |
-| JSDoc on exports                               | `deno doc --lint`                                                                           |
+| Rule                                  | Enforcement tool                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| No `any`                              | ESLint `@typescript-eslint/no-explicit-any`                                                                 |
+| No `eval` or Function constructor     | ESLint `no-eval` and `no-restricted-syntax`                                                                 |
+| No unused variables                   | ESLint `@typescript-eslint/no-unused-vars` and TypeScript `noUnusedLocals`                                  |
+| Strict TypeScript                     | `tsconfig.base.json` and `pnpm run check`                                                                   |
+| Test coverage 90%+                    | Vitest per-file V8 thresholds and the Deno runtime lane                                                     |
+| No circular dependencies              | `node scripts/node-manifests.ts --check` refuses source-level workspace cycles; review intra-package cycles |
+| No security vulnerabilities           | `pnpm run audit:ci` using pnpm audit                                                                        |
+| Code formatting                       | Prettier; the SDK generated-client fixtures additionally use `deno fmt`                                     |
+| Code style                            | ESLint with typescript-eslint                                                                               |
+| Runtime-specific APIs outside runtime | Source review and forbidden-construct search; no dedicated ESLint boundary rule                             |
+| JSDoc on exports                      | TypeDoc ratchet in `pnpm run check:docs`                                                                    |
 
 ### 17.3 Escalation
 
@@ -1195,7 +1211,7 @@ If a rule needs to be violated for a justifiable reason:
 2. Document the mitigation plan.
 3. Document the timeline for compliance.
 4. Get explicit approval from a maintainer.
-5. Add a `// deno-lint-ignore <rule>` with the reason documented.
+5. Add `// eslint-disable-next-line <rule> -- <reason>` with the reason documented.
 
 ### 17.4 Rule Updates
 

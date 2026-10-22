@@ -289,9 +289,13 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
 
       const orders: unknown[] = [];
       const payments: unknown[] = [];
-      await broker!.subscribe(ordersTopic, (m) => {
-        orders.push(m);
-      }, { queue: 'orders.eu' });
+      await broker!.subscribe(
+        ordersTopic,
+        (m) => {
+          orders.push(m);
+        },
+        { queue: 'orders.eu' },
+      );
       await broker!.subscribe(paymentsTopic, (m) => {
         payments.push(m);
       });
@@ -363,14 +367,20 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
       await appA.start();
       await appB.start();
       const received: unknown[] = [];
-      await first!.subscribe(topic, (m) => {
-        received.push(m);
-      }, { queue: 'orders.eu' });
-
-      const err = await second!.subscribe(topic, () => {}, { queue: 'orders_2eeu' }).then(
-        () => null,
-        (e: unknown) => e,
+      await first!.subscribe(
+        topic,
+        (m) => {
+          received.push(m);
+        },
+        { queue: 'orders.eu' },
       );
+
+      const err = await second!
+        .subscribe(topic, () => {}, { queue: 'orders_2eeu' })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
       expect(err).toBeInstanceOf(NatsConsumerNameCollisionError);
       expect((err as NatsConsumerNameCollisionError).existingQueue).toBe('orders.eu');
 
@@ -446,10 +456,12 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
     const jsm = await jsmConn.jetstreamManager();
     try {
       await app.start();
-      await expect(broker!.publish(topic, { id: 1 }, { headers: { 'Nats-Rollup': 'sub' } }))
-        .rejects.toThrow(RangeError);
-      await expect(broker!.publish(topic, { id: 1 }, { headers: { 'nats-rollup': 'sub' } }))
-        .rejects.toThrow(RangeError);
+      await expect(
+        broker!.publish(topic, { id: 1 }, { headers: { 'Nats-Rollup': 'sub' } }),
+      ).rejects.toThrow(RangeError);
+      await expect(
+        broker!.publish(topic, { id: 1 }, { headers: { 'nats-rollup': 'sub' } }),
+      ).rejects.toThrow(RangeError);
       // Nothing was appended: the server never saw the refused publish.
       expect((await jsm.streams.info(streamName)).state.messages).toBe(0);
     } finally {
@@ -491,6 +503,73 @@ describe('REAL NATS JetStream (guarded on NATS_URL)', { skip: natsUrl === undefi
       expect(headers['x-tenant']).toBe('acme');
       // The framework's own header rides beside the caller's.
       expect(headers['x-setu-ordering-key']).toBeUndefined();
+    } finally {
+      await app.stop();
+      await jsm.streams.delete(streamName).catch(() => {});
+      await jsmConn.close();
+    }
+  });
+
+  it('boots the scaffold subject set under the fixed `app` scope (M113h V9-17)', async () => {
+    // The literal set the CLI now renders into every NATS scaffold. It is the
+    // messaging plugin's documented RPC-capable shape; `>` alone is refused by
+    // NATS, and this is what a scaffolded workspace's shared MESSAGING stream
+    // owns.
+    const subjects = ['app.>', 'rr.req.app.>', 'rr.inbox.>'] as const;
+    const nats = await import('nats');
+    const suffix = crypto.randomUUID().replaceAll('-', '').slice(0, 10);
+    const streamName = `M113H_NATS_${suffix}`;
+
+    let broker: IMessageBroker | undefined;
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        MessagingPlugin({ broker: 'nats', url, streamName, streamSubjects: [...subjects] }),
+        brokerProbe((b) => {
+          broker = b;
+        }),
+      ],
+    });
+
+    const jsmConn = await nats.connect({ servers: url });
+    const jsm = await jsmConn.jetstreamManager();
+    try {
+      // Only one stream per account may own `rr.inbox.>`, so a leftover MESSAGING
+      // stream from a booted scaffold (including this milestone's own
+      // verification) makes the fresh stream's creation fail as an opaque
+      // overlap. Name the owner instead, and say how to clear it.
+      const owner = await jsm.streams.find('app.x').catch(() => undefined);
+      if (owner !== undefined) {
+        throw new Error(
+          `Stream '${owner}' already owns 'app.x'. Delete it before running this case: ` +
+            `nats stream rm ${owner}`,
+        );
+      }
+
+      await app.start();
+      const info = await jsm.streams.info(streamName);
+      expect(info.config.subjects).toEqual([...subjects]);
+
+      // Publish/subscribe under `app.>` …
+      const received: unknown[] = [];
+      await broker!.subscribe('app.x', (message) => {
+        received.push(message);
+      });
+      await broker!.publish('app.x', { id: 1 });
+      await waitFor(() => received.length > 0, 'app.x delivery');
+      expect(received[0]).toEqual({ id: 1 });
+
+      // … and request/reply, whose subjects the set covers via `rr.req.app.>`
+      // and `rr.inbox.>`.
+      await broker!.respond<{ n: number }, { doubled: number }>('app.y', (request) => ({
+        doubled: request.n * 2,
+      }));
+      const reply = await broker!.request<{ n: number }, { doubled: number }>(
+        'app.y',
+        { n: 21 },
+        { timeoutMs: 10_000 },
+      );
+      expect(reply).toEqual({ doubled: 42 });
     } finally {
       await app.stop();
       await jsm.streams.delete(streamName).catch(() => {});

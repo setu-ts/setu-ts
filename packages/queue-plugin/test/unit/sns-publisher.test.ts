@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { SnsPublisher } from '../../src/sns/sns-publisher.ts';
 import type { ISnsTransport } from '../../src/sns/sns-publisher.ts';
 
@@ -202,14 +202,11 @@ describe('SnsPublisher', () => {
         },
       };
 
-      adaptSnsModule(
-        mod as unknown as import('../../src/sns/sns-publisher.ts').SnsSdkModule,
-        {
-          region: 'eu-west-1',
-          credentials: { accessKeyId: 'key', secretAccessKey: 'secret' },
-          endpoint: 'http://localstack:4566',
-        },
-      );
+      adaptSnsModule(mod as unknown as import('../../src/sns/sns-publisher.ts').SnsSdkModule, {
+        region: 'eu-west-1',
+        credentials: { accessKeyId: 'key', secretAccessKey: 'secret' },
+        endpoint: 'http://localstack:4566',
+      });
 
       expect(capturedConfig.region).toBe('eu-west-1');
       expect(capturedConfig.credentials).toEqual({
@@ -247,9 +244,7 @@ describe('loadSnsModule (exported)', () => {
   });
 
   it('the REAL SDK module adapts to a port carrying every member the code calls', async () => {
-    const { loadSnsModule, adaptSnsModule } = await import(
-      '../../src/sns/sns-publisher.ts'
-    );
+    const { loadSnsModule, adaptSnsModule } = await import('../../src/sns/sns-publisher.ts');
 
     // Loads `npm:` for real (pinned in deno.lock), then adapts it. Asserting the
     // adapted PORT rather than just reaching the import line is what catches SDK
@@ -280,14 +275,11 @@ describe('C4: class-level lazy SNS config', () => {
       },
       PublishCommand: class {},
     };
-    adaptSnsModule(
-      mod as unknown as import('../../src/sns/sns-publisher.ts').SnsSdkModule,
-      {
-        region: 'eu-west-1',
-        credentials: { accessKeyId: 'SNS-KEY', secretAccessKey: 'sns-secret' },
-        endpoint: 'http://local-sns:4566',
-      },
-    );
+    adaptSnsModule(mod as unknown as import('../../src/sns/sns-publisher.ts').SnsSdkModule, {
+      region: 'eu-west-1',
+      credentials: { accessKeyId: 'SNS-KEY', secretAccessKey: 'sns-secret' },
+      endpoint: 'http://local-sns:4566',
+    });
     expect(capturedConfig).not.toBeUndefined();
     expect(capturedConfig!.region).toBe('eu-west-1');
     expect(capturedConfig!.endpoint).toBe('http://local-sns:4566');
@@ -295,5 +287,28 @@ describe('C4: class-level lazy SNS config', () => {
       accessKeyId: 'SNS-KEY',
       secretAccessKey: 'sns-secret',
     });
+  });
+});
+
+describe('loadSnsModule — the guarded import (M113d §3.1)', () => {
+  it('rejects with OptionalDependencyUnavailableError when the SDK is absent', async () => {
+    const { loadSnsModule } = await import('../../src/sns/sns-publisher.ts');
+    vi.doMock('@aws-sdk/client-sns', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      let caught: unknown;
+      try {
+        await loadSnsModule();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('@aws-sdk/client-sns');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('@aws-sdk/client-sns');
+    }
   });
 });

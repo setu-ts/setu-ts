@@ -412,10 +412,8 @@ function withErrorLoggingIterable(
         // (`report` degrades silently if the logger itself fails).
         async return(value?: unknown): Promise<IteratorResult<unknown>> {
           try {
-            return await (
-              iterator.return?.(value) ??
-                Promise.resolve({ value: undefined, done: true })
-            );
+            return await (iterator.return?.(value) ??
+              Promise.resolve({ value: undefined, done: true }));
           } catch (error) {
             report(error);
           }

@@ -163,9 +163,7 @@ describe('WebSocketPlugin integration', () => {
 
     const ws = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET);
     const fromFirst = ws.room('shared');
-    const fromSecond = app.services
-      .get<IWebSocketService>(CAPABILITIES.WEBSOCKET)
-      .room('shared');
+    const fromSecond = app.services.get<IWebSocketService>(CAPABILITIES.WEBSOCKET).room('shared');
 
     expect(fromFirst).toBe(fromSecond);
     await app.stop();

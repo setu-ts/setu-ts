@@ -2,7 +2,7 @@
  * Job executor with retry and backoff.
  *
  * Runs the handler, and on rejection with `attempt < retry.limit`
- * waits the computed backoff (via `runtime.setTimeout`) and retries.
+ * waits the computed backoff in bounded, due-checked timer chunks and retries.
  * At `attempt === retry.limit` it gives up.
  *
  * @module
@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { composeBehaviorChain } from '@setu-ts/common';
 import { computeBackoffMs } from '../retry/retry-handler.ts';
+import { sleepUntil } from '../timers/bounded-timer.ts';
 import type {
   SchedulerAttemptObserver,
   SchedulerAttemptSettle,
@@ -177,6 +178,8 @@ function invokeHandler<T>(
 interface RunOptions {
   runtime: IRuntimeServices;
   logger?: ILogger | undefined;
+  /** Stops future attempts and cancels backoff; an in-flight handler may settle. */
+  signal?: AbortSignal;
   /**
    * The M98k attempt observer for an observed dispatch. Absent — the
    * default — the executor runs exactly the pre-M98k path: no observation
@@ -184,6 +187,9 @@ interface RunOptions {
    */
   attempts?: SchedulerAttemptObserver | undefined;
 }
+
+/** Internal fire result; exhausted retries still reject and are classified by the caller. */
+export type RunOutcome = 'succeeded' | 'failed' | 'cancelled';
 
 /**
  * Runs a handler with retry and backoff.
@@ -194,7 +200,8 @@ interface RunOptions {
  * @param data - Optional payload
  * @param retry - Optional retry configuration
  * @param options - Runtime and optional logger
- * @returns The final settled result
+ * @returns `succeeded`, or `cancelled` before a final outcome
+ * @throws The handler's error when retries are exhausted (the `failed` outcome)
  */
 export async function run<T = unknown>(
   jobId: string,
@@ -203,12 +210,12 @@ export async function run<T = unknown>(
   data: T | undefined,
   retry: RetryOptions | undefined,
   options: RunOptions,
-): Promise<void> {
-  const { runtime, logger, attempts } = options;
+): Promise<RunOutcome> {
+  const { runtime, logger, attempts, signal } = options;
   const limit = retry?.limit ?? 1;
   let attempt = 0;
 
-  while (true) {
+  while (!signal?.aborted) {
     attempt++;
     // N6 FIX: Remove the `?? undefined as T` pattern that defeats type safety.
     // The `data` parameter is `T | undefined`, so `T` is inferred as `unknown | undefined`
@@ -235,26 +242,24 @@ export async function run<T = unknown>(
       await (attempts === undefined || CHAIN_WRAPPED.has(handler)
         ? handler(job)
         : invokeHandler(handler, job, 'await'));
-      return;
+      return 'succeeded';
     } catch (error) {
       if (attempt < limit) {
+        if (signal?.aborted) return 'cancelled';
         const backoffMs = retry !== undefined ? computeBackoffMs(attempt, retry) : 1000;
-        logger?.warn(
-          `Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`,
-          { error: error instanceof Error ? error.message : String(error) },
-        );
-        await new Promise<void>((resolve) => {
-          runtime.setTimeout(resolve, backoffMs);
+        logger?.warn(`Job '${jobName}' attempt ${attempt} failed, retrying in ${backoffMs}ms`, {
+          error: error instanceof Error ? error.message : String(error),
         });
+        await sleepUntil(runtime, runtime.now() + backoffMs, signal);
       } else {
-        logger?.error(
-          `Job '${jobName}' failed after ${attempt} attempt(s)`,
-          { error: error instanceof Error ? error.message : String(error) },
-        );
+        logger?.error(`Job '${jobName}' failed after ${attempt} attempt(s)`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
         throw error;
       }
     }
   }
+  return 'cancelled';
 }
 
 /**
@@ -300,9 +305,12 @@ export function withIngressBehaviors<T>(
   // Clear the gate once open so the steady state costs nothing. A REJECTED
   // gate is deliberately left in place: startup failed, the chain is never
   // completed, and running through a partial chain is what this prevents.
-  void chainReady?.then(() => {
-    gate = undefined;
-  }, () => {});
+  void chainReady?.then(
+    () => {
+      gate = undefined;
+    },
+    () => {},
+  );
 
   const dispatch = (job: ScheduledJob<T>): void | Promise<void> => {
     if (behaviors.length === 0) {

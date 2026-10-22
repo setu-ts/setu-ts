@@ -42,10 +42,7 @@ const MIME_DEFAULT = 'application/octet-stream';
  * @returns The parsed parts
  * @throws {Error} If no boundary is found in content-type
  */
-export function parseMultipart(
-  body: Uint8Array,
-  contentType: string,
-): ParsedPart[] {
+export function parseMultipart(body: Uint8Array, contentType: string): ParsedPart[] {
   // Extract boundary from content-type header.
   const boundary = extractBoundary(contentType);
   if (boundary === null) {

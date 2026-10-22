@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- a gate must print actionable findings.
+/* eslint-disable no-console -- a gate must print actionable findings. */
 /**
  * @module
  *
@@ -15,7 +15,7 @@
  *
  * The comparison is the README `## Exports` table rather than the barrel
  * itself, and that is what makes the gate cheap: those tables are DERIVED from
- * the barrel by `deno task docs:exports` and already gated for drift, so the
+ * the barrel by `pnpm run docs:exports` and already gated for drift, so the
  * committed table is the barrel's contents — checked — in a form two git
  * revisions can be diffed in without a TypeScript parser, a `deno doc` run per
  * package, or a network call. {@linkcode parseExportsTable} does the reading,
@@ -31,6 +31,9 @@
  * #195 was dependency ranges, a workflow and a release artifact. Reading the
  * merged PR list stays in the runbook for that reason.
  */
+
+import { run as runProcess } from './lib/run.ts';
+import { readFile } from 'node:fs/promises';
 
 import { parseExportsTable } from './package-exports.ts';
 
@@ -212,7 +215,7 @@ export async function undoReleaseRename(
   const cut = headings[0];
   const previous = headings[1];
   if (cut?.[1] === undefined || previous?.[1] === undefined) return null;
-  if (await tagExists(cut[1]) || !(await tagExists(previous[1]))) return null;
+  if ((await tagExists(cut[1])) || !(await tagExists(previous[1]))) return null;
   const withoutEmpty = changelog.replace(/^## \[Unreleased\]\s*\n(?=## \[)/m, '');
   return {
     base: previous[1],
@@ -228,39 +231,34 @@ export async function undoReleaseRename(
  * @returns The contents, or `null` when the path is absent there
  */
 export async function readAtRevision(revision: string, path: string): Promise<string | null> {
-  const shown = await new Deno.Command('git', {
-    args: ['show', `${revision}:${path}`],
-    stdout: 'piped',
-    stderr: 'null',
-  }).output();
-  return shown.success ? new TextDecoder().decode(shown.stdout) : null;
+  const shown = await runProcess('git', ['show', `${revision}:${path}`]);
+  return shown.code === 0 ? shown.stdout : null;
 }
 
 /** Whether a revision resolves at all, which a shallow clone's tags do not. */
 export async function revisionExists(revision: string): Promise<boolean> {
-  const shown = await new Deno.Command('git', {
-    args: ['rev-parse', '--verify', `${revision}^{commit}`],
-    stdout: 'null',
-    stderr: 'null',
-  }).output();
-  return shown.success;
+  const shown = await runProcess('git', ['rev-parse', '--verify', `${revision}^{commit}`]);
+  return shown.code === 0;
 }
 
 /** Every published package README, in a stable order. */
 export async function publishedReadmes(): Promise<readonly string[]> {
-  const listed = await new Deno.Command('git', {
-    args: ['ls-files', 'packages/*/README.md', 'packages/*/*/README.md'],
-    stdout: 'piped',
-    stderr: 'piped',
-  }).output();
+  const listed = await runProcess('git', [
+    'ls-files',
+    'packages/*/README.md',
+    'packages/*/*/README.md',
+  ]);
   // Discarding the status here would turn every git failure — a missing
   // binary, a checkout that is not a repository, a cwd outside the root —
   // into an empty list, which reads downstream as "no packages to check" and
   // passes. That is this gate's own failure mode.
-  if (!listed.success) {
-    throw new Error(`git ls-files failed: ${new TextDecoder().decode(listed.stderr).trim()}`);
+  if (!(listed.code === 0)) {
+    throw new Error(`git ls-files failed: ${listed.stderr.trim()}`);
   }
-  return new TextDecoder().decode(listed.stdout).split('\n').filter((line) => line !== '').sort();
+  return listed.stdout
+    .split('\n')
+    .filter((line) => line !== '')
+    .sort();
 }
 
 /** The I/O `main` needs, injected so its branches are testable. */
@@ -355,12 +353,12 @@ export async function main(deps: MainDeps): Promise<number> {
  */
 export function productionDeps(): MainDeps {
   return {
-    readChangelog: () => Deno.readTextFile('CHANGELOG.md'),
+    readChangelog: () => readFile('CHANGELOG.md', 'utf8'),
     revisionExists,
     readAtRevision,
     readWorkingTree: async (path) => {
       try {
-        return await Deno.readTextFile(path);
+        return await readFile(path, 'utf8');
       } catch {
         return null;
       }
@@ -372,5 +370,8 @@ export function productionDeps(): MainDeps {
 }
 
 if (import.meta.main) {
-  Deno.exit(await main(productionDeps()));
+  await (async () => {
+    process.exitCode = await main(productionDeps());
+    return;
+  })();
 }

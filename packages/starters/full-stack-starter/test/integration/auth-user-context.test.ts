@@ -53,9 +53,7 @@ describe('full-stack starter auth → userContext', () => {
                 return Promise.reject(new Error('unexpected load context'));
               }
               const principal = loadContext.get(userContext);
-              return Promise.resolve(
-                Response.json({ id: principal?.id ?? null }),
-              );
+              return Promise.resolve(Response.json({ id: principal?.id ?? null }));
             },
           }),
       },

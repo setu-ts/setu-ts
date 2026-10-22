@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for CloudflareWorkersHttpAdapter.
  *
@@ -16,7 +16,7 @@ describe('cf-http-adapter | setHandler/fetch', () => {
   it('stores handler; fetch round-trips', async () => {
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -40,14 +40,15 @@ describe('cf-http-adapter | setHandler/fetch', () => {
     // way, which is why the async arm below could not cover it.
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    adapter.setHandler((_request) =>
-      ({
-        snapshot: () => ({
-          status: 201,
-          headers: new Headers({ 'x-sync': 'yes' }),
-          body: 'sync',
-        }),
-      }) as any
+    adapter.setHandler(
+      (_request) =>
+        ({
+          snapshot: () => ({
+            status: 201,
+            headers: new Headers({ 'x-sync': 'yes' }),
+            body: 'sync',
+          }),
+        }) as any,
     );
 
     const response = adapter.fetch(new Request('https://example.com/'));
@@ -60,11 +61,12 @@ describe('cf-http-adapter | setHandler/fetch', () => {
   it('still returns a promise when the handler is asynchronous', async () => {
     const adapter = new CloudflareWorkersHttpAdapter();
 
-    // deno-lint-ignore require-await
-    adapter.setHandler(async (_request) =>
-      ({
-        snapshot: () => ({ status: 202, headers: new Headers(), body: 'async' }),
-      }) as any
+    adapter.setHandler(
+      // eslint-disable-next-line require-await -- an asynchronous handler is the case under test
+      async (_request) =>
+        ({
+          snapshot: () => ({ status: 202, headers: new Headers(), body: 'async' }),
+        }) as any,
     );
 
     const response = adapter.fetch(new Request('https://example.com/'));
@@ -87,9 +89,7 @@ describe('cf-http-adapter | setHandler/fetch', () => {
 describe('cf-http-adapter | listen', () => {
   it('throws with CF Workers message', () => {
     const adapter = new CloudflareWorkersHttpAdapter();
-    expect(() => adapter.listen(8080)).toThrow(
-      'Cloudflare Workers has no listen(port) model',
-    );
+    expect(() => adapter.listen(8080)).toThrow('Cloudflare Workers has no listen(port) model');
   });
 });
 

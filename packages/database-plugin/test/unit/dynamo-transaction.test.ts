@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async facade fakes model IDynamoClient promises.
+/* eslint-disable require-await -- async facade fakes model IDynamoClient promises. */
 /**
  * Coverage for the {@linkcode DynamoAdapter} deferred transaction.
  *
@@ -215,9 +215,7 @@ describe('DynamoDB adapter — deferred TransactWriteItems transactions', () => 
     }
     // The buffer enforces the API's own 100-item ceiling (M80 plan §1A T3)
     // before any call, naming the condition.
-    await expect(ds.create({ pk: 'key-100' })).rejects.toThrow(
-      /more than 100 write operations/,
-    );
+    await expect(ds.create({ pk: 'key-100' })).rejects.toThrow(/more than 100 write operations/);
     expect(client.transactCalls).toHaveLength(0);
   });
 

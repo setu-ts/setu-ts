@@ -215,8 +215,9 @@ describe('@ResponseHeader validation', () => {
   });
 
   it('refuses an empty header name', () => {
-    expect(refusal({ responseHeaders: [{ name: '', value: 'v' }] }))
-      .toContain(headerError('', 'v'));
+    expect(refusal({ responseHeaders: [{ name: '', value: 'v' }] })).toContain(
+      headerError('', 'v'),
+    );
   });
 
   it('accepts what the runtime accepts, including an empty value', () => {
@@ -230,7 +231,10 @@ describe('@ResponseHeader validation', () => {
 
   it('refuses the same name twice, case-insensitively', () => {
     const message = refusal({
-      responseHeaders: [{ name: 'X-A', value: '1' }, { name: 'x-a', value: '2' }],
+      responseHeaders: [
+        { name: 'X-A', value: '1' },
+        { name: 'x-a', value: '2' },
+      ],
     });
 
     expect(message).toContain('twice');

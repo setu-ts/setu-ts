@@ -1,0 +1,180 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "useUnknownInCatchVariables": true,
+    "lib": [
+      "deno.ns",
+      "deno.window",
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ]
+  },
+  "nodeModulesDir": "auto",
+  "permissions": {
+    "runtime": {
+      "sys": [
+        "hostname",
+        "cpus"
+      ],
+      "net": true,
+      "env": true,
+      "read": true,
+      "write": true
+    },
+    "cli": {
+      "read": true,
+      "write": true,
+      "env": true,
+      "sys": [
+        "hostname",
+        "cpus"
+      ],
+      "net": [
+        "127.0.0.1"
+      ],
+      "run": [
+        "deno",
+        "npm"
+      ]
+    },
+    "websocket-plugin": {
+      "net": true
+    },
+    "realtime-backplane-plugin": {
+      "read": true,
+      "import": true,
+      "env": true,
+      "net": true,
+      "run": [
+        "docker"
+      ]
+    },
+    "diagnostics-plugin": {
+      "read": true,
+      "env": true,
+      "net": [
+        "127.0.0.1"
+      ]
+    }
+  },
+  "imports": {
+    "@std/expect": "jsr:@std/expect@^1.0.20",
+    "@std/testing": "jsr:@std/testing@^1.0.19",
+    "vitest": "./vitest-shim.ts",
+    "zod-v3": "npm:zod@^3.24.0",
+    "zod-v4": "npm:zod@^4.4.0",
+    "@vitest/coverage-v8": "npm:@vitest/coverage-v8@5.0.3",
+    "esbuild": "npm:esbuild@0.28.2",
+    "xml-crypto": "npm:xml-crypto@^6",
+    "ioredis": "npm:ioredis@5.x",
+    "@simplewebauthn/server": "npm:@simplewebauthn/server@14.0.3",
+    "drizzle-orm": "npm:drizzle-orm@0.45.2",
+    "pg": "npm:pg@^8.0.0",
+    "@google-cloud/bigtable": "npm:@google-cloud/bigtable@^6",
+    "@azure/cosmos": "npm:@azure/cosmos@^4",
+    "@aws-sdk/client-dynamodb": "npm:@aws-sdk/client-dynamodb@^3",
+    "@prisma/client": "npm:@prisma/client@7.8.0",
+    "@prisma/adapter-pg": "npm:@prisma/adapter-pg@^7.10.0",
+    "mongodb": "npm:mongodb@^6.21.0",
+    "graphql": "npm:graphql@^16",
+    "@opentelemetry/api": "npm:@opentelemetry/api@^1.9.0",
+    "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
+    "pino": "npm:pino@10.x",
+    "nodemailer": "npm:nodemailer@^10",
+    "@google-cloud/pubsub": "npm:@google-cloud/pubsub@^6",
+    "amqplib": "npm:amqplib@0.10.x",
+    "kafkajs": "npm:kafkajs@2.x",
+    "nats": "npm:nats@2.x",
+    "@aws-sdk/client-sqs": "npm:@aws-sdk/client-sqs@^3",
+    "react-router": "npm:react-router@8",
+    "@hono/node-server": "npm:@hono/node-server@^2.0.0",
+    "@aws-sdk/client-secrets-manager": "npm:@aws-sdk/client-secrets-manager@^3",
+    "@aws-sdk/client-s3": "npm:@aws-sdk/client-s3@^3",
+    "@opentelemetry/exporter-trace-otlp-http": "npm:@opentelemetry/exporter-trace-otlp-http@^0.220.0",
+    "drizzle-orm/": "npm:drizzle-orm@0.45.2/",
+    "@std/testing/bdd": "jsr:@std/testing@^1.0.19/bdd",
+    "@setu-ts/common": "./../../packages/common/src/index.ts",
+    "@setu-ts/kernel": "./../../packages/kernel/src/index.ts",
+    "@setu-ts/runtime": "./../../packages/runtime/src/index.ts",
+    "@setu-ts/runtime/worker": "./../../packages/runtime/src/worker/define-worker-task.ts",
+    "@setu-ts/exceptions": "./../../packages/exceptions/src/index.ts",
+    "@setu-ts/di-plugin": "./../../packages/di-plugin/src/index.ts",
+    "@setu-ts/decorator-plugin": "./../../packages/decorator-plugin/src/index.ts",
+    "@setu-ts/logger-plugin": "./../../packages/logger-plugin/src/index.ts",
+    "@setu-ts/config-plugin": "./../../packages/config-plugin/src/index.ts",
+    "@setu-ts/validation-plugin": "./../../packages/validation-plugin/src/index.ts",
+    "@setu-ts/database-plugin": "./../../packages/database-plugin/src/index.ts",
+    "@setu-ts/cache-plugin": "./../../packages/cache-plugin/src/index.ts",
+    "@setu-ts/events-plugin": "./../../packages/events-plugin/src/index.ts",
+    "@setu-ts/cqrs-plugin": "./../../packages/cqrs-plugin/src/index.ts",
+    "@setu-ts/messaging-plugin": "./../../packages/messaging-plugin/src/index.ts",
+    "@setu-ts/queue-plugin": "./../../packages/queue-plugin/src/index.ts",
+    "@setu-ts/auth-plugin": "./../../packages/auth-plugin/src/index.ts",
+    "@setu-ts/http-security-plugin": "./../../packages/http-security-plugin/src/index.ts",
+    "@setu-ts/scheduler-plugin": "./../../packages/scheduler-plugin/src/index.ts",
+    "@setu-ts/metrics-plugin": "./../../packages/metrics-plugin/src/index.ts",
+    "@setu-ts/health-plugin": "./../../packages/health-plugin/src/index.ts",
+    "@setu-ts/openapi-plugin": "./../../packages/openapi-plugin/src/index.ts",
+    "@setu-ts/telemetry-plugin": "./../../packages/telemetry-plugin/src/index.ts",
+    "@setu-ts/secrets-plugin": "./../../packages/secrets-plugin/src/index.ts",
+    "@setu-ts/audit-plugin": "./../../packages/audit-plugin/src/index.ts",
+    "@setu-ts/resilience-plugin": "./../../packages/resilience-plugin/src/index.ts",
+    "@setu-ts/storage-plugin": "./../../packages/storage-plugin/src/index.ts",
+    "@setu-ts/mail-plugin": "./../../packages/mail-plugin/src/index.ts",
+    "@setu-ts/notification-plugin": "./../../packages/notification-plugin/src/index.ts",
+    "@setu-ts/feature-flags-plugin": "./../../packages/feature-flags-plugin/src/index.ts",
+    "@setu-ts/multi-tenancy-plugin": "./../../packages/multi-tenancy-plugin/src/index.ts",
+    "@setu-ts/testing": "./../../packages/testing/src/index.ts",
+    "@setu-ts/cli": "./../../packages/cli/src/index.ts",
+    "@setu-ts/cli/main": "./../../packages/cli/src/main.ts",
+    "@setu-ts/create": "./../../packages/create/src/index.ts",
+    "@setu-ts/sdk": "./../../packages/sdk/src/index.ts",
+    "@setu-ts/rest-starter": "./../../packages/starters/rest-starter/src/index.ts",
+    "@setu-ts/microservice-starter": "./../../packages/starters/microservice-starter/src/index.ts",
+    "@setu-ts/full-stack-starter": "./../../packages/starters/full-stack-starter/src/index.ts",
+    "@setu-ts/sse-plugin": "./../../packages/sse-plugin/src/index.ts",
+    "@setu-ts/react-router-plugin": "./../../packages/react-router-plugin/src/index.ts",
+    "@setu-ts/worker-pool-plugin": "./../../packages/worker-pool-plugin/src/index.ts",
+    "@setu-ts/websocket-plugin": "./../../packages/websocket-plugin/src/index.ts",
+    "@setu-ts/realtime-backplane-plugin": "./../../packages/realtime-backplane-plugin/src/index.ts",
+    "@setu-ts/session-plugin": "./../../packages/session-plugin/src/index.ts",
+    "@setu-ts/service-discovery-plugin": "./../../packages/service-discovery-plugin/src/index.ts",
+    "@setu-ts/grpc-plugin": "./../../packages/grpc-plugin/src/index.ts",
+    "@setu-ts/cloudflare-plugin": "./../../packages/cloudflare-plugin/src/index.ts",
+    "@setu-ts/graphql-plugin": "./../../packages/graphql-plugin/src/index.ts",
+    "@setu-ts/static-plugin": "./../../packages/static-plugin/src/index.ts",
+    "@setu-ts/view-plugin": "./../../packages/view-plugin/src/index.ts",
+    "@setu-ts/localization-plugin": "./../../packages/localization-plugin/src/index.ts",
+    "@setu-ts/localization-plugin/format": "./../../packages/localization-plugin/src/format/index.ts",
+    "@setu-ts/diagnostics-plugin": "./../../packages/diagnostics-plugin/src/index.ts",
+    "@setu-ts/idempotency-plugin": "./../../packages/idempotency-plugin/src/index.ts"
+  },
+  "scopes": {
+    "../../packages/cli/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/diagnostics-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/realtime-backplane-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/runtime/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../packages/websocket-plugin/test/": {
+      "vitest": "./vitest-shim.ts"
+    },
+    "../../test/": {
+      "vitest": "./vitest-shim.ts"
+    }
+  }
+}

@@ -45,8 +45,8 @@ export interface SessionCookieOptions {
   readonly domain?: string;
   /** `SameSite` policy. Default `'lax'`. */
   readonly sameSite?: 'strict' | 'lax' | 'none';
-  /** `Secure` attribute. Default `true`. */
-  readonly secure?: boolean;
+  /** `Secure` attribute. Default `true`; `'auto'` follows the trusted request protocol. */
+  readonly secure?: boolean | 'auto';
   /** `HttpOnly` attribute. Default `true`. */
   readonly httpOnly?: boolean;
 }
@@ -77,6 +77,36 @@ export interface CsrfFormOptions {
    * it to bypass CSRF for application form routes.
    */
   readonly exclude?: readonly (string | RegExp)[];
+  /**
+   * Skip verification for a bearer request ONLY when a bearer (header-credential)
+   * strategy authenticated it AND the request restored no session — the session
+   * `session-plugin` parked for the request is new (M113e, V9-27, L3). Default
+   * `true`. A request the bearer rule exempts also gets no browser session: whatever
+   * its handler writes to the session is not committed and no `Set-Cookie` is
+   * sent (L4), so it cannot plant a session in a browser whose cookie no longer
+   * restores.
+   *
+   * Form CSRF defends credentials the BROWSER attaches by itself — the session
+   * cookie. A bearer token is never attached by the browser, and a page on
+   * another origin cannot add an `Authorization` header without a CORS
+   * preflight the server approves, so a cross-site form cannot forge a
+   * bearer-authenticated API call. The exemption is decided by the credential
+   * that actually authenticated the request AND the session it restored, not by
+   * the header's presence: a request carrying a valid session cookie must
+   * present a CSRF token even with a valid bearer token, because the handler
+   * would otherwise act on that browser's session — an origin CORS lets send
+   * credentials can send its own valid bearer token beside the victim's cookie,
+   * authenticating as the attacker while the session middleware restored the
+   * victim's session (M113e, L3). A non-browser API client sends no session
+   * cookie, so its new session keeps the exemption. It fails closed when the
+   * session or the credential source is missing. `Basic` credentials are NOT
+   * exempt: browsers re-send cached Basic credentials automatically. `false`
+   * verifies every unsafe request, the behaviour before 0.10.0.
+   *
+   * Requires authentication to run before form CSRF, which the default
+   * priorities guarantee (300 then 325).
+   */
+  readonly exemptBearer?: boolean;
 }
 
 /**
@@ -163,7 +193,7 @@ export interface ResolvedSessionConfig {
   readonly cookiePath: string;
   readonly cookieDomain?: string;
   readonly cookieSameSite: 'strict' | 'lax' | 'none';
-  readonly cookieSecure: boolean;
+  readonly cookieSecure: boolean | 'auto';
   readonly cookieHttpOnly: boolean;
   readonly maxAgeSeconds: number;
   readonly maxAgeMs: number;
@@ -178,7 +208,8 @@ export interface ResolvedSessionConfig {
  *
  * @param options - The caller's options
  * @returns The resolved configuration
- * @throws {TypeError} If `maxAge`, `idleTimeoutMs`, or `maxCookieBytes` is not a positive number
+ * @throws {TypeError} If a numeric option is not positive, `cookie.secure` is invalid,
+ *   or `cookie.secure: 'auto'` conflicts with `cookie.sameSite: 'none'`
  * @since 0.2.0
  */
 export function resolveSessionConfig(options: SessionPluginOptions = {}): ResolvedSessionConfig {
@@ -193,6 +224,18 @@ export function resolveSessionConfig(options: SessionPluginOptions = {}): Resolv
   }
 
   const cookie = options.cookie ?? {};
+  if (
+    cookie.secure !== undefined &&
+    typeof cookie.secure !== 'boolean' &&
+    cookie.secure !== 'auto'
+  ) {
+    throw new TypeError("SessionPlugin option 'cookie.secure' must be a boolean or 'auto'.");
+  }
+  if (cookie.secure === 'auto' && cookie.sameSite === 'none') {
+    throw new TypeError(
+      "SessionPlugin options 'cookie.secure' and 'cookie.sameSite' conflict: 'auto' cannot use 'none'.",
+    );
+  }
 
   // Built in two steps because exactOptionalPropertyTypes forbids assigning
   // `undefined` to an optional property — the optional keys are spread in only
@@ -223,6 +266,7 @@ export interface ResolvedCsrfConfig {
   readonly fieldName: string;
   readonly headerName: string;
   readonly ignoreMethods: ReadonlySet<string>;
+  readonly exemptBearer: boolean;
 }
 
 /**
@@ -238,7 +282,20 @@ export function resolveCsrfConfig(options: CsrfFormOptions = {}): ResolvedCsrfCo
     fieldName: options.fieldName ?? DEFAULT_CSRF_FIELD,
     headerName: options.headerName ?? DEFAULT_CSRF_HEADER,
     ignoreMethods: new Set(methods.map((m) => m.toUpperCase())),
+    exemptBearer: resolveExemptBearer(options.exemptBearer),
   };
+}
+
+/**
+ * Resolves `csrf.exemptBearer`, refusing a non-boolean so a value such as
+ * `'false'` from an untyped config cannot silently leave the exemption on.
+ */
+function resolveExemptBearer(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (typeof value !== 'boolean') {
+    throw new TypeError("SessionPlugin option 'csrf.exemptBearer' must be a boolean.");
+  }
+  return value;
 }
 
 /** Rejects a non-positive or non-finite numeric option at configuration time. */

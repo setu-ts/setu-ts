@@ -50,9 +50,7 @@ export class ProviderRegistry {
    */
   register(token: string, entry: ProviderEntry): void {
     if (this.#entries.has(token)) {
-      throw new Error(
-        `DI token '${token}' is already registered. Use a child scope to override.`,
-      );
+      throw new Error(`DI token '${token}' is already registered. Use a child scope to override.`);
     }
     this.#entries.set(token, entry);
   }

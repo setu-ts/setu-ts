@@ -314,7 +314,10 @@ interface UserRepository {
 @Injectable({ token: 'user-service' })
 @Inject('user-repository', CAPABILITIES.CACHE)
 export class UserService {
-  constructor(private readonly repo: UserRepository, private readonly cache: ICacheStore) {}
+  constructor(
+    private readonly repo: UserRepository,
+    private readonly cache: ICacheStore,
+  ) {}
 
   async findAll() {
     // Check cache first
@@ -740,8 +743,7 @@ runs. It fails closed: with no authorization service registered (`AuthPlugin` wi
 option), it answers `501` rather than serving the route unguarded, and `register()` warns once per
 affected route. Several roles on one route mean any of them; roles and permissions together mean
 both. `@Public` marks a route public for the OpenAPI document.
-`DecoratorPlugin({ enforceRoles:
-false })` restores metadata-only behaviour.
+`DecoratorPlugin({ enforceRoles: false })` restores metadata-only behaviour.
 
 ```typescript
 import { Controller, Get, Permissions, Public, Roles } from '@setu-ts/decorator-plugin';
@@ -944,13 +946,17 @@ const app = createApplication({
     DiPlugin(),
     DecoratorPlugin({
       autoDiscover: true,
-      controllersPath: './src/controllers',
+      controllersPath: './src',
     }),
   ],
 });
 
 await app.start({ port: 3000 });
 ```
+
+Discovery scans recursively from that root (skipping dot-directories and `node_modules`), so `./src`
+also reaches the `@Controller` classes inside `src/modules/<name>/` — pointing it at
+`./src/controllers` alone would miss every module controller.
 
 ## Limitations
 

@@ -1,6 +1,5 @@
 /** Behavioral tests for the actual production Worker startup seam. @module */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+import { describe, expect, it } from 'vitest';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createWorkerHandler } from '../apps/cloudflare/worker.ts';
 
@@ -20,10 +19,7 @@ function deferred(): {
   return { promise, resolve, reject };
 }
 
-function fakeApp(
-  start: () => Promise<void>,
-  onFetch: () => void,
-): IKernelApplication {
+function fakeApp(start: () => Promise<void>, onFetch: () => void): IKernelApplication {
   return {
     router: {} as IKernelApplication['router'],
     middleware: {} as IKernelApplication['middleware'],
@@ -47,10 +43,13 @@ describe('production Worker startup behavior', () => {
     let starts = 0;
     let fetches = 0;
     const handler = createWorkerHandler(() =>
-      fakeApp(() => {
-        starts += 1;
-        return gate.promise;
-      }, () => fetches += 1)
+      fakeApp(
+        () => {
+          starts += 1;
+          return gate.promise;
+        },
+        () => (fetches += 1),
+      ),
     );
 
     const first = handler.fetch(new Request('https://example.test/1'), env);
@@ -71,10 +70,13 @@ describe('production Worker startup behavior', () => {
     let starts = 0;
     let fetches = 0;
     const handler = createWorkerHandler(() =>
-      fakeApp(() => {
-        starts += 1;
-        return gate.promise;
-      }, () => fetches += 1)
+      fakeApp(
+        () => {
+          starts += 1;
+          return gate.promise;
+        },
+        () => (fetches += 1),
+      ),
     );
 
     const first = handler.fetch(new Request('https://example.test/1'), env);
@@ -93,27 +95,23 @@ describe('production Worker startup behavior', () => {
     let starts = 0;
     let fetches = 0;
     const handler = createWorkerHandler(() =>
-      fakeApp(() => {
-        starts += 1;
-        return starts === 1 ? Promise.reject(new Error('transient')) : Promise.resolve();
-      }, () => fetches += 1)
+      fakeApp(
+        () => {
+          starts += 1;
+          return starts === 1 ? Promise.reject(new Error('transient')) : Promise.resolve();
+        },
+        () => (fetches += 1),
+      ),
     );
 
-    const failed = await handler.fetch(
-      new Request('https://example.test/1'),
-      env,
-    ).catch(
-      (error: unknown) => error,
-    );
+    const failed = await handler
+      .fetch(new Request('https://example.test/1'), env)
+      .catch((error: unknown) => error);
     expect(failed).toBeInstanceOf(Error);
     expect(fetches).toBe(0);
 
-    expect(
-      (await handler.fetch(new Request('https://example.test/2'), env)).status,
-    ).toBe(200);
-    expect(
-      (await handler.fetch(new Request('https://example.test/3'), env)).status,
-    ).toBe(200);
+    expect((await handler.fetch(new Request('https://example.test/2'), env)).status).toBe(200);
+    expect((await handler.fetch(new Request('https://example.test/3'), env)).status).toBe(200);
     expect(starts).toBe(2);
     expect(fetches).toBe(2);
   });

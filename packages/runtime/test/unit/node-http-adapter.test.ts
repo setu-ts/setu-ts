@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-explicit-any
+/* eslint-disable @typescript-eslint/no-explicit-any */
 /**
  * Unit tests for NodeHttpAdapter — uses a fake NodeServeHost.
  *
@@ -13,6 +13,57 @@ import {
 } from '../../src/adapters/node/node-http-adapter.ts';
 import { UPGRADE_INTENT } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
+import { createTestContext } from '@setu-ts/testing';
+
+describe('Node socket peer', () => {
+  it('reads incoming.socket.remoteAddress and tolerates absent env members', async () => {
+    const handle = new NodeHttpServerHandle();
+    let peer: string | undefined;
+    handle.setHandler((request) => {
+      peer = request.ip;
+      return createTestContext().response;
+    });
+    const fetch = handle.createFetchHandler();
+    for (const env of [undefined, {}, { incoming: {} }, { incoming: { socket: {} } }]) {
+      await fetch(new Request('http://localhost/'), env);
+      expect(peer).toBeUndefined();
+    }
+    await fetch(new Request('http://localhost/'), {
+      incoming: { socket: { remoteAddress: '::ffff:10.1.2.3' } },
+    });
+    expect(peer).toBe('10.1.2.3');
+  });
+  it('carries the peer through the raw upgrade pipeline', async () => {
+    const handle = new NodeHttpServerHandle();
+    const seen = Promise.withResolvers<string | undefined>();
+    handle.setUpgradeRouter(() => Promise.resolve(null));
+    handle.setHandler((request) => {
+      seen.resolve(request.ip);
+      return createTestContext().response;
+    });
+    let listener: ((...args: never[]) => void) | undefined;
+    const server = {
+      close() {},
+      on(_event: string, fn: (...args: never[]) => void) {
+        listener = fn;
+      },
+    };
+    handle.attachUpgradeListener(server);
+    listener!(
+      ...([
+        {
+          url: '/ws',
+          headers: { host: 'localhost' },
+          socket: { remoteAddress: '::ffff:192.0.2.1' },
+        },
+        { write() {}, destroy() {} },
+        new Uint8Array(),
+      ] as unknown as never[]),
+    );
+    expect(await seen.promise).toBe('192.0.2.1');
+    await Promise.resolve();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Fake host
@@ -75,7 +126,7 @@ describe('node-http-adapter | setHandler/fetch', () => {
 
     // Simpler: directly test fetch with a handler that returns a known response
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({
@@ -110,7 +161,7 @@ describe('node-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -138,7 +189,7 @@ describe('node-http-adapter | listen', () => {
     const { host, recorded } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -161,7 +212,7 @@ describe('node-http-adapter | close', () => {
     const { host } = createFakeHost();
 
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -184,7 +235,7 @@ describe('node-http-adapter | close', () => {
   it('close with null server is a no-op', async () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -208,7 +259,7 @@ describe('node-http-adapter | close with invalid handle', () => {
     const { host } = createFakeHost();
     const adapter = new NodeHttpAdapter(host);
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (_request) => {
       return {
         snapshot: () => ({ streaming: false, status: 200, headers: new Headers(), body: null }),
@@ -247,7 +298,7 @@ describe('node-http-adapter | performUpgrade via fetch path', () => {
     let onCloseCalled = false;
     let onCloseReason = '';
 
-    // deno-lint-ignore require-await
+    // eslint-disable-next-line require-await
     adapter.setHandler(async (request) => {
       // Write upgrade intent on the request (simulating kernel terminal handler).
       (request as unknown as Record<symbol, any>)[UPGRADE_INTENT] = {

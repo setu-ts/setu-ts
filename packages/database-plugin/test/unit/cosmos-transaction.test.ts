@@ -71,7 +71,7 @@ describe('BatchBuffer', () => {
         container: 'orders',
         partitionKey: 't1',
         operation: { operationType: 'Create', resourceBody: { id: 'one-too-many' } },
-      })
+      }),
     ).toThrow(CosmosTransactionScopeError);
   });
 
@@ -112,16 +112,19 @@ describe('itemIdOf', () => {
   // each arm has to answer for the kind it is given.
   it('reads a Delete and a Patch from the operation itself', () => {
     expect(itemIdOf({ operationType: 'Delete', id: 'd1' })).toBe('d1');
-    expect(itemIdOf({
-      operationType: 'Patch',
-      id: 'p1',
-      resourceBody: { operations: [{ op: 'set', path: '/a', value: 1 }] },
-    })).toBe('p1');
+    expect(
+      itemIdOf({
+        operationType: 'Patch',
+        id: 'p1',
+        resourceBody: { operations: [{ op: 'set', path: '/a', value: 1 }] },
+      }),
+    ).toBe('p1');
   });
 
   it('prefers a document body id, and falls back to the operation id', () => {
-    expect(itemIdOf({ operationType: 'Create', resourceBody: { id: 'body' }, id: 'op' }))
-      .toBe('body');
+    expect(itemIdOf({ operationType: 'Create', resourceBody: { id: 'body' }, id: 'op' })).toBe(
+      'body',
+    );
     // A non-string body id is not an id Cosmos would accept, so the operation's
     // own value is used instead.
     expect(itemIdOf({ operationType: 'Upsert', resourceBody: { id: 7 }, id: 'op' })).toBe('op');
@@ -149,13 +152,15 @@ describe('CosmosTransaction', () => {
     // The update is a `Patch`, not a `Replace`: it writes only the fields the
     // payload names, so it neither clobbers a concurrent writer's other fields
     // nor discards an earlier buffered update of the same row.
-    expect(fake.recorder.batches[0]?.operations.map((operation) => operation.operationType))
-      .toEqual(['Create', 'Patch', 'Delete']);
+    expect(
+      fake.recorder.batches[0]?.operations.map((operation) => operation.operationType),
+    ).toEqual(['Create', 'Patch', 'Delete']);
   });
 
   it('buffers a narrow update as set operations naming only the payload fields', async () => {
     const { transaction, fake } = makeTransaction();
-    await transaction.createDataSource('Order')
+    await transaction
+      .createDataSource('Order')
       .update({ id: 'existing', tenantId: 't1' }, { total: 5, note: 'x' });
     await transaction.commit();
     const [operation] = fake.recorder.batches[0]?.operations ?? [];
@@ -193,7 +198,8 @@ describe('CosmosTransaction', () => {
     // update naming only those has nothing left to write — sending an empty
     // patch would be a write that changes nothing.
     const { transaction, fake } = makeTransaction();
-    const row = await transaction.createDataSource('Order')
+    const row = await transaction
+      .createDataSource('Order')
       .update({ id: 'existing', tenantId: 't1' }, { id: 'existing', tenantId: 't1' });
     expect(row).toEqual({ id: 'existing', tenantId: 't1', total: 1 });
     await transaction.commit();
@@ -210,8 +216,12 @@ describe('CosmosTransaction', () => {
     expect(operation?.operationType).toBe('Replace');
     // The replace carries the committed row merged with the payload, which is
     // exactly why a second write to this row cannot be allowed after it.
-    expect((operation as { resourceBody: Record<string, unknown> }).resourceBody)
-      .toMatchObject({ id: 'existing', tenantId: 't1', total: 1, f0: 0 });
+    expect((operation as { resourceBody: Record<string, unknown> }).resourceBody).toMatchObject({
+      id: 'existing',
+      tenantId: 't1',
+      total: 1,
+      f0: 0,
+    });
   });
 
   it('returns the row that WILL be written, before the flush', async () => {
@@ -256,23 +266,26 @@ describe('CosmosTransaction', () => {
   it('refuses a second container by name, at the write that causes it', async () => {
     const { transaction } = makeTransaction();
     await transaction.createDataSource('Order').create({ id: 'o1', tenantId: 't1' });
-    await expect(transaction.createDataSource('Invoice').create({ id: 'i1', tenantId: 't1' }))
-      .rejects.toThrow(/cannot span containers.*'orders'.*'invoices'/s);
+    await expect(
+      transaction.createDataSource('Invoice').create({ id: 'i1', tenantId: 't1' }),
+    ).rejects.toThrow(/cannot span containers.*'orders'.*'invoices'/s);
   });
 
   it('refuses a second partition-key value by name', async () => {
     const { transaction } = makeTransaction();
     const orders = transaction.createDataSource('Order');
     await orders.create({ id: 'o1', tenantId: 't1' });
-    await expect(orders.create({ id: 'o2', tenantId: 't2' }))
-      .rejects.toThrow(/single partition-key value.*"t1".*"t2"/s);
+    await expect(orders.create({ id: 'o2', tenantId: 't2' })).rejects.toThrow(
+      /single partition-key value.*"t1".*"t2"/s,
+    );
   });
 
   it('surfaces a failed batch with its per-operation statuses', async () => {
     const { transaction } = makeTransaction({ batchCode: 207 });
     await transaction.createDataSource('Order').create({ id: 'o1', tenantId: 't1' });
-    await expect(transaction.commit())
-      .rejects.toThrow(/batch on 'orders' failed with status 207 \(per-operation: 424\)/);
+    await expect(transaction.commit()).rejects.toThrow(
+      /batch on 'orders' failed with status 207 \(per-operation: 424\)/,
+    );
   });
 
   it('retains the root per-operation failure code for the service classifier', async () => {
@@ -324,10 +337,8 @@ describe('CosmosTransaction', () => {
         };
       },
     };
-    const transaction = new CosmosTransaction(
-      silent,
-      new PartitionKeyResolver(silent),
-      (entity) => resolveCosmosTarget(entity, mapping),
+    const transaction = new CosmosTransaction(silent, new PartitionKeyResolver(silent), (entity) =>
+      resolveCosmosTarget(entity, mapping),
     );
     await transaction.createDataSource('Order').create({ id: 'o1', tenantId: 't1' });
     await transaction.commit();
@@ -348,14 +359,13 @@ describe('CosmosTransaction', () => {
         };
       },
     };
-    const transaction = new CosmosTransaction(
-      terse,
-      new PartitionKeyResolver(terse),
-      (entity) => resolveCosmosTarget(entity, mapping),
+    const transaction = new CosmosTransaction(terse, new PartitionKeyResolver(terse), (entity) =>
+      resolveCosmosTarget(entity, mapping),
     );
     await transaction.createDataSource('Order').create({ id: 'o1', tenantId: 't1' });
-    await expect(transaction.commit())
-      .rejects.toThrow(/failed with status 500 \(per-operation: \)/);
+    await expect(transaction.commit()).rejects.toThrow(
+      /failed with status 500 \(per-operation: \)/,
+    );
   });
 
   it('refuses a second settlement of the same handle', async () => {
@@ -433,7 +443,7 @@ describe('CosmosTransaction', () => {
         container: 'orders',
         partitionKey: 't1',
         operation: { operationType: 'Replace', id: 'o1', resourceBody: { id: 'o1' } },
-      })
+      }),
     ).toThrow(/already writes to 'o1'/);
   });
 
@@ -456,7 +466,10 @@ describe('CosmosTransaction', () => {
       partitionKey: 't1',
       operation: { operationType: 'Delete', id: 'o1' },
     });
-    expect(buffer.operations().map((operation) => operation.operationType))
-      .toEqual(['Patch', 'Patch', 'Delete']);
+    expect(buffer.operations().map((operation) => operation.operationType)).toEqual([
+      'Patch',
+      'Patch',
+      'Delete',
+    ]);
   });
 });

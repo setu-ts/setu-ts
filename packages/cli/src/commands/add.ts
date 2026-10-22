@@ -27,15 +27,28 @@ import {
   PROGRAM_NAME,
   type TargetRuntime,
 } from '../constants.ts';
-import { joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import {
+  type GeneratedFile,
+  joinPath,
+  readExistingText,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import { stringFlag } from '../args.ts';
+import { BRIEF_BEGIN } from '../agents/brief-file.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
+import { composingStarter } from '../utils/starter-arms.ts';
+import { hostSeamSpecs } from '../seams/registry.ts';
+import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
+  callArguments,
   callsIdentifier,
   DEVTOOL_SOURCES_MODULE,
   factoryScope,
@@ -71,6 +84,16 @@ interface IAddablePackage {
   readonly pkg: string;
   /** Packages used only while developing belong in npm devDependencies. */
   readonly section?: 'dev';
+  /**
+   * Optional peer packages a package manager will not install for the
+   * consumer. Written on the runtimes listed here, at their
+   * {@linkcode CLIENT_RANGES} range: into `package.json` `dependencies`, or
+   * into a `deno.json`/`deno.jsonc` import map as `npm:<name>@<range>`.
+   */
+  readonly peers?: {
+    readonly runtimes: readonly TargetRuntime[];
+    readonly packages: readonly string[];
+  };
 }
 
 /**
@@ -85,11 +108,12 @@ interface IAddablePackage {
  * manifest carries. Both resolve, so `setu add auth` and
  * `setu add @setu-ts/auth-plugin` are the same command.
  */
-const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
+export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['audit', { pkg: 'audit-plugin' }],
   ['auth', { pkg: 'auth-plugin' }],
   ['cache', { pkg: 'cache-plugin' }],
   ['cloudflare', { pkg: 'cloudflare-plugin' }],
+  ['common', { pkg: 'common' }],
   ['config', { pkg: 'config-plugin' }],
   ['cqrs', { pkg: 'cqrs-plugin' }],
   ['database', { pkg: 'database-plugin' }],
@@ -101,6 +125,8 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['grpc', { pkg: 'grpc-plugin' }],
   ['health', { pkg: 'health-plugin' }],
   ['http-security', { pkg: 'http-security-plugin' }],
+  ['idempotency', { pkg: 'idempotency-plugin' }],
+  ['localization', { pkg: 'localization-plugin' }],
   ['logger', { pkg: 'logger-plugin' }],
   ['mail', { pkg: 'mail-plugin' }],
   ['messaging', { pkg: 'messaging-plugin' }],
@@ -122,12 +148,19 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['storage', { pkg: 'storage-plugin' }],
   ['testing', { pkg: 'testing', section: 'dev' }],
   ['telemetry', { pkg: 'telemetry-plugin' }],
-  ['validation', { pkg: 'validation-plugin' }],
-  ['websocket', { pkg: 'websocket-plugin' }],
+  [
+    'validation',
+    {
+      pkg: 'validation-plugin',
+      peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
+    },
+  ],
+  ['view', { pkg: 'view-plugin' }],
+  ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
 
-const RUNTIME_RESTRICTIONS: ReadonlyMap<
+export const RUNTIME_RESTRICTIONS: ReadonlyMap<
   string,
   { readonly runtimes: readonly TargetRuntime[]; readonly reason: string }
 > = new Map([
@@ -162,6 +195,14 @@ interface IPluginWiring {
  * manifest-only like every other `setu add` package.
  */
 const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
+  ['worker-pool-plugin', { symbol: 'WorkerPoolPlugin' }],
+  ['secrets-plugin', { symbol: 'SecretsPlugin' }],
+  ['storage-plugin', { symbol: 'StoragePlugin' }],
+  ['audit-plugin', { symbol: 'AuditPlugin' }],
+  ['mail-plugin', { symbol: 'MailPlugin' }],
+  ['resilience-plugin', { symbol: 'ResiliencePlugin' }],
+  ['view-plugin', { symbol: 'ViewPlugin' }],
+  ['idempotency-plugin', { symbol: 'IdempotencyPlugin' }],
   ['cqrs-plugin', { symbol: 'CqrsPlugin' }],
   ['events-plugin', { symbol: 'EventsPlugin' }],
   ['messaging-plugin', { symbol: 'MessagingPlugin' }],
@@ -176,54 +217,44 @@ const ZERO_CONFIG_WIRINGS: ReadonlyMap<string, IPluginWiring> = new Map([
   ['realtime-backplane-plugin', { symbol: 'RealtimeBackplanePlugin' }],
 ]);
 
-/** Starter-owned options, including optional arms that must first be configured. */
-const REST_ARMS: ReadonlyMap<string, string> = new Map([
-  ['config-plugin', 'config'],
-  ['logger-plugin', 'logger'],
-  ['validation-plugin', 'validation'],
-  ['http-security-plugin', 'httpSecurity'],
-  ['health-plugin', 'health'],
-  ['metrics-plugin', 'metrics'],
-  ['openapi-plugin', 'openapi'],
-  ['decorator-plugin', 'decorators'],
-  ['database-plugin', 'database'],
-  ['auth-plugin', 'auth'],
-  ['websocket-plugin', 'realtime.websocket'],
-  ['sse-plugin', 'realtime.sse'],
-  ['realtime-backplane-plugin', 'realtime.backplane'],
-  ['session-plugin', 'session'],
-  ['di-plugin', 'di'],
-  ['graphql-plugin', 'graphql'],
-  ['service-discovery-plugin', 'serviceDiscovery'],
-]);
-const MICROSERVICE_ARMS: ReadonlyMap<string, string> = new Map([
-  ...REST_ARMS,
-  ['messaging-plugin', 'messaging'],
-  ['queue-plugin', 'queue'],
-  ['resilience-plugin', 'resilience'],
-  ['telemetry-plugin', 'telemetry'],
-]);
-const FULL_STACK_ARMS: ReadonlyMap<string, string> = new Map([
-  ...MICROSERVICE_ARMS,
-  ['cache-plugin', 'cache'],
-  ['events-plugin', 'events'],
-  ['cqrs-plugin', 'cqrs'],
-  ['scheduler-plugin', 'scheduler'],
-  ['audit-plugin', 'audit'],
-  ['secrets-plugin', 'secrets'],
-  ['storage-plugin', 'storage'],
-  ['mail-plugin', 'mail'],
-  ['feature-flags-plugin', 'featureFlags'],
-  ['notification-plugin', 'notifications'],
-  ['multi-tenancy-plugin', 'multiTenancy'],
-  ['react-router-plugin', 'reactRouter'],
-  ['static-plugin', 'static'],
-]);
-const STARTER_ARMS = [
-  { symbol: 'createRestApp', pkg: 'rest-starter', arms: REST_ARMS },
-  { symbol: 'createMicroserviceApp', pkg: 'microservice-starter', arms: MICROSERVICE_ARMS },
-  { symbol: 'createFullStackAppFromConfig', pkg: 'full-stack-starter', arms: FULL_STACK_ARMS },
-] as const;
+/**
+ * The generated-artifact seam a zero-config provider consumes through its options.
+ *
+ * `setu new` wires each seam into `setu.config.ts` at scaffold time (for example
+ * `EventsPlugin({ handlers: EVENT_HANDLERS })` on `microservice`). `setu add` used to
+ * insert the bare call instead, so every handler a later `setu generate` wrote into
+ * the seam barrel was registered by nothing — the M60 defect class. This carries the
+ * same wiring `setu new` emits, derived from the same seam registry.
+ */
+export interface AddSeam {
+  /** Options argument for the provider call, e.g. `{ handlers: EVENT_HANDLERS }`. */
+  readonly args: string;
+  /** Config imports that bring the barrel symbols into scope. */
+  readonly imports: readonly { readonly symbols: readonly string[]; readonly from: string }[];
+  /** The seam barrels, rendered empty, for a project that has none yet. */
+  readonly files: readonly GeneratedFile[];
+}
+
+/**
+ * Resolves the seam a provider consumes in a project with the given packages.
+ *
+ * Class-based projects receive handlers through `DecoratorPlugin`'s ingress barrel,
+ * so `hostSeamSpecs` omits the functional event and CQRS seams there and this
+ * returns `undefined` — the bare call stays correct.
+ *
+ * @param bare - Bare package name being added
+ * @param installed - Bare package names installed after this add
+ * @returns The seam wiring, or `undefined` when the provider consumes none
+ */
+export function addSeam(bare: string, installed: ReadonlySet<string>): AddSeam | undefined {
+  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+  if (provider === undefined) return undefined;
+  const specs = hostSeamSpecs(installed).filter((spec) => spec.requiresPlugin === bare);
+  if (specs.length === 0) return undefined;
+  const args = withPluginOptionSeams([{ pkg: bare, symbol: provider.symbol }], specs)[0]?.args;
+  if (args === undefined) return undefined;
+  return { args, imports: seamLocalImports(specs), files: seamFiles(specs) };
+}
 
 /** The concrete registration to show when configuration belongs to the application. */
 function registrationLine(bare: string): string | undefined {
@@ -235,6 +266,12 @@ function registrationLine(bare: string): string | undefined {
     return "AuthPlugin({ jwt: { secret: '<your-secret>' }, rbac: { roles: {} } })";
   }
   if (bare === 'session-plugin') return "SessionPlugin({ secret: '<your-secret>' })";
+  if (bare === 'telemetry-plugin') {
+    return "TelemetryPlugin({ serviceName: '<service-name>', exporter: 'console' })";
+  }
+  if (bare === 'localization-plugin') {
+    return "LocalizationPlugin({ supportedLocales: ['en'], catalogues: { en: {} } })";
+  }
   if (bare === 'grpc-plugin') return 'GrpcPlugin({ services: [] })';
   if (bare === 'database-plugin') return "DatabasePlugin({ type: 'memory' })";
   if (bare === 'feature-flags-plugin') return "FeatureFlagsPlugin({ provider: 'memory' })";
@@ -250,7 +287,13 @@ function registrationLine(bare: string): string | undefined {
   if (bare === 'service-discovery-plugin') {
     return "ServiceDiscoveryPlugin({ provider: 'static', services: {} })";
   }
-  if (bare === 'cloudflare-plugin') return 'CloudflarePlugin({ env })';
+  if (bare === 'cloudflare-plugin') {
+    // M113d §3.8: `setu add cloudflare` is accepted only on cloudflare-workers,
+    // whose generated factory takes the platform sink as its second parameter.
+    // The spread is required under `exactOptionalPropertyTypes`: `setu commands`
+    // calls the factory with no `waitUntil`.
+    return 'CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })';
+  }
   return undefined;
 }
 
@@ -259,12 +302,21 @@ function printWiringNote(
   source: string | undefined,
   bare: string,
   log: (line: string) => void,
+  seam?: AddSeam,
 ): void {
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
       log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
+      // The barrel exists by now; without this line nothing would ever pass it to
+      // the arm, so every handler generated into it would register nowhere.
+      if (seam !== undefined) {
+        log(`  Pass the generated artifacts through it: ${arm}: ${seam.args}`);
+        for (const item of seam.imports) {
+          log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
+        }
+      }
       log(
         `  See https://github.com/setu-ts/setu-ts/blob/develop/packages/starters/${starter.pkg}/README.md`,
       );
@@ -277,9 +329,10 @@ function printWiringNote(
   }
   const registration = registrationLine(bare);
   const factory = registration?.slice(0, registration.indexOf('('));
-  const binding = source === undefined || factory === undefined
-    ? undefined
-    : providerBinding(source, bare, factory);
+  const binding =
+    source === undefined || factory === undefined
+      ? undefined
+      : providerBinding(source, bare, factory);
   // Guidance is suppressed only by a real call in code. Inserting refuses on any
   // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
   // in a string would leave the plugin unregistered with nothing said (audit 4).
@@ -288,34 +341,72 @@ function printWiringNote(
   // module scope therefore still gets the line — guidance fails open.
   const scope = source === undefined ? undefined : factoryScope(source);
   if (
-    binding !== undefined && scope !== undefined &&
+    binding !== undefined &&
+    scope !== undefined &&
     callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
   ) {
+    for (const line of seamGapLines(source, bare, seam)) log(line);
     return;
   }
   // No raw-text check here: a string or comment containing the registration's
   // text silenced the guidance for a plugin nothing registers (audit round 5).
   // Only a real call in classified code, checked above, suppresses it.
   if (registration !== undefined) {
+    const call = seam === undefined ? registration : `${factory}(${seam.args})`;
     log(
       starter === undefined
-        ? `  Register ${registration} in setu.config.ts.`
-        : `  Register it after the factory returns: app.register(${registration});`,
+        ? `  Register ${call} in setu.config.ts.`
+        : `  Register it after the factory returns: app.register(${call});`,
     );
+    for (const item of seam?.imports ?? []) {
+      log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
+    }
   }
 }
 
 /**
- * The starter a configuration composes through, if it imports one at all. Any
- * starter import counts — `createRestApp`, or `buildRestPlugins` spread into a
- * synchronous factory — since either registers plugins this file never names, and
- * a second registration is a duplicate plugin name at boot (audit round 6).
- * Read with comments masked where the file classifies, else from raw text, which
- * errs toward starter guidance.
+ * Guidance for a provider the factory already calls WITHOUT the seam it consumes.
+ *
+ * A config that registers a bare `EventsPlugin()` — the shape `setu add` emitted
+ * before it learned the seam, and the shape a hand-written config may carry —
+ * leaves every handler generated into `src/events/index.ts` registered nowhere.
+ * Neither the insert nor the "Register …" guidance fires for it, since the call
+ * exists, so this is the one place that says what the call is missing.
+ *
+ * @param source - The config source, if readable
+ * @param bare - Bare package name being added
+ * @param seam - The seam the provider consumes, if any
+ * @returns The lines to print; empty when there is nothing to say
  */
-function composingStarter(source: string): (typeof STARTER_ARMS)[number] | undefined {
-  const visible = maskComments(source) ?? source;
-  return STARTER_ARMS.find(({ pkg }) => packageSpecifierCount(visible, pkg) > 0);
+function seamGapLines(
+  source: string | undefined,
+  bare: string,
+  seam: AddSeam | undefined,
+): readonly string[] {
+  if (seam === undefined || source === undefined) return [];
+  // A starter that owns the plugin has its own arm guidance; one that does not
+  // (a REST starter has no `events` arm) leaves the call ours to check.
+  if (composingStarter(source)?.arms.has(bare) === true) return [];
+  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+  if (provider === undefined) return [];
+  const binding = providerBinding(source, bare, provider.symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return [];
+  const calls = callArguments(scope.code.slice(scope.start, scope.end), binding);
+  if (calls.length === 0) return [];
+  // The CALL's own arguments decide, not a reference anywhere in the factory: a
+  // body that reads the barrel elsewhere and calls the provider bare still
+  // registers nothing. Fails open — options built elsewhere and passed by name
+  // draw the line, which says too much rather than nothing.
+  const symbols = seam.imports.flatMap((item) => item.symbols);
+  const wired = calls.some((args) => symbols.every((symbol) => referencesIdentifier(args, symbol)));
+  if (wired) return [];
+  return [
+    `  The existing ${binding}(…) call does not pass the generated artifacts; give it ${seam.args}.`,
+    ...seam.imports
+      .filter((item) => !source.includes(`'${item.from}'`) && !source.includes(`"${item.from}"`))
+      .map((item) => `  Import ${item.symbols.join(', ')} from '${item.from}' for it.`),
+  ];
 }
 
 /**
@@ -361,8 +452,11 @@ export function pinnedInOtherNpmSection(
   try {
     const parsed = JSON.parse(source) as Record<string, unknown>;
     const map = parsed[other];
-    return map !== null && typeof map === 'object' &&
-      (map as Record<string, unknown>)[specifier] === range;
+    return (
+      map !== null &&
+      typeof map === 'object' &&
+      (map as Record<string, unknown>)[specifier] === range
+    );
   } catch {
     return false;
   }
@@ -392,9 +486,10 @@ export function withDependency(
 ): string | undefined {
   const parsed = JSON.parse(source) as Record<string, unknown>;
   const existing = parsed[section];
-  const map = existing !== null && typeof existing === 'object'
-    ? { ...existing as Record<string, string> }
-    : {};
+  const map =
+    existing !== null && typeof existing === 'object'
+      ? { ...(existing as Record<string, string>) }
+      : {};
 
   if (map[specifier] === range) return undefined;
 
@@ -410,10 +505,76 @@ export function withDependency(
   const afterScope = scope === '' ? -1 : keys.findLastIndex((key) => key.startsWith(scope));
   const sortedIndex = keys.findIndex((key) => key > specifier);
   const insertion = sorted
-    ? (sortedIndex < 0 ? entries.length : sortedIndex)
-    : (afterScope < 0 ? entries.length : afterScope + 1);
+    ? sortedIndex < 0
+      ? entries.length
+      : sortedIndex
+    : afterScope < 0
+      ? entries.length
+      : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
+}
+
+/**
+ * The optional peer packages a package needs installed on a given runtime.
+ *
+ * @param bare - Bare package name being added
+ * @param runtime - The detected target runtime
+ * @returns Each peer and the range to record for it; empty when the package
+ * declares none or the runtime is not listed
+ */
+function peerPackagesFor(
+  bare: string,
+  runtime: TargetRuntime,
+): readonly { readonly name: string; readonly range: string }[] {
+  const peers = [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.peers;
+  if (peers === undefined || !peers.runtimes.includes(runtime)) return [];
+  return peers.packages.map((name) => {
+    const range = CLIENT_RANGES[name];
+    if (range === undefined) {
+      throw new Error(`No client range for peer ${name}; add it to CLIENT_RANGES.`);
+    }
+    return { name, range };
+  });
+}
+
+/**
+ * Adds optional peer packages to a manifest's `dependencies`, never replacing
+ * an existing pin.
+ *
+ * `setu add websocket` on Node must install `ws` — an optional peer of
+ * `@setu-ts/runtime` that a package manager will not install for the consumer —
+ * or the first upgrade answers 500 with nothing in the log. A peer already
+ * pinned at any range is left exactly as it is: a hand-pinned version may be
+ * deliberate, and this command cannot know why.
+ *
+ * @param source - The manifest's current contents
+ * @param peers - Each peer and the range to record for it
+ * @returns The rewritten manifest and the peers actually added
+ */
+function withPeerDependencies(
+  source: string,
+  peers: readonly { readonly name: string; readonly range: string }[],
+  section: 'dependencies' | 'imports',
+): { readonly contents: string; readonly added: readonly string[] } {
+  if (peers.length === 0) return { contents: source, added: [] };
+  const parsed = JSON.parse(source) as Record<string, unknown>;
+  const existing = parsed[section];
+  const dependencies =
+    existing !== null && typeof existing === 'object'
+      ? { ...(existing as Record<string, string>) }
+      : {};
+  const added: string[] = [];
+  for (const peer of peers) {
+    if (peer.name in dependencies) continue;
+    dependencies[peer.name] = section === 'imports' ? `npm:${peer.name}@${peer.range}` : peer.range;
+    added.push(peer.name);
+  }
+  if (added.length === 0) return { contents: source, added: [] };
+  return {
+    contents: `${JSON.stringify({ ...parsed, [section]: dependencies }, null, 2)}\n`,
+    added,
+  };
 }
 
 /**
@@ -455,10 +616,12 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  *
  * @param source - Existing `setu.config.ts` contents
  * @param bare - Bare package name being added
+ * @param seam - The generated-artifact seam the provider consumes, if any: the
+ * call then carries its options and the barrel imports are added
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
-export function withPluginWiring(source: string, bare: string): string | undefined {
+export function withPluginWiring(source: string, bare: string, seam?: AddSeam): string | undefined {
   const provider = ZERO_CONFIG_WIRINGS.get(bare);
   if (provider === undefined) return undefined;
 
@@ -469,14 +632,12 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   // CLI's Deno rendering) or inline (Prettier's rendering of a short array, which
   // is what an npm-target scaffold carries). Exactly one, so the insertion point
   // is never a guess.
-  const anchors = code === undefined
-    ? []
-    : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
+  const anchors =
+    code === undefined
+      ? []
+      : [...code.matchAll(/\.\.\.\(devtool\?\.plugins \?\? \[\]\)(?=[ \t]*(?:,|\]))/g)];
   const anchorMatch = anchors.length === 1 ? anchors[0]! : null;
-  if (
-    code === undefined || anchorMatch === null ||
-    code.split(anchor).length !== 2
-  ) {
+  if (code === undefined || anchorMatch === null || code.split(anchor).length !== 2) {
     return undefined;
   }
   const providerImport = `import { ${provider.symbol} } from '@setu-ts/${bare}';`;
@@ -506,16 +667,27 @@ export function withPluginWiring(source: string, bare: string): string | undefin
   if (!source.includes(anchor) || referencesIdentifier(uses, factory)) {
     return undefined;
   }
+  // A barrel symbol already bound, or the barrel already imported, means the file
+  // carries wiring this edit cannot see the whole of: fail closed to guidance
+  // rather than declare an identifier twice.
+  for (const item of seam?.imports ?? []) {
+    if (visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`)) return undefined;
+    if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
+  }
 
-  const withImport = importedBinding === undefined ? `${providerImport}\n${source}` : source;
-  const insertion = anchorMatch.index + scope!.start +
-    (importedBinding === undefined ? providerImport.length + 1 : 0);
+  const prefix =
+    (importedBinding === undefined ? `${providerImport}\n` : '') +
+    (seam?.imports ?? [])
+      .map((item) => `import { ${item.symbols.join(', ')} } from '${item.from}';\n`)
+      .join('');
+  const withImport = `${prefix}${source}`;
+  const insertion = anchorMatch.index + scope!.start + prefix.length;
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const before = withImport.slice(lineStart, insertion);
   // On its own line the new call takes a line of its own at the same indentation;
   // inline it joins the array where it stands.
   const separator = before.trim() === '' ? `\n${before}` : ' ';
-  return `${withImport.slice(0, insertion)}${factory}(),${separator}${withImport.slice(insertion)}`;
+  return `${withImport.slice(0, insertion)}${factory}(${seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
 }
 
 /**
@@ -559,7 +731,8 @@ export async function runAddCommand(
     return EXIT_USAGE;
   }
 
-  const bare = resolveAddablePackage(requested);
+  const diagnostics = requested === 'diagnostics' || requested === '@setu-ts/diagnostics-plugin';
+  const bare = diagnostics ? 'diagnostics-plugin' : resolveAddablePackage(requested);
   if (bare === undefined) {
     deps.error(`"${escapeName(requested)}" is not a Setu-TS package this command can add.`);
     deps.error(`  Available: ${addableNames().join(', ')}`);
@@ -572,9 +745,9 @@ export async function runAddCommand(
   const workspaceMarker = await findWorkspaceMarker(deps.fs, dir);
   if (workspaceMarker !== undefined) {
     deps.error(
-      `${escapeName(dir)} is a workspace root (${
-        escapeName(workspaceMarker)
-      }); framework packages are pinned in each ` +
+      `${escapeName(dir)} is a workspace root (${escapeName(
+        workspaceMarker,
+      )}); framework packages are pinned in each ` +
         `member, because \`${PROGRAM_NAME} generate\` reads the member's manifest to decide what ` +
         `is installed.`,
     );
@@ -589,6 +762,12 @@ export async function runAddCommand(
     if (!(cause instanceof RuntimeMarkerUnreadableError)) throw cause;
     deps.error(cause.message);
     return EXIT_ERROR;
+  }
+  if (diagnostics) {
+    deps.error(
+      `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
+    );
+    return EXIT_USAGE;
   }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
   if (restriction !== undefined && !restriction.runtimes.includes(runtime)) {
@@ -609,9 +788,10 @@ export async function runAddCommand(
     { file: 'deno.jsonc', section: 'imports', range: frameworkSpecifier(bare, 'deno') },
     {
       file: 'package.json',
-      section: [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
-        ? 'devDependencies'
-        : 'dependencies',
+      section:
+        [...ADDABLE.values()].find((entry) => entry.pkg === bare)?.section === 'dev'
+          ? 'devDependencies'
+          : 'dependencies',
       range: frameworkSpecifier(bare, 'npm'),
     },
   ];
@@ -619,6 +799,8 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
+  const peerPackages = peerPackagesFor(bare, runtime);
+  const addedPeers: string[] = [];
 
   for (const target of targets) {
     if (runtime === 'deno' && target.file === 'package.json') continue;
@@ -631,34 +813,48 @@ export async function runAddCommand(
     }
     found = true;
 
+    let updated: string | undefined;
     if (pinnedInOtherNpmSection(source, target.file, target.section, specifier, target.range)) {
       alreadyPresent = true;
-      continue;
-    }
-
-    let updated: string | undefined;
-    try {
-      updated = withDependency(source, target.section, specifier, target.range);
-    } catch {
-      const read = await readJsonManifest(deps.fs, path);
-      if (read.kind === 'ok' && read.format === 'jsonc') {
-        deps.error(
-          `${
-            escapeName(path)
-          } is JSONC (comments, trailing commas); rewriting it would discard them. ` +
-            `Add this line under "${target.section}" yourself: ` +
-            `"${specifier}": "${target.range}"`,
-        );
-      } else {
-        deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
+    } else {
+      try {
+        updated = withDependency(source, target.section, specifier, target.range);
+      } catch {
+        const read = await readJsonManifest(deps.fs, path);
+        if (read.kind === 'ok' && read.format === 'jsonc') {
+          deps.error(
+            `${escapeName(
+              path,
+            )} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+              `Add this line under "${target.section}" yourself: ` +
+              `"${specifier}": "${target.range}"`,
+          );
+        } else {
+          deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
+        }
+        return EXIT_ERROR;
       }
-      return EXIT_ERROR;
+      if (updated === undefined) alreadyPresent = true;
     }
 
-    if (updated === undefined) {
-      alreadyPresent = true;
-      continue;
+    // Optional peers ride the SAME manifest rewrite — a second edit for one path
+    // fails as a duplicate — and are applied even when the framework package is
+    // already pinned, so re-running `setu add <name>` is how a project missing
+    // a peer recovers (for example `ws` after `setu add websocket`, or `zod`
+    // after `setu add validation`).
+    {
+      const merged = withPeerDependencies(
+        updated ?? source,
+        peerPackages,
+        target.file === 'package.json' ? 'dependencies' : 'imports',
+      );
+      if (merged.added.length > 0) {
+        updated = merged.contents;
+        addedPeers.push(...merged.added);
+      }
     }
+
+    if (updated === undefined) continue;
     edits.push({ path, contents: updated });
   }
 
@@ -667,20 +863,42 @@ export async function runAddCommand(
   // decorated ingress class fail at startup because the capability was never
   // registered. Activate only the known generated shape; an application-owned
   // config can have arbitrary composition and is not ours to rewrite.
+  const installedAfter = new Set(await detectPlugins(deps.fs, dir));
+  installedAfter.add(bare);
+  const seam = addSeam(bare, installedAfter);
+  // Taken before the config is considered: a manifest edit means a real install.
+  const installing = edits.length > 0;
+
   const configPath = joinPath(dir, 'setu.config.ts');
   let configSource: string | undefined;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
-    const wired = await frameworkImportsRetargeted(deps.fs, dir)
+    const wired = (await frameworkImportsRetargeted(deps.fs, dir))
       ? undefined
-      : withPluginWiring(config, bare);
+      : withPluginWiring(config, bare, seam);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
+  }
+
+  // The barrels exist whether or not the config could be rewritten: the printed
+  // guidance names them, and an import of a missing module would not compile.
+  // Written on a real install, AND whenever the config was just wired to read
+  // them — re-adding an installed package to a config with no provider call
+  // still wires it, and that import must resolve. A re-add that edits nothing
+  // writes nothing.
+  const configWired = edits.some((edit) => edit.path === configPath);
+  for (const file of installing || configWired ? (seam?.files ?? []) : []) {
+    const path = joinPath(dir, file.path);
+    try {
+      await deps.fs.readFile(path);
+    } catch {
+      edits.push({ path, contents: file.contents });
+    }
   }
 
   if (!found) {
@@ -699,8 +917,7 @@ export async function runAddCommand(
     // A project without this managed module has not opted into source wiring.
   }
   if (existingSources !== undefined) {
-    const installed = new Set(await detectPlugins(deps.fs, dir));
-    installed.add(bare);
+    const installed = installedAfter;
     const names = await readDevtoolSourceNames(deps.fs, dir, installed, configSource ?? '');
     const sources = renderDevtoolSources(installed, names);
     const sourcesPath = joinPath(dir, sources.path);
@@ -728,6 +945,8 @@ export async function runAddCommand(
 
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
+    for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
+    if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
 
@@ -755,19 +974,50 @@ export async function runAddCommand(
       return EXIT_INTERRUPTED;
     }
     deps.error(
-      `Failed to update the manifest: ${
-        escapeName(cause instanceof Error ? cause.message : String(cause))
-      }`,
+      `Failed to update the manifest: ${escapeName(
+        cause instanceof Error ? cause.message : String(cause),
+      )}`,
     );
     return EXIT_ERROR;
   }
   for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+  if (addedPeers.includes('ws')) {
+    deps.log('added ws (the Node WebSocket server, an optional peer of @setu-ts/runtime)');
+  }
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  printWiringNote(configSource, bare, deps.log);
-  printPermissionNote(specifier, deps.log);
+  printWiringNote(configSource, bare, deps.log, seam);
+  if (bare === 'cloudflare-plugin') {
+    // M113d §3.8: the generated factory names its second parameter `_waitUntil`
+    // while nothing reads it (a read-free parameter must be underscored to pass
+    // the project's own lint), and a project scaffolded before 0.10.0 has no
+    // such parameter at all. The printed registration reads `waitUntil`, so
+    // both cases are named here rather than detected in the developer's file.
+    deps.log("  In createApp (setu.config.ts), rename the '_waitUntil' parameter to 'waitUntil'.");
+    deps.log('  No such parameter (a project scaffolded before 0.10.0)? Add it as the second');
+    deps.log('  parameter, as docs/upgrading.md describes ("Workers projects: thread waitUntil").');
+  }
+  // Both notes concern a Deno start task's permission flags; on another target
+  // they describe nothing the developer can act on.
+  if (runtime === 'deno') printPermissionNote(specifier, deps.log);
+  await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
+}
+
+/** An add is successful even when its advisory brief reminder cannot be read. */
+async function reportAgentsHint(
+  deps: AddCommandDependencies,
+  dir: string,
+  runtime: TargetRuntime,
+): Promise<void> {
+  try {
+    const brief = await readExistingText(deps.fs, joinPath(dir, 'AGENTS.md'));
+    if (brief?.includes(BRIEF_BEGIN) === true)
+      deps.log(`Run \`${cliInvocation(runtime)} agents\` to update AGENTS.md.`);
+  } catch (cause) {
+    deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
+  }
 }
 
 /**
@@ -821,13 +1071,24 @@ function installCommand(runtime: TargetRuntime): string {
  * security regression traded for an ergonomics one. The generated task's
  * contract is that it stays least-privilege.
  */
-const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([[
-  '@setu-ts/storage-plugin',
+const PERMISSION_NOTES: ReadonlyMap<string, readonly string[]> = new Map([
   [
-    "  The 'local' provider writes files, so a Deno project needs --allow-write",
-    '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+    '@setu-ts/storage-plugin',
+    [
+      "  The 'local' provider writes files, so a Deno project needs --allow-write",
+      '  in its start task. Cloud providers (s3/gcs/azure/b2) do not.',
+    ],
   ],
-]]);
+  [
+    // The built-in `self` indicator reads the host name. Measured on a bare Deno
+    // scaffold: without the flag `/health` answers `down`, so `/ready` fails too.
+    '@setu-ts/health-plugin',
+    [
+      "  The built-in 'self' check reads the host name, so a Deno project needs",
+      '  --allow-sys in its start task, or /health reports down.',
+    ],
+  ],
+]);
 
 /**
  * Prints the permission note for a package that needs one.

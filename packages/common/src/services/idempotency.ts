@@ -254,8 +254,7 @@ export type IdempotencyKeySource =
  * @since 0.9.0
  */
 export type IdempotencyFingerprintSource =
-  | 'request'
-  | ((ctx: IRequestContext) => string | Promise<string>);
+  'request' | ((ctx: IRequestContext) => string | Promise<string>);
 
 /**
  * Options for the HTTP `idempotent()` middleware and the `@Idempotent`
@@ -302,10 +301,7 @@ export interface IdempotentRouteOptions {
  * @since 0.9.0
  */
 export type IngressIdempotencyKeySource =
-  | 'auto'
-  | 'job-id'
-  | 'deduplication-header'
-  | ((ctx: IngressContext) => string | undefined);
+  'auto' | 'job-id' | 'deduplication-header' | ((ctx: IngressContext) => string | undefined);
 
 /**
  * How an ingress work item is fingerprinted. The function's result is re-hashed.
@@ -313,8 +309,7 @@ export type IngressIdempotencyKeySource =
  * @since 0.9.0
  */
 export type IngressIdempotencyFingerprintSource =
-  | 'payload'
-  | ((ctx: IngressContext) => string | Promise<string>);
+  'payload' | ((ctx: IngressContext) => string | Promise<string>);
 
 /**
  * The half of {@linkcode IdempotentIngressOptions} shared by both arms.
@@ -340,13 +335,13 @@ export interface IdempotentIngressCommonOptions {
 /** At least one of `topics` and `jobNames` is required; anything not listed passes through. */
 export type IdempotentIngressOptions =
   | (IdempotentIngressCommonOptions & {
-    readonly topics: readonly string[];
-    readonly jobNames?: readonly string[];
-  })
+      readonly topics: readonly string[];
+      readonly jobNames?: readonly string[];
+    })
   | (IdempotentIngressCommonOptions & {
-    readonly topics?: readonly string[];
-    readonly jobNames: readonly string[];
-  });
+      readonly topics?: readonly string[];
+      readonly jobNames: readonly string[];
+    });
 
 // ── Tier-C options ──────────────────────────────────────────────────────────
 

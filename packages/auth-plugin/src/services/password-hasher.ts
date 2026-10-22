@@ -7,7 +7,19 @@
 import type { IRuntimeServices } from '@setu-ts/common';
 import { toBuffer } from '../utils/buffer.ts';
 
-const PBKDF2_ITERATIONS = 100000;
+/**
+ * Default PBKDF2-SHA256 work factor: OWASP's 2023 password-storage guidance
+ * (M113e, V9-50). Raised from 100,000; existing hashes keep verifying because
+ * `verify` reads the count stored in each hash, and `needsRehash` tells the
+ * application when to upgrade one.
+ */
+const DEFAULT_ITERATIONS = 600_000;
+/**
+ * Lowest configurable work factor — the previous default, so no configuration
+ * is weaker than what shipped before. It is also the most a deployed
+ * Cloudflare Worker is reported to accept.
+ */
+const MIN_ITERATIONS = 100_000;
 const HASH_LENGTH = 32; // 256 bits
 const SALT_LENGTH = 16; // 128 bits
 
@@ -37,20 +49,76 @@ export class MalformedPasswordHashError extends Error {
 }
 
 /**
- * Largest PBKDF2 iteration count `verify` will accept from a stored credential.
- * A sanity cap, not a policy: it exists so a corrupted or hostile hash cannot
- * drive an unbounded key derivation.
+ * Largest PBKDF2 iteration count `verify` will accept from a stored credential,
+ * and the largest a hasher may be configured with. A sanity cap, not a policy:
+ * it exists so a corrupted or hostile hash cannot drive an unbounded key
+ * derivation.
  */
 const MAX_ITERATIONS = 10_000_000;
 
 /**
+ * Options for {@linkcode PasswordHasher}.
+ *
+ * @since 0.10.0
+ */
+export interface PasswordHasherOptions {
+  /**
+   * PBKDF2-SHA256 iterations for NEW hashes: an integer from 100,000 to
+   * 10,000,000, default 600,000. `verify` ignores it — every hash records its
+   * own count — so changing it never breaks a stored credential.
+   *
+   * A deployed Cloudflare Worker is reported to refuse counts above 100,000;
+   * a Workers application passes `iterations: 100_000`.
+   */
+  readonly iterations?: number;
+}
+
+/** A parsed `pbkdf2$<iterations>$<salt>$<hash>` credential. */
+interface StoredHash {
+  readonly iterations: number;
+  readonly salt: Uint8Array;
+  readonly hash: Uint8Array;
+}
+
+/**
  * Password hasher using PBKDF2-SHA256 via Web Crypto.
+ *
+ * @example
+ * ```typescript
+ * const hasher = new PasswordHasher(runtime); // 600,000 iterations
+ * if (await hasher.verify(user.passwordHash, password)) {
+ *   if (hasher.needsRehash(user.passwordHash)) {
+ *     await users.update(user.id, { passwordHash: await hasher.hash(password) });
+ *   }
+ * }
+ * ```
  */
 export class PasswordHasher {
   private readonly runtime: IRuntimeServices;
+  private readonly iterations: number;
 
-  constructor(runtime: IRuntimeServices) {
+  /**
+   * @param runtime - Runtime services supplying `subtle` and `randomBytes`
+   * @param options - Work factor for new hashes
+   * @throws {TypeError} If `options.iterations` is not an integer from 100,000 to 10,000,000
+   */
+  constructor(runtime: IRuntimeServices, options: PasswordHasherOptions = {}) {
+    const iterations = options.iterations ?? DEFAULT_ITERATIONS;
+    // `Number.isInteger` refuses NaN, infinities and fractions: an unset
+    // environment variable read through `Number(...)` is NaN, and a work
+    // factor that silently fell back would weaken every new hash.
+    if (
+      !Number.isInteger(iterations) ||
+      iterations < MIN_ITERATIONS ||
+      iterations > MAX_ITERATIONS
+    ) {
+      throw new TypeError(
+        `PasswordHasher option 'iterations' must be an integer from ${MIN_ITERATIONS} to ` +
+          `${MAX_ITERATIONS}.`,
+      );
+    }
     this.runtime = runtime;
+    this.iterations = iterations;
   }
 
   /**
@@ -61,9 +129,9 @@ export class PasswordHasher {
    */
   async hash(secret: string): Promise<string> {
     const salt = this.runtime.randomBytes(SALT_LENGTH);
-    const hash = await this.deriveHash(secret, salt);
+    const hash = await this.deriveHash(secret, salt, this.iterations);
 
-    const iterationsStr = String(PBKDF2_ITERATIONS);
+    const iterationsStr = String(this.iterations);
     const saltStr = this.base64UrlEncode(salt);
     const hashStr = this.base64UrlEncode(hash);
 
@@ -84,6 +152,37 @@ export class PasswordHasher {
    * @throws {MalformedPasswordHashError} If `stored` is not a well-formed `pbkdf2$…` string
    */
   async verify(stored: string, secret: string): Promise<boolean> {
+    const parsed = this.parseStoredHash(stored);
+    const actualHash = await this.deriveHash(secret, parsed.salt, parsed.iterations);
+
+    // Constant-time comparison
+    return this.constantTimeCompare(actualHash, parsed.hash);
+  }
+
+  /**
+   * Reports whether a stored hash was made with fewer iterations than this
+   * hasher is configured for, so the application re-hashes it after the next
+   * successful {@linkcode PasswordHasher.verify} — the only moment the
+   * plaintext is available.
+   *
+   * A hash at or above the configured count reports `false`, so lowering the
+   * configuration never downgrades a stored credential.
+   *
+   * @param stored - The stored hash string in `pbkdf2$<iterations>$<salt>$<hash>` format
+   * @returns `true` when the hash should be replaced
+   * @throws {MalformedPasswordHashError} On every input `verify` refuses
+   * @since 0.10.0
+   */
+  needsRehash(stored: string): boolean {
+    return this.parseStoredHash(stored).iterations < this.iterations;
+  }
+
+  /**
+   * Parses a stored credential, refusing a malformed one. The single parse
+   * `verify` and `needsRehash` share, so the two cannot disagree about which
+   * inputs are well-formed.
+   */
+  private parseStoredHash(stored: string): StoredHash {
     const parts = stored.split('$');
     if (parts.length !== 4 || parts[0] !== 'pbkdf2') {
       throw new MalformedPasswordHashError(
@@ -104,9 +203,7 @@ export class PasswordHasher {
     // carrying a long digit run would otherwise reach `deriveBits`. The upper
     // bound below catches it: every value `/^\d+$/` admits that is not a safe
     // integer also exceeds MAX_ITERATIONS, so no separate finiteness check is
-    // reachable.
-    // The upper bound is a sanity cap, well above any real work factor
-    // (OWASP's 2023 PBKDF2-SHA256 guidance is 600 000).
+    // reachable. The bound is a sanity cap, well above any real work factor.
     const iterations = parseInt(parts[1], 10);
     if (iterations <= 0) {
       throw new MalformedPasswordHashError(
@@ -120,21 +217,17 @@ export class PasswordHasher {
       );
     }
 
-    let salt: Uint8Array;
-    let expectedHash: Uint8Array;
     try {
-      salt = this.base64UrlDecode(parts[2]);
-      expectedHash = this.base64UrlDecode(parts[3]);
+      return {
+        iterations,
+        salt: this.base64UrlDecode(parts[2]),
+        hash: this.base64UrlDecode(parts[3]),
+      };
     } catch {
       throw new MalformedPasswordHashError(
         "the stored credential's salt/hash parts are not valid base64url",
       );
     }
-
-    const actualHash = await this.deriveHash(secret, salt, iterations);
-
-    // Constant-time comparison
-    return this.constantTimeCompare(actualHash, expectedHash);
   }
 
   /**
@@ -143,7 +236,7 @@ export class PasswordHasher {
   private async deriveHash(
     secret: string,
     salt: Uint8Array,
-    iterations: number = PBKDF2_ITERATIONS,
+    iterations: number,
   ): Promise<Uint8Array> {
     const keyMaterial = await this.runtime.subtle.importKey(
       'raw',

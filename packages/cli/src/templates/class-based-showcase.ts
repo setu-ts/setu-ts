@@ -40,8 +40,7 @@ export class GreetingService {
  * The example controller: routes by decorator, its dependency declared in the
  * class-position `@Inject` list, and its handler arguments in `@Params`.
  */
-const CONTROLLER_SOURCE =
-  `import { Controller, Get, Inject, Param, Params } from '@setu-ts/decorator-plugin';
+const CONTROLLER_SOURCE = `import { Controller, Get, Inject, Param, Params } from '@setu-ts/decorator-plugin';
 import type { GreetingService } from '../services/greeting.service.ts';
 
 /**

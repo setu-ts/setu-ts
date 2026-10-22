@@ -26,8 +26,7 @@ describe('relocation interruption journal', () => {
       expect(await journal.realPath!('/project/a.ts')).toBe('/canonical/a.ts');
       expect(
         await new Response(await journal.readStream!('/project/a.ts', { start: 1, end: 3 })).text(),
-      )
-        .toBe('rig');
+      ).toBe('rig');
     });
     // A filesystem offering neither optional capability: the journal must not
     // invent one.
@@ -43,13 +42,19 @@ describe('relocation interruption journal', () => {
   it('restores only mutated files and leaves an unrelated concurrent write intact', async () => {
     const fs = createFakeFs({ '/project/a.ts': 'original' });
     const controller = new AbortController();
-    await expect(withFileTransaction(fs, async (journal) => {
-      await journal.mkdir('/project/moved', { recursive: true });
-      await journal.writeFile('/project/moved/a.ts', await journal.readFile('/project/a.ts'));
-      await journal.rm('/project/a.ts');
-      await fs.writeFile('/project/unrelated.ts', new TextEncoder().encode('concurrent'));
-      controller.abort();
-    }, controller.signal)).rejects.toBeInstanceOf(InterruptedError);
+    await expect(
+      withFileTransaction(
+        fs,
+        async (journal) => {
+          await journal.mkdir('/project/moved', { recursive: true });
+          await journal.writeFile('/project/moved/a.ts', await journal.readFile('/project/a.ts'));
+          await journal.rm('/project/a.ts');
+          await fs.writeFile('/project/unrelated.ts', new TextEncoder().encode('concurrent'));
+          controller.abort();
+        },
+        controller.signal,
+      ),
+    ).rejects.toBeInstanceOf(InterruptedError);
     expect(fs.read('/project/a.ts')).toBe('original');
     expect(fs.read('/project/unrelated.ts')).toBe('concurrent');
     expect(fs.has('/project/moved/a.ts')).toBe(false);
@@ -59,8 +64,7 @@ describe('relocation interruption journal', () => {
     const fs = createFakeFs({ '/project/src/a.ts': 'keep' });
     await expect(
       withFileTransaction(fs, (journal) => journal.rm('/project/src', { recursive: true })),
-    )
-      .rejects.toThrow('Refusing to remove unrecorded file');
+    ).rejects.toThrow('Refusing to remove unrecorded file');
     expect(fs.read('/project/src/a.ts')).toBe('keep');
   });
 
@@ -72,11 +76,17 @@ describe('relocation interruption journal', () => {
       rm: (path, options) =>
         path.endsWith('a.ts') ? Promise.reject(new Error('cannot remove')) : fs.rm(path, options),
     };
-    await expect(withFileTransaction(broken, async (journal) => {
-      await journal.mkdir('/project');
-      await journal.writeFile('/project/a.ts', new TextEncoder().encode('new'));
-      controller.abort();
-    }, controller.signal)).rejects.toThrow('rollback incomplete: /project/a.ts');
+    await expect(
+      withFileTransaction(
+        broken,
+        async (journal) => {
+          await journal.mkdir('/project');
+          await journal.writeFile('/project/a.ts', new TextEncoder().encode('new'));
+          controller.abort();
+        },
+        controller.signal,
+      ),
+    ).rejects.toThrow('rollback incomplete: /project/a.ts');
   });
 });
 
@@ -101,10 +111,16 @@ describe('writeFiles rollback', () => {
         if (path.endsWith('last.ts')) controller.abort();
       },
     };
-    await expect(writeFiles(wrapped, [
-      { path: 'project/existing.ts', contents: 'after', managed: true },
-      { path: 'project/last.ts', contents: 'last' },
-    ], { root: '/', signal: controller.signal })).rejects.toBeInstanceOf(InterruptedError);
+    await expect(
+      writeFiles(
+        wrapped,
+        [
+          { path: 'project/existing.ts', contents: 'after', managed: true },
+          { path: 'project/last.ts', contents: 'last' },
+        ],
+        { root: '/', signal: controller.signal },
+      ),
+    ).rejects.toBeInstanceOf(InterruptedError);
     expect(fs.read('project/existing.ts')).toBe('before');
     expect(fs.has('project/last.ts')).toBe(false);
   });
@@ -120,10 +136,16 @@ describe('writeFiles rollback', () => {
         if (path.endsWith('b.ts')) throw failure;
       },
     };
-    await expect(writeFiles(failing, [
-      { path: 'project/src/deep/a.ts', contents: 'AAA' },
-      { path: 'project/src/deep/b.ts', contents: 'BBB' },
-    ], { root: '/' })).rejects.toBe(failure);
+    await expect(
+      writeFiles(
+        failing,
+        [
+          { path: 'project/src/deep/a.ts', contents: 'AAA' },
+          { path: 'project/src/deep/b.ts', contents: 'BBB' },
+        ],
+        { root: '/' },
+      ),
+    ).rejects.toBe(failure);
     expect(fs.has('project/src/deep/a.ts')).toBe(false);
     expect(fs.has('project/src/deep/b.ts')).toBe(false);
     await expect(fs.stat('project/src/deep')).rejects.toThrow();
@@ -161,37 +183,44 @@ describe('writeFiles rollback', () => {
 
   it('preserves a file that arrived after preflight, even without managed', async () => {
     const fs = createFakeFs();
-    const files = [{ path: 'arrived', contents: 'new' }, { path: 'failure', contents: 'x' }];
+    const files = [
+      { path: 'arrived', contents: 'new' },
+      { path: 'failure', contents: 'x' },
+    ];
     expect(await findExisting(fs, files)).toEqual([]);
     await fs.writeFile('arrived', new TextEncoder().encode('concurrent file'));
-    await expect(writeFiles(
-      {
-        ...fs,
-        writeFile: (path, data) =>
-          path === 'failure' ? Promise.reject(new Error('disk full')) : fs.writeFile(path, data),
-      },
-      files,
-      { root: '/' },
-    )).rejects.toThrow('disk full');
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          writeFile: (path, data) =>
+            path === 'failure' ? Promise.reject(new Error('disk full')) : fs.writeFile(path, data),
+        },
+        files,
+        { root: '/' },
+      ),
+    ).rejects.toThrow('disk full');
     expect(fs.read('arrived')).toBe('concurrent file');
   });
 
   it('does not overwrite an existing file it cannot snapshot', async () => {
-    const fs = createFakeFs({ 'private': 'precious' });
-    await expect(writeFiles(
-      {
-        ...fs,
-        readFile: () => Promise.reject(new Error('permission denied')),
-      },
-      [{ path: 'private', contents: 'destroyed' }],
-      { root: '/' },
-    )).rejects.toThrow('permission denied');
+    const fs = createFakeFs({ private: 'precious' });
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          readFile: () => Promise.reject(new Error('permission denied')),
+        },
+        [{ path: 'private', contents: 'destroyed' }],
+        { root: '/' },
+      ),
+    ).rejects.toThrow('permission denied');
     expect(fs.read('private')).toBe('precious');
     expect(fs.writes).toEqual([]);
   });
 
   it('reports all cleanup failures alongside the original and continues cleanup', async () => {
-    const fs = createFakeFs({ 'managed': 'original' });
+    const fs = createFakeFs({ managed: 'original' });
     let failed = false;
     const failing: IFileSystem = {
       ...fs,
@@ -208,12 +237,18 @@ describe('writeFiles rollback', () => {
         return fs.rm(path, options);
       },
     };
-    await expect(writeFiles(failing, [
-      { path: 'removed', contents: 'a' },
-      { path: 'left', contents: 'b' },
-      { path: 'managed', contents: 'c', managed: true },
-      { path: 'fail', contents: 'd' },
-    ], { root: '/' })).rejects.toThrow(
+    await expect(
+      writeFiles(
+        failing,
+        [
+          { path: 'removed', contents: 'a' },
+          { path: 'left', contents: 'b' },
+          { path: 'managed', contents: 'c', managed: true },
+          { path: 'fail', contents: 'd' },
+        ],
+        { root: '/' },
+      ),
+    ).rejects.toThrow(
       /disk full[\s\S]*managed[\s\S]*restore denied[\s\S]*left[\s\S]*unlink denied/,
     );
     expect(fs.has('removed')).toBe(false);
@@ -224,16 +259,22 @@ describe('rollback boundaries', () => {
   it('keeps a pre-existing empty parent and rolls back on mkdir failure', async () => {
     const fs = createFakeFs();
     await fs.mkdir('existing');
-    await expect(writeFiles({
-      ...fs,
-      mkdir: (path, options) =>
-        path === 'existing/blocked'
-          ? Promise.reject(new Error('mkdir denied'))
-          : fs.mkdir(path, options),
-    }, [
-      { path: 'existing/new/a', contents: 'a' },
-      { path: 'existing/blocked/b', contents: 'b' },
-    ], { root: '/' })).rejects.toThrow('mkdir denied');
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          mkdir: (path, options) =>
+            path === 'existing/blocked'
+              ? Promise.reject(new Error('mkdir denied'))
+              : fs.mkdir(path, options),
+        },
+        [
+          { path: 'existing/new/a', contents: 'a' },
+          { path: 'existing/blocked/b', contents: 'b' },
+        ],
+        { root: '/' },
+      ),
+    ).rejects.toThrow('mkdir denied');
     expect((await fs.stat('existing')).isDirectory).toBe(true);
     await expect(fs.stat('existing/new')).rejects.toThrow();
     expect(fs.has('existing/new/a')).toBe(false);
@@ -242,10 +283,16 @@ describe('rollback boundaries', () => {
   it('propagates a stat access error instead of claiming an existing directory', async () => {
     const fs = createFakeFs();
     await expect(
-      writeFiles({ ...fs, stat: () => Promise.reject(new Error('stat denied')) }, [{
-        path: 'private/a',
-        contents: 'a',
-      }], { root: '/' }),
+      writeFiles(
+        { ...fs, stat: () => Promise.reject(new Error('stat denied')) },
+        [
+          {
+            path: 'private/a',
+            contents: 'a',
+          },
+        ],
+        { root: '/' },
+      ),
     ).rejects.toThrow('stat denied');
     expect(fs.mkdirs).toEqual([]);
     expect(fs.writes).toEqual([]);
@@ -254,55 +301,61 @@ describe('rollback boundaries', () => {
   it('preserves new content in a directory and reports its non-recursive cleanup failure', async () => {
     const fs = createFakeFs();
     const calls: string[] = [];
-    await expect(writeFiles(
-      {
-        ...fs,
-        writeFile: () => Promise.reject('original failure'),
-        rm(path, options) {
-          calls.push(path);
-          expect(options?.recursive).not.toBe(true);
-          if (path === 'new') return Promise.reject('not empty');
-          return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          writeFile: () => Promise.reject('original failure'),
+          rm(path, options) {
+            calls.push(path);
+            expect(options?.recursive).not.toBe(true);
+            if (path === 'new') return Promise.reject('not empty');
+            return Promise.reject(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+          },
         },
-      },
-      [{ path: 'new/a', contents: 'a' }],
-      { root: '/' },
-    )).rejects.toThrow(
-      'original failure; rollback incomplete: new: not empty',
-    );
+        [{ path: 'new/a', contents: 'a' }],
+        { root: '/' },
+      ),
+    ).rejects.toThrow('original failure; rollback incomplete: new: not empty');
     expect(calls).toEqual(['new/a', 'new']);
   });
 
   it('reports deletion failure for a new file and still removes the others', async () => {
     const fs = createFakeFs();
-    await expect(writeFiles(
-      {
-        ...fs,
-        writeFile: () => Promise.reject(new Error('write denied')),
-        rm: () => Promise.reject(new Error('rm denied')),
-      },
-      [{ path: 'new', contents: 'a' }],
-      { root: '/' },
-    )).rejects.toThrow('new: rm denied');
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          writeFile: () => Promise.reject(new Error('write denied')),
+          rm: () => Promise.reject(new Error('rm denied')),
+        },
+        [{ path: 'new', contents: 'a' }],
+        { root: '/' },
+      ),
+    ).rejects.toThrow('new: rm denied');
   });
 
   it('restores an overwritten path that disappeared before rollback', async () => {
     const fs = createFakeFs({ original: 'original' });
-    await expect(writeFiles(
-      {
-        ...fs,
-        async writeFile(path, bytes) {
-          if (path === 'fail') {
-            await fs.rm('original');
-            throw new Error('disk full');
-          }
-          await fs.writeFile(path, bytes);
+    await expect(
+      writeFiles(
+        {
+          ...fs,
+          async writeFile(path, bytes) {
+            if (path === 'fail') {
+              await fs.rm('original');
+              throw new Error('disk full');
+            }
+            await fs.writeFile(path, bytes);
+          },
         },
-      },
-      [{ path: 'original', contents: 'change' }, { path: 'fail', contents: '' }],
-      { root: '/' },
-    ))
-      .rejects.toThrow('disk full');
+        [
+          { path: 'original', contents: 'change' },
+          { path: 'fail', contents: '' },
+        ],
+        { root: '/' },
+      ),
+    ).rejects.toThrow('disk full');
     expect(fs.read('original')).toBe('original');
   });
 });

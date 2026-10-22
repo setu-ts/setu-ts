@@ -41,9 +41,7 @@ function runtimePluginWith(fake: ReturnType<typeof createFakeRuntime>): IPlugin 
 }
 
 /** Builds a started app with `errorHandler` at `format` (or none) and a `/ok` route. */
-function appWith(
-  format: 'default' | 'rfc9457' | ErrorHandlerFormatter | null,
-): {
+function appWith(format: 'default' | 'rfc9457' | ErrorHandlerFormatter | null): {
   app: Awaited<ReturnType<typeof createApplication>>;
   fake: ReturnType<typeof createFakeRuntime>;
 } {

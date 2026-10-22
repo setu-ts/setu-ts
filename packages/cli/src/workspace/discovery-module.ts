@@ -112,17 +112,18 @@ export function renderDiscoveryModule(
 
   const portOf = new Map(all.map((other) => [other.name, other.port]));
   const entries = siblings
-    .map((name) =>
-      // A literal, not raw text: the name is read back from a manifest a
-      // developer may edit, so a quote in it must not close the key.
-      `  ${stringLiteral(name)}: [{\n` +
-      // The profile's reader, not a literal `Deno.env.get`: this module is emitted
-      // into Node and Bun members too, where that name does not exist. Its own
-      // line breaks are for the deeper indentation of a plugin argument, so they
-      // collapse here.
-      `    host: ${collapse(profile.envRead(hostVariable(name), LOCAL_HOST))},\n` +
-      `    port: ${portOf.get(name)},\n` +
-      `  }],\n`
+    .map(
+      (name) =>
+        // A literal, not raw text: the name is read back from a manifest a
+        // developer may edit, so a quote in it must not close the key.
+        `  ${stringLiteral(name)}: [{\n` +
+        // The profile's reader, not a literal `Deno.env.get`: this module is emitted
+        // into Node and Bun members too, where that name does not exist. Its own
+        // line breaks are for the deeper indentation of a plugin argument, so they
+        // collapse here.
+        `    host: ${collapse(profile.envRead(hostVariable(name), LOCAL_HOST))},\n` +
+        `    port: ${portOf.get(name)},\n` +
+        `  }],\n`,
     )
     .join('');
 

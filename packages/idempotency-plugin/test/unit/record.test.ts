@@ -147,10 +147,9 @@ describe('decodeHttpRecord (M109a §3.10)', () => {
 
   it('rejects a status outside 200-499 and a non-integer status', () => {
     for (const status of [199, 500, 201.5]) {
-      expect(decodeHttpRecord(record({ v: 1, s: status, h: [], b: null }), resolved()))
-        .toBeInstanceOf(
-          IdempotencyRecordError,
-        );
+      expect(
+        decodeHttpRecord(record({ v: 1, s: status, h: [], b: null }), resolved()),
+      ).toBeInstanceOf(IdempotencyRecordError);
     }
   });
 
@@ -170,25 +169,21 @@ describe('decodeHttpRecord (M109a §3.10)', () => {
   });
 
   it('rejects a malformed header pair and a non-string body', () => {
-    expect(decodeHttpRecord(record({ v: 1, s: 200, h: ['x'], b: null }), resolved()))
-      .toBeInstanceOf(
-        IdempotencyRecordError,
-      );
-    expect(decodeHttpRecord(record({ v: 1, s: 200, h: [[1, 2]], b: null }), resolved()))
-      .toBeInstanceOf(
-        IdempotencyRecordError,
-      );
-    expect(decodeHttpRecord(record({ v: 1, s: 200, h: [], b: { data: 1 } }), resolved()))
-      .toBeInstanceOf(
-        IdempotencyRecordError,
-      );
+    expect(
+      decodeHttpRecord(record({ v: 1, s: 200, h: ['x'], b: null }), resolved()),
+    ).toBeInstanceOf(IdempotencyRecordError);
+    expect(
+      decodeHttpRecord(record({ v: 1, s: 200, h: [[1, 2]], b: null }), resolved()),
+    ).toBeInstanceOf(IdempotencyRecordError);
+    expect(
+      decodeHttpRecord(record({ v: 1, s: 200, h: [], b: { data: 1 } }), resolved()),
+    ).toBeInstanceOf(IdempotencyRecordError);
     expect(
       decodeHttpRecord(
         record({ v: 1, s: 200, h: [], b: { data: 'x', binary: 'yes' } }),
         resolved(),
       ),
-    )
-      .toBeInstanceOf(IdempotencyRecordError);
+    ).toBeInstanceOf(IdempotencyRecordError);
     expect(decodeHttpRecord(record({ v: 1, s: 200, h: [], b: 5 }), resolved())).toBeInstanceOf(
       IdempotencyRecordError,
     );
@@ -251,10 +246,10 @@ describe('replay (M109a §3.10)', () => {
       body: new Uint8Array([1, 2]),
     });
     expect(state.status).toBe(201);
-    expect(state.headers).toEqual([['content-type', 'text/plain'], [
-      'Idempotent-Replayed',
-      'true',
-    ]]);
+    expect(state.headers).toEqual([
+      ['content-type', 'text/plain'],
+      ['Idempotent-Replayed', 'true'],
+    ]);
     expect(state.sent).toEqual(new Uint8Array([1, 2]));
   });
 

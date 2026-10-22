@@ -11,12 +11,8 @@ import { describe, expect, it } from 'vitest';
 import * as dynamoMarshal from '../../src/adapters/dynamo/dynamo-marshal.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
 
-const {
-  marshalDynamoValue,
-  marshalDynamoItem,
-  unmarshalDynamoValue,
-  unmarshalDynamoItem,
-} = dynamoMarshal;
+const { marshalDynamoValue, marshalDynamoItem, unmarshalDynamoValue, unmarshalDynamoItem } =
+  dynamoMarshal;
 
 /** §1A N1's measured value: 38 decimal digits, lossy through `Number()`. */
 const LOSSY_N = '99999999999999999999999999999999999999';
@@ -85,9 +81,7 @@ describe('marshalDynamoValue — declared date encodings', () => {
 
 describe('marshalDynamoValue — composites', () => {
   it('marshals a plain object to M with each member marshalled', () => {
-    expect(
-      marshalDynamoValue({ name: 'ada', count: 2, active: true, note: null }),
-    ).toStrictEqual({
+    expect(marshalDynamoValue({ name: 'ada', count: 2, active: true, note: null })).toStrictEqual({
       M: {
         name: { S: 'ada' },
         count: { N: '2' },
@@ -341,8 +335,10 @@ describe('marshalDynamoItem', () => {
   });
 
   it('omits an undefined member inside a nested map', () => {
-    expect(marshalDynamoItem({ id: 'u1', meta: { a: 1, b: undefined } }))
-      .toStrictEqual({ id: { S: 'u1' }, meta: { M: { a: { N: '1' } } } });
+    expect(marshalDynamoItem({ id: 'u1', meta: { a: 1, b: undefined } })).toStrictEqual({
+      id: { S: 'u1' },
+      meta: { M: { a: { N: '1' } } },
+    });
   });
 
   it('marshals an empty row to an empty item', () => {
@@ -366,16 +362,11 @@ describe('marshalDynamoItem', () => {
 
   it('refuses an undeclared Date attribute, naming the attribute', () => {
     try {
-      marshalDynamoItem(
-        { pk: 'o1', createdAt: new Date(0) },
-        { updatedAt: 'iso' },
-      );
+      marshalDynamoItem({ pk: 'o1', createdAt: new Date(0) }, { updatedAt: 'iso' });
       throw new Error('expected marshalDynamoItem to refuse');
     } catch (error) {
       expect(error).toBeInstanceOf(UnsupportedQueryFeatureError);
-      expect((error as UnsupportedQueryFeatureError).feature).toBe(
-        'date-encoding',
-      );
+      expect((error as UnsupportedQueryFeatureError).feature).toBe('date-encoding');
       expect((error as Error).message).toContain("'createdAt'");
     }
   });
@@ -390,10 +381,8 @@ describe('marshalDynamoItem', () => {
 });
 
 describe('round trips (marshal → unmarshal is identity per type)', () => {
-  const roundTrips = (
-    value: unknown,
-    dateEncoding?: 'iso' | 'epochMs',
-  ): unknown => unmarshalDynamoValue(marshalDynamoValue(value, dateEncoding));
+  const roundTrips = (value: unknown, dateEncoding?: 'iso' | 'epochMs'): unknown =>
+    unmarshalDynamoValue(marshalDynamoValue(value, dateEncoding));
 
   it('identity per scalar type', () => {
     expect(roundTrips('widget')).toBe('widget');
@@ -403,9 +392,7 @@ describe('round trips (marshal → unmarshal is identity per type)', () => {
     expect(roundTrips(true)).toBe(true);
     expect(roundTrips(false)).toBe(false);
     expect(roundTrips(null)).toBe(null);
-    expect(roundTrips(new Uint8Array([4, 5, 6]))).toStrictEqual(
-      new Uint8Array([4, 5, 6]),
-    );
+    expect(roundTrips(new Uint8Array([4, 5, 6]))).toStrictEqual(new Uint8Array([4, 5, 6]));
   });
 
   it('identity for nested objects and arrays, recursively', () => {
@@ -425,8 +412,10 @@ describe('round trips (marshal → unmarshal is identity per type)', () => {
   });
 
   it('an exact stored N becomes a number; a lossy stored N stays a string', () => {
-    expect(unmarshalDynamoItem({ exact: { N: '42' }, lossy: { N: LOSSY_N } }))
-      .toStrictEqual({ exact: 42, lossy: LOSSY_N });
+    expect(unmarshalDynamoItem({ exact: { N: '42' }, lossy: { N: LOSSY_N } })).toStrictEqual({
+      exact: 42,
+      lossy: LOSSY_N,
+    });
   });
 });
 
@@ -436,9 +425,7 @@ describe('DynamoDB marshalling hardening (Qodo review)', () => {
     // attribute and `epochMs` emitted `{ N: 'NaN' }`, which DynamoDB rejects
     // later with a message naming neither the entity nor the attribute.
     for (const encoding of ['iso', 'epochMs'] as const) {
-      expect(() => marshalDynamoValue(new Date('nonsense'), encoding)).toThrow(
-        /Date .*is invalid/,
-      );
+      expect(() => marshalDynamoValue(new Date('nonsense'), encoding)).toThrow(/Date .*is invalid/);
     }
     expect(() => marshalDynamoValue(new Date('2026-01-01T00:00:00.000Z'), 'iso')).not.toThrow();
   });

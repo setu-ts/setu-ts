@@ -112,9 +112,7 @@ describe('Session data access', () => {
     const snapshot = session.toJSON() as { nested: { deep: { value: number } } };
     snapshot.nested.deep.value = 99;
 
-    expect(
-      (session.get<{ deep: { value: number } }>('nested'))?.deep.value,
-    ).toBe(1);
+    expect(session.get<{ deep: { value: number } }>('nested')?.deep.value).toBe(1);
   });
 
   it('does not copy the initial data by reference', () => {

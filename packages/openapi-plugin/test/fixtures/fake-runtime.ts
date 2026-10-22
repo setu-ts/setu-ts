@@ -11,9 +11,7 @@ import type { IRuntimeServices } from '@setu-ts/common';
  * @param overrides - Partial overrides for specific methods
  * @returns A fake IRuntimeServices implementation
  */
-export function createFakeRuntime(
-  overrides?: Partial<IRuntimeServices>,
-): IRuntimeServices {
+export function createFakeRuntime(overrides?: Partial<IRuntimeServices>): IRuntimeServices {
   const base: IRuntimeServices = {
     now: () => 1_000_000_000_000,
     hrtime: () => 0,

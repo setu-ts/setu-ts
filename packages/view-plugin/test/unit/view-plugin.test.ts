@@ -82,14 +82,12 @@ describe('ViewPlugin', () => {
   });
 
   it('the view indicator reports the selected engine and is always up', async () => {
-    for (
-      const [options, expected] of [
-        [{}, 'hono-jsx'],
-        [{ engine: 'hono-jsx' }, 'hono-jsx'],
-        [{ engine: 'hono-html' }, 'hono-html'],
-        [{ engine: 'custom', view: { render: () => '' } as IViewEngine }, 'custom'],
-      ] as const
-    ) {
+    for (const [options, expected] of [
+      [{}, 'hono-jsx'],
+      [{ engine: 'hono-jsx' }, 'hono-jsx'],
+      [{ engine: 'hono-html' }, 'hono-html'],
+      [{ engine: 'custom', view: { render: () => '' } as IViewEngine }, 'custom'],
+    ] as const) {
       // Read the captured indicator through the object AFTER register() —
       // destructuring would bind the (still undefined) value before it.
       const recording = createRecordingContext();

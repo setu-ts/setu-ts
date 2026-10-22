@@ -95,8 +95,11 @@ export function policyGuardOf(middleware: MiddlewareFunction): PolicyGuardBrand 
   };
   const { policy, abilities, anonymous } = brand;
   if (
-    typeof policy !== 'string' || typeof anonymous !== 'boolean' || !Array.isArray(abilities) ||
-    abilities.length === 0 || !abilities.every((ability) => typeof ability === 'string')
+    typeof policy !== 'string' ||
+    typeof anonymous !== 'boolean' ||
+    !Array.isArray(abilities) ||
+    abilities.length === 0 ||
+    !abilities.every((ability) => typeof ability === 'string')
   ) {
     return undefined;
   }
@@ -148,7 +151,9 @@ export function requirePolicy<A extends string, T>(
   const name = policy.name;
   const abilities = policy.abilities as Readonly<Record<string, unknown>>;
   if (
-    typeof name !== 'string' || typeof ability !== 'string' || !Object.hasOwn(abilities, ability)
+    typeof name !== 'string' ||
+    typeof ability !== 'string' ||
+    !Object.hasOwn(abilities, ability)
   ) {
     throw new AuthPluginConfigurationError(
       `auth-plugin: requirePolicy names ability ${label(ability)} that policy ${label(name)} ` +
@@ -192,9 +197,10 @@ export function requirePolicy<A extends string, T>(
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
-    const resolved = typeof target === 'function'
-      ? await (target as (ctx: IRequestContext) => T | undefined | Promise<T | undefined>)(ctx)
-      : target;
+    const resolved =
+      typeof target === 'function'
+        ? await (target as (ctx: IRequestContext) => T | undefined | Promise<T | undefined>)(ctx)
+        : target;
     if (!(await service.can(user, name, ability, resolved))) {
       respondWithAuthorizationFailure(
         ctx,

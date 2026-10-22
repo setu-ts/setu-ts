@@ -199,7 +199,10 @@ const RESERVED = new Set([
  * `#/components/schemas/`, keeping only the component name.
  */
 function identifierParts(raw: string): string[] {
-  return raw.replace(/^.*\//, '').split(/[^A-Za-z0-9]+/).filter(Boolean);
+  return raw
+    .replace(/^.*\//, '')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
 }
 
 /**
@@ -226,7 +229,7 @@ export function sanitizeIdentifier(raw: string): string {
     .map((part, i) =>
       i === 0
         ? part.charAt(0).toLowerCase() + part.slice(1)
-        : part.charAt(0).toUpperCase() + part.slice(1)
+        : part.charAt(0).toUpperCase() + part.slice(1),
     )
     .join('');
   return finishIdentifier(joined, 'operation');
@@ -381,21 +384,27 @@ function renderSchema(
   if (schema.enum) return schema.enum.map(renderLiteral).join(' | ') || 'unknown';
   if (schema.const !== undefined) return renderLiteral(schema.const);
   if (schema.anyOf) {
-    return schema.anyOf.map((s) => renderSchema(s, next, path, method, depth)).join(' | ') ||
-      'unknown';
+    return (
+      schema.anyOf.map((s) => renderSchema(s, next, path, method, depth)).join(' | ') || 'unknown'
+    );
   }
   if (schema.oneOf) {
-    return schema.oneOf.map((s) => renderSchema(s, next, path, method, depth)).join(' | ') ||
-      'unknown';
+    return (
+      schema.oneOf.map((s) => renderSchema(s, next, path, method, depth)).join(' | ') || 'unknown'
+    );
   }
   if (schema.allOf) {
-    return schema.allOf.map((s) => renderSchema(s, next, path, method, depth)).join(' & ') ||
-      'unknown';
+    return (
+      schema.allOf.map((s) => renderSchema(s, next, path, method, depth)).join(' & ') || 'unknown'
+    );
   }
 
   const types = Array.isArray(schema.type) ? schema.type : [schema.type];
   if (types.length > 1) {
-    return types.filter(Boolean).map((t) => rtp(t!, schema, next, path, method, depth)).join(' | ');
+    return types
+      .filter(Boolean)
+      .map((t) => rtp(t!, schema, next, path, method, depth))
+      .join(' | ');
   }
   return types[0] ? rtp(types[0], schema, next, path, method, depth) : 'unknown';
 }
@@ -463,9 +472,13 @@ function ros(
     for (const [key, val] of keys) {
       const opt = req.has(key) ? '' : '?';
       propLines.push(
-        `${inner}'${escapeSingleQuote(key)}'${opt}: ${
-          renderSchema(val, seen, path, method, depth + 1)
-        };`,
+        `${inner}'${escapeSingleQuote(key)}'${opt}: ${renderSchema(
+          val,
+          seen,
+          path,
+          method,
+          depth + 1,
+        )};`,
       );
     }
     const body = `{\n${propLines.join('\n')}\n${outer}}`;
@@ -509,10 +522,7 @@ const HTTP_METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch'
  * parameters were silently discarded — which, for a shared PATH parameter, then
  * emitted source referencing an undeclared identifier.
  */
-function mergeParameters(
-  item: SdkOpenApiPathItem,
-  op: SdkOpenApiOperation,
-): SdkOpenApiParameter[] {
+function mergeParameters(item: SdkOpenApiPathItem, op: SdkOpenApiOperation): SdkOpenApiParameter[] {
   const shared = item.parameters ?? [];
   if (shared.length === 0) return [...(op.parameters ?? [])];
 
@@ -535,7 +545,10 @@ function collectOperations(doc: SdkOpenApiDocument): OpEntry[] {
           method,
         );
       }
-      const safeName = sanitizeIdentifier(op.operationId);
+      const operationName = sanitizeIdentifier(op.operationId);
+      const safeName = SHADOWING_OPERATION_NAMES.has(operationName)
+        ? `_${operationName}`
+        : operationName;
       const existing = used.get(safeName);
       if (existing) {
         throw new OpenApiCodegenError(
@@ -791,6 +804,30 @@ function getErrorArms(
   return arms.sort((a, b) => a.status - b.status);
 }
 
+/**
+ * Names an emitted operation function may not take: inside the factory, a function named `client`
+ * redeclares the factory parameter (TS2300), and one named `encodeURIComponent` shadows the global
+ * every generated path calls.
+ */
+const SHADOWING_OPERATION_NAMES: ReadonlySet<string> = new Set(['client', 'encodeURIComponent']);
+
+/**
+ * Names a positional path argument may not take: the factory's `client`, the method locals `opts`
+ * and `request`, and the global `encodeURIComponent` its own path expression calls.
+ */
+const SHADOWING_PATH_ARGUMENT_NAMES: ReadonlySet<string> = new Set([
+  'client',
+  'opts',
+  'request',
+  'encodeURIComponent',
+]);
+
+/** Keep positional path arguments clear of the generated factory and method locals. */
+function pathArgumentName(raw: string): string {
+  const name = sanitizeIdentifier(raw);
+  return SHADOWING_PATH_ARGUMENT_NAMES.has(name) ? `_${name}` : name;
+}
+
 /** Every `{placeholder}` name in a path template, in order of appearance. */
 function pathPlaceholders(path: string): string[] {
   return [...path.matchAll(/\{([^}]*)\}/g)].map((m) => m[1]!);
@@ -819,11 +856,11 @@ function assertPathParamsMatchTemplate(
   // placeholder, so `user-id` in the template is satisfied by a `user-id`
   // parameter, and two placeholders deriving onto one identifier are a
   // duplicate-argument defect of their own.
-  const derivedDeclared = new Set(pathParams.map((p) => sanitizeIdentifier(p.name)));
+  const derivedDeclared = new Set(pathParams.map((p) => pathArgumentName(p.name)));
   const seen = new Set<string>();
 
   for (const raw of placeholders) {
-    const derived = sanitizeIdentifier(raw);
+    const derived = pathArgumentName(raw);
     if (!derivedDeclared.has(derived)) {
       throw new OpenApiCodegenError(
         `Path template '${path}' declares placeholder '{${raw}}' with no matching ` +
@@ -843,7 +880,7 @@ function assertPathParamsMatchTemplate(
   }
 
   for (const p of pathParams) {
-    if (!seen.has(sanitizeIdentifier(p.name))) {
+    if (!seen.has(pathArgumentName(p.name))) {
       throw new OpenApiCodegenError(
         `Parameter '${p.name}' is declared 'in: path' but does not appear in the path ` +
           `template '${path}'; its value would be silently dropped`,
@@ -862,7 +899,7 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const aliases: HoistedAlias[] = [];
 
   const render = (p: SdkOpenApiParameter, forcedRequired?: boolean): RenderedParam => ({
-    name: sanitizeIdentifier(p.name),
+    name: p.in === 'path' ? pathArgumentName(p.name) : sanitizeIdentifier(p.name),
     wireName: p.name,
     // A parameter with no `schema` is treated as a string: that is the only
     // shape that can be serialized into a URL or a header without guessing.
@@ -890,23 +927,16 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
   const bodySchema = getBodySchema(entry.operation);
   const bodyType = bodySchema
     ? hoistMultiline(
-      renderSchema(bodySchema, new Set(), path, method),
-      types,
-      `${sanitizeTypeName(entry.operationId)}Body`,
-      `the request body of operation '${entry.operationId}'`,
-      aliases,
-    )
+        renderSchema(bodySchema, new Set(), path, method),
+        types,
+        `${sanitizeTypeName(entry.operationId)}Body`,
+        `the request body of operation '${entry.operationId}'`,
+        aliases,
+      )
     : undefined;
   const bodyRequired = bodyType !== undefined && isBodyRequired(entry.operation);
 
-  const errorArms = getErrorArms(
-    entry.operation,
-    path,
-    method,
-    entry.operationId,
-    types,
-    aliases,
-  );
+  const errorArms = getErrorArms(entry.operation, path, method, entry.operationId, types, aliases);
 
   const successTypes = getSuccessTypes(
     entry.operation,
@@ -916,9 +946,8 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     types,
     aliases,
   );
-  const returnType = successTypes.length === 1 && successTypes[0] === 'void'
-    ? 'void'
-    : successTypes.join(' | ');
+  const returnType =
+    successTypes.length === 1 && successTypes[0] === 'void' ? 'void' : successTypes.join(' | ');
 
   const hasArgs = queryParams.length > 0 || headerParams.length > 0 || bodyType !== undefined;
 
@@ -931,29 +960,30 @@ function buildOpShape(entry: OpEntry, types: TypeNameRegistry): OpShape {
     bodyRequired,
     argsTypeName: hasArgs
       ? types.claim(
-        sanitizeTypeName(entry.operationId) + 'Args',
-        `arguments of operation '${entry.operationId}'`,
-      )
+          sanitizeTypeName(entry.operationId) + 'Args',
+          `arguments of operation '${entry.operationId}'`,
+        )
       : sanitizeTypeName(entry.operationId) + 'Args',
     hasArgs,
-    argsRequired: bodyRequired ||
-      queryParams.some((p) => p.required) ||
-      headerParams.some((p) => p.required),
+    argsRequired:
+      bodyRequired || queryParams.some((p) => p.required) || headerParams.some((p) => p.required),
     returnType,
     errorArms,
     aliases,
-    errorTypeName: errorArms.length > 0
-      ? types.claim(
-        sanitizeTypeName(entry.operationId) + 'Error',
-        `error responses of operation '${entry.operationId}'`,
-      )
-      : '',
-    errorGuardName: errorArms.length > 0
-      ? types.claim(
-        `is${sanitizeTypeName(entry.operationId)}Error`,
-        `the error guard of operation '${entry.operationId}'`,
-      )
-      : `is${sanitizeTypeName(entry.operationId)}Error`,
+    errorTypeName:
+      errorArms.length > 0
+        ? types.claim(
+            sanitizeTypeName(entry.operationId) + 'Error',
+            `error responses of operation '${entry.operationId}'`,
+          )
+        : '',
+    errorGuardName:
+      errorArms.length > 0
+        ? types.claim(
+            `is${sanitizeTypeName(entry.operationId)}Error`,
+            `the error guard of operation '${entry.operationId}'`,
+          )
+        : `is${sanitizeTypeName(entry.operationId)}Error`,
   };
 }
 
@@ -983,14 +1013,16 @@ function getSuccessTypes(
         // component of the same name — the measured M99c collision —
         // `…Response200Body` reads correctly, while the bare numeric form
         // (`…Response2002`) reads as a status code.
-        out.push(hoistMultiline(
-          renderSchema(media.schema, new Set(), path, method),
-          types,
-          `${sanitizeTypeName(operationId)}Response${s}`,
-          `the ${s} response body of operation '${operationId}'`,
-          aliases,
-          `${sanitizeTypeName(operationId)}Response${s}Body`,
-        ));
+        out.push(
+          hoistMultiline(
+            renderSchema(media.schema, new Set(), path, method),
+            types,
+            `${sanitizeTypeName(operationId)}Response${s}`,
+            `the ${s} response body of operation '${operationId}'`,
+            aliases,
+            `${sanitizeTypeName(operationId)}Response${s}Body`,
+          ),
+        );
       } else out.push('void');
     }
   }
@@ -1020,7 +1052,7 @@ function buildPathLiteral(path: string, indent: string, prefix: string): string[
     if (m.index > cursor) {
       parts.push({ literal: true, text: normalized.slice(cursor, m.index) });
     }
-    parts.push({ literal: false, text: sanitizeIdentifier(m[1]!) });
+    parts.push({ literal: false, text: pathArgumentName(m[1]!) });
     cursor = m.index + m[0].length;
   }
 
@@ -1033,7 +1065,7 @@ function buildPathLiteral(path: string, indent: string, prefix: string): string[
 
   const template = parts
     .map((part) =>
-      part.literal ? escapeTemplateLiteral(part.text) : `\${encodeURIComponent(${part.text})}`
+      part.literal ? escapeTemplateLiteral(part.text) : `\${encodeURIComponent(${part.text})}`,
     )
     .join('');
   const single = `${indent}${prefix}\`${template}\`,`;
@@ -1050,7 +1082,7 @@ function buildPathLiteral(path: string, indent: string, prefix: string): string[
     ...parts.map((part) =>
       part.literal
         ? `${indent}${INDENT}'${escapeSingleQuote(part.text)}',`
-        : `${indent}${INDENT}encodeURIComponent(${part.text}),`
+        : `${indent}${INDENT}encodeURIComponent(${part.text}),`,
     ),
     `${indent}].join(''),`,
   ];
@@ -1064,10 +1096,7 @@ function buildPathLiteral(path: string, indent: string, prefix: string): string[
  * cannot break out of or inject into the emitted literal.
  */
 function escapeTemplateLiteral(s: string): string {
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
+  return s.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$/g, '\\$');
 }
 
 /**
@@ -1097,7 +1126,12 @@ export function generateOpenApiClient(
   // conditional: the guard names that force it are claimed during shape
   // building, below, so whether it is needed is not yet known here — and the
   // name belongs to the SDK either way.
-  for (const imported of ['ClientResponse', 'IHttpClient', 'HttpClientError']) {
+  for (const imported of [
+    'ClientResponse',
+    'IHttpClient',
+    'HttpClientError',
+    'OperationRequestOptions',
+  ]) {
     types.claim(imported, 'an identifier imported from @setu-ts/sdk');
   }
   const apiTypeName = types.claim(sanitizeTypeName(opts.apiTypeName), 'the `apiTypeName` option');
@@ -1119,7 +1153,7 @@ export function generateOpenApiClient(
   const shapes = operations.map((entry) => buildOpShape(entry, types));
   const anyErrors = shapes.some((shape) => shape.errorArms.length > 0);
   const hasRedirects = operations.some((entry) =>
-    Object.keys(entry.operation.responses ?? {}).some(isRedirectResponseCode)
+    Object.keys(entry.operation.responses ?? {}).some(isRedirectResponseCode),
   );
 
   // No lint pragma. The generator emits only lint-clean constructs, and a
@@ -1135,7 +1169,9 @@ export function generateOpenApiClient(
   }
   L(' */');
   L('');
-  L(`import type { ClientResponse, IHttpClient } from '${opts.sdkImport}';`);
+  L(
+    `import type { ClientResponse, IHttpClient, OperationRequestOptions } from '${opts.sdkImport}';`,
+  );
   if (anyErrors) {
     // A VALUE import, not a type-only one: the generated guards narrow with
     // `instanceof`.
@@ -1232,14 +1268,13 @@ export function generateOpenApiClient(
     // The guard's own signature goes over width on operationId length ALONE,
     // with no inline schema involved, so it wraps through the same helper the
     // operation signatures use rather than a second mechanism.
-    for (
-      const line of renderSignature(
-        '',
-        `export function ${shape.errorGuardName}`,
-        ['e: unknown'],
-        `: e is ${shape.errorTypeName} {`,
-      )
-    ) L(line);
+    for (const line of renderSignature(
+      '',
+      `export function ${shape.errorGuardName}`,
+      ['e: unknown'],
+      `: e is ${shape.errorTypeName} {`,
+    ))
+      L(line);
     const clauses = shape.errorArms.map((a) => `e.status === ${a.status}`);
     const oneLine = `${INDENT}return e instanceof HttpClientError && (${clauses.join(' || ')});`;
     if (oneLine.length <= LINE_WIDTH) {
@@ -1273,14 +1308,14 @@ export function generateOpenApiClient(
     if (shape.hasArgs) {
       params.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
     }
-    for (
-      const line of renderSignature(
-        INDENT,
-        shape.entry.safeName,
-        params,
-        `: Promise<ClientResponse<${shape.returnType}>>;`,
-      )
-    ) L(line);
+    params.push('request?: OperationRequestOptions');
+    for (const line of renderSignature(
+      INDENT,
+      shape.entry.safeName,
+      params,
+      `: Promise<ClientResponse<${shape.returnType}>>;`,
+    ))
+      L(line);
   }
   L('}');
   L('');
@@ -1305,14 +1340,14 @@ export function generateOpenApiClient(
       paramList.push(`opts${shape.argsRequired ? '' : '?'}: ${shape.argsTypeName}`);
     }
 
-    for (
-      const line of renderSignature(
-        i1,
-        `function ${entry.safeName}`,
-        paramList,
-        `: Promise<ClientResponse<${returnType}>> {`,
-      )
-    ) L(line);
+    paramList.push('request?: OperationRequestOptions');
+    for (const line of renderSignature(
+      i1,
+      `function ${entry.safeName}`,
+      paramList,
+      `: Promise<ClientResponse<${returnType}>> {`,
+    ))
+      L(line);
 
     L(`${i2}return client.request<${returnType}>({`);
     L(`${i3}method: '${entry.method.toUpperCase()}',`);
@@ -1322,8 +1357,8 @@ export function generateOpenApiClient(
       // No cast: the arg field is already declared with this parameter's rendered
       // type, so it assigns to `ClientRequest.query` directly. A cast here would
       // silence nothing and would hide a genuinely unassignable query type.
-      const qParts = shape.queryParams.map((p) =>
-        `'${escapeSingleQuote(p.wireName)}': ${optsRef}.${p.name}`
+      const qParts = shape.queryParams.map(
+        (p) => `'${escapeSingleQuote(p.wireName)}': ${optsRef}.${p.name}`,
       );
       L(`${i3}query: { ${qParts.join(', ')} },`);
     }
@@ -1334,13 +1369,11 @@ export function generateOpenApiClient(
       L(`${i3}headers: (() => {`);
       L(`${i4}const headers: Record<string, string> = {};`);
       for (const p of shape.headerParams) {
+        L(`${i4}if (${optsRef}.${p.name} !== undefined) {`);
         L(
-          `${i4}if (${optsRef}.${p.name} !== undefined) {`,
-        );
-        L(
-          `${i4}${INDENT}headers['${
-            escapeSingleQuote(p.wireName)
-          }'] = String(${optsRef}.${p.name});`,
+          `${i4}${INDENT}headers['${escapeSingleQuote(
+            p.wireName,
+          )}'] = String(${optsRef}.${p.name});`,
         );
         L(`${i4}}`);
       }
@@ -1351,6 +1384,9 @@ export function generateOpenApiClient(
       L(`${i3}json: ${optsRef}.body,`);
     }
 
+    for (const field of ['idempotencyKey', 'signal']) {
+      L(`${i3}...(request?.${field} === undefined ? {} : { ${field}: request.${field} }),`);
+    }
     L(`${i2}});`);
     L(`${i1}}`);
   }

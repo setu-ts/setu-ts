@@ -12,6 +12,7 @@ import {
   ACK_SCRIPT,
   DEAD_LETTER_SCRIPT,
   ENQUEUE_SCRIPT,
+  EXTEND_SCRIPT,
   REQUEUE_SCRIPT,
   RESERVE_SCRIPT,
 } from '../../src/adapters/redis-queue-scripts.ts';
@@ -80,7 +81,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     this.#hashes.clear();
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async connect(): Promise<void> {
     this.#record('connect', []);
 
@@ -91,13 +92,13 @@ export class FakeRedisClient implements IRedisQueueClient {
     this.#connected = true;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async quit(): Promise<void> {
     this.#record('quit', []);
     this.#connected = false;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zadd(key: string, score: number, member: string): Promise<number> {
     this.#record('zadd', [key, score, member]);
 
@@ -118,7 +119,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return isNew ? 1 : 0;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zrangebyscore(
     key: string,
     min: number | string,
@@ -163,7 +164,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return sliced.map((m) => m.member);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zrem(key: string, ...members: string[]): Promise<number> {
     this.#record('zrem', [key, ...members]);
 
@@ -187,7 +188,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return removed;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hset(key: string, field: string, value: string): Promise<number> {
     this.#record('hset', [key, field, value]);
 
@@ -207,7 +208,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return isNew ? 1 : 0;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hget(key: string, field: string): Promise<string | null> {
     this.#record('hget', [key, field]);
 
@@ -223,7 +224,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return hash.get(field) ?? null;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async hdel(key: string, ...fields: string[]): Promise<number> {
     this.#record('hdel', [key, ...fields]);
 
@@ -247,7 +248,7 @@ export class FakeRedisClient implements IRedisQueueClient {
     return deleted;
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async del(...keys: string[]): Promise<number> {
     this.#record('del', keys);
 
@@ -275,7 +276,7 @@ export class FakeRedisClient implements IRedisQueueClient {
    * is zero rather than an error — Redis's own behaviour, and the distinction
    * matters because the health indicator must be able to report an empty queue.
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async zcard(key: string): Promise<number> {
     this.#record('zcard', [key]);
 
@@ -293,7 +294,7 @@ export class FakeRedisClient implements IRedisQueueClient {
    *
    * @returns `1` when the key exists, `0` otherwise, matching Redis
    */
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async expire(key: string, seconds: number): Promise<number> {
     this.#record('expire', [key, seconds]);
 
@@ -315,6 +316,8 @@ export class FakeRedisClient implements IRedisQueueClient {
 export class FakeEvalRedisClient extends FakeRedisClient {
   /** Every `eval` call, as `[script, numKeys, ...keysAndArgs]`. */
   readonly evals: Array<readonly unknown[]> = [];
+  serverNowMs = 100;
+  #sequences = new Map<string, number>();
 
   async eval(
     script: string,
@@ -330,29 +333,73 @@ export class FakeEvalRedisClient extends FakeRedisClient {
         await this.zadd(keys[1], Number(args[2]), args[0]);
         return 1;
       case RESERVE_SCRIPT: {
-        const ids = await this.zrangebyscore(keys[0], '-inf', args[0], 'LIMIT', 0, Number(args[1]));
-        const out: string[] = [];
+        const expired = await this.zrangebyscore(
+          keys[1],
+          '-inf',
+          this.serverNowMs,
+          'LIMIT',
+          0,
+          Number(args[0]),
+        );
+        for (const id of expired) {
+          await this.zrem(keys[1], id);
+          await this.hdel(keys[3], id);
+          if ((await this.hget(keys[2], id)) !== null) {
+            const stalls = Number((await this.hget(keys[4], id)) ?? '0') + 1;
+            await this.hset(keys[4], id, String(stalls));
+            await this.zadd(keys[0], this.serverNowMs, id);
+          } else {
+            await this.zrem(keys[0], id);
+            await this.hdel(keys[4], id);
+          }
+        }
+        const ids = await this.zrangebyscore(
+          keys[0],
+          '-inf',
+          this.serverNowMs,
+          'LIMIT',
+          0,
+          Number(args[0]),
+        );
+        const out: [string, number, string][] = [];
         for (const id of ids) {
           await this.zrem(keys[0], id);
-          await this.zadd(keys[1], Number(args[0]), id);
           const raw = await this.hget(keys[2], id);
           if (raw !== null) {
-            out.push(raw);
+            const sequence = (this.#sequences.get(keys[5]) ?? 0) + 1;
+            this.#sequences.set(keys[5], sequence);
+            const token = String(sequence);
+            await this.zadd(keys[1], this.serverNowMs + Number(args[1]), id);
+            await this.hset(keys[3], id, token);
+            out.push([raw, Number((await this.hget(keys[4], id)) ?? '0'), token]);
+          } else {
+            await this.zrem(keys[1], id);
+            await this.hdel(keys[3], id);
+            await this.hdel(keys[4], id);
           }
         }
         return out;
       }
       case ACK_SCRIPT:
+        if ((await this.hget(keys[2], args[0])) !== args[1]) return 0;
         await this.zrem(keys[0], args[0]);
         await this.hdel(keys[1], args[0]);
+        await this.hdel(keys[2], args[0]);
+        await this.hdel(keys[3], args[0]);
         return 1;
       case REQUEUE_SCRIPT:
+        if ((await this.hget(keys[3], args[0])) !== args[3]) return 0;
         await this.hset(keys[0], args[0], args[1]);
         await this.zrem(keys[1], args[0]);
         await this.zadd(keys[2], Number(args[2]), args[0]);
+        await this.hdel(keys[3], args[0]);
+        await this.hdel(keys[4], args[0]);
         return 1;
       case DEAD_LETTER_SCRIPT: {
+        if ((await this.hget(keys[4], args[0])) !== args[3]) return 0;
         await this.zrem(keys[0], args[0]);
+        await this.hdel(keys[4], args[0]);
+        await this.hdel(keys[5], args[0]);
         if (args[2] === '1') {
           const raw = await this.hget(keys[2], args[0]);
           if (raw !== null) {
@@ -363,6 +410,10 @@ export class FakeEvalRedisClient extends FakeRedisClient {
         await this.zadd(keys[1], Number(args[1]), args[0]);
         return 1;
       }
+      case EXTEND_SCRIPT:
+        if ((await this.hget(keys[1], args[0])) !== args[1]) return 0;
+        await this.zadd(keys[0], this.serverNowMs + Number(args[2]), args[0]);
+        return 1;
       default:
         throw new Error('ERR unknown script');
     }

@@ -31,9 +31,7 @@ describe('SseFrameParser', () => {
   it('discards comment frames and does not leak heartbeat payloads', () => {
     const parser = new SseFrameParser();
 
-    expect(parser.push(': heartbeat\n\ndata: {"ok":true}\n\n')).toEqual([
-      { data: '{"ok":true}' },
-    ]);
+    expect(parser.push(': heartbeat\n\ndata: {"ok":true}\n\n')).toEqual([{ data: '{"ok":true}' }]);
   });
 
   it('retains partial lines and frames until later chunks complete them', () => {
@@ -52,9 +50,7 @@ describe('SseFrameParser', () => {
   it('ignores retry values that are not decimal integers', () => {
     const parser = new SseFrameParser();
 
-    expect(parser.push('retry: 1.5\n\nretry: -1\n\nretry: 200\n\n')).toEqual([
-      { retry: 200 },
-    ]);
+    expect(parser.push('retry: 1.5\n\nretry: -1\n\nretry: 200\n\n')).toEqual([{ retry: 200 }]);
   });
 
   it("ignores retry values outside JavaScript's safe integer range", () => {

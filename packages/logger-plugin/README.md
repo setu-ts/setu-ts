@@ -3,8 +3,8 @@
 Structured logging. Registers an `ILogger` under `CAPABILITIES.LOGGER` (`'logger'`) and, optionally,
 request/response logging middleware.
 
-Three implementations ship: `ConsoleLogger` (zero-dependency default), `PinoLogger` (over
-`npm:pino`, lazily imported or injected), and `NoopLogger`.
+Three implementations ship: `ConsoleLogger` (zero-dependency default), `PinoLogger` (over `pino`,
+lazily imported or injected), and `NoopLogger`.
 
 ## Installation
 
@@ -31,6 +31,19 @@ logger.info('server ready', { port: 3000 });
 
 ## Options
 
+The plugin's `excludePaths` accepts the same `readonly PathPattern[]` as request middleware: strings
+match exactly and regular expressions match the request path.
+
+`errorHandler` owns the caught-error diagnostic: one `warn` below 500, one `error` for 5xx. Request
+logging records completion with the error responder's predicted status and rethrows; without a
+responder it records 500. A custom `ErrorHandlerOptions.respond` hook can choose a different served
+status; request completion still reports the rule's status. Request logging stays inside telemetry
+so trace identifiers remain available.
+
+Without a registered logger, unhandled kernel errors and handled 5xx use the runtime's `reportError`
+sink (one JSON line to stderr; Workers uses its platform log channel). Handled 4xx stays silent
+without a logger. Registering a logger selects it exclusively, including a no-op logger.
+
 | Option                 | Type                                   | Default               | Description                                                                                             |
 | ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
@@ -53,6 +66,9 @@ a console-logging application never pulls it in. You may also inject a pre-built
 
 `createRequestLoggerMiddleware(options)` logs each request and its outcome. Durations are computed
 from the monotonic clock (`runtime.hrtime()`), never from a wall-clock epoch.
+
+The scaffolded templates opt in with `requestLogging: true` and exclude `/live`, `/ready`, `/health`
+and `/metrics`, so probe traffic writes no line. The plugin's own default stays `false`.
 
 ## Trace correlation
 
@@ -124,7 +140,7 @@ set `redact: []` to restore the previous no-default-redaction behaviour.
 | `LoggerTransport`               | type      |
 | `PinoFactory`                   | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

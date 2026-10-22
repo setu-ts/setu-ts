@@ -45,13 +45,13 @@ const board = createRealtimeClient({
 
 ```bash
 # npm / pnpm / yarn
-npm install @setu-ts/sdk@^0.9.0
+npm install @setu-ts/sdk@^0.10.0
 
 # Bun
-bun add @setu-ts/sdk@^0.9.0
+bun add @setu-ts/sdk@^0.10.0
 
 # Deno
-deno add npm:@setu-ts/sdk@^0.9.0
+deno add npm:@setu-ts/sdk@^0.10.0
 ```
 
 ## Quick Start
@@ -61,9 +61,7 @@ import { createBearerAuthInterceptor, createClient } from '@setu-ts/sdk';
 
 const client = createClient({
   baseUrl: 'https://api.example.com',
-  requestInterceptors: [
-    createBearerAuthInterceptor('my-token'),
-  ],
+  requestInterceptors: [createBearerAuthInterceptor('my-token')],
   retry: {
     limit: 3,
     delay: 500,
@@ -240,7 +238,13 @@ retryable `409`.
 Keyed `POST`/`PATCH` retries are safe ONLY when the server de-duplicates on that key, for example
 with `idempotent()` or `within`. Against a server that does not, a retried `POST` can execute twice.
 A keyed request carries a non-safelisted header, so a cross-origin browser call triggers a CORS
-preflight; the server must list that header in `Access-Control-Allow-Headers`.
+preflight; the server must list that header in `Access-Control-Allow-Headers`. For the page to read
+the replay response, `Access-Control-Expose-Headers` must list `Idempotent-Replayed`.
+
+A generated operation takes the same key per call in its trailing `request` parameter
+(`request?: OperationRequestOptions`): `api.createOrder({ body }, { idempotencyKey })`. The
+`idempotencyKey` and `signal` fields carry the same meaning as the same-named fields of
+`ClientRequest`, and the generated code forwards only those two fields.
 
 ### Circuit Breaker
 
@@ -417,6 +421,7 @@ publish or format it has nowhere to go.
   means what it always did. The union is discriminated on `status` because
   `HttpClientError<A> | HttpClientError<B>` is not — `status` is `number` on both arms. A `default`
   response and range codes such as `4XX` are skipped: they name no single status.
+
 - **Formatting matches `deno fmt`.** Two-space indentation, a signature past 100 columns wrapped one
   parameter per line, and a path template too long for one line emitted as an equivalent
   `[…].join('')` — a template literal is not usable there, because `deno fmt` rewraps a long one at
@@ -434,6 +439,18 @@ publish or format it has nowhere to go.
 - **Path parameters are positional arguments; everything else lives in `opts`.** Each path
   placeholder is substituted and percent-encoded, including a placeholder that shares a segment with
   literal text (`/files/{id}.json`).
+- **Every operation ends with an optional trailing `request` parameter** —
+  `request?: OperationRequestOptions`, after the path parameters and after `opts` — whose
+  `idempotencyKey` and `signal` fields carry the same meaning as the same-named fields of
+  `ClientRequest`; the generated code forwards only those two fields, and existing calls are
+  unaffected. A path parameter whose identifier is `client`, `opts`, `request` or
+  `encodeURIComponent` is emitted with a `_` prefix, so it cannot shadow the factory's `client`, the
+  method's locals or the global its path expression calls; path parameters are positional, so no
+  caller changes. An operation whose method name is `client` or `encodeURIComponent` is emitted as
+  `_client` or `_encodeURIComponent` — a renamed method, but before, `client` never compiled and
+  `encodeURIComponent` broke every generated path that encodes a parameter. A document component
+  named `OperationRequestOptions` is refused like `ClientResponse`, rather than shadowing the import
+  the generated file claims from `sdkImport`.
 - **`opts` is required when any of its fields is required.** A required query parameter or a
   `requestBody` marked `required` makes the `opts` parameter itself required, so a caller cannot
   omit it and silently skip a mandatory value.
@@ -448,6 +465,13 @@ publish or format it has nowhere to go.
   emitted string literal and path template is escaped for its own context.
 
 ### Codegen diagnostics
+
+Declared OpenAPI ids name generated methods just like derived ones: `listUsers` produces
+`listUsers`. Distinct ids may sanitize to one method name: declared `getUsers` beside undeclared
+`GET /users` (derived `get-users`) is valid OpenAPI, but code generation refuses it with
+`Duplicate operation name`. Choose ids that yield distinct TypeScript names. Changing an id also
+changes its generated argument, error and inline-schema type names; regenerate clients and update
+their callers.
 
 `generateOpenApiClient` throws `OpenApiCodegenError` — carrying `path` and `method` where they apply
 — rather than emitting a client that misbehaves or does not compile:
@@ -492,11 +516,7 @@ export function createApp(
   });
   void payments; // routes use `payments`
   return createApplication({
-    plugins: [
-      RuntimePlugin(),
-      ...(observed ? [observed.plugin] : []),
-      ...(devtool?.plugins ?? []),
-    ],
+    plugins: [RuntimePlugin(), ...(observed ? [observed.plugin] : []), ...(devtool?.plugins ?? [])],
     ...(devtool?.diagnostics !== undefined ? { diagnostics: devtool.diagnostics } : {}),
   });
 }
@@ -594,6 +614,7 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `ObservedFetch`                 | interface |
 | `ObservedFetchOptions`          | interface |
 | `OpenApiCodegenOptions`         | interface |
+| `OperationRequestOptions`       | interface |
 | `RawSseEvent`                   | interface |
 | `RealtimeClientOptions`         | interface |
 | `RealtimeMessage`               | interface |
@@ -618,5 +639,5 @@ registering its `plugin` in a second one throws. The helper needs `crypto.getRan
 | `SseEventMap`                   | type      |
 | `WebSocketFactory`              | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

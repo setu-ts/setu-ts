@@ -3,7 +3,7 @@
 Caching with pluggable stores. Registers an `ICacheStore` under `CAPABILITIES.CACHE` (`'cache'`).
 
 Three stores ship: `MemoryStore` (LRU with per-entry TTL, zero-dependency default), `RedisStore`
-(over `npm:ioredis`, lazily imported or injected), and `NoopStore`.
+(over `ioredis`, lazily imported or injected), and `NoopStore`.
 
 ## Installation
 
@@ -33,9 +33,13 @@ const user = await cache.get<{ name: string }>('user:1');
 
 // CacheService adds coalesced read-through for one cache key.
 const readThroughCache = app.services.get<CacheService>(CAPABILITIES.CACHE);
-const profile = await readThroughCache.getOrSet('profile:1', async () => {
-  return await loadProfile('1');
-}, 60);
+const profile = await readThroughCache.getOrSet(
+  'profile:1',
+  async () => {
+    return await loadProfile('1');
+  },
+  60,
+);
 ```
 
 ## Options
@@ -92,27 +96,35 @@ programmatic read-through calls.
 
 ## Exports
 
-| Export                    | Kind      |
-| ------------------------- | --------- |
-| `cacheMiddleware`         | function  |
-| `CachePlugin`             | function  |
-| `CacheService`            | class     |
-| `MemoryStore`             | class     |
-| `NoopStore`               | class     |
-| `RedisStore`              | class     |
-| `CacheDiagnosticsOptions` | interface |
-| `CachedResponsePayload`   | interface |
-| `CacheMiddlewareOptions`  | interface |
-| `CachePluginOptions`      | interface |
-| `CacheStoreOptions`       | interface |
-| `ICacheStore`             | interface |
-| `IRedisClient`            | interface |
-| `CacheStoreType`          | type      |
+| Export                       | Kind      |
+| ---------------------------- | --------- |
+| `cacheMiddleware`            | function  |
+| `CachePlugin`                | function  |
+| `CacheService`               | class     |
+| `CacheStoreUnavailableError` | class     |
+| `MemoryStore`                | class     |
+| `NoopStore`                  | class     |
+| `RedisStore`                 | class     |
+| `CacheDiagnosticsOptions`    | interface |
+| `CachedResponsePayload`      | interface |
+| `CacheMiddlewareOptions`     | interface |
+| `CachePluginOptions`         | interface |
+| `CacheStoreOptions`          | interface |
+| `ICacheStore`                | interface |
+| `IRedisClient`               | interface |
+| `CacheStoreType`             | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#cacheplugin-setu-tscache-plugin).
+
+## Readiness and dependency outages (M113b)
+
+`RedisStore.get/set/delete/has/clear` wrap recognised connection faults in
+`CacheStoreUnavailableError`, preserving the original as `cause`. With the exceptions
+`errorHandler`, this returns 503 and the fixed detail `The cache is temporarily unavailable.` Other
+errors propagate unchanged. Inspect `cause` for driver diagnostics.

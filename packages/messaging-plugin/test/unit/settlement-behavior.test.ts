@@ -13,9 +13,9 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
     platform: () => platform as ReturnType<IRuntimeServices['platform']>,
     uuid: () => 'uuid-1',
     now: () => 1000000,
-    setTimeout: (_fn: () => void) => (1 as unknown as ReturnType<typeof setTimeout>),
+    setTimeout: (_fn: () => void) => 1 as unknown as ReturnType<typeof setTimeout>,
     clearTimeout: () => {},
-    setInterval: () => (1 as unknown as ReturnType<typeof setInterval>),
+    setInterval: () => 1 as unknown as ReturnType<typeof setInterval>,
     clearInterval: () => {},
     randomBytes: () => new Uint8Array(16),
     subtle: undefined,
@@ -28,9 +28,11 @@ function createRuntime(platform: string = 'node'): IRuntimeServices {
   } as unknown as IRuntimeServices;
 }
 
-type OnMessageFn = (
-  msg: { payload: string; ack: () => void; nack: () => void },
-) => void | Promise<void>;
+type OnMessageFn = (msg: {
+  payload: string;
+  ack: () => void;
+  nack: () => void;
+}) => void | Promise<void>;
 
 // ---------------------------------------------------------------------------
 // GcpPubSubBroker settlement behavior
@@ -42,7 +44,8 @@ type OnMessageFn = (
 // ---------------------------------------------------------------------------
 describe('GcpPubSubBroker settlement behavior', () => {
   it('ack() called exactly once on handler success', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IPubSubTransport = {
@@ -56,10 +59,14 @@ describe('GcpPubSubBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -87,7 +94,8 @@ describe('GcpPubSubBroker settlement behavior', () => {
   });
 
   it('nack() called exactly once on handler throw', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IPubSubTransport = {
@@ -101,10 +109,14 @@ describe('GcpPubSubBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -128,7 +140,8 @@ describe('GcpPubSubBroker settlement behavior', () => {
   });
 
   it('non-Error rejection results in exactly one nack', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IPubSubTransport = {
@@ -142,10 +155,14 @@ describe('GcpPubSubBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new GcpPubSubBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new GcpPubSubBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -183,7 +200,8 @@ describe('GcpPubSubBroker settlement behavior', () => {
 // ---------------------------------------------------------------------------
 describe('ServiceBusBroker settlement behavior', () => {
   it('ack() called exactly once on handler success', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IServiceBusTransport = {
@@ -197,10 +215,14 @@ describe('ServiceBusBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -226,7 +248,8 @@ describe('ServiceBusBroker settlement behavior', () => {
   });
 
   it('nack() called exactly once on handler throw', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IServiceBusTransport = {
@@ -240,10 +263,14 @@ describe('ServiceBusBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -281,10 +308,14 @@ describe('ServiceBusBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 
@@ -292,20 +323,23 @@ describe('ServiceBusBroker settlement behavior', () => {
       throw new Error('force nack');
     });
 
-    await expect(onMessageCb!({
-      payload: '{"x":1}',
-      ack: () => {},
-      nack: () => {
-        nackCount++;
-        throw nackError;
-      },
-    })).rejects.toThrow('nack failed');
+    await expect(
+      onMessageCb!({
+        payload: '{"x":1}',
+        ack: () => {},
+        nack: () => {
+          nackCount++;
+          throw nackError;
+        },
+      }),
+    ).rejects.toThrow('nack failed');
 
     expect(nackCount).toBe(1);
   });
 
   it('non-Error handler rejection results in exactly one nack', async () => {
-    let ackCount = 0, nackCount = 0;
+    let ackCount = 0,
+      nackCount = 0;
     let onMessageCb: OnMessageFn | undefined;
 
     const transport: IServiceBusTransport = {
@@ -319,10 +353,14 @@ describe('ServiceBusBroker settlement behavior', () => {
       close: () => Promise.resolve(),
     };
 
-    const broker = new ServiceBusBroker(createRuntime(), {
-      serialize: (v) => JSON.stringify(v),
-      deserialize: (s) => JSON.parse(s),
-    }, { client: transport });
+    const broker = new ServiceBusBroker(
+      createRuntime(),
+      {
+        serialize: (v) => JSON.stringify(v),
+        deserialize: (s) => JSON.parse(s),
+      },
+      { client: transport },
+    );
 
     await broker.connect();
 

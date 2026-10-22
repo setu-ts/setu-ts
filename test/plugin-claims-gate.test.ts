@@ -14,8 +14,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readdir, stat, readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import { PLUGIN_HEALTH_INDICATORS } from '../packages/cli/src/utils/plugin-claims.ts';
 
@@ -46,11 +47,14 @@ const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
   ['cache-plugin', [{ expression: '`${token}`', name: 'cache' }]],
   ['database-plugin', [{ expression: '`${token}`', name: 'database' }]],
   ['mail-plugin', [{ expression: 'CAPABILITIES.MAIL', name: 'mail' }]],
-  ['messaging-plugin', [
-    { expression: 'token', name: 'messaging' },
-    { expression: 'outboxToken', name: 'outbox' },
-    { expression: 'inboxToken', name: 'inbox' },
-  ]],
+  [
+    'messaging-plugin',
+    [
+      { expression: 'token', name: 'messaging' },
+      { expression: 'outboxToken', name: 'outbox' },
+      { expression: 'inboxToken', name: 'inbox' },
+    ],
+  ],
   ['queue-plugin', [{ expression: 'token', name: 'queue' }]],
   ['secrets-plugin', [{ expression: 'CAPABILITIES.SECRETS', name: 'secrets' }]],
   ['storage-plugin', [{ expression: 'CAPABILITIES.STORAGE', name: 'storage' }]],
@@ -59,9 +63,9 @@ const DERIVED_SITES: ReadonlyMap<string, readonly DerivedSite[]> = new Map([
 /** Recursively lists every `.ts` file under `dir`, workspace-relative. */
 async function listTsFiles(dir: string): Promise<string[]> {
   const out: string[] = [];
-  for await (const entry of Deno.readDir(dir)) {
-    if (entry.isFile && entry.name.endsWith('.ts')) out.push(`${dir}/${entry.name}`);
-    else if (entry.isDirectory) out.push(...(await listTsFiles(`${dir}/${entry.name}`)));
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.ts')) out.push(`${dir}/${entry.name}`);
+    else if (entry.isDirectory()) out.push(...(await listTsFiles(`${dir}/${entry.name}`)));
   }
   return out;
 }
@@ -118,16 +122,16 @@ function checkDerivedSites(
 /** Collects every registration site across the package sources. */
 async function collectSites(): Promise<Site[]> {
   const sites: Site[] = [];
-  for await (const pkg of Deno.readDir('packages')) {
-    if (!pkg.isDirectory || NON_PLUGIN_PACKAGES.has(pkg.name)) continue;
+  for await (const pkg of await readdir('packages', { withFileTypes: true })) {
+    if (!pkg.isDirectory() || NON_PLUGIN_PACKAGES.has(pkg.name)) continue;
     const srcDir = `packages/${pkg.name}/src`;
     try {
-      await Deno.stat(srcDir);
+      await stat(srcDir);
     } catch {
       continue;
     }
     for (const file of await listTsFiles(srcDir)) {
-      sites.push(...sitesIn(pkg.name, file, await Deno.readTextFile(file)));
+      sites.push(...sitesIn(pkg.name, file, await readFile(file, 'utf8')));
     }
   }
   return sites;
@@ -144,8 +148,9 @@ describe('CLI health-indicator claim table', () => {
   });
 
   it('accounts for every derived indicator name', async () => {
-    expect(checkDerivedSites(await collectSites(), DERIVED_SITES, PLUGIN_HEALTH_INDICATORS))
-      .toEqual([]);
+    expect(
+      checkDerivedSites(await collectSites(), DERIVED_SITES, PLUGIN_HEALTH_INDICATORS),
+    ).toEqual([]);
   });
 
   it('the derived-site check itself fails on an unaccounted name (self-test)', () => {
@@ -153,10 +158,15 @@ describe('CLI health-indicator claim table', () => {
     // assumed: a package with TWO accounted derived sites passes, and a THIRD,
     // unaccounted derived name in the same package is reported.
     const claims = new Map([['demo-plugin', ['demo', 'demo-outbox']]]);
-    const derived = new Map([['demo-plugin', [
-      { expression: 'token', name: 'demo' },
-      { expression: 'outboxToken', name: 'demo-outbox' },
-    ]]]);
+    const derived = new Map([
+      [
+        'demo-plugin',
+        [
+          { expression: 'token', name: 'demo' },
+          { expression: 'outboxToken', name: 'demo-outbox' },
+        ],
+      ],
+    ]);
     const site = (argument: string): Site => ({
       pkg: 'demo-plugin',
       file: 'packages/demo-plugin/src/plugin.ts',

@@ -40,14 +40,13 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
       members: [],
     });
     const profile = workspaceProfile(runtime);
-    seed[`/acme/${profile.rootManifestFile}`] = root ??
-      `${
-        JSON.stringify(
-          { [profile.globKey]: [profile.memberGlob('apps'), profile.memberGlob('libs')] },
-          null,
-          2,
-        )
-      }\n`;
+    seed[`/acme/${profile.rootManifestFile}`] =
+      root ??
+      `${JSON.stringify(
+        { [profile.globKey]: [profile.memberGlob('apps'), profile.memberGlob('libs')] },
+        null,
+        2,
+      )}\n`;
   }
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -62,6 +61,14 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
 }
 
 describe('runLibraryCommand', () => {
+  it('dry-run collision refuses without writing', async () => {
+    const h = harness();
+    await h.fs.writeFile('/acme/libs/widget/src/index.ts', new TextEncoder().encode('mine'));
+    const writes = [...h.fs.writes];
+    expect(await h.run(['library', 'widget', '--dry-run'])).toBe(1);
+    expect(h.err.text()).toContain('WOULD REFUSE: /acme/libs/widget/src/index.ts already exists');
+    expect(h.fs.writes).toEqual(writes);
+  });
   it('prints its usage under --help and exits 0', async () => {
     const h = harness();
     expect(await h.run(['library', '--help'])).toBe(0);
@@ -202,7 +209,10 @@ describe('runLibraryCommand', () => {
   // resolve until an install links the package. Deno needs nothing — it resolves a
   // member from the manifest glob — so the line appears only where it is true.
   it('says to re-install on npm and Bun, where the link is made by the install', async () => {
-    for (const [runtime, command] of [['node', 'npm install'], ['bun', 'bun install']] as const) {
+    for (const [runtime, command] of [
+      ['node', 'npm install'],
+      ['bun', 'bun install'],
+    ] as const) {
       const h = harness(undefined, true, runtime);
       expect(await h.run(['library', 'shared'])).toBe(0);
       expect(h.out.text()).toContain(command);

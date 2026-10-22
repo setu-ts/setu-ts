@@ -8,6 +8,7 @@
  *
  * @module
  */
+import { assertPrimaryKeyUnchanged, InvalidCursorError } from '@setu-ts/common';
 
 import type {
   CursorPayload,
@@ -114,9 +115,7 @@ async function findD1Page(
     decoded = decodeCursor(query.cursor);
     if (decoded === null) {
       return Promise.reject(
-        new CloudflareUnsupportedError(
-          `D1: entity '${target.table}': malformed cursor token`,
-        ),
+        new InvalidCursorError(`Entity '${target.table}': malformed cursor token.`),
       );
     }
   }
@@ -126,10 +125,16 @@ async function findD1Page(
   const fingerprint = sortFingerprint(query.orderBy);
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
-      new CloudflareUnsupportedError(
-        `D1: entity '${target.table}': cursor fingerprint mismatch — expected ` +
-          `'${fingerprint}', got '${decoded.sortFingerprint}'`,
-      ),
+      new InvalidCursorError(`Entity '${target.table}': cursor fingerprint mismatch.`),
+    );
+  }
+  if (
+    decoded !== null &&
+    (decoded.keyValues.length !== target.primaryKey.length ||
+      decoded.orderedValues.length !== Object.keys(query.orderBy).length)
+  ) {
+    return Promise.reject(
+      new InvalidCursorError(`Entity '${target.table}': cursor key shape mismatch.`),
     );
   }
 
@@ -142,20 +147,23 @@ async function findD1Page(
   // sorting by `orderBy` alone leaves tied rows in an order the backend
   // picks freely and the predicate skips or repeats them.
   const keysetSort = resolveKeysetSort(query.orderBy, target.primaryKey);
-  const keyset = decoded === null
-    ? undefined
-    : keysetPredicate(decoded.orderedValues, decoded.keyValues, query.orderBy, target.primaryKey);
-  const filter: FilterExpression | undefined = keyset !== undefined && query.filter !== undefined
-    ? { type: 'and', filters: [query.filter, keyset] }
-    : keyset ?? query.filter;
+  const keyset =
+    decoded === null
+      ? undefined
+      : keysetPredicate(decoded.orderedValues, decoded.keyValues, query.orderBy, target.primaryKey);
+  const filter: FilterExpression | undefined =
+    keyset !== undefined && query.filter !== undefined
+      ? { type: 'and', filters: [query.filter, keyset] }
+      : (keyset ?? query.filter);
 
   // 4. The caller's projection is augmented with the key columns and the
   //    ordered fields the minting reads, so they participate in the probe and
   //    are available to mintNextCursor; they are stripped from the returned
   //    rows. An empty select keeps today's `*` path.
-  const effectiveSelect = query.select.length === 0
-    ? []
-    : [...new Set([...query.select, ...target.primaryKey, ...Object.keys(query.orderBy)])];
+  const effectiveSelect =
+    query.select.length === 0
+      ? []
+      : [...new Set([...query.select, ...target.primaryKey, ...Object.keys(query.orderBy)])];
   const probeQuery: NormalizedQuery = {
     ...query,
     orderBy: keysetSort,
@@ -180,9 +188,10 @@ async function findD1Page(
 
   // 6. Strip the augmented columns so the caller's projection is what comes
   //    back.
-  const rows = effectiveSelect.length === 0
-    ? pageRows
-    : pageRows.map((row) => projectD1Fields(row, query.select));
+  const rows =
+    effectiveSelect.length === 0
+      ? pageRows
+      : pageRows.map((row) => projectD1Fields(row, query.select));
   return Promise.resolve({ rows, nextCursor });
 }
 
@@ -232,6 +241,8 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
       if (row === null) {
         throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
@@ -249,6 +260,7 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       if (!checked.ok) throw new CloudflareUnsupportedError(checked.problem);
       where = checked.where;
       data = checked.data;
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
     },
     async deleteWhere(id, where) {
@@ -356,7 +368,7 @@ export function createD1TransactionDataSource(
       return await committed.findById(id);
     },
 
-    // deno-lint-ignore require-await -- must reject, not throw synchronously
+    // eslint-disable-next-line require-await -- must reject, not throw synchronously
     async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
       buffer.assertOpen();
       // A deferred INSERT cannot report a generated key back to a caller that
@@ -387,12 +399,12 @@ export function createD1TransactionDataSource(
       id: EntityKey,
       data: Partial<Record<string, unknown>>,
     ): Promise<Record<string, unknown>> {
+      data = { ...data };
+      assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
       buffer.assertOpen();
       const current = await committed.findById(id);
       if (current === null) {
-        throw new Error(
-          `Entity '${target.table}' with id '${JSON.stringify(id)}' not found`,
-        );
+        throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
       }
       buffer.add(buildUpdate(target, id, data));
       return { ...current, ...data };

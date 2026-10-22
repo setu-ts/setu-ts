@@ -139,15 +139,18 @@ describe('renderPrometheus', () => {
       help: 'help\rwith\u0000controls\nand a line feed',
       labels: ['task_module'],
       values: new Map([
-        ['task_module=x', {
-          value: 1,
-          labels: { task_module: 'file:///a\r\n# FAKE 1\u0000\u007f.ts' },
-        }],
+        [
+          'task_module=x',
+          {
+            value: 1,
+            labels: { task_module: 'file:///a\r\n# FAKE 1\u0000\u007f.ts' },
+          },
+        ],
       ]),
     };
     const result = renderPrometheus([snapshot]);
     // No raw control character other than the separating line feeds survives.
-    // deno-lint-ignore no-control-regex
+    // eslint-disable-next-line no-control-regex
     expect(/[\u0000-\u0009\u000b-\u001f\u007f]/.test(result)).toBe(false);
     expect(result).toContain('task_module="file:///a\ufffd0d\\n# FAKE 1\ufffd00\ufffd7f.ts"');
     expect(result).toContain(
@@ -397,9 +400,7 @@ describe('renderPrometheus', () => {
       type: 'counter',
       help: 'Test counter',
       labels: [],
-      values: new Map([
-        ['', { value: 0 }],
-      ]),
+      values: new Map([['', { value: 0 }]]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -415,9 +416,7 @@ describe('renderPrometheus', () => {
       type: 'gauge',
       help: 'Test gauge',
       labels: [],
-      values: new Map([
-        ['', { value: 0 }],
-      ]),
+      values: new Map([['', { value: 0 }]]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -499,9 +498,7 @@ describe('renderPrometheus', () => {
       type: 'counter',
       help: 'Test counter',
       labels: ['method', 'unknown_label'],
-      values: new Map([
-        ['', { value: 1 }],
-      ]),
+      values: new Map([['', { value: 1 }]]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -590,9 +587,7 @@ describe('renderPrometheus', () => {
       type: 'gauge',
       help: 'Test gauge',
       labels: [],
-      values: new Map([
-        ['', { value: -42 }],
-      ]),
+      values: new Map([['', { value: -42 }]]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -606,9 +601,7 @@ describe('renderPrometheus', () => {
       type: 'counter',
       help: 'Test counter',
       labels: [],
-      values: new Map([
-        ['', { value: 0 }],
-      ]),
+      values: new Map([['', { value: 0 }]]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -894,9 +887,7 @@ describe('renderPrometheus', () => {
           {
             value: 3,
             sum: 30,
-            quantiles: new Map([
-              [0.5, 5],
-            ]),
+            quantiles: new Map([[0.5, 5]]),
             labels: { endpoint: '/api' },
           },
         ],
@@ -916,10 +907,15 @@ describe('renderPrometheus', () => {
       type: 'counter',
       help: 'Test',
       labels: ['method', 'status'],
-      values: new Map([['method=GET|status=200', {
-        value: 10,
-        labels: { method: 'GET', status: '200' },
-      }]]),
+      values: new Map([
+        [
+          'method=GET|status=200',
+          {
+            value: 10,
+            labels: { method: 'GET', status: '200' },
+          },
+        ],
+      ]),
     };
 
     const result = renderPrometheus([snapshot]);
@@ -1126,23 +1122,25 @@ it('renders incomplete label snapshots and a histogram without buckets determini
     ['empty-labels', { value: 3, labels: {} }],
   ]);
   expect(
-    renderPrometheus([{
-      name: 'partial',
-      type: 'counter',
-      help: 'partial',
-      labels: ['missing'],
-      values,
-    }]),
-  )
-    .toContain('partial{} 3');
+    renderPrometheus([
+      {
+        name: 'partial',
+        type: 'counter',
+        help: 'partial',
+        labels: ['missing'],
+        values,
+      },
+    ]),
+  ).toContain('partial{} 3');
   expect(
-    renderPrometheus([{
-      name: 'latency',
-      type: 'histogram',
-      help: 'latency',
-      labels: [],
-      values: new Map([['', { value: 2, sum: 3 }]]),
-    }]),
-  )
-    .toContain('latency_sum 3\nlatency_count 2');
+    renderPrometheus([
+      {
+        name: 'latency',
+        type: 'histogram',
+        help: 'latency',
+        labels: [],
+        values: new Map([['', { value: 2, sum: 3 }]]),
+      },
+    ]),
+  ).toContain('latency_sum 3\nlatency_count 2');
 });

@@ -123,9 +123,10 @@ export interface NameConflict {
  *
  * A schematic never conflicts with ITSELF: a second `setu g route widget` is the
  * ordinary overwrite refusal, which reports the file rather than a name clash.
- * That refusal is also what still catches a functional `module` against a
- * same-named `route` — they share the filename `<name>.routes.ts`, so the
- * command never reaches this check.
+ * Functional modules live in their own folders. Their admitted names must be
+ * supplied separately: a same-named top-level route no longer shares a file,
+ * but still claims the same HTTP path. Scoped callers supply only that module's
+ * artifacts and no application-wide module names.
  *
  * @param schematic - The schematic about to run
  * @param kebab - The artifact's kebab-case name
@@ -134,6 +135,7 @@ export interface NameConflict {
  *   that already claim one
  * @param artifacts - Artifact names already present, by schematic name
  * @param modules - Domain module names already present
+ * @param module - Feature scope, when the supplied artifacts are module-local
  * @returns The conflict, or `undefined` when the name is free
  */
 export function findNameConflict(
@@ -142,7 +144,22 @@ export function findNameConflict(
   plugins: ReadonlySet<string>,
   artifacts: SeamArtifacts,
   modules: readonly string[],
+  module?: string,
 ): NameConflict | undefined {
+  if (module !== undefined) {
+    const other =
+      schematic === 'route' ? 'controller' : schematic === 'controller' ? 'route' : undefined;
+    if (other !== undefined && (artifacts[other] ?? []).includes(kebab)) {
+      return {
+        claimedBy: `the ${other} of the same name`,
+        resource: `the HTTP path /${module}/${kebab}`,
+        consequence:
+          'they export the same registrar into one module index, so the project would not compile',
+        remedy: `remove the existing ${other}`,
+      };
+    }
+    return undefined;
+  }
   const decorated = plugins.has('decorator-plugin');
 
   // A1: the other claimant is a plugin, not a generated artifact, so it is reported
@@ -153,7 +170,8 @@ export function findNameConflict(
       return {
         claimedBy: `the installed plugin @setu-ts/${claimant}`,
         resource: `the health-indicator name '${kebab}'`,
-        consequence: 'the health service refuses a duplicate indicator name, so the application ' +
+        consequence:
+          'the health service refuses a duplicate indicator name, so the application ' +
           'would type-check and then throw at app.start()',
         remedy: `remove @setu-ts/${claimant} from the project`,
       };
@@ -167,7 +185,7 @@ export function findNameConflict(
       if (other === schematic) continue;
       // Modules are scanned separately from the flat families, because a module is a
       // directory that must hold two specific files rather than one suffixed file.
-      const present = other === 'module' ? modules : artifacts[other] ?? [];
+      const present = other === 'module' ? modules : (artifacts[other] ?? []);
       if (present.includes(kebab)) {
         return {
           claimedBy: `the ${other} of the same name`,

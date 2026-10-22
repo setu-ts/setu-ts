@@ -9,7 +9,7 @@
  * a retry and a dead-letter; the restart itself is proven against a real broker
  * in `durability-real.test.ts`.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin, IQueue } from '@setu-ts/common';
@@ -81,9 +81,14 @@ async function outcomeAfterBound(
   advanceMs: number,
 ): Promise<string> {
   let done = false;
-  const outcome = call.then(() => 'resolved', (e: Error) => e.message).finally(() => {
-    done = true;
-  });
+  const outcome = call
+    .then(
+      () => 'resolved',
+      (e: Error) => e.message,
+    )
+    .finally(() => {
+      done = true;
+    });
   await settle();
   expect(done).toBe(false);
   await runtime.advanceMs(advanceMs);
@@ -96,10 +101,10 @@ describe('RabbitMqQueue durability', () => {
     await queue.enqueue(job(runtime, 'ready'));
     await queue.enqueue(job(runtime, 'delayed', 5_000));
     const [first] = await queue.reserve('emails', 1, runtime.now());
-    await queue.requeue('emails', first!.id, runtime.now() + 1_000, 1);
+    await queue.requeue('emails', first!.id, runtime.now() + 1_000, 1, first!.claimToken);
     await queue.enqueue(job(runtime, 'doomed'));
     const [doomed] = await queue.reserve('emails', 1, runtime.now());
-    await queue.deadLetter('emails', doomed!.id, runtime.now());
+    await queue.deadLetter('emails', doomed!.id, runtime.now(), doomed!.claimToken);
 
     const sent = publishes(channel);
     expect(sent.map((p) => p.queue)).toEqual([
@@ -176,13 +181,13 @@ describe('RabbitMqQueue durability', () => {
       return accepted;
     };
     const before = acks(channel);
-    await expect(queue.requeue('emails', reserved!.id, runtime.now() + 10, 1)).rejects.toThrow(
-      'refused',
-    );
+    await expect(
+      queue.requeue('emails', reserved!.id, runtime.now() + 10, 1, reserved!.claimToken),
+    ).rejects.toThrow('refused');
     expect(acks(channel)).toBe(before);
-    await expect(queue.deadLetter('emails', reserved!.id, runtime.now())).rejects.toThrow(
-      'refused',
-    );
+    await expect(
+      queue.deadLetter('emails', reserved!.id, runtime.now(), reserved!.claimToken),
+    ).rejects.toThrow('refused');
     expect(acks(channel)).toBe(before);
     await queue.disconnect();
   });
@@ -195,7 +200,13 @@ describe('RabbitMqQueue durability', () => {
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
 
-    const retrying = queue.requeue('emails', reserved!.id, runtime.now() + 10, 1);
+    const retrying = queue.requeue(
+      'emails',
+      reserved!.id,
+      runtime.now() + 10,
+      1,
+      reserved!.claimToken,
+    );
     await settle();
     expect(acks(channel)).toBe(0);
     channel.releaseConfirms();
@@ -211,7 +222,7 @@ describe('RabbitMqQueue durability', () => {
     channel.releaseConfirms();
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
-    const dying = queue.deadLetter('emails', reserved!.id, runtime.now());
+    const dying = queue.deadLetter('emails', reserved!.id, runtime.now(), reserved!.claimToken);
     await settle();
     await queue.disconnect();
     channel.releaseConfirms();
@@ -252,7 +263,13 @@ describe('RabbitMqQueue durability', () => {
     channel.releaseConfirms();
     await enqueueing;
     const [reserved] = await queue.reserve('emails', 1, runtime.now());
-    const retrying = queue.requeue('emails', reserved!.id, runtime.now() + 10, 1);
+    const retrying = queue.requeue(
+      'emails',
+      reserved!.id,
+      runtime.now() + 10,
+      1,
+      reserved!.claimToken,
+    );
     await settle();
     channel.emitClose();
     await expect(retrying).rejects.toThrow('channel closed before the confirm arrived');
@@ -305,8 +322,9 @@ describe('RabbitMqQueue durability', () => {
     expect(resolvePublishTimeoutMs(0)).toBe(0);
     for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY, 2_147_483_648]) {
       expect(() => resolvePublishTimeoutMs(bad)).toThrow(RangeError);
-      expect(() => new RabbitMqQueue(new FakeRuntimeServices(), { publishTimeoutMs: bad }))
-        .toThrow('publishTimeoutMs');
+      expect(() => new RabbitMqQueue(new FakeRuntimeServices(), { publishTimeoutMs: bad })).toThrow(
+        'publishTimeoutMs',
+      );
     }
   });
 
@@ -361,8 +379,9 @@ describe('QueuePlugin RabbitMQ durability options', () => {
   });
 
   it('refuses a non-boolean persistentMessages when QueuePlugin(...) is called', () => {
-    expect(() => QueuePlugin({ adapter: 'rabbitmq', persistentMessages: 1 as unknown as boolean }))
-      .toThrow(TypeError);
+    expect(() =>
+      QueuePlugin({ adapter: 'rabbitmq', persistentMessages: 1 as unknown as boolean }),
+    ).toThrow(TypeError);
   });
 
   it('does not validate RabbitMQ options for another adapter', () => {
@@ -444,5 +463,30 @@ describe('QueuePlugin RabbitMQ durability options', () => {
     await app.start();
     expect(warnings.some((w) => w.includes('NOT confirmed'))).toBe(true);
     await app.stop();
+  });
+});
+
+describe('RabbitMqQueue — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when amqplib is absent', async () => {
+    const { RabbitMqQueue } = await import('../../src/adapters/rabbitmq-queue.ts');
+    const { FakeRuntimeServices } = await import('../fixtures/fake-runtime.ts');
+    vi.doMock('amqplib', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const queue = new RabbitMqQueue(new FakeRuntimeServices(), { url: 'amqp://localhost' });
+      let caught: unknown;
+      try {
+        await queue.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('amqplib');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('amqplib');
+    }
   });
 });

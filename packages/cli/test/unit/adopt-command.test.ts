@@ -12,12 +12,14 @@ import {
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 import { COMPOSE_FILE, DOCKERFILE } from '../../src/workspace/compose.ts';
+import { InterruptedError } from '../../src/utils/interruption.ts';
 
 /** A scaffolded project, plus the repository files that must NOT move. */
 const PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/deno.json': '{ "tasks": { "start": "deno run main.ts" } }\n',
   '/work/svc/setu.config.ts': 'export function createApp() {}\n',
-  '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+  '/work/svc/main.ts':
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
   '/work/svc/.gitignore': 'coverage/\n',
@@ -43,7 +45,8 @@ const NODE_PROJECT: Readonly<Record<string, string>> = {
   '/work/svc/.npmrc': '@jsr:registry=https://npm.jsr.io\n',
   '/work/svc/tsconfig.json': '{}\n',
   '/work/svc/setu.config.ts': 'export function createApp() {}\n',
-  '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+  '/work/svc/main.ts':
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`,
   '/work/svc/README.md': '# svc\n',
   '/work/svc/src/controllers/index.ts': 'export const routes = [];\n',
@@ -184,7 +187,8 @@ describe('pruneAdoptedDirectories', () => {
 });
 
 describe('rewriteEntryPort', () => {
-  const entry = `import { createApp } from './setu.config.ts';\n` +
+  const entry =
+    `import { createApp } from './setu.config.ts';\n` +
     `\nconst app = await createApp();\n\nawait app.start({ port: 3000 });\n`;
 
   it('binds the allocated port through the discovery module', () => {
@@ -197,8 +201,9 @@ describe('rewriteEntryPort', () => {
   // A developer may have changed the entry; guessing at an edit there would be
   // worse than reporting the two lines to change.
   it('declines an entry that no longer carries the literal', () => {
-    expect(rewriteEntryPort('await app.start({ port: Number(x) });', 'P', './p.ts'))
-      .toBeUndefined();
+    expect(
+      rewriteEntryPort('await app.start({ port: Number(x) });', 'P', './p.ts'),
+    ).toBeUndefined();
   });
 });
 
@@ -218,6 +223,333 @@ describe('runAdoptCommand', () => {
     expect(await h.run([])).toBe(1);
     expect(h.err.text()).toContain('already exists');
     expect(h.fs.writes).toEqual([]);
+  });
+
+  describe('probe support recorded from the project dependencies', () => {
+    /** Runs adopt over the project with the given `@setu-ts` imports declared. */
+    const adoptWith = async (imports: Readonly<Record<string, string>>): Promise<Harness> => {
+      const h = harness({
+        ...PROJECT,
+        '/work/svc/deno.json': JSON.stringify({ tasks: {}, imports }),
+      });
+      expect(await h.run([])).toBe(0);
+      return h;
+    };
+
+    /** The member record the command persisted. */
+    const member = (h: Harness): { healthProbes?: boolean; metricsEndpoint?: boolean } =>
+      (
+        JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+          members: { healthProbes?: boolean; metricsEndpoint?: boolean }[];
+        }
+      ).members[0]!;
+
+    it('records both when the project declares a starter', async () => {
+      const h = await adoptWith({ '@setu-ts/rest-starter': 'npm:@setu-ts/rest-starter@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: true, metricsEndpoint: true });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+httpGet:/);
+      expect(yaml).toContain('prometheus.io/scrape');
+    });
+
+    it('records health support alone from health-plugin', async () => {
+      const h = await adoptWith({ '@setu-ts/health-plugin': 'npm:@setu-ts/health-plugin@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: true, metricsEndpoint: false });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+httpGet:/);
+      expect(yaml).not.toContain('prometheus.io/scrape');
+    });
+
+    it('records the metrics endpoint alone from metrics-plugin', async () => {
+      const h = await adoptWith({
+        '@setu-ts/metrics-plugin': 'npm:@setu-ts/metrics-plugin@^0.9.0',
+      });
+
+      expect(member(h)).toMatchObject({ healthProbes: false, metricsEndpoint: true });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+tcpSocket:/);
+      expect(yaml).toContain('prometheus.io/scrape');
+    });
+
+    it('records neither when the project declares no supporting package', async () => {
+      const h = await adoptWith({ '@setu-ts/logger-plugin': 'npm:@setu-ts/logger-plugin@^0.9.0' });
+
+      expect(member(h)).toMatchObject({ healthProbes: false, metricsEndpoint: false });
+      const yaml = h.fs.read('/work/svc/k8s/members.yaml');
+      expect(yaml).toMatch(/readinessProbe:\n\s+tcpSocket:/);
+      expect(yaml).not.toContain('prometheus.io/scrape');
+    });
+  });
+
+  describe('the configured dotenv pair (V9-39)', () => {
+    /** A config naming one env path, plus the files the pair needs. */
+    const withEnv = (envFilePath: string, files: Readonly<Record<string, string>>) =>
+      harness({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '${envFilePath}', envFileOptional: true };\n`,
+        ...files,
+      });
+
+    it('moves the default pair with the member, so the member reads its own env', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/.env')).toBe(false);
+      expect(h.fs.has('/work/svc/.env.example')).toBe(false);
+      expect(h.fs.read('/work/svc/apps/svc/.env')).toBe('SECRET=1\n');
+      expect(h.fs.read('/work/svc/apps/svc/.env.example')).toBe('SECRET=\n');
+      expect(h.out.text()).toContain('moved .env -> apps/svc/.env');
+    });
+
+    it('moves a custom single-segment name', async () => {
+      const h = withEnv('name.env', {
+        '/work/svc/name.env': 'SECRET=1\n',
+        '/work/svc/name.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/name.env')).toBe(false);
+      expect(h.fs.read('/work/svc/apps/svc/name.env')).toBe('SECRET=1\n');
+    });
+
+    // A root rule such as `/.env` is anchored to the repository root, so it stops
+    // matching once the file moves under apps/. A nested .gitignore is anchored to
+    // its own directory and keeps the secret ignored (F1).
+    it('writes a member .gitignore anchored to the moved dotenv file', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      const ignore = h.fs.read('/work/svc/apps/svc/.gitignore');
+      expect(ignore).toContain('/.env');
+      // The example is committed, so it is deliberately absent from the rules.
+      expect(ignore).not.toContain('/.env.example');
+    });
+
+    it('anchors a custom single-segment dotenv name in the member .gitignore', async () => {
+      const h = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.read('/work/svc/apps/svc/.gitignore')).toContain('/local.env');
+    });
+
+    it('writes no member .gitignore when no dotenv file moves', async () => {
+      const h = withEnv('.env', {});
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/apps/svc/.gitignore')).toBe(false);
+    });
+
+    // The member directory is new, so this cannot happen in practice — but the
+    // rule is appended rather than replacing whatever is already there.
+    it('appends to a member .gitignore that already exists', async () => {
+      for (const existing of ['coverage/', 'coverage/\n']) {
+        const fs = createFakeFs({
+          ...PROJECT,
+          '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+          '/work/svc/.env': 'SECRET=1\n',
+          '/work/svc/apps/svc/.gitignore': existing,
+        });
+        const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+        expect(plan.ok).toBe(true);
+        if (!plan.ok) continue;
+        const created = plan.creates?.find((file) => file.path === 'apps/svc/.gitignore');
+        expect(created?.contents).toBe('coverage/\n/.env\n');
+      }
+    });
+
+    // A directory, a FIFO or a link is not something the conversion wrote, and
+    // reading one is how a committed special file hangs or exhausts the run.
+    it('refuses a member .gitignore that is a directory, before moving anything', async () => {
+      const h = withEnv('.env', {
+        '/work/svc/.env': 'SECRET=1\n',
+        '/work/svc/apps/svc/.gitignore/keep.txt': 'not a file\n',
+      });
+
+      expect(await h.run([])).toBe(1);
+
+      expect(h.err.text()).toContain('apps/svc/.gitignore');
+      expect(h.err.text()).toContain('not a regular file');
+      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.has('/work/svc/.env')).toBe(true);
+      expect(h.fs.has('/work/svc/main.ts')).toBe(true);
+    });
+
+    // The bound is checked from `stat`, so an oversized file is refused rather
+    // than read: the fake records every read so this cannot pass by luck.
+    it('refuses a member .gitignore larger than 64 KiB without reading it', async () => {
+      const target = '/work/svc/apps/svc/.gitignore';
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+        [target]: 'x'.repeat(64 * 1024 + 1),
+      });
+      const reads: string[] = [];
+      const readFile = fs.readFile.bind(fs);
+      fs.readFile = (path) => {
+        reads.push(path);
+        return readFile(path);
+      };
+      const out = createRecorder();
+      const err = createRecorder();
+      const code = await runAdoptCommand(parseArgs([]), {
+        fs,
+        cwd: '/work/svc',
+        log: out.sink,
+        error: err.sink,
+      });
+
+      expect(code).toBe(1);
+      expect(err.text()).toContain('larger than the 64 KiB');
+      expect(reads).not.toContain(target);
+      expect(fs.writes).toEqual([]);
+      expect(fs.has('/work/svc/.env')).toBe(true);
+    });
+
+    // The generated .dockerignore covers .env and .env.* only. A custom name would
+    // be copied into the image, so the step to add it is printed.
+    it('prints the .dockerignore step only for a name the generic rules miss', async () => {
+      const covered = withEnv('.env', { '/work/svc/.env': 'SECRET=1\n' });
+      expect(await covered.run([])).toBe(0);
+      expect(covered.out.text()).not.toContain('to .dockerignore');
+
+      const custom = withEnv('local.env', { '/work/svc/local.env': 'SECRET=1\n' });
+      expect(await custom.run([])).toBe(0);
+      expect(custom.out.text()).toContain(
+        'Add apps/svc/local.env to .dockerignore: the generated rules cover only .env and .env.* names, ' +
+          'so this file would be copied into the image.',
+      );
+    });
+
+    it('does not move a multi-segment path, and prints the step to take', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      // A root ignore pattern containing a slash is anchored, so moving the file
+      // would silently stop ignoring it; the developer is told to move it by hand.
+      expect(h.fs.read('/work/svc/config/.env')).toBe('SECRET=1\n');
+      expect(h.fs.has('/work/svc/apps/svc/config/.env')).toBe(false);
+      expect(h.out.text()).toContain('spans directories, so it was not moved');
+      expect(h.out.text()).toContain('move it into apps/svc/config/.env by hand');
+    });
+
+    it('prints the by-hand note only after the conversion succeeds', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+
+      expect(await h.run([])).toBe(0);
+
+      const output = h.out.text();
+      const converted = output.indexOf('Converted into a workspace');
+      const note = output.indexOf('spans directories, so it was not moved');
+      expect(converted).toBeGreaterThanOrEqual(0);
+      expect(note).toBeGreaterThan(converted);
+    });
+
+    it('prints no by-hand note when the conversion fails after planning', async () => {
+      const h = withEnv('config/.env', {
+        '/work/svc/config/.env': 'SECRET=1\n',
+        '/work/svc/config/.env.example': 'SECRET=\n',
+      });
+      // Planning has already produced the note by now; the first move fails.
+      h.fs.writeFile = () => Promise.reject(new Error('disk full'));
+
+      expect(await h.run([])).toBe(1);
+      expect(h.err.text()).toContain('disk full');
+      expect(h.out.text()).not.toContain('spans directories');
+    });
+
+    it('moves nothing, and does not fail, when neither file exists', async () => {
+      const h = withEnv('.env', {});
+
+      expect(await h.run([])).toBe(0);
+
+      expect(h.fs.has('/work/svc/apps/svc/.env')).toBe(false);
+    });
+
+    it('leaves a configured path that is a directory where it is', async () => {
+      // `src` passes the path validation, but adopting it as the dotenv file
+      // would list the whole directory as one move rather than walk it.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: 'src', envFileOptional: true };\n`,
+      });
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) expect(plan.files.map((file) => file.from)).not.toContain('src');
+    });
+
+    it('does not plan a configured path a static entry already moved', async () => {
+      // `README.md` is a legal dotenv name and is also in the adopted entry set.
+      // A second move would list the same destination twice.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: 'README.md', envFileOptional: true };\n`,
+      });
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) {
+        expect(plan.files.filter((file) => file.from === 'README.md')).toHaveLength(1);
+      }
+    });
+
+    it('refuses a configured path that resolves outside the project', async () => {
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+      });
+      const realPath = fs.realPath?.bind(fs);
+      expect(realPath).toBeDefined();
+      if (realPath === undefined) return;
+      fs.realPath = (path) =>
+        path === '/work/svc/.env' ? Promise.resolve('/outside/.env') : realPath(path);
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(false);
+      if (!plan.ok) expect(plan.message).toContain('symbolic link');
+    });
+
+    it('skips the pair when the config cannot be read', async () => {
+      // The config was stat-able before planning; a read failure here leaves the
+      // file where it is rather than failing the conversion.
+      const fs = createFakeFs({
+        ...PROJECT,
+        '/work/svc/setu.config.ts': `export const config = { envFilePath: '.env', envFileOptional: true };\n`,
+        '/work/svc/.env': 'SECRET=1\n',
+      });
+      const readFile = fs.readFile.bind(fs);
+      fs.readFile = (path) =>
+        path === '/work/svc/setu.config.ts'
+          ? Promise.reject(new Error('read refused'))
+          : readFile(path);
+      const plan = await planAdoption(fs, '/work/svc', 'apps/svc');
+
+      expect(plan.ok).toBe(true);
+      if (plan.ok) expect(plan.files.map((file) => file.from)).not.toContain('.env');
+    });
   });
 
   it('refuses a directory with no Setu project in it', async () => {
@@ -360,7 +692,9 @@ describe('runAdoptCommand', () => {
     const manifest = JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
       members: { name: string; port: number }[];
     };
-    expect(manifest.members).toEqual([{ name: 'svc', port: 4000 }]);
+    expect(manifest.members).toEqual([
+      { name: 'svc', port: 4000, healthProbes: false, metricsEndpoint: false },
+    ]);
     expect(h.fs.read(`/work/svc/apps/svc/${DISCOVERY_MODULE}`)).toContain(
       'export const SERVICE_PORT = 4000;',
     );
@@ -450,7 +784,8 @@ describe('runAdoptCommand', () => {
   it('reports the two lines to change when the entry cannot be rewritten', async () => {
     const h = harness({
       ...PROJECT,
-      '/work/svc/main.ts': `import { createApp } from './setu.config.ts';\n` +
+      '/work/svc/main.ts':
+        `import { createApp } from './setu.config.ts';\n` +
         `const app = await createApp();\nawait app.start({ port: Number(Deno.args[0]) });\n`,
     });
     expect(await h.run([])).toBe(0);
@@ -498,6 +833,65 @@ describe('runAdoptCommand', () => {
     expect(await h.run(['--dry-run'])).toBe(1);
     expect(h.out.text()).toContain('WOULD REFUSE');
     expect(h.fs.writes).toEqual([]);
+  });
+
+  // A ROOT file the conversion writes is not part of the planner's `creates`
+  // list, so it used to escape the up-front containment check: the dry run
+  // printed a clean plan and the real run refused only after moving files.
+  it('refuses a planned root file that resolves outside the project before moving', async () => {
+    const fs = createFakeFs(PROJECT);
+    const realPath = fs.realPath?.bind(fs);
+    expect(realPath).toBeDefined();
+    if (realPath === undefined) return;
+    fs.realPath = (path) =>
+      path === '/work/svc/.dockerignore'
+        ? Promise.resolve('/outside/.dockerignore')
+        : realPath(path);
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs,
+      cwd: '/work/svc',
+      log: out.sink,
+      error: err.sink,
+    });
+
+    expect(code).toBe(1);
+    expect(err.text()).toContain('symbolic link');
+    expect(out.text()).not.toContain('moved ');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/work/svc/main.ts')).toBe(true);
+    expect(fs.has('/work/svc/apps/svc/main.ts')).toBe(false);
+  });
+
+  // A MOVE's destination is not a generated file, so the up-front loop used to
+  // skip it: `moveFile` refused after the earlier moves had run and the
+  // transaction rolled them back, which is a real run disagreeing with a clean
+  // dry run.
+  it('refuses a planned move destination that resolves outside the project before moving', async () => {
+    const fs = createFakeFs(PROJECT);
+    const realPath = fs.realPath?.bind(fs);
+    expect(realPath).toBeDefined();
+    if (realPath === undefined) return;
+    fs.realPath = (path) =>
+      path === '/work/svc/apps/svc/README.md'
+        ? Promise.resolve('/outside/README.md')
+        : realPath(path);
+    const out = createRecorder();
+    const err = createRecorder();
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs,
+      cwd: '/work/svc',
+      log: out.sink,
+      error: err.sink,
+    });
+
+    expect(code).toBe(1);
+    expect(err.text()).toContain('symbolic link');
+    expect(out.text()).not.toContain('moved ');
+    expect(fs.writes).toEqual([]);
+    expect(fs.has('/work/svc/README.md')).toBe(true);
+    expect(fs.has('/work/svc/apps/svc/README.md')).toBe(false);
   });
 
   it('reports an inspection failure before moving project files', async () => {
@@ -575,9 +969,9 @@ describe('runAdoptCommand', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  // Stopping part-way is safe BECAUSE of the copy-verify-delete order, and the
-  // message has to say so — every file moved so far exists in both places.
-  it('stops and says nothing is lost when a move fails', async () => {
+  // A failure after the first move must undo it: the transaction rolls back a
+  // throw, so the command reports the refusal instead of returning one.
+  it('stops and rolls the failed conversion back when a move fails', async () => {
     const fs = createFakeFs(PROJECT);
     const err = createRecorder();
     const failing = {
@@ -595,13 +989,77 @@ describe('runAdoptCommand', () => {
     });
     expect(code).toBe(1);
     expect(err.text()).toContain('disk full');
-    expect(err.text()).toContain('nothing is lost');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    expect(err.text()).not.toContain('Stopped part-way');
+    // The files that moved before the refusing one are back where they started.
+    expect(failing.has('/work/svc/deno.json')).toBe(true);
+    expect(failing.has('/work/svc/main.ts')).toBe(true);
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/apps/svc/main.ts')).toBe(false);
   });
 
   // The guard exists for a file that appears AFTER the plan was made — an editor
   // writing into `src/` mid-run. An adopted directory is walked wholesale, so
   // nothing present at plan time is ever left behind; what must never happen is a
   // recursive delete of something this command did not move.
+  // The reported failure used to happen AFTER every move, with no rollback: the
+  // project's `.env` stayed under apps/ and could be staged. A root target that
+  // refuses its write must leave the starting tree in place.
+  it('restores every moved file when a root target cannot be written', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        path === '/work/svc/.dockerignore'
+          ? Promise.reject(new Error('read-only root'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('read-only root');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    expect(err.text()).not.toContain('Stopped part-way');
+    // Every source path is back, and the member tree is gone.
+    for (const path of Object.keys(PROJECT)) {
+      expect(failing.has(path)).toBe(true);
+    }
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/apps/svc/main.ts')).toBe(false);
+    expect(failing.has('/work/svc/setu.workspace.json')).toBe(false);
+  });
+
+  it('undoes a completed move when the next one fails', async () => {
+    const fs = createFakeFs(PROJECT);
+    const err = createRecorder();
+    const failing = {
+      ...fs,
+      writeFile: (path: string, data: Uint8Array) =>
+        // The second move is `main.ts`: its source is still at the root.
+        path === '/work/svc/apps/svc/main.ts' && fs.has('/work/svc/main.ts')
+          ? Promise.reject(new Error('disk full'))
+          : fs.writeFile(path, data),
+    };
+    const code = await runAdoptCommand(parseArgs([]), {
+      fs: failing,
+      cwd: '/work/svc',
+      log: createRecorder().sink,
+      error: err.sink,
+    });
+    expect(code).toBe(1);
+    expect(err.text()).toContain('disk full');
+    expect(err.text()).toContain('Nothing was changed: every move was undone.');
+    // The first move, `deno.json`, is back at the root.
+    expect(failing.read('/work/svc/deno.json')).toBe(PROJECT['/work/svc/deno.json']);
+    expect(failing.has('/work/svc/apps/svc/deno.json')).toBe(false);
+    expect(failing.has('/work/svc/main.ts')).toBe(true);
+  });
+
   it('keeps and reports a directory that gained a file after the plan', async () => {
     const fs = createFakeFs(PROJECT);
     const out = createRecorder();
@@ -686,6 +1144,14 @@ it('reports scalar failures while planning top-level and nested adoption paths',
   }
 });
 
+it('reports an Error from walking a nested directory', async () => {
+  const fs = createFakeFs(PROJECT);
+  fs.readdir = () => Promise.reject(new Error('cannot enumerate'));
+  const result = await planAdoption(fs, '/work/svc', 'apps/svc');
+  expect(result.ok).toBe(false);
+  if (!result.ok) expect(result.message).toContain('cannot enumerate');
+});
+
 it('prunes only directories and preserves ordinary top-level files', async () => {
   const fs = createFakeFs({ '/root/config.ts': 'keep' });
   expect(await pruneAdoptedDirectories(fs, '/root', ['config.ts', 'absent'])).toEqual([]);
@@ -726,6 +1192,22 @@ it('reports write and entry-read failures without throwing scalar errors', async
     expect(await h.run(['adopt'])).toBe(1);
     expect(h.err.text()).toContain('refused');
   }
+});
+
+it('rethrows an interruption raised while rewriting the entry', async () => {
+  const h = harness();
+  const write = h.fs.writeFile.bind(h.fs);
+  let entryWrites = 0;
+  h.fs.writeFile = (path, bytes) => {
+    // The move wrote the entry once; the port rewrite is the second write.
+    if (path === '/work/svc/apps/svc/main.ts' && ++entryWrites === 2) {
+      return Promise.reject(new InterruptedError());
+    }
+    return write(path, bytes);
+  };
+
+  expect(await h.run(['adopt'])).toBe(130);
+  expect(h.err.text()).toContain('Interrupted;');
 });
 
 it('reports a scalar failure from the application log and refuses an unnamed root project', async () => {

@@ -21,9 +21,10 @@ interface Delegate {
   create(args: { data: Record<string, unknown> }): Promise<unknown>;
   findMany(args: { where?: Record<string, unknown> }): Promise<Record<string, unknown>[]>;
   count(args: { where?: Record<string, unknown> }): Promise<number>;
-  update(
-    args: { where: Record<string, unknown>; data: Record<string, unknown> },
-  ): Promise<Record<string, unknown>>;
+  update(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<Record<string, unknown>>;
   delete(args: { where: Record<string, unknown> }): Promise<unknown>;
 }
 
@@ -153,21 +154,25 @@ describe("the adapter's own NOT-emitting path evaluates through the fixture", ()
         filter,
       }) as never;
 
-    const empty = await source.findAll(query({
-      type: 'comparison',
-      field: ['profile', 'city'],
-      operator: 'in',
-      value: [],
-    }));
+    const empty = await source.findAll(
+      query({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'in',
+        value: [],
+      }),
+    );
     expect(empty).toEqual([]);
 
     // The non-empty case is the control: the same path must still match.
-    const one = await source.findAll(query({
-      type: 'comparison',
-      field: ['profile', 'city'],
-      operator: 'in',
-      value: ['Kolkata'],
-    }));
+    const one = await source.findAll(
+      query({
+        type: 'comparison',
+        field: ['profile', 'city'],
+        operator: 'in',
+        value: ['Kolkata'],
+      }),
+    );
     expect(one.map((r) => r.id)).toEqual(['u1']);
   });
 });

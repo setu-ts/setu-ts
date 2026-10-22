@@ -108,14 +108,14 @@ on `origin/develop` at `b66cf10b` (after M109a merged).
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #  | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                                                                                                                                                  | Doc deliverable (same PR)                                             |
-| -- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
-| C1 | ROADMAP M108 lists `packages/messaging-plugin` only                                                                                                                         | Source: `IUnitOfWork` is in `database-plugin` and the port must be implemented there by name (§1, M107 C1)                                                                                                                                | ROADMAP M108 package list gains `common`, `database-plugin` and `cli` |
-| C2 | ROADMAP M108: "a `DuplicateKeyError` (#420) means 'already handled'"                                                                                                        | Source: a commit-time duplicate carries no entity, and a concurrent MongoDB loser is a `SerializationConflictError` (§1). Any `run` rejection is followed by a re-read; only a present marker means "already handled" (§3.6)              | ROADMAP M108 scope bullet corrected                                   |
-| C3 | ROADMAP M108 leaves the handler shape open ("an additive fourth handler argument … or a separate `IntegrationEventInboxHandler` type")                                      | Both, as one decision: a separate exported type whose fourth argument is the unit of work, selected by an overload on the `inbox` option (§3.3)                                                                                           | ROADMAP M108 bullet records the choice                                |
-| C4 | ROADMAP M108: "Backends. The same per-backend table as M107: SQL, MongoDB, DynamoDB and D1 support it; Cosmos needs the inbox row in the business partition"                | Source (§3.10): MongoDB on a replica set only; Cosmos and Bigtable refused at startup                                                                                                                                                     | Per-backend table in the messaging README and PUBLIC_API              |
-| C5 | ROADMAP M108 example `{ inbox: { consumer: 'payroll' } }` returns a value usable directly in `subscriptions`, while `onIntegrationEvent` returns a `SubscriptionDefinition` | With `inbox`, the call returns a `RegistryFactory<SubscriptionDefinition>` — a valid `SubscriptionEntry`, so the ROADMAP example works as written in `subscriptions`; imperative use calls it with a registry at or after `onInit` (§3.2) | README and the `onIntegrationEvent` JSDoc show both forms             |
-| C6 | ROADMAP M108: "Depends on broker redelivery being real, which #419 and #421 fixed"                                                                                          | True only for durable named queues on RabbitMQ and for Redis Streams (§1); NATS redelivers without limit and Kafka blocks the partition. §3.4 defaults the queue; §3.8 states each broker's budget                                        | ROADMAP M108 "Depends on" sentence corrected                          |
+| #   | Conflict                                                                                                                                                                    | Resolution (picked side)                                                                                                                                                                                                                  | Doc deliverable (same PR)                                             |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| C1  | ROADMAP M108 lists `packages/messaging-plugin` only                                                                                                                         | Source: `IUnitOfWork` is in `database-plugin` and the port must be implemented there by name (§1, M107 C1)                                                                                                                                | ROADMAP M108 package list gains `common`, `database-plugin` and `cli` |
+| C2  | ROADMAP M108: "a `DuplicateKeyError` (#420) means 'already handled'"                                                                                                        | Source: a commit-time duplicate carries no entity, and a concurrent MongoDB loser is a `SerializationConflictError` (§1). Any `run` rejection is followed by a re-read; only a present marker means "already handled" (§3.6)              | ROADMAP M108 scope bullet corrected                                   |
+| C3  | ROADMAP M108 leaves the handler shape open ("an additive fourth handler argument … or a separate `IntegrationEventInboxHandler` type")                                      | Both, as one decision: a separate exported type whose fourth argument is the unit of work, selected by an overload on the `inbox` option (§3.3)                                                                                           | ROADMAP M108 bullet records the choice                                |
+| C4  | ROADMAP M108: "Backends. The same per-backend table as M107: SQL, MongoDB, DynamoDB and D1 support it; Cosmos needs the inbox row in the business partition"                | Source (§3.10): MongoDB on a replica set only; Cosmos and Bigtable refused at startup                                                                                                                                                     | Per-backend table in the messaging README and PUBLIC_API              |
+| C5  | ROADMAP M108 example `{ inbox: { consumer: 'payroll' } }` returns a value usable directly in `subscriptions`, while `onIntegrationEvent` returns a `SubscriptionDefinition` | With `inbox`, the call returns a `RegistryFactory<SubscriptionDefinition>` — a valid `SubscriptionEntry`, so the ROADMAP example works as written in `subscriptions`; imperative use calls it with a registry at or after `onInit` (§3.2) | README and the `onIntegrationEvent` JSDoc show both forms             |
+| C6  | ROADMAP M108: "Depends on broker redelivery being real, which #419 and #421 fixed"                                                                                          | True only for durable named queues on RabbitMQ and for Redis Streams (§1); NATS redelivers without limit and Kafka blocks the partition. §3.4 defaults the queue; §3.8 states each broker's budget                                        | ROADMAP M108 "Depends on" sentence corrected                          |
 
 ## 3. Design decisions
 
@@ -158,6 +158,7 @@ on `origin/develop` at `b66cf10b` (after M109a merged).
   M86 behaviour chain is final, so the store is verified before the subscription is established.
   Imperatively, inside a plugin's `onInit` or later:
   `const d = onIntegrationEvent(...)(ctx.services); await broker.subscribe(d.topic, d.handler, d.options);`
+
 - **Why:** the ROADMAP's own example works unchanged because a `RegistryFactory` is a
   `SubscriptionEntry` (C5). The `WeakMap` lookup is the M98 package-private-attachment pattern:
   `IInbox` exposes only operator methods, and the delivery path stays internal.
@@ -186,6 +187,7 @@ on `origin/develop` at `b66cf10b` (after M109a merged).
   `SubscribeOptions & { readonly inbox: IntegrationEventInboxOptions }`. The store hands the handler
   whatever its transaction yields (`unknown` at the port); `S` is the handler's own annotation —
   `uow: IUnitOfWork` for the database bridge — exactly as `services.get<T>()` is the caller's claim.
+
 - **Why:**
   - Every existing call keeps its type and return value (§9.2).
   - Declaring the inbox overload LAST — the plan's first draft — was falsified by the verification
@@ -240,7 +242,6 @@ on `origin/develop` at `b66cf10b` (after M109a merged).
   | `updatedAt`  | `number`                                                 | `runtime.now()` at the row's last write — the retention clock                                       |
   | `lastError`  | `string` (absent when none)                              | `describeError(error)` cut to 1024 characters — read by `IInbox.parked()`                           |
   | `envelope`   | `string` (absent unless `parked` and within the cap)     | the delivered envelope as received — returned by `release('retry')` (§3.9)                          |
-
   - **Keys are hashed.** The marker id is the lowercase hex SHA-256 (`runtime.subtle`) of
     `JSON.stringify(['setu-inbox/1', consumer, envelopeId.toWellFormed()])`; the attempts id is the
     marker id followed by `.attempts`. Every id is therefore 64 or 73 characters from `[0-9a-f.]` on
@@ -253,6 +254,7 @@ on `origin/develop` at `b66cf10b` (after M109a merged).
   - **The discriminator is one rule on every backend** (M107 §3.2, inherited by name in the
     ROADMAP): the bridge writes `kind: 'setu-inbox'` on every row, conjoins it to the `where` of
     every read (`find`, `parked`, `stats`, `purge`), and treats a row of another `kind` as missing.
+
 - **Why:** the first draft used the raw JSON array as the id. The verification round measured its
   worst case at about 530 bytes (`JSON.stringify` doubles `"` and `\`, which `publishIdProblem`
   allows), and an envelope id the rule refuses could not be keyed at all — so on NATS and Kafka,

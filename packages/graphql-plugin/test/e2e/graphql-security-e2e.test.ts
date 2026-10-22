@@ -47,7 +47,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: deepQuery }),
       });
-      const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+      const json = (await res.json()) as { errors?: Array<{ message?: string }>; data?: unknown };
 
       // Under JSON media type, validation errors (including depth limit) return 200 (B1 watershed)
       expect(res.statusCode).toBe(200);
@@ -93,7 +93,7 @@ describe('GraphQL security', () => {
         },
         body: JSON.stringify({ query: deepQuery }),
       });
-      const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+      const json = (await res.json()) as { errors?: Array<{ message?: string }>; data?: unknown };
 
       // Under graphql-response media type, validation errors return 400
       expect(res.statusCode).toBe(400);
@@ -130,7 +130,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: shallowQuery }),
       });
-      const json = await res.json() as {
+      const json = (await res.json()) as {
         errors?: unknown;
         data?: { nested?: { level1?: string } };
       };
@@ -172,7 +172,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ error }' }),
       });
-      const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+      const json = (await res.json()) as { errors?: Array<{ message?: string }>; data?: unknown };
 
       expect(json.errors?.[0]?.message).toBe('Internal server error');
 
@@ -208,7 +208,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ error }' }),
       });
-      const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+      const json = (await res.json()) as { errors?: Array<{ message?: string }>; data?: unknown };
 
       expect(json.errors?.[0]?.message).toBe('Internal server details');
 
@@ -244,7 +244,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ error }' }),
       });
-      const maskedJson = await maskedRes.json() as {
+      const maskedJson = (await maskedRes.json()) as {
         errors?: Array<{ message?: string }>;
         data?: unknown;
       };
@@ -267,7 +267,7 @@ describe('GraphQL security', () => {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ query: '{ error }' }),
       });
-      const unmaskedJson = await unmaskedRes.json() as {
+      const unmaskedJson = (await unmaskedRes.json()) as {
         errors?: Array<{ message?: string }>;
         data?: unknown;
       };
@@ -309,10 +309,7 @@ describe('GraphQL security', () => {
       // The unit tests drive the rule directly; only this proves the plugin
       // option reaches `validate()` at all.
       const app = createApplication({
-        plugins: [
-          RuntimePlugin(),
-          GraphqlPlugin({ typeDefs, resolvers, maxNodes: 100 }),
-        ],
+        plugins: [RuntimePlugin(), GraphqlPlugin({ typeDefs, resolvers, maxNodes: 100 })],
       });
       await app.start({ port: 0 });
       try {
@@ -322,7 +319,7 @@ describe('GraphQL security', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ query: aliasBomb(200) }),
         });
-        const json = await res.json() as { errors?: Array<{ message?: string }>; data?: unknown };
+        const json = (await res.json()) as { errors?: Array<{ message?: string }>; data?: unknown };
 
         // A validation error under the JSON media type is 200 (the B1
         // watershed), same as the depth limiter above.
@@ -348,7 +345,7 @@ describe('GraphQL security', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ query: aliasBomb(200) }),
         });
-        const json = await res.json() as { errors?: unknown; data?: Record<string, unknown> };
+        const json = (await res.json()) as { errors?: unknown; data?: Record<string, unknown> };
 
         expect(res.statusCode).toBe(200);
         expect(json.errors).toBeUndefined();
@@ -379,7 +376,7 @@ describe('GraphQL security', () => {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ query: bundled, operationName }),
           });
-          const json = await res.json() as { errors?: unknown; data?: unknown };
+          const json = (await res.json()) as { errors?: unknown; data?: unknown };
           expect(json.errors).toBeUndefined();
           expect(json.data).toBeDefined();
         }
@@ -397,7 +394,7 @@ describe('GraphQL security', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ query: withBig, operationName: 'Small' }),
         });
-        const json = await res.json() as { errors?: Array<{ message?: string }> };
+        const json = (await res.json()) as { errors?: Array<{ message?: string }> };
         expect(json.errors?.[0]?.message).toContain('Maximum node count is 4');
       } finally {
         await app.stop();
@@ -421,7 +418,7 @@ describe('GraphQL security', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ query: '{ user { id name } }' }),
         });
-        const narrowJson = await narrow.json() as { data?: unknown; errors?: unknown };
+        const narrowJson = (await narrow.json()) as { data?: unknown; errors?: unknown };
         expect(narrowJson.errors).toBeUndefined();
         expect(narrowJson.data).toBeDefined();
 
@@ -431,7 +428,7 @@ describe('GraphQL security', () => {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ query: aliasBomb(20) }),
         });
-        const wideJson = await wide.json() as { errors?: Array<{ message?: string }> };
+        const wideJson = (await wide.json()) as { errors?: Array<{ message?: string }> };
         expect(wideJson.errors?.[0]?.message).toContain('Maximum node count is 10');
       } finally {
         await app.stop();

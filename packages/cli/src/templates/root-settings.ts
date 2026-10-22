@@ -49,20 +49,23 @@ const MIN_DEP_AGE_NOTE =
 /**
  * Builds the settings block a generated root manifest carries.
  *
- * @param buildOutputDir - Where a frontend build writes, when the template has
- * one. Excluded from `fmt` and `lint`: both walk the project tree, and a
- * minified bundle is neither formattable nor lintable — `deno fmt` reformatting
- * one is what D2 reported.
+ * @param generatedOutputDirs - A frontend toolchain's generated directories.
+ * Excluded from `fmt` and `lint`: both walk the project tree, and a minified
+ * bundle or typegen output is neither formattable nor lintable — `deno fmt`
+ * reformatting one is what D2 reported.
  * @returns The keys to merge into the emitted `deno.json`, in a fixed order so
  * the generated file is byte-identical across runs
  */
 export function rootManifestSettings(
-  buildOutputDir?: string,
+  generatedOutputDirs: readonly string[] = [],
 ): Readonly<Record<string, unknown>> {
-  const exclude = buildOutputDir === undefined ? {} : {
-    fmt: { ...FMT_SETTINGS, exclude: [buildOutputDir] },
-    lint: { exclude: [buildOutputDir] },
-  };
+  const exclude =
+    generatedOutputDirs.length === 0
+      ? {}
+      : {
+          fmt: { ...FMT_SETTINGS, exclude: [...generatedOutputDirs] },
+          lint: { exclude: [...generatedOutputDirs] },
+        };
   return {
     '//minimumDependencyAge': MIN_DEP_AGE_NOTE,
     minimumDependencyAge: 0,

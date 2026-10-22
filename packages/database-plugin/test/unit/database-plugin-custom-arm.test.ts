@@ -172,8 +172,9 @@ describe('DatabasePlugin — the custom arm', () => {
     await app.start();
 
     const db = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
-    await expect(db.transaction(() => Promise.resolve('done'), { isolation: 'serializable' }))
-      .rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
+    await expect(
+      db.transaction(() => Promise.resolve('done'), { isolation: 'serializable' }),
+    ).rejects.toBeInstanceOf(UnsupportedIsolationLevelError);
     expect(adapter.transactionStarts).toBe(0);
     await app.stop();
   });
@@ -194,10 +195,7 @@ describe('DatabasePlugin — the custom arm', () => {
   it('registers under database.<name> for a named connection', async () => {
     const adapter = new RecordingAdapter();
     const app = createApplication({
-      plugins: [
-        RuntimePlugin(),
-        DatabasePlugin({ type: 'custom', adapter, name: 'analytics' }),
-      ],
+      plugins: [RuntimePlugin(), DatabasePlugin({ type: 'custom', adapter, name: 'analytics' })],
     });
     await app.start();
 

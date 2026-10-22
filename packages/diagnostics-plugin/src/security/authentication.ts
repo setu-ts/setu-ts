@@ -33,16 +33,7 @@ export function requestMacFields(
   authority: string,
   canonicalTarget: string,
 ): readonly string[] {
-  return [
-    MAC_DOMAIN,
-    'request',
-    sessionId,
-    instance,
-    sequence,
-    'GET',
-    authority,
-    canonicalTarget,
-  ];
+  return [MAC_DOMAIN, 'request', sessionId, instance, sequence, 'GET', authority, canonicalTarget];
 }
 
 /**
@@ -137,10 +128,7 @@ export function parseMac(value: string): Uint8Array | null {
  * @throws {Error} When the runtime refuses the import
  * @internal
  */
-export async function importSessionKey(
-  subtle: SubtleCrypto,
-  raw: Uint8Array,
-): Promise<CryptoKey> {
+export async function importSessionKey(subtle: SubtleCrypto, raw: Uint8Array): Promise<CryptoKey> {
   const copy = new Uint8Array(raw);
   try {
     return await subtle.importKey(

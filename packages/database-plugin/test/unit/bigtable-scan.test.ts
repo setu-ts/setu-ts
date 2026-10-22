@@ -36,10 +36,12 @@ describe('row-set derivation', () => {
 
   it('turns a pinned prefix into a range with an EXCLUSIVE successor end', () => {
     const plan = planBigtableScan(composite, query({ where: { tenantId: 't1' } }));
-    expect(plan.read.ranges).toEqual([{
-      start: { value: 't1#', inclusive: true },
-      end: { value: 't1$', inclusive: false },
-    }]);
+    expect(plan.read.ranges).toEqual([
+      {
+        start: { value: 't1#', inclusive: true },
+        end: { value: 't1$', inclusive: false },
+      },
+    ]);
   });
 
   it('leaves the scan unbounded when no key field is pinned and no prefix is mapped', () => {
@@ -53,10 +55,12 @@ describe('row-set derivation', () => {
       Order: { rowKey: { fields: ['id'], prefix: 'o/' } },
     });
     const plan = planBigtableScan(prefixed, query());
-    expect(plan.read.ranges).toEqual([{
-      start: { value: 'o/', inclusive: true },
-      end: { value: 'o0', inclusive: false },
-    }]);
+    expect(plan.read.ranges).toEqual([
+      {
+        start: { value: 'o/', inclusive: true },
+        end: { value: 'o0', inclusive: false },
+      },
+    ]);
   });
 
   it('expands an `in` on the final key field into an explicit key list', () => {
@@ -117,10 +121,7 @@ describe('row-set derivation', () => {
     expect(planBigtableScan(scalar, query({ where: { id: 7 } })).read.keys).toEqual(['7']);
     // A composed key renders numbers too, but a rendered value containing the
     // separator would compose ambiguously, so the push-down widens instead.
-    const numeric = planBigtableScan(
-      composite,
-      query({ where: { tenantId: 1, orderId: 2 } }),
-    );
+    const numeric = planBigtableScan(composite, query({ where: { tenantId: 1, orderId: 2 } }));
     expect(numeric.read.keys).toEqual(['1#2']);
     const collides = planBigtableScan(composite, query({ where: { tenantId: 'a#b' } }));
     expect(collides.read.keys).toBeUndefined();
@@ -146,10 +147,12 @@ describe('row-set derivation', () => {
       query({
         filter: {
           type: 'and',
-          filters: [{
-            type: 'and',
-            filters: [{ type: 'comparison', field: 'id', operator: 'eq', value: 'u1' }],
-          }],
+          filters: [
+            {
+              type: 'and',
+              filters: [{ type: 'comparison', field: 'id', operator: 'eq', value: 'u1' }],
+            },
+          ],
         },
       }),
     );
@@ -170,21 +173,17 @@ describe('row-set derivation', () => {
 
 describe('cursor start keys', () => {
   it('moves the lower bound of a range forward', () => {
-    const plan = planBigtableScan(
-      composite,
-      query({ where: { tenantId: 't1' } }),
-      { after: 't1#o5' },
-    );
+    const plan = planBigtableScan(composite, query({ where: { tenantId: 't1' } }), {
+      after: 't1#o5',
+    });
     expect(plan.read.ranges?.[0].start).toEqual({ value: 't1#o5', inclusive: false });
     expect(plan.read.ranges?.[0].end).toEqual({ value: 't1$', inclusive: false });
   });
 
   it('never moves the lower bound BACKWARD past the key constraints', () => {
-    const plan = planBigtableScan(
-      composite,
-      query({ where: { tenantId: 't5' } }),
-      { after: 't1#o5' },
-    );
+    const plan = planBigtableScan(composite, query({ where: { tenantId: 't5' } }), {
+      after: 't1#o5',
+    });
     expect(plan.read.ranges?.[0].start).toEqual({ value: 't5#', inclusive: true });
   });
 
@@ -287,9 +286,9 @@ describe('projection', () => {
         },
       }),
     );
-    const interleave =
-      (plan.read.filter as { interleave: readonly (readonly { column?: readonly string[] }[])[] })
-        .interleave;
+    const interleave = (
+      plan.read.filter as { interleave: readonly (readonly { column?: readonly string[] }[])[] }
+    ).interleave;
     const columns = interleave[0][0].column as readonly string[];
     // `id` because the key field's CELL is what preserves its type; `city` and
     // `profile` because the client-side evaluator still has to read them.
@@ -310,10 +309,7 @@ describe('projection', () => {
   });
 
   it('keeps the projection inside the innermost condition pass', () => {
-    const plan = planBigtableScan(
-      scalar,
-      query({ select: ['name'], where: { city: 'london' } }),
-    );
+    const plan = planBigtableScan(scalar, query({ select: ['name'], where: { city: 'london' } }));
     const filter = plan.read.filter as {
       condition: {
         pass: readonly { interleave: readonly (readonly { column?: readonly string[] }[])[] }[];
@@ -351,32 +347,28 @@ describe('limit push-down', () => {
 
 describe('refusals', () => {
   it('refuses a non-zero offset by name, pointing at cursor pagination', () => {
-    expect(() => planBigtableScan(scalar, query({ offset: 10 })))
-      .toThrow(/no row offset/);
+    expect(() => planBigtableScan(scalar, query({ offset: 10 }))).toThrow(/no row offset/);
   });
 
   it('honours an empty sort and the full key ascending', () => {
     expect(() => planBigtableScan(scalar, query({ orderBy: {} }))).not.toThrow();
     expect(() => planBigtableScan(scalar, query({ orderBy: { id: 'asc' } }))).not.toThrow();
     expect(() =>
-      planBigtableScan(composite, query({ orderBy: { tenantId: 'asc', orderId: 'asc' } }))
+      planBigtableScan(composite, query({ orderBy: { tenantId: 'asc', orderId: 'asc' } })),
     ).not.toThrow();
   });
 
   it('refuses a descending sort, a non-key sort, and a strict key prefix', () => {
-    for (
-      const orderBy of [
-        { id: 'desc' } as const,
-        { name: 'asc' } as const,
-      ]
-    ) {
-      expect(() => planBigtableScan(scalar, query({ orderBy })))
-        .toThrow(UnsupportedQueryFeatureError);
+    for (const orderBy of [{ id: 'desc' } as const, { name: 'asc' } as const]) {
+      expect(() => planBigtableScan(scalar, query({ orderBy }))).toThrow(
+        UnsupportedQueryFeatureError,
+      );
     }
-    expect(() => planBigtableScan(composite, query({ orderBy: { tenantId: 'asc' } })))
-      .toThrow(/only be ordered by its row key/);
+    expect(() => planBigtableScan(composite, query({ orderBy: { tenantId: 'asc' } }))).toThrow(
+      /only be ordered by its row key/,
+    );
     expect(() =>
-      planBigtableScan(composite, query({ orderBy: { orderId: 'asc', tenantId: 'asc' } }))
+      planBigtableScan(composite, query({ orderBy: { orderId: 'asc', tenantId: 'asc' } })),
     ).toThrow(/only be ordered by its row key/);
   });
 });

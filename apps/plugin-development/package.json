@@ -1,0 +1,22 @@
+{
+  "name": "setu-ts-example-plugin-development",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.20.6",
+    "@setu-ts/common": "workspace:^",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
+    "@setu-ts/testing": "workspace:^"
+  },
+  "devDependencies": {
+    "vitest": "5.0.3"
+  },
+  "scripts": {
+    "start": "tsx main.ts",
+    "smoke": "tsx smoke.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --config vitest.config.ts"
+  }
+}

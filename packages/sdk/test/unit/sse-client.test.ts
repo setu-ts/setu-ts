@@ -165,23 +165,21 @@ describe('createSseClient', () => {
 
     expect(values).toEqual(['RAW']);
     expect(client.state).toBe('closed');
-    for (
-      const reconnect of [
-        { maxAttempts: -1 },
-        { maxAttempts: 1.5 },
-        { delayMs: -1 },
-        { maxDelayMs: -1 },
-        { delayMs: Number.NaN },
-        { delayMs: Infinity },
-        { maxDelayMs: -Infinity },
-      ]
-    ) {
+    for (const reconnect of [
+      { maxAttempts: -1 },
+      { maxAttempts: 1.5 },
+      { delayMs: -1 },
+      { maxDelayMs: -1 },
+      { delayMs: Number.NaN },
+      { delayMs: Infinity },
+      { maxDelayMs: -Infinity },
+    ]) {
       expect(() =>
         createSseClient({
           url: 'https://example.test/events',
           reconnect,
           onEvent: () => {},
-        })
+        }),
       ).toThrow();
     }
   });

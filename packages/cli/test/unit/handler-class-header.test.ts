@@ -229,10 +229,12 @@ describe('renderDeclarationHeader', () => {
     // Both shapes overflowed, so both go through one renderer rather than a
     // second copy with a different keyword baked in.
     const clause = `extends CqrsQuery<${'C'.repeat(60)}>`;
-    expect(renderDeclarationHeader('export interface Short', 'extends CqrsQuery<A>'))
-      .toBe('export interface Short extends CqrsQuery<A> {');
-    expect(renderDeclarationHeader('export interface Long', clause))
-      .toBe(`export interface Long\n  ${clause} {`);
+    expect(renderDeclarationHeader('export interface Short', 'extends CqrsQuery<A>')).toBe(
+      'export interface Short extends CqrsQuery<A> {',
+    );
+    expect(renderDeclarationHeader('export interface Long', clause)).toBe(
+      `export interface Long\n  ${clause} {`,
+    );
   });
 
   it('joins at exactly the width and wraps one character past it', () => {
@@ -253,14 +255,16 @@ describe('renderDeclarationHeader', () => {
 
 describe('renderMethodSignature', () => {
   it('keeps a signature that fits on one line', () => {
-    expect(renderMethodSignature('handle', ['query: AQuery'], 'Promise<AView>'))
-      .toBe('  handle(query: AQuery): Promise<AView> {');
+    expect(renderMethodSignature('handle', ['query: AQuery'], 'Promise<AView>')).toBe(
+      '  handle(query: AQuery): Promise<AView> {',
+    );
   });
 
   it('expands the parameter list when the one-line form overflows', () => {
     const param = `command: ${'A'.repeat(60)}`;
     const ret = `Promise<${'B'.repeat(40)}>`;
-    expect(renderMethodSignature('handle', [param], ret))
-      .toBe(`  handle(\n    ${param},\n  ): ${ret} {`);
+    expect(renderMethodSignature('handle', [param], ret)).toBe(
+      `  handle(\n    ${param},\n  ): ${ret} {`,
+    );
   });
 });

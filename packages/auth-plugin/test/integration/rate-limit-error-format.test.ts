@@ -164,8 +164,9 @@ describe('rate-limit 429 error format (X32-2)', () => {
         const guarded = await read(guardedResponse);
 
         expect(guarded.contentType).toBe(limited.contentType);
-        expect(Object.keys(guarded.body as object).sort())
-          .toEqual(Object.keys(limited.body as object).sort());
+        expect(Object.keys(guarded.body as object).sort()).toEqual(
+          Object.keys(limited.body as object).sort(),
+        );
       } finally {
         await app.stop();
       }

@@ -14,8 +14,8 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
-import { deriveNames } from './names.ts';
-import { joinPath } from './file-writer.ts';
+import { deriveNames, isKebabIdentifier } from './names.ts';
+import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 
 /**
  * A file the barrel is claiming that the CLI did not generate.
@@ -85,6 +85,8 @@ export interface SkippedArtifact {
   readonly path: string;
   /** The symbols the barrel would have imported but the module does not export. */
   readonly missing: readonly string[];
+  /** The base name cannot safely enter an import or identifier. */
+  readonly invalidName?: true;
 }
 
 /** One family's scan result. */
@@ -120,10 +122,15 @@ export interface ArtifactScanAll {
  *
  * @param fs - The filesystem to read through
  * @param path - The absolute path to read
- * @returns The text, or `''` when it cannot be read
+ * @returns The text, or `''` when it cannot be read or is not a regular file under the cap
  */
 async function readTextOrEmpty(fs: IFileSystem, path: string): Promise<string> {
   try {
+    // A committed link or special file at a CLI-owned path (a link to
+    // `/dev/zero`) would otherwise read forever; only a regular file under the
+    // cap counts as evidence. The writer refuses the same path by name.
+    const stat = await fs.stat(path);
+    if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) return '';
     return new TextDecoder().decode(await fs.readFile(path));
   } catch {
     return '';
@@ -227,12 +234,16 @@ export async function readArtifactNames(
     if (!entry.endsWith(spec.suffix)) continue;
     const name = entry.slice(0, -spec.suffix.length);
     if (name === '') continue;
+    if (!isKebabIdentifier(name)) {
+      skipped.push({ path: joinPath(spec.dir, entry), missing: [], invalidName: true });
+      continue;
+    }
 
     const path = joinPath(root, entry);
     let source: string;
     try {
       const stat = await fs.stat(path);
-      if (!stat.isFile) continue;
+      if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) continue;
       source = decoder.decode(await fs.readFile(path));
     } catch {
       // Vanished or unreadable between the listing and the read — skip it rather than
@@ -256,9 +267,10 @@ export async function readArtifactNames(
     // Only for a barrel that registers something. A re-export barrel has no
     // registration to duplicate, and the symbol in the config is the developer
     // consuming the barrel exactly as its header documents.
-    const wired = wiring === undefined || spec.exports.length === 0
-      ? undefined
-      : symbols.find((symbol) => mentionsSymbol(wiring.source, symbol));
+    const wired =
+      wiring === undefined || spec.exports.length === 0
+        ? undefined
+        : symbols.find((symbol) => mentionsSymbol(wiring.source, symbol));
     if (wired !== undefined) {
       manual.push({ path: relative, symbol: wired, wiredIn: wiring!.path });
       continue;
@@ -269,7 +281,8 @@ export async function readArtifactNames(
     // "now registered" wording would be false, and since a fresh functional scaffold
     // never writes that barrel, the claim repeated on every generate.
     if (
-      spec.exports.length > 0 && !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
+      spec.exports.length > 0 &&
+      !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
     ) {
       adopted.push({ path: relative, barrel: spec.barrel });
     }

@@ -199,10 +199,17 @@ function readSourceAttempt(value: unknown): ValidatedSourceAttempt | null {
   }
   const { sequence, queueAlias, jobAlias, attempt, durationMs, outcome, settlement, ageMs } = value;
   if (
-    !isCount(sequence) || sequence < 1 || !isDisplayAlias(queueAlias) ||
-    typeof jobAlias !== 'string' || !JOB_ALIAS.test(jobAlias) || !isCount(attempt) ||
-    attempt < 1 || !isMs(durationMs) || !isOneOf(outcome, OUTCOMES) ||
-    !isOneOf(settlement, SETTLEMENTS) || !isMs(ageMs)
+    !isCount(sequence) ||
+    sequence < 1 ||
+    !isDisplayAlias(queueAlias) ||
+    typeof jobAlias !== 'string' ||
+    !JOB_ALIAS.test(jobAlias) ||
+    !isCount(attempt) ||
+    attempt < 1 ||
+    !isMs(durationMs) ||
+    !isOneOf(outcome, OUTCOMES) ||
+    !isOneOf(settlement, SETTLEMENTS) ||
+    !isMs(ageMs)
   ) {
     return null;
   }
@@ -225,8 +232,13 @@ function readSourceDepth(value: unknown): ValidatedSourceDepth | null {
   }
   const { queueAlias, ready, processing, dead, scope, coverage, ageMs } = value;
   if (
-    !isDisplayAlias(queueAlias) || !isCount(ready) || !isCount(processing) || !isCount(dead) ||
-    !isOneOf(scope, SCOPES) || !isOneOf(coverage, CYCLE_COVERAGES) || !isMs(ageMs)
+    !isDisplayAlias(queueAlias) ||
+    !isCount(ready) ||
+    !isCount(processing) ||
+    !isCount(dead) ||
+    !isOneOf(scope, SCOPES) ||
+    !isOneOf(coverage, CYCLE_COVERAGES) ||
+    !isMs(ageMs)
   ) {
     return null;
   }
@@ -259,10 +271,7 @@ function readSourceDepth(value: unknown): ValidatedSourceDepth | null {
  * @returns The validated copy, or `null` for any violation
  * @internal
  */
-export function readQueueSourceBatch(
-  value: unknown,
-  cursor: number,
-): ValidatedSourceBatch | null {
+export function readQueueSourceBatch(value: unknown, cursor: number): ValidatedSourceBatch | null {
   try {
     if (!isRecord(value)) {
       return null;
@@ -296,11 +305,17 @@ export function readQueueSourceBatch(
       evictedJobAliases,
     } = value;
     if (
-      !isOneOf(depthCoverage, DEPTH_COVERAGES) || !isOneOf(failure, SOURCE_FAILURES) ||
-      !Array.isArray(rawAttempts) || rawAttempts.length > MAX_SOURCE_ATTEMPTS ||
-      !Array.isArray(rawDepths) || rawDepths.length > MAX_SOURCE_DEPTHS ||
-      !isCount(next) || !isCount(lost) || typeof closed !== 'boolean' ||
-      !isCount(droppedAttempts) || !isCount(evictedJobAliases)
+      !isOneOf(depthCoverage, DEPTH_COVERAGES) ||
+      !isOneOf(failure, SOURCE_FAILURES) ||
+      !Array.isArray(rawAttempts) ||
+      rawAttempts.length > MAX_SOURCE_ATTEMPTS ||
+      !Array.isArray(rawDepths) ||
+      rawDepths.length > MAX_SOURCE_DEPTHS ||
+      !isCount(next) ||
+      !isCount(lost) ||
+      typeof closed !== 'boolean' ||
+      !isCount(droppedAttempts) ||
+      !isCount(evictedJobAliases)
     ) {
       return null;
     }
@@ -481,33 +496,55 @@ function isStatusProjection(value: unknown, ids: Set<string>): boolean {
     return false;
   }
   ids.add(sourceId);
-  return isOneOf(value.state, STATUS_STATES) &&
+  return (
+    isOneOf(value.state, STATUS_STATES) &&
     (!hasAlias || isDisplayAlias(value.instanceAlias)) &&
     isOneOf(value.depthCoverage, DEPTH_COVERAGES) &&
     isOneOf(value.failure, STATUS_FAILURES) &&
-    isCount(value.lost) && isCount(value.droppedAttempts) && isCount(value.evictedJobAliases);
+    isCount(value.lost) &&
+    isCount(value.droppedAttempts) &&
+    isCount(value.evictedJobAliases)
+  );
 }
 
 /** Validates one projected merged attempt. */
 function isAttemptProjection(value: unknown, ids: Set<string>): boolean {
-  return isRecord(value) && hasExactKeys(value, ATTEMPT_KEYS) &&
-    isCount(value.sequence) && value.sequence >= 1 &&
-    typeof value.sourceId === 'string' && ids.has(value.sourceId) &&
-    isDisplayAlias(value.instanceAlias) && isDisplayAlias(value.queueAlias) &&
-    typeof value.jobAlias === 'string' && JOB_ALIAS.test(value.jobAlias) &&
-    isCount(value.attempt) && value.attempt >= 1 && isMs(value.durationMs) &&
-    isOneOf(value.outcome, OUTCOMES) && isOneOf(value.settlement, SETTLEMENTS) &&
-    isMs(value.ageMs);
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ATTEMPT_KEYS) &&
+    isCount(value.sequence) &&
+    value.sequence >= 1 &&
+    typeof value.sourceId === 'string' &&
+    ids.has(value.sourceId) &&
+    isDisplayAlias(value.instanceAlias) &&
+    isDisplayAlias(value.queueAlias) &&
+    typeof value.jobAlias === 'string' &&
+    JOB_ALIAS.test(value.jobAlias) &&
+    isCount(value.attempt) &&
+    value.attempt >= 1 &&
+    isMs(value.durationMs) &&
+    isOneOf(value.outcome, OUTCOMES) &&
+    isOneOf(value.settlement, SETTLEMENTS) &&
+    isMs(value.ageMs)
+  );
 }
 
 /** Validates one projected merged depth. */
 function isDepthProjection(value: unknown, ids: Set<string>): boolean {
-  return isRecord(value) && hasExactKeys(value, DEPTH_KEYS) &&
-    typeof value.sourceId === 'string' && ids.has(value.sourceId) &&
-    isDisplayAlias(value.instanceAlias) && isDisplayAlias(value.queueAlias) &&
-    isCount(value.ready) && isCount(value.processing) && isCount(value.dead) &&
-    isOneOf(value.scope, SCOPES) && isOneOf(value.coverage, CYCLE_COVERAGES) &&
-    isMs(value.ageMs);
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, DEPTH_KEYS) &&
+    typeof value.sourceId === 'string' &&
+    ids.has(value.sourceId) &&
+    isDisplayAlias(value.instanceAlias) &&
+    isDisplayAlias(value.queueAlias) &&
+    isCount(value.ready) &&
+    isCount(value.processing) &&
+    isCount(value.dead) &&
+    isOneOf(value.scope, SCOPES) &&
+    isOneOf(value.coverage, CYCLE_COVERAGES) &&
+    isMs(value.ageMs)
+  );
 }
 
 /**
@@ -532,14 +569,21 @@ export function isQueueBatchProjection(value: unknown): value is QueueDiagnostic
   }
   const { sources, events, depths } = value;
   if (
-    value.version !== 1 || typeof value.instanceId !== 'string' || value.instanceId.length === 0 ||
+    value.version !== 1 ||
+    typeof value.instanceId !== 'string' ||
+    value.instanceId.length === 0 ||
     (value.state !== 'unsupported' && value.state !== 'ready') ||
-    !Array.isArray(sources) || sources.length > MAX_QUEUE_SOURCES ||
+    !Array.isArray(sources) ||
+    sources.length > MAX_QUEUE_SOURCES ||
     (value.state === 'unsupported') !== (sources.length === 0) ||
-    !Array.isArray(events) || events.length > MAX_MERGED_EVENTS ||
-    !Array.isArray(depths) || depths.length > MAX_QUEUE_SOURCES * MAX_SOURCE_DEPTHS ||
-    !isCount(value.next) || !isCount(value.lost) ||
-    !isCount(value.truncatedSources) || !isCount(value.truncatedDepths)
+    !Array.isArray(events) ||
+    events.length > MAX_MERGED_EVENTS ||
+    !Array.isArray(depths) ||
+    depths.length > MAX_QUEUE_SOURCES * MAX_SOURCE_DEPTHS ||
+    !isCount(value.next) ||
+    !isCount(value.lost) ||
+    !isCount(value.truncatedSources) ||
+    !isCount(value.truncatedDepths)
   ) {
     return false;
   }
@@ -552,9 +596,12 @@ export function isQueueBatchProjection(value: unknown): value is QueueDiagnostic
   }
   for (let index = 1; index < events.length; index++) {
     if (
-      (events[index] as { sequence: number }).sequence <= (events[index - 1] as {
-        sequence: number;
-      }).sequence
+      (events[index] as { sequence: number }).sequence <=
+      (
+        events[index - 1] as {
+          sequence: number;
+        }
+      ).sequence
     ) {
       return false;
     }

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
-import { devEntryPort, devEntryVariants, renderDevEntry } from '../../src/devtool/dev-entry.ts';
+import {
+  devEntryPort,
+  devEntryVariants,
+  isDevEntry,
+  renderDevEntry,
+} from '../../src/devtool/dev-entry.ts';
+import { VERSION } from '../../src/version.ts';
 
 describe('renderDevEntry', () => {
   it('recognises ports only in complete current and previous CLI renderings', () => {
@@ -14,6 +20,10 @@ describe('renderDevEntry', () => {
       expect(devEntryPort(renderDevEntry({ devtoolPort: port }))).toBeUndefined();
     }
     expect(devEntryPort('handwritten entry')).toBeUndefined();
+    const variants = devEntryVariants(4920);
+    expect(variants[0]).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} devtool enable`);
+    expect(variants[1]).toContain('Re-run `setu devtool enable`');
+    expect(variants[2]).not.toContain('Re-run');
   });
   it('checks plugin registration and diagnostics after starting and stops on discarded composition', () => {
     const entry = renderDevEntry({ devtoolPort: 4919 });
@@ -39,8 +49,9 @@ describe('renderDevEntry', () => {
     expect(warning).toContain('SETU_DEVTOOL_SESSION_ID');
     expect(warning).toContain('SETU_DEVTOOL_SESSION_KEY');
     // The warning precedes the reads it warns about.
-    expect(entry.indexOf('// The two variable names'))
-      .toBeLessThan(entry.indexOf("Deno.env.get('SETU_DEVTOOL_SESSION_ID')"));
+    expect(entry.indexOf('// The two variable names')).toBeLessThan(
+      entry.indexOf("Deno.env.get('SETU_DEVTOOL_SESSION_ID')"),
+    );
   });
 
   it('refuses an absent or malformed session id, naming it and never printing a value', () => {
@@ -88,5 +99,29 @@ describe('renderDevEntry', () => {
     });
     expect(entry).toContain("import { SERVICE_PORT } from './src/discovery/services.ts';");
     expect(entry).toContain('await app.start({ port: SERVICE_PORT });');
+  });
+});
+
+describe('isDevEntry', () => {
+  // The entry names the pinned CLI, so one written by an earlier release differs only
+  // in the version; a CLI upgrade must not make every existing entry read as edited.
+  it('recognizes an entry an earlier release wrote, and only the version may differ', () => {
+    for (const member of [true, false]) {
+      const current = devEntryVariants(4920, member)[0]!;
+      expect(current).toContain(`npm:@setu-ts/cli@${VERSION}`);
+      for (const older of ['0.8.9', '0.10.0-rc.1', '1.2.3+build.7']) {
+        const earlier = current.replaceAll(
+          `npm:@setu-ts/cli@${VERSION}`,
+          `npm:@setu-ts/cli@${older}`,
+        );
+        expect(earlier).not.toBe(current);
+        expect(isDevEntry(earlier, 4920, member)).toBe(true);
+        expect(devEntryPort(earlier, member)).toBe(4920);
+      }
+      const renamed = current.replaceAll(`npm:@setu-ts/cli@${VERSION}`, 'npm:other-cli@0.8.9');
+      expect(isDevEntry(renamed, 4920, member)).toBe(false);
+      expect(isDevEntry(`${current}// edited\n`, 4920, member)).toBe(false);
+      expect(isDevEntry(current, 4921, member)).toBe(false);
+    }
   });
 });

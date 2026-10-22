@@ -11,7 +11,7 @@ describe('extractPersistedQuery', () => {
   });
 
   it('returns null when extensions is not an object', () => {
-    // @ts-ignore -- intentional: test non-object input
+    // @ts-expect-error -- intentional: test non-object input
     expect(extractPersistedQuery(null)).toBeNull();
   });
 
@@ -28,39 +28,51 @@ describe('extractPersistedQuery', () => {
   });
 
   it('returns null when version is missing', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { sha256Hash: 'abc' },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { sha256Hash: 'abc' },
+      }),
+    ).toBeNull();
   });
 
   it('returns null when version is not 1', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { version: 2, sha256Hash: 'abc' },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { version: 2, sha256Hash: 'abc' },
+      }),
+    ).toBeNull();
   });
 
   it('returns null when version is not a number', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { version: '1', sha256Hash: 'abc' },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { version: '1', sha256Hash: 'abc' },
+      }),
+    ).toBeNull();
   });
 
   it('returns null when sha256Hash is missing', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { version: 1 },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { version: 1 },
+      }),
+    ).toBeNull();
   });
 
   it('returns null when sha256Hash is empty', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { version: 1, sha256Hash: '' },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { version: 1, sha256Hash: '' },
+      }),
+    ).toBeNull();
   });
 
   it('returns null when sha256Hash is not a string', () => {
-    expect(extractPersistedQuery({
-      persistedQuery: { version: 1, sha256Hash: 123 },
-    })).toBeNull();
+    expect(
+      extractPersistedQuery({
+        persistedQuery: { version: 1, sha256Hash: 123 },
+      }),
+    ).toBeNull();
   });
 
   it('returns extracted info for valid v1 APQ', () => {

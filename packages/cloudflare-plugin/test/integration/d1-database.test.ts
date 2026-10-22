@@ -101,12 +101,17 @@ describe('D1 through DatabasePlugin — the repository surface', () => {
     await users.create({ id: 'u2', name: 'bob', age: 24 });
     await users.create({ id: 'u3', name: 'ada', age: 51 });
 
-    expect(await users.findAll({ where: { name: 'ada' }, orderBy: { age: 'desc' } }))
-      .toMatchObject([{ id: 'u3' }, { id: 'u1' }]);
-    expect(await users.findAll({ orderBy: { age: 'asc' }, limit: 1, offset: 1 }))
-      .toMatchObject([{ id: 'u1' }]);
-    expect(await users.findAll({ select: ['name'], orderBy: { age: 'asc' } }))
-      .toEqual([{ name: 'bob' }, { name: 'ada' }, { name: 'ada' }]);
+    expect(await users.findAll({ where: { name: 'ada' }, orderBy: { age: 'desc' } })).toMatchObject(
+      [{ id: 'u3' }, { id: 'u1' }],
+    );
+    expect(await users.findAll({ orderBy: { age: 'asc' }, limit: 1, offset: 1 })).toMatchObject([
+      { id: 'u1' },
+    ]);
+    expect(await users.findAll({ select: ['name'], orderBy: { age: 'asc' } })).toEqual([
+      { name: 'bob' },
+      { name: 'ada' },
+      { name: 'ada' },
+    ]);
 
     await app.stop();
   });
@@ -127,8 +132,7 @@ describe('D1 through DatabasePlugin — the repository surface', () => {
 
     expect(
       await ids({ filter: { type: 'comparison', field: 'name', operator: 'eq', value: 'ada' } }),
-    )
-      .toEqual(['u1']);
+    ).toEqual(['u1']);
     // `instr` is a literal substring match, so the `%` and `_` are data here,
     // not wildcards — an unescaped LIKE would return every row.
     expect(
@@ -136,21 +140,26 @@ describe('D1 through DatabasePlugin — the repository surface', () => {
         filter: { type: 'comparison', field: 'name', operator: 'contains', value: '%_off' },
       }),
     ).toEqual(['u3']);
-    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'gt', value: 36 } }))
-      .toEqual(['u3']);
-    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'gte', value: 36 } }))
-      .toEqual(['u1', 'u3']);
-    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'lt', value: 36 } }))
-      .toEqual(['u2']);
-    expect(await ids({ filter: { type: 'comparison', field: 'age', operator: 'lte', value: 36 } }))
-      .toEqual(['u1', 'u2']);
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'age', operator: 'gt', value: 36 } }),
+    ).toEqual(['u3']);
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'age', operator: 'gte', value: 36 } }),
+    ).toEqual(['u1', 'u3']);
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'age', operator: 'lt', value: 36 } }),
+    ).toEqual(['u2']);
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'age', operator: 'lte', value: 36 } }),
+    ).toEqual(['u1', 'u2']);
     expect(
       await ids({
         filter: { type: 'comparison', field: 'id', operator: 'in', value: ['u1', 'u3'] },
       }),
     ).toEqual(['u1', 'u3']);
-    expect(await ids({ filter: { type: 'comparison', field: 'id', operator: 'in', value: [] } }))
-      .toEqual([]);
+    expect(
+      await ids({ filter: { type: 'comparison', field: 'id', operator: 'in', value: [] } }),
+    ).toEqual([]);
     expect(
       await ids({
         filter: {
@@ -273,7 +282,7 @@ describe('D1 through DatabasePlugin — Unit of Work', () => {
     const counted = await db.transaction((uow) =>
       uow.getRepository<User>('User').count({
         filter: { type: 'comparison', field: 'age', operator: 'gte', value: 30 },
-      })
+      }),
     );
 
     expect(counted).toBe(1);
@@ -283,10 +292,12 @@ describe('D1 through DatabasePlugin — Unit of Work', () => {
   it('rolls back and writes nothing when the callback throws', async () => {
     const { app, db, d1 } = await bootApp();
 
-    await expect(db.transaction(async (uow) => {
-      await uow.getRepository<User>('User').create({ id: 'u1', name: 'ada', age: 36 });
-      throw new Error('business rule failed');
-    })).rejects.toThrow('business rule failed');
+    await expect(
+      db.transaction(async (uow) => {
+        await uow.getRepository<User>('User').create({ id: 'u1', name: 'ada', age: 36 });
+        throw new Error('business rule failed');
+      }),
+    ).rejects.toThrow('business rule failed');
 
     expect(d1.batches).toEqual([]);
     expect(await db.getRepository<User>('User').count()).toBe(0);
@@ -303,7 +314,8 @@ describe('D1 through DatabasePlugin — duplicate keys', () => {
     const users = db.getRepository<User>('User');
     await users.create({ id: 'u1', name: 'ada', age: 36 });
 
-    const refusal = await users.create({ id: 'u1', name: 'bob', age: 24 })
+    const refusal = await users
+      .create({ id: 'u1', name: 'bob', age: 24 })
       .catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(DuplicateKeyError);
     expect((refusal as DuplicateKeyError).entity).toBe('User');
@@ -317,11 +329,13 @@ describe('D1 through DatabasePlugin — duplicate keys', () => {
     const { app, db } = await bootApp();
     await db.getRepository<User>('User').create({ id: 'u1', name: 'ada', age: 36 });
 
-    const refusal = await db.transaction(async (uow) => {
-      const users = uow.getRepository<User>('User');
-      await users.create({ id: 'u2', name: 'bob', age: 24 });
-      await users.create({ id: 'u1', name: 'eve', age: 51 });
-    }).catch((error: unknown) => error);
+    const refusal = await db
+      .transaction(async (uow) => {
+        const users = uow.getRepository<User>('User');
+        await users.create({ id: 'u2', name: 'bob', age: 24 });
+        await users.create({ id: 'u1', name: 'eve', age: 51 });
+      })
+      .catch((error: unknown) => error);
 
     expect(refusal).toBeInstanceOf(DuplicateKeyError);
     // The batch is atomic: `u2`, written before the duplicate, is absent too.
@@ -335,9 +349,10 @@ describe('D1 through DatabasePlugin — lifecycle wiring', () => {
   it('reports healthy through the registered database indicator', async () => {
     const { app } = await bootApp();
 
-    const indicators = app.services.getAll<
-      { name: string; check: () => Promise<HealthCheckResult> }
-    >(CAPABILITIES.HEALTH_INDICATOR);
+    const indicators = app.services.getAll<{
+      name: string;
+      check: () => Promise<HealthCheckResult>;
+    }>(CAPABILITIES.HEALTH_INDICATOR);
     const indicator = indicators.find((i) => i.name === CAPABILITIES.DATABASE);
 
     expect(indicator).toBeDefined();

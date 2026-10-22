@@ -17,7 +17,7 @@ const names = (plugins: readonly IPlugin[]): string[] => plugins.map((p) => p.na
 /** Replaces the starter's detecting `RuntimePlugin()` with one forced to Workers. */
 function onWorkers(plugins: readonly IPlugin[]): IPlugin[] {
   return plugins.map((p) =>
-    p.name === 'runtime' ? RuntimePlugin({ platform: 'cloudflare-workers' }) : p
+    p.name === 'runtime' ? RuntimePlugin({ platform: 'cloudflare-workers' }) : p,
   );
 }
 
@@ -42,13 +42,15 @@ describe('full-stack-starter / scheduler on Cloudflare Workers', () => {
 
   it('boots on Workers and answers /health', async () => {
     const app = createApplication({
-      plugins: onWorkers(composeFullStackPlugins({}, 'cloudflare-workers')),
+      plugins: onWorkers(
+        composeFullStackPlugins({ openapi: { swagger: { assets: 'cdn' } } }, 'cloudflare-workers'),
+      ),
     });
     await app.start();
     try {
       const response = await app.fetch(new Request('http://localhost/health'));
       expect(response.status).toBe(200);
-      const body = await response.json() as { checks: Record<string, unknown> };
+      const body = (await response.json()) as { checks: Record<string, unknown> };
       expect(Object.keys(body.checks)).not.toContain('scheduler');
     } finally {
       await app.stop();

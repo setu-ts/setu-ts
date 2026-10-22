@@ -24,12 +24,19 @@ function runtime(env: Record<string, string | undefined> = { PORT: '3000' }) {
 
 describe('loadEnvWithProvenance | precedence evidence', () => {
   it('records the runtime environment winning over every file, with the displaced aliases', async () => {
-    const { values, sources } = await loadEnvWithProvenance(runtime(), {
-      envFilePath: ['.env.local', '.env'],
-    }, {
-      approvedKeys: new Set(['PORT', 'ONLY_FILE']),
-      aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
-    });
+    const { values, sources } = await loadEnvWithProvenance(
+      runtime(),
+      {
+        envFilePath: ['.env.local', '.env'],
+      },
+      {
+        approvedKeys: new Set(['PORT', 'ONLY_FILE']),
+        aliasByPath: new Map([
+          ['.env.local', 'dotenv-local'],
+          ['.env', 'dotenv'],
+        ]),
+      },
+    );
     expect(values['PORT']).toEqual('3000');
     // Displacement order, lowest precedence first: `.env` was displaced
     // before `.env.local`.
@@ -40,12 +47,19 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
   });
 
   it('records file-over-file displacement, lowest precedence first', async () => {
-    const { values, sources } = await loadEnvWithProvenance(runtime({}), {
-      envFilePath: ['.env.local', '.env'],
-    }, {
-      approvedKeys: new Set(['PORT', 'ONLY_FILE']),
-      aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
-    });
+    const { values, sources } = await loadEnvWithProvenance(
+      runtime({}),
+      {
+        envFilePath: ['.env.local', '.env'],
+      },
+      {
+        approvedKeys: new Set(['PORT', 'ONLY_FILE']),
+        aliasByPath: new Map([
+          ['.env.local', 'dotenv-local'],
+          ['.env', 'dotenv'],
+        ]),
+      },
+    );
     expect(values['PORT']).toEqual('2000');
     expect(sources.get('PORT')).toEqual({
       origin: 'file',
@@ -61,13 +75,17 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
   });
 
   it('reduces an unapproved path to the category, never naming it', async () => {
-    const { sources } = await loadEnvWithProvenance(runtime({}), {
-      envFilePath: ['.env.local'],
-    }, {
-      // `.env.local` was NOT approved.
-      approvedKeys: new Set(['PORT']),
-      aliasByPath: new Map(),
-    });
+    const { sources } = await loadEnvWithProvenance(
+      runtime({}),
+      {
+        envFilePath: ['.env.local'],
+      },
+      {
+        // `.env.local` was NOT approved.
+        approvedKeys: new Set(['PORT']),
+        aliasByPath: new Map(),
+      },
+    );
     expect(sources.get('PORT')).toEqual({
       origin: 'file',
       overriddenSourceAliases: [],
@@ -76,10 +94,14 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
   });
 
   it('records an environment-only key with no displacement', async () => {
-    const { sources } = await loadEnvWithProvenance(runtime({ FRESH: 'yes' }), {}, {
-      approvedKeys: new Set(['FRESH']),
-      aliasByPath: new Map(),
-    });
+    const { sources } = await loadEnvWithProvenance(
+      runtime({ FRESH: 'yes' }),
+      {},
+      {
+        approvedKeys: new Set(['FRESH']),
+        aliasByPath: new Map(),
+      },
+    );
     expect(sources.get('FRESH')).toEqual({ origin: 'environment', overriddenSourceAliases: [] });
   });
 
@@ -89,7 +111,10 @@ describe('loadEnvWithProvenance | precedence evidence', () => {
       { envFilePath: ['.env.local', '.env'] },
       {
         approvedKeys: new Set(['PORT']),
-        aliasByPath: new Map([['.env.local', 'dotenv-local'], ['.env', 'dotenv']]),
+        aliasByPath: new Map([
+          ['.env.local', 'dotenv-local'],
+          ['.env', 'dotenv'],
+        ]),
       },
     );
     // The merge itself is unchanged: every key still loads.

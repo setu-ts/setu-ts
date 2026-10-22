@@ -130,8 +130,8 @@ async function redisReachable(url: string): Promise<boolean> {
   }
 }
 
-/** Where the broker proof looks for a Redis, matching the transport default. */
-const REDIS_URL = process.env['REDIS_URL'] ?? 'redis://127.0.0.1:6379';
+/** Explicit opt-in: never discover or use a developer's local Redis implicitly. */
+const REDIS_URL = process.env['REDIS_URL'];
 
 /**
  * The probe for a broker workspace: publish from one service, receive in another.
@@ -294,7 +294,7 @@ describe('a three-service workspace — end to end', () => {
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      })
+      }),
     );
 
     try {
@@ -318,7 +318,7 @@ describe('a three-service workspace — end to end', () => {
         expect(ready, `${peer} never bound ${url}`).toBe(true);
       }
 
-      const result = await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE) as Record<
+      const result = (await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE)) as Record<
         string,
         { url: string; status: number; body: string }
       >;
@@ -357,11 +357,11 @@ describe('a three-service workspace — end to end', () => {
         cwd: `${ws}/apps/${member}`,
         stdout: 'piped',
         stderr: 'piped',
-      })
+      }),
     );
 
     try {
-      const result = await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE) as Record<
+      const result = (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
         string,
         { status: number; body: string }
       >;
@@ -391,8 +391,9 @@ describe('a three-service workspace — end to end', () => {
   // The transport that actually leaves the process. Guarded on a live Redis and
   // reported when absent, never silently skipped as a pass.
   it('delivers a message from one service to another over the redis broker', async (context) => {
-    if (!(await redisReachable(REDIS_URL))) {
-      context.skip('Redis backend is unavailable');
+    if (REDIS_URL === undefined || !(await redisReachable(REDIS_URL))) {
+      context.skip('Redis backend opt-in (REDIS_URL) is absent or unavailable');
+      return;
     }
 
     const ws = await mesh('redis');
@@ -449,10 +450,16 @@ describe('a three-service workspace — end to end', () => {
         expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
-      for (const seam of ['controllers', 'middleware', 'plugins']) {
+      for (const seam of ['controllers', 'middleware', 'plugins', 'modules']) {
         expect((await nodeFs.stat(`${dir}/src/${seam}/index.ts`)).isFile()).toBe(true);
       }
       expect((await nodeFs.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile()).toBe(true);
+      expect(await nodeFs.readFile(`${dir}/setu.config.ts`, 'utf8')).toContain(
+        'registerModules(app.router, app.services)',
+      );
+      for (const file of ['test/support/server.ts', 'test/e2e/app.e2e.test.ts']) {
+        expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
+      }
     }
   });
 
@@ -508,7 +515,7 @@ console.log('__PROBE_RESULT__' + JSON.stringify(out));
 await app.stop();
 Deno.exit(0);
 `;
-    const result = await bootAndProbe(project, probe) as Record<
+    const result = (await bootAndProbe(project, probe)) as Record<
       string,
       { status: number; body: string }
     >;

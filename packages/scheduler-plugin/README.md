@@ -47,6 +47,42 @@ await scheduler.pause('poll-inbox');
 await scheduler.resume('poll-inbox');
 ```
 
+## Timing and registration refusals
+
+`delay`, `every`, `cron` and retry backoff honour long waits in timer chunks of at most 2147483647
+ms, checking the wall clock on every wake. A job never runs before its due time, even after an early
+wake or a clock step backwards. There is no upper limit on a delay or interval: `delay(30 days)`
+waits the full 30 days, and monthly cron jobs wait until their next due instant. Previously, Node,
+Deno and Bun clamped an over-limit timer to about 1 ms, so these jobs could fire early.
+
+Invalid time values now make the async registration call reject with a `RangeError`:
+
+| Registration             | Refused value                   | Message fragment                           |
+| ------------------------ | ------------------------------- | ------------------------------------------ |
+| `delay`                  | `delayMs` not finite or < 0     | `delayMs must be a finite number >= 0`     |
+| `every`                  | `intervalMs` not finite or <= 0 | `intervalMs must be a finite number > 0`   |
+| `delay`, `every`, `cron` | `retry.delay` not finite or < 0 | `retry.delay must be a finite number >= 0` |
+
+Each message names the job, option and rule without echoing the rejected value. Zero `delayMs` and
+zero `retry.delay` are accepted; large finite values are accepted. Fix invalid values before
+registering jobs.
+
+An exponential backoff that overflows to `Infinity` with an enormous retry limit now waits forever
+instead of retrying after about 1 ms.
+
+Disconnect, remove and pause cancel pending retry backoff without another attempt. A one-shot that
+already succeeded or exhausted its retries is removed even while paused and is not re-run. A
+one-shot paused mid-retry stays registered; resume starts it from attempt 1 using the original
+delay. Recurring jobs resume at the next cron/interval boundary. Remaining backoff is discarded. A
+cancelled fire is not reported as success: diagnostics settle it with `false`, counting it in
+`failed` because there is no separate cancellation counter. An in-flight handler may still reach a
+final success or failure after cancellation. If a job is resumed while that handler is still
+running, it is armed only once the handler settles, so the two never overlap. Disconnect releases
+every one-shot `:once` slot this service holds, each release bounded by `acquireTimeoutMs`;
+`resume()` rejects on a disconnected service, and after reconnecting a one-shot re-claims its slot,
+so a replica that claimed it meanwhile runs the job instead. A pause, remove or disconnect during
+that re-claim wins over the resume, and a second `resume()` waits for the first.
+
 ## Options
 
 | Option            | Type                                                                 | Default  | Description                                                                                                                                                                                     |
@@ -101,7 +137,7 @@ await app.start({ port: 3000 });
 
 Without `distributedLock`, a process-local `MemoryLock` is used — fine for a single instance, but
 **every replica will run every job**. Set `{ enabled: true, storage: 'redis' }` to use `RedisLock`
-(over `npm:ioredis`, lazily imported or injected) so only one replica executes each firing.
+(over `ioredis`, lazily imported or injected) so only one replica executes each firing.
 
 Every lock acquire is bounded, whichever lock is in use. An acquire still unsettled after
 `acquireTimeoutMs` is a skipped fire: it is logged, counted as `lockFailed` in the execution
@@ -123,6 +159,22 @@ it belongs to the caller.
 Behaviours run inside that lock. A replica that does not acquire it runs neither the behaviour chain
 nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
 the handler receives its original job directly and no chain is allocated.
+
+## Health
+
+The `scheduler` indicator reports `up` while the scheduler is connected and `down` after disconnect.
+Its `data` includes `connected` and `lock: { reachable }`, where `reachable` is `true`, `false`, or
+`'unknown'`. A shared lock outage stops job fires while request serving can continue, so
+reachability does not change lifecycle status or remove the replica from readiness. Alert on
+`data.lock.reachable` to detect lock outages.
+
+`IDistributedLock.isHealthy?(): Promise<boolean | undefined>` is optional: an absent probe, an
+`undefined` answer, or a probe that does not settle within 2 s reports `'unknown'`. The indicator
+caches each answer for 5 s, uses runtime clocks and timers, and probes only while connected.
+`MemoryLock` always answers `true`. `RedisLock` answers `false` before connect and after disconnect;
+while connected it calls the optional `IRedisLockClient.ping?(): Promise<unknown>`. A resolved PING
+means `true`, a rejected PING means `false`, and a client without PING means `'unknown'`. A built
+client's PING also uses its configured `commandTimeout`.
 
 ## Execution observations
 
@@ -156,7 +208,7 @@ and thrown errors are never captured; without the option nothing is observed at 
 | `SchedulerJobEntry`           | type      |
 | `SchedulerJobHandler`         | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

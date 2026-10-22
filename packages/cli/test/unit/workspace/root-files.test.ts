@@ -1,3 +1,4 @@
+import { VERSION } from '../../../src/constants.ts';
 import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
@@ -21,22 +22,52 @@ const DENO = workspaceProfile('deno');
  * @returns Its contents
  */
 function contentsOf(path: string): string {
-  const file = workspaceRootFiles('acme', 3000, HTTP, DENO).find((candidate) =>
-    candidate.path === path
+  const file = workspaceRootFiles('acme', 3000, HTTP, DENO).find(
+    (candidate) => candidate.path === path,
   );
   expect(file).toBeDefined();
   return file?.contents ?? '';
 }
 
 describe('workspaceRootFiles', () => {
+  it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
+    for (const [runtime, invocation] of [
+      ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
+      ['node', `npx @setu-ts/cli@${VERSION}`],
+      ['bun', `bunx @setu-ts/cli@${VERSION}`],
+    ] as const) {
+      const readme = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime)).find(
+        (file) => file.path === 'README.md',
+      )!.contents;
+      const paragraph = readme.split('## Ports\n')[1]!.split('\n\n')[1]!;
+      expect(paragraph.replaceAll('\n', ' ')).toContain(
+        `\`${invocation} workspace ports --reallocate\``,
+      );
+      for (const line of paragraph.split('\n')) expect(line.length).toBeLessThanOrEqual(100);
+    }
+  });
+
   it('emits the root files and its development runner', () => {
-    expect(workspaceRootFiles('acme', 3000, HTTP, DENO).map((file) => file.path).sort()).toEqual([
-      '.gitignore',
-      'README.md',
-      WORKSPACE_MANIFEST,
-      'deno.json',
-      'scripts/dev.ts',
-    ].sort());
+    expect(
+      workspaceRootFiles('acme', 3000, HTTP, DENO)
+        .map((file) => file.path)
+        .sort(),
+    ).toEqual(
+      ['.gitignore', 'README.md', WORKSPACE_MANIFEST, 'deno.json', 'scripts/dev.ts'].sort(),
+    );
+  });
+
+  it('ignores the React Router typegen directory for members too (V9-11)', () => {
+    // Unanchored, so a full-stack member's `apps/<member>/.react-router/` is
+    // covered by the same rule as the root's.
+    expect(contentsOf('.gitignore')).toContain('.react-router/\n');
+  });
+
+  it('ignores each member dotenv file, and keeps the example (V9-39)', () => {
+    const ignore = contentsOf('.gitignore');
+    expect(ignore).toContain('\n.env\n');
+    expect(ignore).toContain('.env.*');
+    expect(ignore).toContain('!.env.example');
   });
 
   it('plans no path twice', () => {
@@ -89,8 +120,8 @@ describe('workspaceRootFiles', () => {
   });
 
   it('records the base port it was given', () => {
-    const file = workspaceRootFiles('acme', 4100, HTTP, DENO).find((f) =>
-      f.path === WORKSPACE_MANIFEST
+    const file = workspaceRootFiles('acme', 4100, HTTP, DENO).find(
+      (f) => f.path === WORKSPACE_MANIFEST,
     );
     expect(JSON.parse(file?.contents ?? '{}')).toMatchObject({ basePort: 4100 });
   });
@@ -98,7 +129,7 @@ describe('workspaceRootFiles', () => {
   it('names the workspace and the add-a-service command in its README', () => {
     const readme = contentsOf('README.md');
     expect(readme).toContain('# acme');
-    expect(readme).toContain('setu generate app orders');
+    expect(readme).toContain(`deno run -A npm:@setu-ts/cli@${VERSION} generate app orders`);
     expect(readme).toContain(WORKSPACE_MANIFEST);
   });
 });
@@ -151,5 +182,9 @@ describe('the workspace README transport section', () => {
   it('carries the transport operational note when it has one', () => {
     expect(readmeFor('pubsub')).toContain('Topics are NOT');
     expect(readmeFor('service-bus')).toContain('NO entities');
+    // V9-17: the subject scope every member must use, stated where a workspace
+    // developer will look before publishing.
+    expect(readmeFor('nats')).toContain('must start with `app.`');
+    expect(readmeFor('nats')).toContain("topic: 'app.realtime'");
   });
 });

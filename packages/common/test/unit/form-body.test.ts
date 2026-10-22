@@ -74,9 +74,7 @@ describe('parseFormBody — the web-standard semantic rows (plan §1.1)', () => 
   });
 
   it('a part with NO filename is a string, whatever its Content-Type said', () => {
-    const form = parseMultipartFixture([
-      { name: 'field', mime: 'text/plain', data: 'x' },
-    ]);
+    const form = parseMultipartFixture([{ name: 'field', mime: 'text/plain', data: 'x' }]);
     expect(form.get('field')).toBe('x');
   });
 
@@ -114,11 +112,14 @@ describe('parseFormBody — the web-standard semantic rows (plan §1.1)', () => 
     ]);
     expect(Array.from(form.entries())).toEqual([
       ['a', '1'],
-      ['file', {
-        filename: 'b.bin',
-        mimeType: 'application/octet-stream',
-        data: new TextEncoder().encode('zz'),
-      }],
+      [
+        'file',
+        {
+          filename: 'b.bin',
+          mimeType: 'application/octet-stream',
+          data: new TextEncoder().encode('zz'),
+        },
+      ],
       ['a', '2'],
     ]);
   });

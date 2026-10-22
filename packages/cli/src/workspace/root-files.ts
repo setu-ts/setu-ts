@@ -8,7 +8,7 @@
  * @module
  */
 
-import { PROGRAM_NAME } from '../constants.ts';
+import { cliInvocation } from '../templates/project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import {
   MEMBERS_DIR,
@@ -68,47 +68,48 @@ export function workspaceRootFiles(
   // npm's — so there are two shapes here, not three. The command that runs every
   // member differs per toolchain even where the shape does not, which is why it
   // comes from the profile rather than from this branch.
-  const rootManifest = profile.manifestKind === 'deno'
-    ? {
-      path: 'deno.json',
-      contents: `${
-        JSON.stringify(
-          {
-            workspace: globs,
-            tasks: { dev: profile.runAll },
-            // Root-only, and inherited by every member: a member declaring them
-            // is redundant at best and refused at worst.
-            ...rootManifestSettings(),
-            // So the Node `setu` CLI can import a member's `setu.config.ts`:
-            // `deno install` links every member's npm packages, and each
-            // library declaring a `package.json`, into this `node_modules`
-            // (M111d §3.4).
-            nodeModulesDir: 'auto',
-          },
-          null,
-          2,
-        )
-      }\n`,
-    }
-    : {
-      path: 'package.json',
-      contents: `${
-        JSON.stringify(
-          {
-            name,
-            // A root that is never published and never installed as a package:
-            // npm refuses to treat a manifest as a workspace root without it.
-            private: true,
-            // Globs relative to the root, without the `./` Deno's take — npm
-            // matches them as written.
-            workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
-            scripts: { dev: profile.runAll },
-          },
-          null,
-          2,
-        )
-      }\n`,
-    };
+  const rootManifest =
+    profile.manifestKind === 'deno'
+      ? {
+          path: 'deno.json',
+          contents: `${JSON.stringify(
+            {
+              workspace: globs,
+              tasks: { dev: profile.runAll },
+              // Root-only, and inherited by every member: a member declaring them
+              // is redundant at best and refused at worst.
+              ...rootManifestSettings(),
+              // So the Node `setu` CLI can import a member's `setu.config.ts`:
+              // `deno install` links every member's npm packages, and each
+              // library declaring a `package.json`, into this `node_modules`
+              // (M111d §3.4).
+              nodeModulesDir: 'auto',
+            },
+            null,
+            2,
+          )}\n`,
+        }
+      : {
+          path: 'package.json',
+          contents: `${JSON.stringify(
+            {
+              name,
+              // A root that is never published and never installed as a package:
+              // npm refuses to treat a manifest as a workspace root without it.
+              private: true,
+              // Globs relative to the root, without the `./` Deno's take — npm
+              // matches them as written.
+              workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
+              scripts: { dev: profile.runAll },
+              // Scarf (pulled in by a member's `swagger-ui-dist`) reads its
+              // opt-out from the package.json at npm's INIT_CWD — this root —
+              // and ignores a member's own setting (M113f audit R2-F6).
+              scarfSettings: { enabled: false },
+            },
+            null,
+            2,
+          )}\n`,
+        };
 
   const readme = `# ${name}
 
@@ -117,7 +118,7 @@ A [Setu-TS](https://github.com/setu-ts/setu-ts) workspace: one repository, many 
 ## Add a service
 
 \`\`\`bash
-${PROGRAM_NAME} generate app orders --template microservice
+${cliInvocation(profile.runtime)} generate app orders --template microservice
 \`\`\`
 
 Each service lives in \`${MEMBERS_DIR}/<name>/\`, binds a port the CLI allocates, and is registered in every
@@ -134,7 +135,7 @@ ${profile.runScript('dev')}
 When a service needs another one during startup, declare it as it is added:
 
 \`\`\`bash
-${PROGRAM_NAME} generate app billing --template microservice --depends-on orders
+${cliInvocation(profile.runtime)} generate app billing --template microservice --depends-on orders
 \`\`\`
 
 The generated dev runner starts prerequisites first and waits for each prerequisite's \`/ready\`
@@ -145,29 +146,31 @@ where a service is, not whether this service must wait for it at startup.
 
 \`${WORKSPACE_MANIFEST}\` records the port each service binds. It is the source the generated
 \`src/discovery/services.ts\` modules are rendered from; change a port there and the next
-\`${PROGRAM_NAME} generate app\` rewrites them all.
+\`${cliInvocation(profile.runtime)} generate app\` rewrites them all.
 
-If a local process occupies a port, the CLI skips it during allocation. To repair existing
-assignments, stop the services and run \`${PROGRAM_NAME} workspace ports --reallocate\`; it rewrites the
+${wrapProse(`If a local process occupies a port, the CLI skips it during allocation. To repair existing
+assignments, stop the services and run \`${cliInvocation(profile.runtime)} workspace ports --reallocate\`; it rewrites the
 manifest, maps, and deployment artifacts together. It assigns from the base port upward, so a
-service still running holds its own port and is moved off it.
+service still running holds its own port and is moved off it.`)}
 
 ## Transport
 
 Services talk over **${transport.name}** — ${transport.description}.${
-    transport.connection === undefined ? '' : `
+    transport.connection === undefined
+      ? ''
+      : `
 
-${
-      wrapProse(
-        `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
-          `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
-          `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
-          `the local address, and the generated Compose stack overrides the variable with the ` +
-          `broker's service name, because two containers do not share a loopback interface.`,
-      )
-    }${transport.connection.note === undefined ? '' : `\n\n${transport.connection.note}`}`
+${wrapProse(
+  `Every member reads its connection value from \`${transport.connection.variable}\`, ` +
+    `falling back to \`${transportUrl ?? transport.connection.localDefault}\` when that ` +
+    `is unset. Both halves matter: \`${profile.runScript('dev')}\` on this machine needs ` +
+    `the local address, and the generated Compose stack overrides the variable with the ` +
+    `broker's service name, because two containers do not share a loopback interface.`,
+)}${transport.connection.note === undefined ? '' : `\n\n${wrapProse(transport.connection.note)}`}`
   }${
-    transport.compose === undefined ? '' : `
+    transport.compose === undefined
+      ? ''
+      : `
 
 ## Run the stack
 
@@ -202,11 +205,16 @@ members can only meet on a bus they share. Every service added later inherits it
     { path: 'README.md', contents: readme },
     {
       path: '.gitignore',
-      contents: profile.manifestKind === 'deno'
-        ? 'node_modules/\ncoverage/\n'
-        // Both locations: Bun installs into each MEMBER's node_modules as well as
-        // the root, measured — an ignore listing only the root would commit them.
-        : 'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n',
+      contents:
+        profile.manifestKind === 'deno'
+          ? 'node_modules/\ncoverage/\n.react-router/\n.env\n.env.*\n!.env.example\n'
+          : // Both locations: Bun installs into each MEMBER's node_modules as well as
+            // the root, measured — an ignore listing only the root would commit them.
+            // `.react-router/` is unanchored, so it covers a full-stack member's
+            // typegen directory as well as the root's. The dotenv rules are
+            // unanchored too, so they cover each member's own `.env`.
+            'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n' +
+            '.react-router/\n.env\n.env.*\n!.env.example\n',
     },
   ];
 }

@@ -66,6 +66,13 @@ export interface BunServeHost {
  */
 export interface BunServer {
   /**
+   * Returns the socket peer; older injected hosts may omit this operation.
+   * @param request - The native server request
+   * @returns The peer address, or null when unavailable
+   * @since 0.10.0
+   */
+  requestIP?(request: Request): { address: string } | null;
+  /**
    * Stops the server gracefully.
    */
   stop(): void;
@@ -79,10 +86,7 @@ export interface BunServer {
    * @param options - Per-socket data and response headers for the handshake
    * @returns `true` when the upgrade succeeded and no response should be sent
    */
-  upgrade?(
-    request: Request,
-    options: { data: BunSocketData; headers?: Headers },
-  ): boolean;
+  upgrade?(request: Request, options: { data: BunSocketData; headers?: Headers }): boolean;
 }
 
 /**
@@ -205,7 +209,11 @@ export class BunHttpServerHandle {
       request: Request,
       server: BunServer,
     ): Response | undefined | Promise<Response | undefined> => {
-      const frameworkRequest = mapWebRequestToFrameworkRequest(request, this.#maxBodyBytes);
+      const frameworkRequest = mapWebRequestToFrameworkRequest(
+        request,
+        this.#maxBodyBytes,
+        server.requestIP?.(request)?.address,
+      );
 
       if (!this.#handler) {
         return new Response('Handler not set', { status: 500 });
@@ -314,7 +322,7 @@ export class BunHttpAdapter implements IHttpAdapter {
     return this.#handle.createFetchHandler()(request);
   }
 
-  // deno-lint-ignore require-await
+  // eslint-disable-next-line require-await
   async listen(port: number, hostname?: string): Promise<ServerHandle> {
     const server = this.#host.serve({
       port,

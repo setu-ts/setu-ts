@@ -11,8 +11,13 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { classifyDriverError } from '../../src/errors/classify.ts';
-import { DatabaseUnavailableError, SerializationConflictError } from '../../src/errors.ts';
+import { DatabaseSync } from 'node:sqlite';
+import { classifyDriverError, isUnansweredConnect } from '../../src/errors/classify.ts';
+import {
+  DatabaseTimeoutError,
+  DatabaseUnavailableError,
+  SerializationConflictError,
+} from '../../src/errors.ts';
 import { DuplicateKeyError } from '@setu-ts/common';
 import type { DatabaseAdapterType } from '../../src/interfaces/index.ts';
 
@@ -68,9 +73,9 @@ describe('classifyDriverError — unavailable signals (503)', () => {
   });
 
   it('the pg pool timeout anchor, which carries no code', () => {
-    expect(
-      classifyDriverError(new Error('timeout exceeded when trying to connect')),
-    ).toBe('unavailable');
+    expect(classifyDriverError(new Error('timeout exceeded when trying to connect'))).toBe(
+      'unavailable',
+    );
   });
 
   it('MongoDB MongoNetworkError by name', () => {
@@ -164,6 +169,50 @@ const DUPLICATE_SIGNALS: ReadonlyArray<{
 ];
 
 describe('classifyDriverError — duplicate-key signals (409, not retryable)', () => {
+  it('classifies a real node:sqlite duplicate even with its string code', () => {
+    const database = new DatabaseSync(':memory:');
+    try {
+      database.exec('CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1)');
+      let error: unknown;
+      try {
+        database.exec('INSERT INTO t VALUES (1)');
+      } catch (caught) {
+        error = caught;
+      }
+      expect(error).toMatchObject({
+        message: 'UNIQUE constraint failed: t.id',
+        code: 'ERR_SQLITE_ERROR',
+        errcode: 1555,
+      });
+      expect(classifyDriverError(error, 'drizzle')).toBe('duplicate');
+      expect(classifyDriverError(new Error('Failed query', { cause: error }))).toBe('duplicate');
+    } finally {
+      database.close();
+    }
+  });
+
+  for (const anchor of [
+    'UNIQUE constraint failed',
+    'UNIQUE constraint failed: t.id',
+    'D1_ERROR: UNIQUE constraint failed: t.id',
+  ]) {
+    it(`does not classify quoted SQLite anchor ${anchor} as a duplicate`, () => {
+      const driver = Object.assign(
+        new Error(`invalid input syntax for type integer: "${anchor}"`),
+        { code: '22P02' },
+      );
+      for (const error of [
+        driver,
+        new Error(`Failed query: insert into "numbers" values ($1)\nparams: ${anchor}`, {
+          cause: driver,
+        }),
+        new Error(`Failed query: insert into "numbers" values ($1)\nparams: ${anchor}`),
+      ]) {
+        expect(classifyDriverError(error, 'drizzle')).toBeNull();
+      }
+    });
+  }
+
   for (const { backend, error, adapterType } of DUPLICATE_SIGNALS) {
     it(backend, () => {
       expect(classifyDriverError(error, adapterType)).toBe('duplicate');
@@ -185,10 +234,15 @@ describe('classifyDriverError — duplicate-key signals (409, not retryable)', (
   });
 
   it('a duplicate signal outranks a retryable label beside it', () => {
-    expect(classifyDriverError({
-      code: 11000,
-      errorLabels: ['TransientTransactionError'],
-    }, 'mongodb')).toBe('duplicate');
+    expect(
+      classifyDriverError(
+        {
+          code: 11000,
+          errorLabels: ['TransientTransactionError'],
+        },
+        'mongodb',
+      ),
+    ).toBe('duplicate');
   });
 });
 
@@ -272,12 +326,75 @@ describe('classifyDriverError — already-classified errors', () => {
   });
 
   it('a DuplicateKeyError returns null — the adapters raise it themselves', () => {
-    expect(classifyDriverError(new DuplicateKeyError('dup', { cause: { code: '23505' } })))
-      .toBeNull();
+    expect(
+      classifyDriverError(new DuplicateKeyError('dup', { cause: { code: '23505' } })),
+    ).toBeNull();
   });
 
   it('a package-owned DatabaseUnavailableError returns null too', () => {
     const mine = new DatabaseUnavailableError('pool exhausted', { cause: { code: '08006' } });
     expect(classifyDriverError(mine)).toBe(null);
+  });
+});
+
+describe('M113g measured pg timeout signals', () => {
+  for (const [message, expected] of [
+    ['timeout exceeded when trying to connect', 'unavailable'],
+    ['Connection terminated due to connection timeout', 'unavailable'],
+    ['Query read timeout', 'timeout'],
+  ] as const) {
+    it(`classifies ${message} including Drizzle wrappers`, () => {
+      const error = new Error(message);
+      expect(classifyDriverError(error, 'drizzle')).toBe(expected);
+      expect(classifyDriverError(new Error('Failed query', { cause: error }), 'drizzle')).toBe(
+        expected,
+      );
+      expect(isUnansweredConnect(error)).toBe(true);
+      expect(isUnansweredConnect(new Error('Failed query', { cause: error }))).toBe(true);
+    });
+    it(`does not classify client text quoting ${message} as a pg timeout`, () => {
+      const driver = Object.assign(
+        new Error(`invalid input syntax for type integer: "${message}"`),
+        { code: '22P02' },
+      );
+      const wrapper = new Error(
+        `Failed query: insert into "numbers" values ($1)\nparams: ${message}`,
+        {
+          cause: driver,
+        },
+      );
+      for (const error of [
+        driver,
+        wrapper,
+        new Error(`prefix ${message}`),
+        new Error(`${message}\n`),
+      ]) {
+        expect(classifyDriverError(error, 'drizzle')).toBeNull();
+        expect(isUnansweredConnect(error)).toBe(false);
+      }
+    });
+    it(`a string code anywhere in the chain vetoes the exact pg message ${message}`, () => {
+      for (const code of ['22P02', '']) {
+        for (const error of [
+          Object.assign(new Error(message), { code }),
+          new Error(message, { cause: { code } }),
+          Object.assign(new Error('Failed query', { cause: new Error(message) }), { code }),
+        ]) {
+          expect(classifyDriverError(error, 'drizzle')).toBeNull();
+          expect(isUnansweredConnect(error)).toBe(false);
+        }
+      }
+      const numericCode = Object.assign(new Error(message), { code: 123 });
+      expect(classifyDriverError(numericCode, 'drizzle')).toBe(expected);
+      expect(isUnansweredConnect(numericCode)).toBe(true);
+    });
+  }
+  it('passes already classified timeouts through without rewrapping', () => {
+    expect(
+      classifyDriverError(
+        new DatabaseTimeoutError('bounded', { cause: new Error('Query read timeout') }),
+      ),
+    ).toBeNull();
+    expect(isUnansweredConnect({ code: 'ECONNREFUSED' })).toBe(false);
   });
 });

@@ -111,8 +111,9 @@ export class ReplyInboxObject {
  * the same swap applies to it.
  */
 const WORKERS_SWAP = {
-  removePackages: ['messaging-plugin', 'queue-plugin'],
+  removePackages: ['messaging-plugin', 'queue-plugin', 'openapi-plugin'],
   addPlugins: [
+    { pkg: 'openapi-plugin', symbol: 'OpenApiPlugin', args: "{ swagger: { assets: 'cdn' } }" },
     {
       pkg: 'cloudflare-plugin',
       symbol: 'CloudflarePlugin',
@@ -127,7 +128,8 @@ const WORKERS_SWAP = {
       // Pre-wrapped exactly as `deno fmt` would produce it: the single-line
       // form is ~150 chars against the emitted `lineWidth: 100`, so a fresh
       // scaffold failed its own `deno fmt --check` (X2-4's class).
-      workersArgs: '{\n' +
+      workersArgs:
+        '{\n' +
         '        env,\n' +
         '        ...(waitUntil ? { waitUntil } : {}),\n' +
         "        messaging: { binding: 'MESSAGES', rpc: { binding: 'REPLY_INBOX' } },\n" +

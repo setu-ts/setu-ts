@@ -109,8 +109,7 @@ describe('buildSelect', () => {
         }),
       ),
     ).toEqual({
-      sql:
-        'SELECT * FROM "users" WHERE "active" = ?1 AND (instr("name", ?2) > 0 OR "age" >= ?3 OR "id" IN (?4, ?5))',
+      sql: 'SELECT * FROM "users" WHERE "active" = ?1 AND (instr("name", ?2) > 0 OR "age" >= ?3 OR "id" IN (?4, ?5))',
       params: [true, 'ada', 21, 'u1', 'u2'],
     });
   });
@@ -229,18 +228,14 @@ describe('buildSelect', () => {
     expect(() => buildSelect(TARGET, query({ orderBy: { [bad]: 'asc' } }))).toThrow(
       CloudflareUnsupportedError,
     );
-    expect(() => buildSelect(TARGET, query({ select: [bad] }))).toThrow(
-      CloudflareUnsupportedError,
-    );
+    expect(() => buildSelect(TARGET, query({ select: [bad] }))).toThrow(CloudflareUnsupportedError);
   });
 
   it('accepts exactly the parameter budget and refuses one more', () => {
     const atLimit = Object.fromEntries(
       Array.from({ length: D1_MAX_BOUND_PARAMS }, (_, i) => [`c${i}`, i]),
     );
-    expect(buildSelect(TARGET, query({ where: atLimit })).params).toHaveLength(
-      D1_MAX_BOUND_PARAMS,
-    );
+    expect(buildSelect(TARGET, query({ where: atLimit })).params).toHaveLength(D1_MAX_BOUND_PARAMS);
 
     const overLimit = { ...atLimit, one_too_many: 1 };
     expect(() => buildSelect(TARGET, query({ where: overLimit }))).toThrow(
@@ -295,9 +290,7 @@ describe('buildSelectById', () => {
     const keys = Array.from({ length: 101 }, (_, i) => `c${i}`);
     // A record with 101 string columns, each requiring a bound value.
     const wide = Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, string | number>;
-    expect(() => buildSelectById({ table: 'x', primaryKey: keys }, wide)).toThrow(
-      /key predicate/,
-    );
+    expect(() => buildSelectById({ table: 'x', primaryKey: keys }, wide)).toThrow(/key predicate/);
   });
 });
 
@@ -334,12 +327,12 @@ describe('buildUpdate', () => {
   });
 
   it('emits multi-column key predicates in declaration order for a composite target', () => {
-    expect(buildUpdate(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' }, { status: 'shipped' }))
-      .toEqual({
-        sql:
-          'UPDATE "orders" SET "status" = ?1 WHERE "tenantId" = ?2 AND "orderId" = ?3 RETURNING *',
-        params: ['shipped', 't1', 'o1'],
-      });
+    expect(
+      buildUpdate(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' }, { status: 'shipped' }),
+    ).toEqual({
+      sql: 'UPDATE "orders" SET "status" = ?1 WHERE "tenantId" = ?2 AND "orderId" = ?3 RETURNING *',
+      params: ['shipped', 't1', 'o1'],
+    });
   });
 
   it('refuses an empty patch', () => {
@@ -374,8 +367,7 @@ describe('buildDelete', () => {
 
   it('returns the composite key columns in declaration order', () => {
     expect(buildDelete(COMPOSITE_TARGET, { tenantId: 't1', orderId: 'o1' })).toEqual({
-      sql:
-        'DELETE FROM "orders" WHERE "tenantId" = ?1 AND "orderId" = ?2 RETURNING "tenantId", "orderId"',
+      sql: 'DELETE FROM "orders" WHERE "tenantId" = ?1 AND "orderId" = ?2 RETURNING "tenantId", "orderId"',
       params: ['t1', 'o1'],
     });
   });
@@ -407,13 +399,17 @@ describe('buildCount', () => {
 
   it('counts through a portable expression', () => {
     expect(
-      buildCount(TARGET, {}, {
-        type: 'and',
-        filters: [
-          { type: 'comparison', field: 'age', operator: 'gt', value: 18 },
-          { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
-        ],
-      }),
+      buildCount(
+        TARGET,
+        {},
+        {
+          type: 'and',
+          filters: [
+            { type: 'comparison', field: 'age', operator: 'gt', value: 18 },
+            { type: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
+          ],
+        },
+      ),
     ).toEqual({
       sql: 'SELECT COUNT(*) AS "count" FROM "users" WHERE ("age" > ?1 AND "role" = ?2)',
       params: [18, 'admin'],

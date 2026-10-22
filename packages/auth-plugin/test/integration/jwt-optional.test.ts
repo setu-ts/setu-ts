@@ -66,9 +66,7 @@ describe('JWT-optional AuthPlugin', () => {
     const cookie = login.headers.getSetCookie()[0]?.split(';')[0];
     expect(cookie).toBeDefined();
 
-    const response = await app.fetch(
-      new Request(`${BASE}/me`, { headers: { cookie: cookie! } }),
-    );
+    const response = await app.fetch(new Request(`${BASE}/me`, { headers: { cookie: cookie! } }));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ id: 'session-user' });
   });

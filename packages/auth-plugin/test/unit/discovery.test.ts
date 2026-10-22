@@ -14,14 +14,16 @@ function setup(issuerValue: string, document: () => { status?: number; body: unk
     'http://localhost:8080/certs': { body: { keys: [KEY] } },
   });
   const failures: string[] = [];
-  const compiled = compileIssuers([{
-    name: 'idp',
-    issuer: issuerValue,
-    audience: 'api',
-    keys: { discovery: true },
-    keySet: { ttlMs: 1000, minRefreshIntervalMs: 100 },
-    toPrincipal: () => null,
-  }])[0];
+  const compiled = compileIssuers([
+    {
+      name: 'idp',
+      issuer: issuerValue,
+      audience: 'api',
+      keys: { discovery: true },
+      keySet: { ttlMs: 1000, minRefreshIntervalMs: 100 },
+      toPrincipal: () => null,
+    },
+  ])[0];
   const keySet = new IssuerKeySet(compiled, runtime, fake.http, (_n, r) => failures.push(r));
   return { runtime, keySet, calls: fake.calls, failures };
 }
@@ -110,9 +112,12 @@ describe('discovery', () => {
   it('retries a failed discovery only after the cooldown', async () => {
     let fail = true;
     const t = setup('https://idp.test', () =>
-      fail ? { status: 500, body: 'no' } : {
-        body: { issuer: 'https://idp.test', jwks_uri: 'https://idp.test/certs' },
-      });
+      fail
+        ? { status: 500, body: 'no' }
+        : {
+            body: { issuer: 'https://idp.test', jwks_uri: 'https://idp.test/certs' },
+          },
+    );
     expect(await t.keySet.keys()).toBeNull();
     fail = false;
     expect(await t.keySet.keys()).toBeNull();

@@ -92,8 +92,9 @@ describe('PartitionKeyResolver', () => {
   it('reports a container definition carrying no partition key', async () => {
     const fake = createFakeCosmosClient({ containers: { odd: { partitionKeyPaths: [] } } });
     const resolver = new PartitionKeyResolver(fake.client.database('db'));
-    await expect(resolver.resolve(resolveCosmosTarget('odd', undefined)))
-      .rejects.toThrow(/no partition-key definition on container 'odd'/);
+    await expect(resolver.resolve(resolveCosmosTarget('odd', undefined))).rejects.toThrow(
+      /no partition-key definition on container 'odd'/,
+    );
   });
 
   it('renders a non-Error rejection from the definition read', async () => {
@@ -105,8 +106,9 @@ describe('PartitionKeyResolver', () => {
         read: () => Promise.reject('a bare string, not an Error'),
       }),
     });
-    await expect(resolver.resolve(resolveCosmosTarget('odd', undefined)))
-      .rejects.toThrow(/a bare string, not an Error/);
+    await expect(resolver.resolve(resolveCosmosTarget('odd', undefined))).rejects.toThrow(
+      /a bare string, not an Error/,
+    );
   });
 
   it('keeps a hostile non-Error rejection as the definition-read cause', async () => {
@@ -155,8 +157,9 @@ describe('two entity mappings sharing one container', () => {
       B: { container: 'shared', partitionKey: 'wrongField' },
     });
     await resolver.resolve(discovered);
-    await expect(resolver.resolve(conflicting))
-      .rejects.toThrow(/declares \/wrongField but the container declares \/tenantId/);
+    await expect(resolver.resolve(conflicting)).rejects.toThrow(
+      /declares \/wrongField but the container declares \/tenantId/,
+    );
     // The container definition is still read only once, so the guard costs no
     // extra round trip.
     expect(fake.recorder.definitionReads['shared']).toBe(1);

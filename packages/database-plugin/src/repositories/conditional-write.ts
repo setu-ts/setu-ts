@@ -5,13 +5,14 @@ import { UnsupportedQueryFeatureError } from '../errors.ts';
 
 /** A conditional update's result; unsupported is guaranteed to precede I/O. */
 type UpdateOutcome<Entity> =
-  | { outcome: 'applied'; row: Entity }
-  | { outcome: 'not-matched' }
-  | { outcome: 'unsupported' };
+  { outcome: 'applied'; row: Entity } | { outcome: 'not-matched' } | { outcome: 'unsupported' };
 /** A conditional delete's result. */
-type DeleteOutcome = { outcome: 'applied' } | { outcome: 'not-matched' } | {
-  outcome: 'unsupported';
-};
+type DeleteOutcome =
+  | { outcome: 'applied' }
+  | { outcome: 'not-matched' }
+  | {
+      outcome: 'unsupported';
+    };
 
 /**
  * Tries a native conditional update, exposing only the named unsupported refusal as fallback.

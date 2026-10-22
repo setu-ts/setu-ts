@@ -162,7 +162,10 @@ export class WorkerPoolService implements IWorkerPool {
   }
 
   /** Merges plugin defaults with the per-task-module overrides (§4.1). */
-  private resolveConfig(taskModule: string, host: IWorkerHost): {
+  private resolveConfig(
+    taskModule: string,
+    host: IWorkerHost,
+  ): {
     specifier: string;
     size: number;
     maxQueue: number;

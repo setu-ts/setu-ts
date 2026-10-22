@@ -1,5 +1,10 @@
 # @setu-ts/runtime
 
+Each adapter supplies `IRuntimeServices.reportError`: one JSON line to stderr on Node, Bun and Deno,
+or the platform log channel on Workers. Serialization and write failures never escape. The kernel
+and `errorHandler` use it only without a registered logger, for unhandled errors and handled 5xx
+respectively; handled 4xx stays silent without a logger.
+
 RuntimePlugin and runtime adapters providing `IRuntimeServices` for Node.js, Deno, Bun, and
 Cloudflare Workers.
 
@@ -96,6 +101,23 @@ means for `maxDepth`/`maxNodes`/`maxBatchSize` elsewhere in this framework. Omit
 the one way to say unbounded. A value that is not a non-negative integer throws at
 `RuntimePlugin(...)`; `NaN` in particular would make every comparison against the cap `false` and
 silently disable the bound, and `Number()` of an unset environment variable is exactly `NaN`.
+
+For in-process oversized-upload tests on Node 24 or Node 26 (up to 26.12.0), build the multipart
+request body from a `Blob` or use `inject()` instead of
+`app.fetch(new Request(..., { body: formData }))` with a file. Those releases bundle undici
+7.20.0–8.11.2, whose `FormData` request body throws an uncaught `ERR_INVALID_STATE` when the runtime
+cancels it after the cap is exceeded; undici 8.12.0 fixes it, and no released Node bundles that yet.
+Node 22, Bun and Deno are unaffected, as are real-socket uploads and `inject()`. The runtime still
+cancels oversized bodies to enforce the read bound.
+
+### Reporting a failed WebSocket handshake
+
+`HttpAdapterOptions` accepts `reportError?: (record: Readonly<Record<string, unknown>>) => void`
+(`@since 0.10.0`). `RuntimePlugin` supplies one resolved at CALL time: the registered logger's
+`error`, else `IRuntimeServices.reportError`, and a throwing logger never fails the report. The Node
+adapter calls it at most once per distinct message per handle when a server-side handshake fails —
+`ws` is missing or throws — before answering `500`; Deno, Workers and Bun ignore the option.
+Omitted, the refusal is silent as before.
 
 `adapters` and `httpAdapters` are marked `@internal` — they exist so unit tests can run without OS
 permissions or real runtime globals, not as application configuration.
@@ -228,5 +250,5 @@ package fits the plugin architecture.
 | ------------------ | -------- |
 | `defineWorkerTask` | function |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

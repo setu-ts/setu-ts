@@ -61,18 +61,16 @@ describe('inbox barrel exports', () => {
   });
 
   it('keeps the inbox internals out of the barrel', () => {
-    for (
-      const internal of [
-        'InboxService',
-        'inboxServiceOf',
-        'createInboxHealthIndicator',
-        'resolveInboxOptions',
-        'deriveInboxIds',
-        'idsFromMarker',
-        'isMarkerId',
-        'parseEnvelopeData',
-      ]
-    ) {
+    for (const internal of [
+      'InboxService',
+      'inboxServiceOf',
+      'createInboxHealthIndicator',
+      'resolveInboxOptions',
+      'deriveInboxIds',
+      'idsFromMarker',
+      'isMarkerId',
+      'parseEnvelopeData',
+    ]) {
       expect(internal in messaging).toBe(false);
     }
   });

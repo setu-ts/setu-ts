@@ -122,9 +122,7 @@ function assertByteLimit(option: string, value: number): void {
  * @param options - Middleware configuration
  * @returns A middleware function
  */
-export function createUploadMiddleware(
-  options?: UploadMiddlewareOptions,
-): MiddlewareFunction {
+export function createUploadMiddleware(options?: UploadMiddlewareOptions): MiddlewareFunction {
   const fieldname = options?.fieldname ?? DEFAULT_FIELDNAME;
   const maxSize = options?.maxSize ?? DEFAULT_MAX_SIZE;
   const allowedMimeTypes = options?.allowedMimeTypes;
@@ -178,9 +176,8 @@ export function createUploadMiddleware(
       // the request carries it, through the same shared `parseFormBody` when
       // it does not — the branch an out-of-repo `IRequest` takes. The guard
       // above guarantees this parse cannot reject with a `415`.
-      const form: FormBody = ctx.request.formData !== undefined
-        ? await ctx.request.formData()
-        : parseFormBody(body, ct);
+      const form: FormBody =
+        ctx.request.formData !== undefined ? await ctx.request.formData() : parseFormBody(body, ct);
 
       // The field's FILE parts only. `typeof value !== 'string'` is exactly
       // the web standard's discriminator — a part is a file when it declared
@@ -188,9 +185,9 @@ export function createUploadMiddleware(
       // `filename=""`); a truthiness test on `filename` here would wrongly
       // drop that case. A part with NO filename under the field name is a
       // plain form value now and is no longer an upload (CHANGELOG).
-      const files = form.getAll(fieldname).filter((value): value is FormFile =>
-        typeof value !== 'string'
-      );
+      const files = form
+        .getAll(fieldname)
+        .filter((value): value is FormFile => typeof value !== 'string');
 
       // Enforce maxFiles cap.
       if (maxFiles !== undefined && files.length > maxFiles) {

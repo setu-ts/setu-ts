@@ -1,6 +1,4 @@
-// deno-lint-ignore-file no-console -- this CI script reports progress, drift and skips.
-import { fromFileUrl } from 'jsr:@std/path@^1.1.6';
-import { startRegistryOverlay } from './registry-overlay.ts';
+/* eslint-disable no-console -- this CI script reports progress, drift and skips. */
 
 /**
  * @module
@@ -17,15 +15,21 @@ import { startRegistryOverlay } from './registry-overlay.ts';
  * cluster proof is opt-in locally and mandatory in CI:
  *
  * ```
- * deno task check:deploy                 # render + build + compose + generated
- * deno task check:deploy --render        # rendered manifests match the chart
- * deno task check:deploy --cluster       # real kind apply + serve + RBAC
- * deno task check:deploy --generated     # scaffold → build its image → serve it air-gapped
+ * pnpm run check:deploy                 # render + build + compose + generated
+ * pnpm run check:deploy --render        # rendered manifests match the chart
+ * pnpm run check:deploy --cluster       # real kind apply + serve + RBAC
+ * pnpm run check:deploy --generated     # scaffold → build its image → serve it air-gapped
  * ```
  *
  * A mode whose tooling is absent exits with {@linkcode SKIP_EXIT_CODE} (77) — the same code
  * `scripts/check-apps.ts` reserves — so a missing prerequisite can never read as a pass.
  */
+
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { run as runProcess } from './lib/run.ts';
+import { startRegistryOverlay } from './registry-overlay.ts';
+import { stat, readdir, readFile, mkdir, mkdtemp, rm, writeFile, rename } from 'node:fs/promises';
 
 /** Exit code reserved for "this check reported a skip", matching `scripts/check-apps.ts`. */
 export const SKIP_EXIT_CODE = 77;
@@ -210,7 +214,7 @@ const ALL_MODE_FLAGS = [
  * the named ones. An unrecognized flag is REFUSED rather than ignored, so a typo cannot silently
  * reduce the gate to nothing.
  *
- * @param args - Raw arguments, typically `Deno.args`
+ * @param args - Raw arguments, typically `process.argv.slice(2)`
  * @returns The modes to run
  * @throws {Error} If an argument is not one of the known mode flags
  */
@@ -221,9 +225,7 @@ export function parseModes(args: readonly string[]): ModeSet {
     throw new Error('--write modifies --render; it selects no check on its own');
   }
 
-  const unknown = args.filter(
-    (arg) => !(ALL_MODE_FLAGS as readonly string[]).includes(arg),
-  );
+  const unknown = args.filter((arg) => !(ALL_MODE_FLAGS as readonly string[]).includes(arg));
   if (unknown.length > 0) {
     throw new Error(
       `Unknown flag(s): ${unknown.join(', ')}. Known flags: ${ALL_MODE_FLAGS.join(', ')}`,
@@ -280,11 +282,7 @@ export function renderDrift(
 
 /** True when the report records no difference at all. */
 export function isClean(report: DriftReport): boolean {
-  return (
-    report.added.length === 0 &&
-    report.removed.length === 0 &&
-    report.changed.length === 0
-  );
+  return report.added.length === 0 && report.removed.length === 0 && report.changed.length === 0;
 }
 
 /**
@@ -294,10 +292,26 @@ export function isClean(report: DriftReport): boolean {
  * @param present - Tool names found on PATH
  * @returns The missing names, so a skip message can say which
  */
-export function missingTools(
-  required: readonly string[],
-  present: readonly string[],
-): string[] {
+/**
+ * The last lines of a failed step's captured output, indented for the report.
+ *
+ * A quiet step's output is otherwise discarded, so a failed image build printed only a cross
+ * mark: a CI failure then gave no reason to read (M111e3).
+ *
+ * @param output - The step's combined stdout and stderr
+ * @param lines - How many trailing non-blank lines to keep
+ * @returns The indented tail, or an empty string when there was no output
+ */
+export function failureTail(output: string, lines = 30): string {
+  return output
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .slice(-lines)
+    .map((line) => `      ${line}`)
+    .join('\n');
+}
+
+export function missingTools(required: readonly string[], present: readonly string[]): string[] {
   return required.filter((tool) => !present.includes(tool));
 }
 
@@ -322,10 +336,10 @@ export function pathCandidates(tool: string, pathValue: string): string[] {
 }
 
 async function onPath(tool: string): Promise<boolean> {
-  for (const candidate of pathCandidates(tool, Deno.env.get('PATH') ?? '')) {
+  for (const candidate of pathCandidates(tool, process.env['PATH'] ?? '')) {
     try {
-      const info = await Deno.stat(candidate);
-      if (info.isFile || info.isSymlink) return true;
+      const info = await stat(candidate);
+      if (info.isFile() || info.isSymbolicLink()) return true;
     } catch {
       // Not at this PATH entry; try the next.
       continue;
@@ -343,29 +357,27 @@ async function run(
   } = {},
 ): Promise<{ success: boolean; stdout: string; stderr: string }> {
   const quiet = options.quiet === true;
-  const output = await new Deno.Command(command[0], {
-    args: [...command.slice(1)],
+  const output = await runProcess(command[0]!, command.slice(1), {
     ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
-    ...(options.env === undefined ? {} : { env: { ...options.env } }),
-    stdout: quiet ? 'piped' : 'inherit',
-    stderr: quiet ? 'piped' : 'inherit',
-  }).output();
+    ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+    inherit: !quiet,
+  });
   return {
-    success: output.success,
+    success: output.code === 0,
     // `output.stdout` throws when the stream was inherited rather than piped, so both are only
     // read in the quiet case. Callers that need either always pass quiet.
-    stdout: quiet ? new TextDecoder().decode(output.stdout) : '',
+    stdout: quiet ? output.stdout : '',
     // Where kubectl puts the reason a wait timed out, which is the one thing worth printing when
     // the probe pod never reaches a terminal phase.
-    stderr: quiet ? new TextDecoder().decode(output.stderr) : '',
+    stderr: quiet ? output.stderr : '',
   };
 }
 
 async function readManifestDir(directory: string): Promise<Map<string, string>> {
   const files = new Map<string, string>();
-  for await (const entry of Deno.readDir(directory)) {
-    if (entry.isFile && entry.name.endsWith('.yaml')) {
-      files.set(entry.name, await Deno.readTextFile(`${directory}/${entry.name}`));
+  for await (const entry of await readdir(directory, { withFileTypes: true })) {
+    if (entry.isFile() && entry.name.endsWith('.yaml')) {
+      files.set(entry.name, await readFile(`${directory}/${entry.name}`, 'utf8'));
     }
   }
   return files;
@@ -379,23 +391,28 @@ async function checkRender(write: boolean): Promise<CheckOutcome> {
     return 'skipped';
   }
 
-  const temporary = await Deno.makeTempDir({ prefix: 'setu-render-' });
+  const temporary = await await mkdir('.tmp', { recursive: true }).then(() =>
+    mkdtemp('.tmp/test-'),
+  );
   try {
-    const rendered = await run([
-      'helm',
-      'template',
-      'setu',
-      'k8s/chart',
-      '-f',
-      'k8s/render-values.yaml',
-      // Pinned, and it must match NAMESPACE below. `helm template` defaults Release.Namespace to
-      // "default", which silently produced a RoleBinding whose ServiceAccount subject named the
-      // wrong namespace — the objects applied fine and the app simply had no permission.
-      '--namespace',
-      NAMESPACE,
-      '--output-dir',
-      temporary,
-    ], { quiet: true });
+    const rendered = await run(
+      [
+        'helm',
+        'template',
+        'setu',
+        'k8s/chart',
+        '-f',
+        'k8s/render-values.yaml',
+        // Pinned, and it must match NAMESPACE below. `helm template` defaults Release.Namespace to
+        // "default", which silently produced a RoleBinding whose ServiceAccount subject named the
+        // wrong namespace — the objects applied fine and the app simply had no permission.
+        '--namespace',
+        NAMESPACE,
+        '--output-dir',
+        temporary,
+      ],
+      { quiet: true },
+    );
     if (!rendered.success) {
       console.error('  helm template failed');
       return 'failed';
@@ -405,10 +422,10 @@ async function checkRender(write: boolean): Promise<CheckOutcome> {
     const committed = await readManifestDir(MANIFEST_DIR);
     if (write) {
       for (const name of committed.keys()) {
-        if (!fresh.has(name)) await Deno.remove(`${MANIFEST_DIR}/${name}`);
+        if (!fresh.has(name)) await rm(`${MANIFEST_DIR}/${name}`);
       }
       for (const [name, content] of fresh) {
-        await Deno.writeTextFile(`${MANIFEST_DIR}/${name}`, content);
+        await writeFile(`${MANIFEST_DIR}/${name}`, content);
       }
       console.log(`  ✓ wrote ${fresh.size} manifest(s) to ${MANIFEST_DIR}/`);
       return 'passed';
@@ -425,10 +442,10 @@ async function checkRender(write: boolean): Promise<CheckOutcome> {
     for (const name of report.added) console.error(`      + ${name} (rendered, not committed)`);
     for (const name of report.removed) console.error(`      - ${name} (committed, not rendered)`);
     for (const name of report.changed) console.error(`      ~ ${name} (content differs)`);
-    console.error('    Re-render with: deno task deploy:render');
+    console.error('    Re-render with: pnpm run deploy:render');
     return 'failed';
   } finally {
-    await Deno.remove(temporary, { recursive: true });
+    await rm(temporary, { recursive: true });
   }
 }
 
@@ -454,20 +471,27 @@ async function checkBuild(): Promise<CheckOutcome> {
 
   let ok = true;
   for (const target of BUILD_MATRIX) {
-    const built = await run([
-      'docker',
-      'build',
-      '--quiet',
-      '-f',
-      target.dockerfile,
-      '--build-arg',
-      `APP=${target.app}`,
-      '-t',
-      target.tag,
-      '.',
-    ], { quiet: true });
+    const built = await run(
+      [
+        'docker',
+        'build',
+        '--quiet',
+        '-f',
+        target.dockerfile,
+        '--build-arg',
+        `APP=${target.app}`,
+        '-t',
+        target.tag,
+        '.',
+      ],
+      { quiet: true },
+    );
     console.log(`  ${built.success ? '✓' : '✗'} ${target.app} → ${target.tag}`);
-    if (!built.success) ok = false;
+    if (!built.success) {
+      ok = false;
+      const tail = failureTail(`${built.stdout}\n${built.stderr}`);
+      if (tail !== '') console.error(tail);
+    }
   }
   return ok ? 'passed' : 'failed';
 }
@@ -481,12 +505,10 @@ async function checkCompose(): Promise<CheckOutcome> {
   }
 
   let ok = true;
-  for (
-    const args of [
-      ['docker', 'compose', '-f', 'docker/compose.yaml', 'config'],
-      ['docker', 'compose', '-f', 'docker/compose.yaml', '--profile', 'telemetry', 'config'],
-    ]
-  ) {
+  for (const args of [
+    ['docker', 'compose', '-f', 'docker/compose.yaml', 'config'],
+    ['docker', 'compose', '-f', 'docker/compose.yaml', '--profile', 'telemetry', 'config'],
+  ]) {
     const result = await run(args, { quiet: true });
     const label = args.includes('telemetry') ? 'telemetry profile' : 'default profile';
     console.log(`  ${result.success ? '✓' : '✗'} ${label} resolves`);
@@ -565,7 +587,7 @@ export const PRODUCTION_DEVTOOL_PROBE: string = [
  * @returns The decoded native filesystem path
  */
 export function nativeFilePath(fileUrl: URL): string {
-  return fromFileUrl(fileUrl);
+  return fileURLToPath(fileUrl);
 }
 
 /**
@@ -576,7 +598,7 @@ export function nativeFilePath(fileUrl: URL): string {
 export const CLI_COMMAND: readonly string[] = [
   'node',
   '--import',
-  new URL('../test/node-source-register.ts', import.meta.url).href,
+  new URL('../scripts/lib/source-register.ts', import.meta.url).href,
   '--import',
   new URL('../packages/cli/node_modules/tsx/dist/esm/index.mjs', import.meta.url).href,
   nativeFilePath(new URL('../packages/cli/src/bin.ts', import.meta.url)),
@@ -634,35 +656,36 @@ export async function buildGeneratedImage(
   execute: typeof run = run,
 ): ReturnType<typeof run> {
   const env = { NPM_CONFIG_REGISTRY: registry };
-  const installed = await execute([Deno.execPath(), 'install'], { quiet: true, cwd: root, env });
+  const installed = await execute(['deno', 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
-  const cached = await execute([
-    Deno.execPath(),
-    'cache',
-    '--lock=deno.lock',
-    `apps/${GENERATED_MEMBER}/main.ts`,
-  ], { quiet: true, cwd: root, env });
+  const cached = await execute(
+    ['deno', 'cache', '--lock=deno.lock', `apps/${GENERATED_MEMBER}/main.ts`],
+    { quiet: true, cwd: root, env },
+  );
   if (!cached.success) return cached;
 
   // The image's own install step resolves the framework from the same registry, reached on the
   // host's loopback — hence the host network for the BUILD only; the container runs with none.
-  return await execute([
-    'docker',
-    'build',
-    '--quiet',
-    '--network',
-    'host',
-    '-f',
-    `${root}/docker/Dockerfile`,
-    '--build-arg',
-    `MEMBER=${GENERATED_MEMBER}`,
-    '--build-arg',
-    `NPM_CONFIG_REGISTRY=${registry}`,
-    '-t',
-    image,
-    root,
-  ], { quiet: true });
+  return await execute(
+    [
+      'docker',
+      'build',
+      '--quiet',
+      '--network',
+      'host',
+      '-f',
+      `${root}/docker/Dockerfile`,
+      '--build-arg',
+      `MEMBER=${GENERATED_MEMBER}`,
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${registry}`,
+      '-t',
+      image,
+      root,
+    ],
+    { quiet: true },
+  );
 }
 
 /**
@@ -694,11 +717,10 @@ async function checkGenerated(): Promise<CheckOutcome> {
     return 'skipped';
   }
 
-  await Deno.mkdir('.tmp', { recursive: true });
-  const workspace = await Deno.makeTempDir({
-    dir: await Deno.realPath('.tmp'),
-    prefix: 'setu-generated-',
-  });
+  await mkdir('.tmp', { recursive: true });
+  // Absolute: the CLI runs with this directory as its cwd, so a relative `--dir` below would be
+  // resolved against it a second time (`.tmp/test-x/.tmp/test-x/acme`).
+  const workspace = resolve(await mkdtemp('.tmp/test-'));
   const root = `${workspace}/${GENERATED_WORKSPACE}`;
   const resources = generatedResources();
   // Nothing is on npm until the cut, and the scaffold pins the CLI's own version, so the
@@ -708,7 +730,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // Inside the `try`: packing the tree can fail (no `pnpm install`, a build error), and that
     // must report as this mode failing — with the temp workspace removed — not escape the run.
     try {
-      overlay = await startRegistryOverlay({ root: Deno.cwd() });
+      overlay = await startRegistryOverlay({ root: process.cwd() });
     } catch (cause) {
       console.error(
         `  ✗ the local registry overlay did not start (run \`pnpm install\` first): ${
@@ -744,22 +766,22 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // layout also proves a member can inherit imports from the workspace root.
     const memberManifest = `${root}/apps/${GENERATED_MEMBER}/deno.json`;
     const memberJsonc = `${memberManifest}c`;
-    const memberSource = await Deno.readTextFile(memberManifest);
+    const memberSource = await readFile(memberManifest, 'utf8');
     for (const layout of GENERATED_LAYOUTS) {
       if (layout === 'commented-json') {
-        await Deno.writeTextFile(memberManifest, `// Member configuration\n${memberSource}`);
+        await writeFile(memberManifest, `// Member configuration\n${memberSource}`);
       } else if (layout === 'jsonc') {
-        await Deno.rename(memberManifest, memberJsonc);
+        await rename(memberManifest, memberJsonc);
       } else {
         const member = JSON.parse(memberSource) as { imports?: Record<string, string> };
         const rootPath = `${root}/deno.json`;
-        const rootManifest = JSON.parse(await Deno.readTextFile(rootPath)) as {
+        const rootManifest = JSON.parse(await readFile(rootPath, 'utf8')) as {
           imports?: Record<string, string>;
         };
         rootManifest.imports = { ...rootManifest.imports, ...member.imports };
         delete member.imports;
-        await Deno.writeTextFile(rootPath, `${JSON.stringify(rootManifest, null, 2)}\n`);
-        await Deno.writeTextFile(
+        await writeFile(rootPath, `${JSON.stringify(rootManifest, null, 2)}\n`);
+        await writeFile(
           memberJsonc,
           `// Imports inherited from the root\n${JSON.stringify(member, null, 2)}\n`,
         );
@@ -771,19 +793,22 @@ async function checkGenerated(): Promise<CheckOutcome> {
         console.error(built.stderr);
         return 'failed';
       }
-      const connectorCache = await run([
-        'docker',
-        'run',
-        '--rm',
-        '--read-only',
-        '--network',
-        'none',
-        '--entrypoint',
-        'sh',
-        resources.image,
-        '-c',
-        PRODUCTION_DEVTOOL_PROBE,
-      ], { quiet: true });
+      const connectorCache = await run(
+        [
+          'docker',
+          'run',
+          '--rm',
+          '--read-only',
+          '--network',
+          'none',
+          '--entrypoint',
+          'sh',
+          resources.image,
+          '-c',
+          PRODUCTION_DEVTOOL_PROBE,
+        ],
+        { quiet: true },
+      );
       if (!connectorCache.success) {
         console.error(`  ✗ production carries a devtool entry or cached connector (${layout})`);
         // The probe's grep prints every matching path, which is what says WHERE.
@@ -797,29 +822,19 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // even with --no-lock after install. Redis loads the ioredis driver and its
     // transitive npm modules. Redis and the app share a network-none namespace:
     // loopback reaches the broker, while npm/jsr remain unreachable.
-    const broker = await run([
-      'docker',
-      'run',
-      '-d',
-      '--name',
-      resources.broker,
-      '--network',
-      'none',
-      'redis:7',
-    ], { quiet: true });
+    const broker = await run(
+      ['docker', 'run', '-d', '--name', resources.broker, '--network', 'none', 'redis:7'],
+      { quiet: true },
+    );
     if (!broker.success) {
       console.error(broker.stderr);
       return 'failed';
     }
     let brokerReady = false;
     for (let attempt = 0; attempt < 30; attempt += 1) {
-      const ready = await run([
-        'docker',
-        'exec',
-        resources.broker,
-        'redis-cli',
-        'ping',
-      ], { quiet: true });
+      const ready = await run(['docker', 'exec', resources.broker, 'redis-cli', 'ping'], {
+        quiet: true,
+      });
       if (ready.success) {
         brokerReady = true;
         break;
@@ -836,19 +851,22 @@ async function checkGenerated(): Promise<CheckOutcome> {
     // gate exists to catch, and its logs — the only record of which specifier Deno tried to
     // record — must survive until they are read below. `resources.container` is unique to this
     // invocation, so cleanup can never remove a concurrent check's container.
-    const started = await run([
-      'docker',
-      'run',
-      '-d',
-      '--name',
-      resources.container,
-      '--read-only',
-      '--network',
-      `container:${resources.broker}`,
-      '--tmpfs',
-      '/tmp',
-      resources.image,
-    ], { quiet: true });
+    const started = await run(
+      [
+        'docker',
+        'run',
+        '-d',
+        '--name',
+        resources.container,
+        '--read-only',
+        '--network',
+        `container:${resources.broker}`,
+        '--tmpfs',
+        '/tmp',
+        resources.image,
+      ],
+      { quiet: true },
+    );
     if (!started.success) {
       console.error('  ✗ the image did not start');
       console.error(started.stderr);
@@ -857,16 +875,19 @@ async function checkGenerated(): Promise<CheckOutcome> {
 
     let served = false;
     for (let attempt = 0; attempt < GENERATED_PROBE_ATTEMPTS; attempt += 1) {
-      const probe = await run([
-        'docker',
-        'exec',
-        resources.container,
-        'wget',
-        '-q',
-        '-O',
-        '/dev/null',
-        `http://127.0.0.1:${GENERATED_PORT}/health`,
-      ], { quiet: true });
+      const probe = await run(
+        [
+          'docker',
+          'exec',
+          resources.container,
+          'wget',
+          '-q',
+          '-O',
+          '/dev/null',
+          `http://127.0.0.1:${GENERATED_PORT}/health`,
+        ],
+        { quiet: true },
+      );
       if (probe.success) {
         served = true;
         break;
@@ -896,7 +917,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     await run(['docker', 'rm', '-f', '-v', resources.broker], { quiet: true });
     await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
     await overlay?.close();
-    await Deno.remove(workspace, { recursive: true });
+    await rm(workspace, { recursive: true });
   }
 }
 
@@ -941,18 +962,21 @@ async function checkCluster(): Promise<CheckOutcome> {
     const image = 'setu/rest-api:m39';
     if (!(await run(['docker', 'image', 'inspect', image], { quiet: true })).success) {
       console.log(`  building ${image} first …`);
-      const built = await run([
-        'docker',
-        'build',
-        '--quiet',
-        '-f',
-        'docker/Dockerfile',
-        '--build-arg',
-        'APP=rest-api',
-        '-t',
-        image,
-        '.',
-      ], { quiet: true });
+      const built = await run(
+        [
+          'docker',
+          'build',
+          '--quiet',
+          '-f',
+          'docker/Dockerfile',
+          '--build-arg',
+          'APP=rest-api',
+          '-t',
+          image,
+          '.',
+        ],
+        { quiet: true },
+      );
       if (!built.success) {
         console.error(`  ✗ could not build ${image}`);
         return 'failed';
@@ -960,9 +984,7 @@ async function checkCluster(): Promise<CheckOutcome> {
     }
 
     console.log(`  loading ${image} into the cluster …`);
-    if (
-      !(await run(['kind', 'load', 'docker-image', image, '--name', CLUSTER_NAME])).success
-    ) {
+    if (!(await run(['kind', 'load', 'docker-image', image, '--name', CLUSTER_NAME])).success) {
       console.error('  ✗ kind load failed');
       return 'failed';
     }
@@ -970,10 +992,9 @@ async function checkCluster(): Promise<CheckOutcome> {
     await run(kubectl('create', 'namespace', NAMESPACE), { quiet: true });
 
     console.log('  applying the COMMITTED manifests …');
-    const applied = await run(
-      kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'),
-      { quiet: true },
-    );
+    const applied = await run(kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'), {
+      quiet: true,
+    });
     if (!applied.success) {
       console.error('  ✗ kubectl apply failed');
       await run(kubectl('apply', '-n', NAMESPACE, '-f', 'k8s/manifests/'));
@@ -1102,7 +1123,7 @@ async function checkCluster(): Promise<CheckOutcome> {
     return 'passed';
   } finally {
     await run(kubectl('delete', 'namespace', NAMESPACE, '--wait=false'), { quiet: true });
-    if (Deno.env.get('KEEP_CLUSTER') === undefined) {
+    if (process.env['KEEP_CLUSTER'] === undefined) {
       console.log(`  deleting cluster ${CLUSTER_NAME} …`);
       await run(['kind', 'delete', 'cluster', '--name', CLUSTER_NAME], { quiet: true });
     }
@@ -1112,10 +1133,11 @@ async function checkCluster(): Promise<CheckOutcome> {
 async function main(): Promise<void> {
   let modes: ModeSet;
   try {
-    modes = parseModes(Deno.args);
+    modes = parseModes(process.argv.slice(2));
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
-    Deno.exit(2);
+    process.exitCode = 2;
+    return;
   }
 
   const results: CheckOutcome[] = [];
@@ -1127,17 +1149,21 @@ async function main(): Promise<void> {
 
   if (results.includes('failed')) {
     console.error('\ncheck:deploy FAILED');
-    Deno.exit(1);
+    process.exitCode = 1;
+    return;
   }
   // A skip is reported with its own exit code rather than folded into success, so an absent
   // prerequisite can never be mistaken for a passing gate. CI must not permit it.
   if (results.includes('skipped')) {
     console.warn('\ncheck:deploy SKIPPED (tooling absent)');
-    Deno.exit(SKIP_EXIT_CODE);
+    process.exitCode = SKIP_EXIT_CODE;
+    return;
   }
   console.log('\ncheck:deploy OK');
 }
 
 if (import.meta.main) {
-  await main();
+  await (async () => {
+    await main();
+  })();
 }

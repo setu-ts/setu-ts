@@ -116,9 +116,13 @@ export function createTopicInbox(deps: TopicInboxDeps): OpenInbox {
   return async (onReply: (message: unknown) => void): Promise<ReplyInbox> => {
     // Unique per open so replies never cross-talk between broker instances.
     const address = `${TOPIC_INBOX_PREFIX}${deps.uuid()}`;
-    const subscription = await deps.subscribe(address, (message) => {
-      onReply(message);
-    }, { queue: address, [REPLY_INBOX_TRANSIENT]: true });
+    const subscription = await deps.subscribe(
+      address,
+      (message) => {
+        onReply(message);
+      },
+      { queue: address, [REPLY_INBOX_TRANSIENT]: true },
+    );
 
     return {
       address,

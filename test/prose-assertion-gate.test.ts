@@ -4,8 +4,9 @@
  *
  * @module
  */
-import { describe, it } from '@std/testing/bdd';
-import { expect } from '@std/expect';
+
+import { readFile } from 'node:fs/promises';
+import { describe, expect, it } from 'vitest';
 
 import {
   buildProgram,
@@ -20,7 +21,7 @@ import {
   run,
   SCAN_ROOTS,
 } from '../scripts/check-prose-assertions.ts';
-import { SCRIPT_TARGETS } from '../scripts/script-coverage.ts';
+import { SCRIPT_TARGETS } from '../scripts/script-targets.ts';
 
 const TABLE = [
   `<!-- ${MARKER} -->`,
@@ -38,8 +39,7 @@ describe('prose assertion gate — marker and grammar', () => {
         findClaimBlocks(
           `${marker}\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`,
         ).length,
-      )
-        .toBe(1);
+      ).toBe(1);
     }
   });
 
@@ -48,8 +48,7 @@ describe('prose assertion gate — marker and grammar', () => {
   });
 
   it('does not mistake prose mentioning the marker for an assertion', () => {
-    const source =
-      `${MARKER} is a marker.\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`;
+    const source = `${MARKER} is a marker.\n\n| Expression | Value |\n| - | - |\n| \`1 === 1\` | \`true\` |`;
 
     expect(findClaimBlocks(source)).toEqual([]);
   });
@@ -121,12 +120,24 @@ describe('prose assertion gate — marker and grammar', () => {
 });
 
 describe('prose assertion gate — evaluator', () => {
+  it('refuses environment and network access from the expression context', async () => {
+    for (const expression of ['process.env.HOME', 'fetch("https://example.test")']) {
+      const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${expression}\` | \`null\` |`;
+      const findings = await checkDocument('sandbox-globals.md', source);
+      expect(findings).toHaveLength(1);
+      expect(findings[0]?.message).toContain('ReferenceError');
+    }
+  });
   it('wraps every expression in its own catch block', () => {
     const block = findClaimBlocks(TABLE)[0];
     if (block === undefined) throw new Error('Expected a marked block');
     const program = buildProgram(parseClaimTable(block));
 
-    expect(program.match(/try \{/g)?.length).toBe(2);
+    expect(program).toContain(
+      JSON.stringify(parseClaimTable(block).map((claim) => claim.expression)),
+    );
+    expect(program).toContain('for (const expression');
+    expect(program).toContain('try {');
     expect(program).toContain('catch (error)');
   });
 
@@ -135,21 +146,71 @@ describe('prose assertion gate — evaluator', () => {
     if (block === undefined) throw new Error('Expected a marked block');
     const results = await evaluateClaims(parseClaimTable(block));
 
-    expect(results).toEqual([{ ok: true, value: true }, { ok: true, value: false }]);
+    expect(results).toEqual([
+      { ok: true, value: true },
+      { ok: true, value: false },
+    ]);
   });
 
   it('denies filesystem access to an expression from the document', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.readTextFileSync('/etc/hostname')\` | \`"unreachable"\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().getBuiltinModule('fs').readFileSync('/etc/hostname', 'utf8')\` | \`"unreachable"\` |`;
     const findings = await checkDocument('sandbox.md', source);
 
     expect(findings.length).toBe(1);
-    expect(findings[0]?.message).toContain('NotCapable');
+    expect(findings[0]?.message).toContain('ERR_ACCESS_DENIED');
+  });
+
+  it('lets a claim import the package it describes', async () => {
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(await import('@setu-ts/common')).CAPABILITIES.LOGGER\` | \`"logger"\` |`;
+    expect(await checkDocument('import.md', source)).toEqual([]);
+  });
+
+  it('denies writing inside the repository and starting a child process', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').writeFileSync('.tmp/prose-write', 'x')\` | \`null\` |\n| \`${proc}.getBuiltinModule('child_process').execFileSync('true')\` | \`null\` |`;
+    const findings = await checkDocument('write.md', source);
+
+    expect(findings.length).toBe(2);
+    for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
+  });
+
+  it('denies reading repository files outside the import grants, such as .git', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.git', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('README.md', 'utf8')\` | \`null\` |\n| \`${proc}.getBuiltinModule('fs').readFileSync('.env', 'utf8')\` | \`null\` |`;
+    const findings = await checkDocument('git.md', source);
+
+    expect(findings.length).toBe(3);
+    for (const finding of findings) expect(finding.message).toContain('ERR_ACCESS_DENIED');
+  });
+
+  it('denies builtins that bypass the permission model, on every route', async () => {
+    const proc = 'this.constructor.constructor("return process")()';
+    const rows = [
+      `(await import('node:sqlite')).DatabaseSync`,
+      `${proc}.getBuiltinModule('node:sqlite').DatabaseSync`,
+      `${proc}.getBuiltinModule('module').createRequire('/x')('node:sqlite')`,
+      `(await import('node:module')).registerHooks`,
+      `new (${proc}.getBuiltinModule('worker_threads').Worker)('void 0', { eval: true })`,
+      `Object.defineProperty(${proc}, 'getBuiltinModule', { value: () => 1 })`,
+      `${proc}.dlopen({ exports: {} }, '/dev/null')`,
+    ];
+    const table = rows.map((row) => `| \`${row}\` | \`null\` |`).join('\n');
+    const findings = await checkDocument(
+      'sqlite.md',
+      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n${table}`,
+    );
+
+    expect(findings.length).toBe(rows.length);
+    for (const finding of findings.slice(0, 5)) {
+      expect(finding.message).toContain('ERR_ACCESS_DENIED');
+    }
+    expect(findings[5]?.message).toContain('Cannot redefine property');
+    // Under --permission, Node refuses every native addon with its own code.
+    expect(findings[6]?.message).toContain('ERR_DLOPEN_DISABLED');
   });
 
   it('fails closed when a claim exits before every result is emitted', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`Deno.exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`this.constructor.constructor("return process")().exit(0)\` | \`null\` |\n| \`1 === 1\` | \`true\` |`;
     const findings = await checkDocument('exit.md', source);
 
     expect(findings.length).toBe(2);
@@ -162,7 +223,7 @@ describe('prose assertion gate — evaluator', () => {
       '',
       '| Expression | Value |',
       '| - | - |',
-      '| `Deno.exit(0)` | `null` |',
+      '| `this.constructor.constructor("return process")().exit(0)` | `null` |',
       '',
       `<!-- ${MARKER} -->`,
       '',
@@ -177,8 +238,7 @@ describe('prose assertion gate — evaluator', () => {
   });
 
   it('fails closed when a document batch exceeds its timeout', async () => {
-    const source =
-      `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
+    const source = `<!-- ${MARKER} -->\n\n| Expression | Value |\n| - | - |\n| \`(() => { while (true) {} })()\` | \`null\` |`;
     const findings = await checkDocument('timeout.md', source, 20);
 
     expect(findings.length).toBe(1);
@@ -221,19 +281,19 @@ describe('prose assertion gate — evaluator', () => {
 
 describe('prose assertion gate — inventory and wiring', () => {
   it('pins the seeded numeric-claim inventory', async () => {
-    const source = await Deno.readTextFile('.roo/rules-code-review/01-review-only.md');
+    const source = await readFile('.roo/rules-code-review/01-review-only.md', 'utf8');
     const claims = findClaimBlocks(source).flatMap((block) => parseClaimTable(block));
 
     expect(claims.length).toBe(12);
   });
 
   it('scans .roo and is wired into both documentation gates', async () => {
-    const manifest = JSON.parse(await Deno.readTextFile('deno.json')) as {
-      tasks: Record<string, string>;
+    const manifest = JSON.parse(await readFile('package.json', 'utf8')) as {
+      scripts: Record<string, string>;
     };
 
     expect(SCAN_ROOTS).toContain('.roo');
-    expect(manifest.tasks['check:docs']).toContain('scripts/check-prose-assertions.ts');
+    expect(manifest.scripts['check:docs']).toContain('scripts/check-prose-assertions.ts');
     expect(SCRIPT_TARGETS).toContain('scripts/check-prose-assertions.ts');
   });
 

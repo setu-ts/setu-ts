@@ -35,15 +35,17 @@ import { QueuePlugin } from '../../src/index.ts';
 async function docker(args: string[]): Promise<string> {
   const out = await runProcess('docker', { args });
   if (!out.success) {
-    throw new Error(
-      `docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`,
-    );
+    throw new Error(`docker ${args.join(' ')} failed: ${new TextDecoder().decode(out.stderr)}`);
   }
   return new TextDecoder().decode(out.stdout);
 }
 
 async function containerIdForPort(port: number): Promise<string> {
-  const ids = (await docker(['ps', '-q', '--filter', `publish=${port}`])).trim();
+  const shard = process.env['SETU_CI_SHARD'];
+  const filters = shard
+    ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+    : ['--filter', `publish=${port}`];
+  const ids = (await docker(['ps', '-q', ...filters])).trim();
   if (ids === '') {
     throw new Error(`no container publishing port ${port}`);
   }
@@ -94,14 +96,10 @@ async function waitForPort(port: number, timeoutMs: number): Promise<void> {
  * Reconnects a `RabbitMqQueue` after a real outage, retrying with backoff.
  * `docker start` returns at container boot and the port accepts TCP before
  * RabbitMQ's AMQP handshake is ready, so a single immediate `connect()` can
- * hit a reset. Retrying mirrors what an application/orchestrator would do for
- * an observation-only adapter (the §3.5 ReconnectSupervisor is scoped to
- * messaging-plugin brokers, not the queue).
+ * hit a reset. This exercises explicit lifecycle reconnection alongside the
+ * automatic recovery proved by rabbitmq-restart-real.test.ts.
  */
-async function reconnectWithRetry(
-  queue: RabbitMqQueue,
-  attempts = 40,
-): Promise<void> {
+async function reconnectWithRetry(queue: RabbitMqQueue, attempts = 40): Promise<void> {
   let lastError: unknown = null;
   for (let i = 0; i < attempts; i++) {
     try {
@@ -201,15 +199,13 @@ describe('REAL RabbitMqQueue outage (§3.7)', () => {
         await waitTrue(async () => (await probe()) === true, 'up baseline', 15_000);
         expect(await probe()).toBe(true);
 
-        // (stop) real RabbitMQ stop → fault listener sets #faulted → down
+        // (stop) real RabbitMQ stop → fault listener calls supervisor.fault() → down
         await docker(['stop', containerId]);
         await waitTrue(async () => (await probe()) === false, 'down after stop', 30_000);
         expect(await probe()).toBe(false);
 
-        // (restart) real RabbitMQ start. The queue adapter is observation-only
-        // (§3.5 scopes the ReconnectSupervisor to messaging-plugin brokers), so
-        // it does not self-heal: recovery is an explicit lifecycle reconnection,
-        // which resets the fault flag and re-establishes the connection → up.
+        // (restart) real RabbitMQ start. Exercise an explicit lifecycle
+        // reconnection here; the automatic path has its own restart test.
         // `docker start` returns at container boot, not when RabbitMQ is
         // listening, so wait for the port to accept connections first.
         await docker(['start', containerId]);
@@ -264,9 +260,7 @@ describe(
       await app.start();
       const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
       const jobName = JOB_NAME;
-      const [source] = app.services.getAll<IQueueDiagnosticsSource>(
-        CAPABILITIES.QUEUE_DIAGNOSTICS,
-      );
+      const [source] = app.services.getAll<IQueueDiagnosticsSource>(CAPABILITIES.QUEUE_DIAGNOSTICS);
 
       let paused = false;
       try {

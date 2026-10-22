@@ -132,30 +132,26 @@ describe('validatePublishOptions — copy-once', () => {
 });
 
 describe('validatePublishOptions — shape refusals', () => {
-  for (
-    const [label, bad] of [
-      ['an array', []],
-      ['a string', 'options'],
-      ['a number', 1],
-      ['null', null],
-      ['a boolean', true],
-      ['a Date', new Date(0)],
-      ['a function', () => {}],
-    ] as const
-  ) {
+  for (const [label, bad] of [
+    ['an array', []],
+    ['a string', 'options'],
+    ['a number', 1],
+    ['null', null],
+    ['a boolean', true],
+    ['a Date', new Date(0)],
+    ['a function', () => {}],
+  ] as const) {
     it(`refuses options that are ${label}`, async () => {
       const error = await expectRejection(bad);
       expect(error.message).toContain('plain object');
     });
   }
 
-  for (
-    const [label, bad] of [
-      ['an array', []],
-      ['a string', 'headers'],
-      ['null', null],
-    ] as const
-  ) {
+  for (const [label, bad] of [
+    ['an array', []],
+    ['a string', 'headers'],
+    ['null', null],
+  ] as const) {
     it(`refuses headers that are ${label}`, async () => {
       const error = await expectRejection({ headers: bad });
       expect(error.message).toContain('headers must be a plain object');
@@ -234,7 +230,7 @@ describe('validatePublishOptions — header name rules', () => {
 
   it('refuses a header name with a space or a non-ASCII character', async () => {
     expect((await expectRejection({ headers: { 'bad name': 'v' } })).message).toContain('index 0');
-    expect((await expectRejection({ headers: { 'é': 'v' } })).message).toContain('index 0');
+    expect((await expectRejection({ headers: { é: 'v' } })).message).toContain('index 0');
   });
 
   it('reports the failing index for a bad name after good ones', async () => {
@@ -287,13 +283,11 @@ describe('validatePublishOptions — reserved names, three casings each', () => 
   ];
 
   for (const name of reservedCases) {
-    for (
-      const variant of [
-        name.toLowerCase(),
-        name.toUpperCase(),
-        `${name.charAt(0).toUpperCase()}${name.slice(1).toLowerCase()}`,
-      ]
-    ) {
+    for (const variant of [
+      name.toLowerCase(),
+      name.toUpperCase(),
+      `${name.charAt(0).toUpperCase()}${name.slice(1).toLowerCase()}`,
+    ]) {
       it(`refuses reserved header ${JSON.stringify(variant)}`, async () => {
         const error = await expectRejection({ headers: { [variant]: 'v' } });
         expect(error.message).toContain('reserved');
@@ -371,10 +365,11 @@ describe('framework transport-header own keys across runtimes', () => {
     expect(Object.getPrototypeOf(wire)).toBe(Object.prototype);
     expect(Object.getOwnPropertyDescriptor(wire, '__proto__')?.value).toBe('safe');
     expect(Object.entries(wire)).toEqual(
-      expect.arrayContaining([['constructor', 'ctor'], ['prototype', 'proto'], [
-        'traceparent',
-        'framework',
-      ]]),
+      expect.arrayContaining([
+        ['constructor', 'ctor'],
+        ['prototype', 'proto'],
+        ['traceparent', 'framework'],
+      ]),
     );
     expect(Object.hasOwn(wire, 'inherited')).toBe(false);
   });

@@ -14,9 +14,12 @@ function composedApp(diagnostics: KernelDiagnosticsOptions | undefined) {
         name: 'app',
         version: '1.0.0',
         register(ctx) {
-          ctx.middleware.add(async (_ctx, next) => {
-            await next();
-          }, { name: 'pass', priority: 100 });
+          ctx.middleware.add(
+            async (_ctx, next) => {
+              await next();
+            },
+            { name: 'pass', priority: 100 },
+          );
           ctx.router.get('/sync', (ctx) => ctx.response.json({ route: 'sync' }));
           ctx.router.get('/async', (ctx) => Promise.resolve(ctx.response.json({ route: 'async' })));
           ctx.router.get('/short', {

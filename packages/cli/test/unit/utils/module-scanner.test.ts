@@ -6,7 +6,15 @@
 import { describe, expect, it } from 'vitest';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
-import { MODULES_DIR, readModuleNames, scanModules } from '../../../src/utils/module-scanner.ts';
+import {
+  MODULES_DIR,
+  readModuleNames,
+  scanModules,
+  scanModuleArtifacts,
+} from '../../../src/utils/module-scanner.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
+import { MAX_EXISTING_FILE_BYTES } from '../../../src/utils/file-writer.ts';
+import { deriveNames } from '../../../src/utils/names.ts';
 
 /** A directory stat, shaped as the real runtime adapters report one. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
@@ -41,7 +49,15 @@ function fsWith(
       // shape of a well-formed module the CLI generated.
       return Promise.resolve(key.includes('/') ? FILE_STAT : DIR_STAT);
     },
-    readFile: () => Promise.reject(new Error('unused')),
+    readFile: (path) => {
+      const file = path.slice(path.lastIndexOf('/') + 1);
+      const [name, kind] = file.split('.');
+      const suffix =
+        kind === 'controller' ? 'Controller' : kind === 'service' ? 'Service' : 'Module';
+      return Promise.resolve(
+        new TextEncoder().encode(`export class ${deriveNames(name ?? '').pascal}${suffix} {}`),
+      );
+    },
     writeFile: () => Promise.reject(new Error('unused')),
     mkdir: () => Promise.reject(new Error('unused')),
     rm: () => Promise.reject(new Error('unused')),
@@ -49,7 +65,171 @@ function fsWith(
 }
 
 /** A stat rejection shaped like a real runtime's missing-path error. */
-const MISSING = new Error('NotFound');
+const MISSING = Object.assign(new Error('NotFound'), { name: 'NotFound' });
+
+describe('functional module scanning', () => {
+  it('reports an index that is not a regular file without reading it', async () => {
+    const fs = createFakeFs({ '/app/src/modules/billing/billing.routes.ts': '' });
+    const probe: IFileSystem = {
+      ...fs,
+      stat: (path) => (path.endsWith('/index.ts') ? Promise.resolve(DIR_STAT) : fs.stat(path)),
+      readFile: () => Promise.reject(new Error('must not read')),
+    };
+    expect(await scanModules(probe, '/app', 'functional')).toEqual({
+      names: [],
+      skipped: [
+        {
+          kind: 'missing-export',
+          name: 'billing',
+          path: 'src/modules/billing',
+          missing: 'registerBillingModule',
+        },
+      ],
+      rejected: [],
+    });
+  });
+  for (const oversized of [false, true]) {
+    it(`${oversized ? 'skips and reports' : 'admits'} an index ${oversized ? 'over' : 'at'} the read limit`, async () => {
+      const index = '/app/src/modules/billing/index.ts';
+      const fs = createFakeFs({
+        '/app/src/modules/billing/billing.routes.ts': '',
+        [index]: 'export function registerBillingModule() {}',
+      });
+      const reads: string[] = [];
+      const probe: IFileSystem = {
+        ...fs,
+        stat: async (path) => ({
+          ...(await fs.stat(path)),
+          ...(path === index ? { size: MAX_EXISTING_FILE_BYTES + Number(oversized) } : {}),
+        }),
+        readFile: (path) => {
+          reads.push(path);
+          return fs.readFile(path);
+        },
+      };
+      const scan = await scanModules(probe, '/app', 'functional');
+      expect(scan.names).toEqual(oversized ? [] : ['billing']);
+      expect(scan.skipped).toEqual(
+        oversized
+          ? [
+              {
+                kind: 'missing-export',
+                name: 'billing',
+                path: 'src/modules/billing',
+                missing: 'registerBillingModule',
+              },
+            ]
+          : [],
+      );
+      expect(reads).toEqual(oversized ? [] : [index]);
+    });
+  }
+  it('admits exported registrars, reports missing exports and ignores old modules and shared folders', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/zebra/zebra.routes.ts': '',
+      '/app/src/modules/zebra/index.ts': 'export function registerZebraModule() {}',
+      '/app/src/modules/billing/billing.routes.ts': '',
+      '/app/src/modules/billing/index.ts': 'export { registerBillingModule } from "./register.ts";',
+      '/app/src/modules/broken/broken.routes.ts': '',
+      '/app/src/modules/broken/index.ts': '// registerBrokenModule',
+      '/app/src/modules/missing/missing.routes.ts': '',
+      '/app/src/modules/legacy/legacy.service.ts': '',
+      '/app/src/modules/legacy/index.ts': 'export * from "./legacy.service.ts";',
+      '/app/src/modules/shared/helper.ts': '',
+    });
+    const scan = await scanModules(fs, '/app', 'functional');
+    expect(scan.names).toEqual(['billing', 'zebra']);
+    expect(scan.skipped.map((skip) => skip.name)).toEqual(['broken', 'missing']);
+    expect(scan.skipped[0]?.missing).toBe('registerBrokenModule');
+    expect((await scanModules(fs, '/app', 'class-based')).names).toEqual([]);
+    const unreadable = { ...fs, readFile: () => Promise.reject(new Error('unreadable')) };
+    expect((await scanModules(unreadable, '/app', 'functional')).names).toEqual([]);
+  });
+  it('scans sibling routes and controllers by the symbols their index imports', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/invoices/invoices.routes.ts': 'export function registerInvoicesRoutes() {}',
+      '/app/src/modules/invoices/summary.routes.ts': 'export function registerSummaryRoutes() {}',
+      '/app/src/modules/invoices/billing.controller.ts':
+        'export function registerBillingRoutes() {}',
+      '/app/src/modules/invoices/broken.routes.ts': 'export const broken = 1;',
+      '/app/src/modules/invoices/pricing.service.ts': '',
+    });
+    const scan = await scanModuleArtifacts(fs, '/app', 'invoices');
+    expect(scan.artifacts).toEqual({ route: ['invoices', 'summary'], controller: ['billing'] });
+    expect(scan.skipped).toEqual([
+      { path: 'src/modules/invoices/broken.routes.ts', missing: ['registerBrokenRoutes'] },
+    ]);
+  });
+});
+
+describe('class-based module exports', () => {
+  for (const kind of ['controller', 'service', 'module'] as const) {
+    for (const failure of [
+      'missing-export',
+      'oversized',
+      'non-regular',
+      'unreadable',
+      'stat-error',
+    ] as const) {
+      it(`reports a ${failure} ${kind} and never calls it legacy`, async () => {
+        const files = {
+          '/app/src/modules/orders/orders.controller.ts': 'export class OrdersController {}',
+          '/app/src/modules/orders/orders.service.ts': 'export class OrdersService {}',
+          '/app/src/modules/orders/orders.module.ts': 'export class OrdersModule {}',
+        };
+        const base = createFakeFs(files);
+        const path = `/app/src/modules/orders/orders.${kind}.ts`;
+        const fs: IFileSystem = {
+          ...base,
+          stat: (file) =>
+            file !== path
+              ? base.stat(file)
+              : failure === 'stat-error'
+                ? Promise.reject(new Error('EACCES'))
+                : failure === 'oversized'
+                  ? Promise.resolve({ ...FILE_STAT, size: MAX_EXISTING_FILE_BYTES + 1 })
+                  : failure === 'non-regular'
+                    ? Promise.resolve({ isFile: false, isDirectory: false, size: 0 })
+                    : base.stat(file),
+          readFile: (file) =>
+            file !== path
+              ? base.readFile(file)
+              : failure === 'unreadable'
+                ? Promise.reject(new Error('EIO'))
+                : failure === 'missing-export'
+                  ? Promise.resolve(new TextEncoder().encode('// no exports'))
+                  : Promise.reject(new Error('must not read rejected file')),
+        };
+        const symbol = `Orders${kind[0].toUpperCase()}${kind.slice(1)}`;
+        expect(await scanModules(fs, '/app', 'class-based')).toEqual({
+          names: [],
+          rejected: [],
+          skipped: [
+            { kind: 'missing-export', name: 'orders', path: 'src/modules/orders', missing: symbol },
+          ],
+        });
+      });
+    }
+  }
+  it('keeps only an absent declaration as legacy, after checking the other exports', async () => {
+    const fs = createFakeFs({
+      '/app/src/modules/orders/orders.controller.ts': 'export class OrdersController {}',
+      '/app/src/modules/orders/orders.service.ts': 'export class OrdersService {}',
+    });
+    expect(await scanModules(fs, '/app')).toEqual({
+      names: [],
+      rejected: [],
+      skipped: [
+        {
+          kind: 'legacy',
+          name: 'orders',
+          path: 'src/modules/orders',
+          missing: 'orders.module.ts',
+        },
+      ],
+    });
+  });
+});
 
 describe('readModuleNames', () => {
   it('returns directory names sorted', () => {
@@ -133,7 +313,7 @@ describe('readModuleNames', () => {
 
     expect(scan.names).toEqual([]);
     expect(scan.skipped).toEqual([
-      { name: 'legacy', path: 'src/modules/legacy', missing: 'legacy.module.ts' },
+      { kind: 'legacy', name: 'legacy', path: 'src/modules/legacy', missing: 'legacy.module.ts' },
     ]);
   });
 
@@ -175,4 +355,38 @@ it('sorts multiple skipped legacy modules independently of filesystem enumeratio
     '/app',
   );
   expect(result.skipped.map((entry) => entry.name)).toEqual(['alpha', 'zeta']);
+});
+
+describe('module directory names', () => {
+  // A directory name is spliced into an import specifier and an identifier in the
+  // CLI-owned activation barrel, so a name that does not round-trip through
+  // `deriveNames` is rejected rather than written into generated source.
+  const hostile = ['Bad_Name', '9lives', 'a"b', 'x\u001b[31m'];
+  it('rejects a functional module whose name is not a kebab-case identifier', async () => {
+    const files: Record<string, string> = {
+      '/app/src/modules/billing/billing.routes.ts': '',
+      '/app/src/modules/billing/index.ts': 'export function registerBillingModule() {}',
+    };
+    for (const name of hostile) {
+      files[`/app/src/modules/${name}/${name}.routes.ts`] = '';
+      files[`/app/src/modules/${name}/index.ts`] = 'export function registerX() {}';
+    }
+    const scan = await scanModules(createFakeFs(files), '/app', 'functional');
+    expect(scan.names).toEqual(['billing']);
+    expect(scan.skipped).toEqual([]);
+    expect(scan.rejected).toEqual(hostile.map((name) => `${MODULES_DIR}/${name}`).sort());
+  });
+  it('rejects a class-based module whose name is not a kebab-case identifier', async () => {
+    const scan = await scanModules(fsWith(['orders', ...hostile]), '/app', 'class-based');
+    expect(scan.names).toEqual(['orders']);
+    expect(scan.rejected).toEqual(hostile.map((name) => `${MODULES_DIR}/${name}`).sort());
+  });
+  it('does not reject a hostile directory that is not a module at all', async () => {
+    const scan = await scanModules(
+      createFakeFs({ '/app/src/modules/Bad_Name/helper.ts': '' }),
+      '/app',
+      'functional',
+    );
+    expect(scan.rejected).toEqual([]);
+  });
 });

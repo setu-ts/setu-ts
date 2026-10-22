@@ -12,46 +12,54 @@ import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('REAL RedisStreamsBroker round trip (guarded)', () => {
-  it('publish → subscribe round trip against live Redis', {
-    skip: process.env['REDIS_URL'] === undefined,
-  }, async () => {
-    const url = process.env['REDIS_URL'];
-    if (url === undefined) throw new Error('Backend guard failed');
+  it(
+    'publish → subscribe round trip against live Redis',
+    {
+      skip: process.env['REDIS_URL'] === undefined,
+    },
+    async () => {
+      const url = process.env['REDIS_URL'];
+      if (url === undefined) throw new Error('Backend guard failed');
 
-    await import('ioredis');
+      await import('ioredis');
 
-    const runtime: IRuntimeServices = createFakeRuntime();
-    const serializer = new JsonSerializer();
-    const topic = `m53:${crypto.randomUUID()}`;
-    const queue = `m53-queue-${crypto.randomUUID()}`;
+      const runtime: IRuntimeServices = createFakeRuntime();
+      const serializer = new JsonSerializer();
+      const topic = `m53:${crypto.randomUUID()}`;
+      const queue = `m53-queue-${crypto.randomUUID()}`;
 
-    const broker = new RedisStreamsBroker(runtime, serializer, {
-      url,
-      pollIntervalMs: 50,
-    });
+      const broker = new RedisStreamsBroker(runtime, serializer, {
+        url,
+        pollIntervalMs: 50,
+      });
 
-    try {
-      await broker.connect();
-      expect(broker.isReady()).toBe(true);
+      try {
+        await broker.connect();
+        expect(broker.isReady()).toBe(true);
 
-      const received: unknown[] = [];
-      await broker.subscribe(topic, (msg) => {
-        received.push(msg);
-        return Promise.resolve();
-      }, { queue });
+        const received: unknown[] = [];
+        await broker.subscribe(
+          topic,
+          (msg) => {
+            received.push(msg);
+            return Promise.resolve();
+          },
+          { queue },
+        );
 
-      // Allow subscription to initialize before publishing
-      await new Promise((r) => setTimeout(r, 100));
+        // Allow subscription to initialize before publishing
+        await new Promise((r) => setTimeout(r, 100));
 
-      await broker.publish(topic, { hello: 'world' });
+        await broker.publish(topic, { hello: 'world' });
 
-      // Wait for poll interval to deliver the message
-      await new Promise((r) => setTimeout(r, 200));
+        // Wait for poll interval to deliver the message
+        await new Promise((r) => setTimeout(r, 200));
 
-      expect(received.length).toBeGreaterThanOrEqual(1);
-      expect(received[0]).toEqual({ hello: 'world' });
-    } finally {
-      await broker.disconnect();
-    }
-  });
+        expect(received.length).toBeGreaterThanOrEqual(1);
+        expect(received[0]).toEqual({ hello: 'world' });
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
 });

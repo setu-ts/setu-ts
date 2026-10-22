@@ -1,3 +1,7 @@
+import {
+  DEFAULT_PUBLISH_TIMEOUT_MS,
+  resolvePublishTimeoutMs,
+} from '../../src/brokers/publish-timeout.ts';
 /**
  * RabbitMQ message durability: persistent publishes and publisher confirms.
  *
@@ -12,11 +16,7 @@ import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IMessageBroker, IPlugin } from '@setu-ts/common';
-import {
-  DEFAULT_PUBLISH_TIMEOUT_MS,
-  RabbitMqBroker,
-  resolvePublishTimeoutMs,
-} from '../../src/brokers/rabbitmq-broker.ts';
+import { RabbitMqBroker } from '../../src/brokers/rabbitmq-broker.ts';
 import { MessagingPlugin } from '../../src/plugin/messaging-plugin.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import type { IAmqpConnection, RabbitMqOptions } from '../../src/interfaces/index.ts';
@@ -213,8 +213,9 @@ describe('RabbitMqBroker durability', () => {
     expect(resolvePublishTimeoutMs(0)).toBe(0);
     for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY, 2_147_483_648]) {
       expect(() => resolvePublishTimeoutMs(bad)).toThrow(RangeError);
-      expect(() =>
-        new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { publishTimeoutMs: bad })
+      expect(
+        () =>
+          new RabbitMqBroker(createFakeRuntime(), new JsonSerializer(), { publishTimeoutMs: bad }),
       ).toThrow('publishTimeoutMs');
     }
   });
@@ -222,10 +223,7 @@ describe('RabbitMqBroker durability', () => {
   describe('a facade without createConfirmChannel()', () => {
     it('keeps a plain channel and warns once through the logger as a METHOD', async () => {
       const logger = new PrivateFieldLogger();
-      const { broker, channel } = await connected(
-        { withoutConfirmChannel: true },
-        { logger },
-      );
+      const { broker, channel } = await connected({ withoutConfirmChannel: true }, { logger });
       expect(channel.confirmMode).toBe(false);
       await broker.publish('orders.created', { id: 1 });
       await broker.publish('orders.created', { id: 2 });
@@ -280,13 +278,14 @@ describe('MessagingPlugin RabbitMQ durability options', () => {
       MessagingPlugin({
         broker: 'rabbitmq',
         persistentMessages: 'yes' as unknown as boolean,
-      })
+      }),
     ).toThrow(TypeError);
   });
 
   it('does not validate RabbitMQ options for another broker', () => {
-    expect(() => MessagingPlugin({ broker: 'memory', publishTimeoutMs: Number.NaN } as never)).not
-      .toThrow();
+    expect(() =>
+      MessagingPlugin({ broker: 'memory', publishTimeoutMs: Number.NaN } as never),
+    ).not.toThrow();
   });
 
   it('threads both options into the broker through a real kernel app', async () => {
@@ -342,8 +341,9 @@ describe('MessagingPlugin RabbitMQ durability options', () => {
       ],
     });
     await app.start();
-    expect(logger.lines.some((line) => line.startsWith('warn:') && line.includes('NOT confirmed')))
-      .toBe(true);
+    expect(
+      logger.lines.some((line) => line.startsWith('warn:') && line.includes('NOT confirmed')),
+    ).toBe(true);
     await app.stop();
   });
 });

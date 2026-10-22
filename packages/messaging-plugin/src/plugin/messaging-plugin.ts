@@ -26,10 +26,10 @@ import { RedisStreamsBroker } from '../brokers/redis-streams-broker.ts';
 import {
   RabbitMqBroker,
   resolveConsumerOptions,
-  resolvePublishTimeoutMs,
   validateConsumerQueue,
 } from '../brokers/rabbitmq-broker.ts';
-import { NatsBroker } from '../brokers/nats-broker.ts';
+import { resolvePublishTimeoutMs } from '../brokers/publish-timeout.ts';
+import { NatsBroker, resolveNatsReconnect } from '../brokers/nats-broker.ts';
 import { KafkaBroker } from '../brokers/kafka-broker.ts';
 import { GcpPubSubBroker } from '../brokers/pubsub-broker.ts';
 import { ServiceBusBroker } from '../brokers/service-bus-broker.ts';
@@ -158,29 +158,27 @@ function assertChainReadyTimeoutMs(value: number): number {
  *
  * @since 0.1.0
  */
-export function MessagingPlugin(
-  options: MessagingPluginOptions = {},
-): IPlugin {
+export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
   const brokerType: string = (options as { broker?: string }).broker ?? 'memory';
   let rabbitConsumerOptions: ReturnType<typeof resolveConsumerOptions> | undefined;
   // Refused HERE, before any application exists, like every other bound
   // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
   // boot failure far from the line that caused it.
+  if (brokerType === 'kafka' || brokerType === 'pubsub' || brokerType === 'rabbitmq') {
+    resolvePublishTimeoutMs((options as { publishTimeoutMs?: number }).publishTimeoutMs);
+  }
+  if (brokerType === 'nats') resolveNatsReconnect(options as NatsOptions);
   if (brokerType === 'rabbitmq') {
     const rabbit = options as RabbitMqMessagingOptions;
-    resolvePublishTimeoutMs(rabbit.publishTimeoutMs);
     rabbitConsumerOptions = resolveConsumerOptions(rabbit);
-    if (
-      rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean'
-    ) {
+    if (rabbit.persistentMessages !== undefined && typeof rabbit.persistentMessages !== 'boolean') {
       throw new TypeError('messaging-plugin: persistentMessages must be a boolean');
     }
   }
   const instanceName = (options as { name?: string }).name;
   const serializer =
-    (options as { serializer?: import('../serializers/serializer.ts').ISerializer })
-      .serializer ??
-      new JsonSerializer();
+    (options as { serializer?: import('../serializers/serializer.ts').ISerializer }).serializer ??
+    new JsonSerializer();
 
   // Determine the token based on whether this is a named instance
   const token = instanceName ? createNamedToken(instanceName) : CAPABILITIES.MESSAGING;
@@ -190,9 +188,8 @@ export function MessagingPlugin(
   // M107: the outbox arm is validated HERE, at plugin construction, like every
   // other bound (the M90a rule). Absent, nothing below changes: no capability,
   // no lifecycle hook, no indicator and no ordering edge is added.
-  const outboxOptions = options.outbox === undefined
-    ? undefined
-    : resolveOutboxOptions(options.outbox);
+  const outboxOptions =
+    options.outbox === undefined ? undefined : resolveOutboxOptions(options.outbox);
   const outboxToken = instanceName
     ? createCapabilityToken(`outbox.${instanceName}`)
     : CAPABILITIES.OUTBOX;
@@ -296,19 +293,20 @@ export function MessagingPlugin(
       // invalid, registration must leave an externally backed broker untouched.
       // No factory means no gate, so the documented ignored-option behavior is
       // preserved for that arm.
-      const chainReadyTimeoutMs = behaviorFactories.length > 0 &&
-          options.chainReadyTimeoutMs !== undefined
-        ? assertChainReadyTimeoutMs(options.chainReadyTimeoutMs)
-        : undefined;
+      const chainReadyTimeoutMs =
+        behaviorFactories.length > 0 && options.chainReadyTimeoutMs !== undefined
+          ? assertChainReadyTimeoutMs(options.chainReadyTimeoutMs)
+          : undefined;
 
       // Resolve optional logger
       let logger: { error: (msg: string) => void; warn?: (msg: string) => void } | undefined;
       if (ctx.services.has('logger')) {
         logger = ctx.services.get('logger');
       }
-      const telemetry = options.tracing !== false && ctx.services.has(CAPABILITIES.TELEMETRY)
-        ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
-        : undefined;
+      const telemetry =
+        options.tracing !== false && ctx.services.has(CAPABILITIES.TELEMETRY)
+          ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
+          : undefined;
 
       // Build the broker based on type
       let broker: MessageBrokerAdapter;
@@ -360,7 +358,7 @@ export function MessagingPlugin(
         }
         if (logger !== undefined) redisOptions.logger = logger;
         // The built client's reconnect failures go to the logger (read at call
-        // time) rather than ioredis's own console fallback.
+        // time) rather than being dropped.
         redisOptions.connectionErrorReporter = createConnectionErrorReporter({
           source: `${pluginName}: redis-streams broker`,
           logger: () => ctx.logger,
@@ -394,8 +392,10 @@ export function MessagingPlugin(
           streamSubjects?: NatsOptions['streamSubjects'];
           defaultQueue?: string;
           headersFactory?: NatsOptions['headersFactory'];
+          reconnect?: NatsOptions['reconnect'];
         };
         const natsOptions: NatsOptions = {};
+        if (opts.reconnect !== undefined) natsOptions.reconnect = opts.reconnect;
         if (opts.url !== undefined) natsOptions.url = opts.url;
         if (opts.client !== undefined) natsOptions.client = opts.client;
         if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;
@@ -412,6 +412,7 @@ export function MessagingPlugin(
           defaultQueue?: string;
           replyTopic?: string;
           retry?: KafkaOptions['retry'];
+          publishTimeoutMs?: number;
         };
         const kafkaOptions: KafkaOptions = {};
         if (opts.brokers !== undefined) kafkaOptions.brokers = opts.brokers;
@@ -420,6 +421,8 @@ export function MessagingPlugin(
         if (opts.defaultQueue !== undefined) kafkaOptions.defaultQueue = opts.defaultQueue;
         if (opts.replyTopic !== undefined) kafkaOptions.replyTopic = opts.replyTopic;
         if (opts.retry !== undefined) kafkaOptions.retry = opts.retry;
+        if (opts.publishTimeoutMs !== undefined)
+          kafkaOptions.publishTimeoutMs = opts.publishTimeoutMs;
         if (logger !== undefined) kafkaOptions.logger = logger;
         broker = new KafkaBroker(ctx.runtime, serializer, kafkaOptions);
       } else if (brokerType === 'pubsub') {
@@ -430,12 +433,15 @@ export function MessagingPlugin(
           defaultQueue?: string;
           replyTopic?: string;
           enableMessageOrdering?: boolean;
+          publishTimeoutMs?: number;
         };
         const pubSubOptions: import('../brokers/pubsub-broker.ts').PubSubOptions = {};
         if (pubSubOpts.projectId !== undefined) pubSubOptions.projectId = pubSubOpts.projectId;
         if (pubSubOpts.credentials !== undefined) {
           pubSubOptions.credentials = pubSubOpts.credentials;
         }
+        if (pubSubOpts.publishTimeoutMs !== undefined)
+          pubSubOptions.publishTimeoutMs = pubSubOpts.publishTimeoutMs;
         if (pubSubOpts.client !== undefined) pubSubOptions.client = pubSubOpts.client;
         if (pubSubOpts.defaultQueue !== undefined) {
           pubSubOptions.defaultQueue = pubSubOpts.defaultQueue;
@@ -488,9 +494,8 @@ export function MessagingPlugin(
       // the broker's, keeps the drain ahead of the broker disconnect on that
       // path too. Both hooks share one memoized drain.
       let outboxRuntime: OutboxRuntime | undefined;
-      const outboxDrain = outboxOptions === undefined
-        ? undefined
-        : createOutboxDrain(ctx, () => outboxRuntime);
+      const outboxDrain =
+        outboxOptions === undefined ? undefined : createOutboxDrain(ctx, () => outboxRuntime);
       if (outboxDrain !== undefined) {
         ctx.lifecycle.onShutdown(outboxDrain);
         ctx.lifecycle.onClose(outboxDrain);
@@ -535,15 +540,22 @@ export function MessagingPlugin(
         // subscription per process so a redelivery to another process is not
         // mistaken for a duplicate.
         const subscriptionIdPrefix = ctx.runtime.uuid();
-        broker = behaviorFactories.length === 0
-          ? new PipelinedBroker(broker, behaviorChain, undefined, undefined, subscriptionIdPrefix)
-          : new PipelinedBroker(broker, behaviorChain, chainReady, {
-            runtime: ctx.runtime,
-            // exactOptionalPropertyTypes: omit the option when unset so the
-            // broker applies its own default bound. The validated value is
-            // resolved before any external broker is connected.
-            ...(chainReadyTimeoutMs !== undefined ? { timeoutMs: chainReadyTimeoutMs } : {}),
-          }, subscriptionIdPrefix);
+        broker =
+          behaviorFactories.length === 0
+            ? new PipelinedBroker(broker, behaviorChain, undefined, undefined, subscriptionIdPrefix)
+            : new PipelinedBroker(
+                broker,
+                behaviorChain,
+                chainReady,
+                {
+                  runtime: ctx.runtime,
+                  // exactOptionalPropertyTypes: omit the option when unset so the
+                  // broker applies its own default bound. The validated value is
+                  // resolved before any external broker is connected.
+                  ...(chainReadyTimeoutMs !== undefined ? { timeoutMs: chainReadyTimeoutMs } : {}),
+                },
+                subscriptionIdPrefix,
+              );
       }
 
       // Register the broker as IMessageBroker
@@ -651,11 +663,11 @@ export function MessagingPlugin(
               ...behaviors.map((entry, index) =>
                 typeof entry === 'function'
                   ? resolveRegistryEntry(
-                    entry,
-                    ctx.services,
-                    `MessagingPlugin({ behaviors })[${index}]`,
-                  )
-                  : entry
+                      entry,
+                      ctx.services,
+                      `MessagingPlugin({ behaviors })[${index}]`,
+                    )
+                  : entry,
               ),
             );
 
@@ -739,13 +751,13 @@ function registerOutbox(ctx: IPluginContext, registration: OutboxRegistration): 
   const { options, broker, outboxToken, relayJobName, purgeJobName, telemetry } = registration;
   const collector = ctx.services.has(CAPABILITIES.METRICS)
     ? new OutboxCollector(
-      ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
-      outboxToken,
-      // Read through `ctx` at CALL time (the M52b lesson).
-      (error: Error): void => {
-        ctx.logger?.warn('outbox metrics write failed', { error: error.message });
-      },
-    )
+        ctx.services.get<IMetricsService>(CAPABILITIES.METRICS),
+        outboxToken,
+        // Read through `ctx` at CALL time (the M52b lesson).
+        (error: Error): void => {
+          ctx.logger?.warn('outbox metrics write failed', { error: error.message });
+        },
+      )
     : undefined;
   const service = new OutboxService({
     runtime: ctx.runtime,
@@ -868,9 +880,10 @@ function registerInbox(
       purgeScheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
     }
     const entry = options.store;
-    const store: IInboxStore = typeof entry === 'function'
-      ? resolveRegistryEntry(entry, ctx.services, 'MessagingPlugin({ inbox: { store } })')
-      : entry;
+    const store: IInboxStore =
+      typeof entry === 'function'
+        ? resolveRegistryEntry(entry, ctx.services, 'MessagingPlugin({ inbox: { store } })')
+        : entry;
     await withDeadline(() => store.verify(), {
       timeoutMs: options.storeTimeoutMs,
       onTimeout: () => new InboxStoreVerifyTimeoutError(options.storeTimeoutMs),
@@ -937,7 +950,7 @@ function createOutboxDrain(
 ): () => Promise<void> {
   let drained: Promise<void> | undefined;
   return () =>
-    drained ??= (async () => {
+    (drained ??= (async () => {
       const outbox = current();
       if (outbox === undefined) return;
       const closed = outbox.service.close();
@@ -955,5 +968,5 @@ function createOutboxDrain(
         }
       }
       await closed;
-    })();
+    })());
 }

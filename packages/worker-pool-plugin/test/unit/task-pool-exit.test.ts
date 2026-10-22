@@ -48,7 +48,7 @@ async function captureExit(promise: Promise<unknown>): Promise<WorkerExitError> 
     if (raised instanceof WorkerExitError) {
       return raised;
     }
-    throw new Error(`expected WorkerExitError, got ${String(raised)}`);
+    throw new Error(`expected WorkerExitError, got ${String(raised)}`, { cause: raised });
   }
   throw new Error('expected the task to reject, but it resolved');
 }
@@ -253,7 +253,10 @@ describe('TaskPool — a crash reports ONCE, not once per platform event', () =>
 
     // The bystander must still be queued — a fresh worker was spawned for it.
     let settled = false;
-    void second.then(() => settled = true, () => settled = true);
+    void second.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(settled).toBe(false);
     expect(pool.stats()).toMatchObject({ queued: 1 });

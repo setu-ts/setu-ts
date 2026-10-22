@@ -1,4 +1,4 @@
-// deno-lint-ignore-file no-console -- captures console.error/warn to prove ioredis wrote nothing there.
+/* eslint-disable no-console -- captures console.error/warn to prove ioredis wrote nothing there. */
 import { run as runProcess } from '../../../../test/node-helpers.ts';
 /**
  * Shared real-Redis harness for the connection-error routing suites.
@@ -109,7 +109,11 @@ async function docker(args: string[]): Promise<string> {
 }
 
 async function containerIdForPort(port: number): Promise<string> {
-  const ids = (await docker(['ps', '-q', '--filter', `publish=${port}`])).trim();
+  const shard = process.env['SETU_CI_SHARD'];
+  const filters = shard
+    ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+    : ['--filter', `publish=${port}`];
+  const ids = (await docker(['ps', '-q', ...filters])).trim();
   if (ids === '') {
     throw new Error(`no container publishing port ${port}`);
   }

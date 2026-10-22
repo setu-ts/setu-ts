@@ -56,9 +56,7 @@ const app = createApplication({
   plugins: [
     RuntimePlugin(),
     GrpcPlugin({
-      services: [
-        { definition: MyServiceDefinition, implementation: myServiceImpl },
-      ],
+      services: [{ definition: MyServiceDefinition, implementation: myServiceImpl }],
     }),
   ],
 });
@@ -87,9 +85,7 @@ GrpcPlugin({
   basePath: '/my-grpc',
   reflection: true,
   health: true,
-  services: [
-    { definition: MyServiceDescriptor, implementation: MyServiceImpl },
-  ],
+  services: [{ definition: MyServiceDescriptor, implementation: MyServiceImpl }],
   interceptors: [myInterceptor],
 });
 ```
@@ -144,6 +140,7 @@ HTTP has taken out of rotation. A `service` naming something this server does no
   in-repo client and every one the reference suite exercises. A native `application/grpc` call is
   refused from its headers and never reaches the buffering — which is what a half-open stream used
   to hang on.
+
 - **Application injection**: `Application.inject()` reaches gRPC handlers — the kernel dispatches
   gRPC from the service registry, not through the HTTP adapter, so an injected request is routed
   exactly like an adapter-delivered one. `app.fetch()` with a web `Request` works too, for streaming
@@ -225,5 +222,5 @@ base64 -w0 < reflection.binpb  # 2332 chars
 | `GrpcServingStatus`     | type      |
 | `RpcFetchHandler`       | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

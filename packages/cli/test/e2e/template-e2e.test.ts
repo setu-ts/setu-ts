@@ -72,7 +72,7 @@ const REST_AVAILABLE = [...UNGATED, 'controller'] as const;
  * scaffolded project failed. A gate that skips the generated file it is least
  * sure about is a gate written around the bug.
  */
-const MODULE_FILES_PER_NAME = 5;
+const MODULE_FILES_PER_NAME = 7;
 
 /**
  * Families that can share one name, grouped so no group contains a collision.
@@ -222,9 +222,7 @@ describe('template scaffolding — end to end', () => {
     const project = `${root}/msvc`;
 
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
-    expect(config).toContain(
-      "ServiceDiscoveryPlugin({ provider: 'static', services: {} })",
-    );
+    expect(config).toContain("ServiceDiscoveryPlugin({ provider: 'static', services: {} })");
 
     const sources = [`${project}/main.ts`, `${project}/setu.config.ts`];
     await useWorkspacePackages(project);
@@ -333,7 +331,7 @@ describe('template scaffolding — end to end', () => {
     for (const name of ['a', 'b']) {
       const config = await nodeFs.readFile(`${root}/${name}/setu.config.ts`, 'utf8');
       expect(config).toContain('MessagingPlugin()');
-      expect(config).toContain('QueuePlugin()');
+      expect(config).toContain('QueuePlugin({ processors: [...QUEUE_PROCESSORS] })');
       expect(config).not.toContain('CloudflarePlugin');
     }
 
@@ -555,10 +553,9 @@ describe('template scaffolding — end to end', () => {
     for (const target of ['deno', 'node', 'bun', 'cloudflare-workers']) {
       out = [];
       err = [];
-      expect(await run(['new', `svc-${target}`, '--template', 'class-based', '--runtime', target]))
-        .toBe(
-          0,
-        );
+      expect(
+        await run(['new', `svc-${target}`, '--template', 'class-based', '--runtime', target]),
+      ).toBe(0);
     }
   });
 
@@ -607,7 +604,7 @@ describe('template scaffolding — end to end', () => {
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, sources);
       expect(stderr).not.toContain('SyntaxError');
-      expect(code).toBe(0);
+      expect(code, stderr).toBe(0);
     });
   }
 });
@@ -735,20 +732,18 @@ describe('setu generate module, end to end', () => {
   // The module schematic is UNGATED since M65, so it emits a runnable test into
   // every host — including the two that declared none of what that test
   // imports. Both scaffolded cleanly, generated cleanly, reported `created
-  // …/widget.service.test.ts`, and then failed the developer's first `deno
+  // …/widget.test.ts`, and then failed the developer's first `deno
   // test` with `Import "@std/testing/bdd" not a dependency and not in import
   // map`: the M58 defect, reintroduced by ungating.
   //
   // Checked with a real `deno check` of the emitted TEST file, not a manifest
   // assertion — a manifest assertion is what the unit gate does, and it cannot
   // see whether Deno actually resolves the specifier from the project.
-  for (
-    const [label, argv] of [
-      ['no template', ['new', '--runtime', 'deno', 'bare']],
-      ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
-      ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
-    ] as const
-  ) {
+  for (const [label, argv] of [
+    ['no template', ['new', '--runtime', 'deno', 'bare']],
+    ['--template rest', ['new', '--runtime', 'deno', 'bare', '--template', 'rest']],
+    ['--template full-stack', ['new', '--runtime', 'deno', 'bare', '--template', 'full-stack']],
+  ] as const) {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
       expect(await run(argv)).toBe(0);
       const project = `${root}/bare`;
@@ -756,7 +751,7 @@ describe('setu generate module, end to end', () => {
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, [
-        `${project}/src/modules/widget/widget.service.test.ts`,
+        `${project}/src/modules/widget/widget.test.ts`,
       ]);
       expect(stderr).not.toContain('not in import map');
       expect(code).toBe(0);
@@ -833,7 +828,7 @@ const p = await app.inject({
   method: 'POST',
   url: '/orders',
   headers: { 'content-type': 'application/json' },
-  body: JSON.stringify({ sku: 'ABC-1' }),
+  body: JSON.stringify({ name: 'ABC-1' }),
 });
 out['POST /orders'] = { status: p.statusCode, body: p.body };
 console.log('__PROBE_RESULT__' + JSON.stringify(out));

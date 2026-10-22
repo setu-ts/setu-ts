@@ -27,11 +27,13 @@ const typeDefs = `
 function createApp(options: Partial<GraphqlPluginOptions> & { resolvers: never }) {
   const app = createApplication();
   app.register(RuntimePlugin());
-  app.register(GraphqlPlugin({
-    graphqlModule: realModule,
-    typeDefs,
-    ...options,
-  } as GraphqlPluginOptions));
+  app.register(
+    GraphqlPlugin({
+      graphqlModule: realModule,
+      typeDefs,
+      ...options,
+    } as GraphqlPluginOptions),
+  );
   return app;
 }
 
@@ -252,10 +254,12 @@ describe('GraphQL plugin integration', () => {
 
     const app = createApplication();
     app.register(RuntimePlugin());
-    app.register(GraphqlPlugin({
-      graphqlModule: realModule,
-      schema: schema as never,
-    }));
+    app.register(
+      GraphqlPlugin({
+        graphqlModule: realModule,
+        schema: schema as never,
+      }),
+    );
     await app.start();
 
     const res = await post(app, { query: '{ hello }' });

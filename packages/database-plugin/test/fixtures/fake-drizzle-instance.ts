@@ -1,4 +1,4 @@
-// deno-lint-ignore-file require-await -- async methods must match real Drizzle instance interface
+/* eslint-disable require-await -- async methods must match real Drizzle instance interface */
 /**
  * Fake Drizzle database instance for unit testing the DrizzleAdapter.
  *
@@ -77,9 +77,7 @@ export function createFakeDrizzleInstance(): {
     from: (table: Record<string, unknown>) => FakeSelectQuery;
   };
   insert: (table: string | Record<string, unknown>) => {
-    values: (
-      data: Record<string, unknown> | Record<string, unknown>[],
-    ) => {
+    values: (data: Record<string, unknown> | Record<string, unknown>[]) => {
       execute: () => Promise<Record<string, unknown>[]>;
       returning: () => Promise<Record<string, unknown>[]>;
     };
@@ -255,8 +253,7 @@ export function createFakeDrizzleInstance(): {
       },
       then<TResult1 = Record<string, unknown>[], TResult2 = never>(
         onfulfilled?:
-          | ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>)
-          | null,
+          ((value: Record<string, unknown>[]) => TResult1 | PromiseLike<TResult1>) | null,
         onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
       ): PromiseLike<TResult1 | TResult2> {
         let rows = Array.from(getStore(extractTableName(table)).records.values());
@@ -271,9 +268,10 @@ export function createFakeDrizzleInstance(): {
           return Promise.resolve([{ [alias]: rows.length }]).then(onfulfilled, onrejected);
         }
         const firstOrder = order[0] as Record<string, unknown> | undefined;
-        const field = firstOrder?.col !== undefined
-          ? String((firstOrder.col as Record<string, unknown>).name)
-          : undefined;
+        const field =
+          firstOrder?.col !== undefined
+            ? String((firstOrder.col as Record<string, unknown>).name)
+            : undefined;
         if (field !== undefined) {
           rows.sort((left, right) => String(left[field]).localeCompare(String(right[field])));
           if (firstOrder?.op === 'desc') rows.reverse();
@@ -281,9 +279,7 @@ export function createFakeDrizzleInstance(): {
         rows = rows.slice(offset ?? 0, limit === undefined ? undefined : (offset ?? 0) + limit);
         if (fields !== undefined) {
           rows = rows.map((row) =>
-            Object.fromEntries(
-              Object.keys(fields).map((fieldName) => [fieldName, row[fieldName]]),
-            )
+            Object.fromEntries(Object.keys(fields).map((fieldName) => [fieldName, row[fieldName]])),
           );
         }
         return Promise.resolve(rows).then(onfulfilled, onrejected);
@@ -321,9 +317,7 @@ export function createFakeDrizzleInstance(): {
       const tableName = extractTableName(table);
       recordedCalls.push({ action: 'insert', entity: tableName, args: {} });
       return {
-        values(
-          data: Record<string, unknown> | Record<string, unknown>[],
-        ) {
+        values(data: Record<string, unknown> | Record<string, unknown>[]) {
           const items = Array.isArray(data) ? data : [data];
           recordedCalls.push({ action: 'insert', entity: tableName, args: { data: items } });
           return {
@@ -366,7 +360,7 @@ export function createFakeDrizzleInstance(): {
                   const found = [...store.records.entries()].find(([id, row]) =>
                     conditions.length > 0
                       ? conditions.every(([field, value]) => row[field] === value)
-                      : id === extractWhereId(expr)
+                      : id === extractWhereId(expr),
                   );
                   if (found !== undefined) {
                     const [key, existing] = found;
@@ -394,7 +388,7 @@ export function createFakeDrizzleInstance(): {
               const found = [...store.records.entries()].find(([id, row]) =>
                 conditions.length > 0
                   ? conditions.every(([field, value]) => row[field] === value)
-                  : id === extractWhereId(expr)
+                  : id === extractWhereId(expr),
               );
               if (found === undefined) return [];
               const [id, existing] = found;

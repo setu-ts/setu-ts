@@ -76,7 +76,8 @@ async function race(a: IInboxStore, b: IInboxStore): Promise<PromiseSettledResul
   const write = (store: IInboxStore, name: string, gate?: Promise<void>) =>
     store.run(marker, async (scope) => {
       aInside();
-      await (scope as IUnitOfWork).getRepository<Record<string, unknown>>('Person')
+      await (scope as IUnitOfWork)
+        .getRepository<Record<string, unknown>>('Person')
         .create({ id: `p-${name}`, name });
       if (gate !== undefined) await gate;
       return name;
@@ -161,7 +162,10 @@ describe('inbox over a real MongoDB replica set', { skip: mongoRsUri === undefin
       try {
         const db = client.db('setu_m108_inbox');
         for (const name of [`inbox_${suffix}`, `people_${suffix}`]) {
-          await db.collection(name).drop().catch(() => false);
+          await db
+            .collection(name)
+            .drop()
+            .catch(() => false);
         }
       } finally {
         await client.close();
@@ -172,7 +176,10 @@ describe('inbox over a real MongoDB replica set', { skip: mongoRsUri === undefin
 
 /** The error `start()` rejected with. */
 async function startFailure(app: IKernelApplication): Promise<unknown> {
-  return await app.start().then(() => undefined, (error: unknown) => error);
+  return await app.start().then(
+    () => undefined,
+    (error: unknown) => error,
+  );
 }
 
 /** An app with the inbox over one adapter. */

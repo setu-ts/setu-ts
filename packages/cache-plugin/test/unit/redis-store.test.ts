@@ -1,5 +1,5 @@
-// deno-lint-ignore-file require-await -- test fixtures use sync methods matching async interface signatures
-import { describe, expect, it } from 'vitest';
+/* eslint-disable require-await -- test fixtures use sync methods matching async interface signatures */
+import { describe, expect, it, vi } from 'vitest';
 
 import { RedisStore, validateClient } from '../../src/stores/redis-store.ts';
 import type { IRedisClient } from '../../src/interfaces/index.ts';
@@ -238,5 +238,29 @@ describe('RedisStore', () => {
       await store.disconnect();
       await expect(store.isHealthy()).resolves.toBe(false);
     });
+  });
+});
+
+describe('RedisStore — the guarded import (M113d §3.1)', () => {
+  it('connect rejects with OptionalDependencyUnavailableError when ioredis is absent', async () => {
+    const { RedisStore } = await import('../../src/stores/redis-store.ts');
+    vi.doMock('ioredis', () => {
+      throw new Error('Cannot find package');
+    });
+    try {
+      const store = new RedisStore('m113d:', { url: 'redis://localhost:6379' });
+      let caught: unknown;
+      try {
+        await store.connect();
+      } catch (error) {
+        caught = error;
+      }
+      const loadError = caught as Error & { dependency: string; cause: unknown };
+      expect(loadError.name).toBe('OptionalDependencyUnavailableError');
+      expect(loadError.dependency).toBe('ioredis');
+      expect(loadError.cause).toBeInstanceOf(Error);
+    } finally {
+      vi.doUnmock('ioredis');
+    }
   });
 });

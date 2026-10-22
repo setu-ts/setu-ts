@@ -73,10 +73,7 @@ export type CacheControlOptions = {
  * @returns The Cache-Control header value
  * @since 0.1.0
  */
-export function resolveCacheControl(
-  requestPath: string,
-  options: CacheControlOptions,
-): string {
+export function resolveCacheControl(requestPath: string, options: CacheControlOptions): string {
   const { cacheControl } = options;
 
   if (typeof cacheControl === 'string') {

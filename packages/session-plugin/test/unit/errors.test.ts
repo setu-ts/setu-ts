@@ -32,9 +32,7 @@ describe('session errors', () => {
     const error = new CsrfTokenMismatchError('the session carries no CSRF token');
     expect(error).toBeInstanceOf(Error);
     expect(error.name).toBe('CsrfTokenMismatchError');
-    expect(error.message).toBe(
-      'CSRF verification failed: the session carries no CSRF token',
-    );
+    expect(error.message).toBe('CSRF verification failed: the session carries no CSRF token');
   });
 
   it('SessionTooLargeError reports both sizes and the way out', () => {

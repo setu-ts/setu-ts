@@ -121,10 +121,7 @@ describe('exception factories', () => {
     });
 
     it('accepts a custom message', () => {
-      const err = validationError(
-        [{ field: 'a', message: 'x' }],
-        'Custom validation message',
-      );
+      const err = validationError([{ field: 'a', message: 'x' }], 'Custom validation message');
       expect(err.message).toBe('Custom validation message');
     });
   });

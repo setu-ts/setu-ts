@@ -85,14 +85,12 @@ describe('barrel exports', () => {
     const options: AuthPluginOptions = { issuers: [issuer], http };
     expect(options.issuers?.[0].keys).toBe(keys);
     const barrel = auth as Record<string, unknown>;
-    for (
-      const internal of [
-        'IssuerStrategy',
-        'IssuerKeySet',
-        'createDefaultAuthHttp',
-        'compileIssuers',
-      ]
-    ) {
+    for (const internal of [
+      'IssuerStrategy',
+      'IssuerKeySet',
+      'createDefaultAuthHttp',
+      'compileIssuers',
+    ]) {
       expect(barrel[internal]).toBeUndefined();
     }
   });
@@ -309,15 +307,13 @@ describe('barrel exports', () => {
     expect(config.providers.length).toBe(2);
     expect(tokens.accessToken).toBe('a');
     const barrel = auth as Record<string, unknown>;
-    for (
-      const internal of [
-        'AuthSessionService',
-        'AuthSessionStrategy',
-        'compileSignIn',
-        'registerSignInRoutes',
-        'exchangeCode',
-      ]
-    ) {
+    for (const internal of [
+      'AuthSessionService',
+      'AuthSessionStrategy',
+      'compileSignIn',
+      'registerSignInRoutes',
+      'exchangeCode',
+    ]) {
       expect(barrel[internal]).toBeUndefined();
     }
   });
@@ -336,9 +332,12 @@ describe('barrel exports', () => {
     expect(store).toBeInstanceOf(auth.MemorySamlRequestStore);
     expect(auth.DEFAULT_MAX_PENDING_SAML_REQUESTS).toBe(10_000);
     expect(new auth.SamlRuntimeLoadError('npm:x')).toBeInstanceOf(Error);
-    for (
-      const internal of ['registerSamlRoutes', 'loadSaml', 'describeError', 'compileSamlProvider']
-    ) {
+    for (const internal of [
+      'registerSamlRoutes',
+      'loadSaml',
+      'describeError',
+      'compileSamlProvider',
+    ]) {
       expect((auth as Record<string, unknown>)[internal]).toBeUndefined();
     }
   });
@@ -394,15 +393,13 @@ describe('@setu-ts/auth-plugin barrel — authorization policies (M110a)', () =>
 
   it('keeps the internals off the barrel', () => {
     const names = Object.keys(auth);
-    for (
-      const internal of [
-        'PolicyService',
-        'validatePolicyDefinition',
-        'policyGuardOf',
-        'scanPolicyGuards',
-        'isAnonymousAbility',
-      ]
-    ) {
+    for (const internal of [
+      'PolicyService',
+      'validatePolicyDefinition',
+      'policyGuardOf',
+      'scanPolicyGuards',
+      'isAnonymousAbility',
+    ]) {
       expect(names).not.toContain(internal);
     }
   });
@@ -436,17 +433,19 @@ describe('scoped RBAC exports (M110b)', () => {
   });
 
   it('keeps the scoped internals off the barrel', () => {
-    for (
-      const internal of [
-        'compileScopedRbac',
-        'createScopedRbac',
-        'ScopedEvaluator',
-        'GrantResolver',
-        'brandPolicyGuard',
-        'walkScopeChain',
-      ]
-    ) {
+    for (const internal of [
+      'compileScopedRbac',
+      'createScopedRbac',
+      'ScopedEvaluator',
+      'GrantResolver',
+      'brandPolicyGuard',
+      'walkScopeChain',
+    ]) {
       expect(Object.hasOwn(auth, internal)).toBe(false);
     }
   });
+});
+
+it('exports RateLimitStoreUnavailableError', () => {
+  expect(new auth.RateLimitStoreUnavailableError(null).name).toBe('RateLimitStoreUnavailableError');
 });

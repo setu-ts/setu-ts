@@ -1,0 +1,315 @@
+{
+  "IRequest": {
+    "members": [
+      {
+        "kind": "method",
+        "name": "bytes",
+        "readonly": false,
+        "optional": false,
+        "signature": "bytes():Promise<Uint8Array>"
+      },
+      {
+        "kind": "method",
+        "name": "formData",
+        "readonly": false,
+        "optional": true,
+        "signature": "formData?():Promise<FormBody>"
+      },
+      {
+        "kind": "property",
+        "name": "headers",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly headers:Headers"
+      },
+      {
+        "kind": "property",
+        "name": "ip",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly ip?:string"
+      },
+      {
+        "kind": "method",
+        "name": "json",
+        "readonly": false,
+        "optional": false,
+        "signature": "json<T=unknown>():Promise<T>"
+      },
+      {
+        "kind": "property",
+        "name": "locale",
+        "readonly": false,
+        "optional": true,
+        "signature": "locale?:string"
+      },
+      {
+        "kind": "property",
+        "name": "method",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly method:HttpMethod"
+      },
+      {
+        "kind": "property",
+        "name": "path",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly path:string"
+      },
+      {
+        "kind": "property",
+        "name": "raw",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly raw?:Request"
+      },
+      {
+        "kind": "property",
+        "name": "signal",
+        "readonly": false,
+        "optional": true,
+        "signature": "signal?:AbortSignal"
+      },
+      {
+        "kind": "property",
+        "name": "tenant",
+        "readonly": false,
+        "optional": true,
+        "signature": "tenant?:ITenant"
+      },
+      {
+        "kind": "method",
+        "name": "text",
+        "readonly": false,
+        "optional": false,
+        "signature": "text():Promise<string>"
+      },
+      {
+        "kind": "property",
+        "name": "url",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly url:string"
+      },
+      {
+        "kind": "property",
+        "name": "user",
+        "readonly": false,
+        "optional": true,
+        "signature": "user?:IPrincipal"
+      }
+    ]
+  },
+  "IRuntimeServices": {
+    "members": [
+      {
+        "kind": "method",
+        "name": "clearInterval",
+        "readonly": false,
+        "optional": false,
+        "signature": "clearInterval(handle:TimerHandle):void"
+      },
+      {
+        "kind": "method",
+        "name": "clearTimeout",
+        "readonly": false,
+        "optional": false,
+        "signature": "clearTimeout(handle:TimerHandle):void"
+      },
+      {
+        "kind": "property",
+        "name": "dns",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly dns?:IDnsResolver"
+      },
+      {
+        "kind": "property",
+        "name": "env",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly env:Readonly<Record<string,string|undefined>>"
+      },
+      {
+        "kind": "method",
+        "name": "exit",
+        "readonly": false,
+        "optional": false,
+        "signature": "exit(code?:number):never"
+      },
+      {
+        "kind": "property",
+        "name": "fs",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly fs?:IFileSystem"
+      },
+      {
+        "kind": "method",
+        "name": "hostname",
+        "readonly": false,
+        "optional": false,
+        "signature": "hostname():string"
+      },
+      {
+        "kind": "method",
+        "name": "hrtime",
+        "readonly": false,
+        "optional": false,
+        "signature": "hrtime():number"
+      },
+      {
+        "kind": "method",
+        "name": "now",
+        "readonly": false,
+        "optional": false,
+        "signature": "now():number"
+      },
+      {
+        "kind": "method",
+        "name": "onSignal",
+        "readonly": false,
+        "optional": true,
+        "signature": "onSignal?(signal:RuntimeSignal,handler:()=>void):void"
+      },
+      {
+        "kind": "method",
+        "name": "platform",
+        "readonly": false,
+        "optional": false,
+        "signature": "platform():RuntimePlatform"
+      },
+      {
+        "kind": "method",
+        "name": "randomBytes",
+        "readonly": false,
+        "optional": false,
+        "signature": "randomBytes(length:number):Uint8Array"
+      },
+      {
+        "kind": "method",
+        "name": "reportError",
+        "readonly": false,
+        "optional": true,
+        "signature": "reportError?(record:Readonly<Record<string,unknown>>):void"
+      },
+      {
+        "kind": "method",
+        "name": "setInterval",
+        "readonly": false,
+        "optional": false,
+        "signature": "setInterval(fn:()=>void,ms:number):TimerHandle"
+      },
+      {
+        "kind": "method",
+        "name": "setTimeout",
+        "readonly": false,
+        "optional": false,
+        "signature": "setTimeout(fn:()=>void,ms:number):TimerHandle"
+      },
+      {
+        "kind": "property",
+        "name": "subtle",
+        "readonly": true,
+        "optional": false,
+        "signature": "readonly subtle:SubtleCrypto"
+      },
+      {
+        "kind": "method",
+        "name": "uuid",
+        "readonly": false,
+        "optional": false,
+        "signature": "uuid():string"
+      },
+      {
+        "kind": "method",
+        "name": "version",
+        "readonly": false,
+        "optional": false,
+        "signature": "version():string"
+      },
+      {
+        "kind": "property",
+        "name": "workers",
+        "readonly": true,
+        "optional": true,
+        "signature": "readonly workers?:IWorkerHost"
+      }
+    ]
+  },
+  "IResponse": {
+    "members": [
+      {
+        "kind": "method",
+        "name": "appendHeader",
+        "readonly": false,
+        "optional": false,
+        "signature": "appendHeader(name:string,value:string):IResponse"
+      },
+      {
+        "kind": "method",
+        "name": "header",
+        "readonly": false,
+        "optional": false,
+        "signature": "header(name:string,value:string):IResponse"
+      },
+      {
+        "kind": "method",
+        "name": "html",
+        "readonly": false,
+        "optional": false,
+        "signature": "html(body:string):HandlerResult"
+      },
+      {
+        "kind": "method",
+        "name": "json",
+        "readonly": false,
+        "optional": false,
+        "signature": "json<T>(body:T):HandlerResult"
+      },
+      {
+        "kind": "method",
+        "name": "redirect",
+        "readonly": false,
+        "optional": false,
+        "signature": "redirect(url:string,status?:number):HandlerResult"
+      },
+      {
+        "kind": "method",
+        "name": "send",
+        "readonly": false,
+        "optional": false,
+        "signature": "send(body?:Uint8Array):HandlerResult"
+      },
+      {
+        "kind": "method",
+        "name": "snapshot",
+        "readonly": false,
+        "optional": false,
+        "signature": "snapshot():ResponseSnapshot"
+      },
+      {
+        "kind": "method",
+        "name": "status",
+        "readonly": false,
+        "optional": false,
+        "signature": "status(code:number):IResponse"
+      },
+      {
+        "kind": "method",
+        "name": "stream",
+        "readonly": false,
+        "optional": false,
+        "signature": "stream(body:ReadableStream<Uint8Array>):HandlerResult"
+      },
+      {
+        "kind": "method",
+        "name": "text",
+        "readonly": false,
+        "optional": false,
+        "signature": "text(body:string):HandlerResult"
+      }
+    ]
+  }
+}

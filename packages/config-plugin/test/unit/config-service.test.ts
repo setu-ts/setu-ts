@@ -46,24 +46,18 @@ describe('ConfigService', () => {
 
   it('getOrThrow throws with key name when absent', () => {
     const config = new ConfigService({});
-    expect(() => config.getOrThrow<string>('PORT')).toThrow(
-      /"PORT"/,
-    );
+    expect(() => config.getOrThrow<string>('PORT')).toThrow(/"PORT"/);
   });
 
   it('getOrThrow throws for undefined value', () => {
     const config = new ConfigService({ PORT: undefined });
-    expect(() => config.getOrThrow<string>('PORT')).toThrow(
-      /"PORT"/,
-    );
+    expect(() => config.getOrThrow<string>('PORT')).toThrow(/"PORT"/);
   });
 
   it('getOrThrow does not expose other config values in error', () => {
     const config = new ConfigService({ SECRET: 'super-secret' });
     expect(() => config.getOrThrow<string>('MISSING')).toThrow(/"MISSING"/);
-    expect(() => config.getOrThrow<string>('MISSING')).not.toThrow(
-      /super-secret/,
-    );
+    expect(() => config.getOrThrow<string>('MISSING')).not.toThrow(/super-secret/);
   });
 
   it('has returns true for existing key', () => {

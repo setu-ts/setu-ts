@@ -20,8 +20,7 @@ const HASH_MISMATCH = 'PERSISTED_QUERY_HASH_MISMATCH';
  * The result of resolving APQ for a request.
  */
 export type ApqResolveResult =
-  | { ok: true; query: string }
-  | { ok: false; message: string; code: string; status: number };
+  { ok: true; query: string } | { ok: false; message: string; code: string; status: number };
 
 /**
  * Bounded in-memory LRU using insertion-order eviction.

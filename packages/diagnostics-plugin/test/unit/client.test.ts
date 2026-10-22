@@ -119,7 +119,10 @@ function fakeServer(
      * signed `x-setu-instance`; `body` replaces the body's `instanceId`
      * (`null` serves JSON null, `'omit'` removes the field).
      */
-    identity?: (path: string, call: number) => {
+    identity?: (
+      path: string,
+      call: number,
+    ) => {
       header?: string;
       body?: string | null | 'omit';
     };
@@ -134,9 +137,7 @@ function fakeServer(
     void key;
     return await key.then(async (imported) => {
       const target = `${url.pathname}${url.search}`;
-      const session = String(
-        requestHeadersOf(input).get('x-setu-session') ?? '',
-      );
+      const session = String(requestHeadersOf(input).get('x-setu-session') ?? '');
       const sequence = requestHeadersOf(input).get('x-setu-sequence') ?? '';
       const instance = requestHeadersOf(input).get('x-setu-instance');
       const mac = requestHeadersOf(input).get('x-setu-mac') ?? '';
@@ -227,8 +228,12 @@ function fakeServer(
         );
       } else if (target === '/v1/event') {
         bodyText = JSON.stringify(
-          overrides.eventSnapshotBody ??
-            { version: 1, instanceId: TEST_INSTANCE_ID, state: 'ready', sources: [] },
+          overrides.eventSnapshotBody ?? {
+            version: 1,
+            instanceId: TEST_INSTANCE_ID,
+            state: 'ready',
+            sources: [],
+          },
         );
       } else if (target === '/v1/scheduler') {
         bodyText = JSON.stringify({
@@ -253,9 +258,7 @@ function fakeServer(
         bodyText = JSON.stringify((overrides.tracesBody ?? traceBatchBody)(after));
       } else if (url.pathname === '/v1/authorization') {
         const after = Number(url.searchParams.get('after'));
-        bodyText = JSON.stringify(
-          (overrides.authorizationBody ?? authorizationBatchBody)(after),
-        );
+        bodyText = JSON.stringify((overrides.authorizationBody ?? authorizationBatchBody)(after));
       } else {
         const after = Number(url.searchParams.get('after'));
         bodyText = JSON.stringify(overrides.eventsBody?.(after) ?? minimalBatch());
@@ -280,8 +283,8 @@ function fakeServer(
         }
         bodyText = JSON.stringify(record);
       }
-      const headerInstance = identity.header ??
-        (overrides.wrongInstance ? '0'.repeat(36) : TEST_INSTANCE_ID);
+      const headerInstance =
+        identity.header ?? (overrides.wrongInstance ? '0'.repeat(36) : TEST_INSTANCE_ID);
       // An oversized body the server SIGNS, and which is otherwise a valid
       // snapshot projection. Both halves are load-bearing: serving unsigned
       // bytes would be refused by MAC verification, and serving invalid JSON
@@ -336,28 +339,32 @@ function queueBatchBody(after: number): Record<string, unknown> {
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    sources: [{
-      sourceId: 'q1',
-      state: 'ready',
-      instanceAlias: 'mailer',
-      depthCoverage: 'complete',
-      failure: 'none',
-      lost: 0,
-      droppedAttempts: 0,
-      evictedJobAliases: 0,
-    }],
-    events: [{
-      sequence: after + 1,
-      sourceId: 'q1',
-      instanceAlias: 'mailer',
-      queueAlias: 'emails',
-      jobAlias: 'j1',
-      attempt: 1,
-      durationMs: 2,
-      outcome: 'completed',
-      settlement: 'acknowledged',
-      ageMs: 3,
-    }],
+    sources: [
+      {
+        sourceId: 'q1',
+        state: 'ready',
+        instanceAlias: 'mailer',
+        depthCoverage: 'complete',
+        failure: 'none',
+        lost: 0,
+        droppedAttempts: 0,
+        evictedJobAliases: 0,
+      },
+    ],
+    events: [
+      {
+        sequence: after + 1,
+        sourceId: 'q1',
+        instanceAlias: 'mailer',
+        queueAlias: 'emails',
+        jobAlias: 'j1',
+        attempt: 1,
+        durationMs: 2,
+        outcome: 'completed',
+        settlement: 'acknowledged',
+        ageMs: 3,
+      },
+    ],
     depths: [],
     next: after + 1,
     lost: 0,
@@ -380,19 +387,21 @@ function traceBatchBody(after: number): Record<string, unknown> {
     coverage: 'completed-sampled-spans',
     instrumentation: ['http'],
     sampler: { kind: 'always-on' },
-    records: [{
-      sequence: after + 1,
-      serviceAlias: 'orders',
-      operationAlias: 'create-order',
-      traceId: 'a'.repeat(32),
-      spanId: 'b'.repeat(16),
-      links: [],
-      kind: 'server',
-      outcome: 'ok',
-      durationMs: 4,
-      ageMs: 6,
-      parentVisibility: 'root',
-    }],
+    records: [
+      {
+        sequence: after + 1,
+        serviceAlias: 'orders',
+        operationAlias: 'create-order',
+        traceId: 'a'.repeat(32),
+        spanId: 'b'.repeat(16),
+        links: [],
+        kind: 'server',
+        outcome: 'ok',
+        durationMs: 4,
+        ageMs: 6,
+        parentVisibility: 'root',
+      },
+    ],
     next: after + 1,
     lost: 0,
     closed: false,
@@ -406,18 +415,20 @@ function authorizationBatchBody(after: number): Record<string, unknown> {
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    decisions: [{
-      sequence: after + 1,
-      id: `d${after + 1}`,
-      operation: 'role',
-      result: true,
-      ruleAliases: ['A'],
-      steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
-      stepsEvaluated: 1,
-      stepsTruncated: false,
-      reason: 'direct-role',
-      ageMs: 2,
-    }],
+    decisions: [
+      {
+        sequence: after + 1,
+        id: `d${after + 1}`,
+        operation: 'role',
+        result: true,
+        ruleAliases: ['A'],
+        steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
+        stepsEvaluated: 1,
+        stepsTruncated: false,
+        reason: 'direct-role',
+        ageMs: 2,
+      },
+    ],
     next: after + 1,
     lost: 0,
     closed: false,
@@ -458,10 +469,12 @@ function recording(base: typeof fetch): typeof fetch {
  * @param overrides - Server and client overrides
  * @returns The client, the request log, and the timing log
  */
-function buildClient(overrides: {
-  server?: Parameters<typeof fakeServer>[1];
-  client?: Partial<DiagnosticsClientOptions>;
-} = {}): {
+function buildClient(
+  overrides: {
+    server?: Parameters<typeof fakeServer>[1];
+    client?: Partial<DiagnosticsClientOptions>;
+  } = {},
+): {
   client: ReturnType<typeof createDiagnosticsClient>;
   requests: RecordedRequest[];
   timeouts: number[];
@@ -515,9 +528,7 @@ describe('Client — endpoint and option validation', () => {
       'not a url',
     ];
     for (const endpoint of bad) {
-      expect(() => createDiagnosticsClient({ ...base, endpoint })).toThrow(
-        CLIENT_ERRORS.endpoint,
-      );
+      expect(() => createDiagnosticsClient({ ...base, endpoint })).toThrow(CLIENT_ERRORS.endpoint);
     }
   });
 
@@ -532,14 +543,14 @@ describe('Client — endpoint and option validation', () => {
       },
     };
     expect(() =>
-      createDiagnosticsClient({ ...base, sessionId: 'short', sessionKey: TEST_KEY_BYTES })
+      createDiagnosticsClient({ ...base, sessionId: 'short', sessionKey: TEST_KEY_BYTES }),
     ).toThrow(CLIENT_ERRORS.sessionId);
     expect(() =>
       createDiagnosticsClient({
         ...base,
         sessionId: TEST_SESSION_ID,
         sessionKey: new Uint8Array(8),
-      })
+      }),
     ).toThrow(CLIENT_ERRORS.sessionKey);
   });
 });
@@ -578,10 +589,7 @@ describe('Client — pairing and reads', () => {
 
   it('serializes calls and reserves strictly increasing sequence numbers', async () => {
     const { client, requests } = buildClient();
-    const [snapshot, batch] = await Promise.all([
-      client.snapshot(),
-      client.read(0, 4),
-    ]);
+    const [snapshot, batch] = await Promise.all([client.snapshot(), client.read(0, 4)]);
     expect(snapshot.version).toEqual(1);
     expect(batch.version).toEqual(1);
     const sequences = requests.map((r) => Number.parseInt(r.sequence, 10));
@@ -685,16 +693,19 @@ describe('Client — refusal bodies', () => {
    */
   function trackedRefusal(status: number) {
     const tracker = { pulled: 0, cancelled: 0 };
-    const body = new ReadableStream<Uint8Array>({
-      pull(controller) {
-        tracker.pulled += 1;
-        controller.enqueue(new TextEncoder().encode('canary-refusal-body'));
-        controller.close();
+    const body = new ReadableStream<Uint8Array>(
+      {
+        pull(controller) {
+          tracker.pulled += 1;
+          controller.enqueue(new TextEncoder().encode('canary-refusal-body'));
+          controller.close();
+        },
+        cancel() {
+          tracker.cancelled += 1;
+        },
       },
-      cancel() {
-        tracker.cancelled += 1;
-      },
-    }, { highWaterMark: 0 });
+      { highWaterMark: 0 },
+    );
     return { tracker, response: new Response(body, { status }) };
   }
 
@@ -933,30 +944,34 @@ function cacheResponseBody(): Record<string, unknown> {
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    sources: [{
-      sourceId: 's1',
-      snapshot: {
-        state: 'ready',
-        alias: 'primary',
-        coverage: 'owned-instance',
-        records: [{
+    sources: [
+      {
+        sourceId: 's1',
+        snapshot: {
+          state: 'ready',
           alias: 'primary',
-          operation: 'get',
-          count: 2,
-          lastDurationMs: 1,
-          ageMs: 3,
-          succeeded: 1,
-          failed: 1,
-          hits: 1,
-          misses: 0,
-          present: 0,
-          absent: 0,
-          removed: 0,
-          notRemoved: 0,
-        }],
-        dropped: 0,
+          coverage: 'owned-instance',
+          records: [
+            {
+              alias: 'primary',
+              operation: 'get',
+              count: 2,
+              lastDurationMs: 1,
+              ageMs: 3,
+              succeeded: 1,
+              failed: 1,
+              hits: 1,
+              misses: 0,
+              present: 0,
+              absent: 0,
+              removed: 0,
+              notRemoved: 0,
+            },
+          ],
+          dropped: 0,
+        },
       },
-    }],
+    ],
   };
 }
 
@@ -976,13 +991,15 @@ function realtimeResponseBody(): Record<string, unknown> {
           sourceKind: 'websocket',
           coverage: 'owned-instance',
           gauges: { state: 'available', openConnections: 3, groups: 1 },
-          records: [{
-            alias: 'chat',
-            operation: 'close',
-            lastDurationMs: null,
-            backpressureCloses: null,
-            ...counts,
-          }],
+          records: [
+            {
+              alias: 'chat',
+              operation: 'close',
+              lastDurationMs: null,
+              backpressureCloses: null,
+              ...counts,
+            },
+          ],
           dropped: 0,
         },
       },
@@ -994,13 +1011,15 @@ function realtimeResponseBody(): Record<string, unknown> {
           sourceKind: 'sse',
           coverage: 'owned-instance',
           gauges: { state: 'available', openConnections: 0, groups: 0 },
-          records: [{
-            alias: 'feed',
-            operation: 'close',
-            lastDurationMs: null,
-            backpressureCloses: 1,
-            ...counts,
-          }],
+          records: [
+            {
+              alias: 'feed',
+              operation: 'close',
+              lastDurationMs: null,
+              backpressureCloses: 1,
+              ...counts,
+            },
+          ],
           dropped: 0,
         },
       },
@@ -1012,13 +1031,15 @@ function realtimeResponseBody(): Record<string, unknown> {
           sourceKind: 'backplane',
           coverage: 'owned-instance',
           gauges: { state: 'unsupported', openConnections: null, groups: null },
-          records: [{
-            alias: 'fanout',
-            operation: 'backplane-publish',
-            lastDurationMs: 4,
-            backpressureCloses: null,
-            ...counts,
-          }],
+          records: [
+            {
+              alias: 'fanout',
+              operation: 'backplane-publish',
+              lastDurationMs: 4,
+              backpressureCloses: null,
+              ...counts,
+            },
+          ],
           dropped: 0,
         },
       },
@@ -1032,25 +1053,29 @@ function storageResponseBody(): Record<string, unknown> {
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    sources: [{
-      sourceId: 's1',
-      snapshot: {
-        state: 'ready',
-        alias: 'primary',
-        coverage: 'owned-instance',
-        records: [{
+    sources: [
+      {
+        sourceId: 's1',
+        snapshot: {
+          state: 'ready',
           alias: 'primary',
-          operation: 'put',
-          count: 2,
-          lastDurationMs: 1,
-          ageMs: 3,
-          succeeded: 1,
-          failed: 1,
-          lastBytes: 64,
-        }],
-        dropped: 0,
+          coverage: 'owned-instance',
+          records: [
+            {
+              alias: 'primary',
+              operation: 'put',
+              count: 2,
+              lastDurationMs: 1,
+              ageMs: 3,
+              succeeded: 1,
+              failed: 1,
+              lastBytes: 64,
+            },
+          ],
+          dropped: 0,
+        },
       },
-    }],
+    ],
   };
 }
 
@@ -1065,25 +1090,29 @@ function outboundHttpResponseBody(): Record<string, unknown> {
     version: 1,
     instanceId: TEST_INSTANCE_ID,
     state: 'ready',
-    sources: [{
-      sourceId: 's1',
-      snapshot: {
-        state: 'ready',
-        alias: 'payments',
-        coverage: 'owned-instance',
-        records: [{
+    sources: [
+      {
+        sourceId: 's1',
+        snapshot: {
+          state: 'ready',
           alias: 'payments',
-          operation: 'attempt',
-          started: 2,
-          count: 1,
-          responses: 1,
-          failures: 0,
-          lastStatusClass: '2xx',
-          lastDurationMs: 7,
-          ageMs: 1,
-        }],
+          coverage: 'owned-instance',
+          records: [
+            {
+              alias: 'payments',
+              operation: 'attempt',
+              started: 2,
+              count: 1,
+              responses: 1,
+              failures: 0,
+              lastStatusClass: '2xx',
+              lastDurationMs: 7,
+              ageMs: 1,
+            },
+          ],
+        },
       },
-    }],
+    ],
   };
 }
 
@@ -1123,18 +1152,30 @@ describe('Client — outbound HTTP negotiation (M98n)', () => {
   });
 
   const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
-    ['count above started', (b) => {
-      outboundRecord(b).count = 3;
-    }],
-    ['a raw status number', (b) => {
-      outboundRecord(b).lastStatusClass = 404;
-    }],
-    ['an extra record field', (b) => {
-      outboundRecord(b).url = 'https://canary.example/secret';
-    }],
-    ['a different instance', (b) => {
-      b.instanceId = '00000000-0000-4000-8000-000000000000';
-    }],
+    [
+      'count above started',
+      (b) => {
+        outboundRecord(b).count = 3;
+      },
+    ],
+    [
+      'a raw status number',
+      (b) => {
+        outboundRecord(b).lastStatusClass = 404;
+      },
+    ],
+    [
+      'an extra record field',
+      (b) => {
+        outboundRecord(b).url = 'https://canary.example/secret';
+      },
+    ],
+    [
+      'a different instance',
+      (b) => {
+        b.instanceId = '00000000-0000-4000-8000-000000000000';
+      },
+    ],
   ];
   for (const [name, mutate] of hostile) {
     it(`refuses a correctly signed body carrying ${name}`, async () => {
@@ -1179,28 +1220,49 @@ describe('Client — realtime negotiation (M98l)', () => {
   });
 
   const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
-    ['numeric backplane gauges', (b) => {
-      realtimeSnapshot(b, 2).gauges = { state: 'available', openConnections: 1, groups: 1 };
-    }],
-    ['null gauges on an available websocket source', (b) => {
-      realtimeSnapshot(b, 0).gauges = { state: 'available', openConnections: null, groups: 0 };
-    }],
-    ['a backpressure count on a websocket close', (b) => {
-      (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.backpressureCloses = 0;
-    }],
-    ['a backplane operation on an sse source', (b) => {
-      (realtimeSnapshot(b, 1).records as Record<string, unknown>[])[0]!.operation =
-        'backplane-receive';
-    }],
-    ['an unknown kind carrying records', (b) => {
-      realtimeSnapshot(b, 0).sourceKind = 'unknown';
-    }],
-    ['an extra record field', (b) => {
-      (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.room = 'canary-room';
-    }],
-    ['a different instance', (b) => {
-      b.instanceId = '00000000-0000-4000-8000-000000000000';
-    }],
+    [
+      'numeric backplane gauges',
+      (b) => {
+        realtimeSnapshot(b, 2).gauges = { state: 'available', openConnections: 1, groups: 1 };
+      },
+    ],
+    [
+      'null gauges on an available websocket source',
+      (b) => {
+        realtimeSnapshot(b, 0).gauges = { state: 'available', openConnections: null, groups: 0 };
+      },
+    ],
+    [
+      'a backpressure count on a websocket close',
+      (b) => {
+        (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.backpressureCloses = 0;
+      },
+    ],
+    [
+      'a backplane operation on an sse source',
+      (b) => {
+        (realtimeSnapshot(b, 1).records as Record<string, unknown>[])[0]!.operation =
+          'backplane-receive';
+      },
+    ],
+    [
+      'an unknown kind carrying records',
+      (b) => {
+        realtimeSnapshot(b, 0).sourceKind = 'unknown';
+      },
+    ],
+    [
+      'an extra record field',
+      (b) => {
+        (realtimeSnapshot(b, 0).records as Record<string, unknown>[])[0]!.room = 'canary-room';
+      },
+    ],
+    [
+      'a different instance',
+      (b) => {
+        b.instanceId = '00000000-0000-4000-8000-000000000000';
+      },
+    ],
   ];
   for (const [name, mutate] of hostile) {
     it(`refuses a correctly signed body carrying ${name}`, async () => {
@@ -1247,25 +1309,42 @@ describe('Client — cache negotiation (M98i)', () => {
   });
 
   const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
-    ['a missing outcome field', (b) => {
-      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!;
-      delete record.failed;
-    }],
-    ['an extra record field', (b) => {
-      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!.key = 'canary-key';
-    }],
-    ['an invalid operation', (b) => {
-      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!.operation = 'evict';
-    }],
-    ['a wrong aggregate state', (b) => {
-      b.state = 'no-data';
-    }],
-    ['a different instance', (b) => {
-      b.instanceId = '00000000-0000-4000-8000-000000000000';
-    }],
+    [
+      'a missing outcome field',
+      (b) => {
+        const record = (b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!
+          .snapshot.records[0]!;
+        delete record.failed;
+      },
+    ],
+    [
+      'an extra record field',
+      (b) => {
+        (
+          b.sources as { snapshot: { records: Record<string, unknown>[] } }[]
+        )[0]!.snapshot.records[0]!.key = 'canary-key';
+      },
+    ],
+    [
+      'an invalid operation',
+      (b) => {
+        (
+          b.sources as { snapshot: { records: Record<string, unknown>[] } }[]
+        )[0]!.snapshot.records[0]!.operation = 'evict';
+      },
+    ],
+    [
+      'a wrong aggregate state',
+      (b) => {
+        b.state = 'no-data';
+      },
+    ],
+    [
+      'a different instance',
+      (b) => {
+        b.instanceId = '00000000-0000-4000-8000-000000000000';
+      },
+    ],
   ];
   for (const [name, mutate] of hostile) {
     it(`refuses a correctly signed body carrying ${name}`, async () => {
@@ -1403,7 +1482,7 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('test timed out — the body read was never aborted')), ms)
+      setTimeout(() => reject(new Error('test timed out — the body read was never aborted')), ms),
     ),
   ]);
 }
@@ -1447,10 +1526,13 @@ describe('Client — the deadline and close() govern the body read', () => {
     }) as typeof fetch;
   }
 
-  function stallClient(captured: { signal: AbortSignal | null }, timing: {
-    setTimeout(fn: () => void, ms: number): unknown;
-    clearTimeout(handle: unknown): void;
-  }): ReturnType<typeof createDiagnosticsClient> {
+  function stallClient(
+    captured: { signal: AbortSignal | null },
+    timing: {
+      setTimeout(fn: () => void, ms: number): unknown;
+      clearTimeout(handle: unknown): void;
+    },
+  ): ReturnType<typeof createDiagnosticsClient> {
     return createDiagnosticsClient({
       endpoint: `http://127.0.0.1:${TEST_PORT}`,
       sessionId: TEST_SESSION_ID,
@@ -1516,10 +1598,7 @@ describe('Client — queue observations (M98f)', () => {
     const batch = await client.queues(4, 10);
     expect(batch.state).toEqual('ready');
     expect(batch.events[0].sequence).toEqual(5);
-    expect(requests.map((r) => r.target)).toEqual([
-      '/v1/status',
-      '/v1/queues?after=4&limit=10',
-    ]);
+    expect(requests.map((r) => r.target)).toEqual(['/v1/status', '/v1/queues?after=4&limit=10']);
     expect(Object.isFrozen(batch)).toBe(true);
     expect(Object.isFrozen(batch.events[0])).toBe(true);
     expect(Object.isFrozen(batch.sources[0])).toBe(true);
@@ -1559,7 +1638,12 @@ describe('Client — queue observations (M98f)', () => {
 
   it('refuses bad arguments before sending anything', async () => {
     const { client, requests } = buildClient();
-    for (const [after, limit] of [[-1, 1], [1.5, 1], [0, 0], [0, 129]] as const) {
+    for (const [after, limit] of [
+      [-1, 1],
+      [1.5, 1],
+      [0, 0],
+      [0, 129],
+    ] as const) {
       await expect(client.queues(after, limit)).rejects.toThrow(CLIENT_ERRORS.arguments);
     }
     expect(requests.length).toEqual(0);
@@ -1568,39 +1652,57 @@ describe('Client — queue observations (M98f)', () => {
 
   const violations: [string, (after: number) => Record<string, unknown>][] = [
     ['fails the exact DTO validator', (after) => ({ ...queueBatchBody(after), extra: 1 })],
-    ['is bound to another instance', (after) => ({
-      ...queueBatchBody(after),
-      instanceId: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
-    })],
-    ['starts at or before the cursor', (after) => {
-      const body = queueBatchBody(after);
-      const events = body.events as Record<string, unknown>[];
-      events[0].sequence = after;
-      body.next = after;
-      return body;
-    }],
-    ['reports a lost that disagrees with the page', (after) => ({
-      ...queueBatchBody(after),
-      lost: 3,
-    })],
-    ['moves the cursor on an empty page', (after) => ({
-      ...queueBatchBody(after),
-      events: [],
-      next: after + 2,
-    })],
-    ['reports loss on an empty page', (after) => ({
-      ...queueBatchBody(after),
-      events: [],
-      next: after,
-      lost: 1,
-    })],
-    ['returns more events than the limit', (after) => {
-      const body = queueBatchBody(after);
-      const first = (body.events as Record<string, unknown>[])[0];
-      body.events = [first, { ...first, sequence: after + 2 }];
-      body.next = after + 2;
-      return body;
-    }],
+    [
+      'is bound to another instance',
+      (after) => ({
+        ...queueBatchBody(after),
+        instanceId: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
+      }),
+    ],
+    [
+      'starts at or before the cursor',
+      (after) => {
+        const body = queueBatchBody(after);
+        const events = body.events as Record<string, unknown>[];
+        events[0].sequence = after;
+        body.next = after;
+        return body;
+      },
+    ],
+    [
+      'reports a lost that disagrees with the page',
+      (after) => ({
+        ...queueBatchBody(after),
+        lost: 3,
+      }),
+    ],
+    [
+      'moves the cursor on an empty page',
+      (after) => ({
+        ...queueBatchBody(after),
+        events: [],
+        next: after + 2,
+      }),
+    ],
+    [
+      'reports loss on an empty page',
+      (after) => ({
+        ...queueBatchBody(after),
+        events: [],
+        next: after,
+        lost: 1,
+      }),
+    ],
+    [
+      'returns more events than the limit',
+      (after) => {
+        const body = queueBatchBody(after);
+        const first = (body.events as Record<string, unknown>[])[0];
+        body.events = [first, { ...first, sequence: after + 2 }];
+        body.next = after + 2;
+        return body;
+      },
+    ],
   ];
   for (const [label, body] of violations) {
     it(`refuses a body that ${label}`, async () => {
@@ -1629,9 +1731,7 @@ describe('Client — trace observations (M98g)', () => {
   it('echoes the cursor and limit on the wire for a paged read', async () => {
     const { client, requests } = buildClient();
     const batch = await client.traces(41, 7);
-    expect(requests.some((request) => request.target === '/v1/traces?after=41&limit=7')).toBe(
-      true,
-    );
+    expect(requests.some((request) => request.target === '/v1/traces?after=41&limit=7')).toBe(true);
     expect(batch.records[0]!.sequence).toBe(42);
     client.close();
   });
@@ -1690,10 +1790,9 @@ describe('Client — authorization observations (M98h)', () => {
   it('pairs, sends the signed authorization request, and returns the validated frozen batch', async () => {
     const { client, requests } = buildClient();
     const batch = await client.authorization(0);
-    expect(requests.some((request) => request.target === '/v1/authorization?after=0&limit=128'))
-      .toBe(
-        true,
-      );
+    expect(
+      requests.some((request) => request.target === '/v1/authorization?after=0&limit=128'),
+    ).toBe(true);
     expect(requests.some((request) => request.instance === TEST_INSTANCE_ID)).toBe(true);
     expect(batch.state).toBe('ready');
     expect(batch.decisions[0]!.ruleAliases).toEqual(['A']);
@@ -1705,10 +1804,9 @@ describe('Client — authorization observations (M98h)', () => {
   it('echoes the cursor and limit on the wire for a paged read', async () => {
     const { client, requests } = buildClient();
     const batch = await client.authorization(41, 7);
-    expect(requests.some((request) => request.target === '/v1/authorization?after=41&limit=7'))
-      .toBe(
-        true,
-      );
+    expect(
+      requests.some((request) => request.target === '/v1/authorization?after=41&limit=7'),
+    ).toBe(true);
     expect(batch.decisions[0]!.sequence).toBe(42);
     client.close();
   });
@@ -1818,12 +1916,10 @@ describe('Client — paired-instance binding (correctly signed hostile responses
     expect(OTHER_INSTANCE_ID).toMatch(/^[0-9a-f-]{36}$/);
   });
 
-  for (
-    const variant of [
-      { label: 'header B, body A', header: OTHER_INSTANCE_ID },
-      { label: 'header A, body B', body: OTHER_INSTANCE_ID },
-    ]
-  ) {
+  for (const variant of [
+    { label: 'header B, body A', header: OTHER_INSTANCE_ID },
+    { label: 'header A, body B', body: OTHER_INSTANCE_ID },
+  ]) {
     it(`fails initial status pairing terminally for ${variant.label}`, async () => {
       const { client, requests } = buildClient({
         server: { identity: (path) => (path === '/v1/status' ? variant : {}) },
@@ -1893,7 +1989,7 @@ describe('Client — paired-instance binding (correctly signed hostile responses
     it(`refuses ${label} body identity on a paired snapshot and event read`, async () => {
       const { client } = buildClient({
         server: {
-          identity: (path) => path === '/v1/snapshot' || path === '/v1/events' ? { body } : {},
+          identity: (path) => (path === '/v1/snapshot' || path === '/v1/events' ? { body } : {}),
         },
       });
       await expect(client.snapshot()).rejects.toThrow(CLIENT_ERRORS.connection);
@@ -1977,24 +2073,39 @@ describe('Client — core DTO validation over correctly signed bodies (F02)', ()
   const hostileSnapshots: ReadonlyArray<readonly [string, () => Record<string, unknown>]> = [
     ['an unknown state', () => ({ ...minimalSnapshot(), state: 'exploded' })],
     ['an extra top-level field', () => ({ ...minimalSnapshot(), secrets: ['x'] })],
-    ["a node carrying another kind's field", () => ({
-      ...minimalSnapshot(),
-      nodes: [{ id: 'p1', kind: 'plugin', method: 'GET' }, {
-        id: 'c1',
-        kind: 'capability',
-      }],
-    })],
-    ['a dangling edge', () => ({
-      ...minimalSnapshot(),
-      edges: [{ from: 'p1', to: 'c9', kind: 'owns' }],
-    })],
-    ['a control character in a label', () => ({
-      ...minimalSnapshot(),
-      nodes: [{ id: 'p1', kind: 'plugin', label: '\u001b[2Jcatalog' }, {
-        id: 'c1',
-        kind: 'capability',
-      }],
-    })],
+    [
+      "a node carrying another kind's field",
+      () => ({
+        ...minimalSnapshot(),
+        nodes: [
+          { id: 'p1', kind: 'plugin', method: 'GET' },
+          {
+            id: 'c1',
+            kind: 'capability',
+          },
+        ],
+      }),
+    ],
+    [
+      'a dangling edge',
+      () => ({
+        ...minimalSnapshot(),
+        edges: [{ from: 'p1', to: 'c9', kind: 'owns' }],
+      }),
+    ],
+    [
+      'a control character in a label',
+      () => ({
+        ...minimalSnapshot(),
+        nodes: [
+          { id: 'p1', kind: 'plugin', label: '\u001b[2Jcatalog' },
+          {
+            id: 'c1',
+            kind: 'capability',
+          },
+        ],
+      }),
+    ],
   ];
 
   for (const [label, body] of hostileSnapshots) {
@@ -2009,26 +2120,38 @@ describe('Client — core DTO validation over correctly signed bodies (F02)', ()
   const hostileBatches: ReadonlyArray<
     readonly [string, (after: number) => Record<string, unknown>]
   > = [
-    ['an event field outside the contract', (after) => {
-      const batch = coreBatchAfter(after);
-      (batch.events as Record<string, unknown>[])[0].message = 'boom';
-      return batch;
-    }],
-    ['an unknown event stage', (after) => {
-      const batch = coreBatchAfter(after);
-      (batch.events as Record<string, unknown>[])[0].stage = 'sql';
-      return batch;
-    }],
-    ['non-consecutive sequences', (after) => {
-      const batch = coreBatchAfter(after, 2);
-      (batch.events as Record<string, unknown>[])[1].sequence = after + 5;
-      batch.next = after + 5;
-      return batch;
-    }],
-    ['a next that is not the last returned sequence', (after) => ({
-      ...coreBatchAfter(after),
-      next: after + 7,
-    })],
+    [
+      'an event field outside the contract',
+      (after) => {
+        const batch = coreBatchAfter(after);
+        (batch.events as Record<string, unknown>[])[0].message = 'boom';
+        return batch;
+      },
+    ],
+    [
+      'an unknown event stage',
+      (after) => {
+        const batch = coreBatchAfter(after);
+        (batch.events as Record<string, unknown>[])[0].stage = 'sql';
+        return batch;
+      },
+    ],
+    [
+      'non-consecutive sequences',
+      (after) => {
+        const batch = coreBatchAfter(after, 2);
+        (batch.events as Record<string, unknown>[])[1].sequence = after + 5;
+        batch.next = after + 5;
+        return batch;
+      },
+    ],
+    [
+      'a next that is not the last returned sequence',
+      (after) => ({
+        ...coreBatchAfter(after),
+        next: after + 7,
+      }),
+    ],
   ];
 
   for (const [label, body] of hostileBatches) {
@@ -2065,10 +2188,13 @@ describe('Client — read() cursor contract relative to the request (F02)', () =
     ['more events than the requested limit', (after) => coreBatchAfter(after, 9)],
     ['an empty page that moves the cursor', (after) => ({ ...coreBatchAfter(after, 0), next: 99 })],
     ['an empty page reporting loss', (after) => ({ ...coreBatchAfter(after, 0), lost: 2 })],
-    ['a lost count that disagrees with the gap', (after) => ({
-      ...coreBatchAfter(after + 4),
-      lost: 1,
-    })],
+    [
+      'a lost count that disagrees with the gap',
+      (after) => ({
+        ...coreBatchAfter(after + 4),
+        lost: 1,
+      }),
+    ],
   ];
 
   for (const [label, body] of cases) {
@@ -2147,37 +2273,60 @@ describe('Client — storage negotiation (M98m)', () => {
   });
 
   const hostile: ReadonlyArray<[string, (body: Record<string, unknown>) => void]> = [
-    ['a missing outcome field', (b) => {
-      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!;
-      delete record.failed;
-    }],
-    ['an extra record field', (b) => {
-      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!.key = 'canary-key';
-    }],
-    ['an invalid operation', (b) => {
-      ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!.operation = 'list';
-    }],
-    ['a duration on getSignedUrl', (b) => {
-      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!;
-      record.operation = 'getSignedUrl';
-      record.lastBytes = null;
-      record.lastDurationMs = 1;
-    }],
-    ['bytes on a non-buffered operation', (b) => {
-      const record = ((b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!)
-        .snapshot.records[0]!;
-      record.operation = 'delete';
-    }],
-    ['a wrong aggregate state', (b) => {
-      b.state = 'no-data';
-    }],
-    ['a different instance', (b) => {
-      b.instanceId = '00000000-0000-4000-8000-000000000000';
-    }],
+    [
+      'a missing outcome field',
+      (b) => {
+        const record = (b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!
+          .snapshot.records[0]!;
+        delete record.failed;
+      },
+    ],
+    [
+      'an extra record field',
+      (b) => {
+        (
+          b.sources as { snapshot: { records: Record<string, unknown>[] } }[]
+        )[0]!.snapshot.records[0]!.key = 'canary-key';
+      },
+    ],
+    [
+      'an invalid operation',
+      (b) => {
+        (
+          b.sources as { snapshot: { records: Record<string, unknown>[] } }[]
+        )[0]!.snapshot.records[0]!.operation = 'list';
+      },
+    ],
+    [
+      'a duration on getSignedUrl',
+      (b) => {
+        const record = (b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!
+          .snapshot.records[0]!;
+        record.operation = 'getSignedUrl';
+        record.lastBytes = null;
+        record.lastDurationMs = 1;
+      },
+    ],
+    [
+      'bytes on a non-buffered operation',
+      (b) => {
+        const record = (b.sources as { snapshot: { records: Record<string, unknown>[] } }[])[0]!
+          .snapshot.records[0]!;
+        record.operation = 'delete';
+      },
+    ],
+    [
+      'a wrong aggregate state',
+      (b) => {
+        b.state = 'no-data';
+      },
+    ],
+    [
+      'a different instance',
+      (b) => {
+        b.instanceId = '00000000-0000-4000-8000-000000000000';
+      },
+    ],
   ];
   for (const [name, mutate] of hostile) {
     it(`refuses a correctly signed body carrying ${name}`, async () => {
@@ -2217,14 +2366,15 @@ describe('Client event inspector negotiation', () => {
     } finally {
       unsupported.client.close();
     }
-    for (
-      const body of [{ version: 1, instanceId: TEST_INSTANCE_ID, state: 'bogus', sources: [] }, {
+    for (const body of [
+      { version: 1, instanceId: TEST_INSTANCE_ID, state: 'bogus', sources: [] },
+      {
         version: 1,
         instanceId: 'other',
         state: 'ready',
         sources: [],
-      }]
-    ) {
+      },
+    ]) {
       const { client, requests } = buildClient({ server: { eventSnapshotBody: body } });
       try {
         await expect(client.events()).rejects.toThrow(CLIENT_ERRORS.connection);

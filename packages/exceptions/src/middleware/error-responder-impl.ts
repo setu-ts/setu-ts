@@ -16,7 +16,7 @@ import type {
   IErrorResponder,
   IRequestContext,
 } from '@setu-ts/common';
-import { resolveResponseStatus } from '@setu-ts/common';
+import { httpStatusHintOf, resolveResponseStatus } from '@setu-ts/common';
 
 import { HttpError } from '../errors/http-error.ts';
 import { RESPONDER_DETAIL } from '../formatters/problem-details.ts';
@@ -30,6 +30,23 @@ import type { ErrorHandlerFormatter } from '../formatters/error-formatter.ts';
  * request path) exactly when its resolved content type is this one.
  */
 const PROBLEM_JSON = 'application/problem+json';
+
+/** The pure thrown-value rule, shared by serving and request-log prediction. */
+export function thrownErrorStatus(error: unknown): { requested: number; status: number } {
+  const requested =
+    error instanceof HttpError ? error.statusCode : (httpStatusHintOf(error)?.status ?? 500);
+  // Fetch refuses informational responses and bodies on 204, 205 and 304.
+  const status =
+    Number.isInteger(requested) &&
+    requested >= 200 &&
+    requested <= 599 &&
+    requested !== 204 &&
+    requested !== 205 &&
+    requested !== 304
+      ? requested
+      : 500;
+  return { requested, status };
+}
 
 /**
  * Narrows an {@linkcode ErrorResponderTarget} to a full {@linkcode
@@ -88,9 +105,8 @@ export function buildErrorFromInit(init: ErrorResponseInit): HttpError {
   // through unchanged. Carrying it this way — rather than in `error.message` —
   // keeps the title verbatim, which a site's (non-)disclosure decision depends
   // on.
-  const details = init.detail !== undefined
-    ? { ...init.details, detail: init.detail }
-    : init.details;
+  const details =
+    init.detail !== undefined ? { ...init.details, detail: init.detail } : init.details;
   const error = new HttpError(init.status, init.title, details);
   // Mark the error as responder-built and carry the disclosure on a
   // module-private symbol, which is what `buildProblemDetails` promotes to the
@@ -132,6 +148,7 @@ export function createErrorResponder(
   contentType: string,
 ): IErrorResponder {
   return {
+    statusFor: (error: unknown): number => thrownErrorStatus(error).status,
     respond(target: ErrorResponderTarget, init: ErrorResponseInit): void {
       // Sanitized before the error is built, not just before the status is
       // written, so the formatted body's `status` member agrees with the status
@@ -169,10 +186,7 @@ export function createErrorResponder(
         body = { ...body, instance: target.request.path };
       }
       const bytes = new TextEncoder().encode(JSON.stringify(body));
-      target.response
-        .status(status)
-        .header('content-type', contentType)
-        .send(bytes);
+      target.response.status(status).header('content-type', contentType).send(bytes);
     },
   };
 }

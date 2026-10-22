@@ -61,14 +61,14 @@ export const MAX_PORT = 65535;
  * @returns True when a member could bind it
  */
 export function isUsablePort(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) &&
-    value >= MIN_PORT && value <= MAX_PORT;
+  return (
+    typeof value === 'number' && Number.isInteger(value) && value >= MIN_PORT && value <= MAX_PORT
+  );
 }
 
 /** What reading a valued port flag produced. */
 export type PortFlagResult =
-  | { readonly ok: true; readonly port?: number }
-  | { readonly ok: false; readonly message: string };
+  { readonly ok: true; readonly port?: number } | { readonly ok: false; readonly message: string };
 
 /**
  * Reads and validates a valued port flag.
@@ -110,9 +110,9 @@ export function readPortFlag(
   if (!isUsablePort(port)) {
     return {
       ok: false,
-      message: `Invalid --${flag} "${
-        escapeName(raw)
-      }": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
+      message: `Invalid --${flag} "${escapeName(
+        raw,
+      )}": expected an integer between ${MIN_PORT} and ${MAX_PORT}.`,
     };
   }
   return { ok: true, port };
@@ -230,12 +230,12 @@ export type WorkspaceManifestProblem =
    * a typo'd port.
    */
   | {
-    readonly kind: 'invalid-port';
-    /** The offending value, exactly as it appeared. */
-    readonly port: number;
-    /** `basePort`, or the member whose port it is. */
-    readonly field: string;
-  }
+      readonly kind: 'invalid-port';
+      /** The offending value, exactly as it appeared. */
+      readonly port: number;
+      /** `basePort`, or the member whose port it is. */
+      readonly field: string;
+    }
   /**
    * Well-formed, but naming a transport this CLI does not know.
    *
@@ -285,7 +285,8 @@ function toMember(value: unknown): WorkspaceMember | undefined {
     dependsOn !== undefined &&
     (!Array.isArray(dependsOn) ||
       !dependsOn.every((entry) => typeof entry === 'string' && entry !== ''))
-  ) return undefined;
+  )
+    return undefined;
   // A DEFINED but wrong-shaped devtool port invalidates the manifest rather
   // than being dropped, which is the caller's own rule one level down: a
   // silently omitted `devtoolPort` is an address `ports --reallocate` then
@@ -389,10 +390,7 @@ export async function readWorkspaceManifest(
   // toolchain would rewrite every member's manifest and its Dockerfile.
   const rawRuntime = record['runtime'];
   const runtime = rawRuntime === undefined ? 'deno' : rawRuntime;
-  if (
-    typeof runtime !== 'string' || !isTargetRuntime(runtime) ||
-    !isWorkspaceRuntime(runtime)
-  ) {
+  if (typeof runtime !== 'string' || !isTargetRuntime(runtime) || !isWorkspaceRuntime(runtime)) {
     return { ok: false, problem: { kind: 'unknown-runtime', runtime: String(runtime) } };
   }
 
@@ -441,7 +439,8 @@ export async function readWorkspaceManifest(
       dependencies.includes(member.name) ||
       new Set(dependencies).size !== dependencies.length ||
       dependencies.some((dependency) => !names.has(dependency))
-    ) return { ok: false, problem: { kind: 'malformed' } };
+    )
+      return { ok: false, problem: { kind: 'malformed' } };
   }
 
   return {
@@ -466,13 +465,11 @@ export async function readWorkspaceManifest(
  */
 export function renderWorkspaceManifest(manifest: WorkspaceManifest): string {
   const { devtoolBasePort, ...rest } = manifest;
-  return `${
-    JSON.stringify(
-      { ...rest, ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }) },
-      null,
-      2,
-    )
-  }\n`;
+  return `${JSON.stringify(
+    { ...rest, ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }) },
+    null,
+    2,
+  )}\n`;
 }
 
 /**

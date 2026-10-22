@@ -12,6 +12,7 @@ import type {
   IRuntimeServices,
   ITelemetryService,
   LogLevel,
+  PathPattern,
 } from '@setu-ts/common';
 import {
   CAPABILITIES,
@@ -61,8 +62,8 @@ export interface LoggerPluginOptions {
   readonly requestLogging?: boolean;
   /** Requests slower than this (ms) trigger a `warn` entry. Defaults to `5000`. */
   readonly slowRequestThreshold?: number;
-  /** Exact paths excluded from request logging. */
-  readonly excludePaths?: readonly string[];
+  /** Exact strings or regular expressions excluded from request logging. */
+  readonly excludePaths?: readonly PathPattern[];
   /**
    * Inject a pre-loaded Pino factory for the pino transport, bypassing
    * the `import('pino')` path. Useful for tests.
@@ -123,13 +124,7 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
 
     async register(ctx: IPluginContext): Promise<void> {
       const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
-      const logger = await createLogger(
-        transport,
-        level,
-        runtime,
-        options,
-        loggerRedaction,
-      );
+      const logger = await createLogger(transport, level, runtime, options, loggerRedaction);
 
       // X34-2: every record names the trace it was emitted in, so an operator
       // holding a trace id can find the log lines and vice versa.
@@ -146,21 +141,19 @@ export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
       // reports nothing and the record is byte-identical to an undecorated one.
       ctx.services.register<ILogger>(
         CAPABILITIES.LOGGER,
-        new TraceEnrichedLogger(
-          logger,
-          () =>
-            ctx.services.has(CAPABILITIES.TELEMETRY)
-              ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
-              : undefined,
+        new TraceEnrichedLogger(logger, () =>
+          ctx.services.has(CAPABILITIES.TELEMETRY)
+            ? ctx.services.get<ITelemetryService>(CAPABILITIES.TELEMETRY)
+            : undefined,
         ),
       );
 
       if (requestLogging) {
         const middlewareOptions: RequestLoggerOptions = buildRequestLoggerOptions(options);
-        ctx.middleware.add(
-          createRequestLoggerMiddleware(middlewareOptions),
-          { name: 'request-logger', priority: PLUGIN_PRIORITY.HIGH },
-        );
+        ctx.middleware.add(createRequestLoggerMiddleware(middlewareOptions), {
+          name: 'request-logger',
+          priority: PLUGIN_PRIORITY.HIGH,
+        });
       }
     },
   };
@@ -264,8 +257,8 @@ function resolveRedaction(
   return redaction === undefined
     ? undefined
     : 'redactRecord' in redaction
-    ? redaction
-    : createRedactionService(redaction);
+      ? redaction
+      : createRedactionService(redaction);
 }
 
 /**
@@ -309,7 +302,7 @@ export function composeLoggerRedaction(
 function buildRequestLoggerOptions(options?: LoggerPluginOptions): RequestLoggerOptions {
   const base: {
     slowRequestThreshold?: number;
-    excludePaths?: readonly string[];
+    excludePaths?: readonly PathPattern[];
   } = {};
   if (options?.slowRequestThreshold !== undefined) {
     base.slowRequestThreshold = options.slowRequestThreshold;

@@ -24,7 +24,7 @@ import { fakeTransactionalStore } from '../fixtures/fake-transactional-store.ts'
 
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>((r) => resolve = r);
+  const promise = new Promise<void>((r) => (resolve = r));
   return { promise, resolve };
 }
 
@@ -316,10 +316,11 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     try {
       await app.stop();
       expect(scheduler.removed).toContain('idempotency-purge');
-      expect(logger.lines.some((line) =>
-        line.message ===
-          'idempotency: the transactional purge timed out'
-      )).toBe(true);
+      expect(
+        logger.lines.some(
+          (line) => line.message === 'idempotency: the transactional purge timed out',
+        ),
+      ).toBe(true);
       await job();
     } finally {
       release.resolve();
@@ -342,10 +343,11 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     });
     await app.start();
     try {
-      const result = await capture.service().within<number, unknown>(
-        { key: 'k-1', namespace: 'orders', scope: 't:u' },
-        () => Promise.resolve(5),
-      );
+      const result = await capture
+        .service()
+        .within<number, unknown>({ key: 'k-1', namespace: 'orders', scope: 't:u' }, () =>
+          Promise.resolve(5),
+        );
       expect(result).toEqual({ value: 5, replayed: false });
     } finally {
       await app.stop();
@@ -415,9 +417,7 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
       ],
     });
     const failure = await app.start().catch((error: unknown) => error);
-    expect((failure as IdempotencyVerifyTimeoutError).name).toBe(
-      'IdempotencyVerifyTimeoutError',
-    );
+    expect((failure as IdempotencyVerifyTimeoutError).name).toBe('IdempotencyVerifyTimeoutError');
   });
 
   it('schedules the purge, runs it, and removes the job at shutdown', async () => {
@@ -460,13 +460,15 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     });
     await app.start();
     try {
-      const withinFailure = await capture.service()
+      const withinFailure = await capture
+        .service()
         .within({ key: 'k', namespace: 'n', scope: 's' }, () => Promise.resolve(1))
         .catch((error: unknown) => error);
       expect((withinFailure as IdempotencyConfigurationError).option).toBe('transactional');
-      const purgeFailure = await capture.service().purgeTransactional().catch(
-        (error: unknown) => error,
-      );
+      const purgeFailure = await capture
+        .service()
+        .purgeTransactional()
+        .catch((error: unknown) => error);
       expect((purgeFailure as IdempotencyConfigurationError).option).toBe('transactional');
     } finally {
       await app.stop();
@@ -490,7 +492,10 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     });
     await app.start();
     try {
-      const failure = await capture.service().purgeTransactional().catch((error: unknown) => error);
+      const failure = await capture
+        .service()
+        .purgeTransactional()
+        .catch((error: unknown) => error);
       expect((failure as { readonly reason?: string }).reason).toBe('store-failed');
       expect((failure as Error).message).not.toContain('SECRET');
     } finally {
@@ -516,7 +521,10 @@ describe('IdempotencyPlugin transactional wiring (M109b §3.5)', () => {
     });
     await app.start();
     try {
-      const failure = await capture.service().purgeTransactional().catch((error: unknown) => error);
+      const failure = await capture
+        .service()
+        .purgeTransactional()
+        .catch((error: unknown) => error);
       expect((failure as { readonly name?: string }).name).toBe('IdempotencyWithinError');
       expect((failure as { readonly reason?: string }).reason).toBe('store-failed');
     } finally {

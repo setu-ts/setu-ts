@@ -64,12 +64,17 @@ describe('the inbox on D1', () => {
             retainMs: 60_000,
           },
           subscriptions: [
-            onIntegrationEvent(hired, async (payload: Hired, _e, _m, uow: IUnitOfWork) => {
-              calls.push(payload.personId);
-              await uow.getRepository<Record<string, unknown>>('Person')
-                .create({ id: `${payload.personId}-${calls.length}`, name: 'Ada' });
-              if (fail) throw new Error('handler failed');
-            }, { inbox: { consumer: 'payroll' } }),
+            onIntegrationEvent(
+              hired,
+              async (payload: Hired, _e, _m, uow: IUnitOfWork) => {
+                calls.push(payload.personId);
+                await uow
+                  .getRepository<Record<string, unknown>>('Person')
+                  .create({ id: `${payload.personId}-${calls.length}`, name: 'Ada' });
+                if (fail) throw new Error('handler failed');
+              },
+              { inbox: { consumer: 'payroll' } },
+            ),
           ],
         }),
       ],
@@ -93,7 +98,8 @@ describe('the inbox on D1', () => {
       expect(d1.dump('setu_inbox')).toHaveLength(1);
 
       // Age the processed marker past retention, then fire the Cron Trigger.
-      const repo = app.services.get<IDatabaseService>(CAPABILITIES.DATABASE)
+      const repo = app.services
+        .get<IDatabaseService>(CAPABILITIES.DATABASE)
         .getRepository<Record<string, unknown>>('Inbox');
       for (const row of d1.dump('setu_inbox')) {
         await repo.update(row.id as string, { updatedAt: 1 });

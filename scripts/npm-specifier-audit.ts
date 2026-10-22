@@ -1,24 +1,38 @@
 /**
- * Recurrence gate for computed `import()` specifiers (M70e, plan §3.7/§3.8).
+ * Recurrence gates for dynamic `import()` in package `src` trees.
  *
- * JSR's npm-compatibility rewrite is **static**: it rewrites only a `npm:`
- * specifier that sits as a literal argument to `import()`. A specifier that
- * reaches `import()` through a parameter, a map lookup, or a
- * `(spec) => import(spec)` indirection ships `npm:` verbatim and cannot load
- * on Node or Bun (X7-3). This module is the source-level gate that keeps the
- * shape from recurring: it refuses any dynamic `import()` in a package's
- * `src` tree whose first argument is not a string literal, unless the call
- * carries the in-source marker — a block comment reading
+ * **Computed specifiers** (M70e, plan §3.7/§3.8). JSR's npm-compatibility
+ * rewrite is **static**: it rewrites only a `npm:` specifier that sits as a
+ * literal argument to `import()`. A specifier that reaches `import()` through
+ * a parameter, a map lookup, or a `(spec) => import(spec)` indirection ships
+ * `npm:` verbatim and cannot load on Node or Bun (X7-3). The gate refuses any
+ * dynamic `import()` whose first argument is not a string literal, unless the
+ * call carries the in-source marker — a block comment reading
  * `computed-specifier: <reason>` (inline or on the preceding line; an empty
  * reason is rejected).
  *
- * The decidable half is the pure {@linkcode findComputedImports}; the thin
- * {@linkcode auditPackageSources} walker is the I/O seam that feeds it. The
- * pure core is what carries the 90% coverage bar via `SCRIPT_TARGETS`.
+ * **Unguarded bare imports** (M113d, plan §3.2). Wrangler bundles a Worker
+ * with esbuild, which resolves a string-literal `import('<bare peer>')` at
+ * build time: a Worker importing a Setu-TS package fails its build with
+ * `Could not resolve "mongodb"` although it never loads one. The rule
+ * (AI_GUIDELINES §12.2, as amended) is that every bare-package dynamic
+ * `import()` sits inside the `try` block of a `try`/`catch` in the SAME
+ * function — the one shape esbuild leaves as a runtime import, Node resolves
+ * unchanged, and every bundler needs. {@linkcode findUnguardedImports} reads
+ * the real syntax tree (the regex scanner cannot see lexical nesting) and
+ * refuses any bare import whose walk to the first function-like node never
+ * passes through a `tryBlock`; a `catch` block and a `.catch()` chain are NOT
+ * accepted although esbuild tolerates them — one shape, so the gate and a
+ * reader have one thing to recognise.
  *
- * **Heuristic limits.** The scanner is a regex-based heuristic over masked
- * source text, not a parser. A regex literal that happens to contain the text
- * `import(` can false-positive, and a specifier built by
+ * The decidable halves are the pure {@linkcode findComputedImports} and
+ * {@linkcode findUnguardedImports}; the thin {@linkcode auditPackageSources}
+ * walker is the I/O seam that feeds them. The pure cores carry the 90%
+ * coverage bar via `SCRIPT_TARGETS`.
+ *
+ * **Heuristic limits.** The computed-import scanner is a regex-based heuristic
+ * over masked source text, not a parser. A regex literal that happens to
+ * contain the text `import(` can false-positive, and a specifier built by
  * `new Function("return import(...)")`-style construction is invisible to it.
  * `eval`/`new Function` are forbidden repo-wide (AI_GUIDELINES §13.5), which
  * is what keeps that blind spot empty; the `computed-specifier` marker is the
@@ -27,6 +41,9 @@
  *
  * @module
  */
+
+import { readFile, readdir, stat } from 'node:fs/promises';
+import ts from 'typescript';
 
 /** A computed (non-literal) `import()` the gate refuses. */
 export interface ComputedImport {
@@ -64,6 +81,25 @@ export interface AuditResult {
   readonly srcRootsVisited: readonly string[];
   /** `npm:`/`jsr:` import specifiers in `src` — the gate fails when non-empty (M111a §3.8). */
   readonly prefixed: readonly PrefixedSpecifier[];
+  /**
+   * Bare-package dynamic `import()` sites not guarded by a same-function
+   * `try` — the gate fails when this is non-empty (M113d §3.2).
+   */
+  readonly unguarded: readonly UnguardedImport[];
+}
+
+/** A bare-package dynamic `import()` the guard rule refuses (M113d §3.2). */
+export interface UnguardedImport {
+  /**
+   * The file the import was found in. Empty when produced by
+   * {@linkcode findUnguardedImports} (which sees only source text); populated
+   * by {@linkcode auditPackageSources}.
+   */
+  readonly file: string;
+  /** The 1-based line of the `import` keyword. */
+  readonly line: number;
+  /** A short excerpt of the offending import, for failure messages. */
+  readonly snippet: string;
 }
 
 /** The internal per-import record before the `file` is known. */
@@ -100,9 +136,10 @@ function scanSource(source: string): readonly ScanHit[] {
     if (argOffset >= code.length) continue;
 
     const argChar = code[argOffset];
-    const isComputed = argChar !== "'" && argChar !== '"' && argChar !== '`'
-      ? true
-      : !isBareStringArgument(source, code, argOffset, parenOffset);
+    const isComputed =
+      argChar !== "'" && argChar !== '"' && argChar !== '`'
+        ? true
+        : !isBareStringArgument(source, code, argOffset, parenOffset);
     if (!isComputed) continue;
 
     const line = offsetToLine[start];
@@ -127,15 +164,144 @@ export function findComputedImports(source: string): readonly ComputedImport[] {
     .map((hit) => ({ file: '', line: hit.line, snippet: hit.snippet }));
 }
 
+// ── The guarded-import rule (M113d §3.2) ─────────────────────────────────────
+
 /**
- * Walks every `src` tree under `root` and audits each `.ts` file. Returns
- * the unmarked
- * computed imports (the findings), plus the vacuity counters the gate test
- * asserts on: the number of files visited and the number of marked sites.
+ * Finds every bare-package dynamic `import()` in `source` that is NOT guarded
+ * by a same-function `try` — the pure core of the M113d gate. `file` is empty
+ * here; {@linkcode auditPackageSources} is the caller that supplies it.
+ *
+ * `scriptKind` selects how the text is parsed (`.tsx` files parse as TSX); it
+ * changes only JSX handling, never the guard decision.
+ */
+export function findUnguardedImports(
+  source: string,
+  scriptKind: ts.ScriptKind = ts.ScriptKind.TS,
+): readonly UnguardedImport[] {
+  const sourceFile = ts.createSourceFile(
+    'audit.ts',
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind,
+  );
+  const hits: { line: number; snippet: string }[] = [];
+
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteral(node.arguments[0]) &&
+      isBarePackageSpecifier(node.arguments[0].text) &&
+      !isGuardedBySameFunctionTry(node)
+    ) {
+      const start = node.getStart(sourceFile);
+      hits.push({
+        line: sourceFile.getLineAndCharacterOfPosition(start).line + 1,
+        snippet: makeSnippet(source, start),
+      });
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+
+  return hits.map((hit) => ({ file: '', ...hit }));
+}
+
+/** The `ts.ScriptKind` a source file at `file` parses as. */
+function scriptKindFor(file: string): ts.ScriptKind {
+  return file.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+}
+
+/**
+ * True when `specifier` names a bare package: not relative (`.`/`/`), not
+ * `@setu-ts/*` (a workspace package resolves for every bundler), and not a
+ * scheme-like prefix (`node:`, `cloudflare:`, `data:`) — those carry their own
+ * resolution rules and are exempt from the guard rule.
+ */
+function isBarePackageSpecifier(specifier: string): boolean {
+  if (specifier === '') return false;
+  if (specifier.startsWith('.') || specifier.startsWith('/')) return false;
+  if (specifier.startsWith('@setu-ts/')) return false;
+  if (/^[A-Za-z][A-Za-z0-9._-]*:/.test(specifier)) return false;
+  return true;
+}
+
+/**
+ * True when the `import()` call at `node` is AWAITED inside the `try` block of a
+ * `try`/`catch` in the SAME function — the one shape the rule admits (M113d
+ * §3.1) and a shape esbuild leaves as a runtime import.
+ *
+ * Both halves were measured against esbuild 0.28.2, which is what Wrangler
+ * bundles a Worker with:
+ *
+ * - **The `await` is load-bearing.** An awaited import is tolerated wherever the
+ *   `await` sits in the surrounding expression — a statement, an assignment, a
+ *   `return`, a call argument, an array element, an object property. An
+ *   UNAWAITED import is refused everywhere, including as a variable initializer
+ *   (`const p = import('x')`), a bare `return import('x')`, and an element of
+ *   `Promise.all([import('x')])`: esbuild resolves it at build time and fails on
+ *   the absent package. Parentheses and TypeScript assertions between the call
+ *   and the `await` are skipped, since `tsc` erases the assertions before a
+ *   bundler ever sees the code.
+ * - **The `try` must be in the same function.** The walk stops at the first
+ *   function-like node, so a `try` of an ENCLOSING function does not guard; nor
+ *   does a `catch` or `finally` block.
+ *
+ * esbuild also tolerates an awaited `.catch()` chain; the rule refuses it
+ * anyway, so a reader and this gate recognise one shape.
+ */
+function isGuardedBySameFunctionTry(node: ts.Node): boolean {
+  let operand: ts.Node = node;
+  while (operand.parent !== undefined && isTransparentWrapper(operand.parent)) {
+    operand = operand.parent;
+  }
+  if (operand.parent === undefined || !ts.isAwaitExpression(operand.parent)) return false;
+  let current: ts.Node = operand.parent;
+  while (current.parent !== undefined) {
+    const parent: ts.Node = current.parent;
+    if (isFunctionLikeNode(parent)) return false;
+    if (ts.isTryStatement(parent) && parent.tryBlock === current) return true;
+    current = parent;
+  }
+  return false;
+}
+
+/** Syntax that changes neither what is awaited nor what a bundler sees. */
+function isTransparentWrapper(node: ts.Node): boolean {
+  return (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isSatisfiesExpression(node) ||
+    ts.isTypeAssertionExpression(node) ||
+    ts.isNonNullExpression(node)
+  );
+}
+
+/** The function-like syntax kinds a guard walk may not cross. */
+function isFunctionLikeNode(node: ts.Node): boolean {
+  return (
+    ts.isFunctionDeclaration(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isArrowFunction(node) ||
+    ts.isMethodDeclaration(node) ||
+    ts.isConstructorDeclaration(node) ||
+    ts.isGetAccessorDeclaration(node) ||
+    ts.isSetAccessorDeclaration(node)
+  );
+}
+
+/**
+ * Walks every `src` tree under `root` and audits each `.ts`/`.tsx` file.
+ * Returns the unmarked computed imports (the findings), the unguarded
+ * bare-package imports, plus the vacuity counters the gate test asserts on:
+ * the number of files visited and the number of marked sites.
  */
 export async function auditPackageSources(root: string): Promise<AuditResult> {
   const findings: ComputedImport[] = [];
   const prefixed: PrefixedSpecifier[] = [];
+  const unguarded: UnguardedImport[] = [];
   let filesVisited = 0;
   let markedSites = 0;
 
@@ -143,7 +309,7 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
   for (const srcDir of srcRootsVisited) {
     for await (const file of walkTsFiles(srcDir)) {
       filesVisited++;
-      const source = await Deno.readTextFile(file);
+      const source = await readFile(file, 'utf8');
       for (const hit of scanSource(source)) {
         if (hit.marked) {
           markedSites++;
@@ -152,10 +318,13 @@ export async function auditPackageSources(root: string): Promise<AuditResult> {
         }
       }
       for (const hit of findPrefixedSpecifiers(source)) prefixed.push({ ...hit, file });
+      for (const hit of findUnguardedImports(source, scriptKindFor(file))) {
+        unguarded.push({ ...hit, file });
+      }
     }
   }
 
-  return { findings, filesVisited, markedSites, srcRootsVisited, prefixed };
+  return { findings, filesVisited, markedSites, srcRootsVisited, prefixed, unguarded };
 }
 
 /**
@@ -175,8 +344,8 @@ async function collectSrcRoots(root: string): Promise<string[]> {
   const roots: string[] = [];
 
   async function descend(dir: string): Promise<void> {
-    for await (const entry of Deno.readDir(dir)) {
-      if (!entry.isDirectory) continue;
+    for await (const entry of await readdir(dir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
       if (entry.name === 'node_modules') continue;
       const path = `${dir}/${entry.name}`;
       if (entry.name === 'src') {
@@ -429,10 +598,7 @@ function firstArgumentEnd(code: string, parenOffset: number): number {
  * interpolation (an interpolated template is computed). `end` is `-1` when
  * the literal is unterminated or interpolated.
  */
-export function readStringLiteral(
-  source: string,
-  offset: number,
-): { end: number; clean: boolean } {
+export function readStringLiteral(source: string, offset: number): { end: number; clean: boolean } {
   const quote = source[offset];
   const n = source.length;
   let i = offset + 1;
@@ -487,18 +653,18 @@ function makeSnippet(source: string, start: number): string {
 
 async function isDirectory(path: string): Promise<boolean> {
   try {
-    return (await Deno.stat(path)).isDirectory;
+    return (await stat(path)).isDirectory();
   } catch {
     return false;
   }
 }
 
 async function* walkTsFiles(dir: string): AsyncGenerator<string> {
-  for await (const entry of Deno.readDir(dir)) {
+  for await (const entry of await readdir(dir, { withFileTypes: true })) {
     const path = `${dir}/${entry.name}`;
-    if (entry.isDirectory) {
+    if (entry.isDirectory()) {
       yield* walkTsFiles(path);
-    } else if (entry.isFile && entry.name.endsWith('.ts')) {
+    } else if (entry.isFile() && (entry.name.endsWith('.ts') || entry.name.endsWith('.tsx'))) {
       yield path;
     }
   }
@@ -614,10 +780,7 @@ function classifyLiteral(
 }
 
 /** The identifier ending just before `from`, as `{ text, start }`, or null. */
-function wordBefore(
-  code: string,
-  from: number,
-): { text: string; start: number } | null {
+function wordBefore(code: string, from: number): { text: string; start: number } | null {
   let end = from;
   while (end > 0 && /\s/.test(code[end - 1])) end -= 1;
   let start = end;

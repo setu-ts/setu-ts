@@ -1,0 +1,21 @@
+{
+  "name": "setu-ts-example-compiled-binary",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "tsx": "^4.20.6",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "postject": "1.0.0-alpha.6"
+  },
+  "scripts": {
+    "start": "tsx main.ts",
+    "smoke": "tsx smoke.ts",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "build:sea": "node build-sea.ts"
+  }
+}

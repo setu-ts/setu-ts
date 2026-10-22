@@ -11,7 +11,7 @@
  * @module
  */
 
-import { CONFIG_EXPORT, CONFIG_MODULE, PROGRAM_NAME, type TargetRuntime } from '../constants.ts';
+import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
@@ -32,13 +32,38 @@ import type {
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
-import { renderEquals, testHarnessFor } from '../schematics/test-harness.ts';
+import { wrapProse } from '../utils/wrap-prose.ts';
+import {
+  renderEquals,
+  testHarnessFor,
+  renderTestServer,
+  renderAppE2e,
+} from '../schematics/test-harness.ts';
+import { renderFunctionalModuleBarrel, REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
 import {
   NPM_TOOLING_DEV_DEPENDENCIES,
   NPM_TOOLING_SCRIPTS,
   npmToolingFiles,
 } from './npm-tooling.ts';
+import {
+  seamFiles,
+  seamLocalImports,
+  seamPluginSpreads,
+  seamSetupCalls,
+  withPluginOptionSeams,
+} from './seam.ts';
+
+/**
+ * The version-pinned package runner for a generated project's target runtime.
+ *
+ * @param runtime - The generated project's runtime
+ * @returns A command prefix that resolves this CLI's version
+ */
+export function cliInvocation(runtime: TargetRuntime): string {
+  const runner = runtime === 'deno' ? 'deno run -A npm:' : runtime === 'bun' ? 'bunx ' : 'npx ';
+  return `${runner}@setu-ts/cli@${VERSION}`;
+}
 
 /**
  * The devtool composition parameter every generated factory accepts as its
@@ -108,6 +133,15 @@ function renderAddOptions(options: MiddlewareWiring['addOptions']): string {
 export interface ResolvedHost {
   /** Connector port, read by the generated README. */
   readonly devtoolPort?: number;
+  /**
+   * Operational facts a selected transport contributes to the generated README.
+   *
+   * Appended by {@linkcode withBrokerArgs}/{@linkcode withQueueArgs} from
+   * `TransportSpec.connection.note`. Declared internal: the workspace root README
+   * reads the spec directly, while a standalone project has no spec left at
+   * render time, so the overlay carries the text forward.
+   */
+  readonly transportNotes?: readonly string[];
   readonly plugins: readonly Wiring[];
   /** Module exports the Workers entry declares beside `fetch`. */
   readonly workerExports: readonly WorkerExport[];
@@ -154,38 +188,68 @@ export interface ResolvedHost {
 /**
  * Fills in a host's optional members and applies its runtime swap.
  *
- * Every host in the registry happens to declare `localImports` and `files`, so
- * those two fallbacks are unreachable through `runNewCommand` today; they are
- * not dead, because {@linkcode TemplateHost} declares both optional and a
- * future host may omit either.
+ * Showcase files and explicit host contributions stay separate from seams.
+ * Seam files, imports and plugin arguments are derived only after the swap
+ * removes incompatible plugins.
  *
  * @param host - The selected template, or the no-template host
  * @returns The host with every member present
  */
-export function resolveHost(
-  host: TemplateHost,
-  runtime: TargetRuntime,
-): ResolvedHost {
+export function resolveHost(host: TemplateHost, runtime: TargetRuntime): ResolvedHost {
   const swap = host.runtimeSwaps?.[runtime];
+  const seams = (host.seams ?? []).filter(
+    (s) => s.requiresPlugin === undefined || !swap?.removePackages.includes(s.requiresPlugin),
+  );
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
+  const functional = !swapped.some((plugin) => plugin.pkg === 'decorator-plugin');
+  const setupCalls = [...(host.setupCalls ?? []), ...seamSetupCalls(seams)];
+  if (functional) {
+    const afterRoutes = setupCalls.findIndex((call) => call.startsWith('registerGeneratedRoutes('));
+    setupCalls.splice(
+      afterRoutes < 0 ? setupCalls.length : afterRoutes + 1,
+      0,
+      `${REGISTER_MODULES_EXPORT}(app.router, app.services);`,
+    );
+  }
   // Workers receive configuration exclusively through their request bindings.
   // Leaving an env-file path in the manifest would make ConfigPlugin require a
-  // filesystem that the Workers runtime deliberately does not provide.
-  const manifest = runtime === 'cloudflare-workers' && host.manifest?.envFilePath !== undefined
-    ? withoutEnvFilePath(host.manifest)
-    : host.manifest;
+  // filesystem that the Workers runtime deliberately does not provide. Nor can
+  // a Worker self-host Swagger UI (no filesystem; its swap selects the CDN), so
+  // the asset package is dropped rather than installed and never loaded.
+  const manifest =
+    runtime === 'cloudflare-workers' && host.manifest !== undefined
+      ? withoutWorkersFilesystemNeeds(host.manifest)
+      : host.manifest;
 
   return {
-    plugins: swapped,
+    plugins: withPluginOptionSeams(swapped, seams),
     workerExports: swap?.workerExports ?? [],
     entryReExports: swap?.entryReExports ?? [],
     wranglerToml: swap?.wranglerToml ?? '',
     middleware: host.middleware,
-    localImports: host.localImports ?? [],
+    localImports: [
+      ...(host.localImports ?? []),
+      ...seamLocalImports(seams),
+      ...(functional
+        ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
+        : []),
+    ],
     packageImports: host.packageImports ?? [],
-    files: [...(host.files ?? []), ...(swap?.files ?? [])],
-    pluginSpreads: host.pluginSpreads ?? [],
-    setupCalls: host.setupCalls ?? [],
+    files: [
+      ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
+      ...seamFiles(seams, host.seamArtifacts ?? {}),
+      ...(swap?.files ?? []),
+      ...(functional
+        ? [
+            {
+              path: 'src/modules/index.ts',
+              contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
+            },
+          ]
+        : []),
+    ],
+    pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
+    setupCalls,
     extraTasks: { ...host.extraTasks },
     extraImports: {},
     extraDependencies: {},
@@ -196,6 +260,7 @@ export function resolveHost(
     appFactoryContext: {
       ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
       ...host.appFactoryContext,
+      ...swap?.appFactoryContext,
     },
     manifest,
   };
@@ -215,10 +280,9 @@ export function resolveHost(
 function envFileContents(variables: readonly EnvVariable[]): string {
   const header = '# Local configuration. This file is ignored by Git.\n';
   if (variables.length === 0) return header;
-  return `${header}# The values below are development placeholders. Replace them before deploying.\n${
-    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
-      .join('\n')
-  }\n`;
+  return `${header}# The values below are development placeholders. Replace them before deploying.\n${variables
+    .map((variable) => `\n# ${variable.description}\n${variable.name}=${variable.develop}`)
+    .join('\n')}\n`;
 }
 
 /**
@@ -231,27 +295,45 @@ function envFileContents(variables: readonly EnvVariable[]): string {
  * @param variables - The variables this template's generated source reads
  * @returns The example file contents
  */
-function envExampleContents(
-  envFilePath: string,
-  variables: readonly EnvVariable[],
-): string {
-  const header = `# Copy this file to \`${envFilePath}\` and fill in local values.\n` +
+function envExampleContents(envFilePath: string, variables: readonly EnvVariable[]): string {
+  const header =
+    `# Copy this file to \`${envFilePath}\` and fill in local values.\n` +
     `# \`${envFilePath}\` is ignored by Git; this example is committed.\n`;
   if (variables.length === 0) return header;
-  return `${header}${
-    variables.map((variable) => `\n# ${variable.description}\n${variable.name}=`).join('')
-  }\n`;
+  return `${header}${variables
+    .map((variable) => `\n# ${variable.description}\n${variable.name}=`)
+    .join('')}\n`;
 }
 
 /**
- * Removes the filesystem-only dotenv setting for a Workers project.
+ * Removes the filesystem-only parts of a manifest for a Workers project: the
+ * dotenv path, and the self-hosted Swagger asset package.
  *
- * @param manifest - The template manifest that may declare a dotenv path
- * @returns The manifest without its dotenv path
+ * @param manifest - The template manifest
+ * @returns The manifest without them
  */
-function withoutEnvFilePath(manifest: TemplateManifest): TemplateManifest {
-  const { envFilePath: _envFilePath, ...without } = manifest;
-  return without;
+function withoutWorkersFilesystemNeeds(manifest: TemplateManifest): TemplateManifest {
+  const { envFilePath: _envFilePath, npmDependencies, ...without } = manifest;
+  if (npmDependencies === undefined) return without;
+  const { [SWAGGER_ASSET_PACKAGE]: _assets, ...kept } = npmDependencies;
+  return Object.keys(kept).length === 0 ? without : { ...without, npmDependencies: kept };
+}
+
+/** The package `OpenApiPlugin` self-hosts Swagger UI from. */
+const SWAGGER_ASSET_PACKAGE = 'swagger-ui-dist';
+
+/**
+ * Opts a generated npm project out of Scarf, the install-time analytics hook
+ * `swagger-ui-dist` depends on: under npm its `postinstall` reports platform,
+ * Node version and dependency data unless the ROOT package.json disables it.
+ *
+ * @param dependencies - The dependencies the manifest declares
+ * @returns The `scarfSettings` member to spread, or nothing
+ */
+function scarfOptOut(dependencies: Readonly<Record<string, string>>): Record<string, unknown> {
+  return Object.hasOwn(dependencies, SWAGGER_ASSET_PACKAGE)
+    ? { scarfSettings: { enabled: false } }
+    : {};
 }
 
 /**
@@ -279,10 +361,7 @@ export function withEnvFile(host: ResolvedHost, envFilePath: string): ResolvedHo
  * user can reach, and silently dropping it would leave a swap that no longer
  * removes what its author believed it did
  */
-function applyRuntimeSwap(
-  plugins: readonly Wiring[],
-  swap: RuntimeSwap,
-): readonly Wiring[] {
+function applyRuntimeSwap(plugins: readonly Wiring[], swap: RuntimeSwap): readonly Wiring[] {
   const present = new Set(plugins.map((wiring) => wiring.pkg));
   const absent = swap.removePackages.filter((pkg) => !present.has(pkg));
   if (absent.length > 0) {
@@ -307,10 +386,7 @@ function applyRuntimeSwap(
  * @param host - The resolved template host
  * @returns The `setu.config.ts` contents
  */
-function configModule(
-  runtime: TargetRuntime,
-  host: ResolvedHost,
-): string {
+function configModule(runtime: TargetRuntime, host: ResolvedHost): string {
   const {
     plugins,
     middleware,
@@ -322,26 +398,30 @@ function configModule(
   } = host;
   const pluginArgs = (wiring: Wiring): string =>
     wiring.pkg !== 'config-plugin'
-      ? wiring.args ?? ''
+      ? (wiring.args ?? '')
       : runtime === 'cloudflare-workers'
-      ? ''
-      : host.manifest?.envFilePath === undefined
-      ? wiring.args ?? ''
-      : renderConfigOptions(host.manifest.envFilePath);
+        ? ''
+        : host.manifest?.envFilePath === undefined
+          ? (wiring.args ?? '')
+          : renderConfigOptions(host.manifest.envFilePath);
   const sourceInstalled = new Set(plugins.map((plugin) => plugin.pkg));
   const sourceNames = {
     project: 'app',
-    authorization: plugins.some((plugin) =>
-      plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
+    authorization: plugins.some(
+      (plugin) => plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? ''),
     ),
-    customBackplane: plugins.some((plugin) =>
-      plugin.pkg === 'realtime-backplane-plugin' && /transport:\s*'custom'/.test(plugin.args ?? '')
+    customBackplane: plugins.some(
+      (plugin) =>
+        plugin.pkg === 'realtime-backplane-plugin' &&
+        /transport:\s*'custom'/.test(plugin.args ?? ''),
     ),
   };
-  const hasSources = host.devtoolPort !== undefined &&
-    plugins.some((plugin) =>
-      withSourceArgs(plugin.pkg, pluginArgs(plugin), sourceInstalled, sourceNames) !==
-        pluginArgs(plugin)
+  const hasSources =
+    host.devtoolPort !== undefined &&
+    plugins.some(
+      (plugin) =>
+        withSourceArgs(plugin.pkg, pluginArgs(plugin), sourceInstalled, sourceNames) !==
+        pluginArgs(plugin),
     );
   // `common` is always imported for IPlugin, so a template naming more
   // symbols from it merges into that one statement rather than emitting a
@@ -350,36 +430,31 @@ function configModule(
     .filter((p) => p.pkg === 'common')
     .flatMap((p) => p.symbols ?? []);
   // Merge template-specific common symbols into the one statement.
-  const commonImport = extraCommonSymbols.length === 0
-    ? `import type { IPlugin } from '@setu-ts/common';`
-    : renderImport(
-      [...extraCommonSymbols, 'type IPlugin'],
-      '@setu-ts/common',
-    );
+  const commonImport =
+    extraCommonSymbols.length === 0
+      ? `import type { IPlugin } from '@setu-ts/common';`
+      : renderImport([...extraCommonSymbols, 'type IPlugin'], '@setu-ts/common');
 
   const imports = [
-    ...(!hasSources ? [] : [
-      "import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';",
-    ]),
+    ...(!hasSources ? [] : ["import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';"]),
     // A starter factory returns the application, so `createApplication` is not
     // imported on that path — but the factory's devtool parameter names
     // `KernelDiagnosticsOptions` on EVERY target, so every config module still
     // imports the kernel, as a type.
     ...(appFactory === undefined
       ? [
-        renderImport([
-          'createApplication',
-          'type IKernelApplication',
-          'type KernelDiagnosticsOptions',
-        ], '@setu-ts/kernel'),
-      ]
+          renderImport(
+            ['createApplication', 'type IKernelApplication', 'type KernelDiagnosticsOptions'],
+            '@setu-ts/kernel',
+          ),
+        ]
       : [
-        renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`),
-        renderImport(
-          ['type IKernelApplication', 'type KernelDiagnosticsOptions'],
-          '@setu-ts/kernel',
-        ),
-      ]),
+          renderImport([appFactory.symbol], `@setu-ts/${appFactory.pkg}`),
+          renderImport(
+            ['type IKernelApplication', 'type KernelDiagnosticsOptions'],
+            '@setu-ts/kernel',
+          ),
+        ]),
     commonImport,
     ...plugins.map((p) => renderImport([p.symbol], `@setu-ts/${p.pkg}`)),
     ...middleware.map((m) => renderImport([m.symbol], `@setu-ts/${m.pkg}`)),
@@ -390,22 +465,23 @@ function configModule(
     ...localImports.map((l) => renderImport(l.symbols, l.from)),
   ].join('\n');
 
-  const middlewareLines = middleware.length === 0 ? '' : `\n${
-    middleware
-      .map((m) =>
-        `  app.middleware.add(${m.symbol}(${m.args ?? ''})${renderAddOptions(m.addOptions)});`
-      )
-      .join('\n')
-  }\n`;
+  const middlewareLines =
+    middleware.length === 0
+      ? ''
+      : `\n${middleware
+          .map(
+            (m) =>
+              `  app.middleware.add(${m.symbol}(${m.args ?? ''})${renderAddOptions(m.addOptions)});`,
+          )
+          .join('\n')}\n`;
 
   // Placed after the middleware block and before the hello-world route: the app must
   // exist, and a generated route should be registered before the template's own `/`
   // handler so route precedence reads top-to-bottom in the emitted file. Pipeline
   // position is NOT affected by where a middleware is added — the kernel orders by
   // priority — which is why the generated middleware loop passes one explicitly.
-  const setupLines = setupCalls.length === 0
-    ? ''
-    : `\n${setupCalls.map((line) => `  ${line}`).join('\n')}\n`;
+  const setupLines =
+    setupCalls.length === 0 ? '' : `\n${setupCalls.map((line) => `  ${line}`).join('\n')}\n`;
 
   if (appFactory !== undefined) {
     // No hello-world route here: this application's routes come from its own
@@ -415,21 +491,28 @@ function configModule(
     // to a starter-composed host. The starter still owns its curated set; these
     // additions are registered before createApp() returns, so the kernel can
     // resolve their declared dependencies at start() in the usual way.
-    const factoryPluginLines = plugins.length === 0
-      ? ''
-      : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
+    const factoryPluginLines =
+      plugins.length === 0
+        ? ''
+        : `\n${plugins.map((p) => `  app.register(${p.symbol}(${pluginArgs(p)}));`).join('\n')}\n`;
     const parameter = appFactory.parameter;
-    const parameterName = parameter === undefined
-      ? ''
-      : parameter.readOn.includes(runtime)
-      ? parameter.name
-      : `_${parameter.name}`;
-    const factoryParameterDoc = parameter === undefined
-      ? ''
-      : `\n * @param ${parameterName} - ${parameter.doc}`;
-    const factoryParameterLine = parameter === undefined
-      ? ''
-      : `\n  ${parameterName}?: ${parameter.type},`;
+    const parameterName =
+      parameter === undefined
+        ? ''
+        : parameter.readOn.includes(runtime)
+          ? parameter.name
+          : `_${parameter.name}`;
+    const factoryParameterDoc =
+      parameter === undefined ? '' : `\n * @param ${parameterName} - ${parameter.doc}`;
+    const factoryParameterLine =
+      parameter === undefined ? '' : `\n  ${parameterName}?: ${parameter.type},`;
+    // M113d §3.8: on Workers the platform sink is the SECOND parameter of every
+    // generated factory, so the entry can pass it positionally whether or not
+    // this composition reads it. Underscore-prefixed where nothing reads it.
+    const workersWaitUntilLine =
+      runtime === 'cloudflare-workers'
+        ? `\n  _waitUntil?: (promise: Promise<unknown>) => void,`
+        : '';
     return `${imports}
 
 /**
@@ -440,22 +523,28 @@ function configModule(
  *
  * @param env - The discovery environment \`setu commands\` passes positionally
  * on every target; the starter reads configuration itself, so this is
- * forwarded through unchanged.
+ * forwarded through unchanged.${
+   runtime === 'cloudflare-workers'
+     ? `\n * @param _waitUntil - The platform's post-response sink, from \`src/index.ts\`,` +
+       `\n * accepted for one signature on every target; the starter owns its construction,` +
+       `\n * so nothing here reads it.`
+     : ''
+ }
  * @param _devtool - Accepted for one signature on every target. The starter
  * owns its construction, so a devtool composition cannot be honored here —
  * the CLI refuses the devtool opt-in on this template by name.${factoryParameterDoc}
  * @returns The configured, unstarted application
  */
 export async function ${CONFIG_EXPORT}(
-  env?: Readonly<Record<string, unknown>>,
+  env?: Readonly<Record<string, unknown>>,${workersWaitUntilLine}
   _${DEVTOOL_PARAMETER}${factoryParameterLine}
 ): Promise<IKernelApplication> {
   const app = await ${appFactory.symbol}(${
-      appFactory.args?.({
-        runtime,
-        ...host.appFactoryContext,
-      }) ?? ''
-    });
+    appFactory.args?.({
+      runtime,
+      ...host.appFactoryContext,
+    }) ?? ''
+  });
 ${factoryPluginLines}${middlewareLines}${setupLines}
   return app;
 }
@@ -467,16 +556,16 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   // `fetch` handler and is threaded through the factory.
   const onWorkers = runtime === 'cloudflare-workers';
   const pluginList = [
-    ...plugins
-      .map((p) =>
+    ...plugins.map(
+      (p) =>
         `      ${p.symbol}(${
           onWorkers
-            ? p.workersArgs ?? pluginArgs(p)
+            ? (p.workersArgs ?? pluginArgs(p))
             : host.devtoolPort === undefined
-            ? pluginArgs(p)
-            : withSourceArgs(p.pkg, pluginArgs(p), sourceInstalled, sourceNames)
-        }),`
-      ),
+              ? pluginArgs(p)
+              : withSourceArgs(p.pkg, pluginArgs(p), sourceInstalled, sourceNames)
+        }),`,
+    ),
     ...pluginSpreads.map((spread) => `      ${spread},`),
     // The devtool composition lands LAST: the kernel resolves plugins by
     // declared dependencies, so position is presentation, and the production
@@ -485,7 +574,12 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
     ...(onWorkers ? [] : ['      ...(devtool?.plugins ?? []),']),
   ].join('\n');
 
-  const wantsWaitUntil = onWorkers && consumesWaitUntil(plugins);
+  // M113d §3.8: on Workers the parameter is ALWAYS declared, so the entry can
+  // pass the platform sink positionally whether or not the plugin list
+  // consumes it. It is underscore-prefixed only when nothing in the factory
+  // reads it, so a project that never registers CloudflarePlugin passes its
+  // own lint.
+  const waitUntilParameter = consumesWaitUntil(plugins) ? 'waitUntil' : '_waitUntil';
   // The devtool composition is the SECOND parameter on every target, never
   // the first: `setu commands` calls this factory with its inert discovery
   // env as the FIRST positional argument on every target (`app-loader.ts`), so
@@ -499,17 +593,17 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
   // (M63/D6).
   const factoryParam = !onWorkers
     ? `\n  _env?: Readonly<Record<string, unknown>>,\n  ${DEVTOOL_PARAMETER}\n`
-    : wantsWaitUntil
-    ? '\n  env: Readonly<Record<string, unknown>> = {},' +
-      '\n  waitUntil?: (promise: Promise<unknown>) => void,' +
-      `\n  _${DEVTOOL_PARAMETER}\n`
-    : `\n  env: Readonly<Record<string, unknown>> = {},\n  _${DEVTOOL_PARAMETER}\n`;
+    : '\n  env: Readonly<Record<string, unknown>> = {},' +
+      `\n  ${waitUntilParameter}?: (promise: Promise<unknown>) => void,` +
+      `\n  _${DEVTOOL_PARAMETER}\n`;
   // The kernel-diagnostics option is gated on the SAME condition as the plugin
   // spread above: on Workers the parameter is rendered `_devtool`, so emitting
   // a reference to `devtool` there produced a `setu.config.ts` that failed its
   // own `deno check` with TS2552 and threw a ReferenceError at boot. The two
   // halves of one composition must read one flag.
-  const devtoolDiagnostics = onWorkers ? '' : `
+  const devtoolDiagnostics = onWorkers
+    ? ''
+    : `
     // Kernel diagnostics reach the CONSTRUCTOR only — the collector is built
     // there — so the devtool option threads through this object rather than
     // being registered onto a finished application.
@@ -522,13 +616,10 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
       `\n * parameter deliberately: \`setu commands\` passes its inert discovery env as the` +
       `\n * FIRST argument on every target, which the unused \`_env\` above absorbs.`;
   const envDoc = onWorkers
-    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler${
-      wantsWaitUntil
-        ? `\n * @param waitUntil - The platform's post-response sink, from \`src/index.ts\`.` +
-          `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
-          `\n * which cannot resolve \`cloudflare:workers\` at all.`
-        : ''
-    }${devtoolDoc}`
+    ? `\n * @param env - The Worker's bindings and variables, from the \`fetch\` handler` +
+      `\n * @param ${waitUntilParameter} - The platform's post-response sink, from \`src/index.ts\`.` +
+      `\n * Only the Worker ENTRY can import it: \`setu\` loads this module under Deno,` +
+      `\n * which cannot resolve \`cloudflare:workers\` at all.${devtoolDoc}`
     : `\n * @param _env - The discovery environment \`setu commands\` passes positionally on` +
       `\n * every target; accepted and unused, because a socket project reads configuration` +
       `\n * from the process environment.${devtoolDoc}`;
@@ -545,10 +636,10 @@ ${factoryPluginLines}${middlewareLines}${setupLines}
  */
 export function ${CONFIG_EXPORT}(${factoryParam}): IKernelApplication {
 ${
-    !hasSources
-      ? ''
-      : '  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;\n'
-  }\
+  !hasSources
+    ? ''
+    : '  const sources: Partial<typeof DEVTOOL_SOURCES> = devtool === undefined ? {} : DEVTOOL_SOURCES;\n'
+}\
   const app = createApplication({
     plugins: [
 ${pluginList}
@@ -755,9 +846,10 @@ function renderRoutes(entry: WorkerExport): string {
   }
 
   const cases = entry.routes
-    .map((route) =>
-      `      case '${route.queueName}':\n` +
-      `        return await ${route.symbol}(app)(payload);`
+    .map(
+      (route) =>
+        `      case '${route.queueName}':\n` +
+        `        return await ${route.symbol}(app)(payload);`,
     )
     .join('\n');
 
@@ -773,7 +865,7 @@ ${cases}
 function workersEntry(
   workerExports: readonly WorkerExport[],
   entryReExports: readonly string[],
-  wantsWaitUntil: boolean,
+  ssr?: { readonly importLine: string; readonly argument: string },
 ): string {
   // `env` is threaded in on BOTH paths. On Workers the environment is not
   // process-wide — bindings and variables arrive as the `env` argument below —
@@ -788,10 +880,20 @@ function workersEntry(
   // the plugin README's only usage example shows, breaks the CLI outright with
   // `Unsupported scheme "cloudflare"`. This entry module is never loaded by
   // `setu`, so it is the one place the specifier is safe.
-  const waitUntilImport = wantsWaitUntil ? "import { waitUntil } from 'cloudflare:workers';\n" : '';
+  // M113d §3.8: the sink is imported and passed on EVERY Workers project — a
+  // factory that never reads it takes it as `_waitUntil`, so the positional
+  // pass type-checks either way and a plugin added later needs no entry edit.
+  const waitUntilImport = "import { waitUntil } from 'cloudflare:workers';\n";
+  // M113d §3.10: a starter-composed host reads its `ssr` argument on Workers
+  // too, so the entry statically imports the compiled server build and passes
+  // it — the module arm, the only form a bundled Worker can supply.
+  const ssrImport = ssr === undefined ? '' : `${ssr.importLine}\n`;
   const bootSignature =
     'async function boot(env: Record<string, unknown>): Promise<IKernelApplication> {';
-  const bootCall = `${CONFIG_EXPORT}(env${wantsWaitUntil ? ', waitUntil' : ''})`;
+  const bootCall =
+    ssr === undefined
+      ? `${CONFIG_EXPORT}(env, waitUntil)`
+      : `${CONFIG_EXPORT}(env, waitUntil, undefined, ${ssr.argument})`;
   const fetchSignature =
     'async fetch(request: Request, env: Record<string, unknown>): Promise<Response> {';
 
@@ -820,8 +922,7 @@ function workersEntry(
   // because timers cannot be relied on between Worker invocations.
   // `acquire` is synchronous on purpose: an `async` function with no await
   // fails the generated project's own `deno lint` (require-await).
-  const cacheBlock =
-    `/** One application, built from one \`env\`, and the work currently using it. */
+  const cacheBlock = `/** One application, built from one \`env\`, and the work currently using it. */
 interface BootedApp {
   readonly app: Promise<IKernelApplication>;
   started: boolean;
@@ -923,14 +1024,16 @@ function stopQuietly(entry: BootedApp): void {
   // tables, and a subscription registered on one would be invisible to the
   // other.
   const exportImports = workerExports
-    .map((entry) =>
-      `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
-      renderRouteImports(entry.routes)
+    .map(
+      (entry) =>
+        `import type { ${entry.payloadType} } from '@setu-ts/${entry.payloadPkg}';\n` +
+        renderRouteImports(entry.routes),
     )
     .join('\n');
   const exportBlock = workerExports
-    .map((entry) =>
-      `\n  async ${entry.name}(
+    .map(
+      (entry) =>
+        `\n  async ${entry.name}(
     payload: ${entry.payloadType},
     env: Record<string, unknown>,
   ): Promise<void> {
@@ -941,14 +1044,14 @@ ${indent(renderRoutes(entry), '  ')}
     } finally {
       release(booted);
     }
-  },`
+  },`,
     )
     .join('');
   const reExportBlock = entryReExports.length === 0 ? '' : `\n${entryReExports.join('\n')}\n`;
 
   return `import type { IKernelApplication } from '@setu-ts/kernel';
 import { ${CONFIG_EXPORT} } from '../${CONFIG_MODULE}';
-${waitUntilImport}${exportImports === '' ? '' : `${exportImports}\n`}
+${waitUntilImport}${ssrImport}${exportImports === '' ? '' : `${exportImports}\n`}
 ${cacheBlock}
 
 export default {
@@ -995,7 +1098,10 @@ ${reExportBlock}`;
  * @returns The re-indented block
  */
 function indent(block: string, prefix: string): string {
-  return block.split('\n').map((line) => `${prefix}${line}`).join('\n');
+  return block
+    .split('\n')
+    .map((line) => `${prefix}${line}`)
+    .join('\n');
 }
 
 /**
@@ -1040,12 +1146,15 @@ function frameworkPackages(host: ResolvedHost, runtime: TargetRuntime): readonly
  * Builds the Deno `imports` map for a generated project.
  *
  * @param host - The resolved template host
- * @returns Specifier → `npm:@setu-ts/…` specifier
+ * @returns Framework and template dependency specifiers mapped to npm imports
  */
 function frameworkImports(host: ResolvedHost, runtime: TargetRuntime): Record<string, string> {
   const imports: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     imports[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'deno');
+  }
+  for (const [name, range] of Object.entries(host.manifest?.npmDependencies ?? {})) {
+    imports[name] = `npm:${name}@${range}`;
   }
   // Template aliases last: an alias like `~/` is not a framework package and
   // must not be able to displace one.
@@ -1123,17 +1232,22 @@ function denoTasks(
   const entry = runtime === 'deno' ? 'main.ts' : 'src/index.ts';
   // Workers serves through a `fetch` export, so `deno run` binds nothing and
   // exits 0 — Deno's own warning names `deno serve` as the fix (X9-7).
-  const start = runtime === 'cloudflare-workers'
-    ? `deno serve ${denoPermissions(manifest)} ${entry}`
-    : `deno run ${denoPermissions(manifest)} ${entry}`;
+  const start =
+    runtime === 'cloudflare-workers'
+      ? `deno serve ${denoPermissions(manifest)} ${entry}`
+      : `deno run ${denoPermissions(manifest)} ${entry}`;
 
   // A3: every template emits a `test` task now. `setu generate module` writes a
-  // `*.service.test.ts`, and NO template declared a task that runs it — so the
+  // `<name>.test.ts`, and NO template declared a task that runs it — so the
   // generated test sat beside the generated service, unreachable from
   // `deno check main.ts setu.config.ts`, and both stayed broken through a full
   // green run of every gate a developer had.
   const test = {
-    test: runtime === 'cloudflare-workers' ? 'deno test -A --permit-no-files' : 'deno test -A',
+    test:
+      runtime === 'cloudflare-workers'
+        ? 'deno test -A --permit-no-files'
+        : "deno test -A --ignore='**/*.e2e.test.ts'",
+    ...(runtime === 'cloudflare-workers' ? {} : { 'test:e2e': "deno test -A '**/*.e2e.test.ts'" }),
   };
 
   if (manifest?.npmBuild === undefined) {
@@ -1153,6 +1267,9 @@ function denoTasks(
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
     test: `deno task build && ${test.test}`,
+    ...(test['test:e2e'] === undefined
+      ? {}
+      : { 'test:e2e': `deno task build && ${test['test:e2e']}` }),
     // The development entry runs Vite in-process and needs it installed, but
     // not the production build: Vite serves the route modules itself.
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
@@ -1285,7 +1402,7 @@ function denoPermissions(manifest?: TemplateManifest): string {
       '--allow-net',
       '--allow-env',
       ...(manifest?.envFilePath === undefined ? [] : ['--allow-read']),
-      ...manifest?.denoPermissions ?? [],
+      ...(manifest?.denoPermissions ?? []),
     ]),
   ].join(' ');
 }
@@ -1320,14 +1437,29 @@ function tsconfigOptions(
   manifest?: TemplateManifest,
 ): Record<string, unknown> {
   const template = manifest?.tsconfigCompilerOptions;
-  const workers = runtime === 'cloudflare-workers'
-    ? {
-      // A template's own `lib` wins: a frontend build needs the DOM for the code
-      // it ships to a browser.
-      lib: template?.['lib'] ?? ['ES2022'],
-      types: [WORKERS_TYPES_PACKAGE, ...templateTypes(template)],
-    }
-    : {};
+  const workers =
+    runtime === 'cloudflare-workers'
+      ? {
+          // A template's own `lib` wins: a frontend build needs the DOM for the code
+          // it ships to a browser.
+          lib: template?.['lib'] ?? ['ES2022'],
+          types: [
+            WORKERS_TYPES_PACKAGE,
+            // The template's npm build (Vite) imports `node:fs`, and the same
+            // `tsconfig.json` type-checks it. A Workers project without one
+            // names no Node declarations at all.
+            ...(manifest?.npmBuild === undefined ? [] : ['node']),
+            ...templateTypes(template),
+          ],
+          // The Workers entry statically imports the compiled React Router
+          // server build (`build/server/index.js`), which has no declarations.
+          // The `check` script builds first, so the file exists; without
+          // `allowJs`, `tsc --noEmit` still reports TS7016 on it even though
+          // that import is what `wrangler dev` runs. A rest or microservice
+          // Worker imports no JavaScript build.
+          ...(manifest?.npmBuild === undefined ? {} : { allowJs: true }),
+        }
+      : {};
   // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
   // its imports end in `.ts` — which `tsc` accepts only alongside `noEmit`. A
   // Deno project's `tsconfig.json` serves its frontend build alone.
@@ -1335,11 +1467,12 @@ function tsconfigOptions(
   // TypeScript 6 includes no `@types/*` package unless `types` names it, so the
   // runtime's own declarations are named — `process` and `node:test` on Node,
   // `bun:test` on Bun. Workers names its own below.
-  const runtimeTypes = runtime === 'node'
-    ? { types: ['node', ...templateTypes(template)] }
-    : runtime === 'bun'
-    ? { types: ['bun', ...templateTypes(template)] }
-    : {};
+  const runtimeTypes =
+    runtime === 'node'
+      ? { types: ['node', ...templateTypes(template)] }
+      : runtime === 'bun'
+        ? { types: ['bun', ...templateTypes(template)] }
+        : {};
   return {
     target: 'ES2022',
     module: 'ESNext',
@@ -1367,6 +1500,23 @@ function templateTypes(options?: Readonly<Record<string, unknown>>): readonly un
 
 /** The ambient type package a Workers project's `tsconfig.json` names. */
 const WORKERS_TYPES_PACKAGE = '@cloudflare/workers-types';
+
+/**
+ * Every directory a template's frontend toolchain generates.
+ *
+ * One list feeds all four standalone consumers — `.gitignore`, ESLint's ignores,
+ * `.prettierignore`, and Deno's `fmt`/`lint` excludes — so a toolchain that
+ * writes typegen output beside its build cannot be ignored by one and linted by
+ * another. A template with no npm build contributes nothing.
+ *
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The build output first, then any further generated directories
+ */
+function generatedOutputDirs(manifest?: TemplateManifest): readonly string[] {
+  const build = manifest?.npmBuild;
+  if (build === undefined) return [];
+  return [build.outputDir, ...(build.generatedDirs ?? [])];
+}
 
 /**
  * The `compilerOptions` a generated `deno.json` carries.
@@ -1403,17 +1553,18 @@ function denoCompilerOptions(
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The scripts block
  */
-function npmScripts(
-  runtime: TargetRuntime,
-  manifest?: TemplateManifest,
-): Record<string, string> {
+function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
   const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
   // A3 applies to every target, not just the Deno ones: `setu generate module`
-  // emits a `*.service.test.ts` here too, and before this nothing could run it.
+  // emits a `<name>.test.ts` here too, and before this nothing could run it.
   // Each runtime's own runner, matching the harness the schematic emits — `bun
   // test` for `bun:test`, and `node --test` under the same loader `start` uses,
   // since the generated test is TypeScript.
-  const test = runtime === 'bun' ? 'bun test' : `${NODE_RUNNER} --test`;
+  const test =
+    runtime === 'bun'
+      ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
+      : `${NODE_RUNNER} --test '**/!(*.e2e).test.ts'`;
+  const e2e = runtime === 'bun' ? 'bun test .e2e.test' : `${NODE_RUNNER} --test '**/*.e2e.test.ts'`;
   // With a frontend build both scripts boot an app that loads the server
   // bundle, so both build first, as the Deno `start` and `test` tasks do. A
   // `start` without it is what the next-step hint and the README tell a new
@@ -1423,15 +1574,21 @@ function npmScripts(
   // Bun project from a Node one.
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
   const devEntry = manifest?.npmBuild?.devEntry;
-  return manifest?.npmBuild === undefined ? { start, test } : {
-    build: manifest.npmBuild.script,
-    start: `${build} && ${start}`,
-    test: `${build} && ${test}`,
-    // No build first: Vite serves the route modules itself in development.
-    ...(devEntry === undefined ? {} : {
-      dev: runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
-    }),
-  };
+  return manifest?.npmBuild === undefined
+    ? { start, test, 'test:e2e': e2e }
+    : {
+        build: manifest.npmBuild.script,
+        start: `${build} && ${start}`,
+        test: `${build} && ${test}`,
+        'test:e2e': `${build} && ${e2e}`,
+        // No build first: Vite serves the route modules itself in development.
+        ...(devEntry === undefined
+          ? {}
+          : {
+              dev:
+                runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
+            }),
+      };
 }
 
 /**
@@ -1454,6 +1611,16 @@ function npmScripts(
 const NODE_RUNNER = 'tsx';
 
 /**
+ * The `@types/node` range a generated project pins.
+ *
+ * One constant because two targets now need it: every Node project, whose entry
+ * registers a shutdown listener on `process`, and a Workers project with an npm
+ * build, whose single `tsconfig.json` type-checks a `vite.config.ts` that
+ * imports `node:fs`.
+ */
+const NODE_TYPES_RANGE = '^24.0.0';
+
+/**
  * npm packages a generated project needs because of its RUNTIME, not its
  * template.
  *
@@ -1464,15 +1631,19 @@ const NODE_RUNNER = 'tsx';
  * NODE_RUNNER}.
  *
  * @param runtime - The selected runtime target
+ * @param manifest - The template's manifest contributions, when it declares them
  * @returns devDependencies to merge, empty for every target but Node
  */
-function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
+function runtimeDevDependencies(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Readonly<Record<string, string>> {
   // Node: see NODE_RUNNER — the start script invokes it, so it must be
   // installed. `@types/node` is what declares the `process` the entry's shutdown
   // listener registers on; without it a generated project's own `tsc` reports an
   // undeclared name while `tsx` runs the file regardless, so nothing but this
   // would catch it.
-  if (runtime === 'node') return { '@types/node': '^24.0.0', tsx: '^4.20.0' };
+  if (runtime === 'node') return { '@types/node': NODE_TYPES_RANGE, tsx: '^4.20.0' };
   // Bun gets `@types/bun` rather than `@types/node`: it is the package Bun's own
   // documentation prescribes, and it supplies the `process` declarations by
   // depending on `@types/node` — so the entry's listener type-checks without the
@@ -1503,6 +1674,12 @@ function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string,
     return {
       wrangler: '~4.148.0',
       [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
+      // A full-stack Workers project runs ONE `tsconfig.json` over both the
+      // Worker source and `vite.config.ts`, which imports `node:fs` — so the
+      // Node declarations have to be present for its own `npm run check` to
+      // pass. A rest or microservice Workers project has no such file and gets
+      // nothing extra.
+      ...(manifest?.npmBuild === undefined ? {} : { '@types/node': NODE_TYPES_RANGE }),
     };
   }
   return {};
@@ -1559,47 +1736,57 @@ function standaloneNpmFiles(
     // Through the same helper the Node branch uses, so runtime-level
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
-    ...runtimeDevDependencies(runtime),
+    ...runtimeDevDependencies(runtime, manifest),
     ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
     ...(manifest?.npmBuild === undefined ? {} : { build: manifest.npmBuild.script }),
     ...(onWorkers
-      ? { ...NPM_TOOLING_SCRIPTS, dev: 'wrangler dev', deploy: 'wrangler deploy' }
+      ? {
+          ...NPM_TOOLING_SCRIPTS,
+          // A template with a build has its Workers entry import the compiled
+          // server module, which does not exist until that build runs. The
+          // check therefore builds first, the same order `start` and `test`
+          // use. Every other target and template keeps the bare `tsc --noEmit`.
+          ...(manifest?.npmBuild === undefined ? {} : { check: 'npm run build && tsc --noEmit' }),
+          dev: 'wrangler dev',
+          deploy: 'wrangler deploy',
+        }
       : {}),
   };
 
   return [
     {
       path: 'package.json',
-      contents: `${
-        JSON.stringify(
-          {
-            name: projectName,
-            version: '0.1.0',
-            private: true,
-            type: 'module',
-            // Emitted unconditionally: this function returns early unless the
-            // target is Workers or the template has an npm build, and both of
-            // those always contribute a script, a dependency and a devDependency.
-            // Guarding each one added three branches no combination can reach.
-            scripts,
-            dependencies,
-            devDependencies,
-          },
-          null,
-          2,
-        )
-      }\n`,
+      contents: `${JSON.stringify(
+        {
+          name: projectName,
+          version: '0.1.0',
+          private: true,
+          type: 'module',
+          // Emitted unconditionally: this function returns early unless the
+          // target is Workers or the template has an npm build, and both of
+          // those always contribute a script, a dependency and a devDependency.
+          // Guarding each one added three branches no combination can reach.
+          scripts,
+          dependencies,
+          ...scarfOptOut(dependencies),
+          devDependencies,
+        },
+        null,
+        2,
+      )}\n`,
     },
     {
       path: 'tsconfig.json',
-      contents: `${
-        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
-      }\n`,
+      contents: `${JSON.stringify(
+        { compilerOptions: tsconfigOptions(runtime, manifest) },
+        null,
+        2,
+      )}\n`,
     },
-    ...(onWorkers ? npmToolingFiles(manifest?.npmBuild?.outputDir) : []),
+    ...(onWorkers ? npmToolingFiles(generatedOutputDirs(manifest)) : []),
   ];
 }
 
@@ -1642,7 +1829,7 @@ export function servedRoutes(host: ResolvedHost): readonly ServedRoute[] {
       ? [{ path: '/', purpose: 'the hello-world route in `setu.config.ts`' }]
       : []),
     ...host.routes,
-    ...Object.entries(PLUGIN_ROUTES).flatMap(([pkg, routes]) => plugins.has(pkg) ? routes : []),
+    ...Object.entries(PLUGIN_ROUTES).flatMap(([pkg, routes]) => (plugins.has(pkg) ? routes : [])),
   ];
 }
 
@@ -1658,11 +1845,12 @@ export function servedRoutes(host: ResolvedHost): readonly ServedRoute[] {
  * @returns The section, starting and ending with a blank line
  */
 function servedRoutesSection(host: ResolvedHost, runtime: TargetRuntime, port?: EntryPort): string {
-  const where = runtime === 'cloudflare-workers'
-    ? 'Under `npx wrangler dev`, at `http://localhost:8787`'
-    : port === undefined
-    ? 'At `http://localhost:3000` (set `PORT` to change it)'
-    : `On the port \`${port.from}\` exports`;
+  const where =
+    runtime === 'cloudflare-workers'
+      ? 'Under `npx wrangler dev`, at `http://localhost:8787`'
+      : port === undefined
+        ? 'At `http://localhost:3000` (set `PORT` to change it)'
+        : `On the port \`${port.from}\` exports`;
   const lines = servedRoutes(host).map((route) => `- \`${route.path}\` — ${route.purpose}`);
   return `\n## What it serves\n\n${where}:\n\n${lines.join('\n')}\n`;
 }
@@ -1689,63 +1877,79 @@ export function projectFiles(
   // backing services; without this line the scaffold cannot complete
   // app.start() until the reader discovers the file on their own.
   const hasBrokerServices = host.files.some((file) => file.path === BROKER_COMPOSE_FILE);
+  // A selected transport's operational note (NATS's subject scope, Pub/Sub's
+  // missing topic creation). Wrapped programmatically at the emitted width: the
+  // workspace README already reflows its own note this way, and hand-wrapping a
+  // paragraph whose interpolated values change length fails `fmt --check` (X2-4).
+  const transportNotes =
+    (host.transportNotes ?? []).length === 0
+      ? ''
+      : `\n${(host.transportNotes ?? []).map((note) => wrapProse(note)).join('\n\n')}\n`;
   const readme = `# ${projectName}
 
 A [Setu-TS](https://github.com/setu-ts/setu-ts) project targeting \`${runtime}\`.
 ${
-    hasBrokerServices
-      // Wrapped exactly as `deno fmt` reflows markdown at the emitted
+  hasBrokerServices
+    ? // Wrapped exactly as `deno fmt` reflows markdown at the emitted
       // lineWidth: 100. Hand-wrapping it anywhere else makes a fresh
       // broker-selected scaffold fail its own `fmt --check` (M63 D6).
       // "the plugins you selected", never "the messaging and queue plugins":
       // the two flags are independent, so `--broker redis` alone leaves
       // `QueuePlugin()` in memory, connecting to nothing.
-      ? `\n## Local transport services\n\nStart these FIRST: the transport plugins you selected ` +
-        `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
-        `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n`
-      : ''
-  }
+      `\n## Local transport services\n\nStart these FIRST: the transport plugins you selected ` +
+      `connect while the application registers, and\ndo not retry, so \`start\` fails against a ` +
+      `backend that is not listening yet.\n\n\`\`\`bash\ndocker compose -f ${BROKER_COMPOSE_FILE} up -d\n\`\`\`\n${transportNotes}`
+    : ''
+}
 ## Run
 
 \`\`\`bash
 ${
-    runtime === 'deno'
-      ? 'deno task start'
-      : runtime === 'cloudflare-workers'
+  runtime === 'deno'
+    ? 'deno task start'
+    : runtime === 'cloudflare-workers'
       ? 'npx wrangler dev'
       : runtime === 'bun'
-      ? 'bun run start'
-      : 'npm start'
-  }
+        ? 'bun run start'
+        : 'npm start'
+}
 \`\`\`
 ${servedRoutesSection(host, runtime, port)}
 ${
-    runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
-      ? `## Develop\n\n\`\`\`bash\n${
+  runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
+    ? `## Develop\n\n\`\`\`bash\n${
         runtime === 'deno' ? 'deno task dev' : runtime === 'bun' ? 'bun run dev' : 'npm run dev'
       }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
-      : ''
-  }${
+    : ''
+}${
     host.devtoolPort === undefined
       ? ''
       : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
   }## Generate code
 
 \`\`\`bash
-${PROGRAM_NAME} generate service billing
-${PROGRAM_NAME} generate --help
+${cliInvocation(runtime)} generate service billing
+${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}`;
 
   // A Deno frontend build creates node_modules too; other Deno projects do not.
   const gitignore = `${
     runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
   }coverage/\n${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
-    // A frontend build's output is generated, so it is ignored like any other
-    // build artifact — the generated file used to list only `coverage/` and the
-    // env file, which left a minified bundle tracked (D2).
-    manifest?.npmBuild === undefined ? '' : `${manifest.npmBuild.outputDir}/\n`}${
-    manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`
+    // A frontend build's output and its typegen directory are generated, so
+    // they are ignored like any other build artifact — the generated file used
+    // to list only `coverage/` and the env file, which left a minified bundle
+    // tracked (D2) and a `.react-router/` typegen directory committed.
+    generatedOutputDirs(manifest)
+      .map((dir) => `${dir}/\n`)
+      .join('')
+  }${manifest?.envFilePath === undefined ? '' : `${manifest.envFilePath}\n`}${
+    // M113d §3.10: on Workers the local variables live in `.dev.vars` (the file
+    // `wrangler dev` reads), never committed.
+    runtime === 'cloudflare-workers' && (manifest?.envVariables?.length ?? 0) > 0
+      ? '.dev.vars\n'
+      : ''
   }`;
 
   const files: GeneratedFile[] = [
@@ -1756,14 +1960,26 @@ ${manifest?.readmeSection === undefined ? '' : `\n${manifest.readmeSection}`}`;
   if (runtime === 'cloudflare-workers') {
     files[0] = {
       path: 'README.md',
-      contents:
-        `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
+      contents: `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
     };
   } else {
+    files.push(
+      { path: 'test/support/server.ts', managed: true, contents: renderTestServer() },
+      {
+        path: 'test/e2e/app.e2e.test.ts',
+        contents: renderAppE2e(runtime, [
+          ...(host.appFactory !== undefined || host.plugins.some((p) => p.pkg === 'health-plugin')
+            ? ['/health', '/ready']
+            : ['/']),
+          ...host.routes
+            .filter((route) => route.path.startsWith('/greetings'))
+            .map((route) => route.path.replace(':name', 'Setu')),
+        ]),
+      },
+    );
     const hasAppFactory = host.appFactory !== undefined;
-    const path = hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin')
-      ? '/health'
-      : '/';
+    const path =
+      hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin') ? '/health' : '/';
     // A factory host composes a starter that serves SSR pages (full-stack
     // today). `/health` stays 200 when `populateLoadContext` throws, so the
     // smoke test also requests `/` — through `fetch`, because an SSR body
@@ -1808,40 +2024,38 @@ describe('application composition', () => {
     const compilerOptions = denoCompilerOptions(manifest);
     files.push({
       path: 'deno.json',
-      contents: `${
-        JSON.stringify(
-          {
-            tasks: denoTasks(runtime, host, manifest),
-            ...(isWorkspaceMember ? {} : rootManifestSettings(manifest?.npmBuild?.outputDir)),
-            // A `package.json` switches Deno to node_modules resolution, and the
-            // full-stack template is the one that emits one on a Deno target. A
-            // pristine scaffold then failed its OWN `check:app` on a cold
-            // checkout — `Could not resolve "@react-router/fs-routes", but found
-            // it in a package.json` — advising a task the project did not have
-            // (X5-4). `apps/full-stack` calls this setting load-bearing and sets
-            // it; the renderer never did.
-            //
-            // Refused in a workspace member, where the root declares it instead.
-            //
-            // Every standalone Deno project carries it too (M111d §3.4): the
-            // `setu` CLI runs on Node and imports `setu.config.ts` through Node
-            // resolution, which cannot read this import map — `deno install`
-            // links `node_modules/@setu-ts/*` under this setting, and that link
-            // is what the import resolves through.
-            ...(!isWorkspaceMember && (runtime === 'deno' || manifest?.npmBuild !== undefined)
-              ? { nodeModulesDir: 'auto' }
-              : {}),
-            // Declared by the template rather than fixed here: `deno check` reads
-            // this file, and what it needs depends on what the template emits —
-            // JSX needs `jsx`, and decorated classes need nothing, because the
-            // decorator surface is TC39 standard decorators.
-            ...(compilerOptions === undefined ? {} : { compilerOptions }),
-            imports: frameworkImports(host, runtime),
-          },
-          null,
-          2,
-        )
-      }\n`,
+      contents: `${JSON.stringify(
+        {
+          tasks: denoTasks(runtime, host, manifest),
+          ...(isWorkspaceMember ? {} : rootManifestSettings(generatedOutputDirs(manifest))),
+          // A `package.json` switches Deno to node_modules resolution, and the
+          // full-stack template is the one that emits one on a Deno target. A
+          // pristine scaffold then failed its OWN `check:app` on a cold
+          // checkout — `Could not resolve "@react-router/fs-routes", but found
+          // it in a package.json` — advising a task the project did not have
+          // (X5-4). `apps/full-stack` calls this setting load-bearing and sets
+          // it; the renderer never did.
+          //
+          // Refused in a workspace member, where the root declares it instead.
+          //
+          // Every standalone Deno project carries it too (M111d §3.4): the
+          // `setu` CLI runs on Node and imports `setu.config.ts` through Node
+          // resolution, which cannot read this import map — `deno install`
+          // links `node_modules/@setu-ts/*` under this setting, and that link
+          // is what the import resolves through.
+          ...(!isWorkspaceMember && (runtime === 'deno' || manifest?.npmBuild !== undefined)
+            ? { nodeModulesDir: 'auto' }
+            : {}),
+          // Declared by the template rather than fixed here: `deno check` reads
+          // this file, and what it needs depends on what the template emits —
+          // JSX needs `jsx`, and decorated classes need nothing, because the
+          // decorator surface is TC39 standard decorators.
+          ...(compilerOptions === undefined ? {} : { compilerOptions }),
+          imports: frameworkImports(host, runtime),
+        },
+        null,
+        2,
+      )}\n`,
     });
 
     // These targets have no npm manifest in the fixed set, so a template that
@@ -1853,47 +2067,48 @@ describe('application composition', () => {
   } else {
     files.push({
       path: 'package.json',
-      contents: `${
-        JSON.stringify(
-          {
-            name: projectName,
-            version: '0.1.0',
-            type: 'module',
-            scripts: {
-              ...npmScripts(runtime, manifest),
-              ...NPM_TOOLING_SCRIPTS,
-              ...host.extraScripts,
-            },
-            dependencies: npmDependencies(host, runtime),
-            // Runtime-level first, so a template that pins its own copy of the
-            // same package wins — the template knows what its build needs.
-            //
-            // Emitted unconditionally: this branch serves Node and Bun, and both
-            // now contribute a runtime devDependency of their own (the TypeScript
-            // runner and the `process` declarations the entry's shutdown listener
-            // needs). The empty-object guard that used to sit here covered the
-            // Bun-with-no-template case and became unreachable, so it is gone
-            // rather than left as a branch no input can take.
-            devDependencies: {
-              ...npmDevFrameworkDependencies(host, runtime),
-              ...runtimeDevDependencies(runtime),
-              ...NPM_TOOLING_DEV_DEPENDENCIES,
-              ...host.extraDevDependencies,
-              ...manifest?.npmDevDependencies,
-            },
+      contents: `${JSON.stringify(
+        {
+          name: projectName,
+          version: '0.1.0',
+          type: 'module',
+          scripts: {
+            ...npmScripts(runtime, manifest),
+            ...NPM_TOOLING_SCRIPTS,
+            ...host.extraScripts,
           },
-          null,
-          2,
-        )
-      }\n`,
+          dependencies: npmDependencies(host, runtime),
+          ...scarfOptOut(npmDependencies(host, runtime)),
+          // Runtime-level first, so a template that pins its own copy of the
+          // same package wins — the template knows what its build needs.
+          //
+          // Emitted unconditionally: this branch serves Node and Bun, and both
+          // now contribute a runtime devDependency of their own (the TypeScript
+          // runner and the `process` declarations the entry's shutdown listener
+          // needs). The empty-object guard that used to sit here covered the
+          // Bun-with-no-template case and became unreachable, so it is gone
+          // rather than left as a branch no input can take.
+          devDependencies: {
+            ...npmDevFrameworkDependencies(host, runtime),
+            ...runtimeDevDependencies(runtime, manifest),
+            ...NPM_TOOLING_DEV_DEPENDENCIES,
+            ...host.extraDevDependencies,
+            ...manifest?.npmDevDependencies,
+          },
+        },
+        null,
+        2,
+      )}\n`,
     });
     files.push({
       path: 'tsconfig.json',
-      contents: `${
-        JSON.stringify({ compilerOptions: tsconfigOptions(runtime, manifest) }, null, 2)
-      }\n`,
+      contents: `${JSON.stringify(
+        { compilerOptions: tsconfigOptions(runtime, manifest) },
+        null,
+        2,
+      )}\n`,
     });
-    for (const file of npmToolingFiles(manifest?.npmBuild?.outputDir)) files.push(file);
+    for (const file of npmToolingFiles(generatedOutputDirs(manifest))) files.push(file);
   }
 
   files.push({
@@ -1901,17 +2116,20 @@ describe('application composition', () => {
     contents: configModule(runtime, host),
   });
   if (host.devtoolPort !== undefined) {
-    files.push(renderDevtoolSources(new Set(frameworkPackages(host, runtime)), {
-      project: projectName,
-      envKeys: manifest?.envVariables?.map((variable) => variable.name) ?? [],
-      authorization: host.plugins.some((plugin) =>
-        plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? '')
-      ),
-      customBackplane: host.plugins.some((plugin) =>
-        plugin.pkg === 'realtime-backplane-plugin' &&
-        /transport:\s*'custom'/.test(plugin.args ?? '')
-      ),
-    }));
+    files.push(
+      renderDevtoolSources(new Set(frameworkPackages(host, runtime)), {
+        project: projectName,
+        envKeys: manifest?.envVariables?.map((variable) => variable.name) ?? [],
+        authorization: host.plugins.some(
+          (plugin) => plugin.pkg === 'auth-plugin' && /\brbac\s*:/.test(plugin.args ?? ''),
+        ),
+        customBackplane: host.plugins.some(
+          (plugin) =>
+            plugin.pkg === 'realtime-backplane-plugin' &&
+            /transport:\s*'custom'/.test(plugin.args ?? ''),
+        ),
+      }),
+    );
   }
 
   if (manifest?.envFilePath !== undefined) {
@@ -1923,6 +2141,22 @@ describe('application composition', () => {
       path: `${manifest.envFilePath}.example`,
       contents: envExampleContents(manifest.envFilePath, manifest.envVariables ?? []),
     });
+  } else if (
+    runtime === 'cloudflare-workers' &&
+    manifest?.envVariables !== undefined &&
+    manifest.envVariables.length > 0
+  ) {
+    // M113d §3.10: on Workers the manifest's envFilePath is removed (a Worker
+    // has no filesystem to read `.env` from), so the same envVariables render
+    // `.dev.vars` — the file `wrangler dev` reads — and a committed example.
+    files.push({
+      path: '.dev.vars',
+      contents: envFileContents(manifest.envVariables ?? []),
+    });
+    files.push({
+      path: '.dev.vars.example',
+      contents: envExampleContents('.dev.vars', manifest.envVariables ?? []),
+    });
   }
 
   if (runtime === 'cloudflare-workers') {
@@ -1931,7 +2165,12 @@ describe('application composition', () => {
       contents: workersEntry(
         host.workerExports,
         host.entryReExports,
-        consumesWaitUntil(host.plugins),
+        host.appFactory?.parameter === undefined
+          ? undefined
+          : {
+              importLine: "import * as serverBuild from '../build/server/index.js';",
+              argument: '{ serverBuild }',
+            },
       ),
     });
     files.push({
@@ -1949,7 +2188,7 @@ compatibility_flags = ["nodejs_compat"]
 # \`fetch\` handler, which \`src/index.ts\` threads into \`${CONFIG_EXPORT}()\`.
 # Register \`CloudflarePlugin\` from @setu-ts/cloudflare-plugin to serve the
 # cache, storage, database, queue, messaging and realtime capabilities from the
-# bindings below. Add a package with \`${PROGRAM_NAME} add cloudflare\`.
+# bindings below. Add a package with \`${cliInvocation(runtime)} add cloudflare\`.
 #
 # The binding types most projects reach for are listed. Uncomment what you use — a
 # binding declared here but absent from the plugin's options is inert, and one
@@ -2015,7 +2254,11 @@ ${host.wranglerToml}`,
   // Template source files last. Any path colliding with the fixed set above is
   // reported by the caller's overwrite check rather than silently winning.
   for (const extra of host.files) {
-    files.push({ path: extra.path, contents: extra.contents });
+    // Static template files can name a runnable CLI command for the target.
+    files.push({
+      path: extra.path,
+      contents: extra.contents.replaceAll('{{cliInvocation}}', cliInvocation(runtime)),
+    });
   }
 
   return files;

@@ -52,12 +52,7 @@ export function canonicalJson(value: unknown): string {
 }
 
 /** Recursive walker. `ancestors` detects cycles; `depth` bounds nesting. */
-function walk(
-  value: unknown,
-  path: string,
-  ancestors: Set<object>,
-  depth: number,
-): string {
+function walk(value: unknown, path: string, ancestors: Set<object>, depth: number): string {
   if (depth > MAX_CANONICAL_DEPTH) {
     throw new CanonicalJsonError(`${path}: deeper than ${MAX_CANONICAL_DEPTH}`);
   }
@@ -84,7 +79,7 @@ function walk(
     }
     if (Array.isArray(object)) {
       const parts = object.map((element, index) =>
-        element === undefined ? 'null' : walk(element, `${path}[${index}]`, ancestors, depth + 1)
+        element === undefined ? 'null' : walk(element, `${path}[${index}]`, ancestors, depth + 1),
       );
       return `[${parts.join(',')}]`;
     }

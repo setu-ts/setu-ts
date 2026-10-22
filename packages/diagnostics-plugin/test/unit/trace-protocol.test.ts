@@ -81,8 +81,9 @@ describe('readTraceSourceBatch — the exact source validator', () => {
   });
 
   it('refuses records on disabled, unsupported, or closed batches', () => {
-    expect(readTraceSourceBatch(sourceBatch(0, { state: 'disabled' }), INSTANCE, 0, 128))
-      .toBeNull();
+    expect(
+      readTraceSourceBatch(sourceBatch(0, { state: 'disabled' }), INSTANCE, 0, 128),
+    ).toBeNull();
     expect(
       readTraceSourceBatch(sourceBatch(0, { state: 'unsupported' }), INSTANCE, 0, 128),
     ).toBeNull();
@@ -367,12 +368,15 @@ it('copies valid link relationships and refuses malformed link fields', () => {
   const projection = projectTraceBatch(validated, INSTANCE);
   expect((projection.records as Record<string, unknown>[])[0]!.links).toEqual([link]);
   expect(isTraceBatchProjection(projection)).toBe(true);
-  for (
-    const invalid of [null, { ...link, extra: true }, { ...link, traceId: 'invalid' }, {
+  for (const invalid of [
+    null,
+    { ...link, extra: true },
+    { ...link, traceId: 'invalid' },
+    {
       ...link,
       spanId: 'invalid',
-    }]
-  ) {
+    },
+  ]) {
     expect(
       readTraceSourceBatch(
         sourceBatch(0, { records: [record(1, { links: [invalid] })] }),

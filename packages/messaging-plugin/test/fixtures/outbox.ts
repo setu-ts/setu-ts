@@ -61,15 +61,14 @@ export interface OrderEvent {
 }
 
 /** The order definition: its selector keys by `data.key` when present. */
-export const orderPlaced: IntegrationEventDefinition<OrderEvent> = defineIntegrationEvent<
-  OrderEvent
->({
-  type: 'orders.placed',
-  version: 1,
-  topic: 'orders.placed.v1',
-  parse: (value) => value as OrderEvent,
-  orderingKey: (envelope) => envelope.data.key,
-});
+export const orderPlaced: IntegrationEventDefinition<OrderEvent> =
+  defineIntegrationEvent<OrderEvent>({
+    type: 'orders.placed',
+    version: 1,
+    topic: 'orders.placed.v1',
+    parse: (value) => value as OrderEvent,
+    orderingKey: (envelope) => envelope.data.key,
+  });
 
 /** A runtime with separately driven wall (`now`) and monotonic (`hrtime`) clocks. */
 export interface OutboxClock {
@@ -362,7 +361,7 @@ export interface HarnessOptions {
 
 /** Builds an active outbox service over the real memory-backed bridge. */
 export async function outboxHarness(opts: HarnessOptions = {}): Promise<OutboxHarness> {
-  const { db, store } = opts.shared ?? await memoryOutbox();
+  const { db, store } = opts.shared ?? (await memoryOutbox());
   const clock = opts.clock ?? outboxClock();
   const broker = opts.broker ?? new FakeOutboxBroker();
   const options: OutboxOptions = { ...opts.options, store };

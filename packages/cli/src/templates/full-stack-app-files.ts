@@ -258,8 +258,7 @@ export const secretsContext = contextKeyFor<ISecretManager | null>('app.secrets'
 export const currentUserContext = contextKeyFor<CurrentUser | null>('app.current-user', null);
 `;
 
-const servicesAccessModule =
-  `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
+const servicesAccessModule = `import type { ILogger, ISecretManager, ISession } from '@setu-ts/common';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import type { CurrentUser } from '~/models/user.ts';
 import {
@@ -394,8 +393,7 @@ export function formatPrice(product: Product): string {
 }
 `;
 
-const userModel =
-  `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
+const userModel = `/** The signed-in user, as the application sees it. Plain data, safe for client code. */
 export interface CurrentUser {
   /** The address the user signed in with. */
   readonly email: string;
@@ -422,7 +420,8 @@ import { currentUserContext, sessionContext } from '~/lib/context-keys.server.ts
  *
  * This project has two middleware layers, and this is the second one:
  *
- * - **Kernel middleware** (\`setu generate middleware <name>\`, in \`src/middleware/\`)
+ * - **Kernel middleware** (\`{{cliInvocation}} generate middleware <name>\`,
+ *   in \`src/middleware/\`)
  *   runs for EVERY request the application serves — health probes, API routes,
  *   static files and SSR pages alike — and works on the kernel request context.
  *   Use it for cross-cutting concerns: headers, auditing, rate limits.
@@ -691,7 +690,7 @@ export function loader({ context }: { context: AppLoadContext }) {
  * Handles the sign-in post.
  *
  * The CSRF token is NOT checked here: the session plugin's form-CSRF
- * middleware runs at priority 275, before this route is ever reached, and
+ * middleware runs at priority 325, before this route is ever reached, and
  * answers 403 on a missing or mismatched token. So this action only runs for a
  * request that already passed the check.
  *
@@ -772,14 +771,17 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
  * interchangeable, and the generic README said nothing about either. Formatted as
  * `deno fmt` formats it, since the scaffold must pass its own `fmt --check`.
  */
-export const FULL_STACK_README_SECTION = `## Middleware
+export const FULL_STACK_README_SECTION = (invocation: string): string => {
+  const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
+  const width = command.length;
+  return `## Middleware
 
 This project has two middleware layers. Pick by what the code needs to see.
 
-| Layer              | Runs for                                                          | Sees                                          | Add it with                                           |
-| ------------------ | ----------------------------------------------------------------- | --------------------------------------------- | ----------------------------------------------------- |
-| Kernel             | every request: health probes, API routes, static files, SSR pages | the kernel request context (\`ctx\`)            | \`setu generate middleware <name>\` (\`src/middleware/\`) |
-| React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | \`export const middleware = [...]\` in a route module   |
+| Layer              | Runs for                                                          | Sees                                          | ${'Add it with'.padEnd(width)} |
+| ------------------ | ----------------------------------------------------------------- | --------------------------------------------- | ${'-'.repeat(width)} |
+| Kernel             | every request: health probes, API routes, static files, SSR pages | the kernel request context (\`ctx\`)            | ${command} |
+| React Router route | only the SSR routes it is attached to                             | React Router's context, including the session | ${'`export const middleware = [...]` in a route module'.padEnd(width)} |
 
 Use kernel middleware for cross-cutting concerns such as headers, auditing and rate limits. Use
 route middleware for page-level rules: \`app/middleware/require-user.server.ts\` redirects a visitor
@@ -791,4 +793,16 @@ who is not signed in to \`/login\`, and puts the signed-in user on the context f
 Import workspace libraries from \`.server.ts\` modules and \`setu.config.ts\`. The SSR build leaves
 their declared package names external so the server runtime resolves them through the workspace.
 Client modules cannot import a Deno workspace library: the browser bundle has no Deno workspace.
+
+## Deploying to Cloudflare Workers
+
+\`npx wrangler deploy\` builds the client and server, then bundles the Worker. The session secret is a
+Cloudflare secret, not a file: run \`npx wrangler secret put SESSION_SECRET\` once per environment
+before the first deploy. Local development reads \`.dev.vars\` instead, which the scaffold creates
+with a labelled-insecure development value.
+
+Everything in \`build/client\` is served by the platform before the Worker runs, so those requests
+skip the application's middleware: no security headers and no authentication apply to them. Put only
+public files in \`public/\`.
 `;
+};

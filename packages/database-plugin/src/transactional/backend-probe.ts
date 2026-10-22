@@ -88,8 +88,7 @@ export function isBigtableBackend(service: IDatabaseService): boolean {
 export function isMongoReplicaSetRefusal(member: object): boolean {
   try {
     const candidate = member as { code?: unknown; codeName?: unknown };
-    return candidate.code === MONGO_ILLEGAL_OPERATION &&
-      candidate.codeName === 'IllegalOperation';
+    return candidate.code === MONGO_ILLEGAL_OPERATION && candidate.codeName === 'IllegalOperation';
   } catch {
     return false;
   }

@@ -54,13 +54,54 @@ The resolved tenant is also available as `ctx.request.tenant`.
 
 `'subdomain'`, `'header'`, `'path'`, and `'jwt'` — or an array of them, tried in order.
 
-**`subdomain` requires `baseDomain`** and constrains resolution to it: a request for an unrelated
-host does not resolve a tenant.
+**`subdomain` takes an optional `baseDomain`.** With one, it constrains resolution to that domain: a
+request for an unrelated host does not resolve a tenant. Without one, the first label of any
+multi-label host is the tenant id, and a single-label host such as `localhost` resolves nothing.
 
 **`jwt` reads an UNVERIFIED claim** — the tenant id comes from a token whose signature nobody has
 checked, so a client can mint a token naming any tenant. Use it only alongside authentication
 middleware which separately verifies the token (e.g. `AuthPlugin`). A `register()` warning fires
 whenever the resolved chain contains a `JwtResolver`.
+
+## Tenant from the signed-in principal
+
+Use a custom `ITenantResolver` when the tenant must come from a verified principal rather than the
+built-in resolver's unverified JWT decode. Register it above passive authentication's priority 300,
+for example 310:
+
+```typescript
+import { none, some, type ITenantResolver } from '@setu-ts/common';
+import { MultiTenancyPlugin } from '@setu-ts/multi-tenancy-plugin';
+
+const resolver: ITenantResolver = {
+  resolve(request) {
+    const tenantId = request.user?.claims?.tenantId;
+    return Promise.resolve(typeof tenantId === 'string' ? some({ id: tenantId }): none());
+  },
+};
+const tenancy = MultiTenancyPlugin({ resolver, middlewarePriority: 310, required: true });
+```
+
+Compose `tenancy` with `AuthPlugin` configured to verify credentials. Everything before 310 sees no
+tenant: localization's `tenantLocale` at 45, and any cache, rate-limit or feature-flag lookup in the
+40–310 band cannot use it. Move dependent readers after resolution or use them per route. See
+[session tenant binding](https://github.com/setu-ts/setu-ts/blob/main/packages/session-plugin/README.md#tenant-binding)
+for the session check that also handles late resolution.
+
+`ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
+`delete`; it has no paging, ordering or expression-filter options. For those, use `IDatabaseService`
+repositories and scope every operation to the verified tenant yourself:
+
+- **Reads:** filter on the tenant column (`findOne({ where: { id, tenantId } })`), never
+  `findById(id)` with a client-supplied id.
+- **Writes:** use `updateWhere(id, { tenantId }, data)` and `deleteWhere(id, { tenantId })`, which
+  apply only while the stored row still carries that tenant. Key-only `update(id, data)` and
+  `delete(id)` select by key alone, so a client-supplied id can reach another tenant's row — putting
+  the tenant column in `data` does not prevent that.
+- Where a data source lacks conditional writes (the call rejects with `conditional-write`), do not
+  fall back to a key-only write or to a read-then-write ownership check, which races a concurrent
+  delete-and-recreate. Isolate the tenant's data physically instead (a schema or database per
+  tenant).
 
 ## Isolation strategies
 
@@ -183,7 +224,7 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 | `ITenantIsolationStrategy`      | type      |
 | `ResolverConfig`                | type      |
 
-Generated from the package barrel by `deno task docs:exports`; `deno task check:docs` fails when it
+Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.
 
 ## Full API

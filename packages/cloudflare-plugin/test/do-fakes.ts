@@ -236,7 +236,10 @@ export class FakeDurableObjectNamespace implements IDurableObjectNamespace {
     const next = previous.then(() => this.#handle(name, input, init));
     // Swallow rejection on the CHAIN only, so one failed call cannot poison
     // every later call to the same object; the caller still sees `next`.
-    this.#gates.set(name, next.catch(() => undefined));
+    this.#gates.set(
+      name,
+      next.catch(() => undefined),
+    );
     return next;
   }
 

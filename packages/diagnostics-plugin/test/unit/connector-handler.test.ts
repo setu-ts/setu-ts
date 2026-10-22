@@ -207,19 +207,8 @@ function projectOf(snapshot: ConfigDiagnosticsSnapshot): Record<string, unknown>
  * @param digest - The served body digest
  * @returns The response MAC input fields
  */
-function responseFieldsFor(
-  target: string,
-  sequence: string,
-  digest: string,
-): readonly string[] {
-  return responseMacFields(
-    TEST_SESSION_ID,
-    TEST_INSTANCE_ID,
-    sequence,
-    target,
-    '200',
-    digest,
-  );
+function responseFieldsFor(target: string, sequence: string, digest: string): readonly string[] {
+  return responseMacFields(TEST_SESSION_ID, TEST_INSTANCE_ID, sequence, target, '200', digest);
 }
 
 describe('Connector handler — structural refusals', () => {
@@ -393,11 +382,7 @@ async function statusRequest(key: CryptoKey, sequence: number) {
   });
 }
 
-async function renewRequest(
-  key: CryptoKey,
-  sequence: number,
-  instance = TEST_INSTANCE_ID,
-) {
+async function renewRequest(key: CryptoKey, sequence: number, instance = TEST_INSTANCE_ID) {
   const mac = await signRequest(crypto.subtle, key, '/v1/renew', sequence, instance);
   return fakeRequest({
     url: `http://${HOST}/v1/renew`,
@@ -435,11 +420,8 @@ describe('Connector handler — renewal', () => {
     const { handler, key } = await buildHarness();
     expect(inspect(await handler(await statusRequest(key, 1))).status).toBe(200);
     expect(
-      inspect(
-        await handler(
-          await renewRequest(key, 2, '00000000-0000-4000-8000-000000000000'),
-        ),
-      ).status,
+      inspect(await handler(await renewRequest(key, 2, '00000000-0000-4000-8000-000000000000')))
+        .status,
     ).toBe(401);
     expect(inspect(await handler(await renewRequest(key, 3))).status).toBe(400);
   });
@@ -539,29 +521,19 @@ describe('Connector handler — authentication and binding', () => {
     expect(session.hasInstance()).toBe(true);
     // The response MAC verifies against the authenticated instance header,
     // over the exact body bytes just served.
-    const verified = await verifyFields(
-      crypto.subtle,
-      key,
-      view.headers.get('x-setu-mac') ?? '',
-      [
-        'setu-diagnostics-v1',
-        'response',
-        'a'.repeat(32),
-        TEST_INSTANCE_ID,
-        '1',
-        '/v1/status',
-        '200',
-        await (async () => {
-          const digest = await crypto.subtle.digest(
-            'SHA-256',
-            utf8(view.bodyText) as BufferSource,
-          );
-          return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join(
-            '',
-          );
-        })(),
-      ],
-    );
+    const verified = await verifyFields(crypto.subtle, key, view.headers.get('x-setu-mac') ?? '', [
+      'setu-diagnostics-v1',
+      'response',
+      'a'.repeat(32),
+      TEST_INSTANCE_ID,
+      '1',
+      '/v1/status',
+      '200',
+      await (async () => {
+        const digest = await crypto.subtle.digest('SHA-256', utf8(view.bodyText) as BufferSource);
+        return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
+      })(),
+    ]);
     expect(verified).toBe(true);
     expect(view.headers.get('x-setu-instance')).toEqual(TEST_INSTANCE_ID);
     expect(view.headers.get('cache-control')).toEqual('no-store');
@@ -572,13 +544,7 @@ describe('Connector handler — authentication and binding', () => {
     const { handler, key } = await buildHarness();
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
 
-    const snapshotMac = await signRequest(
-      crypto.subtle,
-      key,
-      '/v1/snapshot',
-      2,
-      TEST_INSTANCE_ID,
-    );
+    const snapshotMac = await signRequest(crypto.subtle, key, '/v1/snapshot', 2, TEST_INSTANCE_ID);
     const snapshotResponse = await handler(
       fakeRequest({
         url: `http://${HOST}/v1/snapshot`,
@@ -677,8 +643,9 @@ describe('Connector handler — authentication and binding', () => {
 
     // The MAC verifies over the bytes the response actually carries.
     const digest = await crypto.subtle.digest('SHA-256', utf8(view.bodyText) as BufferSource);
-    const bodyHex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0'))
-      .join('');
+    const bodyHex = Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join(
+      '',
+    );
     const verified = await verifyFields(crypto.subtle, key, view.headers.get('x-setu-mac') ?? '', [
       'setu-diagnostics-v1',
       'response',
@@ -847,13 +814,7 @@ describe('Connector handler — projection hardening', () => {
       snapshot: fixture.hostileSnapshotDto as Record<string, unknown>,
     });
     expect(inspect(await handler(await statusRequest(key, 1))).status).toEqual(200);
-    const snapshotMac = await signRequest(
-      crypto.subtle,
-      key,
-      '/v1/snapshot',
-      2,
-      TEST_INSTANCE_ID,
-    );
+    const snapshotMac = await signRequest(crypto.subtle, key, '/v1/snapshot', 2, TEST_INSTANCE_ID);
     const response = await handler(
       fakeRequest({
         url: `http://${HOST}/v1/snapshot`,
@@ -883,24 +844,12 @@ describe('Connector handler — projection hardening', () => {
   it('answers unsupported-version when the source DTO is a future version', async () => {
     const future = { ...minimalSnapshot(), version: 2 };
     const { handler, key } = await buildHarness({ snapshot: future });
-    const statusMac = await signRequest(
-      crypto.subtle,
-      key,
-      '/v1/snapshot',
-      1,
-      TEST_INSTANCE_ID,
-    );
+    const statusMac = await signRequest(crypto.subtle, key, '/v1/snapshot', 1, TEST_INSTANCE_ID);
     // Bind with an unusual pre-known instance: the source is a future DTO
     // but its instance matches, so binding works via a status call first.
     const status = await handler(await statusRequest(key, 2));
     void status;
-    const snapshotMac = await signRequest(
-      crypto.subtle,
-      key,
-      '/v1/snapshot',
-      3,
-      TEST_INSTANCE_ID,
-    );
+    const snapshotMac = await signRequest(crypto.subtle, key, '/v1/snapshot', 3, TEST_INSTANCE_ID);
     const response = await handler(
       fakeRequest({
         url: `http://${HOST}/v1/snapshot`,
@@ -1108,9 +1057,9 @@ describe('Connector handler — health operation (M98d)', () => {
   });
 
   /** Reads `/v1/health` through a fresh handler over the given source. */
-  async function readHealthWith(
-    healthSource: { snapshot: (instanceId: string) => unknown },
-  ): Promise<{ status: number; body: unknown }> {
+  async function readHealthWith(healthSource: {
+    snapshot: (instanceId: string) => unknown;
+  }): Promise<{ status: number; body: unknown }> {
     const clock = new MutableClock();
     const session = await createTestSession(crypto.subtle, clock, 900_000);
     session.bindInstance(TEST_INSTANCE_ID);
@@ -1168,51 +1117,77 @@ describe('Connector handler — health operation (M98d)', () => {
   // `collection-failed`, never a 503 and never the offending value.
   const VIOLATIONS: ReadonlyArray<readonly [string, () => unknown]> = [
     ['non-array observations', () => ({ ...healthSnapshot, observations: 'nope' })],
-    ['a non-framework status', () => ({
-      ...healthSnapshot,
-      observations: [{ ...observation, status: 'canary-status' }],
-    })],
-    ['a status on a non-reported state', () => ({
-      ...healthSnapshot,
-      observations: [{ ...observation, state: 'failed' }],
-    })],
-    ['a reported state with no status', () => ({
-      ...healthSnapshot,
-      observations: [{
-        indicatorAlias: 'database',
-        state: 'reported',
-        latencyMs: 1,
-        ageMs: 1,
-        origin: 'application',
-      }],
-    })],
+    [
+      'a non-framework status',
+      () => ({
+        ...healthSnapshot,
+        observations: [{ ...observation, status: 'canary-status' }],
+      }),
+    ],
+    [
+      'a status on a non-reported state',
+      () => ({
+        ...healthSnapshot,
+        observations: [{ ...observation, state: 'failed' }],
+      }),
+    ],
+    [
+      'a reported state with no status',
+      () => ({
+        ...healthSnapshot,
+        observations: [
+          {
+            indicatorAlias: 'database',
+            state: 'reported',
+            latencyMs: 1,
+            ageMs: 1,
+            origin: 'application',
+          },
+        ],
+      }),
+    ],
     ['an unknown inspector state', () => ({ ...healthSnapshot, state: 'canary-state' })],
-    ['an oversized alias', () => ({
-      ...healthSnapshot,
-      observations: [{ ...observation, indicatorAlias: 'x'.repeat(65) }],
-    })],
-    ['a negative latency', () => ({
-      ...healthSnapshot,
-      observations: [{ ...observation, latencyMs: -1 }],
-    })],
-    ['a non-finite age', () => ({
-      ...healthSnapshot,
-      observations: [{ ...observation, ageMs: Infinity }],
-    })],
+    [
+      'an oversized alias',
+      () => ({
+        ...healthSnapshot,
+        observations: [{ ...observation, indicatorAlias: 'x'.repeat(65) }],
+      }),
+    ],
+    [
+      'a negative latency',
+      () => ({
+        ...healthSnapshot,
+        observations: [{ ...observation, latencyMs: -1 }],
+      }),
+    ],
+    [
+      'a non-finite age',
+      () => ({
+        ...healthSnapshot,
+        observations: [{ ...observation, ageMs: Infinity }],
+      }),
+    ],
     ['a fractional drop count', () => ({ ...healthSnapshot, droppedObservations: 0.5 })],
-    ['more than 64 observations', () => ({
-      ...healthSnapshot,
-      observations: Array.from(
-        { length: 65 },
-        (_, i) => ({ ...observation, indicatorAlias: `a${i}` }),
-      ),
-    })],
-    ['a throwing getter', () => ({
-      ...healthSnapshot,
-      get observations(): never {
-        throw new Error('canary-getter');
-      },
-    })],
+    [
+      'more than 64 observations',
+      () => ({
+        ...healthSnapshot,
+        observations: Array.from({ length: 65 }, (_, i) => ({
+          ...observation,
+          indicatorAlias: `a${i}`,
+        })),
+      }),
+    ],
+    [
+      'a throwing getter',
+      () => ({
+        ...healthSnapshot,
+        get observations(): never {
+          throw new Error('canary-getter');
+        },
+      }),
+    ],
   ];
 
   for (const [label, build] of VIOLATIONS) {
@@ -1352,23 +1327,31 @@ describe('Connector handler — fixture vectors', () => {
     const response = fixture.statusExchange.response;
     const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
     expect(request.macInput).toEqual(
-      decode(canonicalBytes(requestMacFields(
-        fixture.sessionId,
-        request.instance,
-        request.sequence,
-        fixture.authority,
-        request.target,
-      ))),
+      decode(
+        canonicalBytes(
+          requestMacFields(
+            fixture.sessionId,
+            request.instance,
+            request.sequence,
+            fixture.authority,
+            request.target,
+          ),
+        ),
+      ),
     );
     expect(response.macInput).toEqual(
-      decode(canonicalBytes(responseMacFields(
-        fixture.sessionId,
-        fixture.instanceId,
-        request.sequence,
-        request.target,
-        String(response.status),
-        response.bodySha256,
-      ))),
+      decode(
+        canonicalBytes(
+          responseMacFields(
+            fixture.sessionId,
+            fixture.instanceId,
+            request.sequence,
+            request.target,
+            String(response.status),
+            response.bodySha256,
+          ),
+        ),
+      ),
     );
     const key = await crypto.subtle.importKey(
       'raw',
@@ -1379,7 +1362,8 @@ describe('Connector handler — fixture vectors', () => {
     );
     const sign = async (input: string) =>
       [...new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(input)))]
-        .map((byte) => byte.toString(16).padStart(2, '0')).join('');
+        .map((byte) => byte.toString(16).padStart(2, '0'))
+        .join('');
     expect(await sign(request.macInput)).toEqual(request.mac);
     expect(await sign(response.macInput)).toEqual(response.mac);
   });
@@ -1534,9 +1518,7 @@ describe('Connector handler — remaining structural arms', () => {
       if (instance !== '') {
         headers['x-setu-instance'] = instance;
       }
-      const response = await handler(
-        fakeRequest({ url: `http://${HOST}/v1/status`, headers }),
-      );
+      const response = await handler(fakeRequest({ url: `http://${HOST}/v1/status`, headers }));
       expect(inspect(response).status).toEqual(200);
     }
     const overBudget = await handler(await statusRequest(key, 41));
@@ -1973,8 +1955,8 @@ describe('Connector handler — queue observations (M98f)', () => {
     const target = `/v1/queues?${search}`;
     const sequence = options.sequence ?? 2;
     const instance = options.instance ?? TEST_INSTANCE_ID;
-    const mac = options.mac ??
-      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    const mac =
+      options.mac ?? (await signRequest(crypto.subtle, harness.key, target, sequence, instance));
     return inspect(
       await harness.handler(
         fakeRequest({
@@ -2019,12 +2001,15 @@ describe('Connector handler — queue observations (M98f)', () => {
   it('reads no source before authentication succeeds', async () => {
     const source = new ScriptedQueueSource();
     const harness = await queueHarness(new QueueObservationMerger([source], new MutableClock()));
-    expect((await sendQueues(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
-      .toEqual(401);
+    expect((await sendQueues(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status).toEqual(
+      401,
+    );
     expect(
-      (await sendQueues(harness, 'after=0&limit=1', {
-        instance: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
-      })).status,
+      (
+        await sendQueues(harness, 'after=0&limit=1', {
+          instance: '0'.repeat(8) + TEST_INSTANCE_ID.slice(8),
+        })
+      ).status,
     ).toEqual(401);
     expect(source.reads).toEqual(0);
   });
@@ -2081,19 +2066,21 @@ describe('Connector handler — trace observations (M98g)', () => {
       coverage: 'completed-sampled-spans',
       instrumentation: ['http'],
       sampler: { kind: 'traceidratio', ratio: 0.5 },
-      records: [{
-        sequence: after + 1,
-        serviceAlias: 'orders',
-        operationAlias: 'create-order',
-        traceId: 'a'.repeat(32),
-        spanId: 'b'.repeat(16),
-        links: [],
-        kind: 'server',
-        outcome: 'ok',
-        durationMs: 4,
-        ageMs: 6,
-        parentVisibility: 'root',
-      }],
+      records: [
+        {
+          sequence: after + 1,
+          serviceAlias: 'orders',
+          operationAlias: 'create-order',
+          traceId: 'a'.repeat(32),
+          spanId: 'b'.repeat(16),
+          links: [],
+          kind: 'server',
+          outcome: 'ok',
+          durationMs: 4,
+          ageMs: 6,
+          parentVisibility: 'root',
+        },
+      ],
       next: after + 1,
       lost: 0,
       closed: false,
@@ -2136,8 +2123,8 @@ describe('Connector handler — trace observations (M98g)', () => {
     const target = `/v1/traces?${search}`;
     const sequence = options.sequence ?? 2;
     const instance = options.instance ?? TEST_INSTANCE_ID;
-    const mac = options.mac ??
-      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    const mac =
+      options.mac ?? (await signRequest(crypto.subtle, harness.key, target, sequence, instance));
     return inspect(
       await harness.handler(
         fakeRequest({
@@ -2199,8 +2186,9 @@ describe('Connector handler — trace observations (M98g)', () => {
     };
     const harness = await traceHarness(source);
     // Bad MAC: refused before the source is ever read.
-    expect((await sendTraces(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
-      .toEqual(401);
+    expect((await sendTraces(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status).toEqual(
+      401,
+    );
     expect(reads).toEqual(0);
     const view = await sendTraces(harness, 'after=0&limit=1');
     expect(view.status).toEqual(200);
@@ -2264,17 +2252,22 @@ describe('Connector handler — event observation operation (M98j)', () => {
       state,
       alias,
       coverage: 'owned-instance',
-      records: alias === null ? [] : [{
-        alias: 'users',
-        operation: 'publish',
-        count: 1,
-        started: 1,
-        succeeded: 1,
-        failed: 0,
-        noSubscribers: 0,
-        lastDurationMs: 2,
-        ageMs: 1,
-      }],
+      records:
+        alias === null
+          ? []
+          : [
+              {
+                alias: 'users',
+                operation: 'publish',
+                count: 1,
+                started: 1,
+                succeeded: 1,
+                failed: 0,
+                noSubscribers: 0,
+                lastDurationMs: 2,
+                ageMs: 1,
+              },
+            ],
       dropped: 0,
     };
   }
@@ -2327,8 +2320,9 @@ describe('Connector handler — event observation operation (M98j)', () => {
   ) {
     const target = options.target ?? '/v1/event';
     const sequence = options.sequence ?? 2;
-    const mac = options.mac ??
-      await signRequest(crypto.subtle, harness.key, target, sequence, TEST_INSTANCE_ID);
+    const mac =
+      options.mac ??
+      (await signRequest(crypto.subtle, harness.key, target, sequence, TEST_INSTANCE_ID));
     return inspect(
       await harness.handler(
         fakeRequest({
@@ -2349,9 +2343,9 @@ describe('Connector handler — event observation operation (M98j)', () => {
     const source = eventSource(eventSnapshot('bus'));
     const harness = await eventHarness([source]);
     // A query on the snapshot operation is refused before anything else.
-    expect(
-      (await sendEvent(harness, { target: '/v1/event?after=0', sequence: 2 })).status,
-    ).toEqual(400);
+    expect((await sendEvent(harness, { target: '/v1/event?after=0', sequence: 2 })).status).toEqual(
+      400,
+    );
     const view = await sendEvent(harness);
     expect(view.status).toEqual(200);
     expect(view.body.state).toEqual('ready');
@@ -2545,15 +2539,13 @@ describe('Connector handler — event observation operation (M98j)', () => {
     ]);
     const view = await sendEvent(harness);
     expect(view.status).toEqual(200);
-    for (
-      const canary of [
-        'PAYLOAD-CANARY-SYNTHETIC',
-        'user-created',
-        'AGG-CANARY',
-        'ERROR-CANARY-SYNTHETIC',
-        'handler-function-name',
-      ]
-    ) {
+    for (const canary of [
+      'PAYLOAD-CANARY-SYNTHETIC',
+      'user-created',
+      'AGG-CANARY',
+      'ERROR-CANARY-SYNTHETIC',
+      'handler-function-name',
+    ]) {
       expect({ canary, leaked: view.bodyText.includes(canary) }).toEqual({
         canary,
         leaked: false,
@@ -2583,19 +2575,21 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       version: 1,
       instanceId,
       state: 'ready',
-      decisions: [{
-        sequence: after + 1,
-        id: 'd1',
-        operation: 'role',
-        result: true,
-        ruleAliases: ['A'],
-        steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
-        stepsEvaluated: 1,
-        stepsTruncated: false,
-        reason: 'direct-role',
-        policyRevision: 'rev-1',
-        ageMs: 6,
-      }],
+      decisions: [
+        {
+          sequence: after + 1,
+          id: 'd1',
+          operation: 'role',
+          result: true,
+          ruleAliases: ['A'],
+          steps: [{ ruleAlias: 'A', reason: 'direct-role' }],
+          stepsEvaluated: 1,
+          stepsTruncated: false,
+          reason: 'direct-role',
+          policyRevision: 'rev-1',
+          ageMs: 6,
+        },
+      ],
       next: after + 1,
       lost: 0,
       closed: false,
@@ -2638,8 +2632,8 @@ describe('Connector handler — authorization explanations (M98h)', () => {
     const target = `/v1/authorization?${search}`;
     const sequence = options.sequence ?? 2;
     const instance = options.instance ?? TEST_INSTANCE_ID;
-    const mac = options.mac ??
-      await signRequest(crypto.subtle, harness.key, target, sequence, instance);
+    const mac =
+      options.mac ?? (await signRequest(crypto.subtle, harness.key, target, sequence, instance));
     return inspect(
       await harness.handler(
         fakeRequest({
@@ -2698,18 +2692,20 @@ describe('Connector handler — authorization explanations (M98h)', () => {
           version: 1,
           instanceId,
           state: 'ready',
-          decisions: [{
-            sequence: after + 1,
-            id: 'd1',
-            operation: 'any-role',
-            result: true,
-            ruleAliases,
-            steps,
-            stepsEvaluated: 20,
-            stepsTruncated: true,
-            reason: 'compound-satisfied',
-            ageMs: 4,
-          }],
+          decisions: [
+            {
+              sequence: after + 1,
+              id: 'd1',
+              operation: 'any-role',
+              result: true,
+              ruleAliases,
+              steps,
+              stepsEvaluated: 20,
+              stepsTruncated: true,
+              reason: 'compound-satisfied',
+              ageMs: 4,
+            },
+          ],
           next: after + 1,
           lost: 0,
           closed: false,
@@ -2749,8 +2745,9 @@ describe('Connector handler — authorization explanations (M98h)', () => {
     };
     const harness = await authorizationHarness(source);
     // Bad MAC: refused before the source is ever read.
-    expect((await sendAuthorization(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status)
-      .toEqual(401);
+    expect(
+      (await sendAuthorization(harness, 'after=0&limit=1', { mac: 'f'.repeat(64) })).status,
+    ).toEqual(401);
     expect(reads).toEqual(0);
     const view = await sendAuthorization(harness, 'after=0&limit=1');
     expect(view.status).toEqual(200);
@@ -2788,18 +2785,20 @@ describe('Connector handler — authorization explanations (M98h)', () => {
       read: (instanceId, after) =>
         ({
           ...authorizationBatch(instanceId, after),
-          decisions: [{
-            sequence: after + 1,
-            id: 'd0',
-            operation: 'role',
-            result: true,
-            ruleAliases: ['A'],
-            steps: [],
-            stepsEvaluated: 1,
-            stepsTruncated: false,
-            reason: 'direct-role',
-            ageMs: 6,
-          }],
+          decisions: [
+            {
+              sequence: after + 1,
+              id: 'd0',
+              operation: 'role',
+              result: true,
+              ruleAliases: ['A'],
+              steps: [],
+              stepsEvaluated: 1,
+              stepsTruncated: false,
+              reason: 'direct-role',
+              ageMs: 6,
+            },
+          ],
         }) as never,
     };
     const harness = await authorizationHarness(broken);
@@ -2815,21 +2814,21 @@ it('rejects missing and unsafe protocol header fields before authentication', ()
     'x-setu-sequence': '1',
     'x-setu-mac': 'a'.repeat(64),
   };
-  expect(validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers: valid })))
-    .not.toBeNull();
-  for (
-    const headers of [
-      {},
-      { ...valid, 'x-setu-session': '' },
-      { ...valid, 'x-setu-sequence': '' },
-      { ...valid, 'x-setu-sequence': '9007199254740992' },
-      { ...valid, 'x-setu-sequence': '12345678901234567' },
-      { ...valid, 'x-setu-instance': 'bad' },
-      { ...valid, 'x-setu-mac': '' },
-    ]
-  ) {
-    expect(validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers })))
-      .toBeNull();
+  expect(
+    validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers: valid })),
+  ).not.toBeNull();
+  for (const headers of [
+    {},
+    { ...valid, 'x-setu-session': '' },
+    { ...valid, 'x-setu-sequence': '' },
+    { ...valid, 'x-setu-sequence': '9007199254740992' },
+    { ...valid, 'x-setu-sequence': '12345678901234567' },
+    { ...valid, 'x-setu-instance': 'bad' },
+    { ...valid, 'x-setu-mac': '' },
+  ]) {
+    expect(
+      validateProtocolHeaders(fakeRequest({ url: `http://${HOST}/v1/status`, headers })),
+    ).toBeNull();
   }
 });
 
@@ -2837,24 +2836,27 @@ it('refuses source snapshots and batches carrying an unsupported version or anot
   for (const operation of ['snapshot', 'events']) {
     for (const field of ['version', 'instanceId']) {
       const value = field === 'version' ? 2 : 'ffffffff-ffff-ffff-ffff-ffffffffffff';
-      const options = operation === 'snapshot'
-        ? { snapshot: { ...minimalSnapshot(), [field]: value } }
-        : { batch: { ...minimalBatch(), [field]: value } };
+      const options =
+        operation === 'snapshot'
+          ? { snapshot: { ...minimalSnapshot(), [field]: value } }
+          : { batch: { ...minimalBatch(), [field]: value } };
       const { handler, session, key } = await buildHarness(options);
       session.bindInstance(TEST_INSTANCE_ID);
       const target = operation === 'snapshot' ? '/v1/snapshot' : '/v1/events?after=0&limit=16';
       const mac = await signRequest(crypto.subtle, key, target, 1, TEST_INSTANCE_ID);
       const view = inspect(
-        await handler(fakeRequest({
-          url: `http://${HOST}${target}`,
-          headers: {
-            host: HOST,
-            'x-setu-session': TEST_SESSION_ID,
-            'x-setu-sequence': '1',
-            'x-setu-instance': TEST_INSTANCE_ID,
-            'x-setu-mac': mac,
-          },
-        })),
+        await handler(
+          fakeRequest({
+            url: `http://${HOST}${target}`,
+            headers: {
+              host: HOST,
+              'x-setu-session': TEST_SESSION_ID,
+              'x-setu-sequence': '1',
+              'x-setu-instance': TEST_INSTANCE_ID,
+              'x-setu-mac': mac,
+            },
+          }),
+        ),
       );
       expect(view.status).toBe(field === 'version' ? 400 : 401);
     }
@@ -2877,17 +2879,16 @@ it('bounds anonymous malformed requests and refuses oversized or failing kernel 
     const h = await buildHarness(
       mode === 'oversized'
         ? {
-          snapshot: {
-            ...minimalSnapshot(),
-            nodes: [{ id: 'p', kind: 'plugin', label: 'x'.repeat(300_000), version: '1' }],
-          },
-        }
+            snapshot: {
+              ...minimalSnapshot(),
+              nodes: [{ id: 'p', kind: 'plugin', label: 'x'.repeat(300_000), version: '1' }],
+            },
+          }
         : undefined,
     );
     h.session.bindInstance(TEST_INSTANCE_ID);
-    const target = mode === 'range' || mode === 'scalar'
-      ? '/v1/events?after=0&limit=16'
-      : '/v1/snapshot';
+    const target =
+      mode === 'range' || mode === 'scalar' ? '/v1/events?after=0&limit=16' : '/v1/snapshot';
     if (mode === 'range' || mode === 'scalar') {
       h.source.read = () => {
         throw mode === 'range' ? new RangeError('cursor') : 'private';

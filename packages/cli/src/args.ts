@@ -62,9 +62,8 @@ export function parseArgs(
     } else if (Array.isArray(existing)) {
       flags[key] = typeof value === 'string' ? [...existing, value] : value;
     } else {
-      flags[key] = typeof existing === 'string' && typeof value === 'string'
-        ? [existing, value]
-        : value;
+      flags[key] =
+        typeof existing === 'string' && typeof value === 'string' ? [existing, value] : value;
     }
   };
 

@@ -44,10 +44,7 @@ describe('FeatureFlagsPlugin', () => {
         Readonly<Record<string, import('../../src/interfaces/index.ts').FlagDefinition>>
       > => Promise.resolve({}),
     };
-    const provider = createProvider(
-      { provider: 'database', options: { store } },
-      ctx.ctx,
-    );
+    const provider = createProvider({ provider: 'database', options: { store } }, ctx.ctx);
     expect(provider).toBeInstanceOf(DatabaseProvider);
   });
 
@@ -71,8 +68,9 @@ describe('FeatureFlagsPlugin', () => {
     // Cast the full discriminated union through a narrow object that violates the discriminant
     const bogusOptions = Object.freeze({ provider: 'nonexistent', options: {} });
     // We only need to call createProvider with invalid options to trigger the throw
-    expect(() => createProvider(bogusOptions as unknown as FeatureFlagsPluginOptions, ctx.ctx))
-      .toThrow('Unrecognized feature flags provider');
+    expect(() =>
+      createProvider(bogusOptions as unknown as FeatureFlagsPluginOptions, ctx.ctx),
+    ).toThrow('Unrecognized feature flags provider');
   });
 
   it('register awaits service.start() and registers under FEATURE_FLAGS', async () => {
@@ -132,7 +130,7 @@ describe('FeatureFlagsPlugin', () => {
     expect(result.data).toEqual({ provider: 'custom' });
   });
 
-  it('health indicator returns "degraded" for an unhealthy provider', async () => {
+  it('health indicator returns "up" for an unhealthy provider', async () => {
     const fakeProvider: FlagProvider = {
       type: 'custom',
       isEnabled: (): boolean => false,
@@ -152,8 +150,8 @@ describe('FeatureFlagsPlugin', () => {
 
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
-    expect(result.status).toBe('degraded');
-    expect(result.data).toEqual({ provider: 'custom', detail: 'poll failed' });
+    expect(result.status).toBe('up');
+    expect(result.data).toEqual({ provider: 'custom', healthy: false, detail: 'poll failed' });
   });
 
   it('health indicator omits detail when an unhealthy provider reports none', async () => {
@@ -175,10 +173,10 @@ describe('FeatureFlagsPlugin', () => {
 
     const indicator = ctx.healthIndicators.get('feature-flags');
     const result = await indicator!();
-    expect(result.status).toBe('degraded');
+    expect(result.status).toBe('up');
     // `detail` must be ABSENT, not present-and-undefined (exactOptionalPropertyTypes).
-    expect(result.data).toEqual({ provider: 'custom' });
-    expect(Object.keys(result.data as Record<string, unknown>)).toEqual(['provider']);
+    expect(result.data).toEqual({ provider: 'custom', healthy: false });
+    expect(Object.keys(result.data as Record<string, unknown>)).toEqual(['provider', 'healthy']);
   });
 
   it('onClose calls service.stop()', async () => {
@@ -211,10 +209,13 @@ describe('FeatureFlagsPlugin', () => {
 describe('createProvider — launchdarkly arm', () => {
   it('returns a LaunchDarklyProvider for the "launchdarkly" arm', () => {
     const ctx = createFakeContext();
-    const provider = createProvider({
-      provider: 'launchdarkly',
-      options: { client: new FakeLaunchDarklyClient() },
-    }, ctx.ctx);
+    const provider = createProvider(
+      {
+        provider: 'launchdarkly',
+        options: { client: new FakeLaunchDarklyClient() },
+      },
+      ctx.ctx,
+    );
     expect(provider).toBeInstanceOf(LaunchDarklyProvider);
     expect(provider.type).toBe('launchdarkly');
   });

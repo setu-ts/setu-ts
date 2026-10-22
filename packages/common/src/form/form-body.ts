@@ -267,9 +267,10 @@ function multipartForm(parts: readonly ParsedPart[]): FormBody {
     // discriminator, and it is exactly what the parser records — a part with
     // no filename is a plain field value regardless of its Content-Type, and
     // an empty-string filename is still a file (an empty file input).
-    const value: FormValue = part.filename === undefined
-      ? decoder.decode(part.data)
-      : { filename: part.filename, mimeType: part.mimeType, data: part.data };
+    const value: FormValue =
+      part.filename === undefined
+        ? decoder.decode(part.data)
+        : { filename: part.filename, mimeType: part.mimeType, data: part.data };
     appendValue(acc, part.name, value);
   }
   return formBodyOf(acc);

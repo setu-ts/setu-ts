@@ -81,7 +81,36 @@ export interface IValidationService {
    *
    * @param schema - The schema (Zod schema by default)
    * @param target - Which request part to validate
+   * @param options - Per-validator options. Optional, so a two-parameter
+   *   implementation remains assignable; omitted means JSON-only bodies.
    * @returns The validation middleware
    */
-  middleware(schema: unknown, target: ValidationTarget): MiddlewareFunction;
+  middleware(
+    schema: unknown,
+    target: ValidationTarget,
+    options?: ValidationMiddlewareOptions,
+  ): MiddlewareFunction;
+}
+
+/**
+ * Per-validator options for {@linkcode IValidationService.middleware}.
+ *
+ * @example
+ * ```typescript
+ * // Accept a server-rendered <form> post as well as JSON on this route only.
+ * const middleware = validation.middleware(ContactSchema, 'body', { forms: true });
+ * ```
+ * @since 0.10.0
+ */
+export interface ValidationMiddlewareOptions {
+  /**
+   * Validate `application/x-www-form-urlencoded` and `multipart/form-data`
+   * bodies with the same schema. The first-party service otherwise requires
+   * `application/json` or `application/*+json`; an unsupported or absent type
+   * answers 415 before any body read. Replacement services own their media-type
+   * handling. Cookie-authenticated routes still need `csrfMiddleware` or
+   * `csrfFormMiddleware`; pair opted-in forms with the latter. Read only for
+   * the `body` target.
+   */
+  readonly forms?: boolean;
 }

@@ -127,8 +127,9 @@ function isValidHeaderName(name: string): boolean {
 function isRedactionService(value: unknown): value is IRedactionService {
   if (typeof value !== 'object' || value === null) return false;
   const candidate = value as Partial<Record<'redactValue' | 'redactRecord', unknown>>;
-  return typeof candidate.redactValue === 'function' &&
-    typeof candidate.redactRecord === 'function';
+  return (
+    typeof candidate.redactValue === 'function' && typeof candidate.redactRecord === 'function'
+  );
 }
 
 /** Validates a `key` source and names the failing field. */
@@ -173,7 +174,8 @@ export function validateRouteOptionShape(options: IdempotentRouteOptions): void 
     throw new IdempotencyConfigurationError('required', 'idempotency: required must be a boolean');
   }
   if (
-    options.principal !== undefined && options.principal !== 'required' &&
+    options.principal !== undefined &&
+    options.principal !== 'required' &&
     options.principal !== 'optional'
   ) {
     throw new IdempotencyConfigurationError(
@@ -193,7 +195,8 @@ export function validateRouteOptionShape(options: IdempotentRouteOptions): void 
     }
   }
   if (
-    options.fingerprint !== undefined && options.fingerprint !== 'request' &&
+    options.fingerprint !== undefined &&
+    options.fingerprint !== 'request' &&
     typeof options.fingerprint !== 'function'
   ) {
     throw new IdempotencyConfigurationError(
@@ -208,7 +211,9 @@ export function validateRouteOptionShape(options: IdempotentRouteOptions): void 
     throw new IdempotencyConfigurationError('ttlMs', 'idempotency: ttlMs is out of range');
   }
   if (
-    options.response !== undefined && options.response !== 'full' && options.response !== 'status'
+    options.response !== undefined &&
+    options.response !== 'full' &&
+    options.response !== 'status'
   ) {
     throw new IdempotencyConfigurationError(
       'response',
@@ -266,7 +271,10 @@ function validateIngressTargets(options: IdempotentIngressOptions): void {
       'idempotency: idempotentIngress needs a non-empty topics or jobNames list',
     );
   }
-  for (const [field, list] of [['topics', topics], ['jobNames', jobNames]] as const) {
+  for (const [field, list] of [
+    ['topics', topics],
+    ['jobNames', jobNames],
+  ] as const) {
     if (list === undefined) continue;
     if (!Array.isArray(list) || list.length === 0) {
       throw new IdempotencyConfigurationError(
@@ -295,7 +303,10 @@ export function validateIngressOptionShape(options: IdempotentIngressOptions): v
   validateIngressTargets(options);
   const key = options.key;
   if (
-    key !== undefined && key !== 'auto' && key !== 'job-id' && key !== 'deduplication-header' &&
+    key !== undefined &&
+    key !== 'auto' &&
+    key !== 'job-id' &&
+    key !== 'deduplication-header' &&
     typeof key !== 'function'
   ) {
     throw new IdempotencyConfigurationError('key', 'idempotency: ingress key source is invalid');
@@ -384,8 +395,10 @@ function validateStoreConfig(config: IdempotencyStoreConfig): void {
       Record<'name' | 'connect' | 'claim' | 'complete' | 'release', unknown>
     >;
     if (
-      typeof candidate.name !== 'string' || typeof candidate.connect !== 'function' ||
-      typeof candidate.claim !== 'function' || typeof candidate.complete !== 'function' ||
+      typeof candidate.name !== 'string' ||
+      typeof candidate.connect !== 'function' ||
+      typeof candidate.claim !== 'function' ||
+      typeof candidate.complete !== 'function' ||
       typeof candidate.release !== 'function'
     ) {
       throw new IdempotencyConfigurationError(
@@ -409,7 +422,8 @@ function validateStoreConfig(config: IdempotencyStoreConfig): void {
     );
   }
   if (
-    built.commandTimeoutMs !== undefined && !isIntInRange(built.commandTimeoutMs, 0, MAX_TIMEOUT_MS)
+    built.commandTimeoutMs !== undefined &&
+    !isIntInRange(built.commandTimeoutMs, 0, MAX_TIMEOUT_MS)
   ) {
     throw new IdempotencyConfigurationError(
       'store.commandTimeoutMs',
@@ -428,7 +442,8 @@ function validateTransactionalShape(transactional: TransactionalIdempotencyOptio
   }
   const entry = transactional.store;
   if (
-    entry === undefined || entry === null ||
+    entry === undefined ||
+    entry === null ||
     (typeof entry !== 'object' && typeof entry !== 'function')
   ) {
     throw new IdempotencyConfigurationError(
@@ -437,12 +452,12 @@ function validateTransactionalShape(transactional: TransactionalIdempotencyOptio
     );
   }
   if (typeof entry === 'object') {
-    const candidate = entry as Partial<
-      Record<'find' | 'run' | 'purge' | 'verify', unknown>
-    >;
+    const candidate = entry as Partial<Record<'find' | 'run' | 'purge' | 'verify', unknown>>;
     if (
-      typeof candidate.find !== 'function' || typeof candidate.run !== 'function' ||
-      typeof candidate.purge !== 'function' || typeof candidate.verify !== 'function'
+      typeof candidate.find !== 'function' ||
+      typeof candidate.run !== 'function' ||
+      typeof candidate.purge !== 'function' ||
+      typeof candidate.verify !== 'function'
     ) {
       throw new IdempotencyConfigurationError(
         'transactional.store',
@@ -491,9 +506,7 @@ function validateTransactionalShape(transactional: TransactionalIdempotencyOptio
       'idempotency: transactional.purge.schedule must be a boolean',
     );
   }
-  if (
-    purge.intervalMs !== undefined && !isIntInRange(purge.intervalMs, 1, MAX_TIMEOUT_MS)
-  ) {
+  if (purge.intervalMs !== undefined && !isIntInRange(purge.intervalMs, 1, MAX_TIMEOUT_MS)) {
     throw new IdempotencyConfigurationError(
       'transactional.purge.intervalMs',
       'idempotency: transactional.purge.intervalMs is out of range',
@@ -518,7 +531,8 @@ export function validatePluginOptionShape(options: IdempotencyPluginOptions): vo
     throw new IdempotencyConfigurationError('leaseMs', 'idempotency: leaseMs is out of range');
   }
   if (
-    options.ingressLeaseMs !== undefined && !isIntInRange(options.ingressLeaseMs, 1, MAX_LEASE_MS)
+    options.ingressLeaseMs !== undefined &&
+    !isIntInRange(options.ingressLeaseMs, 1, MAX_LEASE_MS)
   ) {
     throw new IdempotencyConfigurationError(
       'ingressLeaseMs',

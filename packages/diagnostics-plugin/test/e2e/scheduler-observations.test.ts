@@ -217,8 +217,8 @@ describe('Scheduler observations e2e (M98k canary)', () => {
       const fire = records.find((r) => r.alias === 'fractional-alias' && r.operation === 'fire');
       expect(fire).toMatchObject({ count: 1, started: 1, succeeded: 1 });
       expect(Number.isSafeInteger(fire!.lastLatenessMs)).toBe(true);
-      const recurring = records.find((r) =>
-        r.alias === 'recurring-alias' && r.operation === 'fire'
+      const recurring = records.find(
+        (r) => r.alias === 'recurring-alias' && r.operation === 'fire',
       );
       expect(recurring!.started).toBeGreaterThanOrEqual(2);
     } finally {

@@ -171,8 +171,9 @@ describe('applySnapshotBudget', () => {
     expect(snapshot.nodes.length).toBe(1);
     expect(snapshot.edges.length).toBe(1);
     expect(snapshot.truncated).toBe(false);
-    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length)
-      .toBeLessThanOrEqual(MAX_SNAPSHOT_BYTES);
+    expect(new TextEncoder().encode(JSON.stringify(snapshot)).length).toBeLessThanOrEqual(
+      MAX_SNAPSHOT_BYTES,
+    );
   });
 
   it('omits later entries and their edges, setting truncated, until it fits', () => {

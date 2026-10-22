@@ -75,10 +75,7 @@ export interface QueueHandlerOptions {
  * Redis queue has no batch to dispatch and would silently drop the delivery
  * @since 0.2.0
  */
-export function createQueueHandler(
-  app: IApplication,
-  options?: QueueHandlerOptions,
-): QueueHandler {
+export function createQueueHandler(app: IApplication, options?: QueueHandlerOptions): QueueHandler {
   const token = instanceToken(CAPABILITIES.QUEUE, options?.name);
 
   // `async`, so a resolution failure arrives as a REJECTED promise rather than

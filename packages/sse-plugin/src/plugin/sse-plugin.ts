@@ -49,9 +49,10 @@ const PLUGIN_NAME = 'sse-plugin';
  */
 export function SsePlugin(options?: SsePluginOptions): IPlugin {
   // M98l: validated here, before any application exists.
-  const diagnosticsAlias = options?.diagnostics === undefined
-    ? null
-    : compileRealtimeDiagnosticsAlias(options.diagnostics);
+  const diagnosticsAlias =
+    options?.diagnostics === undefined
+      ? null
+      : compileRealtimeDiagnosticsAlias(options.diagnostics);
 
   return {
     name: PLUGIN_NAME,
@@ -111,28 +112,27 @@ export function SsePlugin(options?: SsePluginOptions): IPlugin {
       );
 
       // Register health indicator (§3.9).
-      ctx.health.register(
-        'sse',
-        (): Promise<HealthCheckResult> =>
-          Promise.resolve({
-            status: 'up',
-            data: {
-              connections: sseService.connectionCount,
-              // Rises for the life of the application (see
-              // ISseService.channelCount) — a climbing count is the
-              // operator-visible signal that channel names are being derived
-              // from unbounded input. Only `onClose` lowers it, by discarding
-              // every channel.
-              channels: sseService.channelCount,
-            },
-          }),
+      ctx.health.register('sse', (): Promise<HealthCheckResult> =>
+        Promise.resolve({
+          status: 'up',
+          data: {
+            connections: sseService.connectionCount,
+            // Rises for the life of the application (see
+            // ISseService.channelCount) — a climbing count is the
+            // operator-visible signal that channel names are being derived
+            // from unbounded input. Only `onClose` lowers it, by discarding
+            // every channel.
+            channels: sseService.channelCount,
+          },
+        }),
       );
 
-      const unsubscribe = backplane === undefined
-        ? undefined
-        : await backplane.subscribe((frame) => {
-          sseService.deliverRemoteFrame(frame);
-        });
+      const unsubscribe =
+        backplane === undefined
+          ? undefined
+          : await backplane.subscribe((frame) => {
+              sseService.deliverRemoteFrame(frame);
+            });
 
       // Register shutdown hook: close all connections and clear channels.
       ctx.lifecycle.onClose(() => {

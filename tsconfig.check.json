@@ -1,0 +1,100 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "isolatedDeclarations": false,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "types": [
+      "node",
+      "./packages/runtime/node_modules/@types/deno"
+    ],
+    "paths": {
+      "@setu-ts/rest-starter": [
+        "./packages/starters/rest-starter/src/index.ts"
+      ],
+      "@setu-ts/microservice-starter": [
+        "./packages/starters/microservice-starter/src/index.ts"
+      ],
+      "@setu-ts/full-stack-starter": [
+        "./packages/starters/full-stack-starter/src/index.ts"
+      ],
+      "@setu-ts/*": [
+        "./packages/*/src/index.ts"
+      ],
+      "@setu-ts/runtime/worker": [
+        "./packages/runtime/src/worker/define-worker-task.ts"
+      ],
+      "@setu-ts/cli/main": [
+        "./packages/cli/src/main.ts"
+      ],
+      "@setu-ts/localization-plugin/format": [
+        "./packages/localization-plugin/src/format/index.ts"
+      ]
+    }
+  },
+  "include": [
+    "packages/*/src",
+    "packages/*/test",
+    "packages/starters/*/src",
+    "packages/starters/*/test",
+    "scripts",
+    "test"
+  ],
+  "exclude": [
+    "test/inspect-local-diagnostics.test.ts",
+    "packages/diagnostics-plugin/test/unit/cache-observations.test.ts",
+    "packages/diagnostics-plugin/test/unit/outbound-http-observations.test.ts",
+    "packages/diagnostics-plugin/test/unit/realtime-observations.test.ts",
+    "packages/diagnostics-plugin/test/unit/scheduler-observations.test.ts",
+    "packages/diagnostics-plugin/test/unit/storage-observations.test.ts",
+    "packages/websocket-plugin/test/integration/guarded-upgrade.test.ts",
+    "packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts",
+    "packages/websocket-plugin/test/integration/upgrade-guards.test.ts",
+    "packages/websocket-plugin/test/integration/websocket-integration.test.ts",
+    "packages/cli/test/unit/process-boundary.test.ts",
+    "packages/runtime/test/unit/create-runtime-services.test.ts",
+    "packages/runtime/test/e2e/worker-host-real.test.ts",
+    "packages/runtime/test/e2e/deno-stop-bounded.test.ts",
+    "packages/runtime/test/integration/deno-http-adapter.test.ts",
+    "packages/runtime/test/unit/deno-dns-resolver.test.ts",
+    "packages/runtime/test/unit/deno-http-adapter-rpc.test.ts",
+    "packages/runtime/test/unit/deno-http-adapter.test.ts",
+    "packages/runtime/test/unit/deno-read-stream.test.ts",
+    "packages/runtime/test/unit/deno-runtime.test.ts",
+    "packages/runtime/test/unit/deno-upgrade-order.test.ts",
+    "packages/runtime/test/unit/deno-ws-upgrader.test.ts",
+    "packages/diagnostics-plugin/test/e2e/authorization-explanations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/cache-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/config-provenance.test.ts",
+    "packages/diagnostics-plugin/test/e2e/distributed-tracing.test.ts",
+    "packages/diagnostics-plugin/test/e2e/event-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/health-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/local-connector.test.ts",
+    "packages/diagnostics-plugin/test/e2e/outbound-http-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/queue-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/realtime-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/scheduler-observations.test.ts",
+    "packages/diagnostics-plugin/test/e2e/storage-observations.test.ts",
+    "packages/diagnostics-plugin/test/integration/activation.test.ts",
+    "packages/diagnostics-plugin/test/integration/core-conformance.test.ts",
+    "packages/diagnostics-plugin/test/integration/lifecycle.test.ts",
+    "packages/diagnostics-plugin/test/integration/security.test.ts",
+    "packages/runtime/test/unit/local-diagnostics-listener.test.ts",
+    "packages/runtime/test/integration/read-stream-real.test.ts",
+    "packages/runtime/test/integration/peer-address-real.test.ts",
+    "packages/runtime/test/integration/signal-real.test.ts",
+    "packages/realtime-backplane-plugin/test/integration/realtime-observations-redis.test.ts",
+    "packages/runtime/src/adapters/deno/deno-dns-resolver.ts",
+    "packages/runtime/src/adapters/deno/deno-http-adapter.ts",
+    "packages/runtime/src/adapters/deno/deno-runtime.ts",
+    "packages/runtime/src/adapters/deno/deno-ws-upgrader.ts",
+    "packages/runtime/src/diagnostics/local-diagnostics-listener.ts",
+    "test/deno-lane",
+    "test/fixtures/snippets"
+  ]
+}

@@ -123,6 +123,8 @@ export interface ApplicationOptions {
  * @since 0.1.0
  */
 export interface InjectRequest {
+  /** Socket peer to carry into `IRequest.ip`; omitted by default. */
+  ip?: string;
   /** HTTP method. */
   method: string;
   /** Full request URL. */
@@ -154,13 +156,7 @@ export interface InjectRequest {
    * union would go on accepting exactly the values that used to silently
    * JSON-coerce.
    */
-  body?:
-    | string
-    | Uint8Array
-    | ArrayBuffer
-    | Blob
-    | URLSearchParams
-    | Record<string, unknown>;
+  body?: string | Uint8Array | ArrayBuffer | Blob | URLSearchParams | Record<string, unknown>;
 }
 
 /**
@@ -364,9 +360,8 @@ class Application implements IKernelApplication {
         if (event.token === CAPABILITIES.RUNTIME && event.kind !== 'unregister') {
           const runtime = this.#registry.peekResolved<IRuntimeServices>(CAPABILITIES.RUNTIME);
           if (runtime !== undefined) {
-            collector.initializeRuntime(
-              runtime,
-              () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
+            collector.initializeRuntime(runtime, () =>
+              this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
             );
           }
         }
@@ -474,9 +469,11 @@ class Application implements IKernelApplication {
    */
   #explainMissingCapability(token: string): string | undefined {
     if (!this.#registrationStarted) {
-      return 'The application has not started: plugins register their capabilities during ' +
+      return (
+        'The application has not started: plugins register their capabilities during ' +
         'start(), so a lookup before then finds nothing. Resolve it inside a route handler or ' +
-        'a lifecycle hook, or after `await app.start()`.';
+        'a lifecycle hook, or after `await app.start()`.'
+      );
     }
     const current = this.#registeringPlugin;
     if (current === undefined) {
@@ -492,13 +489,17 @@ class Application implements IKernelApplication {
     // Every plugin implicitly depends on the runtime provider, so a dependency
     // edge from it to a later plugin would be a cycle, not a fix.
     if (this.#ordered[position]?.provides?.includes(CAPABILITIES.RUNTIME) === true) {
-      return `Plugin '${provider.name}' provides it, but registers after '${current}', which ` +
+      return (
+        `Plugin '${provider.name}' provides it, but registers after '${current}', which ` +
         `provides the runtime and so always registers first. Resolve '${token}' in a lifecycle ` +
-        `hook such as onInit instead of during register().`;
+        `hook such as onInit instead of during register().`
+      );
     }
-    return `Plugin '${provider.name}' provides it, but registers after '${current}'. Add ` +
+    return (
+      `Plugin '${provider.name}' provides it, but registers after '${current}'. Add ` +
       `'${token}' to the dependencies (or optionalDependencies) of '${current}' so it ` +
-      `registers first.`;
+      `registers first.`
+    );
   }
 
   async start(options?: StartOptions): Promise<void> {
@@ -602,38 +603,22 @@ class Application implements IKernelApplication {
       },
       metrics: {
         register(name: string, config: MetricConfig): void {
-          registry.register(
-            CAPABILITIES.METRIC_REGISTRATION,
-            { name, config },
-            { multi: true },
-          );
+          registry.register(CAPABILITIES.METRIC_REGISTRATION, { name, config }, { multi: true });
         },
       },
       openapi: {
         addSchema(name: string, schema: unknown): void {
-          registry.register(
-            CAPABILITIES.OPENAPI_SCHEMA,
-            { name, schema },
-            { multi: true },
-          );
+          registry.register(CAPABILITIES.OPENAPI_SCHEMA, { name, schema }, { multi: true });
         },
       },
       decorators: {
         register(name: string, handler: DecoratorHandler): void {
-          registry.register(
-            CAPABILITIES.DECORATOR_HANDLER,
-            { name, handler },
-            { multi: true },
-          );
+          registry.register(CAPABILITIES.DECORATOR_HANDLER, { name, handler }, { multi: true });
         },
       },
       cli: {
         register(name: string, handler: CliCommandHandler): void {
-          registry.register(
-            CAPABILITIES.CLI_COMMAND,
-            { name, handler },
-            { multi: true },
-          );
+          registry.register(CAPABILITIES.CLI_COMMAND, { name, handler }, { multi: true });
         },
       },
       environment: {
@@ -760,9 +745,8 @@ class Application implements IKernelApplication {
     // whose registration cannot be observed as a resolved instance at its
     // mutation. `initializeRuntime` is idempotent, so an application whose
     // runtime registered normally was already initialized in the sink above.
-    collector?.initializeRuntime(
-      runtime,
-      () => this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
+    collector?.initializeRuntime(runtime, () =>
+      this.#registry.peekResolved<ITelemetryService>(CAPABILITIES.TELEMETRY),
     );
     this.#validateEnvironment(runtime);
 
@@ -824,6 +808,7 @@ class Application implements IKernelApplication {
       if (listenOperation !== undefined) {
         collector?.observeLifecycleEvent(listenOperation, 'listen', null, 'ok');
       }
+      this.#announceListening(options.port, options.hostname);
     }
   }
 
@@ -960,7 +945,9 @@ class Application implements IKernelApplication {
     // encoding; and a `Blob` declares its own through `.type` (M99c), the
     // same header the platform sets for `new Request(url, { body: blob })`.
     if (
-      bodyBytes !== undefined && defaultContentType !== undefined && !headers.has('content-type')
+      bodyBytes !== undefined &&
+      defaultContentType !== undefined &&
+      !headers.has('content-type')
     ) {
       headers.set('content-type', defaultContentType);
     }
@@ -1007,6 +994,7 @@ class Application implements IKernelApplication {
     let form: Promise<FormBody> | undefined;
 
     const syntheticRequest: IRequest = {
+      ...(request.ip !== undefined ? { ip: request.ip } : {}),
       method: request.method as IRequest['method'],
       url: fullUrl,
       get path() {
@@ -1020,8 +1008,11 @@ class Application implements IKernelApplication {
         // same failure the served path produces. The empty-body arm keeps its
         // `{}` default — an in-process inject that sent no body is not a
         // malformed body.
-        return Promise.resolve().then(() =>
-          parseJsonBody(bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes)) as T
+        return Promise.resolve().then(
+          () =>
+            parseJsonBody(
+              bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes),
+            ) as T,
         );
       },
       text(): Promise<string> {
@@ -1039,7 +1030,7 @@ class Application implements IKernelApplication {
         // what a served request requires. A `Blob` supplies it from `.type`
         // (M99c), as the platform does.
         form ??= Promise.resolve().then(() =>
-          parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type'))
+          parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type')),
         );
         return form;
       },
@@ -1062,11 +1053,12 @@ class Application implements IKernelApplication {
     // reporting `null` made a non-empty response look empty, and made `json()`
     // throw "No JSON body available" for a perfectly valid JSON payload sent
     // as bytes.
-    const body = snapshot.body === null
-      ? null
-      : typeof snapshot.body === 'string'
-      ? snapshot.body
-      : new TextDecoder().decode(snapshot.body);
+    const body =
+      snapshot.body === null
+        ? null
+        : typeof snapshot.body === 'string'
+          ? snapshot.body
+          : new TextDecoder().decode(snapshot.body);
 
     return {
       statusCode: snapshot.status,
@@ -1401,13 +1393,13 @@ class Application implements IKernelApplication {
   ): Promise<void> {
     if (
       this.#registry.has(CAPABILITIES.WEBSOCKET) &&
-      await this.#observeProtocol(ctx, 'websocket-upgrade', () => this.#tryUpgrade(ctx))
+      (await this.#observeProtocol(ctx, 'websocket-upgrade', () => this.#tryUpgrade(ctx)))
     ) {
       return;
     }
     if (
       this.#registry.has(CAPABILITIES.GRPC) &&
-      await this.#observeProtocol(ctx, 'grpc-dispatch', () => this.#tryGrpc(ctx))
+      (await this.#observeProtocol(ctx, 'grpc-dispatch', () => this.#tryGrpc(ctx)))
     ) {
       return;
     }
@@ -1675,10 +1667,7 @@ class Application implements IKernelApplication {
    * @param ctx - The live request context
    * @returns The response, directly or once the hooks have run
    */
-  #failRequest(
-    error: unknown,
-    ctx: IRequestContext,
-  ): ResponseBuilder | Promise<ResponseBuilder> {
+  #failRequest(error: unknown, ctx: IRequestContext): ResponseBuilder | Promise<ResponseBuilder> {
     const err = error instanceof Error ? error : new Error(String(error));
     const hooks = this.#lifecycle.getErrorHooks();
     if (hooks.length === 0) {
@@ -2147,6 +2136,16 @@ class Application implements IKernelApplication {
   #reportUnhandledError(error: Error, ctx: IRequestContext): void {
     try {
       if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        // `msg` carries the label and `message` the error's own text, the same
+        // two keys the console logger writes for the branch below.
+        this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME).reportError?.({
+          level: 'error',
+          msg: 'Unhandled request error',
+          ...serializeError(error),
+          requestId: ctx.id,
+          method: ctx.request.method,
+          path: ctx.request.path,
+        });
         return;
       }
       const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
@@ -2157,8 +2156,7 @@ class Application implements IKernelApplication {
         path: ctx.request.path,
       });
     } catch {
-      // The logger itself failed or none is resolvable — no safe channel
-      // remains without violating the no-console rule; degrade silently.
+      // Reporting must never replace the original request failure.
     }
   }
 
@@ -2178,9 +2176,8 @@ class Application implements IKernelApplication {
    * warning into a startup failure.
    */
   #warnUnsatisfiedConsumers(): void {
-    const unsatisfied = findUnsatisfiedConsumers(
-      this.#plugins,
-      (token) => this.#registry.has(token),
+    const unsatisfied = findUnsatisfiedConsumers(this.#plugins, (token) =>
+      this.#registry.has(token),
     );
     if (unsatisfied.length === 0) {
       return;
@@ -2197,6 +2194,36 @@ class Application implements IKernelApplication {
           { plugin, capability },
         );
       }
+    } catch {
+      // The logger itself failed or none is resolvable — no safe channel
+      // remains without violating the no-console rule; degrade silently.
+    }
+  }
+
+  /**
+   * Announces a successful `adapter.listen` through the registered logger.
+   *
+   * Node and Bun print nothing of their own, so before this a booted project
+   * looked the same whether it had bound a socket or was still starting. Deno
+   * also prints its native "Listening on" banner; this line is additive there,
+   * and both are accurate. A `port: 0` request reports an ephemeral port rather
+   * than the literal zero. A missing or itself-broken logger degrades silently:
+   * it must never turn a successful start into a failure.
+   *
+   * @param port - The port `adapter.listen` was asked for
+   * @param hostname - The configured hostname, absent when none was supplied
+   */
+  #announceListening(port: number, hostname?: string): void {
+    try {
+      if (!this.#registry.has(CAPABILITIES.LOGGER)) {
+        return;
+      }
+      const logger = this.#registry.get<ILogger>(CAPABILITIES.LOGGER);
+      if (port === 0) {
+        logger.info('Server listening on an ephemeral port');
+        return;
+      }
+      logger.info('Server listening', hostname === undefined ? { port } : { port, hostname });
     } catch {
       // The logger itself failed or none is resolvable — no safe channel
       // remains without violating the no-console rule; degrade silently.

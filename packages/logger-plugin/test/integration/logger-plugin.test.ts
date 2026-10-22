@@ -155,9 +155,9 @@ describe('LoggerPlugin (integration)', () => {
 
   it('applies the default secret paths, while redact: [] restores plaintext output', async () => {
     const lines: string[] = [];
-    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    // eslint-disable-next-line no-console -- capture the ConsoleLogger's real egress.
     const originalLog = console.log;
-    // deno-lint-ignore no-console -- capture the ConsoleLogger's real egress.
+    // eslint-disable-next-line no-console -- capture the ConsoleLogger's real egress.
     console.log = (...values: unknown[]): void => {
       lines.push(String(values[0]));
     };
@@ -170,7 +170,7 @@ describe('LoggerPlugin (integration)', () => {
       await LoggerPlugin({ redact: [] }).register(optOutContext.ctx);
       getLogger(optOutContext.registeredServices).info('opt-out', { password: 'secret' });
     } finally {
-      // deno-lint-ignore no-console -- restore the process-wide console after capture.
+      // eslint-disable-next-line no-console -- restore the process-wide console after capture.
       console.log = originalLog;
     }
 

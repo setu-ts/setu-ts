@@ -180,13 +180,13 @@ describe('MetricsService', () => {
       service.register('test_metric', {
         type: 'gauge',
         help: 'Gauge',
-      })
+      }),
     ).toThrow(Error);
     expect(() =>
       service.register('test_metric', {
         type: 'gauge',
         help: 'Gauge',
-      })
+      }),
     ).toThrow('already registered as "counter"');
   });
 
@@ -313,13 +313,13 @@ describe('MetricsService', () => {
       service.register('test_metric', {
         type: 'gauge',
         help: 'Gauge',
-      })
+      }),
     ).toThrow(Error);
     expect(() =>
       service.register('test_metric', {
         type: 'gauge',
         help: 'Gauge',
-      })
+      }),
     ).toThrow('already registered as "counter"');
   });
 
@@ -330,13 +330,13 @@ describe('MetricsService', () => {
       service.register('test_metric', {
         type: 'unknown' as unknown as 'counter',
         help: 'Unknown',
-      })
+      }),
     ).toThrow(Error);
     expect(() =>
       service.register('test_metric', {
         type: 'unknown' as unknown as 'counter',
         help: 'Unknown',
-      })
+      }),
     ).toThrow('Unknown metric type');
   });
 
