@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Declared OpenAPI operation metadata now reaches the document (0.10.0, `@setu-ts/common`,
+- **Declared OpenAPI operation metadata now reaches the document (#487, 0.10.0, `@setu-ts/common`,
   `@setu-ts/decorator-plugin`, `@setu-ts/openapi-plugin`).** Optional `RouteSchema.operationId` and
   `RouteSchema.description` carry programmatic declarations and `@ApiOperation` metadata. A declared
   id is used verbatim: `@ApiOperation({ operationId: 'listUsers' })` now emits `listUsers` instead

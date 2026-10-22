@@ -6622,7 +6622,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   OpenAPI metadata reaches the document, 0.10.0): optional `RouteSchema.operationId`/`description`,
   forwarded from `@ApiOperation`; a declared id is used verbatim and reserved before derived ids by
   one internal helper shared with an `onBootstrap` route scan, and a blank or duplicate declared id
-  fails `start()` with the new `OperationIdError` — complete (PR pending).
+  fails `start()` with the new `OperationIdError` — complete (PR #487).
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
