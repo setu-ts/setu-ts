@@ -66,6 +66,26 @@ describe('Node regular-file writer', () => {
     expect((await readFile(path)).length).toBe(0);
   });
 
+  it.skipIf(process.platform === 'win32')(
+    'drops setuid, setgid and sticky bits while preserving 0o777 permissions',
+    async () => {
+      const path = `${root}/special-mode`;
+      await writeFile(path, 'old');
+      await chmod(path, 0o7640);
+      const beforeMode = (await stat(path)).mode;
+      // Require real setgid/sticky bits; setuid is also exercised wherever retained by the host.
+      expect(beforeMode & 0o3000).toBe(0o3000);
+      expect(beforeMode & 0o777).toBe(0o640);
+      expect(await writeRegularFile(path, bytes('new'), MAX_EXISTING_FILE_BYTES)).toEqual({
+        before: bytes('old'),
+      });
+      const afterMode = (await stat(path)).mode;
+      expect(afterMode & 0o7000).toBe(0);
+      expect(afterMode & 0o777).toBe(beforeMode & 0o777);
+      expect(await readFile(path, 'utf8')).toBe('new');
+    },
+  );
+
   it('refuses an oversize file without changing it', async () => {
     const path = `${root}/oversize`;
     const before = new Uint8Array(MAX_EXISTING_FILE_BYTES + 1).fill(65);

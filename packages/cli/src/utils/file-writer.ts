@@ -26,7 +26,7 @@ export interface ICliFileSystem extends IFileSystem {
   ): Promise<{ before: Uint8Array | undefined }>;
   /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
   readonly invokingUid?: number;
-  /** lstat metadata for adoption's directory-chain trust check; never follows the leaf. */
+  /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
   directoryOwnership?(path: string): Promise<{
     readonly uid: number;
     readonly mode: number;
@@ -591,9 +591,9 @@ export async function writeFiles(
   // Every target is checked BEFORE the first write, so a link anywhere in the
   // plan refuses the whole batch with nothing written.
   // assertInsideProject checks the parents; the Node writer replaces the leaf
-  // via rename. Ancestor workspace adoption also checks directory ownership:
+  // via rename. Agents workspace writes also check directory ownership:
   // a chain owned by the invoking user cannot be rearranged by another user.
-  // Non-adopted writes still resolve parents by name.
+  // Other writes still resolve parents by name.
   for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];

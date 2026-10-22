@@ -8,12 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Agent brief writes (M116, `@setu-ts/cli`):** the Node CLI snapshots regular files read-only,
-  then writes and restores through a fresh same-directory temp file renamed over the target.
-  Existing inodes are never written through; static leaf symlinks, hard links, special files and
-  prior content over 1 MiB are refused. On POSIX, adopting an ancestor workspace refuses directory
-  chains another user can rearrange (ownership, write permissions and symlinks), writing nothing.
-  The ownership check is skipped where uid/metadata are unavailable, including Windows.
+- **CLI writes (M116, `@setu-ts/cli`):** every Node CLI write (`new`, `generate`, `add`, `agents`,
+  …) snapshots regular files read-only, then writes and restores through a fresh same-directory temp
+  file renamed over the target. Existing inodes are never written through; static leaf symlinks,
+  hard links, special files and prior content over 1 MiB are refused independently of ownership.
+  Replacement preserves only `0o777` permissions, never setuid, setgid or sticky bits. Cleanup
+  covers handled failures only: a process killed between temp creation and rename can leave a
+  `.<name>.setu-<hex>.tmp` file. Specific to `setu agents` workspace writes on POSIX, every root and
+  member target's directory chain is checked for ownership, write permissions and symlinks;
+  untrusted chains are refused with nothing written, whether invoked from the root or a member.
+  Missing directories are checked from their nearest existing ancestor; a missing member still exits
+  `1` with `<member>: not a project`, writing nothing. The ownership check is skipped where
+  uid/metadata are unavailable, including Windows; standalone projects are unchecked.
 
 - **CLI file reads and member paths:** manifest reads now refuse non-regular files, files over 1 MiB
   and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A

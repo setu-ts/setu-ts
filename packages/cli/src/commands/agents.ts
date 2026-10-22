@@ -99,11 +99,10 @@ export async function runAgentsCommand(
     }
     const briefs: { dir: string; section: string; facts?: ProjectFacts }[] = [];
     if (workspaceRoot !== undefined && workspace !== undefined) {
-      if (workspaceRoot !== dir)
-        await assertAgentWorkspaceOwnership(deps.fs, [
-          workspaceRoot,
-          ...workspace.members.map((member) => joinPath(workspaceRoot, MEMBERS_DIR, member.name)),
-        ]);
+      await assertAgentWorkspaceOwnership(deps.fs, [
+        workspaceRoot,
+        ...workspace.members.map((member) => joinPath(workspaceRoot, MEMBERS_DIR, member.name)),
+      ]);
       root = workspaceRoot;
       briefs.push({ dir: root, section: renderWorkspaceRoot(workspace, VERSION) });
       for (const member of workspace.members) {

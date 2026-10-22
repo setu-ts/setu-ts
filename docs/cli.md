@@ -645,13 +645,15 @@ port, `dependsOn`, devtool port), the transport and its URL variable, and tells 
 member's own `AGENTS.md` before working in it. Each member's brief is the standalone brief for that
 member plus a pointer at the root file for workspace layout, ports and transport.
 
-When invoked from a member, ancestor workspace adoption on POSIX checks every target's directory
-chain up to `/`: each directory must belong to the invoking user or root and must not be group- or
+Writing a workspace on POSIX, from its root or a member, checks every target's directory chain up to
+`/`: each directory must belong to the invoking user or root and must not be group- or
 other-writable, except root-owned sticky directories such as `/tmp`. Symlinked directories are
 refused too. A failure exits `1`, names the directory and reason, writes nothing, and asks you to
 run `setu agents` in a workspace you own; it never falls back to standalone. This check is skipped
 when ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
-against another process running as the same user. Standalone projects are unchanged.
+against another process running as the same user. Missing directories pass ownership validation only
+when their nearest existing ancestor and its chain pass; a missing member still exits `1` with
+`<member>: not a project`, writing nothing. Standalone projects are unchecked.
 
 ### Where cards come from
 

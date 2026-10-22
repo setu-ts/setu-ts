@@ -484,21 +484,32 @@ Decisions:
   reads in commit `57ede20d`. This repair does not change cards.
 - **Re-audit:** after F1–F5 land, a fresh-context audit re-runs O4, O5, O7 and O9.
 
-- **F6 (R4-1):** before adopting an ancestor workspace, check every write target's directory chain
-  through `/` with an optional CLI-only `directoryOwnership` lstat seam and `invokingUid`, installed
-  at the Node boundary. Refuse symlinks, non-directories, owners other than the invoking uid or 0,
-  and group/other-writable directories except root-owned sticky ones. Report one escaped directory
-  and reason, exit 1, write nothing, and recommend running `setu agents` in a workspace you own. No
-  standalone fallback; direct-root and standalone invocations are unchanged. Missing seam or getuid
-  skips the check (Windows is not protected). Same-uid processes remain trusted; owned chains cannot
-  be rearranged by another user under these permission rules.
-- **F7 (R4-2):** never write an existing inode. Snapshot via read-only no-follow/non-blocking/
-  no-controlling-terminal open, fstat regular/size/static-nlink checks and bounded reads; ENOENT
-  means absent. Static hard-link refusal is diagnostic, not the race protection. Create a random
-  exclusive same-directory temp at mode 0666 (umask applies), write it, preserve existing permission
-  bits with chmod, close, then rename over the entry. Clean failed temps best-effort and retain
+- **F6 (R4-1, R5):** before writing a workspace, from its root or a member, check the root and every
+  member write target's directory chain through `/` with an optional CLI-only `directoryOwnership`
+  lstat seam and `invokingUid`, installed at the Node boundary. Refuse symlinks, non-directories,
+  owners other than the invoking uid or 0, and group/other-writable directories except root-owned
+  sticky ones. Report one escaped directory and reason, exit 1, write nothing, and recommend running
+  `setu agents` in a workspace you own. No standalone fallback; standalone projects remain
+  unchecked. An ENOENT from the seam for a missing directory walks up to the nearest existing
+  ancestor, whose chain must pass the same rule; any other seam error uses the same escaped refusal
+  path. Passing ownership validation does not create a project: a missing member still fails
+  `gatherFacts` with `<member>: not a project`, exits 1 and writes nothing. If `writeFiles` later
+  creates directories for valid projects, they are created by the invoking user inside a chain that
+  just passed. Residual: group/other-write permissions from a permissive umask on a newly created
+  directory are not re-checked. Missing seam or getuid skips the check (Windows is not protected).
+  Same-uid processes remain trusted; owned chains cannot be rearranged by another user under these
+  permission rules.
+- **F7 (R4-2, R5):** every CLI write (`new`, `generate`, `add`, `agents`, …) uses the shared
+  writer's temp-then-rename replacement and ownership-independent file refusals. Never write an
+  existing inode. Snapshot via read-only no-follow/non-blocking/ no-controlling-terminal open, fstat
+  regular/size/static-nlink checks and bounded reads; ENOENT means absent. Static hard-link refusal
+  is diagnostic, not the race protection. Create a random exclusive same-directory temp at mode 0666
+  (umask applies), write it, preserve only existing `stat.mode & 0o777` permissions with chmod
+  (never setuid, setgid or sticky), close, then rename over the entry. Cleanup covers handled
+  failures only: a process killed between temp creation and rename can leave a
+  `.<name>.setu-<hex>.tmp` file. Clean failed temps best-effort and retain
   `RegularFileWriteError.before` for undo. Snapshot close completes before temp creation: if it
   fails, the target is untouched and the error needs no undo wrapper. Restoration uses this same
-  writer; created targets are removed. Parent resolution remains by name outside ancestor adoption;
-  same-user races are trusted for F6. Deterministic real-inode races and removed-guard negative
-  controls verify both decisions.
+  writer; created targets are removed. Parent resolution remains by name outside agents workspace
+  writes; same-user races are trusted for F6. Deterministic real-inode races and removed-guard
+  negative controls verify both decisions.

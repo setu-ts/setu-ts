@@ -50,6 +50,9 @@ export function regularFileWriteFlags(flags: {
 
 /**
  * Snapshots read-only, then replaces the directory entry with a fresh same-directory inode.
+ * Copies only the existing 0o777 permission bits, never setuid, setgid or sticky bits.
+ * Cleanup covers handled failures only: a process killed between temp creation and rename
+ * can leave a .<name>.setu-<hex>.tmp file in the target directory.
  * @param path - Target whose parent chain the caller has checked.
  * @param bytes - Replacement bytes.
  * @param maxExistingBytes - Maximum prior content to retain for undo.
@@ -82,7 +85,7 @@ export async function writeRegularFile(
       if (!stat.isFile() || stat.nlink > 1 || stat.size > maxExistingBytes) {
         throw new Error(refusal);
       }
-      mode = stat.mode & 0o7777;
+      mode = stat.mode & 0o777;
       const previous = new Uint8Array(maxExistingBytes);
       let length = 0;
       while (length < previous.length) {
