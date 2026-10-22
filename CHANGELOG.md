@@ -31,6 +31,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Declared OpenAPI operation metadata now reaches the document (#487, 0.10.0, `@setu-ts/common`,
+  `@setu-ts/decorator-plugin`, `@setu-ts/openapi-plugin`).** Optional `RouteSchema.operationId` and
+  `RouteSchema.description` carry programmatic declarations and `@ApiOperation` metadata. A declared
+  id is used verbatim: `@ApiOperation({ operationId: 'listUsers' })` now emits `listUsers` instead
+  of `get-users`. Regenerating an SDK client renames the method and id-derived types: `<Op>Args`,
+  `<Op>Error`, `is<Op>Error`, `<Op>Error<status>Body`, `<Op>Body`, `<Op>Response<status>` and
+  `<Op><Param>Param`. Hoisted components also follow the id (for example `GetUsersBody` →
+  `ListUsersBody`, only where a schema is hoisted), as does `x-setu-unrepresentable[].at`. Declared
+  ids are reserved first, so an undeclared route's `get-users` can become `get-users-2` when another
+  route declares `get-users`. Blank or duplicate included declared ids now fail `start()` with
+  exported `OperationIdError` (`reason: 'blank' | 'duplicate'`); direct
+  `OpenApiGenerator.generate()` calls throw it too. Excluded routes do not claim ids. A document
+  with no declared ids or descriptions remains byte-identical. Distinct ids such as `getUsers` and
+  `get-users` remain valid OpenAPI, but the SDK refuses their sanitized method-name collision with
+  `Duplicate operation name`. **Migration:** check existing declarations, choose distinct nonblank
+  ids, regenerate clients and update callers and references to renamed types, components and
+  diagnostics. See `docs/upgrading.md` Unreleased.
+
 - **Environment secrets use the config snapshot as a fallback (V9-77, #485, 0.10.0,
   `@setu-ts/secrets-plugin`).** The default `EnvProvider` reads the environment first, then string
   values from `CAPABILITIES.CONFIG` when available. `.env`-only secrets loaded by `ConfigPlugin` now

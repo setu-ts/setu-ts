@@ -184,14 +184,32 @@ Rules and limits:
 
 ## Operation ids
 
-An id is derived from the method and the path with placeholders unwrapped: `GET /orders/{id}`
-becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset flags them — and
-tools that put an `operationId` in an anchor, a filename or a URL are entitled to break on them.
+When no id is declared, an id is derived from the method and the path with placeholders unwrapped:
+`GET /orders/{id}` becomes `get-orders-by-id`. Braces are URL-unsafe — Redocly's recommended ruleset
+flags them — and tools that put an `operationId` in an anchor, a filename or a URL are entitled to
+break on them.
 
 For example, `GET /api/v1/invoices` produces `get-api-v1-invoices`; the SDK generator names its
-method `getApiV1Invoices`. Programmatic routes have no `operationId` override: `RouteSchema`'s
-OpenAPI-specific fields are `tags` and `summary`. `@ApiOperation({ operationId })` accepts and
-stores the option but currently ignores it when building the route schema; ids remain derived.
+method `getApiV1Invoices` when no id is declared. Declare
+`schema: { operationId: 'listInvoices', description: 'Lists invoices.' }` on a programmatic route,
+or use `@ApiOperation({ operationId: 'listInvoices', description: 'Lists invoices.' })`. A declared
+id is used verbatim and `description` is emitted on the operation alongside `summary` and `tags`.
+
+Declared ids are reserved before derived ones, regardless of registration order. A derived
+`get-users` becomes `get-users-2` if another included route declares `get-users`. A blank id (empty
+or whitespace-only) or duplicate declared id throws exported `OperationIdError` with
+`reason: 'blank' | 'duplicate'` at `app.start()`; direct `OpenApiGenerator.generate()` calls throw
+the same error. Its message names the id and routes as `METHOD path`. Excluded paths and owners
+neither claim nor collide. A route added after bootstrap is validated when the document is first
+built; invalid declarations then produce a request-time `500`. The startup scan does not build or
+cache the document.
+
+Distinct ids can still sanitize to the same SDK method: declared `getUsers` beside undeclared
+`GET /users` (derived `get-users`) is valid OpenAPI, but `@setu-ts/sdk` refuses it with
+`Duplicate operation name`. Choose ids that also yield distinct TypeScript names when generating
+clients. See
+[the upgrade guide](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md#unreleased) for
+generated-name changes.
 
 ## Documenting authentication
 
@@ -268,6 +286,7 @@ and the `@ApiTags`/`@ApiOperation`/`@ApiResponse` decorators from
 | `zodToOpenApi`            | function  |
 | `OpenApiGenerator`        | class     |
 | `OpenApiService`          | class     |
+| `OperationIdError`        | class     |
 | `ZodToOpenApi`            | class     |
 | `IOpenApiService`         | interface |
 | `OpenApiDocument`         | interface |

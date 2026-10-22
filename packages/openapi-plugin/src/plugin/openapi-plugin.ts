@@ -1,5 +1,10 @@
 import { CAPABILITIES, OptionalDependencyUnavailableError, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
+import {
+  claimDeclaredOperationIds,
+  DEFAULT_EXCLUDED_OWNERS,
+  isRouteExcluded,
+} from '../generators/declared-operation-ids.ts';
 
 import type { OpenApiGeneratorOptions } from '../generators/openapi-generator.ts';
 import type { IOpenApiService } from '../interfaces/openapi-service.ts';
@@ -58,6 +63,7 @@ export interface OpenApiPluginOptions extends OpenApiGeneratorOptions {
  * @returns An `IPlugin` instance
  * @throws {TypeError} If Swagger asset options are invalid
  * @throws {OptionalDependencyUnavailableError} At registration if self-hosting cannot load swagger-ui-dist
+ * @throws {OperationIdError} At bootstrap if an included declared operation id is blank or duplicated
  *
  * @example
  * ```typescript
@@ -225,6 +231,14 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
           return result;
         });
       }
+
+      const excludedPathSet = new Set(excludedPaths);
+      const excludedOwnerSet = new Set(excludeOwners ?? DEFAULT_EXCLUDED_OWNERS);
+      ctx.lifecycle.onBootstrap(() => {
+        claimDeclaredOperationIds(ctx.router.listRoutes(), (route) =>
+          isRouteExcluded(route, excludedPathSet, excludedOwnerSet),
+        );
+      });
     },
   };
 }

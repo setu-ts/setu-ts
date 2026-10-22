@@ -84,6 +84,7 @@ describe('OpenApiService', () => {
       },
       lifecycle: {
         onInit: () => {},
+        onBootstrap: () => {},
         onStopping: () => {},
         onShutdown: () => {},
       },

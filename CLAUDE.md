@@ -6618,6 +6618,11 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   `options.configFallback` defaults to true, is validated at construction for the env provider, and
   can disable the fallback. Unit and real-kernel ConfigPlugin tests cover ordering, schema
   stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR #485).
+- **`@ApiOperation` operation ids** (`common` + `decorator-plugin` + `openapi-plugin` — declared
+  OpenAPI metadata reaches the document, 0.10.0): optional `RouteSchema.operationId`/`description`,
+  forwarded from `@ApiOperation`; a declared id is used verbatim and reserved before derived ids by
+  one internal helper shared with an `onBootstrap` route scan, and a blank or duplicate declared id
+  fails `start()` with the new `OperationIdError` — complete (PR #487).
 - **Milestone 116** (`packages/cli` + every published library package + `scripts/` — agent briefs):
   `setu agents` writes a marker-delimited section into `AGENTS.md` naming the project's installed
   and not-installed Setu-TS packages, the add-a-listed-package rule and the path to each installed

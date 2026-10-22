@@ -247,9 +247,9 @@ schema and a description the declaration does not carry.
 - **Views** — `@Render(Component)` (renders through a `CAPABILITIES.VIEW` provider — see
   `@setu-ts/view-plugin`)
 - **Response shaping** — `@HttpCode`, `@ResponseHeader`, `@Redirect`
-- **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse` (`@ApiOperation({ operationId })` is
-  accepted and stored but currently ignored when creating the route schema; OpenAPI derives ids from
-  method and path.)
+- **OpenAPI** — `@ApiTags`, `@ApiOperation`, `@ApiResponse` (`@ApiOperation` forwards `operationId`,
+  `summary` and `description` into the route schema; OpenAPI uses a declared id verbatim and derives
+  one from method and path when it is absent.)
 - **Extension** — `createDecorator`, `Custom`, `registerParameterResolver`
 - **Discovery** — `discoverControllers`
 

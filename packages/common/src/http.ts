@@ -470,6 +470,19 @@ export interface RouteSchema {
   /** OpenAPI operation summary. */
   readonly summary?: string;
   /**
+   * Declared OpenAPI operation identifier, used verbatim instead of a derived id.
+   * Must be nonblank and unique among routes included in the document.
+   *
+   * @since 0.10.0
+   */
+  readonly operationId?: string;
+  /**
+   * Longer OpenAPI operation description.
+   *
+   * @since 0.10.0
+   */
+  readonly description?: string;
+  /**
    * OpenAPI security requirements for this operation, overriding any
    * document-level default. Each entry names a scheme declared in the
    * document's `components.securitySchemes` and lists the scopes it needs

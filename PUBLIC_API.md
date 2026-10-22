@@ -9439,6 +9439,7 @@ filesystem refuses self-hosting and names CDN and custom-base remedies.
 
 | Export             | Kind      | Contract                                                                                                              |
 | ------------------ | --------- | --------------------------------------------------------------------------------------------------------------------- |
+| `OperationIdError` | class     | Refuses blank or duplicate declared ids; readonly `reason: 'duplicate' \| 'blank'`                                    |
 | `SwaggerOptions`   | type      | `{ readonly assets?: 'self' \| 'cdn' \| { readonly baseUrl: string } }`                                               |
 | `SwaggerUiOptions` | interface | `specUrl`, optional `title`, `assets` with the same modes, and local `endpoint` (default `/docs`) for `swaggerUiHtml` |
 
@@ -9503,6 +9504,31 @@ app.register(
   }),
 );
 ```
+
+### Operation ids and descriptions
+
+Optional `RouteSchema.operationId` and `RouteSchema.description` (since 0.10.0) carry programmatic
+declarations and `@ApiOperation({ operationId, description })` metadata. The id is used verbatim;
+without it, ids keep the derived method/path format (`GET /users/:id` → `get-users-by-id`). The
+description is emitted when declared, including an empty string.
+
+Declared ids are claimed before derived ones, regardless of route order: a derived `get-users`
+becomes `get-users-2` if another included route declares `get-users`. Excluded paths and owners
+neither claim nor collide. `OpenApiGenerator.generate(routes)` throws `OperationIdError` for blank
+(empty or whitespace-only) or duplicate declared ids. `OpenApiPlugin` performs the same route scan
+at bootstrap, failing `start()` without building or caching a document. A route added after
+bootstrap is checked when the document is first built; a failure then answers `500`.
+
+`OperationIdError extends Error` is exported from `@setu-ts/openapi-plugin` (since 0.10.0). Its
+constructor is `(reason: 'duplicate' | 'blank', message: string)`; readonly `reason` names the
+refusal, `name` is `'OperationIdError'`, and the diagnostic names the declared id and affected
+routes as `METHOD path`. The allocation helper is internal; no service or generator method is added.
+
+Component names and `x-setu-unrepresentable[].at` follow the chosen id. SDK method and type names
+therefore change when an existing declaration starts taking effect; see
+[Upgrading](docs/upgrading.md#unreleased). Distinct OpenAPI ids can still collide in SDK codegen:
+declared `getUsers` beside derived `get-users` is valid OpenAPI but is refused by the SDK with
+`Duplicate operation name`. Choose ids with distinct sanitized TypeScript names.
 
 ### Documenting Authentication
 
@@ -9569,9 +9595,10 @@ Rules and limits, stated rather than left to discovery:
 - **A derived route gains `400: { description: 'Bad request' }`** unless it declares its own. The
   status is real; no body schema is emitted, because the shape depends on the plugin's configured
   `errorFormat`, which the generator cannot see.
-- **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the `operationId`
-  format and schema deduplication are unconditional, so this does not restore the whole
-  pre-derivation document; pass `excludeOwners: []` to document the operational routes again.
+- **`deriveRequestSchemas: false`** disables derivation only. Owner exclusion, the derived
+  `operationId` format for routes without a declared id and schema deduplication are unconditional,
+  so this does not restore the whole pre-derivation document; pass `excludeOwners: []` to document
+  the operational routes again.
 
 Unlike `deriveSecurity` this is ON by default, because nothing has to be configured for it: a
 security requirement names a scheme that cannot be inferred from a guard, while the schema on the
@@ -9616,8 +9643,8 @@ Rules and limits, stated rather than left to discovery:
   an under-specified `headers` object into every document that used the decorator.
 - **A `@Redirect` route is documented under its `3xx`.**
 - **`deriveResponseStatus: false`** restores the assumed `200` for every branded route. Like
-  `deriveRequestSchemas: false` it disables this derivation only; owner exclusion, the `operationId`
-  format and schema deduplication are unconditional.
+  `deriveRequestSchemas: false` it disables this derivation only; owner exclusion, the derived
+  `operationId` format for routes without a declared id and schema deduplication are unconditional.
 
 Like `deriveRequestSchemas` and unlike `deriveSecurity`, this is ON by default, because nothing has
 to be configured for it. It is safe to default on because the brand is new surface: no handler
@@ -9796,12 +9823,13 @@ per-document component.
 ### Notes
 
 - Every `RouteSchema` position the generator reads becomes part of the operation: `body` becomes the
-  `application/json` request body, `response` becomes the responses map, `tags`/`summary` become the
-  operation metadata, and `params`, `query`, and `headers` become `parameters` with `in: 'path'`,
-  `in: 'query'`, and `in: 'header'` respectively. Path parameters are always `required: true` (they
-  come from the path template); query and header parameters take their `required` flag from the
-  schema. Header parameters are emitted verbatim — per OpenAPI 3.1, tooling ignores definitions
-  named `Accept`, `Content-Type`, and `Authorization`, so the generator does not filter them out.
+  `application/json` request body, `response` becomes the responses map,
+  `tags`/`summary`/`operationId`/`description` become the operation metadata, and `params`, `query`,
+  and `headers` become `parameters` with `in: 'path'`, `in: 'query'`, and `in: 'header'`
+  respectively. Path parameters are always `required: true` (they come from the path template);
+  query and header parameters take their `required` flag from the schema. Header parameters are
+  emitted verbatim — per OpenAPI 3.1, tooling ignores definitions named `Accept`, `Content-Type`,
+  and `Authorization`, so the generator does not filter them out.
 - A path parameter the `params` schema does not describe is emitted as `{ type: 'string' }` rather
   than the empty schema, which OpenAPI reads as "any type". Every path segment arrives as a string,
   so the empty form made Swagger UI render an untyped box and client generators emit `unknown`. A
@@ -12364,6 +12392,10 @@ Contract notes:
   is skipped and `stop()` behaves exactly as before.
 - Schema positions (`RouteSchema`, `IValidationService`, `IOpenApiApi`) are typed `unknown` so
   `common` carries no validator dependency; the validation plugin narrows them (Zod by default).
+- `RouteSchema.operationId?: string` and `RouteSchema.description?: string` (since 0.10.0) declare
+  operation metadata. OpenAPI uses the id verbatim, derives it only when absent, and emits the
+  description. Included declared ids must be nonblank and unique; `OperationIdError` from
+  `@setu-ts/openapi-plugin` refuses invalid declarations at bootstrap and document generation.
 - `RouteSchema.security` is documentation only — it describes an operation for the OpenAPI document
   and for client generation, and enforces nothing. Authentication is enforced by middleware and
   guards. An **empty array** declares the operation public and is not the same as omitting the
@@ -13410,7 +13442,7 @@ carry full JSDoc.
 | `AbilityOptions` / `PolicyClassAbility` / `PolicyClassTarget` | type | **Since M110a.** `@Ability`'s options, and the helpers typing `@RequirePolicy`'s ability (a policy class's method names) and target (read off the method's second parameter) |
 | `InjectableOptions`                                           | type | Options for `@Injectable()` (`scope?`, `token?`)                                                                                                                             |
 | `ModuleOptions`                                               | type | Options for `@Module()` (`controllers?`, `providers?`, `imports?`; no `exports`)                                                                                             |
-| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`); `operationId` is stored but ignored when building route schemas; OpenAPI always derives the id    |
+| `ApiOperationConfig`                                          | type | Config for `@ApiOperation()` (`operationId?`, `summary?`, `description?`); all three fields reach RouteSchema; OpenAPI uses a declared id verbatim and emits the description |
 | `ApiResponseConfig`                                           | type | Config for `@ApiResponse()` (`status`, `description?`, `schema?`)                                                                                                            |
 | `HttpMethodDecorator`                                         | type | `(path?: string) => SetuMethodDecorator`                                                                                                                                     |
 | `ParamSource`                                                 | type | One entry in a `@Params(...)` declaration; carries the resolved value type                                                                                                   |

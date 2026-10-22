@@ -5,8 +5,16 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IApplication, IPluginContext } from '@setu-ts/common';
+import type {
+  HttpMethod,
+  IApplication,
+  IPluginContext,
+  RouteDefinition,
+  RouteHandler,
+  RouteInfo,
+} from '@setu-ts/common';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';
+import { OperationIdError } from '../../src/errors.ts';
 
 /**
  * Minimal Router mock for testing.
@@ -46,14 +54,27 @@ class Router {
     const route = this.routes.find((r) => r.method === method && r.path === path);
     return route?.handler ?? null;
   }
+
+  listRoutes(): readonly RouteInfo[] {
+    return this.routes.map((r) => ({
+      method: r.method as HttpMethod,
+      path: r.path,
+      definition:
+        typeof r.handler === 'function'
+          ? { handler: r.handler as RouteHandler }
+          : (r.handler as RouteDefinition),
+    }));
+  }
 }
 
 describe('OpenApiPlugin', () => {
   let ctx: IPluginContext;
   let router: Router;
+  let bootstrapHooks: Array<() => void | Promise<void>>;
 
   beforeEach(() => {
     router = new Router();
+    bootstrapHooks = [];
     const serviceRegistry = {
       register: () => {},
       registerFactory: () => {},
@@ -82,6 +103,9 @@ describe('OpenApiPlugin', () => {
       },
       lifecycle: {
         onInit: () => {},
+        onBootstrap: (fn: () => void | Promise<void>) => {
+          bootstrapHooks.push(fn);
+        },
         onStopping: () => {},
         onShutdown: () => {},
       },
@@ -117,6 +141,38 @@ describe('OpenApiPlugin', () => {
         stop: async () => {},
       } as unknown as IApplication,
     } as unknown as IPluginContext;
+  });
+
+  it.each([
+    { ids: ['same', 'same'], reason: 'duplicate' },
+    { ids: [' '], reason: 'blank' },
+  ])('registers a bootstrap scan that refuses $reason declarations', async ({ ids, reason }) => {
+    await OpenApiPlugin({ swagger: false }).register(ctx);
+    // Registered after the plugin, as routes from later plugins would be.
+    ids.forEach((operationId, i) =>
+      router.get(`/route-${i}`, {
+        handler: () => undefined,
+        schema: { operationId },
+      }),
+    );
+    expect(bootstrapHooks).toHaveLength(1);
+    const hook = bootstrapHooks[0];
+    expect(hook).toThrow(OperationIdError);
+    expect(hook).toThrow(expect.objectContaining({ reason }));
+  });
+
+  it('uses caller and documentation path exclusions at bootstrap', async () => {
+    await OpenApiPlugin({
+      swagger: { assets: 'cdn' },
+      endpoint: '/ui',
+      specEndpoint: '/spec',
+      exclude: ['/hidden'],
+    }).register(ctx);
+    for (const path of ['/hidden', '/ui', '/spec']) {
+      router.post(path, { handler: () => undefined, schema: { operationId: '' } });
+    }
+    expect(bootstrapHooks).toHaveLength(1);
+    expect(bootstrapHooks[0]).not.toThrow();
   });
 
   it('should return an IPlugin with correct name', () => {

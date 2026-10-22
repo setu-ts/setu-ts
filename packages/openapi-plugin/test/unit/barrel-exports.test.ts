@@ -8,6 +8,15 @@ import * as openapiPlugin from '../../src/index.ts';
 import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/index.ts';
 
 describe('Barrel exports', () => {
+  it('exports OperationIdError with a reason and keeps allocation helpers internal', () => {
+    const error = new openapiPlugin.OperationIdError('duplicate', 'duplicate id');
+    expect(error).toBeInstanceOf(Error);
+    expect(error.name).toBe('OperationIdError');
+    expect(error.reason).toBe('duplicate');
+    expect(error.message).toBe('duplicate id');
+    expect(openapiPlugin).not.toHaveProperty('claimDeclaredOperationIds');
+    expect(openapiPlugin).not.toHaveProperty('isRouteExcluded');
+  });
   it('should export OpenApiPlugin', () => {
     expect(openapiPlugin.OpenApiPlugin).toBeDefined();
     expect(typeof openapiPlugin.OpenApiPlugin).toBe('function');
