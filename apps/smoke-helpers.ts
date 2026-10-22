@@ -21,6 +21,22 @@ export function skip(reason: string): never {
   process.exit(SKIP_EXIT_CODE);
 }
 
+/**
+ * Reports a prerequisite that leaves part of a smoke check unrun.
+ *
+ * The process still runs every check that does not need it, and exits with
+ * the skip code only if all of those passed: a real failure keeps its own
+ * exit code. The exit listener runs after `node:test` has set the failure code,
+ * which a `beforeExit` listener would not see.
+ */
+export function skipAfterTests(reason: string): void {
+  process.on('exit', (code) => {
+    if (code !== 0) return;
+    console.warn(`SKIP: ${reason}`);
+    process.exitCode = SKIP_EXIT_CODE;
+  });
+}
+
 /** Binds an ephemeral loopback port, then releases it for the example server. */
 export async function freePort(): Promise<number> {
   const server = createServer();

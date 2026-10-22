@@ -1,36 +1,48 @@
-/* eslint-disable no-console -- a skipped prerequisite must be visible in CI. */
-import { freePort } from '../smoke-helpers.ts';
-import {
-  brokeredGreeting,
-  callServiceB,
-  createServiceA,
-  createServiceB,
-  registerGreetingResponder,
-} from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { freePort, skipAfterTests } from '../smoke-helpers.ts';
+import { greetOverBroker, greetOverHttp } from './src/service-a/greeting.client.ts';
+import { createServiceA } from './src/service-a/service-a.config.ts';
+import { respondToGreetings } from './src/service-b/greeting.responder.ts';
+import { createServiceB } from './src/service-b/service-b.config.ts';
 
-const serviceBPort = await freePort();
 const redisUrl = process.env['REDIS_URL'];
-const serviceB = createServiceB(redisUrl);
-const serviceA = createServiceA(serviceBPort, redisUrl);
-await serviceB.start({ port: serviceBPort });
-await serviceA.start();
-let unsubscribe: (() => Promise<void>) | undefined;
-try {
-  if ((await callServiceB(serviceA)) !== 'Hello, service-a!') {
-    throw new Error("Service A did not receive Service B's network response.");
-  }
-  if (redisUrl === undefined) {
-    console.warn('SKIP: set REDIS_URL to run the cross-service Redis request/reply smoke check.');
-    process.exitCode = 77;
-  } else {
-    unsubscribe = await registerGreetingResponder(serviceB);
-    if ((await brokeredGreeting(serviceA)) !== 'Hello, service-a!') {
-      throw new Error('Service B did not complete Redis request/reply for service A.');
-    }
-  }
-} finally {
-  if (unsubscribe !== undefined) {
-    await unsubscribe();
-  }
-  await Promise.all([serviceA.stop(), serviceB.stop()]);
+
+describe('microservices example', () => {
+  let serviceA: IKernelApplication;
+  let serviceB: IKernelApplication;
+
+  before(async () => {
+    const serviceBPort = await freePort();
+    serviceB = createServiceB(redisUrl);
+    serviceA = createServiceA(serviceBPort, redisUrl);
+    await serviceB.start({ port: serviceBPort });
+    await serviceA.start();
+  });
+
+  after(async () => {
+    await Promise.all([serviceA.stop(), serviceB.stop()]);
+  });
+
+  it('service A discovers service B and calls it over HTTP', async () => {
+    assert.equal(await greetOverHttp(serviceA.services), 'Hello, service-a!');
+  });
+
+  it(
+    'service B answers service A through the Redis broker',
+    { skip: redisUrl === undefined },
+    async () => {
+      const responder = await respondToGreetings(serviceB.services);
+      try {
+        assert.equal(await greetOverBroker(serviceA.services), 'Hello, service-a!');
+      } finally {
+        await responder.unsubscribe();
+      }
+    },
+  );
+});
+
+if (redisUrl === undefined) {
+  skipAfterTests('set REDIS_URL to run the cross-service Redis request/reply check.');
 }

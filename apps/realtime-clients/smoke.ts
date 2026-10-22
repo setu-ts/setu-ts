@@ -1,92 +1,64 @@
-import { freePort, startHost, SOURCE_HOST_ARGS } from '../smoke-helpers.ts';
-import { run as runProcess } from '../../scripts/lib/run.ts';
+import { after, before, describe, it } from 'node:test';
+import { run } from '../../scripts/lib/run.ts';
+import { freePort, SOURCE_HOST_ARGS, startHost, stopHost, waitForHttp } from '../smoke-helpers.ts';
+import type { Host } from '../smoke-helpers.ts';
 import { exerciseRealtimeClients } from './driver.ts';
 
-/**
- * Waits for a server to answer, naming it if it never does.
- *
- * Two different servers are awaited below — the Deno host and the workerd one —
- * so a fixed message reports the wrong one. The CI failure this replaces said
- * "Realtime client server did not start" while that host was already serving
- * and it was workerd that had not appeared.
- *
- * @param baseUrl - Origin to poll
- * @param label - Which server this is, used in the failure
- */
-async function waitForServer(baseUrl: string, label: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+/** Runs a command to completion and fails, naming it, if it does. */
+async function runOrFail(command: string, args: readonly string[]): Promise<void> {
+  const outcome = await run(command, args, { inherit: true });
+  if (outcome.code !== 0) throw new Error(`${command} ${args.join(' ')} exited ${outcome.code}.`);
+}
+
+describe('realtime-clients example', () => {
+  let server: Host;
+  let baseUrl: string;
+
+  before(async () => {
+    const port = await freePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    server = startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(port)]);
+    await waitForHttp(`${baseUrl}/resume`, { label: 'Realtime client server' });
+  });
+
+  after(async () => {
+    await stopHost(server);
+  });
+
+  it('works from this Node process', async () => {
+    await exerciseRealtimeClients(baseUrl);
+  });
+
+  it('works from Node with type stripping', async () => {
+    await runOrFail('node', ['--experimental-strip-types', 'driver.ts', baseUrl]);
+  });
+
+  it('works from Bun', async () => {
+    await runOrFail('bun', ['driver.ts', baseUrl]);
+  });
+
+  it('works from workerd', async () => {
+    // `npx wrangler` downloads Wrangler on first use, which on a cold runner
+    // takes longer than the readiness budget below. Resolve it first.
+    await runOrFail('npx', ['--yes', 'wrangler', '--version']);
+
+    const workerdPort = await freePort();
+    const worker = startHost('npx', [
+      'wrangler',
+      'dev',
+      'worker.ts',
+      '--port',
+      String(workerdPort),
+      '--log-level',
+      'error',
+    ]);
     try {
-      await fetch(`${baseUrl}/resume`);
-      return;
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      const workerdUrl = `http://127.0.0.1:${workerdPort}`;
+      await waitForHttp(workerdUrl, { label: 'workerd client host' });
+      const response = await fetch(`${workerdUrl}/?baseUrl=${encodeURIComponent(baseUrl)}`);
+      if (!response.ok) throw new Error(`The workerd client driver returned ${response.status}.`);
+    } finally {
+      await stopHost(worker);
     }
-  }
-  throw new Error(`${label} did not start within ten seconds.`);
-}
-
-async function run(command: string, args: readonly string[]): Promise<void> {
-  const outcome = await runProcess(command, args, { inherit: true });
-  if (outcome.code !== 0) throw new Error(`${command} realtime driver failed.`);
-}
-
-const serverPort = await freePort();
-const baseUrl = `http://127.0.0.1:${serverPort}`;
-const server = startHost(process.execPath, [...SOURCE_HOST_ARGS, 'main.ts', String(serverPort)]);
-
-try {
-  await waitForServer(baseUrl, 'Realtime client server');
-  await exerciseRealtimeClients(baseUrl);
-  await run('node', ['--experimental-strip-types', 'driver.ts', baseUrl]);
-  await run('bun', ['driver.ts', baseUrl]);
-
-  // `npx wrangler` installs the package on first use, and on a cold runner that
-  // download costs far more than waitForServer's ten-second budget — so the
-  // server was up while the probe had already given up. Measured: resolving it
-  // first costs ~1.2s warm, after which `wrangler dev` binds in ~1.3s, well
-  // inside the budget. Paying it here leaves the window timing startup only.
-  //
-  // `run` throws on failure, so a genuinely unavailable wrangler is a named
-  // error rather than a timeout blamed on the server. apps/cloudflare takes the
-  // other route for the same prerequisite — it probes the BARE `wrangler`
-  // binary and skips when absent — which is why that check skips on CI while
-  // this one runs.
-  await run('npx', ['--yes', 'wrangler', '--version']);
-
-  const workerdPort = await freePort();
-  const worker = startHost('npx', [
-    'wrangler',
-    'dev',
-    'worker.ts',
-    '--port',
-    String(workerdPort),
-    '--log-level',
-    'error',
-  ]);
-  try {
-    await waitForServer(`http://127.0.0.1:${workerdPort}`, 'workerd client host');
-    const response = await fetch(
-      `http://127.0.0.1:${workerdPort}/?baseUrl=${encodeURIComponent(baseUrl)}`,
-    );
-    if (!response.ok) {
-      throw new Error(`workerd client driver returned ${response.status}.`);
-    }
-  } finally {
-    // The same guard this file's outer `finally` already carries for `server`:
-    // `kill()` on an already-terminated child throws, and a throw here would
-    // replace the real failure.
-    try {
-      worker.kill('SIGTERM');
-    } catch {
-      // Already gone; its status still needs awaiting.
-    }
-    await worker.status;
-  }
-} finally {
-  try {
-    server.kill('SIGTERM');
-  } catch {
-    // A startup failure already terminated the child; preserve its original error.
-  }
-  await server.status;
-}
+  });
+});
