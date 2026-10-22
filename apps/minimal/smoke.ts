@@ -1,14 +1,24 @@
-import { createMinimalApp } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
 
-const app = createMinimalApp();
-await app.start();
-try {
-  const response = await app.inject({ method: 'GET', url: 'http://example.test/' });
-  if (response.statusCode !== 200 || response.body !== '{"hello":"world"}') {
-    throw new Error(
-      `Expected GET / to return 200 and the greeting, received ${response.statusCode}`,
-    );
-  }
-} finally {
-  await app.stop();
-}
+describe('minimal example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
+  });
+
+  after(async () => {
+    await app.stop();
+  });
+
+  it('answers GET / with a greeting', async () => {
+    const response = await app.inject({ method: 'GET', url: '/' });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { hello: 'world' });
+  });
+});

@@ -1,30 +1,41 @@
-import { createMultiTenantApp } from './src/app.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp, TENANT_HEADER } from './setu.config.ts';
 
-const app = createMultiTenantApp();
-await app.start();
-try {
-  const headers = { 'x-tenant-id': 'tenant-a' };
-  const created = await app.inject({
-    method: 'POST',
-    url: 'http://example.test/notes',
-    headers,
-    body: { text: 'only A can read this' },
+describe('multi-tenant example', () => {
+  let app: IKernelApplication;
+
+  before(async () => {
+    app = createApp();
+    await app.start();
   });
-  if (created.statusCode !== 201) {
-    throw new Error(`Expected tenant A write to succeed, received ${created.statusCode}`);
-  }
-  const tenantA = await app.inject({ method: 'GET', url: 'http://example.test/notes', headers });
-  const tenantB = await app.inject({
-    method: 'GET',
-    url: 'http://example.test/notes',
-    headers: { 'x-tenant-id': 'tenant-b' },
+
+  after(async () => {
+    await app.stop();
   });
-  if (
-    tenantA.json<readonly unknown[]>().length !== 1 ||
-    tenantB.json<readonly unknown[]>().length !== 0
-  ) {
-    throw new Error('Tenant data isolation failed.');
-  }
-} finally {
-  await app.stop();
-}
+
+  it("keeps one tenant's writes invisible to another", async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/notes',
+      headers: { [TENANT_HEADER]: 'tenant-a' },
+      body: { text: 'only A can read this' },
+    });
+    assert.equal(created.statusCode, 201);
+
+    const tenantA = await app.inject({
+      method: 'GET',
+      url: '/notes',
+      headers: { [TENANT_HEADER]: 'tenant-a' },
+    });
+    const tenantB = await app.inject({
+      method: 'GET',
+      url: '/notes',
+      headers: { [TENANT_HEADER]: 'tenant-b' },
+    });
+
+    assert.equal(tenantA.json<unknown[]>().length, 1);
+    assert.equal(tenantB.json<unknown[]>().length, 0);
+  });
+});

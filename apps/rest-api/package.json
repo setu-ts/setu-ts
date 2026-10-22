@@ -9,7 +9,11 @@
     "@setu-ts/auth-plugin": "workspace:^",
     "@setu-ts/rest-starter": "workspace:^",
     "zod": "^3.24.0",
-    "swagger-ui-dist": "^5"
+    "swagger-ui-dist": "^5",
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/exceptions": "workspace:^",
+    "@setu-ts/validation-plugin": "workspace:^",
+    "@setu-ts/runtime": "workspace:^"
   },
   "devDependencies": {},
   "scripts": {
