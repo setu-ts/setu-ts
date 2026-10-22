@@ -14710,7 +14710,7 @@ since the run is meant to judge them.
 ## Milestone 116: Agent Briefs — `setu agents` and Per-Package Cards
 
 **Package(s):** `packages/cli` (the `setu agents` command and its `--check` mode), every published
-plugin package (one shipped card each), and `scripts/` (the card gate). No `common`, kernel or
+library package (one shipped card each), and `scripts/` (the card gate). No `common`, kernel or
 plugin `src/` change: a card is documentation that ships in the tarball.
 
 **Source:** the agent-brief pilot (2026-10-18/19; its harness, briefs, cards and per-run results are
@@ -14782,16 +14782,18 @@ What the pilot showed, in order of confidence:
   nonexistent); the project's commands; numbered rules, most important first; the project map; the
   installed packages with their capability tokens; and the not-installed packages, each with its npm
   description and the `setu add` name. Everything in the brief is specific to this project's
-  template, style and runtime, and the framework section has a byte budget the command enforces (the
-  pilot's was about 8.5 KB).
+  template, style and runtime, and the framework section has a byte budget a test enforces over
+  every reachable composition (the pilot's was about 8.5 KB): refusing to write a brief because the
+  user installed many packages would punish the user for a limit of ours.
 - **Workspaces get one file per level** (agreed 2026-10-12): the root covers layout, members, the
   dev runner, ports and transport; each member covers itself. Each file points to the other
   explicitly, because an agent started inside a member never sees the root otherwise.
-- **Each published plugin package ships a card** in its npm tarball. A card is hand-written, in the
-  pilot's shape: one heading, how to add it, the one or two snippets that cover its common use, and
-  its options and pitfalls as bullets. It is NOT generated from `PUBLIC_API.md` or the README: the
-  pilot's evidence is that compactness is what helps, and a generated card would be a shortened copy
-  of documents that already exist.
+- **Each published library package ships a card** in its npm tarball — 50 packages: core, plugins,
+  `sdk` and starters. `cli` and `create` are run, never imported, and carry none. A card is
+  hand-written, in the pilot's shape: one heading, how to add it, the one or two snippets that cover
+  its common use, and its options and pitfalls as bullets. It is NOT generated from `PUBLIC_API.md`
+  or the README: the pilot's evidence is that compactness is what helps, and a generated card would
+  be a shortened copy of documents that already exist.
 - **A card is in the project exactly when its package is installed.** The brief points at
   `node_modules/@setu-ts/<package>/`, so a plain `npm install` delivers the card with no Setu
   command — the property the pilot's file watcher simulated.
@@ -14802,7 +14804,7 @@ What the pilot showed, in order of confidence:
   to cards);
 - every backticked `@setu-ts` symbol a card names is exported by the package it names;
 - every card is within a byte budget (the pilot's largest was 2.2 KB);
-- `release:verify` refuses a published plugin package whose tarball carries no card.
+- `release:verify` refuses a published library package whose tarball carries no card.
 
 The not-installed descriptions come from `scripts/jsr-metadata.ts`'s `PACKAGE_METADATA`, which is
 repository-only. The CLI therefore carries its own copy for packages it can add, and a gate refuses
@@ -14819,7 +14821,11 @@ drift between the two.
    at `node_modules/.../*.d.ts` and the model followed it. The plan must confirm the card path is
    read, and decide the fallback for the projects without `node_modules`: copying cards into the
    project (the pilot used `.setu/docs/`) on `setu add`, with `setu agents` filling in cards for
-   packages installed some other way.
+   packages installed some other way. **Decided: declined.** Cards are never copied into the
+   project. A copy would ship a second copy of every card inside the CLI and a second drift gate,
+   and go stale after every upgrade, for package-manager setups no CLI-generated project uses; the
+   brief instead names the deterministic `node_modules/@setu-ts/<package>/AGENT_CARD.md` path and,
+   in a project with no `node_modules`, warns with the setting that creates one.
 2. **The card file's name and location in the tarball**, and whether a non-plugin package (`kernel`,
    `common`, `runtime`, `testing`) gets one. The pilot gave `common`, `runtime` and `testing` cards
    from the start.
@@ -14837,15 +14843,15 @@ follow-on; the pilot did not test any of them.
 
 **Deliverables**
 
-- [ ] `plans/milestone-116-agent-briefs.md`, settling the open questions above
-- [ ] `setu agents` and `setu agents --check`, with standalone and workspace output
-- [ ] A card in every published plugin package, and the four card gates
-- [ ] The CLI's not-installed description table and its drift gate
-- [ ] A scaffold e2e: scaffold, `setu add` a plugin, install, run `setu agents`, and assert the
+- [x] `plans/milestone-116-agent-briefs.md`, settling the open questions above
+- [x] `setu agents` and `setu agents --check`, with standalone and workspace output
+- [x] A card in every published library package, and the four card gates
+- [x] The CLI's not-installed description table and its drift gate
+- [x] A scaffold e2e: scaffold, `setu add` a plugin, install, run `setu agents`, and assert the
       brief names the installed and not-installed sets correctly and the card is reachable from the
       path the brief gives
-- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `116`
+- [x] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `116`
 
 ---
 
@@ -15118,4 +15124,4 @@ patch by construction and gains nothing new here.
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
-| 116       | ⬜     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
+| 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |

@@ -54,8 +54,9 @@ The resolved tenant is also available as `ctx.request.tenant`.
 
 `'subdomain'`, `'header'`, `'path'`, and `'jwt'` — or an array of them, tried in order.
 
-**`subdomain` requires `baseDomain`** and constrains resolution to it: a request for an unrelated
-host does not resolve a tenant.
+**`subdomain` takes an optional `baseDomain`.** With one, it constrains resolution to that domain: a
+request for an unrelated host does not resolve a tenant. Without one, the first label of any
+multi-label host is the tenant id, and a single-label host such as `localhost` resolves nothing.
 
 **`jwt` reads an UNVERIFIED claim** — the tenant id comes from a token whose signature nobody has
 checked, so a client can mint a token naming any tenant. Use it only alongside authentication

@@ -8,7 +8,7 @@
  *
  * The packs are cached under `<root>/.tmp/overlay/<key>`, where the key hashes
  * every input a pack is built from: each published member's `src/`,
- * `package.json`, `tsconfig.json`, `README.md` and `LICENSE`, and the root inputs
+ * `package.json`, `tsconfig.json`, `README.md`, `AGENT_CARD.md` and `LICENSE`, and the root inputs
  * every build inherits — `tsconfig.base.json`, the solution `tsconfig.json`, the
  * root `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, the root
  * `LICENSE` and this script. A change to any of them is a new key, so a stale
@@ -91,6 +91,7 @@ export async function packCacheKey(
       join(member, 'package.json'),
       join(member, 'tsconfig.json'),
       join(member, 'README.md'),
+      join(member, 'AGENT_CARD.md'),
       join(member, 'LICENSE'),
     );
   }

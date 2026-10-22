@@ -99,28 +99,33 @@ export interface GenerateDependencies {
 }
 
 /**
- * Prints the schematics available in the target project.
- *
- * Gated schematics whose plugin is absent are listed as unavailable, naming the
- * package to install.
+ * Selects the schematic metadata available to this installed plugin set.
  *
  * @param installed - The `@setu-ts` packages detected in the project
- * @param log - Output sink
+ * @returns The available schematics, in registry order
  */
+export function availableSchematics(
+  installed: ReadonlySet<string>,
+): ReturnType<typeof listSchematics> {
+  return listSchematics().filter(({ requiresPlugin: fixed, requiresPluginWhen }) => {
+    const required = fixed ?? requiresPluginWhen?.(installed);
+    return required === undefined || installed.has(required);
+  });
+}
+
 function printSchematics(installed: ReadonlySet<string>, log: (message: string) => void): void {
   log(`Usage: ${PROGRAM_NAME} generate <schematic> <name> [options]`);
   log('');
   log('Schematics:');
+  const available = new Set(availableSchematics(installed).map((entry) => entry.name));
   for (const { name, requiresPlugin: fixed, requiresPluginWhen } of listSchematics()) {
     const requiresPlugin = fixed ?? requiresPluginWhen?.(installed);
-    if (requiresPlugin === undefined) {
-      log(`  ${name}`);
-    } else if (installed.has(requiresPlugin)) {
+    if (available.has(name)) {
       log(`  ${name}`);
     } else {
       log(
         `  ${name}  (unavailable — run \`${PROGRAM_NAME} add ` +
-          `${requiresPlugin.replace(/-plugin$/, '')}\`)`,
+          `${requiresPlugin!.replace(/-plugin$/, '')}\`)`,
       );
     }
   }

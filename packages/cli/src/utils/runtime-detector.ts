@@ -27,7 +27,7 @@ import { readJsonManifest } from './manifest-reader.ts';
 import { escapeName } from './names.ts';
 
 /**
- * A runtime marker exists but could not be read, so the runtime cannot be
+ * A runtime marker's metadata could not be inspected, so the runtime cannot be
  * decided. Thrown rather than read as absence: an unreadable `wrangler.jsonc`
  * beside a `wrangler dev` start script would otherwise classify a Workers
  * project as Node, and the caller would act on that guess.
@@ -52,17 +52,17 @@ export class RuntimeMarkerUnreadableError extends Error {
 }
 
 /**
- * Reports whether a marker file exists. Only a missing path counts as absent;
+ * Reports whether a marker path exists, without opening its content. Only a missing path counts as absent;
  * any other failure (an access error, an I/O error) is unknown, not absent.
  *
  * @param fs - The filesystem to read through
  * @param path - The absolute path
  * @returns Whether the file is present
- * @throws {RuntimeMarkerUnreadableError} When the file exists but cannot be read
+ * @throws {RuntimeMarkerUnreadableError} When the path's metadata cannot be inspected
  */
 async function markerPresent(fs: IFileSystem, path: string): Promise<boolean> {
   try {
-    await fs.readFile(path);
+    await fs.stat(path);
     return true;
   } catch (cause) {
     if (isMissingPath(cause)) return false;
@@ -107,8 +107,7 @@ async function denoOrNode(fs: IFileSystem, dir: string): Promise<TargetRuntime> 
  * @param dir - The project directory
  * @returns The detected runtime: `'deno'` only when a `deno.json`/`deno.jsonc`
  *   decides it, `'node'` when nothing else does
- * @throws {RuntimeMarkerUnreadableError} When a marker exists but cannot be
- *   read
+ * @throws {RuntimeMarkerUnreadableError} When a marker's metadata cannot be inspected
  */
 export async function detectTargetRuntime(fs: IFileSystem, dir: string): Promise<TargetRuntime> {
   for (const config of WRANGLER_CONFIGS) {
@@ -119,8 +118,8 @@ export async function detectTargetRuntime(fs: IFileSystem, dir: string): Promise
   // carrying neither falls back to Node, the default target since M111d. Never
   // the bare fallback alone: a Deno-only project has no `package.json` at all,
   // so flipping that fallback would misread every one of them as Node.
-  // Presence is decided first so an access failure is refused, while a file
-  // that reads but does not parse takes the same fallback: the plugin detector
+  // Presence is decided by metadata first so a stat failure is refused, while
+  // unreadable or malformed content takes the same fallback: the plugin detector
   // reports a malformed manifest, and this must not throw on the way there.
   const packagePath = joinPath(dir, 'package.json');
   if (!(await markerPresent(fs, packagePath))) return await denoOrNode(fs, dir);

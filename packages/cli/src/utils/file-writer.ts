@@ -10,6 +10,49 @@ import { isMissingPath } from './filesystem-errors.ts';
 import { InterruptedError, throwIfInterrupted } from './interruption.ts';
 import { escapeName } from './names.ts';
 
+/** Optional CLI-only handle-based I/O, supplied by the executable's process boundary. */
+export interface ICliFileSystem extends IFileSystem {
+  /** Opens non-blocking, checks the opened handle is regular, and reads at most maxBytes + 1. */
+  readRegularFile?(path: string, maxBytes: number): Promise<Uint8Array>;
+  /**
+   * Snapshots without following the leaf link, then replaces using a fresh inode and rename.
+   * Failures after temp creation starts carry RegularFileWriteError; only those whose
+   * `mayHaveChanged` is true (the rename was attempted) are rolled back. Snapshot failures
+   * (including close) precede any mutation and need no undo.
+   */
+  writeRegularFile?(
+    path: string,
+    bytes: Uint8Array,
+    maxExistingBytes: number,
+  ): Promise<{ before: Uint8Array | undefined }>;
+  /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
+  readonly invokingUid?: number;
+  /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
+  directoryOwnership?(path: string): Promise<{
+    readonly uid: number;
+    readonly isSymbolicLink: boolean;
+    readonly isDirectory: boolean;
+  }>;
+}
+
+/** Carries undo bytes when a handle-based write or close fails after the snapshot. */
+export class RegularFileWriteError extends Error {
+  readonly before: Uint8Array | undefined;
+  /** False when the failure provably left the target untouched, so no rollback is due. */
+  readonly mayHaveChanged: boolean;
+
+  /** @param before - Previous bytes, or undefined for a file created by this attempt.
+   * @param cause - The write or close failure.
+   * @param mayHaveChanged - Whether the target may have been altered; defaults to true.
+   */
+  constructor(before: Uint8Array | undefined, cause: unknown, mayHaveChanged = true) {
+    super(failureMessage(cause), { cause });
+    this.before = before;
+    this.mayHaveChanged = mayHaveChanged;
+    this.name = 'RegularFileWriteError';
+  }
+}
+
 /**
  * One file a schematic asks the command layer to create.
  */
@@ -411,6 +454,50 @@ async function previousBytes(fs: IFileSystem, path: string): Promise<Uint8Array 
   }
 }
 
+/**
+ * Reads a developer-owned text file the CLI only inspects. The executable checks
+ * the opened handle and bounds the read; filesystems without that optional CLI
+ * capability retain the stat-then-read fallback.
+ *
+ * @param fs - The filesystem to read through
+ * @param path - The file to read
+ * @returns The decoded text, or `undefined` when the path does not exist
+ * @throws {Error} When the path is not a regular file, is larger than 1 MiB, or
+ *   is not valid UTF-8
+ */
+export async function readExistingText(
+  fs: ICliFileSystem,
+  path: string,
+): Promise<string | undefined> {
+  if (fs.readRegularFile !== undefined) {
+    try {
+      return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+        await fs.readRegularFile(path, MAX_EXISTING_FILE_BYTES),
+      );
+    } catch (cause) {
+      if (!isMissingPath(cause)) throw cause;
+      return undefined;
+    }
+  }
+  let stat: StatResult;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+  if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES)
+    throw new Error(`${path}: expected a regular file at most 1 MiB`);
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
+      await fs.readFile(path),
+    );
+  } catch (cause) {
+    if (!isMissingPath(cause)) throw cause;
+    return undefined;
+  }
+}
+
 /** Classifies a write plan without mutating the filesystem. */
 export async function classifyFiles(
   fs: IFileSystem,
@@ -459,7 +546,7 @@ export async function reportDryRunPlan(
 }
 
 /** Restores even a write that rejected after truncating its target. */
-async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
+async function restoreFile(fs: ICliFileSystem, undo: FileUndo): Promise<void> {
   const { before } = undo;
   if (before === undefined) {
     try {
@@ -467,6 +554,10 @@ async function restoreFile(fs: IFileSystem, undo: FileUndo): Promise<void> {
     } catch (cause) {
       if (!isMissingPath(cause)) throw cause;
     }
+    return;
+  }
+  if (fs.writeRegularFile !== undefined) {
+    await fs.writeRegularFile(undo.path, before, MAX_EXISTING_FILE_BYTES);
     return;
   }
   const current = await previousBytes(fs, undo.path);
@@ -497,12 +588,16 @@ function failureMessage(cause: unknown): string {
  * @throws The original failure, or an AggregateError naming incomplete recovery
  */
 export async function writeFiles(
-  fs: IFileSystem,
+  fs: ICliFileSystem,
   files: readonly GeneratedFile[],
   options: { readonly root: string; readonly signal?: AbortSignal },
 ): Promise<readonly WriteOutcome[]> {
   // Every target is checked BEFORE the first write, so a link anywhere in the
   // plan refuses the whole batch with nothing written.
+  // assertInsideProject checks the parents; the Node writer replaces the leaf
+  // via rename. Agents workspace writes also check directory ownership:
+  // a chain owned by the invoking user cannot be rearranged by another user.
+  // Other writes still resolve parents by name.
   for (const file of files) await assertInsideProject(fs, options.root, file.path);
   const encoder = new TextEncoder();
   const directories: string[] = [];
@@ -513,11 +608,27 @@ export async function writeFiles(
     for (const file of files) {
       throwIfInterrupted(options.signal);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
-      const before = await previousBytes(fs, file.path);
-      attempted.push({ path: file.path, before });
-      await fs.writeFile(file.path, encoder.encode(file.contents));
+      const bytes = encoder.encode(file.contents);
+      let before: Uint8Array | undefined;
+      if (fs.writeRegularFile !== undefined) {
+        try {
+          ({ before } = await fs.writeRegularFile(file.path, bytes, MAX_EXISTING_FILE_BYTES));
+        } catch (cause) {
+          // A failure before the rename left the target untouched: undoing it would only
+          // risk reporting a spurious incomplete rollback, or removing a file another
+          // process created at an absent target meanwhile.
+          if (cause instanceof RegularFileWriteError && cause.mayHaveChanged)
+            attempted.push({ path: file.path, before: cause.before });
+          throw cause;
+        }
+        attempted.push({ path: file.path, before });
+      } else {
+        before = await previousBytes(fs, file.path);
+        attempted.push({ path: file.path, before });
+        await fs.writeFile(file.path, bytes);
+      }
       throwIfInterrupted(options.signal);
-      outcomes.push(outcomeFor(file.path, before, encoder.encode(file.contents)));
+      outcomes.push(outcomeFor(file.path, before, bytes));
     }
     return outcomes;
   } catch (cause) {

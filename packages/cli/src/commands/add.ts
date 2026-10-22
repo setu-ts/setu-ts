@@ -27,10 +27,17 @@ import {
   PROGRAM_NAME,
   type TargetRuntime,
 } from '../constants.ts';
-import { type GeneratedFile, joinPath, resolveDir, writeFiles } from '../utils/file-writer.ts';
+import {
+  type GeneratedFile,
+  joinPath,
+  readExistingText,
+  resolveDir,
+  writeFiles,
+} from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import { stringFlag } from '../args.ts';
+import { BRIEF_BEGIN } from '../agents/brief-file.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
 import { findWorkspaceMarker } from '../utils/project-detector.ts';
 import { readJsonManifest } from '../utils/manifest-reader.ts';
@@ -101,7 +108,7 @@ interface IAddablePackage {
  * manifest carries. Both resolve, so `setu add auth` and
  * `setu add @setu-ts/auth-plugin` are the same command.
  */
-const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
+export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['audit', { pkg: 'audit-plugin' }],
   ['auth', { pkg: 'auth-plugin' }],
   ['cache', { pkg: 'cache-plugin' }],
@@ -153,7 +160,7 @@ const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
 
-const RUNTIME_RESTRICTIONS: ReadonlyMap<
+export const RUNTIME_RESTRICTIONS: ReadonlyMap<
   string,
   { readonly runtimes: readonly TargetRuntime[]; readonly reason: string }
 > = new Map([
@@ -939,6 +946,7 @@ export async function runAddCommand(
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
+    if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
 
@@ -993,7 +1001,23 @@ export async function runAddCommand(
   // Both notes concern a Deno start task's permission flags; on another target
   // they describe nothing the developer can act on.
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
+  await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
+}
+
+/** An add is successful even when its advisory brief reminder cannot be read. */
+async function reportAgentsHint(
+  deps: AddCommandDependencies,
+  dir: string,
+  runtime: TargetRuntime,
+): Promise<void> {
+  try {
+    const brief = await readExistingText(deps.fs, joinPath(dir, 'AGENTS.md'));
+    if (brief?.includes(BRIEF_BEGIN) === true)
+      deps.log(`Run \`${cliInvocation(runtime)} agents\` to update AGENTS.md.`);
+  } catch (cause) {
+    deps.error(`Cannot inspect AGENTS.md: ${escapeName(String(cause))}`);
+  }
 }
 
 /**

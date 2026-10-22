@@ -27,10 +27,38 @@ const valid = {
   repository: { url: REPOSITORY_URL },
   publishConfig: { access: 'public' },
   license: 'MIT',
-  files: ['dist', 'src'],
+  files: ['dist', 'src', 'AGENT_CARD.md'],
   dependencies: { '@setu-ts/common': '^0.8.0' },
 };
 describe('npm release rules', () => {
+  it('stops before registry lookup when the actual library archive excludes its card', async () => {
+    let lookedUp = false;
+    await expect(
+      runNpmPublish({
+        dryRun: true,
+        inCi: false,
+        command: (cmd, args) => {
+          if (args[0] === '--version') return Promise.resolve('11.16.0');
+          if (args[0] === 'pack') return Promise.resolve('packed.tgz');
+          if (cmd === 'tar' && args[0] === '-xzOf')
+            return Promise.resolve(
+              JSON.stringify({
+                ...valid,
+                name: '@setu-ts/common',
+                version: WORKSPACE_VERSION,
+                dependencies: {},
+              }),
+            );
+          return Promise.resolve('');
+        },
+        fetchImpl: () => {
+          lookedUp = true;
+          return Promise.resolve(new Response(null, { status: 404 }));
+        },
+      }),
+    ).rejects.toThrow('packed library tarball is missing AGENT_CARD.md');
+    expect(lookedUp).toBe(false);
+  });
   it('accepts a valid packed manifest and source workspace ranges', () => {
     expect(packedManifestProblems(valid, '0.8.0')).toEqual([]);
     expect(
@@ -99,6 +127,7 @@ describe('npm release rules', () => {
           return 'packed.tgz';
         }
         if (cmd === 'tar') {
+          if (args[0] === '-tzf') return 'package/AGENT_CARD.md\n';
           const source = JSON.parse(await readFile(`${dir}/package.json`, 'utf8'));
           for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
             for (const name of Object.keys(source[field] ?? {})) {

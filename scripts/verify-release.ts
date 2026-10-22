@@ -16,7 +16,8 @@
  * 3. The published and unpublished lists together account for every workspace
  *    member, so a newly added package cannot be silently left out.
  * 4. No publishable package is a stub (`export {}` with nothing else).
- * 5. Every published member carries a non-empty README.md for npm rendering.
+ * 5. Every published member carries a non-empty README.md for npm rendering,
+ *    and every library member carries a non-empty AGENT_CARD.md.
  * 6. No package `src` tree contains a computed `import()` without a
  *    `computed-specifier` marker (M70e). JSR's npm-compatibility rewrite is
  *    static and reaches only a literal `import('npm:…')`; a computed specifier
@@ -52,7 +53,7 @@ import { readFile } from 'node:fs/promises';
 import { workspaceMembers } from './lib/workspace.ts';
 
 import { PUBLICATION_HOLDS, PUBLISHED_PACKAGES, UNPUBLISHED_PACKAGES } from './release-packages.ts';
-import { packedManifestProblems } from './npm-release-gate.ts';
+import { agentCardProblems, packedManifestProblems } from './npm-release-gate.ts';
 import { activeHolds } from './publication-hold.ts';
 import { auditPackageSources } from './npm-specifier-audit.ts';
 import { versionSiteProblems } from './version-sites.ts';
@@ -164,6 +165,9 @@ async function main(): Promise<void> {
 
     const readme = await readFile(`${dir}/README.md`, 'utf8').catch(() => '');
     if (readme.trim() === '') problems.push(`${dir}: README.md is missing or empty`);
+    problems.push(
+      ...agentCardProblems(dir, await readFile(`${dir}/AGENT_CARD.md`, 'utf8').catch(() => '')),
+    );
   }
 
   // ── 6: no computed import() without a marker in packages/*/src ─────────────
