@@ -6617,7 +6617,7 @@ Every item below is a miss from a real milestone plan (M10) caught only in revie
   reads environment strings first, then string values from the optional CONFIG capability.
   `options.configFallback` defaults to true, is validated at construction for the env provider, and
   can disable the fallback. Unit and real-kernel ConfigPlugin tests cover ordering, schema
-  stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR pending).
+  stripping, expansion, cache semantics and silent operation without CONFIG — complete (PR #485).
 - **Next milestone** — M115 (the `v0.10.0` client-brief run).
 
 - **The `v0.6.0` closeout** — covers **two** runs against that version: the regression run (5
