@@ -1,41 +1,56 @@
-# @setu-ts/validation-plugin — Zod-compatible request validation
+# @setu-ts/validation-plugin — validate and read parsed requests
 
-`setu add validation` adds the dependency and its zod peer; REST scaffolds register
-`ValidationPlugin({ errorFormat: 'rfc9457' })`. It provides `CAPABILITIES.VALIDATION`.
+**Add it:** `setu add validation` adds this package and `zod`; register `ValidationPlugin()` in
+`setu.config.ts` (the REST scaffold uses `errorFormat: "rfc9457"`). It provides
+`CAPABILITIES.VALIDATION` (`IValidationService`).
+
+## Validate a JSON body
 
 ```ts
-import { z } from 'zod';
-import { ValidationPlugin, validateBody } from '@setu-ts/validation-plugin';
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { z } from "zod";
+import type { IRouterApi } from "@setu-ts/common";
+import { validateBody } from "@setu-ts/validation-plugin";
 
-const CreateUser = z.object({ name: z.string().min(1) });
-
-export function createValidatedApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), ValidationPlugin({ errorFormat: 'rfc9457' })],
-  });
-  const body = validateBody(CreateUser);
-  app.router.post('/users', {
+export function registerUserRoutes(router: IRouterApi): void {
+  const body = validateBody(z.object({ name: z.string().min(1) }));
+  router.post("/users", {
     middleware: [body],
     handler: (ctx) => ctx.response.status(201).json(body.value(ctx)),
   });
-  return app;
 }
 ```
 
-- `ValidationPluginOptions.errorFormat` defaults to `'default'`; `'rfc9457'` serves
-  `application/problem+json`, `'nestjs'` matches that framework, and a formatter function is
-  accepted.
-- `whitelist` strips properties the schema does not declare by calling its `.strip()` once at
-  registration. `forbidNonWhitelisted` rejects them via `.strict()` and wins when both are set. A
-  schema without those methods is used unchanged.
-- Helpers `validateBody`, `validateQuery`, `validateParams`, `validateHeaders` and `validateCookies`
-  return a `ValidatorMiddleware`; read its parsed output with `body.value(ctx)`. The value is
-  tracked per middleware instance, so a later validator on the same target cannot silently change
-  what an earlier reader returns. `ValidatedOutput<typeof schema>` types the result.
-- Schemas are duck-typed through `safeParse`, so any Zod-compatible object works; TypeScript users
-  get output inference from the schema.
-- Invalid input answers 400 with the configured format; a body that is not JSON or a supported form
-  answers 415. Register `errorHandler` from `@setu-ts/exceptions` for the same Problem Details shape
-  on thrown errors.
+## Coerce query strings into typed values
+
+```ts
+import { z } from "zod";
+import type { IRouterApi } from "@setu-ts/common";
+import { validateQuery } from "@setu-ts/validation-plugin";
+
+export function registerSearchRoutes(router: IRouterApi): void {
+  const query = validateQuery(z.object({ page: z.coerce.number().int().min(1).default(1) }));
+  router.get("/search", {
+    middleware: [query],
+    handler: (ctx) => ctx.response.json(query.value(ctx)),
+  });
+}
+```
+
+## Behaviour the types do not show
+
+- Helpers resolve the configured validation service from `ctx.services`, so they use its error
+  format and unknown-property policy.
+- `body.value(ctx)` returns parsed output, including transformations and defaults. It throws
+  TypeError if that validator never ran successfully or a later validator overwrote its target.
+- Invalid input answers `400` before the handler runs. Body validation requires a JSON media type by
+  default; unsupported or missing content types answer `415`, malformed JSON answers `400`.
+- `errorFormat` defaults to `"default"`; `"rfc9457"` serves `application/problem+json`.
+- `whitelist` uses the schema strip method; `forbidNonWhitelisted` uses its strict method and takes
+  precedence. Schemas without the respective methods are unchanged.
+
+## Other options
+
+- `validateBody(schema, { forms: true })` also accepts URL-encoded and multipart forms.
+- `validateParams`, `validateHeaders` and `validateCookies` validate the other request targets.
+- `errorFormat` also accepts `"nestjs"` or a custom formatter; `ValidatedOutput` names inferred
+  output.

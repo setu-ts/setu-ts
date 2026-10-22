@@ -1,54 +1,40 @@
-# @setu-ts/di-plugin — optional dependency-injection container
+# @setu-ts/di-plugin — constructor injection and service scopes
 
-`setu add di` installs the package; no scaffold wires it, so register `DiPlugin()` yourself. It
-provides an `IContainer` under `CAPABILITIES.DI_CONTAINER`. The kernel's service registry remains
-the primary resolution mechanism — no other plugin requires this container, and `ctx.container` is
-`undefined` without it.
+**Add it:** `setu add di` installs it; add `DiPlugin()` to `setu.config.ts` yourself. It provides
+`CAPABILITIES.DI_CONTAINER` (`IContainer`).
 
-```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { DiPlugin } from '@setu-ts/di-plugin';
-import { CAPABILITIES, type IContainer } from '@setu-ts/common';
-
-export async function createDiApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), DiPlugin({ defaultScope: 'singleton', autoRegister: true })],
-  });
-  await app.start(); // capabilities exist only after start()
-  const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
-  return { app, container };
-}
-```
+## Register dependencies and resolve a scoped service
 
 ```ts
+import { CAPABILITIES } from '@setu-ts/common';
 import type { IContainer } from '@setu-ts/common';
 
-class UserService {
-  constructor(readonly label: string) {}
+class Greeting {
+  constructor(readonly text: string) {}
 }
-
-export function resolveUsers(container: IContainer): UserService {
-  container.register('user-service-label', { useValue: 'users' });
-  container.register<UserService>(
-    'user-service',
-    { useClass: UserService, inject: ['user-service-label'] },
-    { scope: 'scoped' },
-  );
-  const scope = container.createScope();
-  return scope.resolve<UserService>('user-service');
-}
+const container = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+container.register('greeting-text', { useValue: 'hello' });
+container.register<Greeting>('greeting', {
+  useClass: Greeting, inject: ['greeting-text'],
+}, { scope: 'scoped' });
+const scope = container.createScope();
+const greeting = scope.resolve<Greeting>('greeting');
 ```
 
-- Tokens are strings; the class, factory or value travels in the provider, and the lifecycle in the
-  third `register` argument. `ClassProvider` takes `useClass` plus optional `inject` tokens,
-  `FactoryProvider` takes `useFactory`, `ValueProvider` takes `useValue`.
-- `defaultScope` defaults to `'singleton'`; `'scoped'` means one instance per `createScope` scope
-  and `'transient'` a new instance per resolve.
-- `autoRegister` defaults to `true` in the plugin: an unknown token falls back to the kernel
-  registry and the first success is cached as a singleton. `createContainer` instead defaults it to
-  `false`; explicit container registrations always win.
-- `createScope` returns a child sharing the parent's singletons with its own scoped cache. The
-  framework creates no scope per request, so a `scoped` service is not re-created per HTTP request.
-- A dependency cycle throws at resolve with a readable chain, including through factory providers
-  calling back into the container.
+## Behaviour the types do not show
+
+- `defaultScope` defaults to `'singleton'`; `'transient'` creates a new instance on every resolve.
+- A child from `createScope` shares parent singletons but has its own scoped instance cache. The
+  container does not automatically create an HTTP request scope.
+- The plugin defaults `autoRegister` to `true`: unknown tokens fall back to the service registry,
+  and successful results are cached as singletons. Explicit registrations take precedence.
+- Missing providers and circular dependencies throw; resolution does not silently return an absent
+  value.
+- A factory provider's `useFactory` is called without arguments; use a closure for dependencies.
+
+## Other options
+
+- `DiPlugin({ autoRegister: false })` disables fallback to framework capabilities.
+- `register` accepts `useValue`, `useClass` with `inject`, or `useFactory`; scope is its third
+  argument.
+- `createContainer` builds a standalone container and defaults automatic registration to `false`.

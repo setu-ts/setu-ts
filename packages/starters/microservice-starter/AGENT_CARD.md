@@ -1,45 +1,57 @@
-# @setu-ts/microservice-starter — the REST set plus async messaging
+# @setu-ts/microservice-starter — compose HTTP and background jobs
 
-`createMicroserviceApp(options?)` is the REST starter's composition plus four always-registered
-plugins: messaging (in-memory broker by default), queue (memory adapter), resilience, and telemetry
-(no-op with no exporter). The `errorHandler` from the REST tier arrives with it at priority 0.
-Starters are composition libraries, and `setu add` has no short name for them — install
-`@setu-ts/microservice-starter` directly.
+**Add it:** install `@setu-ts/microservice-starter` directly; it has no `setu add` entry. Call
+`createMicroserviceApp` in `setu.config.ts`; the starter itself provides no capability and composes
+the REST plugins plus messaging, queue, resilience and telemetry.
+
+## Accept a request and process its job
+
+Use this factory in place of the scaffold's application construction; put the route function in the
+module's routes file:
 
 ```ts
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IJob, IQueue, IRouterApi } from '@setu-ts/common';
 import { createMicroserviceApp } from '@setu-ts/microservice-starter';
 
-const app = createMicroserviceApp({
-  queue: { adapter: 'memory' },
-  messaging: {},
-  telemetry: { serviceName: 'orders', exporter: 'console' },
-  realtime: { backplane: { transport: 'messaging' } },
-});
+export function registerReceiptRoutes(router: IRouterApi): void {
+  router.post('/orders/:id/receipt', {
+    handler: async (ctx) => {
+      const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+      const id = await queue.add('receipt', { orderId: ctx.params.id! });
+      return ctx.response.status(202).json({ id });
+    },
+  });
+}
 
-app.router.get('/healthz', (ctx) => ctx.response.text('ok'));
+const app = createMicroserviceApp({
+  queue: {
+    processors: [{
+      name: 'receipt',
+      processor: async (job: IJob<{ orderId: string }>) => {
+        console.log(job.data.orderId);
+      },
+    }],
+  },
+  openapi: { swagger: { assets: 'cdn' } },
+});
+registerReceiptRoutes(app.router);
 await app.start({ port: 3000 });
 ```
 
-```ts
-import { buildMicroservicePlugins } from '@setu-ts/microservice-starter';
-import { createApplication } from '@setu-ts/kernel';
+## Behaviour the types do not show
 
-export const app = createApplication({
-  plugins: buildMicroservicePlugins({ queue: { adapter: 'memory' } }),
-});
-```
+- The factory returns an unstarted application and adds the RFC 9457 error handler at priority 0.
+- Messaging, queue, resilience and telemetry are always registered: omitted options use the memory
+  broker, memory queue, resilience defaults and no-op telemetry.
+- Memory jobs and messages are process-local; configure durable backends for shared work.
+- A messaging real-time backplane works here because the broker is present.
+- This factory registers its broker and queue even on Workers; it does not perform the CLI
+  microservice template's platform-binding swap.
 
-- Four added arms, always registered: `messaging`, `queue`, `resilience`, `telemetry`. Omitted →
-  in-memory broker, memory queue adapter, plugin defaults, and a telemetry no-op with no exporter.
-- Inherits every REST arm, gated ones included: `database`, `auth`, `session`, `di`, `graphql`,
-  `serviceDiscovery`, `realtime.websocket`, `realtime.sse`, `realtime.backplane`.
-- `realtime: { backplane: { transport: 'messaging' } }` works here because the broker is always
-  registered; on the REST tier that combination throws at start.
-- The `microservice` CLI template swaps `messaging` and `queue` for `CloudflarePlugin` from
-  `@setu-ts/cloudflare-plugin` on Workers; this starter performs no swap and registers both
-  unconditionally.
-- OpenAPI self-hosts Swagger UI: install `swagger-ui-dist` (`^5`) or pass
-  `openapi: { swagger: { assets: 'cdn' } }`.
-- No arm sets a plugin `name`; register extra instances on the returned app.
-- `buildMicroservicePlugins(options)` returns the plugin array for `createApplication` and does not
-  add the error-handler middleware.
+## Other options
+
+- `messaging`, `queue`, `resilience` and `telemetry` configure this tier's added plugins.
+- REST arms include optional `database`, `auth`, `session`, `di`, `graphql` and `serviceDiscovery`.
+- `realtime` opts into websocket, SSE and backplane plugins independently.
+- `buildMicroservicePlugins` returns a plugin array without the factory's error middleware.

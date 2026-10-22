@@ -1,51 +1,55 @@
-# @setu-ts/cqrs-plugin — command and query buses
+# @setu-ts/cqrs-plugin — command and query dispatch
 
-`setu add cqrs` prints `CqrsPlugin()` and installs the package; it is zero-configuration. The plugin
-registers an `ICqrsFacade` under `CAPABILITIES.CQRS`, plus the two buses under
-`CAPABILITIES.COMMAND_BUS` and `CAPABILITIES.QUERY_BUS`. Both buses share one pipeline, so a
-behavior registered once runs for commands and queries alike.
+**Add it:** `setu add cqrs` installs it and wires `CqrsPlugin()` in a recognized functional config.
+It provides `CAPABILITIES.CQRS` (`ICqrsFacade`), `CAPABILITIES.COMMAND_BUS` (`ICommandBus`) and
+`CAPABILITIES.QUERY_BUS` (`IQueryBus`).
+
+## Register a handler in setu.config.ts
 
 ```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
 import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
+import type { CqrsCommand, ICommandHandler } from '@setu-ts/common';
 
-export function createCqrsApp() {
-  return createApplication({
-    plugins: [RuntimePlugin(), CqrsPlugin({ behaviors: [] })],
+type Echo = CqrsCommand<{ text: string }>;
+const echo: ICommandHandler<Echo, string> = {
+  handle: (command) => command.data.text,
+};
+export const cqrs = CqrsPlugin({
+  commandHandlers: [{ type: 'echo', handler: echo }],
+});
+```
+
+## Execute a command from a route
+
+```ts
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICqrsFacade, IRouterApi } from '@setu-ts/common';
+
+export function registerEchoRoutes(router: IRouterApi): void {
+  router.get('/echo', {
+    handler: async (ctx) => {
+      const cqrs = ctx.services.get<ICqrsFacade>(CAPABILITIES.CQRS);
+      const text = await cqrs.commandBus.execute<string>({
+        type: 'echo', data: { text: 'hello' },
+      });
+      return ctx.response.json({ text });
+    },
   });
 }
 ```
 
-```ts
-import type { CqrsCommand, ICommandHandler, ICqrsFacade } from '@setu-ts/cqrs-plugin';
+## Behaviour the types do not show
 
-class CreateUserCommand implements CqrsCommand<{ email: string }> {
-  readonly type = 'CreateUserCommand';
-  constructor(readonly data: { email: string }) {}
-}
+- Routing uses the string `type`, not class identity; plain objects work.
+- Registering the same type again replaces its previous handler.
+- An unregistered type rejects with `HandlerNotFoundError`; a non-string type rejects with
+  TypeError.
+- `behaviors` run in declared order on both buses. Returning without calling the continuation skips
+  the remaining behaviors and handler.
+- Handler and behavior factories resolve at `onInit`, after capabilities are registered.
 
-class CreateUserHandler implements ICommandHandler<CreateUserCommand, string> {
-  async handle(command: CreateUserCommand): Promise<string> {
-    return command.data.email;
-  }
-}
+## Other options
 
-export async function createUser(cqrs: ICqrsFacade, email: string): Promise<string> {
-  cqrs.commandBus.register<CreateUserCommand, string>(
-    'CreateUserCommand',
-    new CreateUserHandler(),
-  );
-  return cqrs.commandBus.execute<string>(new CreateUserCommand({ email }));
-}
-```
-
-- A request is routed by its string `type`; a class instance or a plain `{ type, data }` object both
-  satisfy `CqrsCommand` / `CqrsQuery`.
-- `behaviors` is `IPipelineBehavior[]`, invoked in declared order for both buses. One that returns
-  without calling its `next` continuation short-circuits the handler and later behaviors.
-- `commandHandlers` and `queryHandlers` take `{ type, handler }` pairs; `handler` is an instance or
-  a factory resolved at `onInit`, so it can use any registered capability.
-- `execute` rejects with `HandlerNotFoundError` (exported for `instanceof`) when no handler is
-  registered, and rejects when `type` is not a string.
-- `setu generate command-handler` writes handlers and wires them through these options.
+- `queryHandlers` registers read handlers; execute them through `queryBus.execute`.
+- `behaviors` accepts instances or factories receiving the service registry.
+- `CommandBus` and `QueryBus` can also be constructed directly without the plugin.

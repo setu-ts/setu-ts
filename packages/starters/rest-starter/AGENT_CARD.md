@@ -1,45 +1,48 @@
-# @setu-ts/rest-starter — one factory for the REST plugin set
+# @setu-ts/rest-starter — compose a REST application
 
-Starters are composition libraries, not plugins: nothing to register, and `setu add` has no short
-name for them — install `@setu-ts/rest-starter` directly. `createRestApp(options?)` returns an
-un-started `IKernelApplication` built from the REST plugin set — runtime, config, logger,
-validation, HTTP security, health, metrics, OpenAPI and decorators — plus
-`errorHandler({ format: 'rfc9457' })` at priority 0. A scaffolded rest project inlines this list
-instead; reach for the starter when you want it named once.
+**Add it:** install `@setu-ts/rest-starter` directly; it has no `setu add` entry. Call
+`createRestApp` from `setu.config.ts`; the starter itself provides no capability and composes the
+runtime, config, logger, validation, HTTP security, health, metrics, OpenAPI and decorator plugins.
+
+## Start a REST service with cookie sessions
+
+Use this factory in place of the scaffold's application construction, and put route registration in
+the module's routes file:
 
 ```ts
+import type { IRouterApi } from '@setu-ts/common';
 import { createRestApp } from '@setu-ts/rest-starter';
 
-const app = createRestApp({
-  logger: {},
-  database: { type: 'memory' },
-  session: { secret: 'replace-with-at-least-32-characters', csrf: {} },
-  realtime: { sse: {}, backplane: { transport: 'memory' } },
-});
+export function registerGreetingRoutes(router: IRouterApi): void {
+  router.get('/greeting', {
+    handler: (ctx) => ctx.response.json({ hello: 'world' }),
+  });
+}
 
-app.router.get('/hello', (ctx) => ctx.response.text('Hello'));
+const app = createRestApp({
+  session: { secret: process.env.SESSION_SECRET!, csrf: {} },
+  openapi: { swagger: { assets: 'cdn' } },
+});
+registerGreetingRoutes(app.router);
 await app.start({ port: 3000 });
 ```
 
-```ts
-import { buildRestPlugins } from '@setu-ts/rest-starter';
-import { createApplication } from '@setu-ts/kernel';
+## Behaviour the types do not show
 
-export const app = createApplication({
-  plugins: buildRestPlugins({ database: { type: 'memory' } }),
-});
-```
+- The factory returns an unstarted application. Register routes and extra plugins before startup.
+- It adds the RFC 9457 error handler at priority 0; `buildRestPlugins` returns only plugins and does
+  not add that middleware.
+- Omitted always-on arms use their plugin defaults. Gated arms register nothing until supplied;
+  `realtime: {}` adds nothing.
+- Sessions require a secret; their cookies default to secure, so plain HTTP development needs
+  `session.cookie: { secure: false }`.
+- OpenAPI self-hosts its UI unless CDN assets are selected; Workers select CDN automatically.
+- A messaging backplane needs a broker; the REST tier does not supply one.
 
-- Always-on arms configure a plugin the starter always registers: `config`, `logger`, `validation`,
-  `httpSecurity`, `health`, `metrics`, `openapi`, `decorators`. Omitted → that plugin's defaults.
-- Gated arms register nothing unless supplied: `database`, `auth`, `session`, `di`, `graphql`,
-  `serviceDiscovery`, and each `realtime` sub-arm (`websocket`, `sse`, `backplane`). `realtime: {}`
-  adds nothing and is not an error.
-- Gated because they cannot be defaulted: `session` throws without a secret, `auth` needs a passive
-  strategy, `graphql` needs a schema, and `di` changes how every decorated service is constructed.
-- OpenAPI self-hosts Swagger UI: install `swagger-ui-dist` (`^5`) or pass
-  `openapi: { swagger: { assets: 'cdn' } }`. On Workers the starter selects CDN for you.
-- No arm sets a plugin `name`; each registers on the bare capability token. Add a second instance on
-  the returned app: `app.register(CachePlugin({ name: 'session' }))`.
-- `backplane: { transport: 'messaging' }` throws during `app.start()` here — this tier registers no
-  broker; use the microservice starter.
+## Other options
+
+- `config`, `logger`, `validation`, `httpSecurity`, `health`, `metrics`, `openapi`, `decorators`
+  configure the always-on plugins.
+- `database`, `auth`, `session`, `di`, `graphql` and `serviceDiscovery` are gated arms.
+- `realtime.websocket`, `realtime.sse` and `realtime.backplane` opt into each real-time plugin.
+- `buildRestPlugins(options)` supplies the array for a custom composition.

@@ -1,36 +1,51 @@
-# @setu-ts/view-plugin — server-rendered HTML as a capability
+# @setu-ts/view-plugin — render HTML from components
 
-`setu add view` adds the dependency and inserts `ViewPlugin()` — the default `'hono-jsx'` arm. It
-registers `CAPABILITIES.VIEW`. Declare `hono` directly; for JSX also set `jsx: 'react-jsx'` and
-`jsxImportSource: 'hono/jsx'` in the application manifest.
+**Add it:** `setu add view` installs it and inserts `ViewPlugin()` into `setu.config.ts`. It
+provides `CAPABILITIES.VIEW` (`IViewEngine`); the default authoring mode is `hono-jsx`.
 
-```ts
-import { ViewPlugin } from '@setu-ts/view-plugin';
+## Render a page from a module route
 
-export const views = ViewPlugin({ engine: 'hono-html' });
-```
+A fixed template with a numeric prop needs no JSX compiler setup:
 
 ```ts
-import { html } from 'hono/html';
-import type { IRequestContext } from '@setu-ts/common';
+import type { IRouterApi } from '@setu-ts/common';
 import { renderView } from '@setu-ts/view-plugin';
 
-const UserList = (props: { readonly users: readonly string[] }) =>
-  html`<ul>${props.users.map((user) => html`<li>${user}</li>`)}</ul>`;
+const receipt = (props: { count: number }) => `<p>Items: ${Number(props.count)}</p>`;
 
-export function usersRoute(context: IRequestContext) {
-  return renderView(context, UserList, { users: ['ada', 'grace'] });
+export function registerReceiptRoutes(router: IRouterApi): void {
+  router.get('/receipt', {
+    handler: (ctx) => renderView(ctx, receipt, { count: 3 }),
+  });
 }
 ```
 
-- `engine` is `'hono-jsx'` (default), `'hono-html'` (the `html` tagged template, usable in a plain
-  `.ts` file) or `'custom'` with a `view` engine implementing `IViewEngine`. The arm names the
-  authoring mode, not the renderer — both default arms escape through hono.
-- `renderView(ctx, Component, props)` answers `text/html; charset=utf-8`. In the class-based style,
-  `@Render` from `@setu-ts/decorator-plugin` puts the component on a route and type-checks the props
-  bag a handler returns.
-- Escaping is the runtime's: JSX and the `html` tag escape, a plain string component is returned
-  unchanged. `raw(markup)` is the explicit opt-out — never build markup by concatenation.
-- `null`, `false`, `true` and `''` render empty; `undefined` throws `ViewRenderError`, usually a
-  missing return. A pending Suspense boundary throws `UnresolvedSuspenseError`.
-- Layouts are ordinary components taking `children`; there is no plugin-level `layout` option.
+## Replace the renderer
+
+Put the returned plugin in the config's plugin list:
+
+```ts
+import type { IViewEngine } from '@setu-ts/common';
+import { ViewPlugin } from '@setu-ts/view-plugin';
+
+export function views(view: IViewEngine) {
+  return ViewPlugin({ engine: 'custom', view });
+}
+```
+
+## Behaviour the types do not show
+
+- `renderView` resolves the engine per request and returns `text/html; charset=utf-8`.
+- Rendering buffers the complete result; it does not stream.
+- Plain string components are returned unchanged. Escape dynamic text in the producer; the numeric
+  conversion above is deliberate. JSX and the template runtime perform their own escaping.
+- `null`, `false`, `true` and an empty string render empty; `undefined` throws `ViewRenderError`.
+- A pending suspense boundary throws `UnresolvedSuspenseError` instead of serving a permanent
+  fallback.
+
+## Other options
+
+- `engine: 'hono-html'` selects template authoring in plain TypeScript; both built-in modes use one
+  engine.
+- `engine: 'hono-jsx'` selects JSX authoring; configure the application's JSX runtime accordingly.
+- Compose layouts as components receiving children; there is no plugin-level layout option.

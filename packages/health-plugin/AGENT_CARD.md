@@ -1,51 +1,48 @@
-# @setu-ts/health-plugin — health checks and Kubernetes probes
+# @setu-ts/health-plugin — health checks and readiness probes
 
-Every scaffold registers `HealthPlugin()` in `setu.config.ts`; elsewhere run `setu add health` and
-install — it is zero-configuration and inserts the bare call. It serves `/health`, `/live` and
-`/ready` and provides `CAPABILITIES.HEALTH`.
+**Add it:** `setu add health` adds the dependency and inserts `HealthPlugin()` in recognized
+scaffolds (already registered in REST projects). It provides `CAPABILITIES.HEALTH`
+(`IHealthService`).
 
-```ts
-import { createHttpIndicator, HealthPlugin } from '@setu-ts/health-plugin';
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+## Probe an upstream dependency
 
-export function createHealthApp() {
-  return createApplication({
-    plugins: [
-      RuntimePlugin(),
-      HealthPlugin({ indicators: [createHttpIndicator('api', { url: 'https://api.example.com' })] }),
-    ],
-  });
-}
-```
+Replace the existing registration in `setu.config.ts`:
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IHealthService, IServiceRegistry } from '@setu-ts/common';
+import { createHttpIndicator, HealthPlugin } from "@setu-ts/health-plugin";
 
-export function registerProbe(services: IServiceRegistry): void {
-  const health = services.get<IHealthService>(CAPABILITIES.HEALTH);
-  health.registerIndicator('billing', async () => ({ status: 'up', data: { queueDepth: 0 } }));
-}
+app.register(HealthPlugin({
+  indicators: [createHttpIndicator("billing", { url: "https://billing.example.com/health" })],
+  indicatorTimeoutMs: 3000,
+}));
 ```
 
-- `endpoints` renames the probe paths; defaults are `'/health'`, `'/live'` and `'/ready'`, and a key
-  set to `undefined` skips that route.
-- `details` defaults to `false`, so HTTP bodies carry only
-  `{ status, timestamp, checks: { name: { status } } }`; `true` adds `data` and `latencyMs`. The
-  service's `check`, `checkLive` and `checkReady` always return full reports.
-- `indicators` takes an `IHealthIndicator` or a factory `(services) => IHealthIndicator`, called at
-  `onInit` so it can resolve a later capability.
-  `createHttpIndicator(name, { url, timeoutMs, fetcher })` reports `up` for a 2xx/3xx answer.
-- `indicatorTimeoutMs` defaults to `5000`; a timeout records
-  `{ status: 'down', data: { reason: 'timeout' } }` and a rejection `{ reason: 'error' }`. Statuses
-  are `up`, `degraded` and `down`: `/health` is 200 for up or degraded and 503 for down, `/live`
-  stays 200, `/ready` is 200 only when every indicator is `up`.
-- `diagnostics` is opt-in with the literal `enabled: true` plus an `indicators` name→alias map; it
-  never changes the probes and registers under `CAPABILITIES.HEALTH_DIAGNOSTICS`.
-- `setu g health-indicator db` writes `src/health/db.indicator.ts` and `src/health/index.ts`
-  exporting `HEALTH_INDICATORS`, wired as `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`.
-- On Deno the `self` indicator reads the host name, so the start task needs `--allow-sys` or
-  `/health` reports down.
+## Read a complete health report
 
-<!-- card-allow: HEALTH_INDICATORS -->
+```ts
+import { CAPABILITIES } from "@setu-ts/common";
+import type { IHealthService } from "@setu-ts/common";
+
+const health = ctx.services.get<IHealthService>(CAPABILITIES.HEALTH);
+const report = await health.checkReady();
+```
+
+## Behaviour the types do not show
+
+- Default routes are `/health`, `/live`, `/ready`. `/health` is `503` only for down, `/ready` is
+  `200` only when every selected indicator is up, and `/live` always responds `200`.
+- `checkLive` runs only the built-in self indicator; `checkReady` excludes it. `check` runs all.
+- `details` defaults to `false`: HTTP checks expose only status, while programmatic reports always
+  include indicator data and measured latency.
+- Indicators run concurrently, but report checks retain registration order. Duplicate names throw.
+- `indicatorTimeoutMs` defaults to `5000` milliseconds. A timed-out or rejecting callback yields
+  down with a fixed reason rather than serializing its thrown error.
+- Indicator factories in `indicators` run at initialization after all plugins register, so they can
+  resolve later capabilities. `createHttpIndicator` accepts HTTP 2xx and 3xx as up.
+
+## Other options
+
+- `endpoints` replaces the default path object; omitted keys skip their routes.
+- `createHttpIndicator` also takes `timeoutMs` and an injected `fetcher`.
+- `diagnostics` with `enabled: true` and indicator aliases enables minimized observations under
+  `CAPABILITIES.HEALTH_DIAGNOSTICS` (`IHealthDiagnosticsSource`); `scheduled` opts into polling.

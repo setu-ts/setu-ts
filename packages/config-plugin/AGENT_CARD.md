@@ -1,50 +1,54 @@
 # @setu-ts/config-plugin — validated environment configuration
 
-`setu add config` adds the dependency; every scaffold already registers `ConfigPlugin` in
-`setu.config.ts` with a dotenv file. It provides `CAPABILITIES.CONFIG`.
+**Add it:** `setu add config` adds the dependency; register `ConfigPlugin()` in `setu.config.ts`
+(the REST scaffold already does). It provides `CAPABILITIES.CONFIG` (`IConfig`).
+
+## Read a setting in a route
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IConfig } from '@setu-ts/common';
-import { ConfigPlugin } from '@setu-ts/config-plugin';
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from "@setu-ts/common";
+import type { IConfig, IRouterApi } from "@setu-ts/common";
 
-export function createConfiguredApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), ConfigPlugin({ envFilePath: '.env', envFileOptional: true })],
+export function registerSettingsRoutes(router: IRouterApi): void {
+  router.get("/currency", {
+    handler: (ctx) => {
+      const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
+      return ctx.response.json({ currency: config.get("CURRENCY", { default: "INR" }) });
+    },
   });
-  app.router.get('/port', (ctx) => {
-    const config = ctx.services.get<IConfig>(CAPABILITIES.CONFIG);
-    return ctx.response.json({ port: config.get<number>('PORT', { default: 3000 }) });
-  });
-  return app;
 }
 ```
 
-Resolve configuration before constructing plugins, then reuse the same snapshot:
+## Load once before constructing plugins
+
+Pass the runtime used by your composition root, then register the returned plugin:
 
 ```ts
-import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
-import { createRuntimeServices } from '@setu-ts/runtime';
+import type { IPlugin, IRuntimeServices } from "@setu-ts/common";
+import { ConfigPlugin, loadConfig } from "@setu-ts/config-plugin";
 
-export async function preloadConfig() {
-  const config = await loadConfig(createRuntimeServices());
-  return { config, plugin: ConfigPlugin({ instance: config }) };
+export async function preloadConfig(runtime: IRuntimeServices): Promise<IPlugin> {
+  const config = await loadConfig(runtime, { envFilePath: ".env", envFileOptional: true });
+  return ConfigPlugin({ instance: config });
 }
 ```
 
-- `ConfigPluginOptions.envFilePath` names one path or several; loading needs `fs`, which edge
-  runtimes lack. `envFileOptional` skips an absent file but still throws when a present file cannot
-  be read. The scaffold emits both options.
-- `instance` uses a pre-loaded snapshot verbatim and ignores `envFilePath`, `envFileOptional`,
-  `validationSchema` and `expandVariables`; declared `sections` still validate.
-- `validationSchema` is a `StructuralSchema` (Zod-compatible). Its parse runs once after merging and
-  expansion, and the parsed output becomes the snapshot, preserving coercions and defaults.
-- `sections` holds `ConfigSection` values from `defineConfigSection`; read one later with
-  `getConfigSection`. `expandVariables` defaults to true and expands `${NAME}` references.
-- Read values only through `CAPABILITIES.CONFIG`: `config.get<T>(key)`,
-  `config.get<T>(key, { default })`, `config.getOrThrow<T>(key)` and `config.has(key)`. Never read
-  `process.env` directly.
-- `diagnostics` is opt-in: pass the literal `enabled: true` plus key and file alias allowlists to
-  record value-free provenance. Omit it and no metadata is built.
+## Behaviour the types do not show
+
+- Runtime environment values override dotenv files; in `envFilePath` arrays the first file wins.
+- Loading merges, expands references, then validates. `expandVariables` defaults to `true`;
+  `validationSchema` output becomes the snapshot, including coercions and defaults.
+- Without schema coercion, environment values remain strings: `config.get<T>` does not convert them.
+- `get` returns `undefined` when absent, or the supplied default; `getOrThrow` throws and `has`
+  returns false for `undefined` values.
+- `envFileOptional` tolerates an absent path; a present file that cannot be read still throws. Any
+  configured file path requires a runtime filesystem.
+- `instance` uses that snapshot directly, ignoring loading, expansion and `validationSchema`;
+  declared `sections` still validate.
+
+## Other options
+
+- `defineConfigSection` declares prefixed `keys` and a schema; pass it in `sections` and read with
+  `getConfigSection` using the same definition.
+- `diagnostics` with `enabled: true` and key/file aliases enables value-free provenance under
+  `CAPABILITIES.CONFIG_DIAGNOSTICS` (`IConfigDiagnosticsSource`); omitted, the source is disabled.

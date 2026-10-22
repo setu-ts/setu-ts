@@ -1,41 +1,50 @@
-# @setu-ts/audit-plugin — immutable audit trail
+# @setu-ts/audit-plugin — record immutable audit events
 
-`setu add audit` adds the dependency and inserts `AuditPlugin()` — the in-memory backend, which is
-lost on restart. It registers `CAPABILITIES.AUDIT`; each stored entry is stamped with an id and a
-timestamp, then deep-frozen.
+**Add it:** `setu add audit` installs and registers `AuditPlugin()` in `setu.config.ts` with
+in-memory storage. It provides `CAPABILITIES.AUDIT` (`IAuditLogger`).
+
+## Record a completed operation
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IAuditLogger, IRequestContext } from '@setu-ts/common';
+import type { IAuditLogger } from '@setu-ts/common';
 
-export async function recordDeletion(context: IRequestContext): Promise<void> {
-  const audit = context.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
-  await audit.log({
-    action: 'user.delete',
-    resource: 'user',
-    resourceId: context.params.id,
-    result: 'success',
-    before: { active: true },
-    after: { active: false },
-  });
-}
+const audit = ctx.services.get<IAuditLogger>(CAPABILITIES.AUDIT);
+await audit.log({
+  action: 'account.disable',
+  resource: 'account',
+  resourceId: ctx.params.id,
+  result: 'success',
+  before: { active: true },
+  after: { active: false },
+});
 ```
+
+## Keep events in a file
+
+Replace the registration in `setu.config.ts`:
 
 ```ts
 import { AuditPlugin } from '@setu-ts/audit-plugin';
 
-export const audit = AuditPlugin({ storage: 'file', options: { path: './var/log/audit.log' } });
+export const audit = AuditPlugin({
+  storage: 'file',
+  options: { path: './var/log/audit.log' },
+});
 ```
 
-- `storage` is `'memory'` (default), `'log'`, `'database'` or `'file'`; an unknown id throws at
-  registration.
-- `AuditEntry` is `action`, `resource`, optional `resourceId`, `userId`, `before`, `after`,
-  `metadata`, plus `result`: `'success'` or `'failure'`. `IAuditLogger` has one method, `log`.
-- `'log'` takes `options.level` (`'info'` default, or `'warn'`, `'error'`) and `options.logger`;
-  with neither an injected logger nor a registered logger capability, registration throws.
-- `'database'` is inject-only: `options.client` is required (an `IAuditDbClient` with `insert` and
-  `select`); `options.table` defaults to `audit_logs`. No driver is ever loaded.
-- `'file'` defaults `options.path` to `./audit.log` and throws at registration on runtimes without a
-  writable `runtime.fs` (Workers/edge). Writes are read-modify-write and serialized.
-- `redaction` filters `before`, `after` and `metadata` before the entry is frozen. An `audit` health
-  indicator reports `{ storage, reachable }`.
+## Behaviour the types do not show
+
+- Memory storage is the default and is lost on restart.
+- Each record gets an id and timestamp from the runtime and is deep-frozen before storage.
+- `log` propagates storage failures; it does not silently discard failed writes.
+- Configured `redaction` filters `before`, `after` and `metadata` before freezing the record.
+- File storage requires writable `runtime.fs`; registration fails when it is absent. File writes are
+  serialized read-modify-write operations.
+- Database storage requires an injected `options.client`; no driver is loaded automatically.
+
+## Other options
+
+- `storage: 'log'` uses `options.logger` or the logger capability; `options.level` defaults to info.
+- `storage: 'database'` takes an `IAuditDbClient`; `options.table` defaults to `audit_logs`.
+- `AuditQuery` and `StoredAuditEntry` describe queries on the exported storage classes.

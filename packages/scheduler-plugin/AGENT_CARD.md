@@ -1,46 +1,54 @@
-# @setu-ts/scheduler-plugin — cron, interval and delayed jobs
+# @setu-ts/scheduler-plugin — timed and recurring background jobs
 
-`setu add scheduler` installs it and, in a recognized functional config, registers
-`SchedulerPlugin()`; otherwise add that line in `setu.config.ts`. Scheduling is unavailable on
-Cloudflare Workers (registration throws `SchedulerUnavailableError`). `CAPABILITIES.SCHEDULER`
-resolves after `app.start`.
+**Add it:** `setu add scheduler` installs it and wires `SchedulerPlugin()` in a recognized
+functional config. It provides `CAPABILITIES.SCHEDULER` (`IScheduler`).
+
+## Send a nightly report
+
+With mail configured, put this registration in `setu.config.ts`:
+
+```ts
+import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IMailer } from '@setu-ts/common';
+
+export const scheduler = SchedulerPlugin({
+  jobs: [(services) => ({
+    trigger: 'cron', name: 'nightly-report', expression: '0 2 * * *',
+    handler: async () => {
+      await services.get<IMailer>(CAPABILITIES.MAIL).send({
+        to: 'ops@example.com', subject: 'Daily report', text: 'Report ready',
+      });
+    },
+  })],
+});
+```
+
+## Schedule one delayed follow-up
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IScheduler } from '@setu-ts/common';
-import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
-app.register(SchedulerPlugin({ distributedLock: { enabled: true, storage: 'redis' } }));
-
-await app.start();
-const scheduler = app.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
-
-await scheduler.cron('nightly-report', '0 2 * * *', async () => {
-  // replace with real work
-});
-await scheduler.every('poll-inbox', 30_000, async () => {
-  // replace with real work
-});
-await scheduler.delay('warmup', 5_000, async () => {
-  // replace with real work
-});
-await scheduler.pause('poll-inbox');
-await scheduler.resume('poll-inbox');
+const scheduler = ctx.services.get<IScheduler>(CAPABILITIES.SCHEDULER);
+await scheduler.delay('warmup', 5000, () => { console.log('Warmup due'); });
 ```
 
-- Cron is 5-field and evaluated in UTC only; `timezone` accepts nothing else. Handlers are
-  process-local: there is no durable store, so a restart loses pending one-shots.
-- Without `distributedLock`, a process-local lock is used and **every replica runs every job**. Set
-  `{ enabled: true, storage: 'redis', url }` (`url` defaults to `redis://localhost:6379`);
-  `acquireTimeoutMs` (default `5000`, `0` waits forever) bounds each acquire, and a timed-out
-  acquire skips that fire instead of stalling the schedule.
-- `jobs: [{ trigger: 'cron', name, expression, handler }, { trigger: 'every', name, intervalMs, handler }, { trigger: 'delay', name, delayMs, handler }]`
-  registers declaratively; each entry may be a factory receiving the service registry at `onInit`.
-  `behaviors` wraps every handler.
-- A non-finite or out-of-range `delayMs`, `intervalMs` or `retry.delay` makes the registration call
-  reject with RangeError. Pass `{ retry: { limit, delay, backoff } }` as the fourth argument to
-  retry.
-- `pause`, `resume`, `remove` and `getNextRun` take the job name. Cancelling a fire during retry
-  backoff discards the attempt; a paused one-shot resumes from attempt 1.
-- `diagnostics: { enabled: true, alias, jobs }` observes only the exact job names listed; without it
-  nothing is observed.
+## Behaviour the types do not show
+
+- Cron has five fields and runs in UTC; any other `timezone` is refused.
+- Jobs are process-local and not durable. Without a distributed lock, each replica runs its own
+  copy. Cloudflare Workers registration throws `SchedulerUnavailableError`.
+- `every` intervals and `delay` delays are milliseconds. Recurring intervals align to epoch grid
+  boundaries, including after resume; delayed jobs are removed after their fire completes.
+- Reusing a scheduled name rejects. `pause` preserves configuration; resuming a delayed job re-arms
+  its full original delay.
+- Job factories resolve at `onInit`. A timed-out lock acquisition skips that fire; the default
+  `acquireTimeoutMs` is 5000 and `0` disables the bound.
+
+## Other options
+
+- `every` schedules a fixed interval; `pause`, `resume`, `remove` and `getNextRun` use the job name.
+- `distributedLock: { enabled: true, storage: 'redis', url }` enables cross-process locking.
+- The scheduling methods' fourth argument accepts `data` and `retry: { limit, delay, backoff }`;
+  `behaviors` wraps all handlers and `diagnostics` observes an explicit job allowlist.

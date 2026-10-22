@@ -1,53 +1,54 @@
-# @setu-ts/metrics-plugin — Prometheus metrics and a scrape endpoint
+# @setu-ts/metrics-plugin — application metrics and scraping
 
-Every scaffold registers `MetricsPlugin()` in `setu.config.ts`; elsewhere run `setu add metrics` and
-install (zero-configuration, so the bare call is inserted). It serves `/metrics` and provides
-`CAPABILITIES.METRICS`.
+**Add it:** `setu add metrics` adds the dependency and inserts `MetricsPlugin()` in recognized
+scaffolds (already registered in REST projects). It provides `CAPABILITIES.METRICS`
+(`IMetricsService`).
+
+## Count a completed operation
 
 ```ts
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IMetricsService } from '@setu-ts/common';
-import { MetricsPlugin } from '@setu-ts/metrics-plugin';
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { CAPABILITIES } from "@setu-ts/common";
+import type { IMetricsService, IRouterApi } from "@setu-ts/common";
 
-export async function createMetricsApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), MetricsPlugin({ endpoint: '/metrics', httpMetrics: true })],
+export function registerExportRoutes(router: IRouterApi): void {
+  router.get("/export", {
+    handler: (ctx) => {
+      const metrics = ctx.services.get<IMetricsService>(CAPABILITIES.METRICS);
+      metrics.counter("exports_total", { help: "Exports served" }).inc();
+      return ctx.response.json({ rows: [] });
+    },
   });
-  await app.start(); // capabilities exist only after start()
-  const metrics = app.services.get<IMetricsService>(CAPABILITIES.METRICS);
-  metrics.counter('app_signups_total', { help: 'Completed signups' }).inc(1);
-  return app;
 }
 ```
 
-Pre-register metrics so their `# HELP` and `# TYPE` lines appear from startup:
+## Declare metrics before the first operation
+
+Configure the existing registration in `setu.config.ts`:
 
 ```ts
-import { MetricsPlugin } from '@setu-ts/metrics-plugin';
-import type { NamedMetricConfig } from '@setu-ts/metrics-plugin';
+import { MetricsPlugin } from "@setu-ts/metrics-plugin";
 
-const billing: readonly NamedMetricConfig[] = [
-  { name: 'invoices_total', type: 'counter', help: 'Invoices issued' },
-];
-
-export const plugin = MetricsPlugin({ customMetrics: billing });
+app.register(MetricsPlugin({
+  customMetrics: [{ name: "exports_total", type: "counter", help: "Exports served" }],
+}));
 ```
 
-- `endpoint` defaults to `'/metrics'`; a scrape answers `text/plain; version=0.0.4; charset=utf-8`.
-- `defaultMetrics` and `httpMetrics` default to `true`. The middleware runs outermost (priority 20).
-  `excludePaths` REPLACES the default `['/health', '/live', '/ready']` set, and `endpoint` is always
-  excluded.
-- `counter`, `gauge`, `histogram` and `summary` are get-or-create (a repeat call returns the same
-  instrument). Record value-first: `inc(value?, labels?)`, `set(value, labels?)`,
-  `observe(value, labels?)`; `get` returns an existing instrument or `undefined`.
-- `MetricOptions` carries `help` (defaults to the name), `labels`, `buckets`, `quantiles` and
-  `maxSamples`. Buckets default to `defaultBuckets`, summary quantiles to `defaultQuantiles`.
-- `customMetrics` takes `NamedMetricConfig`: `name`, `type`, `help`, optional `labels` and
-  `buckets`.
-- `setu g metric signup` writes `src/metrics/signup.metric.ts` with `SIGNUP_TOTAL`, `SIGNUP_METRIC`
-  and `signupCounter`, and `src/metrics/index.ts` exports `CUSTOM_METRICS`, wired as
-  `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`.
+## Behaviour the types do not show
 
-<!-- card-allow: SIGNUP_TOTAL SIGNUP_METRIC CUSTOM_METRICS -->
+- `endpoint` defaults to `/metrics`; scrapes serve Prometheus text with version `0.0.4`.
+- `defaultMetrics` and `httpMetrics` both default to `true`; HTTP collection runs only when both are
+  enabled. The scrape endpoint is always excluded from HTTP collection.
+- `excludePaths` replaces the default health/live/ready exclusions rather than extending them.
+- `counter`, `gauge`, `histogram` and `summary` return the existing instrument for a repeated name;
+  requesting another type under that name throws. `get` returns `undefined` when absent.
+- Counters default to incrementing by one and reject negative increments. Record value first,
+  optional labels second; when labels are declared, supplied names must match that set.
+- `customMetrics` registers at initialization, so metric declarations appear before recording a
+  sample. Unspecified `help` in factory calls defaults to the metric name.
+
+## Other options
+
+- `endpoint` changes the scrape path; `excludePaths` accepts exact strings or regular expressions.
+- `defaultBuckets` and `defaultQuantiles` set histogram and summary defaults.
+- `MetricOptions` adds per-instrument `labels`, `buckets`, `quantiles` and `maxSamples`;
+  `NamedMetricConfig` types declarative `customMetrics` entries.

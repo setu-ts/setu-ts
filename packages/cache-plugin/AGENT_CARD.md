@@ -1,52 +1,52 @@
-# @setu-ts/cache-plugin — caching with memory, Redis and no-op stores
+# @setu-ts/cache-plugin — response and value caching
 
-`setu add cache` adds the dependency and installs — zero-configuration, so the bare `CachePlugin()`
-call is inserted. It provides `CAPABILITIES.CACHE` and a health indicator.
+**Add it:** `setu add cache` installs it and inserts `CachePlugin()` (in-memory store) into
+`setu.config.ts`. It provides `CAPABILITIES.CACHE` (`ICacheStore`) and a health indicator.
+
+## Cache a route's response
+
+Put `cacheMiddleware` on the route, in the module's routes file:
 
 ```ts
-import { CachePlugin } from '@setu-ts/cache-plugin';
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import type { IRouterApi } from '@setu-ts/common';
+import { cacheMiddleware } from '@setu-ts/cache-plugin';
+
+export function registerProductRoutes(router: IRouterApi): void {
+  router.get('/products', {
+    middleware: [cacheMiddleware({ ttlSeconds: 60 })],
+    handler: (ctx) => ctx.response.json([{ id: 'p1', name: 'Pen' }]),
+  });
+}
+```
+
+## Cache a value
+
+```ts
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ICacheStore } from '@setu-ts/common';
 
-export function createCachedApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), CachePlugin({ options: { defaultTtl: 60 } })],
-  });
-  app.router.get('/users/:id', async (ctx) => {
-    const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
-    const cached = await cache.get<{ id: string }>(`user:${ctx.params.id ?? ''}`);
-    return ctx.response.json(cached ?? { id: ctx.params.id });
-  });
-  return app;
-}
+const cache = ctx.services.get<ICacheStore>(CAPABILITIES.CACHE);
+await cache.set('rates', { eur: 1.1 }, 300);
+const rates = await cache.get<{ eur: number }>('rates');
 ```
 
-```ts
-import { CacheService } from '@setu-ts/cache-plugin';
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IServiceRegistry } from '@setu-ts/common';
+## Behaviour the types do not show
 
-export function profileLoader(services: IServiceRegistry, id: string) {
-  const cache = services.get<CacheService>(CAPABILITIES.CACHE);
-  return cache.getOrSet(`profile:${id}`, async () => ({ id }), 60);
-}
-```
+- The middleware sets `X-Cache` itself: `MISS` when the handler ran, `HIT` when replayed,
+  `COALESCED` when a concurrent miss shared one handler run. Do not set it in the handler.
+- Only status `200` is stored by default (`cacheableStatuses` changes that); streamed responses and
+  responses setting a cookie are never stored. The key is the method and URL, plus the tenant and
+  locale when those are resolved.
+- `get` returns `null` for an absent or expired key, never `undefined`.
+- `ttlSeconds` is seconds; omitted, the store's `defaultTtl` applies.
+- `CAPABILITIES.CACHE` resolves only after `app.start()`; inside a handler `ctx.services` is ready.
 
-- `store` is `'memory'` (default; LRU with per-entry TTL), `'redis'` (over `ioredis`) or `'noop'`.
-  Under `options`: `url` and `client` configure Redis, `prefix` namespaces keys, `defaultTtl` is
-  seconds and `maxSize` bounds the LRU.
-- `get` resolves to `null` when absent or expired; `set(key, value, ttlSeconds?)` overrides the
-  default TTL; `delete`, `has` and `clear` complete the contract.
-- `name` other than `'default'` derives the capability token `cache.<name>`, so several caches
-  coexist; point `cacheMiddleware`'s `store` at that token.
-- Resolve the concrete `CacheService` for `getOrSet`, which coalesces concurrent cold reads of one
-  key; a rejected leader leaves no entry, so callers retry their own factory.
-- `cacheMiddleware({ ttlSeconds, key, vary, bypass, store, cacheableStatuses })` caches whole
-  responses (`200` only by default); streaming ones are never replayed.
-- Redis `options.commandTimeoutMs` defaults to `15000` (`0` disables it); an out-of-range value
-  throws RangeError. Connection faults throw `CacheStoreUnavailableError` (503 under
-  `errorHandler`).
-- `diagnostics: { enabled: true, alias }` counts this instance's operations; `enabled` must be the
-  literal `true`.
+## Other options
+
+- `CachePlugin({ store: 'redis', options: { url } })` uses Redis (install `ioredis`); `'noop'`
+  disables caching. `options`: `prefix`, `defaultTtl`, `maxSize`, `commandTimeoutMs`.
+- `cacheMiddleware` also takes `key(ctx)`, `vary(ctx)`, `bypass(ctx)` and `store` (a named instance:
+  `CachePlugin({ name: 'pages' })` registers `cache.pages`).
+- `CacheService.getOrSet(key, factory, ttl)` coalesces concurrent cold reads of one key.
+
+<!-- card-allow: X MISS HIT COALESCED key vary bypass -->

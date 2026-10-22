@@ -1,43 +1,48 @@
-# @setu-ts/secrets-plugin — secrets behind `CAPABILITIES.SECRETS`
+# @setu-ts/secrets-plugin — retrieve secrets without exposing values
 
-`setu add secrets` adds the dependency and inserts `SecretsPlugin()` — the zero-configuration `env`
-provider, which reads the name `database/password` as the environment variable DATABASE_PASSWORD.
-Values are cached 300 s and never logged.
+**Add it:** `setu add secrets` installs it and inserts `SecretsPlugin()` into a recognized
+functional `setu.config.ts`. It provides `CAPABILITIES.SECRETS` (`ISecretManager`), using
+environment variables by default.
+
+## Retrieve a secret inside a handler
+
+Use the value only in the operation needing it; do not put it in a response or log:
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IRequestContext, ISecretManager } from '@setu-ts/common';
+import type { ISecretManager } from '@setu-ts/common';
 
-export async function readDbPassword(context: IRequestContext): Promise<string> {
-  const secrets = context.services.get<ISecretManager>(CAPABILITIES.SECRETS);
-  return await secrets.get('database/password');
-}
+const secrets = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+const password = await secrets.get('database/password');
 ```
 
-HashiCorp Vault needs no SDK; the AWS, GCP and Azure providers lazy-load theirs, or take an injected
-client:
+## Configure the environment naming convention
+
+Put this plugin in the config's plugins array instead of the generated default:
 
 ```ts
 import { SecretsPlugin } from '@setu-ts/secrets-plugin';
 
 export const secrets = SecretsPlugin({
-  provider: 'vault',
-  options: {
-    address: 'https://vault.example.com',
-    token: process.env.VAULT_TOKEN ?? '',
-    mount: 'secret',
-  },
+  provider: 'env',
+  options: { prefix: 'APP_', cacheTtl: 60 },
 });
 ```
 
-- `provider` is `'env'` (default), `'aws-kms'`, `'gcp'`, `'azure'` or `'vault'`. Every arm accepts
-  `options.cacheTtl` in seconds (default `300`; `0` disables the read cache).
-- The contract is `get`, `has` and `rotate`. `rotate` delegates to the provider's write; `env` is
-  read-only and refuses with `ReadOnlySecretProviderError`, answered `501`.
-- A Vault secret is the KV v2 item's `value` field. `requestTimeoutMs` defaults to `5000`; an
-  unreachable or stalled Vault rejects with `SecretProviderUnavailableError` (a `503` hint).
-- Cloud arms take an injected `options.client` facade, bypassing the lazy import: `aws-kms` also
-  reads `region`, `accessKeyId`, `secretAccessKey`, `endpoint`; `gcp` reads `projectId` and
-  `endpoint`; `azure` reads `vaultUrl`.
-- Writing a name that does not exist creates it on `vault` and `azure`, and is refused on `aws-kms`
-  and `gcp` — create those out of band first.
+## Behaviour the types do not show
+
+- Environment names are uppercased and `/`, `-` and `.` become `_`; the configured prefix is
+  prepended first. The example reads database/password from APP_DATABASE_PASSWORD.
+- `get` rejects when absent; `has` returns false. Both successful reads populate the cache.
+- `options.cacheTtl` is seconds, defaults to 300, and `0` disables the read cache.
+- `rotate` writes through the provider and refreshes the cache. The environment provider refuses
+  writes with `ReadOnlySecretProviderError` carrying a 501 hint.
+- Plugin registration logs provider metadata, never secret values.
+
+## Other options
+
+- `provider` also selects `'aws-kms'`, `'gcp'`, `'azure'` or `'vault'`; cloud providers lazy-load
+  SDKs.
+- Cloud `options.client` injects the provider's facade and bypasses its SDK import.
+- Vault stores the KV v2 `value` field; `requestTimeoutMs` defaults to 5000 milliseconds.
+- `rotate` can create missing Vault and Azure names; AWS and GCP names must already exist.

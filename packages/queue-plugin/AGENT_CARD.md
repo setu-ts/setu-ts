@@ -1,49 +1,56 @@
-# @setu-ts/queue-plugin — background jobs with retries
+# @setu-ts/queue-plugin — background jobs and retries
 
-Run `setu add queue`, then install. In a recognized functional config it wires `QueuePlugin()` with
-the processors seam; otherwise follow the printed registration lines in `setu.config.ts`.
+**Add it:** `setu add queue` installs it and wires `QueuePlugin()` with its processors seam in a
+recognized functional config. It provides `CAPABILITIES.QUEUE` (`IQueue`).
 
-Enqueue through `CAPABILITIES.QUEUE`; `queue.add` resolves to the job ID, not completion:
+## Enqueue work from a route
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IQueue, IServiceRegistry } from '@setu-ts/common';
+import type { IQueue, IRouterApi } from '@setu-ts/common';
 
-export async function enqueueReceipt(services: IServiceRegistry): Promise<string> {
-  const queue = services.get<IQueue>(CAPABILITIES.QUEUE);
-  return await queue.add('receipt', { orderId: 'o-1' }, { maxAttempts: 3, delayMs: 100 });
+export function registerReceiptRoutes(router: IRouterApi): void {
+  router.post('/orders/:id/receipt', {
+    handler: async (ctx) => {
+      const queue = ctx.services.get<IQueue>(CAPABILITIES.QUEUE);
+      const id = await queue.add('receipt', { orderId: ctx.params.id! }, {
+        maxAttempts: 3, delayMs: 100,
+      });
+      return ctx.response.status(202).json({ id });
+    },
+  });
 }
 ```
 
-Register a matching `name` with `processor` and optional `options`:
+## Register the matching processor in setu.config.ts
 
 ```ts
 import { QueuePlugin } from '@setu-ts/queue-plugin';
 import type { IJob } from '@setu-ts/common';
 
-export const jobs = QueuePlugin({
+export const queue = QueuePlugin({
   processors: [{
     name: 'receipt',
     processor: async (job: IJob<{ orderId: string }>) => {
-      await Promise.resolve(job.data.orderId); // replace with real work
+      console.log(job.data.orderId);
     },
     options: { concurrency: 2 },
   }],
 });
 ```
 
-- Functional `setu g job receipt` writes `src/jobs/receipt.job.ts`: `RECEIPT_JOB`, payload field
-  `id`, and `createReceiptJobProcessor`. Edit that processor; `src/jobs/index.ts` collects factories
-  as `QUEUE_PROCESSORS`, wired to `QueuePlugin({processors:[...QUEUE_PROCESSORS]})` in
-  `setu.config.ts`. Factories receive the service registry at `onInit`.
-- Class-based generation requires queue and emits `src/ingress/receipt-job.ingress.ts` with
-  `@Processor(RECEIPT_JOB)`. `src/ingress/index.ts` exports `INGRESS_HANDLERS`, passed to
-  `DecoratorPlugin({ingress:[...INGRESS_HANDLERS]})` from `@setu-ts/decorator-plugin`.
-- `adapter` defaults to `'memory'` (process-local). For Redis use `adapter: 'redis'` and `url`;
-  RabbitMQ uses `adapter: 'rabbitmq'` and `url`; SQS uses `adapter: 'sqs'` and `sqs`.
-- `job.data` is the payload; `job.attempts` starts at 1. Throw to fail an attempt; `maxAttempts`
-  exhausted calls `options.onFailed(job,error)` before dead-lettering. Make side effects safe to
-  repeat. `options.concurrency` defaults to 1; `pollIntervalMs` defaults to 1000. Wait for effects
-  in tests; await `app.stop()` on shutdown to stop polling and disconnect.
+## Behaviour the types do not show
 
-<!-- card-allow: RECEIPT_JOB QUEUE_PROCESSORS INGRESS_HANDLERS -->
+- `add` resolves to the job ID, before processing completes; `delayMs` is milliseconds.
+- `job.attempts` is 1 on first delivery. Throwing fails an attempt; make effects safe to repeat.
+- `onFailed` runs once after attempts are exhausted, before dead-lettering. It does not run for
+  attempts that will be retried; its own errors are logged and swallowed.
+- Default processor concurrency is 1 per name; default `pollIntervalMs` is 1000 milliseconds.
+- The default memory adapter is process-local. Processor factories resolve at `onInit`, when
+  capabilities are registered; shutdown stops polling and disconnects the adapter.
+
+## Other options
+
+- `adapter: 'redis'` or `'rabbitmq'` uses `url`; `'sqs'` uses `sqs`.
+- `schedule` registers recurring jobs with a cron expression.
+- `behaviors` wraps processor execution; `diagnostics` observes approved queue names only.

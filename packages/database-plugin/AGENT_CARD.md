@@ -1,50 +1,62 @@
-# @setu-ts/database-plugin — repositories, Unit of Work and ORM adapters
+# @setu-ts/database-plugin — repositories and transactions
 
-`setu add database` prints the `DatabasePlugin({ type: 'memory' })` line to add; no scaffold
-registers it. It provides `IDatabaseService` under `CAPABILITIES.DATABASE`, or under
-`database.<name>` when `name` is set. Adapters: `MemoryAdapter` (default), `PrismaAdapter`,
-`DrizzleAdapter`, `MongoAdapter`, DynamoDB, Cosmos DB and Bigtable.
+**Add it:** `setu add database` installs it; add `DatabasePlugin({ type: 'memory' })` to
+`setu.config.ts`. It provides `CAPABILITIES.DATABASE` (`IDatabaseService`).
+
+## Create and read an entity from routes
 
 ```ts
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import { DatabasePlugin, type IDatabaseService } from '@setu-ts/database-plugin';
-
-export async function createDatabaseApp() {
-  const app = createApplication({
-    plugins: [RuntimePlugin(), DatabasePlugin({ type: 'memory' })],
-  });
-  await app.start(); // capabilities exist only after start()
-  return { app, db: app.services.get<IDatabaseService>(CAPABILITIES.DATABASE) };
-}
-```
-
-```ts
+import type { IRouterApi } from '@setu-ts/common';
 import type { IDatabaseService } from '@setu-ts/database-plugin';
 
-interface User { id: string; email: string; active: boolean }
-
-export async function deactivate(db: IDatabaseService, id: string): Promise<boolean> {
-  const users = db.getRepository<User, string>('User');
-  await db.transaction(async (uow) => {
-    await uow.getRepository<User, string>('User').update(id, { active: false });
+type User = { id: string; email: string; active: boolean };
+export function registerUserRoutes(router: IRouterApi): void {
+  router.post('/users', {
+    handler: async (ctx) => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const users = db.getRepository<User>('User');
+      const user = await users.create({
+        id: (await ctx.request.json<User>()).id, email: 'ada@example.com', active: true,
+      });
+      return ctx.response.status(201).json(user);
+    },
   });
-  return (await users.findById(id))?.active === false;
+  router.get('/users/:id', {
+    handler: async (ctx) => {
+      const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+      const user = await db.getRepository<User>('User').findById(ctx.params.id!);
+      return user ? ctx.response.json(user) : ctx.response.status(404).json({ error: 'missing' });
+    },
+  });
 }
 ```
 
-- `type` defaults to `'memory'`; `'prisma'` requires `options.prismaClient`, `'drizzle'`
-  `drizzleInstance` and `drizzleTables`, `'custom'` `adapter`.
-- Repositories expose `findById`, `findAll`, `findOne`, `create`, `update`, `delete`, `exists`,
-  `count` and `findPage`; `findAll` takes `where`, `filter`, `orderBy`, `limit`, `offset`, `select`
-  and `cursor`; a query carrying both offset and cursor is refused.
-- `transaction(work, { isolation: 'serializable' })` commits on success and rolls back with the
-  error. An unsupported level throws `UnsupportedIsolationLevelError`, never a silent downgrade.
-- `query` runs raw SQL (the memory adapter answers 501); `migrate` always rejects with
-  `UnsupportedMigrationError`.
-- Bridge factories: `createDatabaseTenantDataStore`, `createDatabaseOutboxStore`,
-  `createDatabaseInboxStore` and `createDatabaseIdempotencyStore`.
-- `getDrizzleDatabase`/`getDrizzleTransaction` give typed Drizzle access.
-- `readiness: { migrations: [...] }` adds a schema indicator; pass `provider` when Prisma cannot
-  detect the connector, or `contains` throws `UnsupportedFilterOperatorError`.
+## Update within one transaction
+
+```ts
+import { CAPABILITIES } from '@setu-ts/common';
+import type { IDatabaseService } from '@setu-ts/database-plugin';
+
+const db = ctx.services.get<IDatabaseService>(CAPABILITIES.DATABASE);
+await db.transaction(async (uow) => {
+  const users = uow.getRepository<{ id: string; active: boolean }>('User');
+  await users.update('user-1', { active: false });
+});
+```
+
+## Behaviour the types do not show
+
+- The default adapter is memory and loses data when the process ends.
+- `findById` and `findOne` return `null` when absent.
+- Only repositories obtained from the unit of work share its transaction. Success commits; failure
+  attempts rollback and rejects.
+- Unsupported transaction isolation levels reject rather than silently downgrading.
+- Raw `query` rejects on memory; `migrate` rejects on every current adapter.
+
+## Other options
+
+- `type` also selects `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'`
+  or `'custom'`.
+- `name` selects a named database token; `readiness` configures migration readiness checks.
+- `findAll` supports filtering and ordering; `findPage` supplies cursor pagination where supported.
