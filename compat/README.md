@@ -52,11 +52,12 @@ The final check audits every installed package's `dist/` for `npm:` or `jsr:` in
 including parameterized importers. Comments are stripped before matching. There is no version guard:
 npm never received the historical broken JSR builds.
 
-The first check derives its expectation from `../deno.json` rather than from this directory's own
-`package.json`, so adding a package to the workspace and forgetting it here **fails the compat job**
-instead of quietly shrinking coverage. The one legitimate exception is a package between its
-introduction and its first publish — it cannot be installed before it exists on the registry — which
-goes in `PENDING_FIRST_PUBLISH` in `compat.test.mjs` and comes out once it ships.
+The first check derives its expectation from `../pnpm-workspace.yaml` (each non-private `packages/`
+member's `package.json`) rather than from this directory's own `package.json`, so adding a package
+to the workspace and forgetting it here **fails the compat job** instead of quietly shrinking
+coverage. The one legitimate exception is a package between its introduction and its first publish —
+it cannot be installed before it exists on the registry — which goes in `PENDING_FIRST_PUBLISH` in
+`compat.test.mjs` and comes out once it ships.
 
 The workflow probes `@setu-ts/common` first: HTTP 404 reports the npm scope as unpublished and skips
 install and suite steps; HTTP 200 runs them; every other status fails. All 52 dependencies are
