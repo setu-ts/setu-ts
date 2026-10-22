@@ -416,6 +416,8 @@ configure Redis.
 
 ### Workers projects: thread `waitUntil` through the factory
 
+<!-- version:history -->
+
 A Workers project scaffolded by 0.10.0 passes the platform's `waitUntil` from `src/index.ts` into
 `createApp` in `setu.config.ts` as its SECOND parameter, on every template. The CLI does not edit an
 existing project, so a project scaffolded by 0.9.0 or earlier keeps what it had: only the
@@ -445,6 +447,8 @@ Without `waitUntil`, `CloudflarePlugin` now logs one warning at startup on Worke
 `cacheApiMiddleware` awaits its cache write before answering instead of losing it.
 
 ### Full-stack Workers projects: pass `serverBuild` as a module
+
+<!-- version:history -->
 
 A `full-stack` Workers project scaffolded by 0.9.0 builds but cannot start: its `setu.config.ts`
 locates the server build with `new URL('./build/server/index.js', import.meta.url)`, which a bundled
@@ -507,9 +511,13 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
   non-fatal.
 
+<!-- version:history -->
+
 ## 0.9.0
 
 ### The framework installs from npm (`npm:@setu-ts/`); `--runtime` defaults to `node`
+
+<!-- version:history -->
 
 From 0.9.0 the packages are published to npm under their own names (`@setu-ts/kernel`, …), and the
 CLI is a Node program. What an existing project changes depends on its target:
@@ -717,6 +725,8 @@ refuse newly generated entries with `PREPARATION_FAILED`.
 
 ### Update programmatic CLI `Prompter` implementations
 
+<!-- version:history -->
+
 `Prompter.select` now returns `PromptSelection`. Replace a string result with
 `{ kind: 'answer', value }`, inability to prompt with `{ kind: 'unavailable' }`, and user
 cancellation with `{ kind: 'cancelled' }`. Cancellation stops scaffolding and exits `130`. This is a
@@ -866,6 +876,8 @@ the topic first, or set `retry: { retries: 0 }` to fail immediately.
 
 ### Run Node.js 22 or later (`engines.node >=22`)
 
+<!-- version:history -->
+
 The documented floor was Node 18; five packages use `Promise.withResolvers`, which Node 22 was the
 first to ship. Upgrade runtimes and production images to Node 22 or newer before installing `0.9.0`
 (CI verifies on Node 24).
@@ -930,6 +942,8 @@ not exist on npm. Rewrite `@hono/hono/html` and `@hono/hono/jsx` imports as `hon
 (`npm install hono`, or `deno add npm:hono` on Deno), since your own compiler resolves those paths.
 
 ### Repair projects scaffolded by an earlier `setu new`
+
+<!-- version:history -->
 
 Three defects were in generated output, so a project scaffolded before `0.9.0` keeps them until you
 copy the fix from a fresh scaffold:
@@ -1134,6 +1148,8 @@ Escaping belongs to the rendering runtime, and a component that is already a `st
 unchanged — so any value reaching it is written to the page verbatim. With a user-supplied name of
 `<script>alert(1)</script>` that example emits the script tag, where JSX and hono's `html` tag both
 emit `&lt;script&gt;`.
+
+<!-- version:history -->
 
 Nothing in the plugin changed and no version is affected — the engine always behaved this way. What
 changed is the documentation. If you copied that shape, switch to either escaping form. The

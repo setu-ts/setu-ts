@@ -1759,6 +1759,8 @@ interface IDataSource {
 A data source owns query evaluation end to end — it applies `where`, `orderBy`, `offset`/`limit` and
 `select` itself, and `BaseRepository` must not re-apply any of them.
 
+<!-- version:history -->
+
 **Conditional writes (M105, since 0.9.0).** Both optional members address the supplied key AND
 require every predicate field to equal its value at the write. `updateWhere` returns the updated row
 or `null`; `deleteWhere` returns whether a row was deleted. An absent key and a predicate miss have
@@ -5764,6 +5766,8 @@ listener `ioredis` prints every reconnect failure to `console.error`, bypassing 
 redaction. An injected client gets no listener — it belongs to the caller. Health semantics are
 unchanged; the indicator still reports the outage.
 
+<!-- version:history -->
+
 **RabbitMQ consumer recovery (0.9.0).** Durable consumer groups retry transient handler failures
 through durable quorum `Q.retry.<delay>ms` queues (queue-level TTL, default-exchange DLX back to
 `Q`, at-least-once dead-lettering with `reject-publish` overflow, so a copy is held rather than
@@ -5789,6 +5793,8 @@ consumer. With retries enabled, group names ending in `.dead` or `.retry.<digits
 and helper names must fit 255 UTF-8 bytes. Names are validated before declaration (at construction
 for declarative instances). Rename conflicting groups or set `consumerRetry: false`; migrate
 existing queues occupying helper names before enabling retries.
+
+<!-- version:history -->
 
 **Redis Streams recovery (0.9.0).** Requires Redis ≥6.2 (`XPENDING IDLE`). Failed messages
 redeliver, including after restart, so handlers must be idempotent. The first retry delay must
@@ -5840,6 +5846,7 @@ interface MemoryMessagingOptions extends MessagingCommonOptions {
   broker?: 'memory';
 }
 
+// version:history
 /** Shared retry shape; defaults and lease semantics depend on the broker. @since 0.9.0 */
 interface ConsumerRetryOptions {
   readonly maxAttempts?: number;
@@ -5872,10 +5879,13 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
 interface RabbitMqMessagingOptions extends MessagingCommonOptions {
+  // version:history
   /** Group retry policy, default 5 attempts and [5000, 30000, 120000, 600000] ms. @since 0.9.0 */
   consumerRetry?: false | ConsumerRetryOptions;
+  // version:history
   /** Q.dead retention cap, default 10000; changing requires draining/deleting Q.dead. @since 0.9.0 */
   deadLetterMaxLength?: number;
+  // version:history
   /** Unacked delivery limit per consumer, integer 1–65535, default 32. @since 0.9.0 */
   prefetch?: number;
   broker: 'rabbitmq';
@@ -5894,11 +5904,13 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
    * refused at construction.
    */
   defaultQueue?: string;
+  // version:history
   /**
    * Publish every message persistent (`delivery_mode` 2), so it survives a broker restart.
    * `false` restores the pre-0.9.0 transient publishes. @defaultValue true @since 0.9.0
    */
   persistentMessages?: boolean;
+  // version:history
   /**
    * Bound on one `publish()` in ms — every broker round trip, including the publisher confirm.
    * `0` disables it; outside `0`–`2147483647` throws `RangeError` at `MessagingPlugin(...)`.
@@ -5972,6 +5984,7 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
   defaultQueue?: string;
   /** Request-reply topic; must already exist on the broker. @defaultValue 'messaging.replies' */
   replyTopic?: string;
+  // version:history
   /**
    * Retry budget (M101b). Forwarded to `new Kafka({ retry })` unless `client` is
    * injected, and read by `subscribe()` to retry `UNKNOWN_TOPIC_OR_PARTITION` —
@@ -7278,6 +7291,8 @@ indicator still reports the outage.
 depth row in the observations describes the latest cycle only: a name that cycle did not read has no
 row, and the source's `failure` plus `depthCoverage: 'partial'` say why — an unreadable depth is
 never a retained zero.
+
+<!-- version:history -->
 
 **RabbitMQ durability.** Since 0.9.0 the `'rabbitmq'` adapter publishes every job persistent
 (`persistentMessages`, default `true`) through a publisher-confirm channel. Its ready/delay/dead
@@ -9526,8 +9541,8 @@ routes as `METHOD path`. The allocation helper is internal; no service or genera
 
 Component names and `x-setu-unrepresentable[].at` follow the chosen id. SDK method and type names
 therefore change when an existing declaration starts taking effect; see
-[Upgrading](docs/upgrading.md#unreleased). Distinct OpenAPI ids can still collide in SDK codegen:
-declared `getUsers` beside derived `get-users` is valid OpenAPI but is refused by the SDK with
+[Upgrading](docs/upgrading.md#0100). Distinct OpenAPI ids can still collide in SDK codegen: declared
+`getUsers` beside derived `get-users` is valid OpenAPI but is refused by the SDK with
 `Duplicate operation name`. Choose ids with distinct sanitized TypeScript names.
 
 ### Documenting Authentication
@@ -9923,6 +9938,8 @@ earlier) is refused the same way, pointing at the upgrade guide.
 | `MainRuntime`   | interface | The runtime services `runMain` reads (`fs`, the clock, `onSignal`)                                                                            |
 | `MainProcess`   | interface | The host: `args`, `cwd()`, `isTerminal()`, `prompt(message, signal?) => Promise<string \| null>`, `log`, `error`, `portAvailable`, `dispose?` |
 
+<!-- version:history -->
+
 **Breaking (0.9.0):** `MainProcess.prompt` is asynchronous and takes the run's interrupt signal, so
 an interrupt ends a pending question rather than waiting for Enter; `denoProcess` is removed,
 replaced by `nodeProcess`. Both executables set `process.exitCode` rather than calling
@@ -10192,6 +10209,8 @@ terminal implementation only behind `Deno.stdin.isTerminal()`; and Deno's own `p
 
 The two exported types:
 
+<!-- version:history -->
+
 | Export            | Kind      | Members                                                                                                         |
 | ----------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
 | `Prompter`        | interface | Since 0.9.0, `select(question, choices): Promise<PromptSelection>` — answer, unavailable, or cancelled.         |
@@ -10437,6 +10456,8 @@ workspace created before this keeps its shape.
 | Environment read in generated source | `Deno.env.get(x)`       | `process.env.X`             | `process.env.X` |
 | Library test runner                  | `@std/testing`          | `node:test`                 | `bun test`      |
 | Image                                | `denoland/deno`         | `node:24-alpine`            | `oven/bun`      |
+
+<!-- version:history -->
 
 Three facts were measured, and each shaped the result. **Bun needs no root shape of its own** — it
 reads npm `workspaces` — but it installs into each MEMBER's `node_modules` as well as the root, so
@@ -13326,6 +13347,8 @@ depends on it. Implemented in **Milestone 8**; this section is the authoritative
 | `ProviderEntry`    | type | A provider paired with its resolved scope (internal building block) |
 
 Contract notes:
+
+<!-- version:history -->
 
 - **Optional**: no plugin depends on the DI container. When `DiPlugin` is not registered,
   `ctx.container` is `undefined` and services resolve directly from the `ServiceRegistry`.

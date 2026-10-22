@@ -214,6 +214,8 @@ injected client gets no listener: it belongs to the caller.
 
 ### RabbitMQ durability
 
+<!-- version:history -->
+
 Consumer-group queues are declared durable, and every message is published **persistent** — a
 durable queue keeps only persistent messages across a broker restart. Before 0.9.0 messages were
 published transient, so a RabbitMQ restart emptied every group queue of the messages waiting in it.
@@ -244,6 +246,8 @@ stored anything — and the broker logs one warning saying so; a real amqplib co
 it.
 
 ### RabbitMQ consumer recovery
+
+<!-- version:history -->
 
 Since 0.9.0, durable consumer-group handlers **must be idempotent**: failures redeliver, and a crash
 after a confirmed copy but before the original ack can duplicate a message.
@@ -398,6 +402,8 @@ exhausted, the connection closes and health stays down until the application rep
 `maxAttempts` must be an integer ≥ -1; `waitMs` an integer 1–2147483647. Invalid values throw
 `RangeError` at plugin or broker construction. `reconnect` with an injected `client` throws
 `TypeError`: configure that connection in the application instead.
+
+<!-- version:history -->
 
 **`publish()` resolves once JetStream has stored the message.** It waits for the server's
 acknowledgement, so a publish to a subject no stream captures rejects with an error naming the

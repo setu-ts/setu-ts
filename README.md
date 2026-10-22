@@ -24,8 +24,8 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.9.0` publishes 52 packages to npm under `@setu-ts`** — the first npm
-> release. Every earlier version remains on JSR; nothing new is published there.
+> [!IMPORTANT] **Status: `v0.10.0` publishes 52 packages to npm under `@setu-ts`.** Versions
+> published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
 >
@@ -206,7 +206,7 @@ bun add @setu-ts/kernel@^0.10.0 @setu-ts/runtime@^0.10.0
 deno add npm:@setu-ts/kernel@^0.10.0 npm:@setu-ts/runtime@^0.10.0
 ```
 
-**The `@^0.9.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.10.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -231,6 +231,8 @@ cd my-app && npm install && npm start
 the default target — `--runtime deno`, `bun` or `cloudflare-workers` scaffolds the others, each
 installing the framework from npm with its own package manager.
 
+<!-- version:history -->
+
 All 52 workspace members ship as one release train: the core (`common`, `kernel`, `runtime`,
 `exceptions`, `testing`), every plugin in the tables above, the three starters, the `sdk`, the `cli`
 and `create` — on npm from `v0.9.0`, which publishes `localization-plugin`, `idempotency-plugin` and
@@ -251,8 +253,10 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.9.0` range means `>=0.9.0 <0.10.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.10.0` range means `>=0.10.0 <0.11.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
+
+<!-- version:history -->
 
 From `0.9.0` the **patch is the normal release** and breaking changes are batched into an occasional
 minor: a change that would break a caller or an implementor ships behind its old behaviour first (a
@@ -367,8 +371,12 @@ graph TB
 
 ## Repository Structure
 
+<!-- version:history -->
+
 A pnpm workspace. Every package is published independently to npm; releases before `v0.9.0` were
 published to JSR.
+
+<!-- version:history -->
 
 ```
 setu-ts/

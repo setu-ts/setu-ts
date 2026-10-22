@@ -177,6 +177,8 @@ CPU. That timed-out CPU-bound-thread measurement was taken on Deno only. Treat a
 correctness bound rather than a resource bound for CPU-bound code that can loop, and have long tasks
 check a deadline and return.
 
+<!-- version:history -->
+
 At a hand-over, the terminated thread and its replacement can briefly be alive together: OS threads
 can exceed `maxWorkers` by 1–2 for 20–60 ms on Node, Bun and Deno. This was measured on 0.9.0 with
 20 ms sampling and `maxWorkers: 3`; some sampled runs showed no overshoot, so it does not happen at
