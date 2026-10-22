@@ -1,228 +1,141 @@
-/**
- * Smoke check for the static-file example.
- *
- * Beyond the happy path, this drives the four behaviours that a code review of
- * M55 found broken — a HEAD that opened (and leaked) a body stream, a hashed
- * asset that lost its `immutable` policy when the brotli sidecar was served,
- * and an interrupted download that could never resume because the ETag was
- * weak. A smoke that only requests the paths its author already believed
- * worked is not coverage, so each of those is requested explicitly here.
- */
+import assert from 'node:assert/strict';
 import { stat } from 'node:fs/promises';
-/* eslint-disable no-console */
+import { after, before, describe, it } from 'node:test';
+import type { IKernelApplication } from '@setu-ts/kernel';
+import { createApp } from './setu.config.ts';
 
-import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
-import { StaticPlugin } from '@setu-ts/static-plugin';
+const HASHED_ASSET = '/assets/app-a1b2c3d4.js';
+const IMMUTABLE = 'public, max-age=31536000, immutable';
 
-let failures = 0;
+describe('static-site example', () => {
+  let app: IKernelApplication;
 
-/** Asserts a condition, recording rather than throwing so one run reports every failure. */
-function check(label: string, ok: boolean, detail?: string): void {
-  if (ok) {
-    console.log(`  ok   ${label}`);
-    return;
-  }
-  failures++;
-  console.error(`  FAIL ${label}${detail === undefined ? '' : ` — ${detail}`}`);
-}
+  /** Requests a path and returns the response with its body read as bytes. */
+  const get = async (path: string, init?: RequestInit) => {
+    const response = await app.fetch(new Request(`http://localhost${path}`, init));
+    const body = new Uint8Array(await response.arrayBuffer());
+    return { response, headers: response.headers, body, text: new TextDecoder().decode(body) };
+  };
 
-async function main() {
-  const app = createApplication({
-    plugins: [
-      RuntimePlugin(),
-      StaticPlugin({
-        root: './public',
-        urlPrefix: '/',
-        fallback: 'index.html',
-        // Deliberately tiny so every response takes the STREAMING path rather
-        // than the buffered one. Without this the example would exercise only
-        // `readFile`, and the `readStream` seam — the milestone's headline
-        // deliverable — would go untested end to end.
-        maxBufferBytes: 4,
-      }),
-    ],
+  before(async () => {
+    // A tiny buffer limit sends every file down the streaming path rather than
+    // the buffered one, so the stream implementation is what gets exercised.
+    app = createApp({ maxBufferBytes: 4 });
+    await app.start();
   });
 
-  await app.start({ port: 0 });
+  after(async () => {
+    await app.stop();
+  });
 
-  // ---------------------------------------------------------------- serving
-  const index = await app.fetch(new Request('http://localhost/index.html'));
-  check('serves index.html', index.status === 200, `status ${index.status}`);
-  check(
-    'index.html carries a content type',
-    index.headers.get('Content-Type') === 'text/html',
-    `got ${index.headers.get('Content-Type')}`,
-  );
-  await index.body?.cancel();
+  describe('serving', () => {
+    it('serves index.html with its content type', async () => {
+      const { response, headers } = await get('/index.html');
 
-  // ------------------------------------------------------ conditional (304)
-  const first = await app.fetch(new Request('http://localhost/index.html'));
-  const etag = first.headers.get('ETag');
-  await first.body?.cancel();
-  check('issues an ETag', etag !== null);
+      assert.equal(response.status, 200);
+      assert.equal(headers.get('content-type'), 'text/html');
+    });
 
-  const revalidated = await app.fetch(
-    new Request('http://localhost/index.html', {
-      headers: { 'If-None-Match': etag ?? '' },
-    }),
-  );
-  check('revalidates to 304', revalidated.status === 304, `status ${revalidated.status}`);
-  await revalidated.body?.cancel();
+    it('refuses path traversal', async () => {
+      // An encoded separator survives URL parsing (`/../` would be normalized
+      // away first); the plugin decodes it into `../package.json`, a real file
+      // outside ./public.
+      assert.equal((await get('/..%2fpackage.json')).response.status, 404);
+    });
+  });
 
-  // ------------------------------------------------------------ SPA fallback
-  const fallback = await app.fetch(
-    new Request('http://localhost/nonexistent', {
-      headers: { Accept: 'text/html' },
-    }),
-  );
-  check('serves the SPA fallback for an HTML request', fallback.status === 200);
-  await fallback.body?.cancel();
+  describe('conditional requests', () => {
+    it('revalidates an unchanged file to 304', async () => {
+      const etag = (await get('/index.html')).headers.get('etag');
+      assert.ok(etag, 'no ETag was issued');
 
-  const missingAsset = await app.fetch(
-    new Request('http://localhost/nonexistent.js', {
-      headers: { Accept: '*/*' },
-    }),
-  );
-  check(
-    'does NOT serve the fallback for a non-HTML request',
-    missingAsset.status === 404,
-    `status ${missingAsset.status} — an HTML shell under a JS content type is the classic SPA bug`,
-  );
-  await missingAsset.body?.cancel();
+      const revalidated = await get('/index.html', { headers: { 'if-none-match': etag } });
 
-  // -------------------------------------------------------------------- HEAD
-  const head = await app.fetch(new Request('http://localhost/test.txt', { method: 'HEAD' }));
-  const headBody = await head.arrayBuffer();
-  check('HEAD answers 200', head.status === 200, `status ${head.status}`);
-  check('HEAD carries Content-Length', head.headers.get('Content-Length') === '12');
-  check('HEAD has an empty body', headBody.byteLength === 0, `${headBody.byteLength} bytes`);
+      assert.equal(revalidated.response.status, 304);
+    });
+  });
 
-  // ------------------------------------------------- resuming an interrupted
-  //                                                    download (Range + If-Range)
-  const full = await app.fetch(new Request('http://localhost/test.txt'));
-  const fullEtag = full.headers.get('ETag') ?? '';
-  const fullBody = await full.text();
-  check('full file body is intact', fullBody === 'hello world\n', JSON.stringify(fullBody));
-  check(
-    'ETag is STRONG so If-Range can authorize a resume',
-    !fullEtag.startsWith('W/'),
-    `got ${fullEtag} — a weak validator makes the server ignore If-Range`,
-  );
+  describe('SPA fallback', () => {
+    it('serves index.html for an unknown page a browser asks for', async () => {
+      const { response } = await get('/nonexistent', { headers: { accept: 'text/html' } });
 
-  const resumed = await app.fetch(
-    new Request('http://localhost/test.txt', {
-      headers: { Range: 'bytes=6-', 'If-Range': fullEtag },
-    }),
-  );
-  const resumedBody = await resumed.text();
-  check(
-    'resumes with 206 rather than restarting',
-    resumed.status === 206,
-    `status ${resumed.status}`,
-  );
-  check(
-    'Content-Range describes the resumed slice',
-    resumed.headers.get('Content-Range') === 'bytes 6-11/12',
-    `got ${resumed.headers.get('Content-Range')}`,
-  );
-  check('resumed bytes continue the file', resumedBody === 'world\n', JSON.stringify(resumedBody));
+      assert.equal(response.status, 200);
+    });
 
-  const stale = await app.fetch(
-    new Request('http://localhost/test.txt', {
-      headers: { Range: 'bytes=6-', 'If-Range': '"999-1"' },
-    }),
-  );
-  check('a stale If-Range forces the whole file', stale.status === 200, `status ${stale.status}`);
-  await stale.body?.cancel();
+    it('does not serve it for a missing script, which would arrive as HTML', async () => {
+      const { response } = await get('/nonexistent.js', { headers: { accept: '*/*' } });
 
-  const unsatisfiable = await app.fetch(
-    new Request('http://localhost/test.txt', {
-      headers: { Range: 'bytes=9999-' },
-    }),
-  );
-  check('an out-of-range request answers 416', unsatisfiable.status === 416);
-  check(
-    '416 reports the true size',
-    unsatisfiable.headers.get('Content-Range') === 'bytes */12',
-    `got ${unsatisfiable.headers.get('Content-Range')}`,
-  );
-  await unsatisfiable.body?.cancel();
+      assert.equal(response.status, 404);
+    });
+  });
 
-  // --------------------------------------------- precompressed sidecar + cache
-  const identity = await app.fetch(new Request('http://localhost/assets/app-a1b2c3d4.js'));
-  const identityEtag = identity.headers.get('ETag');
-  const identityCache = identity.headers.get('Cache-Control');
-  await identity.body?.cancel();
-  check(
-    'a content-hashed asset is immutable when served identity',
-    identityCache === 'public, max-age=31536000, immutable',
-    `got ${identityCache}`,
-  );
+  describe('HEAD', () => {
+    it('answers with the length and no body', async () => {
+      const { response, headers, body } = await get('/test.txt', { method: 'HEAD' });
 
-  const brotli = await app.fetch(
-    new Request('http://localhost/assets/app-a1b2c3d4.js', {
-      headers: { 'Accept-Encoding': 'br' },
-    }),
-  );
-  const brotliBytes = new Uint8Array(await brotli.arrayBuffer());
-  check(
-    'negotiates the brotli sidecar',
-    brotli.headers.get('Content-Encoding') === 'br',
-    `got ${brotli.headers.get('Content-Encoding')}`,
-  );
-  check(
-    'keeps the original content type for the sidecar',
-    brotli.headers.get('Content-Type') === 'text/javascript',
-    `got ${brotli.headers.get('Content-Type')}`,
-  );
-  check(
-    'marks the response as varying on Accept-Encoding',
-    brotli.headers.get('Vary') === 'Accept-Encoding',
-  );
-  check(
-    'the sidecar keeps the immutable policy of the original asset',
-    brotli.headers.get('Cache-Control') === 'public, max-age=31536000, immutable',
-    `got ${brotli.headers.get('Cache-Control')} — resolving from the '.js.br' path loses it`,
-  );
-  check(
-    'the sidecar has its OWN ETag',
-    brotli.headers.get('ETag') !== identityEtag,
-    'sharing the original ETag across two byte streams poisons caches',
-  );
+      assert.equal(response.status, 200);
+      assert.equal(headers.get('content-length'), '12');
+      assert.equal(body.byteLength, 0);
+    });
+  });
 
-  // The bytes on the wire really are the compressed sidecar, not the source.
-  const sidecarSize = (await stat('./public/assets/app-a1b2c3d4.js.br')).size;
-  check(
-    'serves the compressed bytes',
-    brotliBytes.byteLength === sidecarSize,
-    `${brotliBytes.byteLength} bytes on the wire vs ${sidecarSize} on disk`,
-  );
+  describe('resuming a download', () => {
+    it('issues a strong ETag, without which If-Range is ignored', async () => {
+      const { headers, text } = await get('/test.txt');
 
-  const refused = await app.fetch(
-    new Request('http://localhost/assets/app-a1b2c3d4.js', {
-      headers: { 'Accept-Encoding': 'br;q=0, *' },
-    }),
-  );
-  check(
-    'an explicit br;q=0 refuses brotli despite the wildcard',
-    refused.headers.get('Content-Encoding') === null,
-    `got ${refused.headers.get('Content-Encoding')}`,
-  );
-  await refused.body?.cancel();
+      assert.equal(text, 'hello world\n');
+      assert.ok(!headers.get('etag')?.startsWith('W/'), `weak ETag: ${headers.get('etag')}`);
+    });
 
-  // ---------------------------------------------------------------- traversal
-  const traversal = await app.fetch(new Request('http://localhost/../deno.json'));
-  check('refuses path traversal', traversal.status === 404, `status ${traversal.status}`);
-  await traversal.body?.cancel();
+    it('resumes from the requested byte with 206', async () => {
+      const etag = (await get('/test.txt')).headers.get('etag') ?? '';
 
-  await app.stop();
+      const resumed = await get('/test.txt', { headers: { range: 'bytes=6-', 'if-range': etag } });
 
-  if (failures > 0) {
-    console.error(`\n${failures} smoke check(s) failed`);
-    process.exit(1);
-  }
-  console.log('\nAll smoke tests passed');
-}
+      assert.equal(resumed.response.status, 206);
+      assert.equal(resumed.headers.get('content-range'), 'bytes 6-11/12');
+      assert.equal(resumed.text, 'world\n');
+    });
 
-await main();
+    it('sends the whole file when If-Range no longer matches', async () => {
+      const stale = await get('/test.txt', {
+        headers: { range: 'bytes=6-', 'if-range': '"999-1"' },
+      });
+
+      assert.equal(stale.response.status, 200);
+    });
+
+    it('answers 416 with the true size for a range past the end', async () => {
+      const { response, headers } = await get('/test.txt', { headers: { range: 'bytes=9999-' } });
+
+      assert.equal(response.status, 416);
+      assert.equal(headers.get('content-range'), 'bytes */12');
+    });
+  });
+
+  describe('precompressed assets', () => {
+    it('marks a content-hashed asset immutable', async () => {
+      assert.equal((await get(HASHED_ASSET)).headers.get('cache-control'), IMMUTABLE);
+    });
+
+    it('serves the brotli sidecar with the original type and cache policy', async () => {
+      const identity = await get(HASHED_ASSET);
+      const brotli = await get(HASHED_ASSET, { headers: { 'accept-encoding': 'br' } });
+      const sidecarSize = (await stat(`./public${HASHED_ASSET}.br`)).size;
+
+      assert.equal(brotli.headers.get('content-encoding'), 'br');
+      assert.equal(brotli.headers.get('content-type'), 'text/javascript');
+      assert.equal(brotli.headers.get('vary'), 'Accept-Encoding');
+      assert.equal(brotli.headers.get('cache-control'), IMMUTABLE);
+      assert.equal(brotli.body.byteLength, sidecarSize);
+      // Two byte streams under one ETag would poison shared caches.
+      assert.notEqual(brotli.headers.get('etag'), identity.headers.get('etag'));
+    });
+
+    it('honours an explicit br;q=0 over a wildcard', async () => {
+      const refused = await get(HASHED_ASSET, { headers: { 'accept-encoding': 'br;q=0, *' } });
+
+      assert.equal(refused.headers.get('content-encoding'), null);
+    });
+  });
+});

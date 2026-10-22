@@ -115,13 +115,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // described apps that no longer existed (routes, plugins, ports), so each
     // deep dive now gives the shell commands it was checked with and links to
     // the app's source. One compiled block remains: the factory/smoke shape
-    // every example shares, taken from apps/minimal.
-    total: 18,
+    // every example shares, taken from apps/minimal. Two more skipped blocks:
+    // the layout tree and the worker-pool commands.
+    total: 20,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 17,
+    skipped: 19,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -249,12 +250,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // 286 in M110b: its Scoped Roles section (+4, all compiling).
   // M113l: +6 getting-started fences and +3 webhook fences.
   // M116: +2 skipped fences in docs/cli.md's `setu agents` section.
-  total: 298,
+  // Examples layout cleanup: +2 skipped fences in docs/examples.md.
+  total: 300,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 69,
+  skipped: 71,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

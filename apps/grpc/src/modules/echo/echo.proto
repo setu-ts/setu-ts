@@ -1,0 +1,21 @@
+// The source of echo.descriptor.ts. The app serves EchoService; StreamService is
+// declared in the descriptor but not implemented.
+syntax = "proto3";
+
+package example;
+
+service EchoService {
+  rpc Echo(EchoRequest) returns (EchoResponse);
+  rpc Ping(PingRequest) returns (PingResponse);
+}
+
+service StreamService {
+  rpc ServerStream(StreamRequest) returns (stream StreamResponse);
+}
+
+message EchoRequest { string message = 1; }
+message EchoResponse { string response = 1; }
+message PingRequest {}
+message PingResponse { bool pong = 1; }
+message StreamRequest { string prefix = 1; }
+message StreamResponse { string message = 1; }

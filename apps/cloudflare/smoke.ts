@@ -1,179 +1,133 @@
-/* eslint-disable no-console -- an unavailable external prerequisite must be visible in CI. */
-import { freePort, startHost } from '../smoke-helpers.ts';
-import { run as runProcess } from '../../scripts/lib/run.ts';
+import assert from 'node:assert/strict';
+import { after, before, describe, it } from 'node:test';
+import { run } from '../../scripts/lib/run.ts';
+import { delay, freePort, skip, startHost, stopHost, waitForHttp } from '../smoke-helpers.ts';
+import type { Host } from '../smoke-helpers.ts';
 
-async function waitForReady(baseUrl: string): Promise<void> {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    try {
-      const response = await fetch(`${baseUrl}/value/ready`, {
-        signal: AbortSignal.timeout(250),
-      });
-      if (response.status === 404) return;
-    } catch {
-      // Wrangler has not started listening yet.
-    }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error('Wrangler did not start within five seconds.');
-}
+const SCRATCH = '../../.tmp/cloudflare-example';
+const BUNDLE = `${SCRATCH}/worker.mjs`;
 
-let check: { code: number } | null = null;
-try {
-  check = await runProcess('wrangler', ['--version']);
-} catch (error) {
-  if (!(
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    error.code === 'ENOENT'
-  )) {
+/** Whether the `wrangler` binary is on PATH. */
+async function wranglerAvailable(): Promise<boolean> {
+  try {
+    return (await run('wrangler', ['--version'])).code === 0;
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return false;
     throw error;
   }
 }
-if (check === null || check.code !== 0) {
-  console.warn('SKIP: Wrangler is not installed; Cloudflare smoke check was not run.');
-  process.exit(77);
+
+/** Bundles the Worker so workerd never evaluates the Node, Deno or Bun adapters. */
+async function bundleWorker(): Promise<void> {
+  const { code } = await run(
+    'pnpm',
+    [
+      'exec',
+      'esbuild',
+      'worker.ts',
+      '--bundle',
+      '--format=esm',
+      '--platform=browser',
+      '--tsconfig=../../tsconfig.apps.json',
+      '--external:node:*',
+      `--outfile=${BUNDLE}`,
+    ],
+    { inherit: true },
+  );
+  if (code !== 0) throw new Error('esbuild could not bundle the Worker.');
 }
 
-const port = await freePort();
-const baseUrl = `http://127.0.0.1:${port}`;
-const bundle = await runProcess(
-  'pnpm',
-  [
-    'exec',
-    'esbuild',
-    'worker.ts',
-    '--bundle',
-    '--format=esm',
-    '--platform=browser',
-    '--tsconfig=../../tsconfig.apps.json',
-    '--external:node:*',
-    '--outfile=../../.tmp/m37-cloudflare-worker.mjs',
-  ],
-  { inherit: true },
-);
-if (bundle.code !== 0) throw new Error('esbuild could not bundle the Cloudflare Worker.');
-const worker = startHost('wrangler', [
-  'dev',
-  '../../.tmp/m37-cloudflare-worker.mjs',
-  '--config',
-  'wrangler.toml',
-  '--local',
-  '--test-scheduled',
-  '--compatibility-date',
-  '2025-09-01',
-  '--compatibility-flag',
-  'nodejs_compat',
-  '--persist-to',
-  '../../.tmp/m37-cloudflare-smoke',
-  '--port',
-  String(port),
-  '--log-level',
-  'error',
-]);
+function startWrangler(port: number): Host {
+  return startHost('wrangler', [
+    'dev',
+    BUNDLE,
+    '--config',
+    'wrangler.toml',
+    '--local',
+    '--test-scheduled',
+    '--compatibility-date',
+    '2025-09-01',
+    '--compatibility-flag',
+    'nodejs_compat',
+    '--persist-to',
+    `${SCRATCH}/state`,
+    '--port',
+    String(port),
+    '--log-level',
+    'error',
+  ]);
+}
 
-try {
-  await waitForReady(baseUrl);
-  const written = await fetch(`${baseUrl}/value/smoke`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ value: 'written-by-wrangler' }),
+if (!(await wranglerAvailable())) skip('Wrangler is not installed; the Worker was not run.');
+
+describe('cloudflare example on workerd', () => {
+  let worker: Host;
+  let baseUrl: string;
+
+  const readValue = async (key: string): Promise<string | undefined> => {
+    const response = await fetch(`${baseUrl}/value/${key}`);
+    return response.ok ? (await response.json()).value : undefined;
+  };
+
+  before(async () => {
+    await bundleWorker();
+    const port = await freePort();
+    baseUrl = `http://127.0.0.1:${port}`;
+    worker = startWrangler(port);
+    // `/value/<unset key>` answers 404 once the Worker is serving.
+    await waitForHttp(`${baseUrl}/value/ready`, {
+      label: 'Wrangler',
+      isReady: (response) => response.status === 404,
+    });
   });
-  if (written.status !== 204) {
-    throw new Error(`KV write returned ${written.status}.`);
-  }
 
-  const value = await (await fetch(`${baseUrl}/value/smoke`)).json();
-  if (value.value !== 'written-by-wrangler') {
-    throw new Error('KV read did not return the written value.');
-  }
-
-  const scheduled = await fetch(`${baseUrl}/__scheduled?cron=*/5+*+*+*+*`);
-  if (!scheduled.ok) {
-    throw new Error(`Scheduled trigger returned ${scheduled.status}.`);
-  }
-  const runs = await (await fetch(`${baseUrl}/value/scheduled-runs`)).json();
-  if (runs.value !== '1') {
-    throw new Error('Scheduled handler did not write its KV confirmation.');
-  }
-
-  // --- Runtime detection on the real platform ------------------------------
-  //
-  // workerd reports `navigator.userAgent === 'Cloudflare-Workers'`, and the
-  // detector compared it against a lowercase needle — so it answered 'node' on
-  // every Worker, and since that answer chooses the runtime adapter, a
-  // scaffolded Worker ran the NODE adapter on Cloudflare. Unit tests could not
-  // catch it: their fake sent a lowercase string the platform never sends.
-  const diag = await (await fetch(`${baseUrl}/diag/platform`)).json();
-  if (diag.detected !== 'cloudflare-workers') {
-    throw new Error(
-      `detectRuntime() answered '${String(diag.detected)}' on real workerd, expected ` +
-        'cloudflare-workers. That answer picks the runtime adapter, so a Worker would run the ' +
-        'Node one.',
-    );
-  }
-
-  // --- Messaging over a real Cloudflare queue -----------------------------
-  //
-  // The publish happens in a `fetch` invocation and the delivery in a separate
-  // `queue` invocation, so a fake cannot stand in for either half. The
-  // subscriber writes to KV, which is how a delivery that happened in another
-  // invocation becomes observable from here.
-  // Unique per run, and load-bearing. `wrangler dev --persist-to` keeps its KV
-  // store between runs, so a fixed value would be satisfied by whatever an
-  // EARLIER green run wrote — the check then passes even when nothing is
-  // delivered at all. Caught by breaking the subscriber's topic and watching
-  // this check stay green.
-  const note = `audited-${crypto.randomUUID()}`;
-  const published = await fetch(`${baseUrl}/publish/${note}`, {
-    method: 'POST',
+  after(async () => {
+    await stopHost(worker);
   });
-  if (published.status !== 202) {
-    throw new Error(`Publish returned ${published.status}.`);
-  }
 
-  let delivered: string | undefined;
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    const response = await fetch(`${baseUrl}/value/last-audit`);
-    if (response.ok) {
-      const seen = (await response.json()).value;
-      // A stale value from an earlier run is not a delivery: keep waiting for
-      // THIS run's note rather than accepting whatever the store holds.
-      if (seen === note) {
-        delivered = seen;
-        break;
-      }
+  it('reads back a KV value it wrote', async () => {
+    const written = await fetch(`${baseUrl}/value/smoke`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ value: 'written-by-wrangler' }),
+    });
+
+    assert.equal(written.status, 204);
+    assert.equal(await readValue('smoke'), 'written-by-wrangler');
+  });
+
+  it('runs the scheduled handler', async () => {
+    const triggered = await fetch(`${baseUrl}/__scheduled?cron=*/5+*+*+*+*`);
+
+    assert.ok(triggered.ok, `scheduled trigger returned ${triggered.status}`);
+    assert.equal(await readValue('scheduled-runs'), '1');
+  });
+
+  it('detects the Cloudflare Workers runtime', async () => {
+    const { detected } = await (await fetch(`${baseUrl}/diag/platform`)).json();
+
+    assert.equal(detected, 'cloudflare-workers');
+  });
+
+  it('delivers a published message to the subscriber in another invocation', async () => {
+    // Unique per run: `--persist-to` keeps KV between runs, so a fixed value
+    // would be satisfied by an earlier run's delivery.
+    const note = `audited-${crypto.randomUUID()}`;
+    const published = await fetch(`${baseUrl}/publish/${note}`, { method: 'POST' });
+    assert.equal(published.status, 202);
+
+    let seen: string | undefined;
+    for (let attempt = 0; attempt < 60 && seen !== note; attempt += 1) {
+      seen = await readValue('last-audit');
+      if (seen !== note) await delay(250);
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
-  }
-  if (delivered !== note) {
-    throw new Error(
-      `Subscriber did not receive the published message (last-audit=${String(delivered)}).`,
-    );
-  }
+    assert.equal(seen, note);
+  });
 
-  // --- Brokered request/reply through a real Durable Object ---------------
-  //
-  // The request rides the queue to the consumer invocation; the reply travels
-  // back through a Durable Object the caller is holding a WebSocket to. Nothing
-  // short of real workerd exercises that crossing.
-  const rpc = await fetch(`${baseUrl}/double/21`);
-  if (!rpc.ok) {
-    throw new Error(`Request/reply returned ${rpc.status}: ${await rpc.text()}`);
-  }
-  const { answer } = await rpc.json();
-  if (answer !== 42) {
-    throw new Error(`Responder answered ${String(answer)}, expected 42.`);
-  }
-} finally {
-  // `kill()` on an already-terminated child THROWS, and a throw from a `finally`
-  // replaces the in-flight exception — so a worker that died on its own reported
-  // `TypeError: Child process has already terminated` and discarded the real
-  // failure. Its status still needs awaiting below.
-  try {
-    worker.kill('SIGTERM');
-  } catch {
-    // Already gone.
-  }
-  await worker.status;
-}
+  it('answers a request through a Durable Object reply inbox', async () => {
+    const response = await fetch(`${baseUrl}/double/21`);
+
+    assert.ok(response.ok, `request/reply returned ${response.status}`);
+    assert.deepEqual(await response.json(), { answer: 42 });
+  });
+});

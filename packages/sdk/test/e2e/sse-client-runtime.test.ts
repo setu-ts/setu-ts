@@ -3,7 +3,7 @@ import { unusedPort as nodeUnusedPort } from '../../../../test/node-helpers.ts';
 
 import { describe, expect, it } from 'vitest';
 import { createSseClient } from '../../src/realtime/sse-client.ts';
-import { createRealtimeClientApp } from '../../../../apps/realtime-clients/src/app.ts';
+import { createApp as createRealtimeClientApp } from '../../../../apps/realtime-clients/setu.config.ts';
 
 function freePort(): Promise<number> {
   return nodeUnusedPort();
