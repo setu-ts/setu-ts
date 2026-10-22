@@ -149,6 +149,10 @@ The SEA embeds the whole Node runtime, so the win over the alpine image is modes
 variant for its **reduced attack surface** — no shell, no package manager, nothing to exec — not for
 size.
 
+Because the binary embeds the Node it was built with, a Node security release reaches it only
+through a rebuild: build again with `--pull` after every Node patch, or the deployed binary keeps
+every flaw that release fixed.
+
 `scratch` is not an option: the binary is dynamically linked against glibc (`libc`, `libstdc++`,
 `libgcc_s` and three more), so it needs a base that provides them. `distroless/cc-debian12` is the
 floor. For the same reason the SEA is built on the **Debian** Node image, not Alpine — an Alpine

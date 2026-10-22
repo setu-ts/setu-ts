@@ -10,8 +10,8 @@ framework.
 
 ## Installation
 
-`setu` is a Node program (Node 22 or later), published to npm with a `bin`. Run it without an
-install, install it globally, or start through `npm create`:
+`setu` is a Node program (Node 22.23.4+, 24.22.1+ or 26.12.1+), published to npm with a `bin`. Run
+it without an install, install it globally, or start through `npm create`:
 
 ```bash
 npx @setu-ts/cli new my-app

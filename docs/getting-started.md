@@ -5,9 +5,9 @@ how to add the plugins most applications need.
 
 ## Prerequisites
 
-- **Deno 2.x**, **Node.js 22.18+**, or **Bun 1.x** — the framework uses `Promise.withResolvers`,
-  which Node 22 was the first to ship, and Node 22.18 is the first release that runs a `.ts` file
-  directly; CI verifies Node 24
+- **Deno 2.x**, **Node.js 22.23.4+, 24.22.1+ or 26.12.1+**, or **Bun 1.x** — the framework uses
+  `Promise.withResolvers`, which Node 22 was the first to ship, and those are the first releases of
+  each line carrying the Node.js security fixes of 2026-10-21; CI verifies Node 24
 - Basic familiarity with TypeScript
 
 ## Two ways to start

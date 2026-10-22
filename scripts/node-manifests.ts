@@ -128,6 +128,13 @@ const LINT_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
 
 const DENO_TYPES_MEMBERS: readonly string[] = ['packages/runtime', 'packages/cli'];
 
+/**
+ * The supported Node range, written into every member manifest and the root. The floor on each
+ * line is its first release carrying the 2026-10-21 security fixes (Node 22.23.4, 24.22.1 and 26.12.1);
+ * Node 22 stays supported because five packages need only `Promise.withResolvers`.
+ */
+export const NODE_ENGINES_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
+
 /** The package whose manifest the §3.4 safeguard-2 guard applies to. */
 const DECORATOR_PLUGIN_DIR = 'packages/decorator-plugin';
 const SYMBOL_METADATA_EXPORT = './dist/metadata/symbol-metadata.js';
@@ -446,7 +453,7 @@ export function renderPackageJson(member: MemberInput, classified: ClassifiedMem
     sideEffects: effects.length === 0 ? false : effects,
     type: 'module',
     license: 'MIT',
-    engines: { node: '>=22' },
+    engines: { node: NODE_ENGINES_RANGE },
     files: ['dist', 'src', 'README.md', 'LICENSE', 'AGENT_CARD.md'],
     exports,
     ...(BIN_ENTRIES[member.dir] === undefined ? {} : { bin: BIN_ENTRIES[member.dir] }),
@@ -523,7 +530,7 @@ export function renderRootPackageJson(): string {
       name: 'setu-ts',
       private: true,
       packageManager: 'pnpm@12.11.2',
-      engines: { node: '>=22' },
+      engines: { node: NODE_ENGINES_RANGE },
       type: 'module',
       scripts: {
         check: 'tsc -p tsconfig.check.json --noEmit',

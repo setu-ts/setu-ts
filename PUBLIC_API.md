@@ -9892,8 +9892,9 @@ the chosen port; `new --devtool` also writes it into the project README. Re-enab
 standalone entry retains its recorded port without probing again.
 
 `@setu-ts/cli` ships the `setu` executable: project scaffolding and plugin-aware code generation. It
-is a Node program (Node 22 or later), published to npm with a `bin`, so it runs without an install
-or installs globally; `@setu-ts/create` makes `npm create @setu-ts` the same as `setu new`:
+is a Node program (Node 22.23.4+, 24.22.1+ or 26.12.1+), published to npm with a `bin`, so it runs
+without an install or installs globally; `@setu-ts/create` makes `npm create @setu-ts` the same as
+`setu new`:
 
 ```bash
 npx @setu-ts/cli new my-app

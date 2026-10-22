@@ -12,6 +12,28 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)
+
+Every package now declares `"node": "^22.23.4 || ^24.22.1 || >=26.12.1"`: the first releases of each
+supported line carrying the Node.js security fixes of 2026-10-21. npm only warns on an `engines`
+mismatch unless `engine-strict` is set, so an older Node keeps installing; the range records the
+floor, it does not enforce it. The fixes are in Node itself, so no Setu-TS code change closes them:
+
+- **Upgrade Node** on developer machines, CI and servers.
+- **Rebuild container images with `--pull`.** A cached `node:24-alpine` or `node:24-bookworm` layer
+  stays on the release it was pulled at.
+- **Rebuild every single executable (SEA)**, including one built from `docker/Dockerfile.compiled`.
+  A SEA embeds the Node binary it was built with, so one built before the patch carries every one of
+  these bugs until it is rebuilt with a patched Node. The advisory also names SEAs for
+  CVE-2026-106074, under which `crypto.randomUUID()` and `crypto.randomInt()` can repeat values
+  across processes — `runtime.uuid()` uses `crypto.randomUUID()` for connection, claim, audit and
+  idempotency ids.
+- **Treat outbound HTTPS as exposed until patched.** Node's `fetch` decompresses a
+  `Content-Encoding: br` response itself, so a server that an attacker controls or can intercept
+  reaches the Brotli decoder flaw (CVE-2026-111497, rated High, out-of-bounds write) through any
+  outbound call: the SDK client, OIDC discovery and key-set fetches, Consul and Kubernetes
+  discovery, Vault, and the SendGrid, Twilio, FCM and Slack providers.
+
 ### Declared `@ApiOperation` ids and descriptions (0.10.0)
 
 `@ApiOperation({ operationId, description })` now reaches the document through optional
