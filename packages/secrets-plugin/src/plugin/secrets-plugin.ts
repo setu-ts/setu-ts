@@ -49,7 +49,8 @@ const DEFAULT_PROVIDER: SecretsProviderType = 'env';
  * @param options - Provider-specific options
  * @param env - The runtime environment map (for `EnvProvider`)
  * @param timing - The runtime's timers, which bound each Vault request
- * @param config - Optional config fallback for the env provider (strings only)
+ * @param config - Config fallback for the env provider (strings only); pass it
+ *   only when the fallback is enabled
  * @returns The provider adapter
  * @throws {Error} If the provider type is unsupported
  */
@@ -90,9 +91,11 @@ export function createProvider(
         ...(timing !== undefined && { timing }),
       });
     case 'env':
+      // The caller decides whether to pass `config`; `options.configFallback`
+      // is read once by `SecretsPlugin`, never again here.
       return new EnvProvider(env, {
         prefix: options.prefix,
-        ...(options.configFallback !== false && config !== undefined ? { config } : {}),
+        ...(config !== undefined ? { config } : {}),
       });
     default:
       throw new Error(`Unsupported secrets provider: ${type as string}`);
@@ -127,11 +130,12 @@ export function createProvider(
  */
 export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
   const providerType = options?.provider ?? DEFAULT_PROVIDER;
-  // Snapshot the caller's options once: validating one read and acting on a
-  // later one would let a caller who mutates (or defines a getter on) the
-  // options object bypass the refusal below, or log a value other than the
-  // one used. Every later read uses this copy.
-  const providerOptions: SecretsProviderOptions = { ...(options?.options ?? {}) };
+  const providerOptions = options?.options ?? {};
+  // Read `configFallback` exactly once, with ordinary property access (so an
+  // inherited value or a getter is honoured), and act on that one value
+  // everywhere: validating one read and acting on a later one would let a
+  // mutated options object bypass the refusal below, or log a value other
+  // than the one used. The options object itself is passed through untouched.
   const configFallbackOption: unknown = providerOptions.configFallback;
   if (
     providerType === 'env' &&
@@ -141,10 +145,6 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
     throw new TypeError('options.configFallback must be a boolean.');
   }
   const useConfigFallback = providerType === 'env' && configFallbackOption !== false;
-  const resolvedOptions: SecretsProviderOptions = {
-    ...providerOptions,
-    configFallback: useConfigFallback,
-  };
 
   return {
     name: PLUGIN_NAME,
@@ -160,14 +160,14 @@ export function SecretsPlugin(options?: SecretsPluginOptions): IPlugin {
           : undefined;
       const provider = createProvider(
         providerType,
-        resolvedOptions,
+        providerOptions,
         ctx.runtime.env,
         resolveProbeTiming(ctx.runtime),
         config,
       );
       await provider.connect();
 
-      const service = new SecretsService(provider, buildServiceOptions(resolvedOptions, ctx));
+      const service = new SecretsService(provider, buildServiceOptions(providerOptions, ctx));
       ctx.services.register<ISecretManager>(CAPABILITIES.SECRETS, service);
 
       const logger = resolveLogger(ctx);

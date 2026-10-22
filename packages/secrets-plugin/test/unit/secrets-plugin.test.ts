@@ -109,6 +109,44 @@ describe('SecretsPlugin configFallback', () => {
     expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
   });
 
+  it.each([
+    [
+      'an inherited value',
+      (): SecretsProviderOptions =>
+        Object.create({ configFallback: false }) as SecretsProviderOptions,
+    ],
+    [
+      'a class accessor',
+      (): SecretsProviderOptions =>
+        new (class {
+          get configFallback(): boolean {
+            return false;
+          }
+        })(),
+    ],
+    [
+      'a non-enumerable own value',
+      (): SecretsProviderOptions =>
+        Object.defineProperty({}, 'configFallback', { value: false, enumerable: false }),
+    ],
+  ])('honours configFallback false supplied as %s', async (_label, makeOptions) => {
+    const config = createFakeConfig({ TOKEN: 'config-only' });
+    const { ctx, logs } = createFakeContext({}, true, true, config);
+    await SecretsPlugin({ options: makeOptions() }).register(ctx);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.has('token')).toBe(false);
+    expect(logs[0].meta).toEqual({ provider: 'env', configFallback: false });
+  });
+
+  it('passes other options through untouched, including an inherited prefix', async () => {
+    const config = createFakeConfig({ TOKEN: 'unprefixed-config' });
+    const { ctx } = createFakeContext({ APP_TOKEN: 'prefixed-env' }, true, true, config);
+    const options = Object.create({ prefix: 'APP_' }) as SecretsProviderOptions;
+    await SecretsPlugin({ options }).register(ctx);
+    const service = ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS);
+    expect(await service.get('token')).toBe('prefixed-env');
+  });
+
   it('is silent when CONFIG is absent and reads only the environment', async () => {
     const { ctx, logs } = createFakeContext({ TOKEN: 'env' }, true);
     await SecretsPlugin({ options: { configFallback: true } }).register(ctx);
@@ -156,10 +194,10 @@ describe('SecretsPlugin configFallback', () => {
 });
 
 describe('createProvider', () => {
-  it('honors the fallback opt-out when called directly', async () => {
+  it('wires config only when the caller passes it', async () => {
     const config = createFakeConfig({ TOKEN: 'config' });
     const enabled = createProvider('env', {}, {}, undefined, config);
-    const disabled = createProvider('env', { configFallback: false }, {}, undefined, config);
+    const disabled = createProvider('env', {}, {});
     expect(await enabled.get('token')).toBe('config');
     expect(await disabled.get('token')).toBeNull();
   });
