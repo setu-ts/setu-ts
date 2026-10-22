@@ -1,5 +1,6 @@
 /** Ordered application guidance, checked against source exports by the card gate. */
 import type { ProjectFacts } from './facts.ts';
+import { notInstalledAddables } from './not-installed.ts';
 
 /** A rule's applicability and the packages whose exports its prose uses. */
 export interface IRuleBlock {
@@ -22,6 +23,13 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     packages: [],
     applies: () => true,
     text: 'Never import one plugin into another. Resolve services through ctx.services.get with a `CAPABILITIES` token and its matching interface from `@setu-ts/common`.',
+  },
+  {
+    id: 'add-first',
+    packages: [],
+    // Omitted when nothing is listed under Not installed: the rule would point at an empty list.
+    applies: (f) => notInstalledAddables(f).length > 0,
+    text: 'Never hand-write what a package under Not installed provides (a cache, queue, event bus, auth): setu add it and use it.',
   },
   {
     id: 'functional',

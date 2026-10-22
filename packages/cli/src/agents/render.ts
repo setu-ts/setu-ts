@@ -2,7 +2,7 @@
 import type { ProjectFacts } from './facts.ts';
 import type { WorkspaceManifest } from '../workspace/manifest.ts';
 import { cliInvocation } from '../templates/project-files.ts';
-import { ADDABLE, RUNTIME_RESTRICTIONS } from '../commands/add.ts';
+import { notInstalledAddables } from './not-installed.ts';
 import { PACKAGE_DATA, TOOLING_PACKAGES } from './package-data.ts';
 import { RULE_BLOCKS } from './rules.ts';
 import { BRIEF_BEGIN, BRIEF_END, briefSection } from './brief-file.ts';
@@ -68,13 +68,7 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     );
   }
   sections.push(`\n## Not installed — run \`${cli} add <name>\` and install before use\n`);
-  for (const [name, { pkg }] of ADDABLE) {
-    const restriction = RUNTIME_RESTRICTIONS.get(pkg);
-    if (
-      facts.installed.has(pkg) ||
-      (restriction !== undefined && !restriction.runtimes.includes(facts.runtime))
-    )
-      continue;
+  for (const [name, pkg] of notInstalledAddables(facts)) {
     // Name the npm package too: Rule 0's card path is `@setu-ts/<package>`, and an add name such
     // as `queue` is not one (`queue-plugin` is), so a bare add name sent agents to a missing card.
     sections.push(`- \`${name}\` (\`@setu-ts/${pkg}\`) — ${PACKAGE_DATA.get(pkg)!.description}`);

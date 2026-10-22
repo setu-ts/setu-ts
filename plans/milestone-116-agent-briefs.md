@@ -130,6 +130,11 @@ from the pilot.
     (`@setu-ts/exceptions` factories, RFC 9457); configuration (handlers read `IConfig`; plugin
     options run before configuration loads); imports (`.ts` suffix where the runtime needs it,
     `import type`).
+  - at least one addable package not installed: never hand-write what a listed package provides (a
+    cache, queue, event bus, auth) — `setu add` it. Added after measurement: one of three T9 runs
+    wrote its own cache instead of adding `cache-plugin`, and the pilot's best hand-made brief
+    (variant F) carried the equivalent rule. Omitted when the Not installed list is empty, which
+    also keeps the all-packages composition inside the byte budget.
   - `functional`: routes on the router (`router.get`, `RouteDefinition`), middleware shape, modules
     under `src/modules/<name>/` with `<name>.schemas.ts` and `validateBody(S).value(ctx)`.
   - `class-based`: `@Controller`/`@Get`, TC39 decorators with no parameter decorators,

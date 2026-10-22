@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { RULE_BLOCKS } from '../../../src/agents/rules.ts';
+import { ADDABLE } from '../../../src/commands/add.ts';
 import { agentFacts } from '../../fixtures/agent-facts.ts';
 import {
   checkFences,
@@ -8,7 +9,7 @@ import {
 } from '../../../../../test/fixtures/snippets/agent-card-checks.ts';
 
 describe('composition-specific rule blocks', () => {
-  const always = ['generate', 'services', 'time', 'errors', 'config', 'imports'];
+  const always = ['generate', 'services', 'add-first', 'time', 'errors', 'config', 'imports'];
   for (const [runtime, style, plugins, expected] of [
     ['node', 'functional', [], ['functional', 'node-tests']],
     ['bun', 'class-based', ['decorator-plugin', 'di-plugin'], ['class-based', 'bun-tests']],
@@ -29,6 +30,14 @@ describe('composition-specific rule blocks', () => {
       ).toEqual([...always, ...expected].sort());
     });
   }
+  it('tells agents to add a listed package rather than hand-write it, only while one is listed', () => {
+    const rule = RULE_BLOCKS.find((r) => r.id === 'add-first')!;
+    expect(rule.text).toContain('Never hand-write what a package under Not installed provides');
+    expect(rule.text).toContain('setu add it');
+    const everything = new Set([...ADDABLE.values()].map((p) => p.pkg));
+    expect(rule.applies(agentFacts({ installed: everything }))).toBe(false);
+    expect(rule.applies(agentFacts({ installed: new Set(['common']) }))).toBe(true);
+  });
   it('checks identifiers against common and each rule’s required packages and compiles its snippets', async () => {
     const packages = [...new Set(['common', ...RULE_BLOCKS.flatMap((r) => r.packages)])].map(
       (p) => `packages/${p}`,
