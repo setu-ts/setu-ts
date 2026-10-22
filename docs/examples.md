@@ -78,10 +78,12 @@ describe('minimal example', () => {
 [`apps/minimal/main.ts`](../apps/minimal/main.ts) and
 [Getting Started — Stopping Cleanly](./getting-started.md#stopping-cleanly).
 
-A few examples need more than one entry point, and say why: `cloudflare` adds the Worker entry
-`worker.ts`, `compiled-binary` adds the CommonJS entry `sea.ts` its executable is built from,
-`realtime-clients` adds a client driver that runs on several runtimes, and `microservices` composes
-two services, so it has one factory per service under `src/service-a/` and `src/service-b/`.
+A few examples differ, and say why: `cloudflare` adds the Worker entry `worker.ts`,
+`compiled-binary` adds the CommonJS entry `sea.ts` its executable is built from, `realtime-clients`
+adds a client driver that runs on several runtimes, and `microservices` composes two services, so it
+has one factory per service under `src/service-a/` and `src/service-b/`. `full-stack` keeps the
+React Router layout `setu new --template full-stack` scaffolds — `app/routes`, `app/features`,
+`app/services` — and reads its port from `PORT`, as that template does.
 
 ## Examples by capability
 

@@ -62,18 +62,20 @@ export function startHost(command: string, args: readonly string[], env = proces
 }
 
 /**
- * Stops a host and waits for it to exit.
+ * Stops a host and resolves with its exit code, or `null` when it could not be started.
  *
- * Safe to call from a `finally` block: a host that already exited is not an
- * error here, so it cannot replace the failure that is being reported.
+ * Safe to call from a `finally` block or an `after` hook: a host that already
+ * exited is not an error here, so it cannot replace the failure being reported.
+ * A caller that owns the entry point asserts the code, since a non-zero exit
+ * means its own shutdown failed.
  */
-export async function stopHost(host: Host): Promise<void> {
+export async function stopHost(host: Host): Promise<number | null> {
   try {
     host.kill('SIGTERM');
   } catch {
     // Already exited.
   }
-  await host.status.catch(() => {});
+  return await host.status.catch(() => null);
 }
 
 /** Options for {@link waitForHttp}. */

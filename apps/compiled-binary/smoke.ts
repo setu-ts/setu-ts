@@ -21,7 +21,7 @@ describe('compiled-binary example', () => {
   });
 
   after(async () => {
-    await stopHost(server);
+    assert.equal(await stopHost(server), 0, 'the executable did not shut down cleanly');
   });
 
   it('serves /health from the standalone executable', async () => {

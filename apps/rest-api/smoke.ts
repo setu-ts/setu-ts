@@ -64,6 +64,27 @@ describe('rest-api example', () => {
     assert.deepEqual(read.json(), todo);
   });
 
+  it('keeps each application its own store', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/todos',
+      headers: authorization,
+      body: { title: 'Only in the first application' },
+    });
+    const { id } = created.json<{ id: string }>();
+
+    const other = createApp();
+    await other.start();
+    try {
+      const token = { authorization: `Bearer ${await issueDemoToken(other)}` };
+      const read = await other.inject({ method: 'GET', url: `/todos/${id}`, headers: token });
+
+      assert.equal(read.statusCode, 404);
+    } finally {
+      await other.stop();
+    }
+  });
+
   it('answers an unknown todo with a Problem Details 404', async () => {
     const response = await app.inject({
       method: 'GET',

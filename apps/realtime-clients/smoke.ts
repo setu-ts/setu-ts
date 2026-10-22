@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { run } from '../../scripts/lib/run.ts';
 import { freePort, SOURCE_HOST_ARGS, startHost, stopHost, waitForHttp } from '../smoke-helpers.ts';
@@ -22,7 +23,7 @@ describe('realtime-clients example', () => {
   });
 
   after(async () => {
-    await stopHost(server);
+    assert.equal(await stopHost(server), 0, 'the server did not shut down cleanly');
   });
 
   it('works from this Node process', async () => {

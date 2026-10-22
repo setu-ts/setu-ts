@@ -43,16 +43,26 @@ async function checkSseClient(baseUrl: string): Promise<void> {
 async function checkIdleSocket(baseUrl: string): Promise<void> {
   let closedUnexpectedly = false;
   let stopping = false;
+  let opened: () => void = () => {};
+  const open = new Promise<void>((resolve) => {
+    opened = resolve;
+  });
   const socket = createRealtimeClient({
     url: baseUrl.replace(/^http/, 'ws') + IDLE_SOCKET_PATH,
     parse: (data) => data,
     reconnect: { maxAttempts: 0 },
     onMessage: () => {},
     onStateChange: (state) => {
+      if (state === 'open') opened();
       if (state === 'closed' && !stopping) closedUnexpectedly = true;
     },
   });
-  // Longer than the server's idle timeout, so only heartbeats keep the socket open.
+  await Promise.race([
+    open,
+    wait(2_000).then(() => Promise.reject(new Error('The WebSocket client did not connect.'))),
+  ]);
+  // Timed from the open, and longer than the server's idle timeout, so only
+  // heartbeats can keep the socket alive.
   await wait(140);
   stopping = true;
   socket.close();
