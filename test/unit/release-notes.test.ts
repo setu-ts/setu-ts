@@ -379,6 +379,28 @@ describe('release workflow wiring', () => {
     }
   });
 
+  it('installs every toolchain the PR job installs, in every workflow that runs the suite', async () => {
+    // The CLI e2e suites spawn `bun` (M114). ci.yml's `node` job installs it
+    // and release.yml's gates job did not, so the v0.10.0 tag run failed with
+    // `spawn bun ENOENT` on a tree every PR check had passed.
+    const ci = await readFile('.github/workflows/ci.yml', 'utf8');
+    const prJob = jobBlock(ci, 'node');
+    const uses = (job: string, tool: string): boolean =>
+      new RegExp(`^ +- uses: \\S*/${tool}@`, 'm').test(job);
+    const toolchains = ['setup-bun', 'setup-deno'].filter((tool) => uses(prJob, tool));
+    expect(toolchains).toContain('setup-bun');
+    for (const { workflow, job } of SUITE_CONSUMERS) {
+      const consumer = jobBlock(await readFile(workflow, 'utf8'), job);
+      for (const tool of toolchains) {
+        expect({ workflow, tool, present: uses(consumer, tool) }).toEqual({
+          workflow,
+          tool,
+          present: true,
+        });
+      }
+    }
+  });
+
   it('flags a 0.x release as a prerelease, not only a -suffix version', async () => {
     // v0.2.0 dropped the `alpha` label without freezing the API, so matching
     // only `*-*` would publish a Release object presented as stable. The
