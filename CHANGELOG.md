@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Kafka watermark capture on a new topic (#493, `@setu-ts/messaging-plugin`).** When a new
+  consumer group subscribed to a topic created moments earlier, the read of that topic's offsets
+  could fail with `NOT_LEADER_OR_FOLLOWER` before its partitions had leaders. The broker logged a
+  warning and skipped the capture, so messages published after `subscribe()` resolved but before the
+  group's first join were not delivered. The read now retries errors kafkajs marks `retriable`,
+  within the `KafkaOptions.retry` budget, and stops on `disconnect()`; a non-retriable error or an
+  exhausted budget behaves as before.
+
 ## [0.10.0] — 2026-10-22
 
 ### Fixed
