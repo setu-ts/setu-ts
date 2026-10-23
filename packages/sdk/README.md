@@ -45,13 +45,13 @@ const board = createRealtimeClient({
 
 ```bash
 # npm / pnpm / yarn
-npm install @setu-ts/sdk@^0.9.0
+npm install @setu-ts/sdk@^0.10.0
 
 # Bun
-bun add @setu-ts/sdk@^0.9.0
+bun add @setu-ts/sdk@^0.10.0
 
 # Deno
-deno add npm:@setu-ts/sdk@^0.9.0
+deno add npm:@setu-ts/sdk@^0.10.0
 ```
 
 ## Quick Start

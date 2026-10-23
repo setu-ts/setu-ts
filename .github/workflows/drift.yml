@@ -222,6 +222,11 @@ jobs:
         with:
           version: 12.11.2
 
+      # The CLI e2e suites scaffold and run Bun projects (M114), as in ci.yml.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       # Every gate below must see this week's resolution: installing the committed
       # pnpm-lock.yaml would test the locked versions and report a drifted ioredis,
       # amqplib, kafkajs, mongodb or AWS SDK as a green `test` row. The committed

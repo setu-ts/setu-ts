@@ -432,6 +432,8 @@ Deno grants nothing by default. The flags an application commonly needs:
 
 ### `npm error Unsupported URL Type "jsr:"`
 
+<!-- version:history -->
+
 You ran `npm install jsr:@setu-ts/…`, an instruction from the JSR era. npm has no `jsr:` protocol,
 and from `v0.9.0` you do not need one: install from npm directly with
 `npm install @setu-ts/<package>` (`bun add` on Bun, `deno add npm:@setu-ts/<package>` on Deno).

@@ -52,6 +52,8 @@ app.register(
 );
 ```
 
+<!-- version:history -->
+
 Every job is published **persistent** through a **confirm channel**. The ready, delay and dead
 queues are durable, and a durable queue keeps only persistent messages across a broker restart —
 before 0.9.0 jobs were published transient, so a RabbitMQ restart silently discarded every job not
@@ -62,6 +64,8 @@ publish, queue declarations included, so a paused broker rejects `add()` rather 
 pending; a rejection is not proof the job was dropped. `persistentMessages: false` restores the
 transient publishes. An injected `client` without `createConfirmChannel()` keeps a plain channel and
 the adapter logs one warning saying its publishes are unconfirmed.
+
+<!-- version:history -->
 
 A queue name is an AMQP short string of at most 255 UTF-8 bytes, so `<prefix>.<name>.delay` must
 fit: with the default prefix a job name may be at most 240 bytes. A longer name is refused with a
@@ -165,6 +169,8 @@ await queue.addRecurring('cleanup', {}, { cron: '0 0 * * *' }); // Daily at midn
 ```
 
 ## Options
+
+<!-- version:history -->
 
 | Option               | Type                                                                 | Default                    | Description                                                                                                                                                                                                                                                                                                                           |
 | -------------------- | -------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

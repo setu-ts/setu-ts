@@ -212,6 +212,13 @@ jobs:
       - name: Frozen dependency install
         run: pnpm install --frozen-lockfile
 
+      # The CLI e2e suites scaffold and run Bun projects (M114), as in ci.yml.
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.0
+          # A release gate restores no shared Bun binary from the Actions cache.
+          no-cache: true
+
       # M100b §6: the real-provider Keycloak suite (auth-plugin) guards on
       # KEYCLOAK_URL. A step rather than a `services:` container because the
       # realm is imported at startup — `start-dev --import-realm` is a COMMAND

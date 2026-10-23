@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-10-22
+
 ### Fixed
 
 - **CLI writes (M116, `@setu-ts/cli`):** every Node CLI write (`new`, `generate`, `add`, `agents`,
@@ -29,16 +31,254 @@ All notable changes to this project are documented here. The format follows
   and files that are not valid UTF-8; runtime-marker checks use metadata without opening content. A
   POSIX path containing `\` is no longer read as a workspace member path.
 
+- **Documentation gaps (M113l).** Corrected optional telemetry/storage peer installation, upgrade
+  and runtime test instructions, locale error headers, worker hand-over sizing,
+  repository/audit/health/OpenAPI/TOTP contracts, principal-based tenancy and construction-time
+  config. Added inbound-webhook and backup/restore guidance, tier-C scheduler wiring, process-env
+  secret loading, and Node/standalone deployment guidance. New examples compile and behavior tests
+  pin the documented compositions; no package source changed.
+
+- **An over-limit body on a validated route answers `413` (M114, `@setu-ts/validation-plugin`).** A
+  body the runtime refuses for size (`RuntimePlugin({ maxBodyBytes })` set) now keeps its `413` on a
+  route carrying `validateBody` — previously the validation middleware's own body read masked the
+  refusal and the route answered `400`. The `413` applies to JSON, `urlencoded` and `multipart`
+  bodies alike.
+- **A decorator barrel the config does not consume is reported (V9-8, M113h, #477, 0.10.0,
+  `@setu-ts/cli`).** Service and controller comments and the decorator barrel headers name the
+  inline `DecoratorPlugin` form and a starter's `decorators` arm. After writing a barrel,
+  `setu generate` prints the exact `DecoratorPlugin` or starter `decorators` lines and the import
+  when `setu.config.ts` does not reference the barrel's export.
+- **Every NATS scaffold carries a stream subject set (V9-17, M113h, #477, 0.10.0, `@setu-ts/cli`).**
+  Standalone and workspace scaffolds emit `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`,
+  so every published topic starts with `app.`. The generated README and Compose note name the scope
+  and the `RealtimeBackplanePlugin` `topic: 'app.realtime'` that the `'messaging'` transport needs.
+- **`setu adopt` records declared probe support (V9-38, M113h, #477, 0.10.0, `@setu-ts/cli`).** The
+  member record in `setu.workspace.json` gains `healthProbes` and `metricsEndpoint` from the
+  project's own `health-plugin`/`metrics-plugin` or starter dependency, so its Kubernetes probes and
+  Prometheus annotations follow declared support and survive later re-renders.
+- **`setu adopt` moves the configured dotenv pair (V9-39, M113h, #477, 0.10.0, `@setu-ts/cli`).** A
+  single-segment `envFilePath` and its `.example` move into the member, and a multi-segment path
+  stays put with one line saying to move it by hand and why the root ignore rule cannot cover it.
+  The moved dotenv file also gains `apps/<member>/.gitignore` with `/<name>`, because a root rule
+  such as `/.env` is anchored to the repository root and would otherwise stop matching after the
+  move; it is written through the conversion's transaction, so an interrupted adopt rolls it back. A
+  custom name the generic `.env`/`.env.*` rules do not cover (for example `local.env`) prints one
+  line naming it by its path from the workspace root, the form the root `.dockerignore` needs. The
+  workspace `.gitignore` gains `.env`, `.env.*` and `!.env.example`; the `.dockerignore` gains
+  `**/.env`, `**/.env.*` and `!**/.env.example`, and its comment states that a custom `--env-file`
+  name is not covered. A conversion that fails part-way is now rolled back, so no moved file is left
+  under the member.
+- **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, #477, 0.10.0,
+  `@setu-ts/cli`).** The Workers `tsconfig.json` names `node` beside `@cloudflare/workers-types` and
+  the manifest adds `@types/node`, so the emitted `vite.config.ts` no longer fails its own check.
+  `allowJs` reads the compiled server build, and a Workers full-stack `check` script is
+  `npm run build && tsc --noEmit` so that build exists first; every full-stack manifest pins
+  TypeScript `~6.0.3`.
+- **The React Router typegen directory is generated output (V9-11, M113h, #477, 0.10.0,
+  `@setu-ts/cli`).** `.react-router/` joins the build output in the standalone `.gitignore`, ESLint
+  ignores, `.prettierignore` and the Deno `fmt`/`lint` excludes, and the workspace root `.gitignore`
+  ignores it for every member.
+- **`setu adopt` rewrites the entry the CLI emits (V9-42, M113h, #477, 0.10.0, `@setu-ts/cli`).**
+  The port rewrite matches the current `port: Number(runtime.env.PORT ?? '3000')` form as well as
+  the legacy literal `3000`, inserting the discovery import after the `createApp` import, so an
+  adopted member binds `SERVICE_PORT` instead of printing a hand-edit message for the form the CLI
+  itself writes. The config import is found by scanning lines rather than by a
+  `import { [^}]+ } from …` regex, which backtracked quadratically on project-supplied text (80k
+  repetitions of `import { ` took ~20 s).
+- **`setu add websocket` declares the `ws` peer on Node (V9-67, M113h, #477, 0.10.0, `@setu-ts/cli`,
+  `@setu-ts/runtime`).** `ws` is written into `package.json` at `^8.18.0`, also when
+  `@setu-ts/websocket-plugin` is already present, and an existing entry is never overwritten.
+  `HttpAdapterOptions.reportError` lets a failed Node WebSocket handshake report once per distinct
+  message through the registered logger, or the runtime sink when none is registered.
+- **The kernel announces it is listening and scaffolds log requests (V9-81, M113h, #477, 0.10.0,
+  `@setu-ts/kernel`, `@setu-ts/cli`).** After a successful listen the kernel logs `Server listening`
+  with the port and hostname, or `Server listening on an ephemeral port` for port `0`, and logs
+  nothing without a logger. New scaffolds enable request logging and exclude `/live`, `/ready`,
+  `/health` and `/metrics`, so probe traffic writes no line.
+- **Long scheduler waits no longer fire early (V9-63, M113m, `@setu-ts/scheduler-plugin`).**
+  `delay`, `every`, `cron` and retry backoff now wait in chunks of at most 2147483647 ms and check
+  the wall clock on each wake, so a job never runs before its due time. Previously, Node, Deno and
+  Bun clamped an over-limit timer to about 1 ms: `delay(30 days)` fired at once, and monthly cron
+  jobs could fire early. Delays and intervals have no upper limit. Disconnect, remove and pause
+  cancel retry backoff without another attempt. A one-shot that already succeeded or exhausted its
+  retries is removed even while paused and is not re-run; one paused mid-retry stays registered and
+  resumes from attempt 1 using the original delay. Recurring jobs resume at the next cron/interval
+  boundary. Cancelled fires settle diagnostics with `false` (counted in `failed`, never
+  `succeeded`). Disconnect releases one-shot slots regardless of outcome, and an old fire cannot
+  remove or release a replacement registered under the same name. Each release at disconnect is
+  bounded by `acquireTimeoutMs`. `resume()` now rejects on a disconnected service, waits for a fire
+  still settling before arming, and re-claims a one-shot slot released at disconnect.
+- **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
+  First-party tokens are refused at and after `exp`, closing the window of up to one second after
+  expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
+  after `exp + clockToleranceSec`.
+- **The SDK generator no longer emits source that shadows its own bindings (M113k, #476, 0.10.0,
+  `@setu-ts/sdk`).** A path parameter whose identifier is `client`, `opts`, `request` or
+  `encodeURIComponent` is emitted with a `_` prefix; before, `client` made the method call
+  `.request` on a string and `opts` beside a query parameter emitted a duplicate parameter. Path
+  parameters are positional, so no caller changes. An operation whose method name is `client` or
+  `encodeURIComponent` is emitted as `_client` or `_encodeURIComponent`; before, `client` was a
+  duplicate identifier and `encodeURIComponent` shadowed the global every generated path calls. A
+  document component named `OperationRequestOptions` is refused like `ClientResponse` rather than
+  shadowing the generated file's import.
+- **Idempotency documentation corrected and completed (V9-14, V9-16, M113k, 0.10.0,
+  `@setu-ts/idempotency-plugin`, `@setu-ts/http-security-plugin`, `@setu-ts/database-plugin`,
+  `@setu-ts/sdk`).** The `http-security-plugin` CORS example now lists `idempotency-key` in
+  `allowedHeaders` and `idempotent-replayed` in `exposedHeaders`, so a keyed cross-origin browser
+  call preflights and the page can read `Idempotent-Replayed`. The tier-C table schema is documented
+  in the `database-plugin` README; the idempotency README names the `ioredis` install step and the
+  `OptionalDependencyUnavailableError` startup failure; its guarantee 2, M105 purge-race sentence
+  and `within` `ttlMs` floor are corrected; a "From a browser" section documents the CORS options,
+  the `request` parameter and a renamed key header. The SDK README's Keyed retries names the
+  per-call form and the `Access-Control-Expose-Headers` requirement.
+- **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`, #472).** In a functional
+  project `setu add events` registered a bare `EventsPlugin()`, so every handler a later
+  `setu generate event-handler` wrote into `src/events/index.ts` was subscribed by nothing and never
+  ran, with no message saying so. `setu add` now registers the seam `setu new` emits, derived from
+  the same registry: `EventsPlugin({ handlers: EVENT_HANDLERS })`,
+  `CqrsPlugin({ commandHandlers, queryHandlers })`, and the indicator and metric barrels for
+  `health` and `metrics`, each with its barrel import, and creates the empty barrel when the project
+  has none. Class-based projects are unchanged: their handlers reach the plugins through
+  `DecoratorPlugin`'s ingress barrel. A config that already imports the barrel, or that the command
+  cannot rewrite, gets printed guidance naming the seam form and the import. Existing projects are
+  not rewritten; re-running `setu add` on one whose call lacks the option names the option and the
+  import to add by hand. A project composed through a starter keeps its config, and the guidance now
+  names the arm value to pass (`events: { handlers: EVENT_HANDLERS }`), so the created barrel is
+  reached.
+- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`,
+  #472).** Without it the built-in `self` check fails and `/health` reports down. The Deno
+  permission notes (this one and storage's `--allow-write`) are no longer printed on other targets,
+  where they do not apply.
+- **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`,
+  #472).** The generated job's comment recommended calling `queue.process()` or `scheduler.cron()`
+  inside another plugin's `register`, where the capability may not be registered yet. It now shows
+  `QueuePlugin({ processors: [...] })` and `SchedulerPlugin({ jobs: [...] })`, both checked to
+  type-check against the published packages.
+- **The database plugin README's Prisma example reads `process.env['DATABASE_URL']`
+  (`@setu-ts/database-plugin`).** It read `Deno.env.get(...)`, which does not exist on Node or Bun,
+  the runtimes npm users run.
+
+- **A value a client sends no longer makes a database error read as a timeout or an outage (M113g,
+  0.10.0, `@setu-ts/database-plugin`).** PostgreSQL quotes a rejected value in its error message,
+  and the node-postgres timeout messages were matched anywhere in the error chain, so a body sending
+  `"Query read timeout"` to an integer column answered `504`, and the two connect timeout messages
+  answered `503`. The three messages now match only as the whole message of an error that carries no
+  SQLSTATE code anywhere in its chain. The pool-wait message
+  (`timeout exceeded when trying to connect`) had the same flaw since 0.5.0. The SQLite
+  unique-violation message is matched only as a message prefix too (`UNIQUE constraint failed:` or
+  `D1_ERROR: UNIQUE constraint failed:`), so the same text no longer answers a false `409`, and an
+  unknown-column refusal from the Drizzle and Memory adapters now quotes the field name escaped and
+  cut to 64 characters, so a field name cannot forge a log line. The M113f scrub of a Drizzle
+  `Failed query` or a SQLSTATE class 22 error now removes the whole stack header even when a bound
+  value contains a line shaped like a stack frame; before, that line and every later bound value
+  survived into the logged stack.
+
+- **The second node-postgres connect-timeout message answered a masked `500` (V9-34, M113g, 0.10.0,
+  `@setu-ts/database-plugin`).** pg-pool raises `Connection terminated due to connection timeout`
+  when a new client's connect times out — the common case during a pause, when the pool has room to
+  open a connection — and the message was unclassified, so a call that never reached the database
+  answered a masked `500`. It is now classified `unavailable` and answered `503` beside
+  `timeout exceeded when trying to connect`; under either message the query was never sent, so
+  `DatabaseUnavailableError`'s "the operation did not happen, and may be retried" holds. A connect
+  that does not complete inside the bound is also why the Drizzle probe reports `degraded` rather
+  than `down`.
+
+- **A paused relay's late publish settlement (M113j, #469, 0.10.0, `@setu-ts/messaging-plugin`).** A
+  `markSent` or `markFailure` for a publish the relay already invoked now runs to its own
+  `storeTimeoutMs` bound even when a pause has exhausted the sweep budget, and its answer is
+  observed when it arrives after the bound: a `markSent` or `markFailure` that finds the row already
+  `sent` records the `duplicate` overlap, a `claim-lost` answer is booked as an overlap, a late
+  `markFailure` that made the row `failed` records `poisoned` without touching the sweep budget, and
+  a late rejection is swallowed. A sweep that overran by a pause can outlive `sweepDeadlineMs` by at
+  most one `storeTimeoutMs`, and the shutdown drain is bounded by the same amount. A publish the
+  budget refused to invoke is no longer counted as a publish failure: the sweep ends `deadline`,
+  writes nothing and reports no `store-write-failing`. The database outbox store's
+  unrecognized-status error no longer quotes the row id (`@setu-ts/database-plugin`), and the
+  `check:docs` continued-line rule (P3) joins each command once instead of from every line.
+- **Stale `npm:` specifiers in committed docs (M113j, #469, V9-22's widened scope and V9-10's
+  `npm:zod` half).** Every `npm:` import and every prose, table or comment claim that a package
+  loads as `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare
+  package the loaders have used since M111a. The fence engine no longer rewrites `npm:` specifiers
+  (the `@hono/hono` → `hono` alias rewrite stays), and `check:docs` refuses a stale one by name: P7
+  names a quoted `npm:` specifier in an import position, P8 any other `npm:<pkg>` reference (Deno
+  `add`/`install` arguments and `@setu-ts`/`@jsr` specifiers are exempt).
+- **A Redis client built without a reporter wrote its errors to the console (M113c).** Since 0.8.0
+  the cache store, queue adapter, Redis Streams broker, realtime backplane, rate-limit store,
+  scheduler lock and idempotency store attached their `'error'` listener only when given a
+  `connectionErrorReporter`. Each plugin passes one, but `RedisRateLimitStore`, which no plugin
+  builds, and any store or adapter constructed directly got none, so ioredis printed
+  `[ioredis] Unhandled error event` on every failed attempt. `attachConnectionErrorReporter`'s
+  `reporter` is now optional: omitted, the listener drops events, as a reporter with no logger
+  already does, and the health probe still reports the outage.
+
+- **Kafka shutdown with sends in flight.** With publishes abandoned at `publishTimeoutMs` during a
+  broker pause, `app.stop()` waited on kafkajs's pending-request drain (about 26 s) and the process
+  never exited, because the abandoned sends kept retrying and reopened connections. The producer
+  close is now bounded at 10 s, and a second close runs once those sends settle.
+
+- **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
+  select npm explicitly. The website install commands resolve the npm packages.
+- **@setu-ts/cli** the devtool runtime refusal names the situation it is in (V9-5, M113i, #479,
+  0.10.0). The refusal takes a required `context` of `'scaffold'` or `'enable'`, so no call site can
+  keep the old wording by omission. The shared first sentence (why the devtool needs Deno) stays,
+  but its last clause now reads "could never start its diagnostics connector" so it is correct in
+  both contexts: the scaffold remedy keeps "Scaffold without --devtool, or create the project with
+  --runtime deno.", and the enable remedy says "This project targets <runtime>; the devtool can only
+  be enabled on a Deno project." with no "scaffold" wording.
+- **@setu-ts/cli** the CLI documentation states what rollback actually covers (V9-13, M113i, #479,
+  0.10.0). `docs/cli.md`, `packages/cli/README.md` and `PUBLIC_API.md` now state that a write is
+  rolled back on SIGINT (Ctrl+C) and a caught error only — SIGTERM, SIGKILL (`kill -9`) and power
+  loss all end the command with no rollback — and that re-running `setu adopt` converges while an
+  interrupted `new` or `generate` leaves the files it wrote, which the next run's refusal lists.
+- **@setu-ts/cli** `setu add` accepts the published packages its help promises (V9-40, M113i, #479,
+  0.10.0). The addable catalogue gains `view` → `view-plugin`, `localization` →
+  `localization-plugin` and `idempotency` → `idempotency-plugin` (the full specifier works too), so
+  the help line "The full specifier works too" is now true for the published framework packages.
+  `setu add diagnostics` — and `add @setu-ts/diagnostics-plugin` — refuses with
+  "`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`." and exits 2,
+  because the devtool composition is `setu devtool enable`'s job and the bare package would produce
+  a project that cannot start the connector. A refusal for any other `@setu-ts/<name>` specifier
+  names that the package is not one this command installs and lists the catalogue, as before.
+- **@setu-ts/cli** a CLI-owned file that is a link or a special file no longer hangs `setu generate`
+  (M113i, #479, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero`
+  made `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates
+  only when it is a regular file under 1 MiB, and refuses the path by name otherwise.
+- **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, #479, 0.10.0). The
+  `packages/cli/README.md` table now lists `plugin` as `src/plugins/<name>.plugin.ts` (it said
+  `src/plugins/<name>.ts`), its `controller` row no longer says `decorator-plugin` is required and
+  names the functional and class-based shapes instead, and the class-based
+  `src/ingress/<name>-<kind>.ingress.ts` outputs of `ws-route`, `job`, `command-handler`,
+  `query-handler` and `event-handler` are listed, with the functional `job` row naming the
+  `QueuePlugin` wiring. The `docs/cli.md` and `PUBLIC_API.md` tables receive the same corrections.
+- **@setu-ts/cli** a functional `setu generate job` is wired when `QueuePlugin` is installed (V9-75,
+  M113i, #479, 0.10.0). In a functional project with `queue-plugin`, `g job` now emits the module
+  with its existing `<SCREAMING>_JOB` and `<Pascal>JobData` plus an exported
+  `create<Pascal>JobProcessor(services): QueueProcessorDefinition<<Pascal>JobData>` factory and the
+  managed `src/jobs/index.ts` barrel exporting `QUEUE_PROCESSORS`, and the wiring renders
+  `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` —
+  `QueuePlugin({ adapter: 'redis', url: …, processors: [...QUEUE_PROCESSORS] })` for a
+  `--queue redis` microservice — so a job is no longer written and registered nowhere. After a
+  write, `setu generate` reports an unconsumed jobs barrel with
+  `Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` and the
+  import line. Without `queue-plugin` the standalone function is emitted unchanged and the jobs seam
+  is not scanned, so a project holding standalone `src/jobs/*.job.ts` files gets no skip report on
+  `setu generate`; a class-based `g job` is refused without `queue-plugin` and, with it, writes the
+  ingress seam, so a class-based project never holds a jobs barrel. On a Cloudflare Workers
+  microservice the runtime swap removes `queue-plugin`, so the jobs seam contributes nothing there.
+  The stale registry premise that `QueuePluginOptions` has no `processors` option is rewritten: a
+  processor polls only its own job name, the same trade the class-based arm already makes.
+
 ### Changed
 
-- **The supported Node floor is a patched release (0.10.0, every package).** Every manifest now
-  declares `engines.node ^22.23.4 || ^24.22.1 || >=26.12.1` (was `>=22`): the first release on each
-  supported line carrying the Node.js security fixes of 2026-10-21. The compatibility workflow pins
-  Node 24.22.1. npm warns rather than refuses on a mismatch unless `engine-strict` is set. Rebuild
-  container images with `--pull` and rebuild every single executable (SEA): a SEA embeds the Node
-  binary it was built with. Until patched, any outbound `fetch` to a server an attacker controls
-  reaches the Brotli decoder flaw (CVE-2026-111497), because `fetch` decompresses `br` responses
-  itself; see the upgrade guide. The lockfile is refreshed in the same change (issue #449).
+- **The supported Node floor is a patched release (#489, 0.10.0, every package).** Every manifest
+  now declares `engines.node ^22.23.4 || ^24.22.1 || >=26.12.1` (was `>=22`): the first release on
+  each supported line carrying the Node.js security fixes of 2026-10-21. The compatibility workflow
+  pins Node 24.22.1. npm warns rather than refuses on a mismatch unless `engine-strict` is set.
+  Rebuild container images with `--pull` and rebuild every single executable (SEA): a SEA embeds the
+  Node binary it was built with. Until patched, any outbound `fetch` to a server an attacker
+  controls reaches the Brotli decoder flaw (CVE-2026-111497), because `fetch` decompresses `br`
+  responses itself; see the upgrade guide. The lockfile is refreshed in the same change (issue
+  #449).
 
 - **Declared OpenAPI operation metadata now reaches the document (#487, 0.10.0, `@setu-ts/common`,
   `@setu-ts/decorator-plugin`, `@setu-ts/openapi-plugin`).** Optional `RouteSchema.operationId` and
@@ -602,245 +842,6 @@ All notable changes to this project are documented here. The format follows
   Pub/Sub uses bounded `getTopics`. Both cache probes for 5 s and bound them at 2 s, including
   direct health calls. Kafka/Pub/Sub gain `publishTimeoutMs`; NATS gains validated `reconnect`.
   Stopped Kafka/Pub/Sub report down; a hung probe reports unknown, which still leaves health up.
-
-### Fixed
-
-- **Documentation gaps (M113l).** Corrected optional telemetry/storage peer installation, upgrade
-  and runtime test instructions, locale error headers, worker hand-over sizing,
-  repository/audit/health/OpenAPI/TOTP contracts, principal-based tenancy and construction-time
-  config. Added inbound-webhook and backup/restore guidance, tier-C scheduler wiring, process-env
-  secret loading, and Node/standalone deployment guidance. New examples compile and behavior tests
-  pin the documented compositions; no package source changed.
-
-- **An over-limit body on a validated route answers `413` (M114, `@setu-ts/validation-plugin`).** A
-  body the runtime refuses for size (`RuntimePlugin({ maxBodyBytes })` set) now keeps its `413` on a
-  route carrying `validateBody` — previously the validation middleware's own body read masked the
-  refusal and the route answered `400`. The `413` applies to JSON, `urlencoded` and `multipart`
-  bodies alike.
-- **A decorator barrel the config does not consume is reported (V9-8, M113h, #477, 0.10.0,
-  `@setu-ts/cli`).** Service and controller comments and the decorator barrel headers name the
-  inline `DecoratorPlugin` form and a starter's `decorators` arm. After writing a barrel,
-  `setu generate` prints the exact `DecoratorPlugin` or starter `decorators` lines and the import
-  when `setu.config.ts` does not reference the barrel's export.
-- **Every NATS scaffold carries a stream subject set (V9-17, M113h, #477, 0.10.0, `@setu-ts/cli`).**
-  Standalone and workspace scaffolds emit `streamSubjects: ['app.>', 'rr.req.app.>', 'rr.inbox.>']`,
-  so every published topic starts with `app.`. The generated README and Compose note name the scope
-  and the `RealtimeBackplanePlugin` `topic: 'app.realtime'` that the `'messaging'` transport needs.
-- **`setu adopt` records declared probe support (V9-38, M113h, #477, 0.10.0, `@setu-ts/cli`).** The
-  member record in `setu.workspace.json` gains `healthProbes` and `metricsEndpoint` from the
-  project's own `health-plugin`/`metrics-plugin` or starter dependency, so its Kubernetes probes and
-  Prometheus annotations follow declared support and survive later re-renders.
-- **`setu adopt` moves the configured dotenv pair (V9-39, M113h, #477, 0.10.0, `@setu-ts/cli`).** A
-  single-segment `envFilePath` and its `.example` move into the member, and a multi-segment path
-  stays put with one line saying to move it by hand and why the root ignore rule cannot cover it.
-  The moved dotenv file also gains `apps/<member>/.gitignore` with `/<name>`, because a root rule
-  such as `/.env` is anchored to the repository root and would otherwise stop matching after the
-  move; it is written through the conversion's transaction, so an interrupted adopt rolls it back. A
-  custom name the generic `.env`/`.env.*` rules do not cover (for example `local.env`) prints one
-  line naming it by its path from the workspace root, the form the root `.dockerignore` needs. The
-  workspace `.gitignore` gains `.env`, `.env.*` and `!.env.example`; the `.dockerignore` gains
-  `**/.env`, `**/.env.*` and `!**/.env.example`, and its comment states that a custom `--env-file`
-  name is not covered. A conversion that fails part-way is now rolled back, so no moved file is left
-  under the member.
-- **A Workers full-stack scaffold type-checks and builds first (V9-9, M113h, #477, 0.10.0,
-  `@setu-ts/cli`).** The Workers `tsconfig.json` names `node` beside `@cloudflare/workers-types` and
-  the manifest adds `@types/node`, so the emitted `vite.config.ts` no longer fails its own check.
-  `allowJs` reads the compiled server build, and a Workers full-stack `check` script is
-  `npm run build && tsc --noEmit` so that build exists first; every full-stack manifest pins
-  TypeScript `~6.0.3`.
-- **The React Router typegen directory is generated output (V9-11, M113h, #477, 0.10.0,
-  `@setu-ts/cli`).** `.react-router/` joins the build output in the standalone `.gitignore`, ESLint
-  ignores, `.prettierignore` and the Deno `fmt`/`lint` excludes, and the workspace root `.gitignore`
-  ignores it for every member.
-- **`setu adopt` rewrites the entry the CLI emits (V9-42, M113h, #477, 0.10.0, `@setu-ts/cli`).**
-  The port rewrite matches the current `port: Number(runtime.env.PORT ?? '3000')` form as well as
-  the legacy literal `3000`, inserting the discovery import after the `createApp` import, so an
-  adopted member binds `SERVICE_PORT` instead of printing a hand-edit message for the form the CLI
-  itself writes. The config import is found by scanning lines rather than by a
-  `import { [^}]+ } from …` regex, which backtracked quadratically on project-supplied text (80k
-  repetitions of `import { ` took ~20 s).
-- **`setu add websocket` declares the `ws` peer on Node (V9-67, M113h, #477, 0.10.0, `@setu-ts/cli`,
-  `@setu-ts/runtime`).** `ws` is written into `package.json` at `^8.18.0`, also when
-  `@setu-ts/websocket-plugin` is already present, and an existing entry is never overwritten.
-  `HttpAdapterOptions.reportError` lets a failed Node WebSocket handshake report once per distinct
-  message through the registered logger, or the runtime sink when none is registered.
-- **The kernel announces it is listening and scaffolds log requests (V9-81, M113h, #477, 0.10.0,
-  `@setu-ts/kernel`, `@setu-ts/cli`).** After a successful listen the kernel logs `Server listening`
-  with the port and hostname, or `Server listening on an ephemeral port` for port `0`, and logs
-  nothing without a logger. New scaffolds enable request logging and exclude `/live`, `/ready`,
-  `/health` and `/metrics`, so probe traffic writes no line.
-- **Long scheduler waits no longer fire early (V9-63, M113m, `@setu-ts/scheduler-plugin`).**
-  `delay`, `every`, `cron` and retry backoff now wait in chunks of at most 2147483647 ms and check
-  the wall clock on each wake, so a job never runs before its due time. Previously, Node, Deno and
-  Bun clamped an over-limit timer to about 1 ms: `delay(30 days)` fired at once, and monthly cron
-  jobs could fire early. Delays and intervals have no upper limit. Disconnect, remove and pause
-  cancel retry backoff without another attempt. A one-shot that already succeeded or exhausted its
-  retries is removed even while paused and is not re-run; one paused mid-retry stays registered and
-  resumes from attempt 1 using the original delay. Recurring jobs resume at the next cron/interval
-  boundary. Cancelled fires settle diagnostics with `false` (counted in `failed`, never
-  `succeeded`). Disconnect releases one-shot slots regardless of outcome, and an old fire cannot
-  remove or release a replacement registered under the same name. Each release at disconnect is
-  bounded by `acquireTimeoutMs`. `resume()` now rejects on a disconnected service, waits for a fire
-  still settling before arming, and re-claims a one-shot slot released at disconnect.
-- **JWT validity boundaries now honour fractional seconds (V9-70, M113m, `@setu-ts/auth-plugin`).**
-  First-party tokens are refused at and after `exp`, closing the window of up to one second after
-  expiry; `nbf` is checked against the same unfloored time. Outside-issuer tokens are refused at and
-  after `exp + clockToleranceSec`.
-- **The SDK generator no longer emits source that shadows its own bindings (M113k, 0.10.0,
-  `@setu-ts/sdk`).** A path parameter whose identifier is `client`, `opts`, `request` or
-  `encodeURIComponent` is emitted with a `_` prefix; before, `client` made the method call
-  `.request` on a string and `opts` beside a query parameter emitted a duplicate parameter. Path
-  parameters are positional, so no caller changes. An operation whose method name is `client` or
-  `encodeURIComponent` is emitted as `_client` or `_encodeURIComponent`; before, `client` was a
-  duplicate identifier and `encodeURIComponent` shadowed the global every generated path calls. A
-  document component named `OperationRequestOptions` is refused like `ClientResponse` rather than
-  shadowing the generated file's import.
-- **Idempotency documentation corrected and completed (V9-14, V9-16, M113k, 0.10.0,
-  `@setu-ts/idempotency-plugin`, `@setu-ts/http-security-plugin`, `@setu-ts/database-plugin`,
-  `@setu-ts/sdk`).** The `http-security-plugin` CORS example now lists `idempotency-key` in
-  `allowedHeaders` and `idempotent-replayed` in `exposedHeaders`, so a keyed cross-origin browser
-  call preflights and the page can read `Idempotent-Replayed`. The tier-C table schema is documented
-  in the `database-plugin` README; the idempotency README names the `ioredis` install step and the
-  `OptionalDependencyUnavailableError` startup failure; its guarantee 2, M105 purge-race sentence
-  and `within` `ttlMs` floor are corrected; a "From a browser" section documents the CORS options,
-  the `request` parameter and a renamed key header. The SDK README's Keyed retries names the
-  per-call form and the `Access-Control-Expose-Headers` requirement.
-- **`setu add` wires the barrel generated handlers live in (`@setu-ts/cli`, #472).** In a functional
-  project `setu add events` registered a bare `EventsPlugin()`, so every handler a later
-  `setu generate event-handler` wrote into `src/events/index.ts` was subscribed by nothing and never
-  ran, with no message saying so. `setu add` now registers the seam `setu new` emits, derived from
-  the same registry: `EventsPlugin({ handlers: EVENT_HANDLERS })`,
-  `CqrsPlugin({ commandHandlers, queryHandlers })`, and the indicator and metric barrels for
-  `health` and `metrics`, each with its barrel import, and creates the empty barrel when the project
-  has none. Class-based projects are unchanged: their handlers reach the plugins through
-  `DecoratorPlugin`'s ingress barrel. A config that already imports the barrel, or that the command
-  cannot rewrite, gets printed guidance naming the seam form and the import. Existing projects are
-  not rewritten; re-running `setu add` on one whose call lacks the option names the option and the
-  import to add by hand. A project composed through a starter keeps its config, and the guidance now
-  names the arm value to pass (`events: { handlers: EVENT_HANDLERS }`), so the created barrel is
-  reached.
-- **`setu add health` on a Deno project says the start task needs `--allow-sys` (`@setu-ts/cli`,
-  #472).** Without it the built-in `self` check fails and `/health` reports down. The Deno
-  permission notes (this one and storage's `--allow-write`) are no longer printed on other targets,
-  where they do not apply.
-- **`setu generate job` points at the queue and scheduler registration options (`@setu-ts/cli`,
-  #472).** The generated job's comment recommended calling `queue.process()` or `scheduler.cron()`
-  inside another plugin's `register`, where the capability may not be registered yet. It now shows
-  `QueuePlugin({ processors: [...] })` and `SchedulerPlugin({ jobs: [...] })`, both checked to
-  type-check against the published packages.
-- **The database plugin README's Prisma example reads `process.env['DATABASE_URL']`
-  (`@setu-ts/database-plugin`).** It read `Deno.env.get(...)`, which does not exist on Node or Bun,
-  the runtimes npm users run.
-
-- **A value a client sends no longer makes a database error read as a timeout or an outage (M113g,
-  0.10.0, `@setu-ts/database-plugin`).** PostgreSQL quotes a rejected value in its error message,
-  and the node-postgres timeout messages were matched anywhere in the error chain, so a body sending
-  `"Query read timeout"` to an integer column answered `504`, and the two connect timeout messages
-  answered `503`. The three messages now match only as the whole message of an error that carries no
-  SQLSTATE code anywhere in its chain. The pool-wait message
-  (`timeout exceeded when trying to connect`) had the same flaw since 0.5.0. The SQLite
-  unique-violation message is matched only as a message prefix too (`UNIQUE constraint failed:` or
-  `D1_ERROR: UNIQUE constraint failed:`), so the same text no longer answers a false `409`, and an
-  unknown-column refusal from the Drizzle and Memory adapters now quotes the field name escaped and
-  cut to 64 characters, so a field name cannot forge a log line. The M113f scrub of a Drizzle
-  `Failed query` or a SQLSTATE class 22 error now removes the whole stack header even when a bound
-  value contains a line shaped like a stack frame; before, that line and every later bound value
-  survived into the logged stack.
-
-- **The second node-postgres connect-timeout message answered a masked `500` (V9-34, M113g, 0.10.0,
-  `@setu-ts/database-plugin`).** pg-pool raises `Connection terminated due to connection timeout`
-  when a new client's connect times out — the common case during a pause, when the pool has room to
-  open a connection — and the message was unclassified, so a call that never reached the database
-  answered a masked `500`. It is now classified `unavailable` and answered `503` beside
-  `timeout exceeded when trying to connect`; under either message the query was never sent, so
-  `DatabaseUnavailableError`'s "the operation did not happen, and may be retried" holds. A connect
-  that does not complete inside the bound is also why the Drizzle probe reports `degraded` rather
-  than `down`.
-
-- **A paused relay's late publish settlement (M113j, #469, 0.10.0, `@setu-ts/messaging-plugin`).** A
-  `markSent` or `markFailure` for a publish the relay already invoked now runs to its own
-  `storeTimeoutMs` bound even when a pause has exhausted the sweep budget, and its answer is
-  observed when it arrives after the bound: a `markSent` or `markFailure` that finds the row already
-  `sent` records the `duplicate` overlap, a `claim-lost` answer is booked as an overlap, a late
-  `markFailure` that made the row `failed` records `poisoned` without touching the sweep budget, and
-  a late rejection is swallowed. A sweep that overran by a pause can outlive `sweepDeadlineMs` by at
-  most one `storeTimeoutMs`, and the shutdown drain is bounded by the same amount. A publish the
-  budget refused to invoke is no longer counted as a publish failure: the sweep ends `deadline`,
-  writes nothing and reports no `store-write-failing`. The database outbox store's
-  unrecognized-status error no longer quotes the row id (`@setu-ts/database-plugin`), and the
-  `check:docs` continued-line rule (P3) joins each command once instead of from every line.
-- **Stale `npm:` specifiers in committed docs (M113j, #469, V9-22's widened scope and V9-10's
-  `npm:zod` half).** Every `npm:` import and every prose, table or comment claim that a package
-  loads as `npm:<pkg>` — about 80 lines across ~20 files, plus one `cli` JSDoc — now names the bare
-  package the loaders have used since M111a. The fence engine no longer rewrites `npm:` specifiers
-  (the `@hono/hono` → `hono` alias rewrite stays), and `check:docs` refuses a stale one by name: P7
-  names a quoted `npm:` specifier in an import position, P8 any other `npm:<pkg>` reference (Deno
-  `add`/`install` arguments and `@setu-ts`/`@jsr` specifiers are exempt).
-- **A Redis client built without a reporter wrote its errors to the console (M113c).** Since 0.8.0
-  the cache store, queue adapter, Redis Streams broker, realtime backplane, rate-limit store,
-  scheduler lock and idempotency store attached their `'error'` listener only when given a
-  `connectionErrorReporter`. Each plugin passes one, but `RedisRateLimitStore`, which no plugin
-  builds, and any store or adapter constructed directly got none, so ioredis printed
-  `[ioredis] Unhandled error event` on every failed attempt. `attachConnectionErrorReporter`'s
-  `reporter` is now optional: omitted, the listener drops events, as a reporter with no logger
-  already does, and the health probe still reports the outage.
-
-- **Kafka shutdown with sends in flight.** With publishes abandoned at `publishTimeoutMs` during a
-  broker pause, `app.stop()` waited on kafkajs's pending-request drain (about 26 s) and the process
-  never exited, because the abandoned sends kept retrying and reopened connections. The producer
-  close is now bounded at 10 s, and a second close runs once those sends settle.
-
-- **npm installation pointers (M111f).** Auth, queue and GraphQL README Deno install commands now
-  select npm explicitly. The website install commands resolve the npm packages.
-- **@setu-ts/cli** the devtool runtime refusal names the situation it is in (V9-5, M113i, #479,
-  0.10.0). The refusal takes a required `context` of `'scaffold'` or `'enable'`, so no call site can
-  keep the old wording by omission. The shared first sentence (why the devtool needs Deno) stays,
-  but its last clause now reads "could never start its diagnostics connector" so it is correct in
-  both contexts: the scaffold remedy keeps "Scaffold without --devtool, or create the project with
-  --runtime deno.", and the enable remedy says "This project targets <runtime>; the devtool can only
-  be enabled on a Deno project." with no "scaffold" wording.
-- **@setu-ts/cli** the CLI documentation states what rollback actually covers (V9-13, M113i, #479,
-  0.10.0). `docs/cli.md`, `packages/cli/README.md` and `PUBLIC_API.md` now state that a write is
-  rolled back on SIGINT (Ctrl+C) and a caught error only — SIGTERM, SIGKILL (`kill -9`) and power
-  loss all end the command with no rollback — and that re-running `setu adopt` converges while an
-  interrupted `new` or `generate` leaves the files it wrote, which the next run's refusal lists.
-- **@setu-ts/cli** `setu add` accepts the published packages its help promises (V9-40, M113i, #479,
-  0.10.0). The addable catalogue gains `view` → `view-plugin`, `localization` →
-  `localization-plugin` and `idempotency` → `idempotency-plugin` (the full specifier works too), so
-  the help line "The full specifier works too" is now true for the published framework packages.
-  `setu add diagnostics` — and `add @setu-ts/diagnostics-plugin` — refuses with
-  "`@setu-ts/diagnostics-plugin` is installed and wired by `setu devtool enable`." and exits 2,
-  because the devtool composition is `setu devtool enable`'s job and the bare package would produce
-  a project that cannot start the connector. A refusal for any other `@setu-ts/<name>` specifier
-  names that the package is not one this command installs and lists the catalogue, as before.
-- **@setu-ts/cli** a CLI-owned file that is a link or a special file no longer hangs `setu generate`
-  (M113i, #479, 0.10.0). A barrel such as `src/jobs/index.ts` committed as a link to `/dev/zero`
-  made `g job` and its `--dry-run` read forever. The CLI now reads an existing file it generates
-  only when it is a regular file under 1 MiB, and refuses the path by name otherwise.
-- **@setu-ts/cli** the schematic tables match the source (V9-62, M113i, #479, 0.10.0). The
-  `packages/cli/README.md` table now lists `plugin` as `src/plugins/<name>.plugin.ts` (it said
-  `src/plugins/<name>.ts`), its `controller` row no longer says `decorator-plugin` is required and
-  names the functional and class-based shapes instead, and the class-based
-  `src/ingress/<name>-<kind>.ingress.ts` outputs of `ws-route`, `job`, `command-handler`,
-  `query-handler` and `event-handler` are listed, with the functional `job` row naming the
-  `QueuePlugin` wiring. The `docs/cli.md` and `PUBLIC_API.md` tables receive the same corrections.
-- **@setu-ts/cli** a functional `setu generate job` is wired when `QueuePlugin` is installed (V9-75,
-  M113i, #479, 0.10.0). In a functional project with `queue-plugin`, `g job` now emits the module
-  with its existing `<SCREAMING>_JOB` and `<Pascal>JobData` plus an exported
-  `create<Pascal>JobProcessor(services): QueueProcessorDefinition<<Pascal>JobData>` factory and the
-  managed `src/jobs/index.ts` barrel exporting `QUEUE_PROCESSORS`, and the wiring renders
-  `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` —
-  `QueuePlugin({ adapter: 'redis', url: …, processors: [...QUEUE_PROCESSORS] })` for a
-  `--queue redis` microservice — so a job is no longer written and registered nowhere. After a
-  write, `setu generate` reports an unconsumed jobs barrel with
-  `Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...QUEUE_PROCESSORS] })` and the
-  import line. Without `queue-plugin` the standalone function is emitted unchanged and the jobs seam
-  is not scanned, so a project holding standalone `src/jobs/*.job.ts` files gets no skip report on
-  `setu generate`; a class-based `g job` is refused without `queue-plugin` and, with it, writes the
-  ingress seam, so a class-based project never holds a jobs barrel. On a Cloudflare Workers
-  microservice the runtime swap removes `queue-plugin`, so the jobs seam contributes nothing there.
-  The stale registry premise that `QueuePluginOptions` has no `processors` option is rewritten: a
-  processor polls only its own job name, the same trade the class-based arm already makes.
 
 ## [0.9.0] — 2026-10-12
 
