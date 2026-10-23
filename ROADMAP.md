@@ -14952,6 +14952,103 @@ node-redis only then. It has no ordering dependency on M115 or M116.
 
 ---
 
+## Milestone 118: `setu check` — a Wiring Gate for Generated Projects
+
+**Package(s):** `packages/cli` only. No `common`, kernel or plugin `src/` change, and no change to
+anything the CLI generates.
+
+**Objective:** give a scaffolded project a read-only command, runnable in CI, that fails when code
+in a CLI-owned seam directory is not registered: an artifact a barrel does not list, a barrel
+`setu.config.ts` does not import, or an artifact registered both by the barrel and by hand. This is
+the M60/M65 defect class (code that compiles and never runs), which `tsc` cannot see and a generated
+e2e test only sees for the routes it requests.
+
+**Where things stand (checked against source, 2026-10-23).** Most of the detection already exists,
+inside `setu generate`:
+
+- Every run scans every seam family the installed plugins enable, whatever schematic was asked for
+  (`scanArtifacts(deps.fs, dir, scanSeamSpecs(installed))`, `commands/generate.ts:421`), plus the
+  module scan. So any `generate` reports every skipped artifact (missing export, non-kebab name, a
+  module without its activation export or `@Module`), every artifact also registered by hand
+  (`scan.manual`, the M68 boot failure), the legacy `src/routes/` layout and the pre-M84 registrar.
+
+What is missing is a way to run that detection on its own, and three gaps in it:
+
+1. **Nothing fails.** Every report goes to stderr and `generate` still exits `0`. It is advice that
+   scrolls past, and no command runs the scan without also generating something (`--dry-run` still
+   needs a schematic and a name).
+2. **Barrel drift is invisible.** A barrel is rewritten only when its family is generated. A file
+   copied or hand-written into `src/controllers/` (by a developer or a coding agent following the
+   M116 brief) stays unregistered until some later `g controller` adopts it, as a side effect of an
+   unrelated run.
+3. **Config wiring is checked only for barrels written in the current run.** `reportUnwiredSeams`
+   filters on the files it just wrote (`commands/generate.ts:684-689`), so a barrel that
+   `setu.config.ts` stopped importing is never reported again.
+
+**Design rules.**
+
+- **One owner for the diagnostics.** The scan-and-report block moves out of `runGenerateCommand`
+  into a pure `diagnoseProject(fs, dir, installed)` returning typed findings. `generate` prints them
+  exactly as today (its stderr stays byte-identical, pinned by a test), and `check` prints them and
+  sets the exit code. Two copies would drift, which is how M65's regenerate loop happened.
+- **Compare name sets, not bytes.** Barrels are formatted with the project's own Prettier config
+  (M111d), so a developer reformatting a barrel must not fail the check. Drift is the difference
+  between the set of artifacts a barrel imports, parsed from its import declarations, and the set
+  the scan admits. A barrel the parser cannot read is a finding naming that barrel.
+- **Three outcomes for config wiring.** `reportUnwiredSeams` reports when it cannot classify
+  `setu.config.ts`, because a false report from `generate` is cheap. A CI gate cannot work that way:
+  since M101g narrowed what the classifier reads, many legitimate hand-edited configs cannot be
+  classified, and a gate that fails on them gets switched off. Wired passes, not wired fails,
+  unclassifiable warns and names the import line to check.
+- **Severity.** Errors (exit `1`): a skipped artifact, barrel drift, an unwired barrel, a duplicate
+  hand registration, a legacy layout still in use. Warnings (exit `0`): adoption of a hand-written
+  file that matches a family's naming convention (usually intended, and the M70g report already
+  treats it as information) and an unclassifiable config. `--strict` turns warnings into errors.
+- **Scope.**
+  - Standalone projects and workspace members. At a workspace root it checks every member and
+    reports per member, as `setu agents --check` does; it refuses a directory that is not a project,
+    with the same message `generate` gives (M101e).
+  - `full-stack` has no seams, so it passes trivially. The check says so rather than printing an
+    empty success.
+  - A Workers project has no jobs seam once the runtime swap removes `QueuePlugin`, so the scan of
+    that family is skipped.
+  - Custom schematics are out of scope: the CLI cannot vouch for what they write.
+  - Placement of code outside the seam directories is out of scope, and stays so. Layout is a
+    convention the CLI scaffolds, not a rule the framework enforces, and `setu adopt` exists for
+    projects that never followed it.
+- **Read-only, with the scanner's existing read limits.** It reads only regular files of at most
+  `MAX_EXISTING_FILE_BYTES` (the M113i fix). It writes nothing, so the ownership and symlink
+  refusals M116 added for writes do not apply.
+- **The `check` verb shadows a plugin command.** Built-in verbs match before plugin-contributed
+  commands (M34b), so a project whose plugin contributes a `check` command loses it. The plan must
+  either accept that with a CHANGELOG note or choose another name.
+
+**Open questions for the plan.**
+
+1. Whether `check` also verifies the M116 brief (folding `setu agents --check` in) or stays limited
+   to wiring.
+2. Whether the scaffold's `check` script or CI workflow (if one is generated) calls it. That would
+   change generated output, which this section otherwise rules out.
+3. Output format: plain lines only, or also `--json` for CI annotations.
+
+**Dependencies.** After M115. If the client-brief run shows agents placing files in seam directories
+by hand, that confirms gap 2 as the priority and supplies the e2e cases. It has no ordering
+dependency on M117.
+
+**Deliverables**
+
+- [ ] `plans/milestone-118-setu-check.md`, settling the open questions above
+- [ ] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
+- [ ] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
+      codes above
+- [ ] Barrel-drift and all-barrel config-wiring detection, comparing name sets
+- [ ] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
+      each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
+      removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
+      naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
+- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `118`
+
 ## Milestone 119: The `v0.10.0` Smoke Closeout
 
 **Source:** the `v0.10.0` smoke programme, run 2026-10-23/24 against the published npm artifacts —
@@ -15702,6 +15799,7 @@ patch by construction and gains nothing new here.
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
+| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects (unregistered artifacts, barrel drift, unwired barrels, duplicate registrations)                                                                                                                                       |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ⬜     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ⬜     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
