@@ -91,7 +91,9 @@ describe('REAL Redis Streams redelivery', () => {
       expect(await until(() => second.includes('m2'))).toBe(true);
       expect(await until(() => second.includes('m1')), 'm1 redelivered after restart').toBe(true);
       expect(second.filter((m) => m === 'm1')).toHaveLength(1);
-      expect((await redis.xpending(topic, 'g'))[0]).toBe(0);
+      expect(await until(async () => (await redis.xpending(topic, 'g'))[0] === 0), 'acked').toBe(
+        true,
+      );
     } finally {
       await b.stop();
       await a.stop();
@@ -120,7 +122,9 @@ describe('REAL Redis Streams redelivery', () => {
       expect(await until(() => delivered.length > 0)).toBe(true);
       await wait(350);
       expect(delivered).toEqual(['m1']);
-      expect((await redis.xpending(topic, 'g'))[0]).toBe(0);
+      expect(await until(async () => (await redis.xpending(topic, 'g'))[0] === 0), 'acked').toBe(
+        true,
+      );
     } finally {
       await a.stop();
       await b.stop();
@@ -156,7 +160,9 @@ describe('REAL Redis Streams redelivery', () => {
           'x-setu-deliveries',
           '3',
         ]);
-        expect((await redis.xpending(topic, 'g'))[0]).toBe(0);
+        expect(await until(async () => (await redis.xpending(topic, 'g'))[0] === 0), 'acked').toBe(
+          true,
+        );
       } finally {
         await app.stop();
         await redis.del(topic, `${topic}.dead.g`);

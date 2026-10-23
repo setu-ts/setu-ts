@@ -14,7 +14,7 @@
  * path has ever had against a real broker.
  */
 import { describe, expect, it } from 'vitest';
-import type { ConsumerConfig } from 'kafkajs';
+import type { Admin, ConsumerConfig } from 'kafkajs';
 import type { IMessageBroker, MessageMetadata } from '@setu-ts/common';
 import type { IKafkaFactory } from '../../src/interfaces/index.ts';
 import { CAPABILITIES } from '@setu-ts/common';
@@ -24,6 +24,30 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { KafkaTopicUnavailableError, MessagingPlugin } from '../../src/index.ts';
 
 const kafkaBrokers = process.env['KAFKA_BROKERS'];
+
+/** Waits for fresh-topic leaders to serve offsets, preserving permanent failures. */
+async function fetchTopicOffsets(
+  admin: Admin,
+  topic: string,
+): ReturnType<Admin['fetchTopicOffsets']> {
+  const deadline = performance.now() + 5_000;
+  for (;;) {
+    try {
+      return await admin.fetchTopicOffsets(topic);
+    } catch (error) {
+      if (
+        typeof error !== 'object' ||
+        error === null ||
+        !('retriable' in error) ||
+        error.retriable !== true ||
+        performance.now() >= deadline
+      ) {
+        throw error;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+}
 
 /** Polls a predicate until true or the deadline, without a fixed sleep. */
 async function waitFor(
@@ -390,12 +414,12 @@ describe(
       try {
         await app.start();
 
-        const before = highWatermarks((await admin.fetchTopicOffsets(topic)) as TopicOffset[]);
+        const before = highWatermarks(await fetchTopicOffsets(admin, topic));
         const N = 6;
         for (let i = 0; i < N; i++) {
           await broker!.publish(topic, { i }, { orderingKey: 'agg-1' });
         }
-        const keyed = (await admin.fetchTopicOffsets(topic)) as TopicOffset[];
+        const keyed = await fetchTopicOffsets(admin, topic);
         const grown = keyed
           .map((o) => ({
             partition: o.partition,
@@ -412,7 +436,7 @@ describe(
         for (let i = 0; i < N; i++) {
           await broker!.publish(topic, { i });
         }
-        const unkeyed = (await admin.fetchTopicOffsets(topic)) as TopicOffset[];
+        const unkeyed = await fetchTopicOffsets(admin, topic);
         const unkeyedTotal = unkeyed.reduce((sum, o) => sum + Number(o.high), 0);
         expect(unkeyedTotal - keyedTotal).toBe(N);
       } finally {

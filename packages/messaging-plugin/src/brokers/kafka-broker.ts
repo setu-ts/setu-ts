@@ -892,8 +892,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     try {
       await consumerTyped.connect();
-      await this.#subscribeWithRetry(consumerTyped, topic, generation);
-      start = await this.#captureGroupStart(topic, groupId, warn);
+      await this.#withSubscribeRetry(
+        () => consumerTyped.subscribe({ topic, fromBeginning: false }),
+        isUnknownTopicError,
+        generation,
+      );
+      start = await this.#captureGroupStart(topic, groupId, warn, generation);
       // A disconnect() that landed while the consumer was connecting, or during
       // a first attempt that then succeeded, must not leave a consumer running
       // after shutdown (security audit O1). The catch below releases it.
@@ -1059,6 +1063,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     topic: string,
     groupId: string,
     warn: (error: unknown) => void,
+    generation: number,
   ): Promise<KafkaStartOffsets | null> {
     const factory = this.#factory;
     if (typeof factory?.admin !== 'function') return null;
@@ -1092,12 +1097,18 @@ export class KafkaBroker implements MessageBrokerAdapter {
         warn(error);
       }
       if (isNew) {
-        return Object.fromEntries(
-          (await admin.fetchTopicOffsets(topic)).map(({ partition, offset }) => [
-            partition,
-            offset,
-          ]),
+        if (generation !== this.#generation) return null;
+        // A fresh KRaft topic can exist before its leaders are ready for ListOffsets.
+        const offsets = await this.#withSubscribeRetry(
+          () => admin.fetchTopicOffsets(topic),
+          (error) =>
+            typeof error === 'object' &&
+            error !== null &&
+            'retriable' in error &&
+            error.retriable === true,
+          generation,
         );
+        return Object.fromEntries(offsets.map(({ partition, offset }) => [partition, offset]));
       }
     } catch (error) {
       warn(error);
@@ -1187,8 +1198,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Subscribes the consumer, retrying an unknown topic within the
-   * {@link KafkaOptions.retry} budget (M101b, V8-26).
+   * Retries subscribe-time operations within the validated {@link KafkaOptions.retry} budget.
    *
    * kafkajs does not retry `UNKNOWN_TOPIC_OR_PARTITION`, and a KRaft broker
    * that auto-creates answers exactly that to the request that creates the
@@ -1198,26 +1208,31 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * consumer again is safe. Any other error, or the budget running out, is
    * rethrown for the caller to classify.
    *
-   * @param consumer - The connected consumer
-   * @param topic - The topic to subscribe
+   * Watermark reads use the same backoff and cancellable wait, retrying only
+   * errors with kafkajs's `retriable: true` property.
+   *
+   * @param operation - The subscribe or watermark read
+   * @param shouldRetry - Classifies errors eligible for another attempt
    * @param generation - The connection generation `subscribe()` started in;
    *   a `disconnect()` since then ends the retry
    */
-  async #subscribeWithRetry(
-    consumer: { subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void> },
-    topic: string,
+  async #withSubscribeRetry<T>(
+    operation: () => Promise<T>,
+    shouldRetry: (error: unknown) => boolean,
     generation: number,
-  ): Promise<void> {
+  ): Promise<T> {
     const budget = this.#subscribeRetry;
     let delay = budget.initialRetryTime;
     for (let attempt = 0; ; attempt++) {
       try {
-        await consumer.subscribe({ topic, fromBeginning: false });
-        return;
+        return await operation();
       } catch (err) {
-        if (!isUnknownTopicError(err) || attempt >= budget.retries) {
+        if (!shouldRetry(err) || attempt >= budget.retries) {
           throw err;
         }
+      }
+      if (generation !== this.#generation) {
+        throw new Error('KafkaBroker was disconnected while subscribing');
       }
       await new Promise<void>((resolve) => {
         const cancel = (): void => {
