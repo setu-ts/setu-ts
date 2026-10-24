@@ -14954,8 +14954,10 @@ node-redis only then. It has no ordering dependency on M115 or M116.
 
 ## Milestone 118: `setu check` — a Wiring Gate for Generated Projects
 
-**Package(s):** `packages/cli` only. No `common`, kernel or plugin `src/` change, and no change to
-anything the CLI generates.
+**Package(s):** `packages/cli` only. No `common`, kernel or plugin `src/` change. The command itself
+changes nothing the CLI generates; wiring it into the generated `check` script and CI is the one
+generated-output change (see "Generated projects run it" below), and wiring it into the production
+build belongs to M120.
 
 **Objective:** give a scaffolded project a read-only command, runnable in CI, that fails when code
 in a CLI-owned seam directory is not registered: an artifact a barrel does not list, a barrel
@@ -15023,13 +15025,28 @@ What is missing is a way to run that detection on its own, and three gaps in it:
   commands (M34b), so a project whose plugin contributes a `check` command loses it. The plan must
   either accept that with a CHANGELOG note or choose another name.
 
+**Generated projects run it (maintainer decision, 2026-10-24).** A gate the project does not run is
+advice, which is gap 1 again. So:
+
+- **The CLI is a pinned devDependency** of every generated project (`@setu-ts/cli` at the CLI's own
+  version, the pin `setu new` already writes for the framework). Today projects reach the CLI
+  through `npx @setu-ts/cli@<version>`, which in a Docker build stage would download it on every
+  build. A devDependency is installed by the build stage and stays out of the runtime image.
+- **The generated `check` script runs it** beside the type check, and a generated CI workflow (if
+  one exists) runs that script. The `dev` and `debug` scripts do not, so the edit loop is never
+  blocked.
+- **Only errors fail it.** Warnings print and exit `0`, as the severity rule above says.
+- **The production build runs it too, before compiling** — M120 wires that, so M120 depends on this
+  milestone. Bun and Deno projects have no build step today; for them the `check` script and CI are
+  the gate. Workers projects are built by wrangler, so their `check` script carries it.
+- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script
+  through `setu add` or an upgrade-guide entry; nothing rewrites a developer's existing script.
+
 **Open questions for the plan.**
 
 1. Whether `check` also verifies the M116 brief (folding `setu agents --check` in) or stays limited
    to wiring.
-2. Whether the scaffold's `check` script or CI workflow (if one is generated) calls it. That would
-   change generated output, which this section otherwise rules out.
-3. Output format: plain lines only, or also `--json` for CI annotations.
+2. Output format: plain lines only, or also `--json` for CI annotations.
 
 **Dependencies.** After M115. If the client-brief run shows agents placing files in seam directories
 by hand, that confirms gap 2 as the priority and supplies the e2e cases. It has no ordering
@@ -15046,7 +15063,10 @@ dependency on M117.
       each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
       removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
       naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
-- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG
+- [ ] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
+      script (and CI, where generated); the scaffold e2e proves a fresh project's `check` passes and
+      a broken seam fails it
+- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `118`
 
 ## Milestone 119: The `v0.10.0` Smoke Closeout
@@ -15384,19 +15404,26 @@ Node service gains little and worsens stack traces.
    service with esbuild (`--platform=node --packages=external` except workspace libraries,
    `--sourcemap`), keeping optional peers external so M113d's guarded `await import()` still works.
    The review recommends evaluating (b) first; `tsc --noEmit` stays the type-check gate.
-2. **Scripts.** `build`; production `start: node --enable-source-maps dist/main.js`;
-   `dev: tsx watch main.ts`; `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether
-   `start` keeps its development meaning (least surprise) with a separate `start:prod`, or follows
-   NestJS (`start` compiled, `start:dev` watch) — an upgrade-guide entry either way.
-3. **Dockerfile.** Multi-stage: a build stage, then `npm ci --omit=dev` and `dist/` with the M95a
-   and V9-78 properties (read-only root, no network at runtime). Standalone projects get it too.
-   Full-stack builds the server entry beside `react-router build`, and its production `start` must
-   not rebuild the bundle on every start, as the standalone `start` does today.
+2. **Scripts.** `build`, which runs `setu check` (M118) before compiling, so code that compiles but
+   is never registered fails the build — only errors fail it, warnings print; production
+   `start: node --enable-source-maps dist/main.js`; `dev: tsx watch main.ts`;
+   `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether `start` keeps its
+   development meaning (least surprise) with a separate `start:prod`, or follows NestJS (`start`
+   compiled, `start:dev` watch) — an upgrade-guide entry either way.
+3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
+   `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
+   `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
+   projects get it too. Full-stack builds the server entry beside `react-router build`, and its
+   production `start` must not rebuild the bundle on every start, as the standalone `start` does
+   today.
 4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
    out of the build, as M101f keeps it out of images).
 5. **Bun and Deno** run TypeScript natively; emit `bun build` / `deno compile` or document them.
 6. **Interim:** if this milestone is not soon, replace `sh -c "npx tsx main.ts"` with
    `node --import tsx main.ts` — about 160 MB and 140 ms per container with no build.
+
+**Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
+generated projects; this milestone wires it into `build`.
 
 **Gate:** `scaffold-runs-e2e` builds, runs the COMPILED output, and runs the built image read-only
 with no network, for every template × runtime, including a workspace with a library (the M63 and
@@ -15404,7 +15431,8 @@ M95a lesson: generated output is proven only by running it).
 
 **Deliverables:**
 
-- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member
+- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member; `build` runs
+      `setu check` first, and the e2e proves a broken seam fails the build
 - [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
       it
 - [ ] `.gitignore` covers `dist/` and `build/`
@@ -15799,7 +15827,7 @@ patch by construction and gains nothing new here.
 | 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
-| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects (unregistered artifacts, barrel drift, unwired barrels, duplicate registrations)                                                                                                                                       |
+| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ⬜     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ⬜     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
