@@ -270,7 +270,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       generatedDirs: ['.react-router'],
       devEntry: FULL_STACK_DEV_ENTRY,
     },
-    npmDependencies: { ...FULL_STACK_NPM_DEPENDENCIES, 'swagger-ui-dist': '^5', zod: '^4' },
+    npmDependencies: { ...FULL_STACK_NPM_DEPENDENCIES, 'swagger-ui-dist': '^5', zod: '^4.6.6' },
     // The test packages are merged in because `setu generate module` is ungated
     // since M65: this template can emit a `<name>.test.ts` too, and a host
     // that emits a test file must declare what that file imports.

@@ -73,7 +73,7 @@ describe('ConfigPlugin E2E — with real application', () => {
 
   it('validates config with Zod at startup', async () => {
     // Import Zod dynamically to test real Zod coercion/defaults/validation.
-    const mod = await import('zod-v3');
+    const mod = await import('zod-v4');
     const z = mod.z;
 
     const schema = z.object({
@@ -102,7 +102,7 @@ describe('ConfigPlugin E2E — with real application', () => {
   });
 
   it('resolves a typed section from the real application service registry', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL', 'POOL_SIZE'],
@@ -134,7 +134,7 @@ describe('ConfigPlugin E2E — with real application', () => {
   });
 
   it('fails startup when Zod validation fails', async () => {
-    const mod = await import('zod-v3');
+    const mod = await import('zod-v4');
     const z = mod.z;
 
     const schema = z.object({

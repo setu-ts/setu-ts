@@ -586,7 +586,7 @@ export function renderRootPackageJson(): string {
         typedoc: '0.28.20',
         yaml: '2.9.1',
         hono: EXTERNAL_RANGES.hono,
-        zod: EXTERNAL_RANGES['zod-v3']!.replace('npm:zod@', ''),
+        zod: EXTERNAL_RANGES['zod-v4']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
         'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
       },
@@ -694,7 +694,7 @@ export function externalAliases(member: MemberInput): ReadonlyMap<string, string
 /**
  * The member `deno.json` with its `imports` block regenerated: the bare
  * aliases from {@linkcode externalAliases} plus any `npm:`/`jsr:`-keyed pin
- * already present (openapi-plugin's two zod majors, kept until 111b), sorted.
+ * already present, sorted.
  *
  * Only the `imports` block is spliced; every other byte stays as `deno fmt`
  * wrote it, because re-serializing the whole file would unfold the short

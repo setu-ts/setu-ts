@@ -9757,22 +9757,22 @@ app.router.post('/users', {
 
 ### Zod Version Support
 
-Both **zod v3 and zod v4** are supported, detected per schema by duck typing — `toJSONSchema`
-presence marks a v4 schema; the plugin imports neither major.
+The supported Zod range is **`>=4.6.6 <5`**. Schemas are recognized by the public `toJSONSchema`
+method; the plugin does not import Zod.
 
 - **Zod v4** is converted through `schema.toJSONSchema()` and adapted from JSON Schema draft 2020-12
   to OpenAPI 3.1: the dialect `$schema` key is dropped, formats and constraints pass through
   verbatim (`format`, `pattern`, `contentEncoding`, …), reused schemas are hoisted into
   `components/schemas` with their pointers rewritten, and a recursive schema's root-cycle pointer
   forces that schema into `components` so no bare `#` ref survives in the document.
-- **A type union is always spelled `anyOf`, on both majors and every supported zod v4.** Draft
-  2020-12 permits two spellings, and zod switched between them inside the supported range: through
-  4.4 a union of bare types emitted `anyOf: [{ "type": "string" }, { "type": "null" }]`, and from
-  4.5 it collapses to `"type": ["string", "null"]`. The transformer normalizes the collapsed form
-  back, so one schema produces one document whichever in-range zod the application installs, the v4
-  path agrees with the v3 path, and the document stays convertible to OpenAPI 3.0 (where a `type`
-  array is not legal). Sibling keywords stay beside the `anyOf` rather than being distributed into
-  its arms — `{ "type": ["string", "null"], "minLength": 2 }` becomes
+- **A type union is always spelled `anyOf`, on every supported zod v4.** Draft 2020-12 permits two
+  spellings, and zod switched between them across v4 releases: through 4.4 a union of bare types
+  emitted `anyOf: [{ "type": "string" }, { "type": "null" }]`, and from 4.5 it collapses to
+  `"type": ["string", "null"]`. The transformer normalizes the collapsed form back, so one schema
+  produces one document whichever in-range zod the application installs, and the document stays
+  convertible to OpenAPI 3.0 (where a `type` array is not legal). Sibling keywords stay beside the
+  `anyOf` rather than being distributed into its arms —
+  `{ "type": ["string", "null"], "minLength": 2 }` becomes
   `{ "minLength": 2, "anyOf": [{ "type": "string" }, { "type": "null" }] }`, which asserts the same
   thing without applying a string constraint to the `null` arm. Only schema positions are rewritten:
   a `default`, `const`, `enum`, example or vendor-extension value is instance DATA and is preserved
@@ -9796,8 +9796,9 @@ presence marks a v4 schema; the plugin imports neither major.
   `at` names the operationId, so the affected route is identifiable without diffing documents. The
   extension is absent when every schema is representable.
 
-- **Zod v3 output is unchanged** — the same schemas produce byte-identical documents as before this
-  support existed.
+- **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
+  `{}` and report the existing `not a recognized zod schema` diagnostic through
+  `x-setu-unrepresentable`. Upgrade Zod to at least 4.6.6 before regenerating documents.
 
 #### Request and response are documented from different sides
 
@@ -9819,21 +9820,18 @@ on the three object modes, measured against zod 4.4:
 | `z.looseObject`  | accepted, kept         | `additionalProperties:{}`    | `additionalProperties:{}`    |
 
 `ZodToOpenApi.transform(schema, io?)` takes the side as an optional second argument, defaulting to
-`'output'`, so a direct call is unchanged. Only the zod v4 path reads it: the v3 path has no `io`
-concept and already emits the input view, which is why v3 documents are byte-identical and why the
-two majors now agree on a request body.
+`'output'`, so a direct call uses the response view.
 
-**Deduplication follows the side.** A schema whose two views are identical — every zod v3 schema,
-and any v4 schema with no default, transform, coercion or object-mode difference — is hoisted into
-ONE component shared by every site, exactly as before. A schema whose views differ and that is used
-on both sides yields one component per side, because the two sites do not describe the same shape. A
-schema registered through `addSchema('Name', …)` keeps that name for the output side and gains a
-`NameInput` twin when a request site reaches it, so the contributor's chosen name still appears on
-both sides. The twin is identified by SCHEMA, never by name alone — registering both `Address` and
-an unrelated `AddressInput` is legal, and the twin then takes the next free suffixed name rather
-than adopting the unrelated component. It belongs to the document that needed it: a later
-`generate()` with no request site for that schema drops it, exactly as it drops every other
-per-document component.
+**Deduplication follows the side.** A schema whose two views are identical — any v4 schema with no
+default, transform, coercion or object-mode difference — is hoisted into ONE component shared by
+every site, exactly as before. A schema whose views differ and that is used on both sides yields one
+component per side, because the two sites do not describe the same shape. A schema registered
+through `addSchema('Name', …)` keeps that name for the output side and gains a `NameInput` twin when
+a request site reaches it, so the contributor's chosen name still appears on both sides. The twin is
+identified by SCHEMA, never by name alone — registering both `Address` and an unrelated
+`AddressInput` is legal, and the twin then takes the next free suffixed name rather than adopting
+the unrelated component. It belongs to the document that needed it: a later `generate()` with no
+request site for that schema drops it, exactly as it drops every other per-document component.
 
 ### Notes
 
@@ -15519,11 +15517,11 @@ Applications own their third-party dependency resolution. Setu-TS therefore does
 consumer's dependency graph; it declares the third-party values it accepts at an application
 boundary and tests those claims in `pnpm run check:compat`.
 
-| Third-party value                  | Owning packages                                           | Supported versions                 | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------------- | --------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Zod schemas                        | `validation-plugin`, `openapi-plugin`, `decorator-plugin` | zod `>=3.24.0 <4` and `>=4.4.0 <5` | Validation uses public `safeParse`; OpenAPI uses Zod v4's public `toJSONSchema()`. The legacy Zod v3 transformer has no equivalent public conversion API, so its private-internal compatibility is limited to the stated v3 range and tested separately. Decorators forward schemas to the validation/OpenAPI boundaries without inspecting them. `toJSONSchema()` output shifts within the v4 range (4.5 collapses a union of bare types into a `type` array), so the OpenAPI transformer normalizes the union spelling rather than passing it through — see Zod Version Support. |
-| Drizzle database and table objects | `database-plugin`                                         | `0.45.2` baseline; range pending   | The application creates the database configuration and tables; the plugin loads its own query operators. Its exact lazy-loader import is a separate resolution-policy repair, so no broader application-instance range is claimed until that pin is removed and both endpoints are tested.                                                                                                                                                                                                                                                                                         |
-| Prisma client                      | `database-plugin`                                         | **Pending boundary repair**        | Prisma v7 is the current application integration, but no formal range is claimed until the adapter stops its `_activeProvider` fallback and relies solely on the documented `provider` option plus public client methods.                                                                                                                                                                                                                                                                                                                                                          |
+| Third-party value                  | Owning packages                                           | Supported versions               | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zod schemas                        | `validation-plugin`, `openapi-plugin`, `decorator-plugin` | zod `>=4.6.6 <5`                 | Validation duck-types public `safeParse` and is tested with Zod 4 only; OpenAPI uses public `toJSONSchema()`. Schemas without that method degrade to `{}` with the existing unrepresentable diagnostic. Decorators forward schemas without inspecting them. OpenAPI normalizes type unions to `anyOf` — see Zod Version Support. |
+| Drizzle database and table objects | `database-plugin`                                         | `0.45.2` baseline; range pending | The application creates the database configuration and tables; the plugin loads its own query operators. Its exact lazy-loader import is a separate resolution-policy repair, so no broader application-instance range is claimed until that pin is removed and both endpoints are tested.                                       |
+| Prisma client                      | `database-plugin`                                         | **Pending boundary repair**      | Prisma v7 is the current application integration, but no formal range is claimed until the adapter stops its `_activeProvider` fallback and relies solely on the documented `provider` option plus public client methods.                                                                                                        |
 
 GraphQL is intentionally absent: `graphqlModule` is a package-declared `GraphqlModuleLike` facade,
 not an opaque `unknown` value. Its compile-time shape and adapter tests cover that boundary.

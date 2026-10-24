@@ -5,22 +5,19 @@ OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IO
 
 ## Zod version support
 
-Both **zod v3 and zod v4** are supported: `>=3.24.0 <4` and `>=4.4.0 <5`. The plugin imports
-neither: each schema is recognized by duck typing (`toJSONSchema` marks a zod v4 schema), so an
-application may use either major — or both in one process. `pnpm run check:compat` exercises each
-declared major independently.
+The supported Zod range is **`>=4.6.6 <5`**. The plugin does not import Zod: each schema is
+recognized by its public `toJSONSchema` method. `pnpm run check:compat` exercises Zod 4.
 
-- **Zod v3** is converted by the historical `_def.typeName` recursion.
 - **Zod v4** is converted wholesale through `schema.toJSONSchema()` (JSON Schema draft 2020-12,
   which OpenAPI 3.1 speaks natively) and adapted: the dialect `$schema` key is dropped, reused
   schemas land in `components/schemas` with their pointers rewritten, and a recursive schema's
   root-cycle pointer forces the schema into `components` so no bare `#` ref survives.
-- **A type union is always `anyOf`, on both majors and every supported zod v4.** Draft 2020-12
-  permits two spellings and zod changed which one it emits inside the supported range — 4.5
-  collapses a union of bare types to `"type": ["string", "null"]` where 4.4 emitted `anyOf` — so the
-  transformer normalizes the collapsed form back. One schema therefore yields one document whichever
-  in-range zod the application installs, and the result still converts down to OpenAPI 3.0, where a
-  `type` array is not legal.
+- **A type union is always `anyOf`, on every supported zod v4.** Draft 2020-12 permits two spellings
+  and zod changed which one it emits across v4 releases — 4.5 collapses a union of bare types to
+  `"type": ["string", "null"]` where 4.4 emitted `anyOf` — so the transformer normalizes the
+  collapsed form back. One schema therefore yields one document whichever in-range zod the
+  application installs, and the result still converts down to OpenAPI 3.0, where a `type` array is
+  not legal.
 - **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
   (`z.date()`, `z.bigint()`, …) becomes an empty schema, and the operation that owns it carries a
   machine-readable `x-setu-unrepresentable` extension naming the operation and the reason:
@@ -34,6 +31,10 @@ declared major independently.
   ```
 
   The extension is absent when every schema is representable, so valid documents are unchanged.
+
+- **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
+  `{}` with the existing `not a recognized zod schema` diagnostic in `x-setu-unrepresentable`.
+  Upgrade Zod to `>=4.6.6 <5` before regenerating documents.
 
 Zod schemas are transformed to OpenAPI schema objects, and a schema reused across request and
 response bodies — including one nested inside another — is hoisted into `components` and referenced
