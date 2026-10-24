@@ -14077,6 +14077,11 @@ artifacts. Deno gates stay authoritative until the later tooling milestones repl
 
 ## Milestone 113: The `v0.9.0` Smoke Closeout
 
+**Status: complete.** All fifteen letters shipped, and the `v0.10.0` regression run re-drove all 82
+rows against `0.9.0` controls: 79 closed, with V9-77 closed by #485 and V9-79 by M114 among them.
+Three closed only in part, and their remainders are rows in M119: V9-13 in M119h, V9-26 in M119e and
+V9-29 in M119i.
+
 **Source:** the three-stage `v0.9.0` smoke programme, run 2026-10-14/15 against the published npm
 artifacts — the regression run (`smoke/V090-REGRESSION.md`), Part 16's exercise block X67–X73
 (`smoke/X67-X73-FINDINGS.md`), the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its outage
@@ -15807,7 +15812,7 @@ patch by construction and gains nothing new here.
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                                                            |
 | 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                                                           |
 | 111f      | ✅     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes ([#460](https://github.com/setu-ts/setu-ts/pull/460))                                                                                                                                                       |
-| 113       | ⬜     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o                                                                                                                                                                                                        |
+| 113       | ✅     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o; closed on published `0.10.0` (V9-13/26/29 remainders carried into M119)                                                                                                                               |
 | 113a      | ✅     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
