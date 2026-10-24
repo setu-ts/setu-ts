@@ -14077,6 +14077,11 @@ artifacts. Deno gates stay authoritative until the later tooling milestones repl
 
 ## Milestone 113: The `v0.9.0` Smoke Closeout
 
+**Status: complete.** All fifteen letters shipped, and the `v0.10.0` regression run re-drove all 82
+rows against `0.9.0` controls: 79 closed, with V9-77 closed by #485 and V9-79 by M114 among them.
+Three closed only in part, and their remainders are rows in M119: V9-13 in M119h, V9-26 in M119e and
+V9-29 in M119i.
+
 **Source:** the three-stage `v0.9.0` smoke programme, run 2026-10-14/15 against the published npm
 artifacts — the regression run (`smoke/V090-REGRESSION.md`), Part 16's exercise block X67–X73
 (`smoke/X67-X73-FINDINGS.md`), the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its outage
@@ -14657,6 +14662,17 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 ## Milestone 115: The `v0.10.0` Client-Brief Run
 
+**Status: complete (2026-10-24).** Relaymark was built by three agents in turn and reached deployed
+acceptance for every non-outage criterion, but one backend outage drains the whole product. The
+security pass found no framework defect. X74 ran in both forms: (a) passed 53/53, and (b) did not
+deliver within 8 hours. The findings are register rows V10-49…V10-63, grouped by shape in M119; the
+generator gaps are M120–M123.
+
+**Correction: rule 1 was missed.** The brief was written on 2026-10-23, after `0.10.0` was
+published, not frozen before the cut. The product shape was fixed in this section beforehand, but
+the author had read the CHANGELOG, so a story that lands on a `0.10.0` fix may be tailored. The
+brief's header and `smoke/M115-FINDINGS.md` record this.
+
 **Package(s):** none — an exercise block against the PUBLISHED `0.10.0` artifacts, the M104 method
 applied to a second, deliberately different product. Its findings become `smoke/DEFECTS.md` rows and
 its defects become the `0.10.0` closeout letters.
@@ -14696,14 +14712,15 @@ since the run is meant to judge them.
 
 **Deliverables**
 
-- [ ] `smoke/v0.10.0/CLIENT-BRIEF.md` written and frozen before the cut, with the time-measure
-      decision
-- [ ] The product built cold against `0.10.0`, with its delivery ledger
-- [ ] Acceptance from a browser and a generated partner client; outage pass; security pass
-- [ ] X74 run on `0.10.0` (both forms)
-- [ ] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
+- [x] `smoke/v0.10.0/CLIENT-BRIEF.md` with the time-measure decision — written AFTER the cut (see
+      the correction above), frozen when the builder started
+- [x] The product built cold against `0.10.0`, with its delivery ledger
+- [x] Acceptance from a browser and a generated partner client; outage pass; security pass (S4,
+      retry after a crash mid-request, not verified)
+- [x] X74 run on `0.10.0` (both forms)
+- [x] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
       M104
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `115`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `115`
 
 ---
 
@@ -14949,6 +14966,610 @@ node-redis only then. It has no ordering dependency on M115 or M116.
 - [ ] Docs: each package README, `PUBLIC_API.md`, CHANGELOG, and a node-redis section in the
       relevant guides
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `117`
+
+---
+
+## Milestone 118: `setu check` — a Wiring Gate for Generated Projects
+
+**Package(s):** `packages/cli` only. No `common`, kernel or plugin `src/` change. The command itself
+changes nothing the CLI generates; wiring it into the generated `check` script and CI is the one
+generated-output change (see "Generated projects run it" below), and wiring it into the production
+build belongs to M120.
+
+**Objective:** give a scaffolded project a read-only command, runnable in CI, that fails when code
+in a CLI-owned seam directory is not registered: an artifact a barrel does not list, a barrel
+`setu.config.ts` does not import, or an artifact registered both by the barrel and by hand. This is
+the M60/M65 defect class (code that compiles and never runs), which `tsc` cannot see and a generated
+e2e test only sees for the routes it requests.
+
+**Where things stand (checked against source, 2026-10-23).** Most of the detection already exists,
+inside `setu generate`:
+
+- Every run scans every seam family the installed plugins enable, whatever schematic was asked for
+  (`scanArtifacts(deps.fs, dir, scanSeamSpecs(installed))`, `commands/generate.ts:421`), plus the
+  module scan. So any `generate` reports every skipped artifact (missing export, non-kebab name, a
+  module without its activation export or `@Module`), every artifact also registered by hand
+  (`scan.manual`, the M68 boot failure), the legacy `src/routes/` layout and the pre-M84 registrar.
+
+What is missing is a way to run that detection on its own, and three gaps in it:
+
+1. **Nothing fails.** Every report goes to stderr and `generate` still exits `0`. It is advice that
+   scrolls past, and no command runs the scan without also generating something (`--dry-run` still
+   needs a schematic and a name).
+2. **Barrel drift is invisible.** A barrel is rewritten only when its family is generated. A file
+   copied or hand-written into `src/controllers/` (by a developer or a coding agent following the
+   M116 brief) stays unregistered until some later `g controller` adopts it, as a side effect of an
+   unrelated run.
+3. **Config wiring is checked only for barrels written in the current run.** `reportUnwiredSeams`
+   filters on the files it just wrote (`commands/generate.ts:684-689`), so a barrel that
+   `setu.config.ts` stopped importing is never reported again.
+
+**Design rules.**
+
+- **One owner for the diagnostics.** The scan-and-report block moves out of `runGenerateCommand`
+  into a pure `diagnoseProject(fs, dir, installed)` returning typed findings. `generate` prints them
+  exactly as today (its stderr stays byte-identical, pinned by a test), and `check` prints them and
+  sets the exit code. Two copies would drift, which is how M65's regenerate loop happened.
+- **Compare name sets, not bytes.** Barrels are formatted with the project's own Prettier config
+  (M111d), so a developer reformatting a barrel must not fail the check. Drift is the difference
+  between the set of artifacts a barrel imports, parsed from its import declarations, and the set
+  the scan admits. A barrel the parser cannot read is a finding naming that barrel.
+- **Three outcomes for config wiring.** `reportUnwiredSeams` reports when it cannot classify
+  `setu.config.ts`, because a false report from `generate` is cheap. A CI gate cannot work that way:
+  since M101g narrowed what the classifier reads, many legitimate hand-edited configs cannot be
+  classified, and a gate that fails on them gets switched off. Wired passes, not wired fails,
+  unclassifiable warns and names the import line to check.
+- **Severity.** Errors (exit `1`): a skipped artifact, barrel drift, an unwired barrel, a duplicate
+  hand registration, a legacy layout still in use. Warnings (exit `0`): adoption of a hand-written
+  file that matches a family's naming convention (usually intended, and the M70g report already
+  treats it as information) and an unclassifiable config. `--strict` turns warnings into errors.
+- **Scope.**
+  - Standalone projects and workspace members. At a workspace root it checks every member and
+    reports per member, as `setu agents --check` does; it refuses a directory that is not a project,
+    with the same message `generate` gives (M101e).
+  - `full-stack` has no seams, so it passes trivially. The check says so rather than printing an
+    empty success.
+  - A Workers project has no jobs seam once the runtime swap removes `QueuePlugin`, so the scan of
+    that family is skipped.
+  - Custom schematics are out of scope: the CLI cannot vouch for what they write.
+  - Placement of code outside the seam directories is out of scope, and stays so. Layout is a
+    convention the CLI scaffolds, not a rule the framework enforces, and `setu adopt` exists for
+    projects that never followed it.
+- **Read-only, with the scanner's existing read limits.** It reads only regular files of at most
+  `MAX_EXISTING_FILE_BYTES` (the M113i fix). It writes nothing, so the ownership and symlink
+  refusals M116 added for writes do not apply.
+- **The `check` verb shadows a plugin command.** Built-in verbs match before plugin-contributed
+  commands (M34b), so a project whose plugin contributes a `check` command loses it. The plan must
+  either accept that with a CHANGELOG note or choose another name.
+
+**Generated projects run it (maintainer decision, 2026-10-24).** A gate the project does not run is
+advice, which is gap 1 again. So:
+
+- **The CLI is a pinned devDependency** of every generated project (`@setu-ts/cli` at the CLI's own
+  version, the pin `setu new` already writes for the framework). Today projects reach the CLI
+  through `npx @setu-ts/cli@<version>`, which in a Docker build stage would download it on every
+  build. A devDependency is installed by the build stage and stays out of the runtime image.
+- **The generated `check` script runs it** beside the type check, and a generated CI workflow (if
+  one exists) runs that script. The `dev` and `debug` scripts do not, so the edit loop is never
+  blocked.
+- **Only errors fail it.** Warnings print and exit `0`, as the severity rule above says.
+- **The production build runs it too, before compiling** — M120 wires that, so M120 depends on this
+  milestone. Bun and Deno projects have no build step today; for them the `check` script and CI are
+  the gate. Workers projects are built by wrangler, so their `check` script carries it.
+- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script
+  through `setu add` or an upgrade-guide entry; nothing rewrites a developer's existing script.
+
+**Open questions for the plan.**
+
+1. Whether `check` also verifies the M116 brief (folding `setu agents --check` in) or stays limited
+   to wiring.
+2. Output format: plain lines only, or also `--json` for CI annotations.
+
+**Dependencies.** After M115. If the client-brief run shows agents placing files in seam directories
+by hand, that confirms gap 2 as the priority and supplies the e2e cases. It has no ordering
+dependency on M117.
+
+**Deliverables**
+
+- [ ] `plans/milestone-118-setu-check.md`, settling the open questions above
+- [ ] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
+- [ ] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
+      codes above
+- [ ] Barrel-drift and all-barrel config-wiring detection, comparing name sets
+- [ ] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
+      each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
+      removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
+      naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
+- [ ] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
+      script (and CI, where generated); the scaffold e2e proves a fresh project's `check` passes and
+      a broken seam fails it
+- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `118`
+
+## Milestone 119: The `v0.10.0` Smoke Closeout
+
+**Source:** the `v0.10.0` smoke programme, run 2026-10-23/24 against the published npm artifacts —
+the regression run (`smoke/V0100-REGRESSION.md`: Pass 1 re-drove all 82 open V9 rows against `0.9.0`
+controls, 79 closed and 3 partial; Pass 2 re-drove the 73 retained exercise rows), Part 18's
+exercise block X75–X82 (`smoke/X75-X82-FINDINGS.md`), the M115 Relaymark client-brief run
+(`smoke/M115-FINDINGS.md`, with its outage and security passes) and both forms of X74 (Ledgerline
+re-pinned, and rebuilt cold by a local model; sections in `V0100-REGRESSION.md`). **No release
+regression.** The register is `smoke/DEFECTS.md`, rows V10-1…V10-63, plus the remainders of the
+three partial closures V9-13, V9-26 and V9-29. One row is High (V10-13). Product defects from M115
+and X74 (b) — the builders' own code — stay in their findings files and are not rows.
+
+**Grouped by SHAPE, not by package**, with the M113 letter kinds: a **design** letter changes a
+contract, a default or a behaviour and needs a plan; a **fix** letter's rows are local defects with
+an obvious fix and may ship as separate `fix/…` branches; a **docs** letter ships on one `docs/…`
+branch. Every row still closes only on a re-run against a newly published version. The eight rows
+tagged `[generator gap]` that are features rather than defects — no full-stack member in a broker
+workspace, no production build, no workspace operations, no styling foundation — are milestones of
+their own (M120–M123), not letters here.
+
+| Letter    | Kind   | Shape                                                          | Rows                                                                                                                          | Packages                                                                                                         |
+| --------- | ------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **M119a** | design | message delivery that repeats, and calls with no bound         | V10-13 **High**, V10-2, V10-21, V10-30, V10-5                                                                                 | `messaging-plugin`                                                                                               |
+| **M119b** | design | readiness that drains replicas for a shared or fan-out problem | V10-49, V10-20, V10-22, V10-31                                                                                                | `mail`, `health`, `realtime-backplane`, `queue`, `database`                                                      |
+| **M119c** | design | safe framework, broken default                                 | V10-17, V10-1, V10-3, V10-36, V10-6, V10-29, V10-44, V10-14, V10-41, two unfiled generator gaps                               | `cli`, `http-security`, `session`, `openapi`, `telemetry`, `service-discovery`                                   |
+| **M119d** | design | forwarded client identity                                      | V10-19, V10-28                                                                                                                | `http-security-plugin`                                                                                           |
+| **M119e** | design | a data contract that is not portable or not checked at startup | V10-4 (+ V9-26 remainder), V10-32, V10-33, V10-37, V10-45, V10-61                                                             | `database-plugin`, `common`, `cloudflare-plugin`                                                                 |
+| **M119f** | design | optional peers in an npm workspace                             | V10-50, V10-58                                                                                                                | `telemetry-plugin` and every package with optional peers, packaging, docs                                        |
+| **M119g** | fix    | failures that reach the operator without their reason          | V10-62, V10-63, V10-34                                                                                                        | `auth-plugin`, `cache-plugin`, `idempotency-plugin`, `service-discovery-plugin`                                  |
+| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42                     | `cli`                                                                                                            |
+| **M119i** | docs   | documentation that does not match the code, or is missing      | V10-7, V10-8, V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46, V10-47, V10-48, V10-56, V10-57, V9-29 remainder | docs of `openapi`, `service-discovery`, `logger`, `react-router`, `worker-pool`; agent cards; `docs/`; CHANGELOG |
+
+**Sequence.** M119a first — it holds the only High: a NATS subscription with no `queue` replays the
+whole stream on every process start, so RPC requests are re-executed after every deploy. M119b next,
+because M115 showed one mail outage taking a whole product out of rotation. M119c is the largest
+user-facing letter and touches what `setu new` emits, so it lands before the M120–M123 generator
+work that edits the same templates. M119d, M119e and M119f are independent design letters. M119g,
+M119h and M119i can start at once. Several letters change a default or generated output, so the
+release that ships them is `0.11.0`.
+
+---
+
+### Milestone 119a: Message Delivery That Repeats, and Calls With No Bound
+
+**Package(s):** `packages/messaging-plugin`
+
+**Objective:** a consumer must not see a message again because the process restarted or the group is
+new, and every broker call must have a bound and a named failure.
+
+- **V10-13 (High)** — a NATS subscription with no `queue` creates a durable consumer named
+  `messaging-<uuid>` (a new uuid per process) with no `deliver_policy`, so the server default (all)
+  applies: every process start replays the whole stream and leaves another durable consumer behind.
+  Measured: an RPC responder's call count 6 → 14 → 24 across restarts, 16 durable consumers after
+  four boots. Same on `0.9.0`. Source: `nats-broker.ts` `jsm.consumers.add(…)` sets `durable_name`
+  and no deliver policy.
+- **V10-2** — a fresh Kafka consumer group delivers its first message twice (4 of 8 runs): M113a's
+  first-join seek rewinds partitions whose committed offset is still `-1`, including partitions
+  already delivered. New in `0.10.0` (`0.9.0` lost the message, V9-3). #493 (after the tag) fixed a
+  different first-join defect — a watermark read failing on a brand-new topic — and the plan must
+  re-measure V10-2 on top of it.
+- **V10-21** — Redis Streams `publish()` has no time bound and hangs against a paused Redis.
+- **V10-30** — the publish timeouts the M113a/M101a letters added reject with a bare `Error`; a
+  caller cannot test for them.
+- **V10-5** — an outbox relay paused at its `markSent` write ends the sweep `store-failure` although
+  the store answered late; the README says only a pause inside the publish does.
+
+**Decisions the plan takes:** the semantics of a queue-less NATS subscription (an ephemeral consumer
+with `deliver_policy: new` — the fan-out meaning every other broker gives a queue-less subscriber —
+or a durable whose name is stable per subscription), and the cleanup of consumers earlier versions
+leaked; how the Kafka seek tells "never committed" from "delivered but not yet committed"; one named
+publish-timeout error class shared by every arm; whether a late `markSent` answer is `store-failure`
+or the late-answer outcome M113j records.
+
+---
+
+### Milestone 119b: Readiness That Drains Replicas for a Shared or Fan-Out Problem
+
+**Package(s):** `packages/mail-plugin`, `packages/health-plugin`,
+`packages/realtime-backplane-plugin`, `packages/queue-plugin`, `packages/database-plugin`
+
+**Objective:** M113b decided that `degraded` means "take this replica out of rotation"; four
+indicators still do that for problems no replica can fix, or report a dependency up when it is not.
+
+- **V10-49** — `mail-plugin`'s indicator reports `down` on an SMTP outage, so `/ready` answers 503
+  on every replica at once. Health-plugin's own guidance says a shared problem that does not stop
+  request serving belongs in `data`. In M115 one Mailpit outage drained the bookings service, and
+  the product's own readiness chaining then took the whole product out of rotation. No per-indicator
+  readiness opt-out exists.
+- **V10-20** — a paused Redis takes the replica out of rotation through the realtime-backplane
+  indicator, whose PING has no bound; fan-out loss is not a reason to stop serving.
+- **V10-22** — the RabbitMQ queue indicator reports `reachable: true` while the broker is paused
+  (the X51-2 mechanism, closed for messaging in M95b, never applied to `queue-plugin`).
+- **V10-31** — M113o's migration readiness turns a paused database into `down` with ~4 s probes.
+
+**Decisions the plan takes:** whether `health-plugin` gains a per-indicator readiness policy (an
+indicator that counts for `/health` but not `/ready`) or each of these indicators moves the
+condition into `data` the way M113b's seven did; the bound for the backplane PING and the queue
+probe (the `createCachedProbe` defaults); what the migration check reports when the ledger read
+times out.
+
+---
+
+### Milestone 119c: Safe Framework, Broken Default
+
+**Package(s):** `packages/cli`, `packages/http-security-plugin`, `packages/session-plugin`,
+`packages/openapi-plugin`, `packages/telemetry-plugin`, `packages/service-discovery-plugin`
+
+**Objective:** the pattern the maintainer named on 2026-10-23. The framework code works as designed,
+but a default, a generated file or a documented example leaves a normal setup broken, and the fix is
+a setting nothing points to. Rated by what the user loses, not by how the code behaves.
+
+| Row        | Breaks                                                                                                                                                                  | The setting                            |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **V10-17** | a generated full-stack app behind a TLS proxy: every React Router action answers 400                                                                                    | `trustedProxies` — no CLI path sets it |
+| **V10-1**  | `csrf: {}` with the plugin's default `Referrer-Policy: no-referrer`: every same-origin HTML form POST is refused 403 in Chrome (a POST navigation sends `Origin: null`) | `referrerPolicy: 'same-origin'`        |
+| **V10-3**  | the README CORS + CSRF example cannot serve a cross-origin POST                                                                                                         | add `x-csrf-token` to `allowedHeaders` |
+| **V10-36** | the CLI installs `swagger-ui-dist@^5` (5.34.0) against SRI hashes for 5.33.3: blank docs page                                                                           | pin `5.33.3`                           |
+| **V10-6**  | `setu add telemetry` prints a registration that crashes at start (no OpenTelemetry peers installed)                                                                     | install the peers                      |
+| **V10-29** | a Redis-transport workspace's generated e2e test never exits with Redis down                                                                                            | test teardown                          |
+| **V10-44** | the `kubernetes` discovery arm outside a cluster reports `down` with no log line                                                                                        | pass `token`                           |
+| **V10-14** | a bearer request's session writes are dropped even on a `csrf.exclude`d path                                                                                            | `exemptBearer: false`                  |
+
+Plus V10-41 (the react-router README and `docs/deployment.md` do not say V10-17 happens) and two
+Part 18 generator gaps that are not rows: `setu add cache` installs no `ioredis`, and in a
+Redis-transport workspace `setu add cache|scheduler|realtime-backplane` inserts in-memory defaults.
+
+**Decisions the plan takes, per row:** change the default, make the generator or `setu add` write
+the setting, or make the failure name the setting where it shows. The framework-level questions are
+V10-1 (do the two defaults stay incompatible, or does the CSRF check accept `Origin: null` when
+`Sec-Fetch-Site: same-origin` says the navigation is same-origin — M113n's rule already reads
+`Sec-Fetch-Site`) and V10-36 (pin the CLI-installed range to the hashed version, or compute SRI for
+the installed one). V10-17 gets a CLI path: the full-stack template asks for, or emits a commented,
+`trustedProxies`. **Gate:** every row gets a test that reproduces the broken setup through the
+generated project or the documented example, not a unit test of the setting.
+
+---
+
+### Milestone 119d: Forwarded Client Identity
+
+**Package(s):** `packages/http-security-plugin`
+
+**Objective:** M113n made the socket peer the last link and the forwarded chain trustworthy behind
+`trustedProxies`; two inputs still change who the client is.
+
+- **V10-19** — behind an appending RFC 7239 proxy, a malformed `Forwarded` element sent by the
+  client erases the client's identity, so rate limiting and audit fall back. New in `0.10.0`. (M113n
+  fixed the direct-client case; this is the case behind a trusted proxy.)
+- **V10-28** — a forwarded IPv4-mapped address (`::ffff:a.b.c.d`) is not normalized, while the
+  socket peer is, so one client has two identities.
+
+**Decisions the plan takes:** how a malformed element in an appended chain is treated (skipped,
+treated as the boundary, or the request's forwarded identity discarded in favour of the trusted
+proxy's own address), and that every resolved address goes through one normalizer.
+
+---
+
+### Milestone 119e: A Data Contract That Is Not Portable or Not Checked at Startup
+
+**Package(s):** `packages/database-plugin`, `packages/common`, `packages/cloudflare-plugin`
+
+**Objective:** the same repository call must mean the same thing on every adapter, and a
+configuration that cannot work must fail at startup, not as a client error.
+
+- **V10-4** (+ the V9-26 remainder) — the Drizzle tenant bridge stamps the tenant **column** name,
+  while M113g's unknown-field refusal accepts **property** names, so a tenant column mapped under
+  another property answers every tenant-scoped write `400` "names a field this resource does not
+  have" — blaming the client — with no startup check (`database-tenant-data-store.ts:236`).
+- **V10-32** — the keyset cursor fingerprint carries no entity, so a cursor from one entity is
+  accepted by another (since `0.2.0`).
+- **V10-33** — an unknown payload field is a 400 on Drizzle, a masked 500 on D1 and silently stored
+  on MongoDB and DynamoDB.
+- **V10-37** — a malformed URL key reaches the database and answers 500 with an `error` log line
+  instead of 400.
+- **V10-45** — the Drizzle missing-key-column refusal is a plain `Error`, raised per request, naming
+  no `entities.<Entity>.primaryKey` remedy, so the app boots and reports ready.
+- **V10-61** — the Drizzle arm requires an app-owned `pg` Pool, and nothing says the pool needs an
+  `'error'` listener; an idle client dropped by Postgres throws an unhandled `'error'` event and the
+  process exits. X74 (b)'s pod crash-looped through a database stop. No README, agent card or guide
+  shows a node-postgres pool setup at all.
+
+**Decisions the plan takes:** whether the tenant bridge validates its column mapping at `onInit`
+against the Drizzle table; whether the cursor fingerprint binds the entity (a token change: old
+cursors stop working, which is the point); the portable answer for an unknown field (refuse
+everywhere, with the schema-less adapters refusing against observed columns or declaring the field
+set); and for V10-61 whether the framework attaches a reporting listener to a pool it is handed, or
+documents the pool setup with the listener in the Drizzle section and the agent card.
+
+---
+
+### Milestone 119f: Optional Peers in an npm Workspace
+
+**Package(s):** `packages/telemetry-plugin` and every package that loads an optional peer; packaging
+(`scripts/node-manifests.ts`); docs
+
+**Objective:** M113d made every optional peer a guarded `await import()` resolved from the
+**package's** location. In an npm workspace where npm hoists the plugin to the root, a peer
+installed in the member is invisible to it.
+
+- **V10-50 (Medium)** — `telemetry-plugin` (and an ioredis-using plugin) hoisted to the workspace
+  root does not find peers installed in the member, and the app crashes at startup. Reported and
+  reproduced by the M115 builders; not re-driven by the operator, so the plan's first step is to
+  reproduce it.
+- **V10-58** — no document says where optional peers go in an npm workspace.
+
+**Decisions the plan takes:** whether the fix is documentation (install peers at the root, or
+prevent hoisting) or a resolution change (resolve from the application's entry, or accept an
+injected module, which the inject-or-lazy arms already allow); and whether `setu add` in a workspace
+member installs peers where they will be found.
+
+---
+
+### Milestone 119g: Failures That Reach the Operator Without Their Reason
+
+**Package(s):** `packages/auth-plugin`, `packages/cache-plugin`, `packages/idempotency-plugin`,
+`packages/service-discovery-plugin`
+
+**Objective:** three failures an operator meets with no cause in the default log.
+
+- **V10-62** — an OIDC login route answering `503 provider-unavailable` logs its reason (in X74 (b),
+  a discovery document whose `issuer` differed from the configured one, because Keycloak derives the
+  issuer from the request host) only at `debug`.
+- **V10-63** — the cache and idempotency Redis store warnings log `error: ""` for an
+  `AggregateError` (multi-address `ECONNREFUSED`/`ETIMEDOUT`); its message is empty and the inner
+  errors are not read.
+- **V10-34** — a service-discovery outage with nothing cached answers a masked 500 instead of a
+  named 503.
+
+**Fix:** log the provider-unavailable reason once per state change at `warn`; describe an
+`AggregateError` by its inner errors through the shared error describer; brand the discovery outage
+with a 503 status hint (the M89b mechanism).
+
+---
+
+### Milestone 119h: CLI Output and Commands That Are Wrong
+
+**Package(s):** `packages/cli`
+
+**Objective:** local defects in generated output and command behaviour, each with an obvious fix.
+
+- **V10-18** — `setu generate … --module <m>` writes into a module that is not wired into
+  `src/modules/index.ts` and says nothing.
+- **V10-23** — Workers projects get no generated `test`/`test:e2e` (`0.9.0` had a stub test).
+- **V10-24 … V10-27** — `setu agents`: `--check` accepts a section whose card path does not exist;
+  run inside a symlinked member it writes into the link target; `--dry-run` promises writes the real
+  run refuses (raw `EACCES`, temp-file name in the message); a symlinked workspace's refusal gives
+  the ownership remedy.
+- **V10-35** — the generated module's 404 echoes the caller-supplied id.
+- **V10-9** — `setu new` accepts a Workers project name containing `.`, which wrangler refuses.
+- **V10-10** (+ the V9-13 remainder) — after a SIGKILL mid-`setu adopt`, the re-run records
+  `healthProbes`/`metricsEndpoint` false, because `adopt.ts:191` probes the original root.
+- **V10-11** — the generated injectable-service comment says `@Inject(...)` goes on a constructor
+  parameter; standard decorators reject that (TS1206).
+- **V10-42** — `setu add` and `setu generate migration` print `blob/develop` and `tree/develop`
+  links from a published CLI; links must name the CLI's own version tag.
+
+---
+
+### Milestone 119i: Documentation That Does Not Match the Code, or Is Missing
+
+**Package(s):** docs of `openapi-plugin`, `service-discovery-plugin`, `logger-plugin`,
+`react-router-plugin`, `worker-pool-plugin`; the agent cards; `docs/`; CHANGELOG
+
+- **Upgrade guide (`docs/upgrading.md`, `0.10.0` section)** — V10-15 (where `swagger-ui-dist` goes
+  on Deno: the workspace ROOT `deno.json`), V10-16 (the Workers full-stack repair never says to set
+  `allowJs`), V10-39 (responder terminals log nothing, beside "handled 4xx logs once at warn"),
+  V10-46 (`ReactRouterPluginOptions` became a union, so `interface X extends …` fails TS2312),
+  V10-47 (the SDK generator renames operations named `client`/`encodeURIComponent`), V10-48 (a
+  plugin command named `agents` becomes unreachable).
+- **Wrong claims** — V10-7 (links to `upgrading.md#unreleased` and "see Unreleased" in the published
+  `[0.10.0]` section), V10-8 (`docs/deployment.md` says generated probes are always `tcpSocket`),
+  V10-12 (service-discovery README passes `retry: { maxAttempts }` where `RetryPolicy` is
+  `{ limit, delay, backoff }`; the README is not in the fence gate — add it), V10-38 (the documented
+  module-scoped service token is `<module>-<name>-service`; the generator writes
+  `<module>.<name>-service`), V10-43 (33 agent cards say `setu add` "installs it"; it edits
+  `package.json` and prints `Next: npm install`), V10-56 (the React Router version differs between
+  the plugin's README and its agent card).
+- **Missing** — V10-40 (the request logger records the raw path, so a bound value that is also a
+  path segment reaches the log despite the M113f scrub), V10-57 (Zod dates become
+  `x-setu-unrepresentable` with no warning at generation time), and the V9-29 remainder (the
+  worker-pool README understates the thread overshoot: cold Node bursts reach 6 threads at bound 3,
+  once for ~0.7 s).
+
+**Recurrence:** V10-12 is the second README outside the fence gate found by a smoke run (M70k, M86);
+the letter adds every package README with a compilable fence to the gate, and a check that
+`docs/upgrading.md` and the CHANGELOG link only headings that exist.
+
+**Deliverables (M119 as a whole):**
+
+- [ ] M119a–M119i, each closing its rows on a published re-run
+- [ ] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
+- [ ] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
+
+---
+
+## Milestone 120: A Production Build for Generated Services
+
+**Package(s):** `packages/cli` (templates, Dockerfile, scripts, `.gitignore`), docs
+
+**Source:** M115 (Relaymark), the maintainer's review of its scaffold, and the build-step review
+`smoke/v0.10.0/BUILD-STEP-REVIEW.md`, measured on published `0.10.0`. Closes **V10-54**, **V10-53**
+and **V10-55**.
+
+**The problem.** Every generated Node service runs TypeScript in production through `tsx`. The
+workspace Dockerfile is one stage, installs dev dependencies (because `tsx` is one) and runs
+`sh -c "npx tsx main.ts"`. A standalone project gets no Dockerfile at all. No Node project gets a
+`dev` (watch) or `debug` script. The full-stack member's Dockerfile does not build the React Router
+SSR bundle (V10-53), and its `.gitignore` does not ignore `build/` (V10-55, the V9-11 class).
+
+**Measured (`rest` and `class-based` scaffolds, five starts each, medians):**
+
+| Mode                                         | Startup    | RSS     | Image (`node:24-alpine`) |
+| -------------------------------------------- | ---------- | ------- | ------------------------ |
+| `npx tsx main.ts` (what the Dockerfile runs) | 312–331 ms | ~267 MB | 417 MB                   |
+| `node --import tsx main.ts`                  | 190 ms     | ~107 MB | —                        |
+| `node dist/main.js` (compiled)               | 108–129 ms | ~91 MB  | 284 MB                   |
+
+The `tsx` image never serves on a read-only root without a writable `/tmp`
+(`ENOENT: mkdir '/tmp/tsx-1000'`) and the process stays alive with no listener. The generated
+Kubernetes manifest mounts an `emptyDir` at `/tmp` for that reason; any other read-only host fails
+silently. A real compile of both scaffolds needs no source edit: a `tsconfig.build.json` with
+`module: nodenext`, `rewriteRelativeImportExtensions` and `sourceMap` compiles with zero errors,
+decorators included, and the output serves.
+
+**Why build.** Startup, memory, image size, production dependencies only and a type-check gate in
+the image build. Not comments or minification: server code never reaches a user, and minifying a
+Node service gains little and worsens stack traces.
+
+**Decisions the plan takes:**
+
+1. **Workspace libraries.** A `generate library` package exports its `.ts` source, so a per-service
+   `tsc` build emits imports that plain `node` cannot load. Either (a) `tsc -b` with project
+   references and conditional exports on libraries, the framework's own layout, or (b) bundle each
+   service with esbuild (`--platform=node --packages=external` except workspace libraries,
+   `--sourcemap`), keeping optional peers external so M113d's guarded `await import()` still works.
+   The review recommends evaluating (b) first; `tsc --noEmit` stays the type-check gate.
+2. **Scripts.** `build`, which runs `setu check` (M118) before compiling, so code that compiles but
+   is never registered fails the build — only errors fail it, warnings print; production
+   `start: node --enable-source-maps dist/main.js`; `dev: tsx watch main.ts`;
+   `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether `start` keeps its
+   development meaning (least surprise) with a separate `start:prod`, or follows NestJS (`start`
+   compiled, `start:dev` watch) — an upgrade-guide entry either way.
+3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
+   `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
+   `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
+   projects get it too. Full-stack builds the server entry beside `react-router build`, and its
+   production `start` must not rebuild the bundle on every start, as the standalone `start` does
+   today.
+4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
+   out of the build, as M101f keeps it out of images).
+5. **Bun and Deno** run TypeScript natively; emit `bun build` / `deno compile` or document them.
+6. **Interim:** if this milestone is not soon, replace `sh -c "npx tsx main.ts"` with
+   `node --import tsx main.ts` — about 160 MB and 140 ms per container with no build.
+
+**Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
+generated projects; this milestone wires it into `build`.
+
+**Gate:** `scaffold-runs-e2e` builds, runs the COMPILED output, and runs the built image read-only
+with no network, for every template × runtime, including a workspace with a library (the M63 and
+M95a lesson: generated output is proven only by running it).
+
+**Deliverables:**
+
+- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member; `build` runs
+      `setu check` first, and the e2e proves a broken seam fails the build
+- [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
+      it
+- [ ] `.gitignore` covers `dist/` and `build/`
+- [ ] The workspace-library build decided and implemented
+- [ ] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `120`
+
+---
+
+## Milestone 121: Full-Stack Members With a Broker, and Messaging on a Full-Stack Project
+
+**Package(s):** `packages/cli`; `packages/starters/full-stack-starter` only if the plan finds an
+option the starter does not already accept
+
+**Source:** M115 (Relaymark) and the maintainer's discussion recorded in `smoke/M115-FINDINGS.md`.
+Closes **V10-51** and **V10-52**. **Maintainer decision (2026-10-24): support it.**
+
+**The problem.** The brief's exact shape — services on a broker plus a React portal — cannot be
+generated. Three entry points share one cause:
+
+1. `setu generate app <name> --template full-stack` is refused in a broker-transport workspace.
+2. `setu new --template full-stack --broker <x>` is refused.
+3. `setu add messaging` on a full-stack project adds the package and prints "configure its messaging
+   arm" — no option written, no broker client installed, and its doc link points at `develop`.
+
+The CLI applies a transport by rewriting the arguments of inline `MessagingPlugin(...)` and
+`QueuePlugin(...)` calls (`withBrokerArgs`, M72). A full-stack member has no inline plugin list —
+its plugins are assembled inside `createFullStackAppFromConfig` in the published starter — and a
+second `MessagingPlugin` is refused by the kernel (duplicate capability provider). So M85 kept the
+refusal for brokers while letting gRPC through, because gRPC is an appended plugin. It is the CLI's
+mechanism, not a framework limit: `MicroserviceStarterOptions` already accepts
+`messaging?: MessagingPluginOptions` and `queue?: QueuePluginOptions`, and the full-stack starter
+inherits both.
+
+M115's first builder hit entry point 1, fell back to `--template rest` plus `setu add react-router`
+(V10-52: it adds the dependency only, and scaffolds no React Router app, routes, Vite config or
+build script), and spent about an hour hand-building what the template generates.
+
+**Design.** Route the transport into the starter's options object, the way M61 routed `di` and M67
+routed `SERVICE_ENDPOINTS` (`AppFactoryRenderContext`). The same rendering serves all three entry
+points. `setu add react-router` either scaffolds the framework-mode app or refuses with the command
+that does (`setu new --template full-stack`, or a new `setu generate app`), rather than half-adding
+it.
+
+**The trap.** TypeScript does not excess-property-check an object literal returned from a callback
+(M61), so a misspelled `messaging` key in the generated
+`createFullStackAppFromConfig((config) => ({…}))` type-checks and is ignored. The gate needs the M61
+typed-position probe, and an e2e that boots a full-stack member on a real broker and proves a
+message crosses it.
+
+**Deliverables:**
+
+- [ ] The three entry points generate a full-stack project whose starter receives the transport
+- [ ] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
+      client
+- [ ] `setu add react-router` scaffolds or refuses with the right command
+- [ ] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
+- [ ] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `121`
+
+---
+
+## Milestone 122: Workspace Operations — Build, Test and Deploy From the Root
+
+**Package(s):** `packages/cli`
+
+**Source:** M115 (Relaymark). Closes **V10-60**.
+
+**The problem.** A generated workspace root has one script, `dev` → `scripts/dev.mjs` (starts
+members in dependency order, waits on each prerequisite's `/ready`, shuts down on Ctrl+C), plus
+`docker/compose.yaml`. There is no root test task across members, no build-all-images step, no
+deploy script and no Kubernetes apply or rollout helper; `dev` runs each member's `start`, so
+nothing watches files. The CLI wrote about 70% of Relaymark's deployment files (701 of 996 lines);
+the builders hand-wrote the rest, including `scripts/deploy.sh` (build, kind-load, apply, set image,
+rollout), `scripts/bootstrap-secrets.mjs` (Secret wiring for 12 `secretKeyRef`s) and a root test
+task.
+
+**Decisions the plan takes:** which root tasks are generated (`test` across members, `build` of
+every image, `deploy` for the generated manifests) and how they stay correct as members are added (a
+managed script reading `setu.workspace.json`, the `dev` runner's pattern); whether Secret wiring is
+generated from each member's declared environment (the `envVariables` manifest field M67 added);
+whether `dev` watches (it should once M120 adds a `dev` script per member). This milestone depends
+on M120 for the per-member build it calls.
+
+**Deliverables:**
+
+- [ ] Generated root `test`, `build` and `deploy` tasks, kept in step with `generate app`
+- [ ] Secret manifests generated from member environment declarations, or a documented decision not
+      to
+- [ ] Workspace e2e running the root tasks against a real kind cluster
+- [ ] CLI README, `docs/deployment.md`, CHANGELOG
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `122`
+
+---
+
+## Milestone 123: A Styling Foundation for the Full-Stack Template
+
+**Package(s):** `packages/cli` (the full-stack template)
+
+**Source:** M115 (Relaymark). Closes **V10-59**.
+
+**The problem.** The full-stack template's whole stylesheet is 13 lines (`color-scheme: light dark`,
+a system font, margins) and the layouts use plain class names. No CSS tooling, design tokens or
+theme switch, so every real product builds its design system from scratch: Relaymark's builders
+added Tailwind 4, shadcn/ui (through the shadcn CLI), tokens and a per-user theme by hand.
+
+**Decisions the plan takes:** whether the template adopts Tailwind (the default most React Router
+starters and shadcn/ui assume) or stays tool-neutral with design tokens in CSS custom properties;
+whether a component library is scaffolded or left to `npx shadcn`, with the template's paths and
+aliases ready for it; light/dark and a persisted user preference without a flash on SSR; and keeping
+the M37c lesson — the landing page must render visible content, asserted by the e2e. Whatever ships
+must survive `deno fmt`/Prettier and the scaffold e2e on every runtime the template supports, and
+the built CSS must reach the M120 image.
+
+**Deliverables:**
+
+- [ ] The chosen styling foundation in the full-stack template, with a theme switch
+- [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
+- [ ] Template README and `docs/` entry; CHANGELOG
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
 
 ---
 
@@ -15203,7 +15824,7 @@ patch by construction and gains nothing new here.
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                                                            |
 | 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                                                           |
 | 111f      | ✅     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes ([#460](https://github.com/setu-ts/setu-ts/pull/460))                                                                                                                                                       |
-| 113       | ⬜     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o                                                                                                                                                                                                        |
+| 113       | ✅     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o; closed on published `0.10.0` (V9-13/26/29 remainders carried into M119)                                                                                                                               |
 | 113a      | ✅     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
@@ -15220,6 +15841,21 @@ patch by construction and gains nothing new here.
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
-| 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
+| 115       | ✅     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
+| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
+| 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
+| 119a      | ⬜     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
+| 119b      | ⬜     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
+| 119c      | ⬜     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |
+| 119d      | ⬜     | http-security-plugin — forwarded client identity                                                                                                                                                                                                                                          |
+| 119e      | ⬜     | database + common + cloudflare — a data contract that is not portable or not checked at startup                                                                                                                                                                                           |
+| 119f      | ⬜     | telemetry + optional-peer packages + packaging — optional peers in an npm workspace                                                                                                                                                                                                       |
+| 119g      | ⬜     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
+| 119h      | ⬜     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
+| 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 120       | ⬜     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
+| 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
+| 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
+| 123       | ⬜     | cli — a styling foundation for the full-stack template                                                                                                                                                                                                                                    |

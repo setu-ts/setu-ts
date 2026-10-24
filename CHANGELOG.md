@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **BREAKING — Zod 3 support removed (0.11.0, `@setu-ts/openapi-plugin`,
+- **BREAKING — Zod 3 support removed (#496, 0.11.0, `@setu-ts/openapi-plugin`,
   `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`).** The supported range is now
   `zod >=4.6.6 <5`; validation still duck-types `safeParse` but is tested with Zod 4 only. OpenAPI
   schemas without the public `toJSONSchema` method, including Zod 3 schemas, now degrade to `{}`
@@ -17,7 +17,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
-- **Clear two High dependency advisories.** Remove Zod 3 from the workspace and require Zod
+- **Clear two High dependency advisories (#496).** Remove Zod 3 from the workspace and require Zod
   `>=4.6.6 <5` for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5).
   Override `@azure/msal-node` to `^7.1.0` for
   [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5), because
