@@ -32,6 +32,43 @@ dependencies and verify that the lockfile resolves MSAL Node 7.1.0 or newer. The
 [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) and
 [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5).
 
+### NATS subscriptions without a queue are shared, and every publish is bounded (M119a, 0.11.0, `@setu-ts/messaging-plugin`)
+
+Affects every application on the NATS arm that subscribes without a `queue`, and every application
+on the Kafka, Pub/Sub, RabbitMQ, Redis Streams or NATS arm that publishes.
+
+- **Queue-less NATS subscriptions no longer fan out.** Before this release a `subscribe()` with no
+  `queue` gave every process its own durable consumer (`messaging-<uuid>`), so every replica
+  received every message, and every start replayed the whole stream. The subscription now uses one
+  durable JetStream consumer per topic — `<defaultQueue>.<topic>` (default prefix
+  `messaging-consumers`) — shared by every replica: each message is delivered to ONE replica, and a
+  restart resumes from the consumer's acknowledgement floor. A group created for the first time
+  starts at messages published after it, so messages published before any replica of a new
+  queue-less group subscribed are not delivered — the same rule as a new Kafka group. An explicit
+  `queue` is unchanged. `respond()` with no queue follows the same path. If you relied on every
+  replica receiving every message, pass a `queue` that is stable and unique per replica (for example
+  the pod name). Do not build the queue from a random per-start value: it would leave a durable
+  consumer behind on every start.
+- **Catch `PublishTimeoutError`.** The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS publish
+  paths reject an expired publish with the exported `PublishTimeoutError` (readonly `topic: string`
+  and `timeoutMs: number`). A timeout does not cancel the transport: the message may still be
+  delivered, so retries need de-duplication. The Kafka, Pub/Sub and RabbitMQ message texts are
+  unchanged from before.
+- **Redis Streams publishes are bounded at 15 s by default.** Before this release a publish held
+  indefinitely against a paused Redis. Set `publishTimeoutMs: 0` to keep the previous unbounded
+  publish wait; consumer reads are unaffected.
+- **The NATS publish bound moved from the client's fixed 5 s to `publishTimeoutMs` (default 15 s).**
+  Code that relied on the 5-second refusal now sees 15 s by default; set `publishTimeoutMs` to the
+  bound you need.
+- **The NATS `request()` reply inbox is ephemeral.** It is deleted on shutdown and re-created if the
+  server removes it, so it no longer leaves a durable consumer behind on every start.
+- **Consumers earlier releases leaked are reaped.** On `connect()` the broker sets a 5-minute
+  `inactive_threshold` on durable consumers named exactly `messaging-<uuid>` or
+  `rr_2einbox_2e<uuid>` whose recorded `setu.queue` metadata is absent or matches, so the server
+  removes them once nothing reads from them; a replica still running an older version keeps its
+  consumer while it reads. A user queue literally named `messaging-<uuid>` is a reserved shape for
+  this reason: such a consumer is reaped only after 5 min with no client attached.
+
 ## 0.10.0
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)

@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **`PublishTimeoutError` (M119a, 0.11.0, `@setu-ts/messaging-plugin`).** A new exported class for a
+  publish that outlived its acknowledgement bound and may still be delivered, so a caller can
+  distinguish it from a broker refusal without parsing the message: `name` is
+  `'PublishTimeoutError'`, and the error carries the published topic and the configured bound as
+  readonly `topic: string` and `timeoutMs: number`. The Kafka, Pub/Sub, RabbitMQ, Redis Streams and
+  NATS publish paths throw it when `publishTimeoutMs` expires; its message names the broker, topic
+  and bound and ends "…; it may still be delivered", with the Kafka, Pub/Sub and RabbitMQ texts
+  unchanged from before, so a caller matching on the text keeps working.
+
+- **`publishTimeoutMs` on the Redis Streams and NATS arms (M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** The option the Kafka, Pub/Sub and RabbitMQ arms already accept is
+  now accepted by `RedisStreamsMessagingOptions` (and `RedisStreamsOptions`) and
+  `NatsMessagingOptions` (and `NatsOptions`): default 15000 ms, `0` unbounded, a value outside
+  0–2147483647 (including `NaN`) refused with `RangeError` at `MessagingPlugin(...)`. On Redis
+  Streams the bound covers the publish's `XADD` only — consumer reads are unaffected. On NATS it is
+  passed to the client as its own publish `timeout` and held by the framework's deadline as well.
+
 ### Changed
 
 - **BREAKING — Zod 3 support removed (#496, 0.11.0, `@setu-ts/openapi-plugin`,
@@ -14,6 +33,30 @@ All notable changes to this project are documented here. The format follows
   schemas without the public `toJSONSchema` method, including Zod 3 schemas, now degrade to `{}`
   with the existing `not a recognized zod schema` unrepresentable diagnostic. Upgrade Zod to at
   least 4.6.6 and migrate any Zod 3 API usage before regenerating OpenAPI documents and clients.
+
+- **A queue-less NATS subscription is shared (V10-13, M119a, 0.11.0, `@setu-ts/messaging-plugin`).**
+  A `subscribe()` with no `queue` — `respond()` with no queue included — no longer gives every
+  replica every message on a per-process consumer. It now uses ONE durable JetStream consumer per
+  topic, named `<defaultQueue>.<topic>` (default prefix `messaging-consumers`) and shared by every
+  replica: each message is delivered to one replica, and a restart re-attaches to the existing
+  consumer and resumes from its acknowledgement floor. A group created for the first time starts at
+  messages published after it, as a new Kafka group does. To keep every replica receiving every
+  message, pass a `queue` that is stable and unique per replica (for example the pod name); a queue
+  made from a random per-start value would leave a durable consumer behind on every start. An
+  explicit `queue` is unchanged.
+
+- **Redis Streams publishes gain a 15 s default bound (V10-21, M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** The arm joins the bounded ones: a publish now rejects at
+  `publishTimeoutMs` (default 15000 ms, `0` unbounded) with `PublishTimeoutError` instead of holding
+  indefinitely against a paused Redis. Set `publishTimeoutMs: 0` to restore the previous unbounded
+  publish wait; consumer reads are unaffected.
+
+- **The NATS publish bound moves from the client's fixed 5 s to `publishTimeoutMs` (M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** Before this release an unresponsive NATS server rejected a publish
+  after the client's own 5 s, with a bare `Error` the caller could not test for. The bound is now
+  `publishTimeoutMs` (default 15000 ms, `0` unbounded, refused out of range), passed to the client
+  as its own publish `timeout` and held by the framework's deadline as well, and an expired publish
+  rejects with `PublishTimeoutError`.
 
 ### Security
 
@@ -34,6 +77,48 @@ All notable changes to this project are documented here. The format follows
   group's first join were not delivered. The read now retries errors kafkajs marks `retriable`,
   within the `KafkaOptions.retry` budget, and stops on `disconnect()`; a non-retriable error or an
   exhausted budget behaves as before.
+
+- **A queue-less NATS subscription no longer replays the stream on every start, and leaves no
+  consumer behind (V10-13, M119a, 0.11.0, `@setu-ts/messaging-plugin`).** Before this release a
+  `subscribe()` with no `queue` created a durable consumer named `messaging-<uuid>` per process with
+  the server's `all` delivery policy, so every start replayed the whole stream and left another
+  durable consumer behind — measured at an RPC responder's call count 6 → 14 → 24 across restarts,
+  16 durable consumers after four boots. The subscription now shares one durable consumer per topic
+  with the other replicas (the Changed entry above), and the per-instance `request()` reply inbox is
+  an ephemeral consumer that is deleted on shutdown and re-created if the server removes it. On
+  `connect()` the broker also sets a 5-minute `inactive_threshold` on the consumers earlier releases
+  leaked — durable consumers named exactly `messaging-<uuid>` or `rr_2einbox_2e<uuid>` whose
+  recorded `setu.queue` metadata is absent or matches — so the server removes them once nothing
+  reads from them; a replica still running an older version keeps its consumer while it reads.
+
+- **A fresh Kafka consumer group no longer delivers its first message twice (V10-2, M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** The first-join seek rewound every assigned partition whose
+  committed offset was still `-1`, including one already delivered, so a message published after
+  `subscribe()` resolved but before the first join's seek arrived twice (4 of 8 runs in the
+  `v0.10.0` run). Each delivery now records the first offset it saw for its partition, and the first
+  join skips a partition already delivered from its start point — seeking only one that was never
+  delivered, or whose first delivery was past the minimum start offset — so the delivery is not
+  repeated when the consumer happened to start at the right offset.
+
+- **A Redis Streams `publish()` no longer hangs against a paused Redis (V10-21, M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** The publish had no time bound and held the call indefinitely —
+  measured 14–21 s against a paused Redis — while every other arm failed at its bound. The publish's
+  `XADD` is now wrapped in the publish deadline and rejects with `PublishTimeoutError` at
+  `publishTimeoutMs` (see Added and Changed above); consumer reads keep their own bounds and are
+  unaffected.
+
+- **Publish timeouts reject with `PublishTimeoutError` instead of a bare `Error` (V10-30, M119a,
+  0.11.0, `@setu-ts/messaging-plugin`).** The Kafka, Pub/Sub and RabbitMQ arms' publish timeouts
+  rejected with a bare `Error` whose text named the bound but which a caller could not test for.
+  They now reject with the exported `PublishTimeoutError` (see Added); the message texts for those
+  three arms are unchanged, so a caller matching on the text keeps working.
+
+- **The README's outbox `store-write-failing` claim is corrected (V10-5, M119a, 0.11.0,
+  `@setu-ts/messaging-plugin`).** The README said only a relay paused inside its publish reports the
+  `store-write-failing` health reason; a pause at a settlement write (`markSent` or `markFailure`)
+  that outlives `storeTimeoutMs` does too, and the store's late answer is still recorded. The
+  behaviour is unchanged; the health row now reads "this instance's last sweep ended on a store call
+  that was rejected or did not answer within `storeTimeoutMs`".
 
 ## [0.10.0] — 2026-10-22
 
