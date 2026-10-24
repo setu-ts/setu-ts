@@ -15234,8 +15234,9 @@ Fetch Metadata rule Go and Hono use; the `no-referrer` default stays). V10-36 â€
 `swagger-ui-dist` at exactly `5.33.3`, the release the SRI hashes match. V10-17 â€” the full-stack
 template reads `TRUSTED_PROXIES` (empty leaves IP security off). V10-29 was measured to be the
 `node --test` runner, not a leaked client; generated Node scripts pass `--test-force-exit`. V10-14
-is documentation only. **Gate:** every row gets a test that reproduces the broken setup through the
-generated project or the documented example, not a unit test of the setting.
+is documentation only. **Gate:** every row with a code or generated-output change gets a test that
+reproduces the broken setup through the generated project or the documented example, not a unit test
+of the setting; the documentation-only row (V10-14) is covered by `check:docs`.
 
 ---
 
