@@ -1076,13 +1076,13 @@ app.router.put('/users/:id', {
 });
 ```
 
-`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
-3 and 4 alike, inferred from the schema you pass, so the type follows the schema instead of being
-restated (or cast) in the handler. `value(ctx)` returns the stored value only when that validator
-ran on the request; it throws a `TypeError` naming the target otherwise — when the validator is not
-in the route's chain, or a later validator for the same target overwrote it. Validated values are
-still stored in `ctx.state` under `validatedStateKey(target)` — the wire format is unchanged, and
-the `@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it — so the old
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — inferred
+from the schema you pass, so the type follows the schema instead of being restated (or cast) in the
+handler. `value(ctx)` returns the stored value only when that validator ran on the request; it
+throws a `TypeError` naming the target otherwise — when the validator is not in the route's chain,
+or a later validator for the same target overwrote it. Validated values are still stored in
+`ctx.state` under `validatedStateKey(target)` — the wire format is unchanged, and the
+`@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it — so the old
 `ctx.state.get(validatedStateKey('body'))` read still works.
 
 ### Using the Service's middleware() Method

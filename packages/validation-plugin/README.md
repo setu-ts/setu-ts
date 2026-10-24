@@ -56,12 +56,12 @@ app.router.post('/users', {
 });
 ```
 
-`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
-3 and 4 alike, and it is inferred from the schema you pass, so the type follows the schema instead
-of being restated in the handler. `value(ctx)` returns the stored value only when that validator ran
-on the request; it throws a `TypeError` naming the target otherwise — when the validator is not in
-the route's chain, or a later validator for the same target overwrote it — a programming error that
-`errorHandler` masks to a 500. The old read still works and is unchanged:
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — and it
+is inferred from the schema you pass, so the type follows the schema instead of being restated in
+the handler. `value(ctx)` returns the stored value only when that validator ran on the request; it
+throws a `TypeError` naming the target otherwise — when the validator is not in the route's chain,
+or a later validator for the same target overwrote it — a programming error that `errorHandler`
+masks to a 500. The old read still works and is unchanged:
 `ctx.state.get(validatedStateKey('body'))` keeps carrying the parsed value, and the
 `@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it.
 
