@@ -25,8 +25,9 @@ const app = createApplication({
     HealthPlugin({
       endpoints: { health: '/health', live: '/live', ready: '/ready' },
       indicators: [createHttpIndicator('external-api', { url: 'https://api.example.com/health' })],
-      // M119b: force `mail` into readiness and `database` out of it.
-      readiness: { include: ['mail'], exclude: ['database'] },
+      // M119b: a shared third-party API outage reports on /health but does not
+      // take every replica out of /ready.
+      readiness: { exclude: ['external-api'] },
     }),
   ],
 });
@@ -155,15 +156,19 @@ Since **M119b** every indicator carries a readiness membership — whether it co
 that the contributing plugin declares and the application overrides by exact name. Absent, an
 indicator counts toward readiness (the previous behaviour); a plugin registers one outside readiness
 with `ctx.health.register(name, fn, { readiness: false })`. The application overrides it with the
-`readiness` option, shown in the [Usage](#usage) example:
-
-`HealthPlugin({ readiness: { include: ['mail'], exclude: ['database'] } })`
+`readiness` option, shown in the [Usage](#usage) example. Each name must match a registered
+indicator — for example, with `MailPlugin` and `DatabasePlugin` registered,
+`HealthPlugin({ readiness: { include: ['mail'], exclude: ['database'] } })` brings mail back into
+readiness and takes the database out.
 
 - `include` forces a named indicator into readiness; `exclude` forces it out. Each overrides the
-  membership the contributing plugin declared.
-- `HealthPlugin(...)` refuses an invalid list with `TypeError`: a non-array, an empty or non-string
-  name, the name `self`, or a name in both lists — the message names the option and never echoes a
-  name. Names that match no registered indicator produce one warning at startup giving only a count.
+  membership the contributing plugin declared, including an indicator a plugin registers directly
+  through `IHealthService.registerIndicator`.
+- `HealthPlugin(...)` (and a directly constructed `HealthService`) refuses an invalid option with
+  `TypeError`: a `readiness` that is not a plain object, a list that is not an array, an empty or
+  non-string name, the name `self`, or a name in both lists — the message names the option and never
+  echoes a name. Names that match no registered indicator produce one warning at startup giving only
+  a count.
 - `/ready` runs only the readiness members (never `self`). An indicator outside readiness still runs
   on `/health`, where a `down` keeps it 503 and alerts firing; it is absent from the `/ready`
   report. `/live` is unchanged.

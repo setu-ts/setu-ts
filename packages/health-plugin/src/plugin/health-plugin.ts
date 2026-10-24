@@ -28,6 +28,7 @@ import {
 } from '../diagnostics/health-observation-collector.ts';
 import {
   attachHealthObservation,
+  compileReadiness,
   HealthService,
   isIndicatorRegistered,
   resolveIndicatorTimeout,
@@ -62,36 +63,6 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
       });
     },
   };
-}
-
-/** Validate and copy operator membership once, without echoing topology. */
-function compileReadiness(options: HealthPluginOptions['readiness']): {
-  include: ReadonlySet<string>;
-  exclude: ReadonlySet<string>;
-} {
-  if (options !== undefined && (typeof options !== 'object' || options === null)) {
-    throw new TypeError('HealthPlugin readiness must be an object.');
-  }
-  const readNames = (raw: unknown, option: string): ReadonlySet<string> => {
-    if (raw === undefined) return new Set();
-    if (
-      !Array.isArray(raw) ||
-      [...raw].some(
-        (name: unknown) => typeof name !== 'string' || name.trim() === '' || name === 'self',
-      )
-    ) {
-      throw new TypeError(
-        `HealthPlugin readiness.${option} must be an array of valid non-empty indicator names.`,
-      );
-    }
-    return new Set(raw as string[]);
-  };
-  const include = readNames(options?.include, 'include');
-  const exclude = readNames(options?.exclude, 'exclude');
-  if ([...include].some((name) => exclude.has(name))) {
-    throw new TypeError('HealthPlugin readiness.include and readiness.exclude must not overlap.');
-  }
-  return { include, exclude };
 }
 
 /**
@@ -180,16 +151,21 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       const runtime = ctx.runtime;
 
       // Create the health service
-      const service = new HealthService(runtime, { indicatorTimeoutMs });
+      // The override is applied INSIDE the service, so a plugin that calls
+      // `IHealthService.registerIndicator` directly is covered too.
+      const service = new HealthService(runtime, {
+        indicatorTimeoutMs,
+        readiness: { include: [...readiness.include], exclude: [...readiness.exclude] },
+      });
 
-      // Resolve membership once for every source. Operator choices override
-      // contributor defaults; request-time checks only read the stored flag.
+      // Every source passes its declared membership; the service applies the
+      // operator's include/exclude once, at registration.
       const registerIndicator = (indicator: IHealthIndicator): void => {
-        service.registerIndicator(indicator.name, indicator.check.bind(indicator), {
-          readiness:
-            readiness.include.has(indicator.name) ||
-            (!readiness.exclude.has(indicator.name) && (indicator.readiness ?? true)),
-        });
+        service.registerIndicator(
+          indicator.name,
+          indicator.check.bind(indicator),
+          indicator.readiness === undefined ? undefined : { readiness: indicator.readiness },
+        );
       };
 
       // Register the service

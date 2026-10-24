@@ -1,14 +1,23 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { HealthReport, IHealthIndicator, ILogger, IPlugin } from '@setu-ts/common';
+import type {
+  HealthReport,
+  IHealthIndicator,
+  IHealthService,
+  ILogger,
+  IPlugin,
+} from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { HealthPlugin } from '../../src/index.ts';
+import { HealthPlugin, HealthService } from '../../src/index.ts';
 import type { HealthPluginOptions } from '../../src/index.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('HealthPlugin readiness options', () => {
   it.each([
     null,
+    [],
+    ['canary-topology'],
     'canary-topology',
     42,
     { include: 'canary-topology' },
@@ -108,5 +117,47 @@ describe('HealthPlugin readiness options', () => {
     } finally {
       await app.stop();
     }
+  });
+
+  it('applies exclude to an indicator registered directly through IHealthService', async () => {
+    const direct: IPlugin = {
+      name: 'direct-registrant',
+      version: '1.0.0',
+      dependencies: ['health'],
+      register(ctx): void {
+        ctx.lifecycle.onInit(() => {
+          ctx.services
+            .get<IHealthService>(CAPABILITIES.HEALTH)
+            .registerIndicator('dependency', () => Promise.resolve({ status: 'down' }));
+        });
+      },
+    };
+    const app = createApplication({
+      plugins: [RuntimePlugin(), HealthPlugin({ readiness: { exclude: ['dependency'] } }), direct],
+    });
+    await app.start();
+    try {
+      const ready = await app.inject({ method: 'GET', url: '/ready' });
+      const health = await app.inject({ method: 'GET', url: '/health' });
+      expect(ready.statusCode).toBe(200);
+      expect(health.statusCode).toBe(503);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('honours the same override when HealthService is constructed directly', async () => {
+    const service = new HealthService(createFakeRuntime(), {
+      readiness: { include: ['mail'], exclude: ['database'] },
+    });
+    service.registerIndicator('mail', () => Promise.resolve({ status: 'down' }), {
+      readiness: false,
+    });
+    service.registerIndicator('database', () => Promise.resolve({ status: 'down' }));
+    const report: HealthReport = await service.checkReady();
+    expect(Object.keys(report.checks)).toEqual(['mail']);
+    expect(() => new HealthService(createFakeRuntime(), { readiness: [] as never })).toThrow(
+      TypeError,
+    );
   });
 });

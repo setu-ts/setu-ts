@@ -14,7 +14,52 @@ import type {
   IRuntimeServices,
 } from '@setu-ts/common';
 import type { HealthObservationCollector } from '../diagnostics/health-observation-collector.ts';
+import type { HealthPluginOptions } from '../interfaces/index.ts';
 import { normalizeIndicatorResult } from './health-status.ts';
+
+/**
+ * Validates and copies the operator's readiness overrides once, without
+ * echoing indicator names (they are deployment topology). Shared by
+ * `HealthPlugin(...)`, which refuses a bad value at construction, and the
+ * barrel-exported `HealthService` constructor, so both read one rule.
+ *
+ * @param options - The `readiness` option as supplied
+ * @returns The include and exclude name sets
+ * @throws {TypeError} When the option is not a plain object, a list is not an
+ *   array of non-empty names, a list names `self`, or the lists overlap
+ * @internal
+ */
+export function compileReadiness(options: HealthPluginOptions['readiness']): {
+  include: ReadonlySet<string>;
+  exclude: ReadonlySet<string>;
+} {
+  if (
+    options !== undefined &&
+    (typeof options !== 'object' || options === null || Array.isArray(options))
+  ) {
+    throw new TypeError('Health readiness must be an object with include/exclude lists.');
+  }
+  const readNames = (raw: unknown, option: string): ReadonlySet<string> => {
+    if (raw === undefined) return new Set();
+    if (
+      !Array.isArray(raw) ||
+      [...raw].some(
+        (name: unknown) => typeof name !== 'string' || name.trim() === '' || name === 'self',
+      )
+    ) {
+      throw new TypeError(
+        `Health readiness.${option} must be an array of valid non-empty indicator names.`,
+      );
+    }
+    return new Set(raw as string[]);
+  };
+  const include = readNames(options?.include, 'include');
+  const exclude = readNames(options?.exclude, 'exclude');
+  if ([...include].some((name) => exclude.has(name))) {
+    throw new TypeError('Health readiness.include and readiness.exclude must not overlap.');
+  }
+  return { include, exclude };
+}
 
 /**
  * The observation-collector attachment seam (M98d). A service is mapped to
@@ -179,6 +224,7 @@ export class HealthService implements IHealthService {
   #indicators = new Map<string, RegisteredIndicator>();
   #runtime: IRuntimeServices;
   readonly #indicatorTimeoutMs: number;
+  readonly #readiness: { include: ReadonlySet<string>; exclude: ReadonlySet<string> };
 
   static {
     // The raw-runner seam (M98d), wired from inside the class body so it can
@@ -198,14 +244,23 @@ export class HealthService implements IHealthService {
    * @param options - Aggregation options
    * @param options.indicatorTimeoutMs - Per-indicator deadline in ms
    *   (default 5,000). Must be a positive finite number.
+   * @param options.readiness - Operator overrides of readiness membership by
+   *   indicator name, applied to every registration (since 0.11.0)
    * @throws {Error} When `indicatorTimeoutMs` is not a positive finite number
+   * @throws {TypeError} When `readiness` is invalid (see `HealthPluginOptions.readiness`)
    */
-  constructor(runtime: IRuntimeServices, options?: { indicatorTimeoutMs?: number }) {
+  constructor(
+    runtime: IRuntimeServices,
+    options?: { indicatorTimeoutMs?: number; readiness?: HealthPluginOptions['readiness'] },
+  ) {
     this.#runtime = runtime;
     // Validated HERE, not only in `HealthPlugin`: this class is barrel-
     // exported, so a caller can construct it directly and bypass the
     // plugin's check entirely.
     this.#indicatorTimeoutMs = resolveIndicatorTimeout(options?.indicatorTimeoutMs);
+    // Applied here rather than in `HealthPlugin`, so an indicator a plugin
+    // registers directly through `IHealthService` honours the override too.
+    this.#readiness = compileReadiness(options?.readiness);
   }
 
   /**
@@ -221,7 +276,10 @@ export class HealthService implements IHealthService {
     if (this.#indicators.has(name)) {
       throw new Error(`Duplicate health indicator name: "${name}"`);
     }
-    this.#indicators.set(name, { name, check: indicator, readiness: options?.readiness ?? true });
+    const readiness =
+      this.#readiness.include.has(name) ||
+      (!this.#readiness.exclude.has(name) && (options?.readiness ?? true));
+    this.#indicators.set(name, { name, check: indicator, readiness });
   }
 
   /**

@@ -8941,10 +8941,13 @@ readiness still runs in `check()` (`/health`) and is absent from the `/ready` re
 is unchanged. `HealthPluginOptions.readiness`
 (`{ include?: readonly string[], exclude?: readonly string[] }`) overrides a contributor's declared
 membership by exact indicator name: `include` forces a named indicator into readiness, `exclude`
-forces it out. `HealthPlugin(...)` refuses an invalid list with `TypeError` — a non-array, an empty
-or non-string name, the name `self`, or a name in both lists; the message names the option and never
-echoes a name. At initialization, names that match no registered indicator produce one count-only
-warning.
+forces it out. The override is applied inside `HealthService.registerIndicator`, so it covers every
+registration path, including a plugin that calls `IHealthService.registerIndicator` directly; a
+directly constructed service takes it as `new HealthService(runtime, { readiness })`. Both
+`HealthPlugin(...)` and that constructor refuse an invalid option with `TypeError` — a `readiness`
+that is not a plain object (an array included), a list that is not an array, an empty or non-string
+name, the name `self`, or a name in both lists; the message names the option and never echoes a
+name. At initialization, names that match no registered indicator produce one count-only warning.
 
 Since **M70c** each indicator's result is **projected** to the declared {@linkcode
 HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An
