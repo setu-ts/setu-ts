@@ -642,6 +642,9 @@ here.
   reply inbox and reaped leaked consumers, the Kafka first-join seek rule, and `PublishTimeoutError`
   with Redis Streams/NATS publish bounds; V10-13, V10-2, V10-21, V10-30, V10-5) — complete (PR
   #498).
+- **Milestone 119g** (`auth-plugin` + `common` + `idempotency-plugin` + `service-discovery-plugin` —
+  failure reasons at `warn` once per state change, `describeError` in `common`, a named discovery
+  503; V10-62, V10-63, V10-34) — complete (PR pending).
 - **Next milestone** — M119b (`mail`, `health`, `realtime-backplane`, `queue`, `database` —
   readiness that drains replicas for a shared or fan-out problem). M118 and M120–M123 are open in
   the ROADMAP; M120 depends on M118.
