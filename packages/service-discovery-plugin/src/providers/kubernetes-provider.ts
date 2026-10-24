@@ -9,7 +9,7 @@ import { DiscoveryUnavailableError } from '../errors.ts';
 import { watchKubernetesService } from './kubernetes-watch.ts';
 
 /** Where the projected service-account token is mounted in every pod. */
-const TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+export const TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 
 /**
  * How long a token read from disk is reused.
@@ -107,6 +107,9 @@ export class KubernetesProvider implements DiscoveryProvider {
    * token was configured.
    *
    * @returns The `Authorization` header value
+   * @throws {DiscoveryUnavailableError} If the projected token file does not
+   * exist (not running in a pod); configure token and apiServer explicitly.
+   * Any other read failure is rethrown unchanged.
    */
   async authHeader(): Promise<string> {
     if (this.#options.token !== undefined) {
@@ -128,7 +131,20 @@ export class KubernetesProvider implements DiscoveryProvider {
           'this runtime supplies neither.',
       );
     }
-    const bytes = await fs.readFile(TOKEN_PATH);
+    let bytes: Uint8Array;
+    try {
+      bytes = await fs.readFile(TOKEN_PATH);
+    } catch (cause) {
+      // Only an ABSENT file means "not in a pod" — a configuration fault with
+      // a named remedy (V10-44). Any other read failure inside a pod (EIO, a
+      // permission blip during rotation) is rethrown unchanged, so the service
+      // still answers it as a temporary outage rather than a misconfiguration.
+      if (!isMissingFile(cause)) throw cause;
+      throw new DiscoveryUnavailableError(
+        `Cannot read Kubernetes token file ${TOKEN_PATH}; set the token and apiServer options outside a pod.`,
+        { cause },
+      );
+    }
     const value = new TextDecoder().decode(bytes).trim();
     this.#cachedToken = { value, stampMs: now };
     return `Bearer ${value}`;
@@ -252,4 +268,24 @@ export class KubernetesProvider implements DiscoveryProvider {
         "set the 'portName' option to choose one.",
     );
   }
+}
+
+/**
+ * Whether a file-system rejection means the file does not exist, across the
+ * runtimes `IRuntimeServices.fs` wraps: Node sets `code: 'ENOENT'`, Deno throws
+ * `Deno.errors.NotFound`, and the Bun adapter rejects with an `ENOENT: …`
+ * message.
+ *
+ * @param error - The rejection from `fs.readFile`
+ * @returns `true` when the file is absent
+ * @internal
+ */
+export function isMissingFile(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const { code, name, message } = error as { code?: unknown; name?: unknown; message?: unknown };
+  return (
+    code === 'ENOENT' ||
+    name === 'NotFound' ||
+    (typeof message === 'string' && message.startsWith('ENOENT'))
+  );
 }

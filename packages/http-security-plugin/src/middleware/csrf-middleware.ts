@@ -55,13 +55,34 @@ export interface CsrfOptions {
    * @since 0.9.0
    */
   readonly exclude?: readonly PathPattern[];
+  /**
+   * Accept `Origin: null` when the browser also sends
+   * `Sec-Fetch-Site: same-origin`. Default `true` (since 0.11.0, M119c).
+   *
+   * Under the default `Referrer-Policy: no-referrer` a browser sends
+   * `Origin: null` on a same-origin HTML form POST; `Sec-Fetch-Site` is set
+   * by the browser and cannot be written by page script, and a sandboxed,
+   * opaque-origin or cross-site initiator reports `cross-site`. `false`
+   * restores the pre-0.11.0 refusal of every `null` origin, for an
+   * application that prefers to send a real origin instead
+   * (`referrerPolicy: 'same-origin'`). A non-boolean value throws `TypeError`
+   * when the middleware is built.
+   *
+   * @since 0.11.0
+   */
+  readonly acceptNullOriginSameOrigin?: boolean;
 }
 
 /**
  * CSRF middleware factory.
  *
+ * Accepts the exact Origin sentinel `null` when Fetch Metadata reports
+ * `same-origin`, including navigation POSTs under the default no-referrer
+ * policy, unless {@linkcode CsrfOptions.acceptNullOriginSameOrigin} is `false`.
+ *
  * @param options - CSRF configuration
  * @returns A middleware function implementing CSRF protection
+ * @throws {TypeError} When `acceptNullOriginSameOrigin` is not a boolean
  */
 export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
   const enabled = options.enabled ?? true;
@@ -72,6 +93,13 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
 
   const trustedOrigins = options.trustedOrigins ?? [];
   const customHeader = options.customHeader;
+  // Read once and refused when malformed: a string `'false'` would otherwise
+  // read as truthy and silently keep the acceptance the caller tried to turn off.
+  const acceptNullSameOrigin = options.acceptNullOriginSameOrigin;
+  if (acceptNullSameOrigin !== undefined && typeof acceptNullSameOrigin !== 'boolean') {
+    throw new TypeError('csrfMiddleware: acceptNullOriginSameOrigin must be a boolean.');
+  }
+  const acceptNull = acceptNullSameOrigin ?? true;
 
   // The exclusion list is PARTITIONED once at registration (M90a's
   // `createPathMatcher` owns the `lastIndex` reset a `g`/`y`-flagged pattern
@@ -124,6 +152,12 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     // `X-Forwarded-Host` through would otherwise let a credentialed CORS
     // origin publish, and then match, its own host (M113n audit N1).
     const fetchSite = ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase();
+    // A no-referrer same-origin navigation can carry an opaque Origin.
+    // Fetch Metadata is browser-owned; only this exact origin sentinel is admitted.
+    if (acceptNull && sourceOrigin === 'null' && fetchSite === 'same-origin') {
+      await next();
+      return;
+    }
     const forwardedCandidates = fetchSite === undefined || fetchSite === 'same-origin';
 
     // The request's own origin is always implicitly trusted

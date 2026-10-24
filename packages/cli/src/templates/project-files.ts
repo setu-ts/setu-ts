@@ -1563,8 +1563,11 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
   const test =
     runtime === 'bun'
       ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-      : `${NODE_RUNNER} --test '**/!(*.e2e).test.ts'`;
-  const e2e = runtime === 'bun' ? 'bun test .e2e.test' : `${NODE_RUNNER} --test '**/*.e2e.test.ts'`;
+      : `${NODE_RUNNER} --test --test-force-exit '**/!(*.e2e).test.ts'`;
+  const e2e =
+    runtime === 'bun'
+      ? 'bun test .e2e.test'
+      : `${NODE_RUNNER} --test --test-force-exit '**/*.e2e.test.ts'`;
   // With a frontend build both scripts boot an app that loads the server
   // bundle, so both build first, as the Deno `start` and `test` tasks do. A
   // `start` without it is what the next-step hint and the README tell a new

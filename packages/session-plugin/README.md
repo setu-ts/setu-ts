@@ -295,7 +295,10 @@ session or the credential source is missing). `Basic` credentials are NOT exempt
 re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
 the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser session:
 whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
-so it cannot plant a session in a browser whose cookie no longer restores.
+so it cannot plant a session in a browser whose cookie no longer restores. **This holds even on a
+path listed in `csrf.exclude`**: the bearer rule is checked first, so a bearer→cookie "exchange"
+login route issues no cookie and logs nothing (V10-14). For such a route set `exemptBearer: false`,
+which commits the session as releases before 0.10.0 did.
 
 ### What `SameSite` does not separate
 

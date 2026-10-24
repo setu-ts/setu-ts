@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { KubernetesProvider } from '../../src/providers/kubernetes-provider.ts';
+import { isMissingFile, KubernetesProvider } from '../../src/providers/kubernetes-provider.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import {
@@ -79,6 +79,40 @@ describe('KubernetesProvider — URL', () => {
 });
 
 describe('KubernetesProvider — token resolution', () => {
+  it('names the outside-pod remedy and preserves the failed read as cause (V10-44)', async () => {
+    const failure = Object.assign(new Error('ENOENT: projected token file missing'), {
+      code: 'ENOENT',
+    });
+    const { fs, paths } = tokenFs([]);
+    fs.readFile = (path) => {
+      paths.push(path);
+      return Promise.reject(failure);
+    };
+    const { provider } = setup(
+      { apiServer: 'https://API_SERVER_CANARY.invalid' },
+      createFakeHttp(),
+      createFakeRuntime({ fs }),
+    );
+    let error: unknown;
+    try {
+      await provider.authHeader();
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((error as Error).message).toContain('token');
+    expect((error as Error).message).toContain('apiServer');
+    expect((error as Error).cause).toBe(failure);
+    expect(String(error) + String((error as Error).cause)).not.toContain('API_SERVER_CANARY');
+    expect(paths).toEqual(['/var/run/secrets/kubernetes.io/serviceaccount/token']);
+  });
+  it('rethrows a read failure other than a missing file unchanged (audit O3)', async () => {
+    const failure = Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' });
+    const { fs } = tokenFs([]);
+    fs.readFile = () => Promise.reject(failure);
+    const { provider } = setup({}, createFakeHttp(), createFakeRuntime({ fs }));
+    await expect(provider.authHeader()).rejects.toBe(failure);
+  });
   it('uses an explicit token verbatim and never touches the file system', async () => {
     const { fs, paths } = tokenFs(['from-disk']);
     const { provider } = setup({ token: 'explicit' }, createFakeHttp(), createFakeRuntime({ fs }));
@@ -317,5 +351,20 @@ describe('KubernetesProvider — constructed outside the factory', () => {
     const { provider } = setup({});
     await expect(provider.authHeader()).rejects.toThrow(DiscoveryUnavailableError);
     await expect(provider.authHeader()).rejects.toThrow('IRuntimeServices.fs');
+  });
+});
+
+describe('isMissingFile — the not-found shapes IRuntimeServices.fs produces', () => {
+  it.each([
+    [Object.assign(new Error('no such file'), { code: 'ENOENT' }), true],
+    [Object.assign(new Error('No such file'), { name: 'NotFound' }), true],
+    [new Error("ENOENT: no such file or directory, read '/x'"), true],
+    [Object.assign(new Error('permission denied'), { code: 'EACCES' }), false],
+    [new Error('EIO: i/o error'), false],
+    ['ENOENT', false],
+    [null, false],
+    [{ message: 42 }, false],
+  ])('%s → %s', (error, missing) => {
+    expect(isMissingFile(error)).toBe(missing);
   });
 });

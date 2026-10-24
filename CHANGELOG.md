@@ -25,7 +25,7 @@ All notable changes to this project are documented here. The format follows
   Streams the bound covers the publish's `XADD` only — consumer reads are unaffected. On NATS it is
   passed to the client as its own publish `timeout` and held by the framework's deadline as well.
 
-- **`describeError(value)` (M119g, 0.11.0, `@setu-ts/common`).** A new exported function that
+- **`describeError(value)` (M119g, #500, 0.11.0, `@setu-ts/common`).** A new exported function that
   renders any thrown value as one bounded diagnostic line —
   `Name: message (code=…, …) [inner; inner] <- cause` — from the same `serializeError` record the
   structured sink uses. A non-`Error` value yields `Error: <string>`, an `AggregateError` lists its
@@ -100,6 +100,19 @@ All notable changes to this project are documented here. The format follows
   within its 2 s bound now reports `up` with `reachable: 'unknown'` and no depth counts, instead of
   `down`; a check that answers `false` still reads `down` at once.
 
+- **The CSRF check accepts `Origin: null` with `Sec-Fetch-Site: same-origin` (V10-1, M119c, 0.11.0,
+  `@setu-ts/http-security-plugin`).** Under the plugin's default `Referrer-Policy: no-referrer` a
+  browser sends `Origin: null` on a same-origin HTML form POST, which was refused 403. The pair is
+  now accepted (the Fetch Metadata rule Go and Hono use); `null` with any other `Sec-Fetch-Site`
+  value, or without it, is still refused. `csrf: { acceptNullOriginSameOrigin: false }` restores the
+  earlier refusal.
+- **Generated Node test scripts force exit (V10-29, M119c, 0.11.0, `@setu-ts/cli`).** `test` and
+  `test:e2e` pass `--test-force-exit`, so a test whose application failed to start fails promptly
+  instead of hanging CI to its timeout.
+- **`setu add cache|scheduler|realtime-backplane` write the Redis arm in a Redis-transport workspace
+  (M119c, 0.11.0, `@setu-ts/cli`).** The registration reads the workspace's `REDIS_URL` and
+  `ioredis` is installed; elsewhere the in-memory default is unchanged.
+
 ### Security
 
 - **Clear two High dependency advisories (#496).** Remove Zod 3 from the workspace and require Zod
@@ -111,6 +124,25 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **A generated full-stack app can run behind a TLS-terminating proxy (V10-17, V10-41, M119c,
+  0.11.0, `@setu-ts/cli`).** Every React Router action answered 400 because nothing configured IP
+  security. The template now reads `TRUSTED_PROXIES` (comma-separated CIDRs; empty leaves it off),
+  and the react-router-plugin README and `docs/deployment.md` name the failure.
+- **The CLI installs `swagger-ui-dist@5.33.3` exactly (V10-36, M119c, 0.11.0, `@setu-ts/cli`).** A
+  `^5` range resolved a newer release whose files fail the OpenAPI plugin's SRI hashes, so a
+  `{ baseUrl }` docs page rendered blank.
+- **`setu add telemetry` installs its OpenTelemetry peers (V10-6, M119c, 0.11.0, `@setu-ts/cli`).**
+  The printed console-exporter registration crashed at start; the four peers are now recorded, with
+  `@opentelemetry/api` held at `~1.9.0` because the 2.x SDK line refuses `1.10`.
+- **Kubernetes discovery outside a pod names `token` (V10-44, M119c, 0.11.0,
+  `@setu-ts/service-discovery-plugin`).** A missing service-account token file now gives one startup
+  warning and a `DiscoveryUnavailableError` naming `token` and `apiServer`, instead of a silent
+  `down`; the README no longer lists `token` as Consul-only. Only a missing file is reported that
+  way; any other token read failure inside a pod still reaches the caller as a temporary outage.
+- **Documentation (V10-3, V10-14, M119c, 0.11.0).** The http-security CORS + CSRF example allows the
+  `x-csrf-token` header it requires; the session-plugin README says the bearer exemption also skips
+  the session commit on a `csrf.exclude`d path and that `exemptBearer: false` restores it.
 
 - **Connection-error lines no longer read `error: ""` for an `AggregateError` (V10-63, M119g,
   0.11.0, `@setu-ts/common`).** `createConnectionErrorReporter` logged `error.message` only, and an
@@ -132,7 +164,7 @@ All notable changes to this project are documented here. The format follows
   `auth-plugin: issuer '<name>' key-set refresh failed (<reason>)` the same way; token rejections
   stay at `debug`.
 
-- **A service-discovery cold outage is answered as a named 503 (V10-34, M119g, 0.11.0,
+- **A service-discovery cold outage is answered as a named 503 (V10-34, M119g, #500, 0.11.0,
   `@setu-ts/service-discovery-plugin`).** With nothing cached, a backend failure threw an unbranded
   `DiscoveryUnavailableError`, which `errorHandler` normalized to a masked 500. That instance now
   carries a `503 Service Unavailable` status hint with the fixed detail "Service discovery is

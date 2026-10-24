@@ -176,6 +176,12 @@ export interface TransportSpec {
    * @returns The argument list, without the enclosing parentheses
    */
   readonly queueArgs?: (connection: string) => string;
+  /** Redis cache options for a later setu add cache in a workspace member. */
+  readonly cacheArgs?: (connection: string) => string;
+  /** Redis distributed-lock options merged with any generated artifact options. */
+  readonly schedulerArgs?: (connection: string) => string;
+  /** Redis backplane options for a later setu add realtime-backplane. */
+  readonly backplaneArgs?: (connection: string) => string;
   /**
    * Client packages the project needs once {@linkcode messagingArgs} selects this
    * broker. Each is an OPTIONAL peer of `messaging-plugin`, which no package
@@ -339,6 +345,10 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
     queueArgs: (connection) => `{ adapter: 'redis', url: ${connection} }`,
+    cacheArgs: (connection) => `{ store: 'redis', options: { url: ${connection} } }`,
+    schedulerArgs: (connection) =>
+      `{ distributedLock: { enabled: true, storage: 'redis', url: ${connection} } }`,
+    backplaneArgs: (connection) => `{ transport: 'redis', url: ${connection} }`,
     connection: {
       variable: 'REDIS_URL',
       localDefault: 'redis://127.0.0.1:6379',
