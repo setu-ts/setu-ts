@@ -638,8 +638,12 @@ here.
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable) — complete (PR #346).
 - **Milestone 115** (no packages — the `v0.10.0` client-brief run: Relaymark built by three agents,
   X74 in both forms; findings V10-49…V10-63, see `smoke/M115-FINDINGS.md`) — complete.
-- **Next milestone** — M119a (`messaging-plugin` — message delivery that repeats, and calls with no
-  bound; V10-13, the only High from the `v0.10.0` run), then M119b. M118 and M120–M123 are open in
+- **Milestone 119a** (`packages/messaging-plugin` — shared queue-less NATS groups, an ephemeral
+  reply inbox and reaped leaked consumers, the Kafka first-join seek rule, and `PublishTimeoutError`
+  with Redis Streams/NATS publish bounds; V10-13, V10-2, V10-21, V10-30, V10-5) — complete (PR
+  pending).
+- **Next milestone** — M119b (`mail`, `health`, `realtime-backplane`, `queue`, `database` —
+  readiness that drains replicas for a shared or fan-out problem). M118 and M120–M123 are open in
   the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
