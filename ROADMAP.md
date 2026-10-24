@@ -15585,16 +15585,30 @@ So there are two stories: the full-stack template gets Tailwind and, optionally,
 (interactive components work, because it is React); server-rendered views get Tailwind with shadcn's
 class recipes and theme variables, without React and without interactive components.
 
+**`setu add view` scaffolds the Tailwind setup (maintainer decision, 2026-10-24).** Adding the view
+plugin leaves a project ready to render styled pages, not just wired:
+
+- the dependencies: `hono` (which closes V10-64 together with the JSX compiler options),
+  `tailwindcss` and `@tailwindcss/cli`, plus `@setu-ts/static-plugin` when the project does not
+  already have it;
+- the JSX compiler options (`jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`) on targets that use a
+  `tsconfig.json`, and the Deno equivalent;
+- a source stylesheet (`@import "tailwindcss"` plus design tokens as CSS custom properties, the
+  variables shadcn's class recipes expect) and an ignored build output;
+- a `css` build step and a watch step for `dev`, run by the project's `build` (M120);
+- `StaticPlugin` registered for the built CSS, and a layout component carrying the fixed app shell
+  and the stylesheet link, which the generated example view renders through.
+
 **Decisions the plan takes:** whether the template adopts Tailwind (the default most React Router
 starters and shadcn/ui assume) or stays tool-neutral with design tokens in CSS custom properties;
 whether a component library is scaffolded or left to `npx shadcn`, with the template's paths and
-aliases ready for it; for server-rendered views, whether `setu add view` (or a `--style`-like
-option) scaffolds the Tailwind build, the `static-plugin` route for the built CSS and a layout
-component, or the docs carry it as a recipe; whether the docs present a React engine for views at
-all, given the JSX type conflict; light/dark and a persisted user preference without a flash on SSR;
-and keeping the M37c lesson — the landing page must render visible content, asserted by the e2e.
-Whatever ships must survive `deno fmt`/Prettier and the scaffold e2e on every runtime the template
-supports, and the built CSS must reach the M120 image.
+aliases ready for it; how `setu add view` behaves in a project that already has a stylesheet, a
+`StaticPlugin` registration or its own CSS build (refuse, merge, or print the lines to add — never
+overwrite); whether the docs present a React engine for views at all, given the JSX type conflict;
+light/dark and a persisted user preference without a flash on SSR; and keeping the M37c lesson — the
+landing page must render visible content, asserted by the e2e. Whatever ships must survive
+`deno fmt`/Prettier and the scaffold e2e on every runtime the template supports, and the built CSS
+must reach the M120 image.
 
 **Deliverables:**
 
@@ -15602,8 +15616,10 @@ supports, and the built CSS must reach the M120 image.
 - [ ] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
       only the content region scrolls; the e2e scrolls the content and asserts the header and
       sidebar have not moved
-- [ ] Server-rendered views: the Tailwind build, the CSS route and a layout, scaffolded or
-      documented as a tested recipe; `docs/mvc.md` states what shadcn/ui can and cannot do there
+- [ ] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
+      runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
+      styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
+      cannot do in server-rendered views
 - [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
 - [ ] Template README and `docs/` entry; CHANGELOG
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
