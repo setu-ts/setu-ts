@@ -119,4 +119,23 @@ describe('bounded Forwarded parser', () => {
     expect(parsed.length).toBeLessThanOrEqual(65);
     expect(parsed[0]).toBe(MALFORMED);
   });
+  it('trims a segment with a long inner run of whitespace in linear time (audit M1)', () => {
+    for (const run of [' ', '\t']) {
+      const parsed = parseForwarded(`x${run.repeat(8000)}y, for=198.51.100.7`);
+      expect(parsed).toEqual([MALFORMED, { ip: '198.51.100.7' }]);
+    }
+    // Surrounding whitespace is still trimmed in recovery.
+    expect(parseForwarded(`garbage!,\t  for=198.51.100.7 \t`)).toEqual([
+      MALFORMED,
+      { ip: '198.51.100.7' },
+    ]);
+  });
+  it('refuses a bracketed node carrying userinfo (audit L1)', () => {
+    expect(parseForwarded('for="[x@[::1]"')).toEqual([MALFORMED]);
+    expect(parseForwarded('for="[x@[::1]", for=198.51.100.7')).toEqual([
+      MALFORMED,
+      { ip: '198.51.100.7' },
+    ]);
+    expect(parseForwarded('for="[::1]:443"')).toEqual([{ ip: '::1' }]);
+  });
 });

@@ -205,13 +205,15 @@ pnpm run release:verify <version>
      element.
   6. A 16 KiB header and 8000 commas complete within the budget (bounded work, asserted by result).
 
-| Threat                                                             | Resolution                                            |
-| ------------------------------------------------------------------ | ----------------------------------------------------- |
-| Client erases its identity behind an appending proxy (V10-19)      | §3.1 boundary + §3.2 right-anchored bounds            |
-| Client walks the resolver past an unreadable hop into spoofed text | §3.1: the walk stops at the boundary with `undefined` |
-| One client, two keys (V10-28)                                      | §3.3 single normalizer on publish and compare         |
-| Quadratic work from a crafted header                               | §3.2 linear recovery within the window                |
-| Trusted proxy's quoted comma split by recovery                     | Fails closed to `undefined`; documented (§8)          |
+| Threat                                                                  | Resolution                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Client erases its identity behind an appending proxy (V10-19)           | §3.1 boundary + §3.2 right-anchored bounds                                  |
+| Client walks the resolver past an unreadable hop into spoofed text      | §3.1: the walk stops at the boundary with `undefined`                       |
+| One client, two keys (V10-28)                                           | §3.3 single normalizer on publish and compare                               |
+| Quadratic work from a crafted header                                    | §3.2 linear recovery within the window                                      |
+| Trusted proxy's quoted comma split by recovery                          | Fails closed to `undefined`; documented (§8)                                |
+| Quadratic trim regex on inner whitespace (audit `8334b453`, M1, Medium) | FIXED after the audit: index-based `trimSegment`, with a test               |
+| Userinfo accepted in a bracketed node (audit L1, Low, pre-existing)     | FIXED after the audit: brackets must hold only IPv6 characters, with a test |
 
 ## 9. Out of scope
 

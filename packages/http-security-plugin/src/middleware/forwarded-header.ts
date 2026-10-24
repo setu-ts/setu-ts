@@ -212,9 +212,18 @@ function utf8Length(value: string, start: number): number {
   return 4;
 }
 
-/** Trims spaces and tabs only — the delimiters the element grammar skips. */
+/**
+ * Trims spaces and tabs only — the delimiters the element grammar skips.
+ * Index-based rather than a regular expression: an alternation anchored at the
+ * end backtracks quadratically on a long inner run of whitespace, which any
+ * client can send (M119d audit M1).
+ */
 function trimSegment(segment: string): string {
-  return segment.replace(/^[ \t]+|[ \t]+$/g, '');
+  let start = 0;
+  let end = segment.length;
+  while (start < end && (segment[start] === ' ' || segment[start] === '\t')) start++;
+  while (end > start && (segment[end - 1] === ' ' || segment[end - 1] === '\t')) end--;
+  return segment.slice(start, end);
 }
 
 /** A null node is malformed; undefined is a valid unknown/obfuscated hop. */
@@ -224,6 +233,10 @@ function parseNode(node: string): string | null | undefined {
   const address = match[1]!;
   if (/^(unknown|_[A-Za-z0-9._-]+)$/i.test(address)) return undefined;
   if (address.startsWith('[')) {
+    // Only IPv6 characters inside the brackets: the URL parser would otherwise
+    // accept userinfo such as `[x@[::1]` and return text that is no address
+    // (M119d audit L1).
+    if (!/^\[[0-9A-Fa-f:.]+\]$/.test(address)) return null;
     try {
       const url = new URL(`http://${address}`);
       return url.hostname.startsWith('[') ? address.slice(1, -1) : null;
