@@ -15793,11 +15793,16 @@ the few things that need a per-request instance, such as a unit of work.
    compilation gives the same safety on Bun, Deno and Workers, which M120 gives no build step, and
    costs microseconds per provider once per process. The plan states what start-up compilation costs
    on a Workers cold start.
-2. **Typed tokens.** `createToken<T>(name)` returns a token `resolve` infers `T` from, carrying its
-   slot index so a scoped resolve is an array read; a class is also accepted as its own token, by
-   identity. Bare strings keep working. The plan decides whether a token is a branded string or a
-   frozen object, and confirms bundling and minification cannot break class tokens (identity only;
-   `constructor.name` appears in error messages and nowhere else).
+2. **Typed tokens.** `createToken<T>(name)` returns a frozen object — its `name` and a numeric `id`
+   unique in the process, assigned at creation — that `resolve` infers `T` from. A token is created
+   at module load, before any container exists, so it cannot carry a container's slot; instead each
+   compiled container indexes its plan by `id`, and a resolve is an array read whichever container
+   compiled it (several applications or test containers in one process share the ids, not the
+   slots). A branded string is rejected: it cannot carry an id, so every resolve would need a `Map`
+   lookup again. A class is also accepted as its own token, matched by identity through one
+   `WeakMap` read; a bare string through one `Map` read. Both keep working and stay the slower path.
+   Bundling and minification cannot break class tokens (identity only; `constructor.name` appears in
+   error messages and nowhere else).
 3. **Dependencies that can be seen.** `ClassProvider.inject` and a new optional
    `FactoryProvider.inject` accept `{ token, optional: true }`, and a factory receives its resolved
    dependencies as arguments. That retires the `@Optional` closure (finding 2). A factory without
