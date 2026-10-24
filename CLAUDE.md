@@ -617,7 +617,6 @@ here.
   OpenAPI metadata reaches the document, 0.10.0) — complete (PR #487).
 - **Milestone 116** (`packages/cli` + every published library package + `scripts/` — agent briefs) —
   complete (PR #484).
-- **Next milestone** — M115 (the `v0.10.0` client-brief run).
 - **The `v0.6.0` closeout** — the regression run and Part 11 (X46–X51) folded together by defect
   shape into M95a–M95d.
 - **Milestone 97** (ingress decorators, response shaping, typed config sections) — complete: 97a (PR
@@ -637,6 +636,11 @@ here.
 - **Milestone 99a** (`packages/logger-plugin` + `packages/common` + `packages/messaging-plugin` — a
   control that reports safe for what it does not cover) — complete (PR #350).
 - **Milestone 99b** (`packages/cli` + `docs` — generated output is usable) — complete (PR #346).
+- **Milestone 115** (no packages — the `v0.10.0` client-brief run: Relaymark built by three agents,
+  X74 in both forms; findings V10-49…V10-63, see `smoke/M115-FINDINGS.md`) — complete.
+- **Next milestone** — M119a (`messaging-plugin` — message delivery that repeats, and calls with no
+  bound; V10-13, the only High from the `v0.10.0` run), then M119b. M118 and M120–M123 are open in
+  the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 
