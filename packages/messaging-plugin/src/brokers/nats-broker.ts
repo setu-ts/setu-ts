@@ -926,6 +926,14 @@ export class NatsBroker implements MessageBrokerAdapter {
     }
   }
 
+  /**
+   * Reports a consumer-lifecycle failure (stop, inbox delete, recovery, the
+   * leaked-consumer sweep) to the logger. Never throws: a failing logger must
+   * not interrupt shutdown or recovery.
+   *
+   * @param operation - The lifecycle step that failed, named in the log line
+   * @param error - The failure, rendered through `describeError`
+   */
   #reportLifecycleError(operation: string, error: unknown): void {
     try {
       this.#logger?.error(`NatsBroker ${operation} failed: ${describeError(error)}`);
