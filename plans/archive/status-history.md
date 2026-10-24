@@ -2,7 +2,7 @@
 
 The full "Current status" entries from `CLAUDE.md`, moved here verbatim on 2026-10-24 when
 `CLAUDE.md` was trimmed to one line per entry. New entries are written in `CLAUDE.md` as one or two
-lines; the long account belongs in the milestone's archived plan.
+lines; the long account belongs in the milestone's PR description.
 
 - **Milestone 0** (monorepo foundation) — complete (PR #1)
 - **Milestone 1** (`packages/common`) — complete (PR #2)

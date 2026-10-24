@@ -129,7 +129,7 @@ found, and every recorded decision — is in
 stood here until 2026-10-24.
 
 Write a new entry the same way: one or two lines naming the packages, the change and the PR. The
-long account of what verification and review found belongs in the milestone's archived plan, not
+long account of what verification and review found belongs in the milestone's PR description, not
 here.
 
 - **Milestone 0** (monorepo foundation) — complete (PR #1).
