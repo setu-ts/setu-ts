@@ -3522,20 +3522,27 @@ Resolves client IP and publishes to `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. Wi
 `trustProxy: false` (default), it uses the socket peer. With `true`, `ipHeader` defaults to
 `X-Forwarded-For`. `trustedProxies` walks right to left starting at the socket peer when available;
 an untrusted peer is the client and forwarded entries are ignored. With no peer, it walks the header
-alone. IPv4 CIDR is expanded; native IPv6 proxy addresses are compared literally. `proxyHops` and
-the leftmost default retain their header-only selection and do not check the peer. Prefer
-`trustedProxies` for stable proxy addresses. `trustedProxies` and `proxyHops` are mutually
-exclusive; `proxyHops` must be a non-negative safe integer. Never short-circuits.
+alone. IPv4 CIDR is expanded; native IPv6 proxy addresses are compared literally. Every published
+address is normalized: an IPv4-mapped address becomes dotted IPv4, and an IPv6 address is published
+in canonical lowercase compressed form; a trusted literal is normalized the same way before
+comparison. `proxyHops` and the leftmost default retain their header-only selection and do not check
+the peer. Prefer `trustedProxies` for stable proxy addresses. `trustedProxies` and `proxyHops` are
+mutually exclusive; `proxyHops` must be a non-negative safe integer. Never short-circuits.
 
 `IpSecurityOptions.forwardedHeader?: 'x-forwarded' | 'forwarded'` defaults to `'x-forwarded'`.
 `'forwarded'` reads only RFC 7239 `Forwarded` and conflicts with `ipHeader`; invalid values and the
-conflict throw at construction. Its parser handles quoted strings, escapes, IPv6 and IPv4 ports;
-malformed input, over 8 KiB, or over 64 elements contributes no hops and no forwarded origin, so the
-socket peer is still checked — a direct client keeps its own address, a trusted proxy sending it
-yields no client. In the default family a `proxyHops` header too short for the chain, or a chain of
-only trusted proxies, also resolves `undefined`, never the socket peer. Unknown or obfuscated hops
-cannot match a trusted proxy and are never returned as clients. The two header families are never
-merged.
+conflict throw at construction. Its parser handles quoted strings, escapes, IPv6 and IPv4 ports. A
+malformed element is a boundary, not a void: the elements to its right were written by later hops
+and are still read, while the trust walk stops at the boundary and never continues left of it;
+everything left of the boundary is one unreadable entry. An oversized field (over 8 KiB or 64
+elements) is read from the right within those bounds instead of voiding the field, so a trusted
+proxy that appends its element still resolves the client behind a padded or malformed prefix. A
+trusted proxy that writes a comma inside a quoted value to the right of malformed input loses that
+element to the boundary and resolves no client (fail closed). A direct client keeps its own address,
+and a boundary with only trusted entries to its right yields no client rather than the proxy's own
+address. In the default family a `proxyHops` header too short for the chain, or a chain of only
+trusted proxies, also resolves `undefined`, never the socket peer. Unknown or obfuscated hops cannot
+match a trusted proxy and are never returned as clients. The two header families are never merged.
 
 The middleware publishes `{ protocol, host }` under `REQUEST_ORIGIN_STATE_KEY`. Forwarded values are
 believed only with `trustedProxies`, a socket peer present and trusted, and the selected client from
