@@ -653,7 +653,7 @@ here.
   framework, broken default: `TRUSTED_PROXIES` in the full-stack template, CSRF `Origin: null` with
   `Sec-Fetch-Site: same-origin` plus an opt-out, exact `swagger-ui-dist` pin, telemetry peers and
   Redis arms from `setu add`, forced test exit, named Kubernetes token fault; V10-17, V10-1, V10-3,
-  V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR pending).
+  V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR #501).
 - **Next milestone** — M119d (`http-security-plugin` — forwarded client identity). M119e, M119f,
   M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
 
