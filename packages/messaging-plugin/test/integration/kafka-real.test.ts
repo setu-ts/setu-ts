@@ -25,6 +25,62 @@ import { KafkaTopicUnavailableError, MessagingPlugin } from '../../src/index.ts'
 
 const kafkaBrokers = process.env['KAFKA_BROKERS'];
 
+it(
+  'M119a REAL ten fresh groups deliver each near-join publish exactly once',
+  { skip: kafkaBrokers === undefined, timeout: 180000 },
+  async () => {
+    const { Kafka, logLevel } = await import('kafkajs');
+    const { KafkaBroker, JsonSerializer } = await import('../../src/index.ts');
+    const { createRuntimeServices } = await import('@setu-ts/runtime');
+    const brokers = kafkaBrokers!.split(',');
+    const kafka = new Kafka({ brokers, clientId: 'm119a-setup', logLevel: logLevel.NOTHING });
+    const admin = kafka.admin();
+    const producer = kafka.producer();
+    const topics = Array.from({ length: 10 }, (_, i) => `m119a.join.${crypto.randomUUID()}.${i}`);
+    try {
+      await admin.connect();
+      await producer.connect();
+      await admin.createTopics({
+        topics: topics.map((topic) => ({ topic, numPartitions: 1, replicationFactor: 1 })),
+        waitForLeaders: true,
+      });
+      for (const topic of topics) {
+        const broker = new KafkaBroker(createRuntimeServices(), new JsonSerializer(), {
+          brokers,
+          client: {
+            producer: () => kafka.producer(),
+            admin: () => kafka.admin(),
+            consumer: (options) => kafka.consumer(options),
+          },
+        });
+        const received: string[] = [];
+        try {
+          await fetchTopicOffsets(admin, topic);
+          await broker.connect();
+          await broker.subscribe(
+            topic,
+            (_message, metadata) => {
+              received.push(metadata.messageId!);
+            },
+            { queue: `${topic}.group` },
+          );
+          // run() starts the join without awaiting it; publish during that join.
+          await producer.send({ topic, messages: [{ value: '{}' }] });
+          await waitFor(() => received.length > 0, `first delivery for ${topic}`);
+          await new Promise((resolve) => setTimeout(resolve, 500));
+          expect(received).toEqual(['0:0']);
+        } finally {
+          await broker.disconnect();
+        }
+      }
+    } finally {
+      await producer.disconnect();
+      await admin.deleteTopics({ topics });
+      await admin.disconnect();
+    }
+  },
+);
+
 /** Waits for fresh-topic leaders to serve offsets, preserving permanent failures. */
 async function fetchTopicOffsets(
   admin: Admin,

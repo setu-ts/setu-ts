@@ -4,6 +4,30 @@ import type { PartitionAssigner } from 'kafkajs';
 export type KafkaStartOffsets = Readonly<Record<string, string>>;
 
 /**
+ * Chooses first-join seeks without rewinding a partition already delivered
+ * from its start. A delivery beyond the minimum still seeks to avoid loss.
+ * @param assigned - This member's assigned partitions
+ * @param uncommitted - Partitions without a committed offset
+ * @param minimum - Group minimum start offsets
+ * @param firstDelivered - First offset observed synchronously per partition
+ * @returns Partition offsets to seek, in assignment order
+ * @internal
+ */
+export function partitionsToSeek(
+  assigned: readonly number[],
+  uncommitted: ReadonlySet<number>,
+  minimum: KafkaStartOffsets,
+  firstDelivered: ReadonlyMap<number, string>,
+): Array<{ partition: number; offset: string }> {
+  return assigned.flatMap((partition) => {
+    if (!uncommitted.has(partition) || !Object.hasOwn(minimum, partition)) return [];
+    const offset = minimum[partition]!;
+    const first = firstDelivered.get(partition);
+    return first === undefined || BigInt(first) > BigInt(offset) ? [{ partition, offset }] : [];
+  });
+}
+
+/**
  * Internal codec port. kafkajs's encoder accepts UTF-8 strings in writeBytes,
  * as well as buffers; using that path avoids a runtime-specific Buffer API.
  */

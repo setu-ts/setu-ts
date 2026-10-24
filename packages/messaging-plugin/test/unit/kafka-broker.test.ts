@@ -17,6 +17,35 @@ import {
 } from '../../src/errors.ts';
 
 describe('M113a Kafka bounds and start position', () => {
+  it.each([undefined, '0', '9'])(
+    'M119a first delivery %s while join offsets are pending',
+    async (offset) => {
+      const factory = new FakeKafkaFactory();
+      const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: factory,
+      });
+      await broker.connect();
+      const handler = vi.fn();
+      try {
+        await broker.subscribe('orders', handler, { queue: 'workers' });
+        const consumer = factory.consumer({ groupId: 'workers' });
+        const admin = factory.admins[1]!;
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof admin.fetchOffsets>>>();
+        vi.spyOn(admin, 'fetchOffsets').mockReturnValueOnce(pending.promise);
+        const join = consumer.join({ orders: [0] });
+        if (offset !== undefined)
+          await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+        pending.resolve([{ topic: 'orders', partitions: [{ partition: 0, offset: '-1' }] }]);
+        await join;
+        expect(handler).toHaveBeenCalledTimes(offset === undefined ? 0 : 1);
+        expect(consumer.calls.filter((c) => c.method === 'seek').map((c) => c.args[0])).toEqual(
+          offset === '0' ? [] : [{ topic: 'orders', partition: 0, offset: '0' }],
+        );
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
   it('releases the connected producer when the probe admin cannot connect', async () => {
     const factory = new FakeKafkaFactory();
     const producer = factory.producer();
