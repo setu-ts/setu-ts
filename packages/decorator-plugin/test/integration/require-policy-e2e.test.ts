@@ -38,7 +38,7 @@ import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 
 // Real Zod, guarded (the roles-enforced precedent): only the 400-ordering arm
 // needs it, and it is skipped where the npm specifier cannot load.
-const zodModule = await import('zod-v3').catch(() => undefined);
+const zodModule = await import('zod-v4').catch(() => undefined);
 const z = zodModule?.z;
 
 const SECRET = 'x'.repeat(40);

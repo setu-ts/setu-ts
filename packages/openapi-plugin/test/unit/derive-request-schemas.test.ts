@@ -9,7 +9,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod-v3';
+import { z } from 'zod-v4';
 import type { MiddlewareFunction, RouteInfo, ValidationTarget } from '@setu-ts/common';
 import { VALIDATION_METADATA, withValidationMetadata } from '@setu-ts/common';
 

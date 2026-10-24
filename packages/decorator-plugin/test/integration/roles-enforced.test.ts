@@ -24,7 +24,7 @@ import { metadataStore } from '../../src/metadata/metadata-store.ts';
 // Real Zod, guarded: the 400-ordering arm needs a real schema. That arm is
 // skipped wholesale where the npm specifier cannot load (the
 // decorator-validation precedent) so the rest of the suite still runs.
-const zodModule = await import('zod-v3').catch(() => undefined);
+const zodModule = await import('zod-v4').catch(() => undefined);
 const z = zodModule?.z;
 
 /**

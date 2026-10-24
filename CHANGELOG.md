@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **BREAKING — Zod 3 support removed (0.11.0, `@setu-ts/openapi-plugin`,
+  `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`).** The supported range is now
+  `zod >=4.6.6 <5`; validation still duck-types `safeParse` but is tested with Zod 4 only. OpenAPI
+  schemas without the public `toJSONSchema` method, including Zod 3 schemas, now degrade to `{}`
+  with the existing `not a recognized zod schema` unrepresentable diagnostic. Upgrade Zod to at
+  least 4.6.6 and migrate any Zod 3 API usage before regenerating OpenAPI documents and clients.
+
+### Security
+
+- **Clear two High dependency advisories.** Remove Zod 3 from the workspace and require Zod
+  `>=4.6.6 <5` for [GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5).
+  Override `@azure/msal-node` to `^7.1.0` for
+  [GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5), because
+  `@azure/identity` still requests the vulnerable 6.x line. Applications using the Azure secrets
+  provider should apply the same override until Azure ships an identity release accepting the fix;
+  workspace overrides do not propagate to consumers.
+
 ### Fixed
 
 - **Kafka watermark capture on a new topic (#493, `@setu-ts/messaging-plugin`).** When a new

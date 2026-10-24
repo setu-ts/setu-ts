@@ -11,14 +11,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { z as z3Floor } from 'zod-v3';
 import { z as z4 } from 'zod-v4';
-import { z as z4Floor } from 'zod-v4';
-// Pinned, not ranged: 4.5 is the first version that collapses a union of bare
-// types into a `type` array, and the case must not go vacuous on a lockfile
-// that resolves 4.4.x. See the `issue #253` block.
-import { z as z4Collapsing } from 'zod-v4';
-import { z as z3 } from 'zod-v3';
 
 import type { OpenApiSchemaObject, SchemaNodeHook } from '../../src/transformers/zod-to-openapi.ts';
 import { ZodToOpenApi } from '../../src/transformers/zod-to-openapi.ts';
@@ -275,14 +268,10 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
     expect(result).toEqual({ type: 'string' });
   });
 
-  it('spells a zero-member array as `anyOf: []`, agreeing with the v3 empty union', () => {
+  it('spells a zero-member array as `anyOf: []`', () => {
     const result = new ZodToOpenApi().transform(zod4Like({ type: [] }));
 
     expect(result).toEqual({ anyOf: [] });
-    // The v3 path's own spelling for an option-less union, so the two agree.
-    expect(result).toEqual(
-      new ZodToOpenApi().transform({ _def: { typeName: 'ZodUnion', options: undefined } }),
-    );
   });
 
   it('rewrites at every depth — properties, items and `$defs`', () => {
@@ -451,15 +440,12 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
     expect(new ZodToOpenApi().transform(zod4Like(already))).toEqual(already);
   });
 
-  it('emits `anyOf` from a REAL zod that collapses the spelling (4.5)', () => {
-    // The fake above asserts the rewrite; this asserts the rewrite is aimed
-    // at something real. Pinned at 4.5.4 rather than resolved through
-    // `^4.4.0`, so the case survives a lockfile that resolves 4.4.x — where
-    // zod emits `anyOf` itself and the assertion would pass vacuously.
+  it('emits `anyOf` from supported Zod despite its collapsed spelling', () => {
+    // The fake above asserts the rewrite; this drives the public Zod converter.
     const result = new ZodToOpenApi().transform(
-      z4Collapsing.object({
-        maybe: z4Collapsing.string().nullable(),
-        either: z4Collapsing.union([z4Collapsing.string(), z4Collapsing.number()]),
+      z4.object({
+        maybe: z4.string().nullable(),
+        either: z4.union([z4.string(), z4.number()]),
       }),
     ) as { properties?: Record<string, OpenApiSchemaObject> };
 
@@ -471,102 +457,38 @@ describe('ZodToOpenApi — collapsed `type` arrays (issue #253)', () => {
     });
   });
 
-  it('agrees byte for byte with the zod version that does NOT collapse (4.4)', () => {
-    // The property the normalization exists for: one schema, one document,
-    // whichever zod inside the declared range the application brings.
-    // The schema is written once per namespace rather than passed to a
-    // shared builder: the two installs carry their own version in their
-    // types (the compiler rejects the cast with `minor: 4 is not comparable
-    // to 5`), which is also the evidence that these really are two libraries.
+  it('agrees byte for byte with equivalent explicit anyOf schemas', () => {
     const collapsing = new ZodToOpenApi().transform(
-      z4Collapsing.object({
-        maybe: z4Collapsing.string().nullable(),
-        either: z4Collapsing.union([z4Collapsing.string(), z4Collapsing.number()]),
-        constrained: z4Collapsing.string().min(2).nullable(),
+      z4.object({
+        maybe: z4.string().nullable(),
+        either: z4.union([z4.string(), z4.number()]),
+        constrained: z4.string().min(2).nullable(),
       }),
     );
-    const floor = new ZodToOpenApi().transform(
-      z4Floor.object({
-        maybe: z4Floor.string().nullable(),
-        either: z4Floor.union([z4Floor.string(), z4Floor.number()]),
-        constrained: z4Floor.string().min(2).nullable(),
+    const explicit = new ZodToOpenApi().transform(
+      zod4Like({
+        type: 'object',
+        properties: {
+          maybe: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+          either: { anyOf: [{ type: 'string' }, { type: 'number' }] },
+          constrained: { anyOf: [{ type: 'string', minLength: 2 }, { type: 'null' }] },
+        },
+        required: ['maybe', 'either', 'constrained'],
+        additionalProperties: false,
       }),
     );
 
-    expect(JSON.stringify(collapsing)).toBe(JSON.stringify(floor));
+    expect(JSON.stringify(collapsing)).toBe(JSON.stringify(explicit));
   });
 });
 
-describe('ZodToOpenApi — declared Zod range floors', () => {
-  it('transforms the supported Zod v3.24.0 floor', () => {
-    const result = new ZodToOpenApi().transform(z3Floor.object({ id: z3Floor.string() })) as {
+describe('ZodToOpenApi — supported Zod range', () => {
+  it('transforms an object with the supported Zod v4 range', () => {
+    const result = new ZodToOpenApi().transform(z4.object({ id: z4.string() })) as {
       properties?: Record<string, OpenApiSchemaObject>;
     };
 
     expect(result.properties?.id).toEqual({ type: 'string' });
-  });
-
-  it('transforms the supported Zod v4.4.0 floor', () => {
-    const result = new ZodToOpenApi().transform(z4Floor.object({ id: z4Floor.string() })) as {
-      properties?: Record<string, OpenApiSchemaObject>;
-    };
-
-    expect(result.properties?.id).toEqual({ type: 'string' });
-  });
-});
-
-describe('ZodToOpenApi — zod v3 byte-identity pins', () => {
-  // The zod-4 work must not move a single byte of the zod-3 output. These
-  // three pins assert EXACT equality with the pre-fix shapes.
-  it('pins a plain object', () => {
-    expect(new ZodToOpenApi().transform(z3.object({ name: z3.string() }))).toEqual({
-      type: 'object',
-      properties: { name: { type: 'string' } },
-      required: ['name'],
-    });
-  });
-
-  it('pins a constrained string', () => {
-    expect(new ZodToOpenApi().transform(z3.string().email().min(5))).toEqual({
-      type: 'string',
-      format: 'email',
-      minLength: 5,
-    });
-  });
-
-  it('pins optional handling', () => {
-    expect(new ZodToOpenApi().transform(z3.object({ n: z3.number().optional() }))).toEqual({
-      type: 'object',
-      properties: { n: { type: 'number' } },
-    });
-  });
-});
-
-describe('ZodToOpenApi — diagnostics on the zod v3 arms', () => {
-  it('reports an unrecognized zod v3 type through the channel while still returning `{}`', () => {
-    const reasons: string[] = [];
-    const transformer = new ZodToOpenApi(undefined, {
-      onUnrepresentable: (diagnostic) => reasons.push(diagnostic.reason),
-    });
-
-    const unknownZod3 = { _def: { typeName: 'ZodSomeFutureType' } };
-    expect(transformer.transform(unknownZod3)).toEqual({});
-    expect(reasons).toEqual(['unsupported zod type ZodSomeFutureType']);
-  });
-
-  it('reports a non-zod input through the channel while still returning `{}`', () => {
-    const reasons: string[] = [];
-    const transformer = new ZodToOpenApi(undefined, {
-      onUnrepresentable: (diagnostic) => reasons.push(diagnostic.reason),
-    });
-
-    expect(transformer.transform('not a schema')).toEqual({});
-    expect(reasons).toEqual(['not a recognized zod schema']);
-  });
-
-  it('falls back to `def.options` when a zod v3 enum carries no `values`', () => {
-    const optionsEnum = { _def: { typeName: 'ZodEnum', options: ['a', 'b'] } };
-    expect(new ZodToOpenApi().transform(optionsEnum)).toEqual({ enum: ['a', 'b'] });
   });
 });
 
@@ -599,5 +521,16 @@ describe('ZodToOpenApi — hook bridge over the zod v4 path', () => {
       required: ['id'],
       additionalProperties: false,
     });
+  });
+});
+
+describe('ZodToOpenApi — unsupported schemas', () => {
+  it('degrades legacy schemas to the existing unrecognized-schema diagnostic', () => {
+    const reasons: string[] = [];
+    const transformer = new ZodToOpenApi(undefined, {
+      onUnrepresentable: ({ reason }) => reasons.push(reason),
+    });
+    expect(transformer.transform({ _def: { typeName: 'ZodString' } })).toEqual({});
+    expect(reasons).toEqual(['not a recognized zod schema']);
   });
 });

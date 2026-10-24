@@ -1474,7 +1474,7 @@ describe('setu add validation — Zod dependency', () => {
         dependencies?: Record<string, string>;
       };
       expect(deno ? updated.imports?.['zod'] : updated.dependencies?.['zod']).toBe(
-        deno ? 'npm:zod@^4.4.0' : '^4.4.0',
+        deno ? 'npm:zod@^4.6.6' : '^4.6.6',
       );
     });
   }

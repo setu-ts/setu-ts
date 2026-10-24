@@ -10,6 +10,28 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Upgrade `zod` and override `@azure/msal-node` for Azure secrets (0.11.0)
+
+Upgrade Zod to `>=4.6.6 <5` and migrate any Zod 3 API usage. Zod 3 support has been removed;
+validation is tested with Zod 4 only. OpenAPI schemas without `toJSONSchema` now produce `{}` and
+the existing `not a recognized zod schema` diagnostic in `x-setu-unrepresentable`. Regenerate
+OpenAPI documents and clients after upgrading.
+
+If you use the Azure secrets provider (`@azure/identity`), add this pnpm override to your
+`pnpm-workspace.yaml` until Azure ships an identity release that accepts patched MSAL Node:
+
+```yaml
+overrides:
+  '@azure/msal-node': ^7.1.0
+```
+
+For npm, put `"overrides": { "@azure/msal-node": "^7.1.0" }` in the root `package.json`. Reinstall
+dependencies and verify that the lockfile resolves MSAL Node 7.1.0 or newer. These steps address
+[GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) and
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5).
+
 ## 0.10.0
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)

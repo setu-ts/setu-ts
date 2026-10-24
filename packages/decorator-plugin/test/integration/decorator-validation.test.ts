@@ -18,7 +18,7 @@ import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 // Real Zod, guarded: the suite is skipped where the npm specifier cannot load
 // (the same arrangement the validation-plugin suites use). Class bodies below
 // call these factories only when a test runs, i.e. never while skipped.
-const zodModule = await import('zod-v3').catch(() => undefined);
+const zodModule = await import('zod-v4').catch(() => undefined);
 const z = zodModule?.z;
 
 /** Minimal runtime-provider plugin backed by the fake runtime. */

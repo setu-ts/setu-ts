@@ -472,8 +472,7 @@ export class OpenApiGenerator {
   /**
    * Memoized answer to "do this schema's input and output views differ?".
    *
-   * They do not for any zod v3 schema — that path hand-walks `_def` and has no
-   * `io` concept — nor for a v4 schema carrying no default, transform, coercion
+   * They agree for a schema carrying no default, transform, coercion
    * or object-mode difference. When they agree, everything below behaves
    * exactly as it did before io existed: one count, one component, every site
    * sharing it. The split is paid for only by documents that genuinely have two
@@ -1090,8 +1089,8 @@ export class OpenApiGenerator {
    * Normalizes a response schema value into a schema + description pair.
    *
    * Programmatic routes store the response schema directly (a Zod schema,
-   * identified by its `_def`). Decorator routes (`@ApiResponse`) store a
-   * `{ schema?, description? }` wrapper (`buildResponseSchemas` in the
+   * identified by its public `toJSONSchema` method). Decorator routes
+   * (`@ApiResponse`) store a `{ schema?, description? }` wrapper (`buildResponseSchemas` in the
    * decorator plugin); this unwraps that shape so the inner schema is
    * transformed instead of collapsing to `{}`, and prefers the
    * decorator-provided description over the status-code default.
@@ -1108,12 +1107,11 @@ export class OpenApiGenerator {
       return { schema: undefined, description: fallback };
     }
 
-    // Bare Zod schema (programmatic convention) — identified by `_def` on
-    // zod v3, or the public `toJSONSchema` method on zod v4 (which has no
-    // `_def` at all).
+    // Recognize supported schemas first; other bare objects still reach the
+    // transformer's unrecognized-schema diagnostic without inspecting internals.
     if (
-      '_def' in value ||
-      typeof (value as { toJSONSchema?: unknown }).toJSONSchema === 'function'
+      typeof (value as { toJSONSchema?: unknown }).toJSONSchema === 'function' ||
+      (!Object.hasOwn(value, 'schema') && !Object.hasOwn(value, 'description'))
     ) {
       return { schema: value, description: fallback };
     }
@@ -1349,9 +1347,9 @@ export class OpenApiGenerator {
   /**
    * The dedup bucket a site's references land in.
    *
-   * One bucket per schema while its two views agree — which is every zod v3
-   * schema and most v4 ones — and one per side when they do not, because two
-   * sites that document different shapes cannot share a component.
+   * One bucket per schema while its two views agree, and one per side when
+   * they do not, because two sites describing different shapes cannot share
+   * a component.
    *
    * @param schema - The schema being referenced
    * @returns The io to bucket under
