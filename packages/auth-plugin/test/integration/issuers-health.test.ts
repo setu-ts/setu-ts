@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IJwtService } from '@setu-ts/common';
+import type { IJwtService, ILogger } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -13,11 +13,19 @@ import { HealthPlugin } from '@setu-ts/health-plugin';
 import { AuthPlugin, requireAuth } from '../../src/index.ts';
 import type { IAuthHttp } from '../../src/index.ts';
 import { generateTestKey, signToken } from '../fixtures/issuer-tokens.ts';
+import { recordingLogger } from '../fixtures/scoped.ts';
 
 const ISS = 'https://idp.test';
 const JWKS = 'https://idp.test/jwks';
 
-async function buildApp(available: () => boolean) {
+interface BuildOptions {
+  /** Registered before start, so the plugin's call-time logger sees it. */
+  readonly logger?: ILogger;
+  /** Seconds added to `now` for the signed token's `exp`. */
+  readonly tokenTtlSeconds?: number;
+}
+
+async function buildApp(available: () => boolean, options: BuildOptions = {}) {
   const key = await generateTestKey('ES256', 'k1');
   const calls: string[] = [];
   const http: IAuthHttp = {
@@ -55,12 +63,15 @@ async function buildApp(available: () => boolean) {
     middleware: [requireAuth()],
     handler: (ctx) => ctx.response.json(ctx.request.user),
   });
+  if (options.logger !== undefined) {
+    app.services.register(CAPABILITIES.LOGGER, options.logger);
+  }
   await app.start();
   const token = await signToken(key, {
     iss: ISS,
     aud: 'api',
     sub: 'idp-user',
-    exp: Math.floor(Date.now() / 1000) + 300,
+    exp: Math.floor(Date.now() / 1000) + (options.tokenTtlSeconds ?? 300),
   });
   return { app, token, calls };
 }
@@ -138,6 +149,52 @@ describe('outside issuers through a real app', () => {
       expect(me.statusCode).toBe(200);
       expect((me.json() as { id: string }).id).toBe('self');
       expect(calls).toEqual([]);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('warns once for an unreachable key set across requests, never for token rejections (M119g, V10-62)', async () => {
+    const logger = recordingLogger();
+    const { app, token } = await buildApp(() => false, { logger });
+    try {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const me = await app.inject({
+          method: 'GET',
+          url: '/me',
+          headers: { authorization: `Bearer ${token}` },
+        });
+        expect(me.statusCode).toBe(401);
+      }
+      const warns = logger.records.filter((record) => record.level === 'warn');
+      expect(warns).toEqual([
+        expect.objectContaining({
+          message: "auth-plugin: issuer 'idp' key-set refresh failed (http-status)",
+        }),
+      ]);
+      // The refusals themselves stay at debug: an unauthenticated caller cannot
+      // turn a stream of bad tokens into a stream of warnings.
+      expect(
+        logger.records.filter(
+          (record) => record.level === 'warn' && record.message.includes('token refused'),
+        ),
+      ).toEqual([]);
+    } finally {
+      await app.stop();
+    }
+  });
+
+  it('logs no warn for an expired token from a healthy issuer', async () => {
+    const logger = recordingLogger();
+    const { app, token } = await buildApp(() => true, { logger, tokenTtlSeconds: -300 });
+    try {
+      const me = await app.inject({
+        method: 'GET',
+        url: '/me',
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(me.statusCode).toBe(401);
+      expect(logger.records.filter((record) => record.level === 'warn')).toEqual([]);
     } finally {
       await app.stop();
     }

@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { describeError } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 
 /**
@@ -44,13 +45,17 @@ export function safeLog(
  * described (M109a audit round 5): a store outage answered `500` instead of
  * `503`, and an ingress settle failure became a redelivery.
  *
+ * The description is the shared {@linkcode describeError} rendering, so an
+ * `AggregateError` from a multi-address store is described by its inner errors
+ * and their classifiers instead of an empty message (M119g, V10-63).
+ *
  * @internal
  * @param value - Whatever was thrown or rejected
- * @returns The error's message, else its string form, else its `typeof`
+ * @returns The shared one-line rendering, else its `typeof` when that throws
  */
 export function describeThrown(value: unknown): string {
   try {
-    return value instanceof Error ? String(value.message) : String(value);
+    return describeError(value);
   } catch {
     return typeof value;
   }
