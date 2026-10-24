@@ -499,7 +499,10 @@ AuthPlugin({
   faults do not withdraw this replica from `/ready`. It reads cached state and performs no I/O, so
   it reports `unfetched` until the first token from that issuer arrives.
 - **Failures** return no principal and are logged at `debug` with a fixed reason code, never the
-  token.
+  token. A key-set refresh failure — a provider the operator cannot reach — is the exception: it
+  logs `auth-plugin: issuer '<name>' key-set refresh failed (<reason>)` at `warn` once per change of
+  reason per issuer, and repeats at `debug`; a successful refresh resets it. Both lines carry the
+  fixed reason code, never the token.
 
 **Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
 provider's **ID token** whose `aud` equals `audience` could verify as an access token. That happens
@@ -586,7 +589,10 @@ afterwards.
   scheme, no control character, at most 256 bytes with non-ASCII percent-encoded — and otherwise
   becomes `/`; it is stored at login and never read from the callback URL, so the redirect after
   sign-in cannot be steered. When the provider's discovery document cannot be read, login answers
-  `503` `provider-unavailable` rather than redirecting to an endpoint it never read.
+  `503` `provider-unavailable` rather than redirecting to an endpoint it never read, and logs
+  `auth-plugin: signIn['<provider>'] provider unavailable (<reason>)` at `warn` on the first or a
+  changed reason and at `debug` on a repeat — so a persistent outage cannot flood the log from an
+  unauthenticated route.
 - **Callback** refuses — `401`, or a redirect to `failureRedirect` with `?error=<code>` — with one
   of four fixed codes: `provider-denied` (the provider reported an error), `state-invalid` (unknown,
   replayed, expired, issued for another provider, or an RFC 9207 `iss` naming another issuer),

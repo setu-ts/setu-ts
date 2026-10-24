@@ -646,9 +646,12 @@ here.
   per-indicator readiness membership with an app override, mail out of readiness by default, bounded
   backplane and RabbitMQ queue probes, gRPC health on readiness, migration readiness on a reachable
   connection; V10-49, V10-20, V10-22, V10-31) — complete (PR #499).
+- **Milestone 119g** (`auth-plugin` + `common` + `idempotency-plugin` + `service-discovery-plugin` —
+  failure reasons at `warn` once per state change, `describeError` in `common`, a named discovery
+  503; V10-62, V10-63, V10-34) — complete (PR #500).
 - **Next milestone** — M119c (`cli`, `http-security`, `session`, `openapi`, `telemetry`,
-  `service-discovery` — safe framework, broken default). M119d–M119i, M118 and M120–M123 are open in
-  the ROADMAP; M120 depends on M118.
+  `service-discovery` — safe framework, broken default). M119d–M119f, M119h, M119i, M118 and
+  M120–M123 are open in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 

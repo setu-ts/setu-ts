@@ -25,6 +25,15 @@ All notable changes to this project are documented here. The format follows
   Streams the bound covers the publish's `XADD` only — consumer reads are unaffected. On NATS it is
   passed to the client as its own publish `timeout` and held by the framework's deadline as well.
 
+- **`describeError(value)` (M119g, 0.11.0, `@setu-ts/common`).** A new exported function that
+  renders any thrown value as one bounded diagnostic line —
+  `Name: message (code=…, …) [inner; inner] <- cause` — from the same `serializeError` record the
+  structured sink uses. A non-`Error` value yields `Error: <string>`, an `AggregateError` lists its
+  members, whitespace and control characters collapse to one space, and the line caps at 8192
+  Unicode code points with `… [truncated]`. Pure and total. It is the one renderer behind
+  `createConnectionErrorReporter`, the idempotency plugin's claim/release/settle lines, and the
+  messaging plugin's broker error lines (moved from there unchanged).
+
 - **`HealthIndicatorOptions` and per-indicator readiness membership (M119b, 0.11.0,
   `@setu-ts/common`).** A new exported interface whose only member is `readiness?: boolean`; absent
   means the indicator counts toward readiness, which is the previous behaviour. It is carried by an
@@ -102,6 +111,32 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **Connection-error lines no longer read `error: ""` for an `AggregateError` (V10-63, M119g,
+  0.11.0, `@setu-ts/common`).** `createConnectionErrorReporter` logged `error.message` only, and an
+  ioredis `AggregateError` carries an empty message, so a two-address `ECONNREFUSED` outage produced
+  `error: ""` in every consumer (cache, idempotency, auth rate-limit store, messaging Redis Streams,
+  queue, realtime backplane, scheduler). The line is now rendered by `describeError`, so it carries
+  each inner message and its `code=…` classifiers; the de-dup key is that rendering, so a stable
+  outage still reports once at `warn` and repeats at `debug`. The idempotency plugin's
+  claim/release/settle lines use the same renderer.
+
+- **A sign-in provider outage names its reason at `warn`, once per state change (V10-62, M119g,
+  0.11.0, `@setu-ts/auth-plugin`).** A login route that answered `503 provider-unavailable` wrote no
+  log line at any level, so a Keycloak issuer mismatch (X74 b) was silent. `resolveEndpoints` now
+  returns a fixed reason code (`key-set-missing`, `discovery-endpoint-invalid`, or the key set's
+  last discovery failure), and the routes report
+  `auth-plugin: signIn['<provider>'] provider unavailable (<reason>)` at `warn` on a new or changed
+  reason, at `debug` on a repeat, and warn again after a successful resolve. The logout path shares
+  the reporter. The outside-issuer bearer path reports
+  `auth-plugin: issuer '<name>' key-set refresh failed (<reason>)` the same way; token rejections
+  stay at `debug`.
+
+- **A service-discovery cold outage is answered as a named 503 (V10-34, M119g, 0.11.0,
+  `@setu-ts/service-discovery-plugin`).** With nothing cached, a backend failure threw an unbranded
+  `DiscoveryUnavailableError`, which `errorHandler` normalized to a masked 500. That instance now
+  carries a `503 Service Unavailable` status hint with the fixed detail "Service discovery is
+  temporarily unavailable."; configuration failures stay unbranded and are still answered as 500.
 
 - **Kafka watermark capture on a new topic (#493, `@setu-ts/messaging-plugin`).** When a new
   consumer group subscribed to a topic created moments earlier, the read of that topic's offsets
