@@ -24,11 +24,69 @@ import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import { RabbitMqQueue } from '../../src/adapters/rabbitmq-queue.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IQueue, IQueueDiagnosticsSource, IRuntimeServices } from '@setu-ts/common';
+import type {
+  HealthReport,
+  IQueue,
+  IQueueDiagnosticsSource,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { QueuePlugin } from '../../src/index.ts';
+
+describe('M119b REAL RabbitMQ queue reachability', () => {
+  it(
+    'paused broker reports unknown, stopped broker reports down through /ready',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = toIpv4(process.env['RABBITMQ_URL']!);
+      const port = Number(new URL(url).port || 5672);
+      const containerId = await containerIdForPort(port);
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HealthPlugin({ details: true }),
+          QueuePlugin({ adapter: 'rabbitmq', url }),
+        ],
+      });
+      let paused = false;
+      try {
+        await app.start();
+        await docker(['pause', containerId]);
+        paused = true;
+        const started = performance.now();
+        const ready = await app.inject({ method: 'GET', url: '/ready' });
+        expect(performance.now() - started).toBeLessThan(3500);
+        expect(ready.statusCode).toBe(200);
+        const check = ready.json<HealthReport>().checks.queue;
+        expect(check).toMatchObject({ status: 'up', data: { reachable: 'unknown' } });
+        expect(check.data).not.toHaveProperty('queues');
+        await docker(['unpause', containerId]);
+        paused = false;
+        await docker(['stop', containerId]);
+        await waitTrue(
+          async () => {
+            const result = await app.inject({ method: 'GET', url: '/ready' });
+            return (
+              result.statusCode === 503 &&
+              result.json<HealthReport>().checks.queue.data?.reachable === false
+            );
+          },
+          'stopped queue down',
+          15000,
+        );
+      } finally {
+        if (paused) await docker(['unpause', containerId]);
+        await docker(['start', containerId]);
+        await waitForPort(port, 30000);
+        await app.stop();
+      }
+    },
+  );
+});
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 

@@ -6,6 +6,7 @@
 import type {
   HealthCheckResult,
   HealthIndicatorFn,
+  HealthIndicatorOptions,
   HealthObservationState,
   HealthReport,
   HealthStatus,
@@ -94,6 +95,7 @@ export function isIndicatorRegistered(service: HealthService, name: string): boo
 interface RegisteredIndicator {
   readonly name: string;
   readonly check: HealthIndicatorFn;
+  readonly readiness: boolean;
 }
 
 /**
@@ -211,11 +213,15 @@ export class HealthService implements IHealthService {
    *
    * @throws {Error} If an indicator with the same name is already registered
    */
-  registerIndicator(name: string, indicator: HealthIndicatorFn): void {
+  registerIndicator(
+    name: string,
+    indicator: HealthIndicatorFn,
+    options?: HealthIndicatorOptions,
+  ): void {
     if (this.#indicators.has(name)) {
       throw new Error(`Duplicate health indicator name: "${name}"`);
     }
-    this.#indicators.set(name, { name, check: indicator });
+    this.#indicators.set(name, { name, check: indicator, readiness: options?.readiness ?? true });
   }
 
   /**
@@ -237,10 +243,12 @@ export class HealthService implements IHealthService {
   /**
    * {@inheritDoc IHealthService.checkReady}
    *
-   * Runs all indicators except "self".
+   * Runs readiness members, excluding "self". Membership is fixed at registration.
    */
   checkReady(): Promise<HealthReport> {
-    return this.#runIndicators((name) => name !== 'self');
+    return this.#runIndicators(
+      (name) => name !== 'self' && this.#indicators.get(name)?.readiness === true,
+    );
   }
 
   /**

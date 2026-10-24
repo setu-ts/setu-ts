@@ -70,6 +70,7 @@ export function mapHealthStatus(status: 'up' | 'down' | 'degraded'): GrpcServing
  *   answer `SERVICE_UNKNOWN` for a name the server does not serve.
  * @param requestedService - The `service` field. The empty string (or absent)
  *   means "the whole server" and yields the mapped aggregate.
+ * @returns The serving status of readiness members, or not-serving on failure
  */
 export async function resolveServingStatus(
   healthService: IHealthService | undefined,
@@ -87,7 +88,7 @@ export async function resolveServingStatus(
   }
 
   try {
-    const report = await healthService.check();
+    const report = await healthService.checkReady();
     return mapHealthStatus(report.status);
   } catch {
     // A health check that throws is not evidence of health.

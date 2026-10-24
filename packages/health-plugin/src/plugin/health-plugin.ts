@@ -9,7 +9,6 @@
 import type {
   HandlerResult,
   HealthDiagnosticsSnapshot,
-  HealthIndicatorFn,
   HealthReport,
   IHealthDiagnosticsSource,
   IHealthIndicator,
@@ -65,12 +64,42 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
   };
 }
 
+/** Validate and copy operator membership once, without echoing topology. */
+function compileReadiness(options: HealthPluginOptions['readiness']): {
+  include: ReadonlySet<string>;
+  exclude: ReadonlySet<string>;
+} {
+  if (options !== undefined && (typeof options !== 'object' || options === null)) {
+    throw new TypeError('HealthPlugin readiness must be an object.');
+  }
+  const readNames = (raw: unknown, option: string): ReadonlySet<string> => {
+    if (raw === undefined) return new Set();
+    if (
+      !Array.isArray(raw) ||
+      [...raw].some(
+        (name: unknown) => typeof name !== 'string' || name.trim() === '' || name === 'self',
+      )
+    ) {
+      throw new TypeError(
+        `HealthPlugin readiness.${option} must be an array of valid non-empty indicator names.`,
+      );
+    }
+    return new Set(raw as string[]);
+  };
+  const include = readNames(options?.include, 'include');
+  const exclude = readNames(options?.exclude, 'exclude');
+  if ([...include].some((name) => exclude.has(name))) {
+    throw new TypeError('HealthPlugin readiness.include and readiness.exclude must not overlap.');
+  }
+  return { include, exclude };
+}
+
 /**
  * Creates a health plugin.
  *
  * @param options - Plugin configuration options
  * @returns A plugin that registers an `IHealthService` under `'health'`
- * @throws {TypeError} If details is not a boolean
+ * @throws {TypeError} If details is not a boolean or readiness membership is invalid
  *
  * @example
  * ```typescript
@@ -99,6 +128,7 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
  * @since 0.2.0
  */
 export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
+  const readiness = compileReadiness(options?.readiness);
   if (options?.details !== undefined && typeof options.details !== 'boolean') {
     throw new TypeError('HealthPlugin details must be a boolean.');
   }
@@ -152,6 +182,16 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // Create the health service
       const service = new HealthService(runtime, { indicatorTimeoutMs });
 
+      // Resolve membership once for every source. Operator choices override
+      // contributor defaults; request-time checks only read the stored flag.
+      const registerIndicator = (indicator: IHealthIndicator): void => {
+        service.registerIndicator(indicator.name, indicator.check.bind(indicator), {
+          readiness:
+            readiness.include.has(indicator.name) ||
+            (!readiness.exclude.has(indicator.name) && (indicator.readiness ?? true)),
+        });
+      };
+
       // Register the service
       ctx.services.register<IHealthService>(CAPABILITIES.HEALTH, service);
 
@@ -162,7 +202,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // Register any app-supplied indicator INSTANCES, exactly as before the
       // factory arm existed.
       for (const indicator of instances) {
-        service.registerIndicator(indicator.name, indicator.check.bind(indicator));
+        registerIndicator(indicator);
       }
 
       // Register the health endpoints
@@ -220,16 +260,23 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
             ctx.services,
             `HealthPlugin({ indicators })[${slot.index}]`,
           );
-          service.registerIndicator(indicator.name, indicator.check.bind(indicator));
+          registerIndicator(indicator);
         }
 
-        const contributions = ctx.services.getAll<{
-          name: string;
-          check: HealthIndicatorFn;
-        }>(CAPABILITIES.HEALTH_INDICATOR);
+        const contributions = ctx.services.getAll<IHealthIndicator>(CAPABILITIES.HEALTH_INDICATOR);
 
         for (const contribution of contributions) {
-          service.registerIndicator(contribution.name, contribution.check);
+          registerIndicator(contribution);
+        }
+        // Names are sensitive topology. Warn once after all three sources
+        // have registered, retaining only a count in the diagnostic.
+        const missing = [...readiness.include, ...readiness.exclude].filter(
+          (name) => !isIndicatorRegistered(service, name),
+        ).length;
+        if (missing > 0) {
+          ctx.logger?.warn(
+            `Health readiness: ${missing} indicator name(s) match no registered indicator.`,
+          );
         }
       });
     },

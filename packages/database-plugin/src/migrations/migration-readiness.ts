@@ -54,7 +54,13 @@ export function validateMigrationReadiness(
   });
 }
 
-/** Compose the existing indicator with an independent bounded, cached ledger read. */
+/**
+ * Compose the existing indicator with a bounded, cached ledger read when reachable.
+ * @param database - Database owning the migration ledger
+ * @param options - Expected migrations and optional ledger entity
+ * @param timing - Monotonic clock and timer services
+ * @returns An evaluator preserving unreachable results with unknown migration state
+ */
 export function createMigrationReadiness(
   database: IDatabaseService,
   options: DatabaseReadinessOptions,
@@ -73,7 +79,13 @@ export function createMigrationReadiness(
     ...timing,
   });
   return async (result) => {
-    if (result.status === 'down') return result;
+    if (
+      result.status === 'down' ||
+      result.data?.reachable === false ||
+      result.data?.reachable === 'unknown'
+    ) {
+      return { ...result, data: { ...result.data, migrations: { state: 'unknown' } } };
+    }
     const applied = await probe();
     if (applied === 'unreadable') {
       return { status: 'down', data: { ...result.data, migrations: { state: 'unreadable' } } };
