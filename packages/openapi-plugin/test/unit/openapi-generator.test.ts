@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod-v3';
+import { z } from 'zod-v4';
 import type { MiddlewareFunction, RouteInfo } from '@setu-ts/common';
 import { withSecurityMetadata } from '@setu-ts/common';
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
@@ -403,6 +403,7 @@ describe('OpenApiGenerator', () => {
         type: 'object',
         properties: { id: { type: 'string' } },
         required: ['id'],
+        additionalProperties: false,
       });
     });
 
@@ -435,7 +436,7 @@ describe('OpenApiGenerator', () => {
         version: '1.0.0',
       });
 
-      const userSchema = z.object({ id: z.string(), name: z.string() });
+      const userSchema = z.strictObject({ id: z.string(), name: z.string() });
 
       const routes: readonly RouteInfo[] = [
         {
@@ -483,7 +484,7 @@ describe('OpenApiGenerator', () => {
         version: '1.0.0',
       });
 
-      const userSchema = z.object({ id: z.string(), name: z.string() });
+      const userSchema = z.strictObject({ id: z.string(), name: z.string() });
 
       // Use the same schema twice to trigger deduplication
       const routes: readonly RouteInfo[] = [
@@ -642,7 +643,11 @@ describe('OpenApiGenerator', () => {
       ]);
 
       const params = result.paths['/users/{id}']?.get?.parameters;
-      expect(params?.[0]?.schema).toEqual({ type: 'string', format: 'uuid' });
+      expect(params?.[0]?.schema).toEqual({
+        type: 'string',
+        format: 'uuid',
+        pattern: z.string().uuid().toJSONSchema().pattern,
+      });
     });
 
     it('should give each parameter its OWN default schema object', () => {

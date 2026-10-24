@@ -9,7 +9,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod-v3';
+import { z } from 'zod-v4';
 import type { RouteInfo } from '@setu-ts/common';
 
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';

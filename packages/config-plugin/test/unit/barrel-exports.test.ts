@@ -13,7 +13,7 @@ const configContractHasExactlyFourMembers: IsEqual<keyof IConfig, 'get' | 'getOr
 
 describe('config-plugin barrel exports', () => {
   it('exports typed configuration-section definitions and accessors', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const section: ConfigSection<{ readonly PORT: number }> = defineConfigSection({
       prefix: 'APP_',
       keys: ['PORT'],

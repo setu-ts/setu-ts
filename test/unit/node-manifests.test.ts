@@ -358,11 +358,11 @@ describe('externalAliases — the member import map (§10, correction 10)', () =
 
 it('maps aliased test dependencies to their real npm package', () => {
   const input = member('packages/openapi-plugin', '@setu-ts/openapi-plugin', {
-    'test/alias.test.ts': "import { z } from 'zod-v3'; import { v } from 'zod-v4/v4';",
+    'test/alias.test.ts': "import { z } from 'zod-v4'; import { v } from 'zod-v4/v4';",
   });
   expect([...externalAliases(input)]).toEqual([
-    ['zod-v3', 'npm:zod@^3.24.0'],
-    ['zod-v4/v4', 'npm:zod@^4.4.0/v4'],
+    ['zod-v4', 'npm:zod@^4.6.6'],
+    ['zod-v4/v4', 'npm:zod@^4.6.6/v4'],
   ]);
 });
 
@@ -381,10 +381,10 @@ describe('renderDenoJson — splices only the imports block', () => {
   it('replaces a stale bare alias and keeps a prefixed pin, sorted', () => {
     const raw =
       '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "stale": "npm:stale@1",\n' +
-      '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n';
+      '    "npm:zod@^4.6.6": "npm:zod@^4.6.6"\n  }\n}\n';
     expect(renderDenoJson(raw, aliases)).toBe(
       '{\n  "name": "@setu-ts/x",\n  "imports": {\n    "hono": "npm:hono@^4.12.30",\n' +
-        '    "npm:zod@^3.24.0": "npm:zod@^3.24.0"\n  }\n}\n',
+        '    "npm:zod@^4.6.6": "npm:zod@^4.6.6"\n  }\n}\n',
     );
   });
 

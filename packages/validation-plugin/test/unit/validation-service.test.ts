@@ -137,7 +137,7 @@ describe('ValidationService — real Zod schema', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let z: { z: any };
     try {
-      const mod = await import('zod-v3');
+      const mod = await import('zod-v4');
       z = mod;
     } catch {
       // Skip if npm:zod is unavailable in the test environment.
@@ -168,7 +168,7 @@ describe('ValidationService — real Zod schema', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let z: { z: any };
     try {
-      const mod = await import('zod-v3');
+      const mod = await import('zod-v4');
       z = mod;
     } catch {
       return;
