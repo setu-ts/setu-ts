@@ -19,14 +19,60 @@ import { run as runProcess } from '../../../../test/node-helpers.ts';
 import { describe, expect, it } from 'vitest';
 import type {
   IRealtimeBackplane,
+  HealthReport,
   IRealtimeDiagnosticsSource,
   RealtimeDiagnosticsSnapshot,
 } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { HealthPlugin } from '@setu-ts/health-plugin';
 import { RealtimeBackplanePlugin } from '../../src/index.ts';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
+
+describe('M119b REAL paused Redis backplane readiness', () => {
+  it(
+    'paused Redis keeps /ready 200 with unknown reachability inside the probe bound',
+    {
+      skip: process.env['REDIS_URL'] === undefined,
+    },
+    async () => {
+      const url = toIpv4(process.env['REDIS_URL']!);
+      const containerId = await containerIdForPort(Number(new URL(url).port || 6379));
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HealthPlugin({ details: true }),
+          RealtimeBackplanePlugin({ transport: 'redis', url }),
+        ],
+      });
+      let paused = false;
+      try {
+        await app.start();
+        const backplane = app.services.get<IRealtimeBackplane>(CAPABILITIES.REALTIME_BACKPLANE);
+        await waitTrue(async () => await backplane.isHealthy!(), 'connected Redis', 15000);
+        await docker(['pause', containerId]);
+        paused = true;
+        const started = performance.now();
+        const ready = await app.inject({ method: 'GET', url: '/ready' });
+        expect(performance.now() - started).toBeLessThan(3500);
+        expect(ready.statusCode).toBe(200);
+        expect(ready.json<HealthReport>().checks['realtime-backplane']).toMatchObject({
+          status: 'up',
+          data: { reachable: 'unknown' },
+        });
+        const cached = await app.inject({ method: 'GET', url: '/ready' });
+        expect(cached.json<HealthReport>().checks['realtime-backplane'].data?.reachable).toBe(
+          'unknown',
+        );
+      } finally {
+        if (paused) await docker(['unpause', containerId]);
+        await docker(['start', containerId]);
+        await app.stop();
+      }
+    },
+  );
+});
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 

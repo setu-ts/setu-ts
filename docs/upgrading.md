@@ -69,6 +69,45 @@ on the Kafka, Pub/Sub, RabbitMQ, Redis Streams or NATS arm that publishes.
   consumer while it reads. A user queue literally named `messaging-<uuid>` is a reserved shape for
   this reason: such a consumer is reaped only after 5 min with no client attached.
 
+### Health indicators gain a readiness membership, and a mail outage no longer drains every replica (M119b, 0.11.0, `@setu-ts/health-plugin`, `@setu-ts/mail-plugin`)
+
+Affects every application that registers `HealthPlugin`, and — through the changed default and the
+repaired probes — every application using `@setu-ts/mail-plugin`, `@setu-ts/queue-plugin`,
+`@setu-ts/realtime-backplane-plugin`, `@setu-ts/database-plugin` (migration readiness) or the gRPC
+health bridge.
+
+- **A mail outage no longer fails `/ready`.** The `mail` indicator is registered outside readiness
+  by default (V10-49). Its status mapping is unchanged: an unreachable mail backend still reads
+  `down`, so `/health` reports the outage (503) and alerts still fire — but `/ready` ignores the
+  indicator and stays 200, because an SMTP outage is shared by every replica and does not stop
+  request serving. **To restore the previous behaviour, pass
+  `HealthPlugin({ readiness: { include: ['mail'] } })`.**
+- **Override readiness membership by name.**
+  `HealthPlugin({ readiness: { include: [...], exclude: [...] } })` forces a named indicator into
+  readiness (`include`) or out of it (`exclude`), overriding what the contributing plugin declared;
+  a plugin can declare it itself with `ctx.health.register(name, fn, { readiness: false })`. An
+  invalid list (a non-array, an empty or non-string name, the name `self`, or a name in both lists)
+  throws `TypeError` at `HealthPlugin(...)`; names that match no registered indicator produce one
+  count-only warning at startup. An indicator outside readiness still runs on `/health` — its `down`
+  still 503s the endpoint and still alerts — but is absent from the `/ready` report.
+- **A queue reachability check that does not answer is `up` with `reachable: 'unknown'`.** For every
+  queue adapter, a check that does not answer within its 2 s bound now reports `up` with
+  `reachable: 'unknown'` and no depth counts, instead of `down`: a queue backend that hangs keeps
+  the replica in rotation where it used to be drained, and a stopped broker still reads `down` at
+  once. The RabbitMQ adapter's check also opens and closes a throwaway channel, so a paused broker
+  no longer reports `reachable: true` (V10-22).
+- **A paused Redis no longer drains the replica through the backplane indicator (V10-20).** The
+  `realtime-backplane` reachability check is cached for 5 s and bounded at 2 s; a check that does
+  not answer within the bound reports `reachable: 'unknown'` and the status stays `up`.
+- **gRPC health reads readiness.** `grpc.health.v1.Health/Check` for the whole server now maps the
+  readiness report, so an indicator that is out of readiness (mail, by default) no longer turns the
+  server `NOT_SERVING`.
+- **A paused database reads `degraded` in one bound (V10-31).** With migration readiness opted in,
+  the ledger is read only on a reachable connection; otherwise the indicator's result is returned
+  unchanged with `data.migrations.state: 'unknown'` added — an adapter with no reachability check is
+  still checked — and a paused database reads `degraded` within one ~2 s bound instead of `down`
+  after ~4 s.
+
 ## 0.10.0
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)

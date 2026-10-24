@@ -9,7 +9,6 @@
 import type {
   HandlerResult,
   HealthDiagnosticsSnapshot,
-  HealthIndicatorFn,
   HealthReport,
   IHealthDiagnosticsSource,
   IHealthIndicator,
@@ -29,6 +28,7 @@ import {
 } from '../diagnostics/health-observation-collector.ts';
 import {
   attachHealthObservation,
+  compileReadiness,
   HealthService,
   isIndicatorRegistered,
   resolveIndicatorTimeout,
@@ -70,7 +70,7 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
  *
  * @param options - Plugin configuration options
  * @returns A plugin that registers an `IHealthService` under `'health'`
- * @throws {TypeError} If details is not a boolean
+ * @throws {TypeError} If details is not a boolean or readiness membership is invalid
  *
  * @example
  * ```typescript
@@ -99,6 +99,7 @@ function createDisabledHealthSource(): IHealthDiagnosticsSource {
  * @since 0.2.0
  */
 export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
+  const readiness = compileReadiness(options?.readiness);
   if (options?.details !== undefined && typeof options.details !== 'boolean') {
     throw new TypeError('HealthPlugin details must be a boolean.');
   }
@@ -150,7 +151,22 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       const runtime = ctx.runtime;
 
       // Create the health service
-      const service = new HealthService(runtime, { indicatorTimeoutMs });
+      // The override is applied INSIDE the service, so a plugin that calls
+      // `IHealthService.registerIndicator` directly is covered too.
+      const service = new HealthService(runtime, {
+        indicatorTimeoutMs,
+        readiness: { include: [...readiness.include], exclude: [...readiness.exclude] },
+      });
+
+      // Every source passes its declared membership; the service applies the
+      // operator's include/exclude once, at registration.
+      const registerIndicator = (indicator: IHealthIndicator): void => {
+        service.registerIndicator(
+          indicator.name,
+          indicator.check.bind(indicator),
+          indicator.readiness === undefined ? undefined : { readiness: indicator.readiness },
+        );
+      };
 
       // Register the service
       ctx.services.register<IHealthService>(CAPABILITIES.HEALTH, service);
@@ -162,7 +178,7 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
       // Register any app-supplied indicator INSTANCES, exactly as before the
       // factory arm existed.
       for (const indicator of instances) {
-        service.registerIndicator(indicator.name, indicator.check.bind(indicator));
+        registerIndicator(indicator);
       }
 
       // Register the health endpoints
@@ -220,18 +236,34 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
             ctx.services,
             `HealthPlugin({ indicators })[${slot.index}]`,
           );
-          service.registerIndicator(indicator.name, indicator.check.bind(indicator));
+          registerIndicator(indicator);
         }
 
-        const contributions = ctx.services.getAll<{
-          name: string;
-          check: HealthIndicatorFn;
-        }>(CAPABILITIES.HEALTH_INDICATOR);
+        const contributions = ctx.services.getAll<IHealthIndicator>(CAPABILITIES.HEALTH_INDICATOR);
 
         for (const contribution of contributions) {
-          service.registerIndicator(contribution.name, contribution.check);
+          registerIndicator(contribution);
         }
       });
+
+      // Names are sensitive topology: warn once, retaining only a count. Run at
+      // bootstrap, after EVERY plugin's onInit, so an indicator another plugin
+      // registers directly through IHealthService from its own onInit (which
+      // runs after this plugin's, in registration order) is not miscounted.
+      // Registered only when an override names something, so a plugin with no
+      // readiness option adds no hook (the same rule the diagnostics wiring keeps).
+      if (readiness.include.size + readiness.exclude.size > 0) {
+        ctx.lifecycle.onBootstrap(() => {
+          const missing = [...readiness.include, ...readiness.exclude].filter(
+            (name) => !isIndicatorRegistered(service, name),
+          ).length;
+          if (missing > 0) {
+            ctx.logger?.warn(
+              `Health readiness: ${missing} indicator name(s) match no registered indicator.`,
+            );
+          }
+        });
+      }
     },
   };
 }

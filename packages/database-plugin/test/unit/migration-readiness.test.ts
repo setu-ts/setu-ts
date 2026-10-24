@@ -83,17 +83,58 @@ describe('migration readiness', () => {
     },
   );
 
-  it('empty expected set is current and down bypasses ledger reads unchanged', async () => {
+  it('empty expected set is current and down bypasses ledger reads with unknown migrations', async () => {
     const { database, evaluate } = await setup([]);
     const read = vi.spyOn(database, 'getRepository');
     const down: HealthCheckResult = { status: 'down', data: { reachable: false } };
-    expect(await evaluate(down)).toBe(down);
+    expect(await evaluate(down)).toEqual({
+      ...down,
+      data: { ...down.data, migrations: { state: 'unknown' } },
+    });
     expect(read).not.toHaveBeenCalled();
     expect(await evaluate(up)).toEqual({
       status: 'up',
       data: { adapter: 'memory', migrations: { state: 'current', applied: 0 } },
     });
     await database.close();
+  });
+
+  it.each<HealthCheckResult>([
+    { status: 'down' },
+    { status: 'down', data: { reachable: true, reason: 'lifecycle' } },
+    { status: 'degraded', data: { reachable: 'unknown', pool: 'saturated' } },
+    { status: 'up', data: { reachable: 'unknown' } },
+    { status: 'up', data: { reachable: false } },
+  ])('skips ledger while reachability is unavailable (%j)', async (input) => {
+    const { database, evaluate } = await setup();
+    const read = vi.spyOn(database, 'getRepository');
+    try {
+      expect(await evaluate(input)).toEqual({
+        ...input,
+        data: { ...input.data, migrations: { state: 'unknown' } },
+      });
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      await database.close();
+    }
+  });
+
+  it.each([undefined, true])('still reads ledger with reachable %s', async (reachable) => {
+    const { database, evaluate } = await setup();
+    const read = vi.spyOn(database, 'getRepository');
+    try {
+      const input: HealthCheckResult = {
+        status: 'up',
+        ...(reachable === undefined ? {} : { data: { reachable } }),
+      };
+      expect(await evaluate(input)).toMatchObject({
+        status: 'degraded',
+        data: { migrations: { state: 'pending', pending: 1 } },
+      });
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      await database.close();
+    }
   });
 
   it.each(['reject', 'oversized', 'hang'] as const)('unreadable on %s', async (mode) => {

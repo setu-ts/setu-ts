@@ -97,23 +97,32 @@ describe('RabbitMQ queue reconnect', () => {
     await queue.connect();
     await queue.enqueue(job);
     expect(await queue.reserve('email', 1, 0)).toHaveLength(1);
+    let processing = connection.channels[0];
     for (let i = 0; i < 20; i++) {
-      const old = connection.channels.at(-1)!;
+      const old = processing;
       connection.emit('error', new Error('fault'));
       connection.emit('close');
       expect(await queue.isHealthy!()).toBe(false);
       await runtime.advanceMs(1000);
       expect(await queue.isHealthy!()).toBe(true);
+      processing = connection.channels.at(-2)!;
       expect(old.listenerCount('error')).toBe(0);
       expect(connection.listenerCount('error')).toBe(1);
       expect(connection.listenerCount('close')).toBe(1);
     }
-    expect(connection.channels).toHaveLength(21);
+    // One initial processing channel, then a reopened processing channel and
+    // one throwaway health channel per flap. Every health channel is released.
+    expect(connection.channels).toHaveLength(41);
+    for (let index = 2; index < connection.channels.length; index += 2) {
+      expect(
+        connection.channels[index].calls.filter((call) => call.method === 'close'),
+      ).toHaveLength(1);
+    }
     expect(connection.closes).toBe(0);
     await expect(queue.ack('email', 'old')).rejects.toThrow('claim is stale');
     await expect(queue.requeue('email', 'old', 0, 2)).rejects.toThrow('claim is stale');
     await expect(queue.deadLetter('email', 'old', 0)).rejects.toThrow('claim is stale');
-    const channel = connection.channels.at(-1)!;
+    const channel = processing;
     expect(channel.calls.filter((call) => call.method === 'ack')).toEqual([]);
     await queue.enqueue({ ...job, id: 'new' });
     expect(channel.calls.filter((call) => call.method === 'assertQueue')).toHaveLength(3);
@@ -124,7 +133,7 @@ describe('RabbitMQ queue reconnect', () => {
     expect(connection.listenerCount('error')).toBe(0);
     expect(channel.listenerCount('error')).toBe(0);
     await runtime.advanceMs(60_000);
-    expect(connection.channels).toHaveLength(21);
+    expect(connection.channels).toHaveLength(41);
   });
 
   it('retries failed channel creation and cancels pending retries on disconnect', async () => {

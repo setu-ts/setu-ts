@@ -1585,6 +1585,9 @@ importers:
       '@aws-sdk/client-sesv2':
         specifier: ^3
         version: 3.1154.0
+      '@setu-ts/health-plugin':
+        specifier: workspace:^
+        version: link:../health-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

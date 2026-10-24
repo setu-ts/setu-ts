@@ -22,6 +22,7 @@ import type {
   EnvVarSpec,
   FormBody,
   HealthIndicatorFn,
+  HealthIndicatorOptions,
   IApplication,
   IConfig,
   IContainer,
@@ -593,10 +594,18 @@ class Application implements IKernelApplication {
       router: this.#router,
       lifecycle: this.#lifecycle,
       health: {
-        register(name: string, indicator: HealthIndicatorFn): void {
+        register(
+          name: string,
+          indicator: HealthIndicatorFn,
+          options?: HealthIndicatorOptions,
+        ): void {
           registry.register(
             CAPABILITIES.HEALTH_INDICATOR,
-            { name, check: indicator },
+            {
+              name,
+              check: indicator,
+              ...(options?.readiness !== undefined && { readiness: options.readiness }),
+            },
             { multi: true },
           );
         },
