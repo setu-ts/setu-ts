@@ -15228,13 +15228,13 @@ Plus V10-41 (the react-router README and `docs/deployment.md` do not say V10-17 
 Part 18 generator gaps that are not rows: `setu add cache` installs no `ioredis`, and in a
 Redis-transport workspace `setu add cache|scheduler|realtime-backplane` inserts in-memory defaults.
 
-**Decisions the plan takes, per row:** change the default, make the generator or `setu add` write
-the setting, or make the failure name the setting where it shows. The framework-level questions are
-V10-1 (do the two defaults stay incompatible, or does the CSRF check accept `Origin: null` when
-`Sec-Fetch-Site: same-origin` says the navigation is same-origin — M113n's rule already reads
-`Sec-Fetch-Site`) and V10-36 (pin the CLI-installed range to the hashed version, or compute SRI for
-the installed one). V10-17 gets a CLI path: the full-stack template asks for, or emits a commented,
-`trustedProxies`. **Gate:** every row gets a test that reproduces the broken setup through the
+**Decisions taken (plan `plans/archive/milestone-119c-safe-defaults.md`):** V10-1 — the CSRF check
+accepts `Origin: null` only with `Sec-Fetch-Site: same-origin` (maintainer decision 2026-10-24, the
+Fetch Metadata rule Go and Hono use; the `no-referrer` default stays). V10-36 — the CLI installs
+`swagger-ui-dist` at exactly `5.33.3`, the release the SRI hashes match. V10-17 — the full-stack
+template reads `TRUSTED_PROXIES` (empty leaves IP security off). V10-29 was measured to be the
+`node --test` runner, not a leaked client; generated Node scripts pass `--test-force-exit`. V10-14
+is documentation only. **Gate:** every row gets a test that reproduces the broken setup through the
 generated project or the documented example, not a unit test of the setting.
 
 ---

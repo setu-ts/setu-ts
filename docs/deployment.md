@@ -58,7 +58,13 @@ client came from the forwarded chain. `requestOriginOf(ctx)` and `publicRequestU
 `@setu-ts/common` expose it. Session `secure: 'auto'` sets `Secure` for that origin's HTTPS
 protocol, including deletion; the default remains `true`. `'auto'` with `sameSite: 'none'` is
 refused at construction because `SameSite=None` forces `Secure`. The React Router bridge passes the
-public URL to loaders and actions. Without IP security these consumers use `ctx.request.url`.
+public URL to loaders and actions. Without IP security these consumers use `ctx.request.url` — and
+behind a TLS-terminating proxy that makes **every React Router action answer 400**, because React
+Router's own origin check compares the browser's `https` origin with the internal `http` URL
+(V10-41). A `setu new --template full-stack` project reads `TRUSTED_PROXIES` (a comma-separated CIDR
+list of your proxies) and registers IP security from it; empty leaves it off. Set it to your
+proxies' addresses only: `0.0.0.0/0` or `::/0` would let every client choose its own address and
+origin.
 
 `csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`

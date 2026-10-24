@@ -109,10 +109,11 @@ or the documentation name it.
 ### 3.4 The CLI installs `swagger-ui-dist` at `5.33.3` (V10-36)
 
 - **Decision:** every CLI site that installs `swagger-ui-dist` writes the exact version `5.33.3`
-  (one constant beside `SWAGGER_ASSET_PACKAGE`, read by `full-stack.ts` and `module-seam.ts`), and a
-  test asserts that constant equals the version in the openapi-plugin's `cdn` URL, so the hashes,
-  the CDN URL and the installed copy cannot drift apart. The openapi-plugin README states the
-  `baseUrl` mode needs exactly that version.
+  (one constant in its own import-free module `templates/swagger-version.ts`, read by
+  `full-stack.ts` and `module-seam.ts`; a constant beside `SWAGGER_ASSET_PACKAGE` would create an
+  import cycle through `registry.ts`), and a test asserts that constant equals the version in the
+  openapi-plugin's `cdn` URL, so the hashes, the CDN URL and the installed copy cannot drift apart.
+  The openapi-plugin README states the `baseUrl` mode needs exactly that version.
 - **Why:** the SRI hashes are fixed to 5.33.3, and SRI for a remote base cannot be computed at
   runtime; pinning is the only setup in which every mode works.
 - **Test home:** `packages/cli/test/unit/` (rendered manifests carry `5.33.3`; the drift test);
@@ -171,8 +172,8 @@ or the documentation name it.
   `setu add cache|scheduler|realtime-backplane` in a member of a workspace whose manifest transport
   has the builder writes that call instead of the bare zero-config one, and adds `ioredis` from
   `CLIENT_RANGES`. Outside such a workspace, or with another transport, behaviour is unchanged.
-  Where the scheduler already needs a seam argument (jobs), the transport argument is merged into
-  it, not substituted.
+  Where a plugin already receives a seam argument, the transport argument is merged into it, not
+  substituted (the scheduler has no generated job seam today, so its call carries the lock alone).
 - **Test home:** `packages/cli/test/unit/` add-command tests (redis workspace member → Redis arm +
   `ioredis`; plain project and other transports → unchanged); a scaffolded Redis workspace member
   after the three `setu add` calls type-checks and boots against a real Redis (guarded `REDIS_URL`).
@@ -288,8 +289,10 @@ never the implementing context.
    and its response still carries `Referrer-Policy: no-referrer`.
 2. **F1, every refused case (negative controls):** `Origin: null` with `Sec-Fetch-Site`
    `cross-site`, `same-site`, `none`, absent, empty, a combined value (`same-origin, cross-site`),
-   and duplicated header lines → 403; `Origin` spelled ` null`, `NULL`, `null ` or `"null"` with
-   `same-origin` → 403. A table the test iterates, not prose.
+   and duplicated header lines → 403; `Origin` spelled `NULL` or `"null"` with `same-origin` → 403
+   (surrounding whitespace never reaches the middleware: Web `Headers` strips it, so ` null` arrives
+   as `null`; the test asserts that normalization rather than a refusal). A table the test iterates,
+   not prose.
 3. **F1, no widening elsewhere:** a real foreign `Origin` with `Sec-Fetch-Site: same-origin` keeps
    today's result; `trustedOrigins` behaviour is byte-identical (an unchanged-table test against
    develop's cases); `Origin: null` never passes through the `trustedOrigins` path unless the
@@ -306,9 +309,11 @@ never the implementing context.
    `X-Forwarded-Host` and `X-Forwarded-Proto` resolves to the socket peer and the internal origin
    (negative control); the same request from a listed peer resolves the forwarded client and the
    `https` origin (positive control).
-6. **F2, fail closed on bad input:** a malformed `TRUSTED_PROXIES` entry (`10.0.0.0/33`, `example`,
-   an IPv6 literal with a bad prefix) makes `app.start()` fail with the existing named
-   `ipSecurityMiddleware` error, never a silent drop to "no proxies" or "all proxies".
+6. **F2, fail closed on bad input** (corrected after implementation: the parser was read, not
+   assumed): a CIDR width that is not plain digits (`10.0.0.1/`, `10.0.0.0/0x20`) is refused with
+   the named `malformed CIDR width` error before the app serves; any other unparseable entry
+   (`example`, `10.0.0.0/33`, `::1/129`) is compared literally, as the plugin documents, matches no
+   address and trusts nothing — the socket peer stays the client. Neither path ever widens trust.
 7. **F2, documented blast radius:** the generated `.env` description and README name what the
    setting trusts and warn that `0.0.0.0/0` or `::/0` trusts every client's forwarded headers.
 8. **F3, no disclosure:** the `DiscoveryUnavailableError` message and the startup warning contain
@@ -330,7 +335,7 @@ never the implementing context.
 | An old browser sends `Origin: null` without `Sec-Fetch-Site`                       | Refused as today (fail closed); the template's `referrerPolicy: 'same-origin'` avoids the case for generated apps                                                       |
 | `trustProxy` enabled with an empty list trusts the leftmost, client-chosen address | The template composes `ipSecurity` only with ≥ 1 trusted entry (obligation 5)                                                                                           |
 | A broad `TRUSTED_PROXIES` (`0.0.0.0/0`) lets any client choose its IP and origin   | Operator choice, documented where it is set (obligation 7); the default is off                                                                                          |
-| A malformed `TRUSTED_PROXIES` silently disables or widens trust                    | Existing registration-time validation fails `start()` (obligation 6)                                                                                                    |
+| A malformed `TRUSTED_PROXIES` silently disables or widens trust                    | A non-digit width is refused before serving; any other bad entry is compared literally and trusts nothing (obligation 6)                                                |
 | The Kubernetes error or warning leaks a token or the API server address            | Messages built from option names and the fixed path only (obligation 8)                                                                                                 |
 | A drifting dependency range installs an incompatible or unexpected package         | Exact pin for `swagger-ui-dist`; OpenTelemetry ranges bounded to the measured-compatible line (obligation 9)                                                            |
 
