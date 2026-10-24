@@ -51,8 +51,12 @@ in `smoke/X75-X82-FINDINGS.md`):
 
 ### 3.1 A malformed element is a boundary, not a void
 
-- **Decision:** the parser returns wire-order entries where each entry is an element or the marker
-  `MALFORMED` (an exported-from-file internal constant). Parsing is two-phase:
+- **Decision:** `parseForwarded` always returns an array (never `undefined`) of wire-order entries,
+  each an `IForwardedElement` or the marker `MALFORMED` (a `unique symbol` constant exported from
+  the file only; the return type is `readonly (IForwardedElement | typeof MALFORMED)[]`). An empty
+  field returns `[MALFORMED]`, which every mode resolves exactly as today's empty chain does. The
+  middleware's `elements ?? []` fallback is removed, and `resolveForwardedIndex` takes chain entries
+  of type `string | undefined | typeof MALFORMED`. Parsing is two-phase:
   1. **Strict pass** — the existing grammar over the whole field. If it succeeds within the bounds,
      its elements are the result (unchanged output for every well-formed field, including quoted
      values that contain commas such as `ext="a\",b"`).
@@ -80,11 +84,13 @@ in `smoke/X75-X82-FINDINGS.md`):
 
 ### 3.2 Bounds bound the work, from the right
 
-- **Decision:** the recovery pass examines at most the trailing 8192 UTF-8 bytes of the field and at
-  most 64 segments; when one of the two budgets runs out before the left end, the remainder is the
-  leading `MALFORMED` boundary. A field the strict pass accepts is still capped at 64 elements and 8
-  KiB (unchanged); exceeding a bound sends it to recovery instead of voiding it. Recovery is linear
-  in the examined window (each segment parsed once).
+- **Decision:** the recovery pass first slices the trailing window of the field (at most 8192 UTF-8
+  bytes, cut at a code-point boundary) and splits only that window, so nothing proportional to the
+  full field is allocated; when the window was cut, its first segment is partial and is treated as
+  the boundary. It parses at most 64 segments; when one of the two budgets runs out before the left
+  end, the remainder is the leading `MALFORMED` boundary. A field the strict pass accepts is still
+  capped at 64 elements and 8 KiB (unchanged); exceeding a bound sends it to recovery instead of
+  voiding it. Recovery is linear in the examined window (each segment parsed once).
 - **Why:** a client padding the header to exceed a bound must not erase its own identity behind an
   appending proxy; the bound must still cap per-request work.
 - **Test home:** `forwarded-header.test.ts` — 65 elements → 64 kept, leading boundary; an 8 KiB+
