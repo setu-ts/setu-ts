@@ -56,14 +56,28 @@ describe('describeThrown', () => {
       },
     });
     const cases: [unknown, string][] = [
-      [new Error('boom'), 'boom'],
-      ['plain', 'plain'],
-      [42, '42'],
-      [undefined, 'undefined'],
-      [Object.create(null), 'object'],
-      [hostileMessage, 'object'],
-      [Symbol('s'), 'Symbol(s)'],
+      [new Error('boom'), 'Error: boom'],
+      ['plain', 'Error: plain'],
+      [42, 'Error: 42'],
+      [undefined, 'Error: undefined'],
+      [Object.create(null), 'Error: [object Object]'],
+      [hostileMessage, 'Error: [object Error]'],
+      [Symbol('s'), 'Error: Symbol(s)'],
     ];
     for (const [value, expected] of cases) expect(describeThrown(value)).toBe(expected);
+  });
+
+  it('describes an AggregateError by its inner errors and classifiers (V10-63)', () => {
+    const aggregate = new AggregateError([
+      Object.assign(new Error('connect ECONNREFUSED ::1:6379'), { code: 'ECONNREFUSED' }),
+      Object.assign(new Error('connect ETIMEDOUT 127.0.0.1:6379'), { code: 'ETIMEDOUT' }),
+    ]);
+
+    const described = describeThrown(aggregate);
+
+    expect(described).toContain('connect ECONNREFUSED ::1:6379');
+    expect(described).toContain('connect ETIMEDOUT 127.0.0.1:6379');
+    expect(described).toContain('code=ECONNREFUSED');
+    expect(described).toContain('code=ETIMEDOUT');
   });
 });

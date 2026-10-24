@@ -12,6 +12,7 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { HealthCheckResult, IServiceDiscovery } from '@setu-ts/common';
+import { errorHandler } from '@setu-ts/exceptions';
 
 import {
   DiscoveryUnavailableError,
@@ -204,6 +205,40 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
 
     await expect(discovery.resolve('billing')).rejects.toThrow(DiscoveryUnavailableError);
     await app.stop();
+  });
+
+  it('answers a cold provider failure as a named 503, never a masked 500 (M119g, V10-34)', async () => {
+    const provider = createFakeProvider([]);
+    provider.failWith(new Error('backend down'));
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ServiceDiscoveryPlugin({ provider: 'custom', discovery: provider }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+    app.router.get('/discover', async (ctx) => {
+      const discovery = ctx.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      return ctx.response.json(await discovery.resolve('billing'));
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/discover' });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<Record<string, unknown>>();
+      expect(body).toEqual({
+        type: 'about:blank',
+        title: 'Service Unavailable',
+        status: 503,
+        detail: 'Service discovery is temporarily unavailable.',
+        instance: '/discover',
+      });
+      // The operator sentence and the requested service name stay out of the body.
+      expect(body).not.toHaveProperty('message');
+      expect(JSON.stringify(body)).not.toContain('billing');
+    } finally {
+      await app.stop();
+    }
   });
 });
 

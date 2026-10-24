@@ -40,6 +40,7 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
+    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",

@@ -24,7 +24,10 @@ function setup(issuerValue: string, document: () => { status?: number; body: unk
       toPrincipal: () => null,
     },
   ])[0];
-  const keySet = new IssuerKeySet(compiled, runtime, fake.http, (_n, r) => failures.push(r));
+  const keySet = new IssuerKeySet(compiled, runtime, fake.http, {
+    failed: (_n, r) => failures.push(r),
+    recovered: () => {},
+  });
   return { runtime, keySet, calls: fake.calls, failures };
 }
 

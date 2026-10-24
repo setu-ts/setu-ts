@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { createCachedProbe, resolveProbeTiming } from '@setu-ts/common';
+import { createCachedProbe, resolveProbeTiming, withHttpStatusHint } from '@setu-ts/common';
 import type {
   IRuntimeServices,
   IServiceDiscovery,
@@ -231,9 +231,16 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
         this.#degraded = true;
         return stale.instances;
       }
-      throw new DiscoveryUnavailableError(
-        `Service discovery could not resolve '${serviceName}' and has nothing cached`,
-        { cause: error },
+      throw withHttpStatusHint(
+        new DiscoveryUnavailableError(
+          `Service discovery could not resolve '${serviceName}' and has nothing cached`,
+          { cause: error },
+        ),
+        {
+          status: 503,
+          title: 'Service Unavailable',
+          detail: 'Service discovery is temporarily unavailable.',
+        },
       );
     }
   }

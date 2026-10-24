@@ -204,6 +204,7 @@ package fits the plugin architecture.
 | `deadlineRangeError`                  | function  |
 | `decodeCursor`                        | function  |
 | `decodeFrameData`                     | function  |
+| `describeError`                       | function  |
 | `encodeCursor`                        | function  |
 | `encodeFrameData`                     | function  |
 | `eraseRedactor`                       | function  |

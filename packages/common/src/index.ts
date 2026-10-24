@@ -35,6 +35,8 @@ export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
+// One bounded diagnostic line for string-only log sinks (M119g)
+export { describeError } from './errors/describe-error.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';

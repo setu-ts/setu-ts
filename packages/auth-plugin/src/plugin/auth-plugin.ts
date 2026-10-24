@@ -39,6 +39,7 @@ import {
 } from '../diagnostics/authorization-observation-collector.ts';
 import { compileIssuers } from '../issuers/trusted-issuer.ts';
 import { IssuerKeySet } from '../issuers/key-set-cache.ts';
+import { createStateChangeReporter } from '../issuers/failure-reporter.ts';
 import { createDefaultAuthHttp } from '../issuers/auth-http.ts';
 import { IssuerStrategy } from '../strategies/issuer-strategy.ts';
 import { compileSignIn } from '../sign-in/config.ts';
@@ -195,6 +196,13 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           // Swallowed deliberately.
         }
       };
+      const warn = (message: string): void => {
+        try {
+          ctx.logger?.warn(message);
+        } catch {
+          // Swallowed deliberately.
+        }
+      };
 
       // Build strategies list
       const strategies: IAuthStrategy[] = [];
@@ -249,9 +257,19 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
       // reading the same header and scheme. The logger is read at call time.
       const issuerKeySets: IssuerKeySet[] = [];
       if (compiledIssuers.length > 0) {
+        // One reporter for the bearer path: a provider the operator cannot
+        // reach warns once per change of reason per issuer, and a successful
+        // refresh resets it so the next outage warns again (M119g, V10-62).
+        const issuerReporter = createStateChangeReporter({ warn, debug });
         const bindings = compiledIssuers.map((issuer) => {
-          const keySet = new IssuerKeySet(issuer, runtime, http, (name, reason) => {
-            debug(`auth-plugin: issuer '${name}' key-set refresh failed (${reason})`);
+          const keySet = new IssuerKeySet(issuer, runtime, http, {
+            failed: (name, reason) =>
+              issuerReporter.failed(
+                name,
+                reason,
+                `auth-plugin: issuer '${name}' key-set refresh failed (${reason})`,
+              ),
+            recovered: (name) => issuerReporter.recovered(name),
           });
           issuerKeySets.push(keySet);
           return { issuer, keySet };
@@ -345,9 +363,13 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           if (provider.compiledIssuer === undefined) {
             continue;
           }
-          const keySet = new IssuerKeySet(provider.compiledIssuer, runtime, http, (name, reason) =>
-            debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
-          );
+          const keySet = new IssuerKeySet(provider.compiledIssuer, runtime, http, {
+            // Debug-only: the sign-in route's reporter carries the operator
+            // line, keyed by provider, so this path does not duplicate it.
+            failed: (name, reason) =>
+              debug(`auth-plugin: signIn['${name}'] key-set refresh failed (${reason})`),
+            recovered: () => {},
+          });
           keySets.set(provider.name, keySet);
           signInKeySets.push(keySet);
         }
@@ -407,6 +429,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           runtime,
           keySets,
           debug,
+          warn,
         });
 
         // SAML (M100f): the library load is awaited by register() (below), so a
