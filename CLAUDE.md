@@ -656,7 +656,7 @@ here.
   V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR #501).
 - **Milestone 119d** (`packages/http-security-plugin` — a malformed `Forwarded` element is a
   boundary the trust walk never crosses, bounds read from the right, one address normalizer; V10-19,
-  V10-28) — complete (PR pending).
+  V10-28) — complete (PR #503).
 - **Next milestone** — M119e (`database-plugin`, `common`, `cloudflare-plugin` — a data contract
   that is not portable or not checked at startup). M119f, M119h, M119i, M118 and M120–M123 are open
   in the ROADMAP; M120 depends on M118.
