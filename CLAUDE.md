@@ -645,7 +645,7 @@ here.
 - **Milestone 119b** (`common` + `kernel` + `health-plugin` + `mail-plugin` and 4 more —
   per-indicator readiness membership with an app override, mail out of readiness by default, bounded
   backplane and RabbitMQ queue probes, gRPC health on readiness, migration readiness on a reachable
-  connection; V10-49, V10-20, V10-22, V10-31) — complete (PR pending).
+  connection; V10-49, V10-20, V10-22, V10-31) — complete (PR #499).
 - **Next milestone** — M119c (`cli`, `http-security`, `session`, `openapi`, `telemetry`,
   `service-discovery` — safe framework, broken default). M119d–M119i, M118 and M120–M123 are open in
   the ROADMAP; M120 depends on M118.
