@@ -8897,8 +8897,10 @@ that never include indicator `data`. HTTP status rules are unchanged.
 
 ### What `degraded` means
 
-`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
-return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+`/ready` runs only the indicators that count toward readiness (never `self`) and returns 200 only
+when every one of them is `up`; `degraded` and `down` both return 503. An indicator outside
+readiness still runs on `/health`. `/health` returns 200 for `up` or `degraded`, and 503 for `down`.
+`/live` remains 200.
 
 Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
 request serving belongs in the indicator's `data`: draining every replica would remove healthy
@@ -8912,7 +8914,7 @@ Resolve the service via `ctx.services.get<IHealthService>('health')`. The servic
 
 ```typescript
 interface IHealthService {
-  registerIndicator(name: string, indicator: HealthIndicatorFn): void;
+  registerIndicator(name: string, indicator: HealthIndicatorFn, options?: HealthIndicatorOptions): void;
   check(): Promise<HealthReport>;
   checkLive(): Promise<HealthReport>;
   checkReady(): Promise<HealthReport>;
@@ -8926,6 +8928,27 @@ interface HealthReport {
   >;
 }
 ```
+
+Since **M119b** every indicator carries a readiness membership — whether it counts toward `/ready` —
+exposed through three additive, optional members: the exported `HealthIndicatorOptions` interface
+(`{ readiness?: boolean }`; absent means the indicator counts — the previous behaviour), the
+optional `IHealthIndicator.readiness?` member a plugin or application indicator instance sets, and
+the `options?` parameter on both registration surfaces —
+`IHealthApi.register(name, indicator, options?)` (the plugin context's `ctx.health.register`) and
+`IHealthService.registerIndicator(name, indicator, options?)` above. `checkReady()` runs the
+indicators that are not `self` and whose effective membership is `true`; an indicator outside
+readiness still runs in `check()` (`/health`) and is absent from the `/ready` report. `checkLive()`
+is unchanged. `HealthPluginOptions.readiness`
+(`{ include?: readonly string[], exclude?: readonly string[] }`) overrides a contributor's declared
+membership by exact indicator name: `include` forces a named indicator into readiness, `exclude`
+forces it out. The override is applied inside `HealthService.registerIndicator`, so it covers every
+registration path, including a plugin that calls `IHealthService.registerIndicator` directly; a
+directly constructed service takes it as `new HealthService(runtime, { readiness })`. Both
+`HealthPlugin(...)` and that constructor refuse an invalid option with `TypeError` — a `readiness`
+that is not a plain object (an array included), a list that is not an array, an empty or non-string
+name, the name `self`, or a name in both lists; the message names the option and never echoes a
+name. After every plugin has initialized (at bootstrap), names that match no registered indicator
+produce one count-only warning.
 
 Since **M70c** each indicator's result is **projected** to the declared {@linkcode
 HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An
@@ -9019,11 +9042,11 @@ app.register({
 
 ### Endpoints
 
-| Endpoint  | Method | Description                            | Status Codes                          |
-| --------- | ------ | -------------------------------------- | ------------------------------------- |
-| `/health` | GET    | Overall health (all indicators)        | 200 (up/degraded), 503 (down)         |
-| `/live`   | GET    | Liveness (self indicator only)         | 200 (always, unless self is down)     |
-| `/ready`  | GET    | Readiness (all contributed indicators) | 200 (all up), 503 (any down/degraded) |
+| Endpoint  | Method | Description                                     | Status Codes                          |
+| --------- | ------ | ----------------------------------------------- | ------------------------------------- |
+| `/health` | GET    | Overall health (all indicators)                 | 200 (up/degraded), 503 (down)         |
+| `/live`   | GET    | Liveness (self indicator only)                  | 200 (always, unless self is down)     |
+| `/ready`  | GET    | Readiness (readiness members, excluding `self`) | 200 (all up), 503 (any down/degraded) |
 
 ### Response
 
@@ -9044,7 +9067,8 @@ GET /health
 **Status aggregation rules:**
 
 - `/live`: Always 200 as long as the process responds (self indicator always returns 'up')
-- `/ready`: 200 when all contributed indicators are 'up', 503 when any is 'degraded' or 'down'
+- `/ready`: 200 when all indicators that count toward readiness are 'up', 503 when any is 'degraded'
+  or 'down'
 - `/health`: 200 when no participating indicator is 'down' (degraded stays 200), 503 when any is
   'down'
 
@@ -12365,7 +12389,7 @@ reaches `redactors[<string>]`):
 | Logging                | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Config                 | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Validation             | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthIndicatorOptions`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Metrics                | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Auth                   | `IPrincipal`, `IJwtService`, `JwtSignOptions` — `IPrincipal` is `{ id: string; roles?: readonly string[]; permissions?: readonly string[]; claims?: Readonly<Record<string, unknown>> }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Database               | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |

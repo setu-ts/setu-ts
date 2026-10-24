@@ -135,6 +135,13 @@ Registered under the `mail` capability. Since M70c it reports two signals: the p
 `data` reports `{ provider, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the provider has no liveness check (e.g. the log provider always reports `true`).
 
+**Readiness (M119b, V10-49).** The indicator is registered **outside readiness** by default. Its
+status mapping is unchanged: a mail backend that is unreachable still reads `down`, so `/health`
+shows the outage (503) and alerts still fire — but `/ready` ignores the indicator and stays 200,
+because an SMTP outage is shared by every replica and does not stop request serving. An application
+that wants a mail outage to drain its replicas restores the previous behaviour with
+`HealthPlugin({ readiness: { include: ['mail'] } })`.
+
 ## Exports
 
 | Export                    | Kind      |

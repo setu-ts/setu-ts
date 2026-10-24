@@ -185,6 +185,12 @@ reports `'unknown'`. `/ready` therefore remains 200 for this shared dependency c
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.
 
+**Bounded probe (M119b, V10-20).** The reachability check is now cached for 5 s and bounded at 2 s.
+A check that does not answer within the bound reports `reachable: 'unknown'` and the status stays
+`up`; previously the unbounded Redis `PING` outlived the health indicator's 5 s deadline and read
+`down`, taking the replica out of rotation for a paused Redis. A transport without a probe still
+reports `'unknown'`.
+
 ## Exports
 
 | Export                             | Kind      |

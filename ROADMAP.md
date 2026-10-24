@@ -15190,11 +15190,17 @@ indicators still do that for problems no replica can fix, or report a dependency
   (the X51-2 mechanism, closed for messaging in M95b, never applied to `queue-plugin`).
 - **V10-31** — M113o's migration readiness turns a paused database into `down` with ~4 s probes.
 
-**Decisions the plan takes:** whether `health-plugin` gains a per-indicator readiness policy (an
-indicator that counts for `/health` but not `/ready`) or each of these indicators moves the
-condition into `data` the way M113b's seven did; the bound for the backplane PING and the queue
-probe (the `createCachedProbe` defaults); what the migration check reports when the ledger read
-times out.
+**Decisions the plan takes:** per-indicator readiness membership with a plugin-declared default
+(`ctx.health.register(name, fn, { readiness })` / `IHealthIndicator.readiness`, absent counts) and
+an application override by name (`HealthPluginOptions.readiness` `include`/`exclude`), the
+maintainer's decision of 2026-10-24 — over moving each condition into `data` the way M113b's seven
+did; `mail` out of readiness by default (V10-49), with `include: ['mail']` restoring the previous
+behaviour; the backplane probe cached 5 s and bounded 2 s, an unanswered check reading
+`reachable: 'unknown'` with the status staying `up` (V10-20); the RabbitMQ queue probe as a
+throwaway-channel round trip, and an unanswered queue check reporting `up` with
+`reachable: 'unknown'` for every adapter (V10-22); the migration ledger read only on a reachable
+connection, a paused database reading `degraded` within one ~2 s bound (V10-31); and the gRPC health
+bridge reading the readiness report so it agrees with `/ready`.
 
 ---
 
@@ -15991,7 +15997,7 @@ patch by construction and gains nothing new here.
 | 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
-| 119b      | ⬜     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
+| 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
 | 119c      | ⬜     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |
 | 119d      | ⬜     | http-security-plugin — forwarded client identity                                                                                                                                                                                                                                          |
 | 119e      | ⬜     | database + common + cloudflare — a data contract that is not portable or not checked at startup                                                                                                                                                                                           |

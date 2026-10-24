@@ -155,6 +155,18 @@ export type HealthIndicatorEntry = IHealthIndicator | RegistryFactory<IHealthInd
  */
 export interface HealthPluginOptions {
   /**
+   * Override contributor readiness membership by exact indicator name.
+   * Lists must contain non-empty strings, cannot overlap, and cannot name `self`.
+   * Unmatched names produce one count-only warning at initialization.
+   * @since 0.11.0
+   */
+  readonly readiness?: {
+    /** Force these indicators into readiness. @since 0.11.0 */
+    readonly include?: readonly string[];
+    /** Force these indicators out of readiness. @since 0.11.0 */
+    readonly exclude?: readonly string[];
+  };
+  /**
    * Include indicator data and latency in HTTP responses. Defaults to false.
    * Only the HTTP bodies change: programmatic reports stay full, and diagnostics
    * keep recording minimized observations without indicator `data`.

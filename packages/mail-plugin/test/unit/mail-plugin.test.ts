@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { Component, IMailer, IViewEngine } from '@setu-ts/common';
@@ -43,6 +43,15 @@ describe('createProvider', () => {
 });
 
 describe('MailPlugin.register', () => {
+  it('declares mail outside readiness while preserving its indicator', async () => {
+    const fake = createFakeContext();
+    const register = vi.spyOn(fake.ctx.health, 'register');
+    await MailPlugin().register(fake.ctx);
+    expect(register).toHaveBeenCalledWith(CAPABILITIES.MAIL, expect.any(Function), {
+      readiness: false,
+    });
+    await Promise.all(fake.onCloseHandlers.map((hook) => hook()));
+  });
   it('registers IMailer, a healthy indicator, an onClose, and logs (with logger)', async () => {
     const sunk: OutgoingMail[] = [];
     const fake = createFakeContext(true);

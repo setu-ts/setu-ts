@@ -178,7 +178,7 @@ describe('GrpcPlugin — health capability bridging', () => {
   it('resolves the health capability when one is registered', async () => {
     let checked = false;
     const healthService = {
-      check: () => {
+      checkReady: () => {
         checked = true;
         return Promise.resolve({ status: 'up' });
       },

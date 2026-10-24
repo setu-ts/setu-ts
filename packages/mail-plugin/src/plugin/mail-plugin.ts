@@ -160,7 +160,9 @@ export function MailPlugin(options?: MailPluginOptions): IPlugin {
         }
         return { status: 'up', data: { provider: providerType, reachable: true } };
       };
-      ctx.health.register(CAPABILITIES.MAIL, mailIndicator);
+      // A shared mail outage remains visible in /health without withdrawing
+      // every serving replica. Applications can explicitly include mail again.
+      ctx.health.register(CAPABILITIES.MAIL, mailIndicator, { readiness: false });
 
       ctx.lifecycle.onClose(async () => {
         await provider.disconnect();

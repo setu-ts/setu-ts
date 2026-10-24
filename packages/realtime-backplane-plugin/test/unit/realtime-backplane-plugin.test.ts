@@ -4,7 +4,7 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { HealthCheckResult, IPluginContext, IRealtimeBackplane } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import { RealtimeBackplanePlugin } from '../../src/plugin/realtime-backplane-plugin.ts';
@@ -26,6 +26,10 @@ function createContext(): Harness {
     runtime: {
       // Honors the real contract: a fresh identifier per call, never a constant.
       uuid: (): string => `uuid-${++counter}`,
+      hrtime: (): number => performance.now(),
+      setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+      clearTimeout: (handle: unknown): void =>
+        clearTimeout(handle as ReturnType<typeof setTimeout>),
     },
     services: {
       has: (token: string): boolean => registered.has(token),
@@ -50,6 +54,54 @@ function createContext(): Harness {
 }
 
 describe('RealtimeBackplanePlugin', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each(['hang', 'throw'] as const)(
+    'bounds and caches a %s probe as unknown without losing serving status',
+    async (mode) => {
+      vi.useFakeTimers();
+      const harness = createContext();
+      let now = 0;
+      harness.ctx.runtime.hrtime = () => now;
+      const isHealthy = vi.fn((): Promise<boolean> =>
+        mode === 'hang'
+          ? new Promise(() => {})
+          : Promise.reject(new Error('secret transport fault')),
+      );
+      const instance: IRealtimeBackplane = {
+        origin: 'probe-origin',
+        connect: async () => {},
+        close: async () => {},
+        publish: async () => {},
+        subscribe: () => Promise.resolve(() => {}),
+        isHealthy,
+      };
+      await RealtimeBackplanePlugin({ transport: 'custom', instance }).register(harness.ctx);
+      const indicator = harness.health.get('realtime-backplane')!;
+      const first = indicator();
+      const concurrent = indicator();
+      await vi.advanceTimersByTimeAsync(1999);
+      if (mode === 'hang') {
+        let settled = false;
+        void first.then(() => {
+          settled = true;
+        });
+        await Promise.resolve();
+        expect(settled).toBe(false);
+      }
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await first).toMatchObject({ status: 'up', data: { reachable: 'unknown' } });
+      expect(await concurrent).toEqual(await first);
+      expect(await indicator()).toEqual(await first);
+      expect(isHealthy).toHaveBeenCalledTimes(1);
+      now = 5001;
+      const refreshed = indicator();
+      await vi.advanceTimersByTimeAsync(2000);
+      expect(await refreshed).toMatchObject({ status: 'up' });
+      expect(isHealthy).toHaveBeenCalledTimes(2);
+      await Promise.all(harness.closeHooks.map((hook) => hook()));
+    },
+  );
   it('declares its identity, capability, and priority', () => {
     const plugin = RealtimeBackplanePlugin();
     expect(plugin.name).toBe('realtime-backplane-plugin');

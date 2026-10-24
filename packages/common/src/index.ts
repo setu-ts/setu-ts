@@ -243,6 +243,7 @@ export type {
 export type {
   HealthCheckResult,
   HealthIndicatorFn,
+  HealthIndicatorOptions,
   HealthReport,
   IHealthIndicator,
   IHealthService,

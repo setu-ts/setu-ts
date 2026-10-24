@@ -500,13 +500,22 @@ MIT
 Registered under the queue's capability token. Since M70c it reports two signals: the adapter's
 lifecycle (`isReady()`) and its reachability (`isHealthy()`).
 
-| Status | Meaning                                                                                   |
-| ------ | ----------------------------------------------------------------------------------------- |
-| `up`   | The adapter is connected and reachable, or cannot be probed (`reachable` is `'unknown'`). |
-| `down` | The adapter is not connected, or is connected but unreachable.                            |
+| Status | Meaning                                                                                                                                                                       |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `up`   | The adapter is connected and reachable, or its reachability is unknown — no liveness check, or a probe that did not answer within its 2 s bound (`reachable` is `'unknown'`). |
+| `down` | The adapter is not connected, or is connected but unreachable.                                                                                                                |
 
 `data` reports `{ adapter, reachable }`, where `reachable` is `true`, `false`, or `'unknown'` when
 the adapter has no liveness check.
+
+**Probes and readiness (M119b, V10-22).** The reachability check stays cached for 5 s and bounded at
+2 s. The RabbitMQ adapter no longer reads a supervisor flag — its check opens and closes a throwaway
+AMQP channel on the connection, so a paused broker can no longer report `reachable: true`; a refused
+round trip answers `false`. For every queue adapter, a check that does not answer within the 2 s
+bound now reports `up` with `reachable: 'unknown'` and no depth counts, instead of `down`: a hung
+probe is not evidence the backend is down. A check that answers `false` — a stopped broker — still
+reads `down` at once. The indicator counts toward readiness by default; the health plugin's
+`readiness` option overrides it by name.
 
 ## Exports
 
