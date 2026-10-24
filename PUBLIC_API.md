@@ -8947,7 +8947,8 @@ directly constructed service takes it as `new HealthService(runtime, { readiness
 `HealthPlugin(...)` and that constructor refuse an invalid option with `TypeError` — a `readiness`
 that is not a plain object (an array included), a list that is not an array, an empty or non-string
 name, the name `self`, or a name in both lists; the message names the option and never echoes a
-name. At initialization, names that match no registered indicator produce one count-only warning.
+name. After every plugin has initialized (at bootstrap), names that match no registered indicator
+produce one count-only warning.
 
 Since **M70c** each indicator's result is **projected** to the declared {@linkcode
 HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An

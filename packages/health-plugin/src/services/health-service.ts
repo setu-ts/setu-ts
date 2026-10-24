@@ -35,7 +35,12 @@ export function compileReadiness(options: HealthPluginOptions['readiness']): {
 } {
   if (
     options !== undefined &&
-    (typeof options !== 'object' || options === null || Array.isArray(options))
+    (typeof options !== 'object' ||
+      options === null ||
+      // A plain object only: an array, a Date, a Map or a class instance
+      // would read as "no overrides" and silently discard the operator's.
+      (Object.getPrototypeOf(options) !== Object.prototype &&
+        Object.getPrototypeOf(options) !== null))
   ) {
     throw new TypeError('Health readiness must be an object with include/exclude lists.');
   }

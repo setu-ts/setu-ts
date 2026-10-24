@@ -18,6 +18,8 @@ describe('HealthPlugin readiness options', () => {
     null,
     [],
     ['canary-topology'],
+    new Date(0),
+    new Map([['include', ['canary-topology']]]),
     'canary-topology',
     42,
     { include: 'canary-topology' },
@@ -120,6 +122,20 @@ describe('HealthPlugin readiness options', () => {
   });
 
   it('applies exclude to an indicator registered directly through IHealthService', async () => {
+    const warn = vi.fn();
+    const logger: IPlugin = {
+      name: 'logger',
+      version: '1.0.0',
+      provides: [CAPABILITIES.LOGGER],
+      register(ctx): void {
+        ctx.services.register(CAPABILITIES.LOGGER, {
+          warn,
+          debug() {},
+          info() {},
+          error() {},
+        } as unknown as ILogger);
+      },
+    };
     const direct: IPlugin = {
       name: 'direct-registrant',
       version: '1.0.0',
@@ -133,7 +149,12 @@ describe('HealthPlugin readiness options', () => {
       },
     };
     const app = createApplication({
-      plugins: [RuntimePlugin(), HealthPlugin({ readiness: { exclude: ['dependency'] } }), direct],
+      plugins: [
+        RuntimePlugin(),
+        logger,
+        HealthPlugin({ readiness: { exclude: ['dependency'] } }),
+        direct,
+      ],
     });
     await app.start();
     try {
@@ -141,6 +162,8 @@ describe('HealthPlugin readiness options', () => {
       const health = await app.inject({ method: 'GET', url: '/health' });
       expect(ready.statusCode).toBe(200);
       expect(health.statusCode).toBe(503);
+      // Registered from a LATER plugin's onInit: the name matches, so no warning.
+      expect(warn).not.toHaveBeenCalled();
     } finally {
       await app.stop();
     }

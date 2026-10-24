@@ -244,17 +244,26 @@ export function HealthPlugin(options?: HealthPluginOptions): IPlugin {
         for (const contribution of contributions) {
           registerIndicator(contribution);
         }
-        // Names are sensitive topology. Warn once after all three sources
-        // have registered, retaining only a count in the diagnostic.
-        const missing = [...readiness.include, ...readiness.exclude].filter(
-          (name) => !isIndicatorRegistered(service, name),
-        ).length;
-        if (missing > 0) {
-          ctx.logger?.warn(
-            `Health readiness: ${missing} indicator name(s) match no registered indicator.`,
-          );
-        }
       });
+
+      // Names are sensitive topology: warn once, retaining only a count. Run at
+      // bootstrap, after EVERY plugin's onInit, so an indicator another plugin
+      // registers directly through IHealthService from its own onInit (which
+      // runs after this plugin's, in registration order) is not miscounted.
+      // Registered only when an override names something, so a plugin with no
+      // readiness option adds no hook (the same rule the diagnostics wiring keeps).
+      if (readiness.include.size + readiness.exclude.size > 0) {
+        ctx.lifecycle.onBootstrap(() => {
+          const missing = [...readiness.include, ...readiness.exclude].filter(
+            (name) => !isIndicatorRegistered(service, name),
+          ).length;
+          if (missing > 0) {
+            ctx.logger?.warn(
+              `Health readiness: ${missing} indicator name(s) match no registered indicator.`,
+            );
+          }
+        });
+      }
     },
   };
 }
