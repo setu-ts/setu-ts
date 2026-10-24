@@ -35,8 +35,8 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys', '--allow-read'],
-  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4' },
-  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4' },
+  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4.6.6' },
+  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4.6.6' },
 };
 
 /** Manifest additions unique to the class-based module composition. */

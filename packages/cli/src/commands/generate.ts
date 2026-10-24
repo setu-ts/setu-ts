@@ -617,7 +617,7 @@ export async function runGenerateCommand(
       }
       if (!hasZod)
         deps.log(
-          `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4' : runtime === 'bun' ? 'bun add zod@^4' : 'npm install zod@^4'}`,
+          `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4.6.6' : runtime === 'bun' ? 'bun add zod@^4.6.6' : 'npm install zod@^4.6.6'}`,
         );
     }
     // After the write, so a refused or failed run never reports a claim it did not

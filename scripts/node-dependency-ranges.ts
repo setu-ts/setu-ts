@@ -27,8 +27,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   prettier: '^3.9.10',
   tsx: '^4.23.0',
   vitest: '5.0.3',
-  'zod-v3': 'npm:zod@^3.24.0',
-  'zod-v4': 'npm:zod@^4.4.0',
+  'zod-v4': 'npm:zod@^4.6.6',
   'xml-crypto': '^6',
   '@simplewebauthn/server': '14.0.3',
   '@prisma/adapter-pg': '^7.10.0',
@@ -82,7 +81,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'swagger-ui-dist': '^5',
   'react-router': '^8',
   ws: '^8.18.0',
-  zod: '^4.4.0',
+  zod: '^4.6.6',
 };
 
 /**

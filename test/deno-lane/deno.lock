@@ -51,8 +51,7 @@
     "npm:tsx@^4.23.0": "4.23.15",
     "npm:ws@^8.18.0": "8.22.0",
     "npm:xml-crypto@6": "6.3.3",
-    "npm:zod@^3.24.0": "3.25.76",
-    "npm:zod@^4.4.0": "4.6.6"
+    "npm:zod@^4.6.6": "4.6.6"
   },
   "jsr": {
     "@std/assert@1.0.19": {
@@ -3384,9 +3383,6 @@
     "yocto-queue@0.1.0": {
       "integrity": "sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q=="
     },
-    "zod@3.25.76": {
-      "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="
-    },
     "zod@4.6.6": {
       "integrity": "sha512-4UmzQUF5fxvfcYHlbjBmejU+w+hbDnWFx4aS8kBx7nPBHcO2SqPbpAG8snbdg+Xse4pRefR98hgjFgIMCI/UhA=="
     }
@@ -3424,8 +3420,7 @@
       "npm:pino@10",
       "npm:react-router@8",
       "npm:xml-crypto@6",
-      "npm:zod@^3.24.0",
-      "npm:zod@^4.4.0"
+      "npm:zod@^4.6.6"
     ],
     "links": {
       "jsr:@setu-ts/audit-plugin@0.10.0": {
@@ -3468,7 +3463,7 @@
       "jsr:@setu-ts/config-plugin@0.10.0": {
         "dependencies": [
           "npm:vitest@5.0.3",
-          "npm:zod@^3.24.0"
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/cqrs-plugin@0.10.0": {
@@ -3497,7 +3492,7 @@
       "jsr:@setu-ts/decorator-plugin@0.10.0": {
         "dependencies": [
           "npm:vitest@5.0.3",
-          "npm:zod@^3.24.0"
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/di-plugin@0.10.0": {
@@ -3562,7 +3557,7 @@
           "npm:mongodb@^6.21.0",
           "npm:pg@8",
           "npm:vitest@5.0.3",
-          "npm:zod@^3.24.0"
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/kernel@0.10.0": {
@@ -3635,8 +3630,7 @@
         "dependencies": [
           "npm:swagger-ui-dist@5",
           "npm:vitest@5.0.3",
-          "npm:zod@^3.24.0",
-          "npm:zod@^4.4.0"
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/queue-plugin@0.10.0": {
@@ -3751,8 +3745,7 @@
       "jsr:@setu-ts/validation-plugin@0.10.0": {
         "dependencies": [
           "npm:vitest@5.0.3",
-          "npm:zod@^3.24.0",
-          "npm:zod@^4.4.0"
+          "npm:zod@^4.6.6"
         ]
       },
       "jsr:@setu-ts/view-plugin@0.10.0": {

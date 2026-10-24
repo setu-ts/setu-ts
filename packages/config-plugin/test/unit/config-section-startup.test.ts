@@ -7,7 +7,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | startup validation', () => {
   it('rejects an invalid section without disclosing the rejected value or cause', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const application = defineConfigSection({
       prefix: 'APP_',
       keys: ['MODE'],
@@ -25,7 +25,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('validates a supplied IConfig instance through declared named reads', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['PORT'],
@@ -43,7 +43,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('does not reparse a section after startup', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     let parses = 0;
     const application = defineConfigSection({
       prefix: 'APP_',
@@ -64,7 +64,7 @@ describe('typed configuration sections | startup validation', () => {
   });
 
   it('clears an injected snapshot cache when a later validation fails', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const application = defineConfigSection({
       prefix: 'APP_',
       keys: ['MODE'],

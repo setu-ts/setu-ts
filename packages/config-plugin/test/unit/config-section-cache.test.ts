@@ -7,7 +7,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | cache', () => {
   it('keeps cached values isolated by configuration snapshot', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL'],
@@ -28,7 +28,7 @@ describe('typed configuration sections | cache', () => {
   });
 
   it('rejects a read for a definition that was not validated at startup', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL'],
@@ -44,7 +44,7 @@ describe('typed configuration sections | cache', () => {
   });
 
   it('snapshots a definition so caller mutations cannot change its cached section', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const definition = {
       prefix: 'DATABASE_',
       keys: ['URL'],

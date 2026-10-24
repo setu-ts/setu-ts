@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod-v3';
+import { z } from 'zod-v4';
 import type { RouteInfo } from '@setu-ts/common';
 import { OpenApiGenerator } from '../../src/generators/openapi-generator.ts';
 import { OperationIdError } from '../../src/index.ts';
@@ -16,7 +16,7 @@ function route(path: string, operationId?: string): RouteInfo {
 }
 
 describe('operation ids', () => {
-  it('keeps a no-declaration document byte-identical to develop 242a9b1e', async () => {
+  it('pins a no-declaration Zod 4 document', async () => {
     const shared = z.object({ name: z.string(), createdAt: z.date() });
     const routes: RouteInfo[] = [
       {
@@ -115,7 +115,7 @@ describe('operation ids', () => {
   });
 
   it('names hoisted components and diagnostics from the declared id', () => {
-    const shared = z.object({ name: z.string(), callback: z.function() });
+    const shared = z.strictObject({ name: z.string(), callback: z.function() });
     const result = new OpenApiGenerator({}).generate([
       {
         method: 'POST',
@@ -137,7 +137,7 @@ describe('operation ids', () => {
     expect(result.components?.schemas).toHaveProperty('CreateUsersBody');
     expect(JSON.stringify(result)).not.toContain('PostUsersBody');
     expect(op?.['x-setu-unrepresentable']).toEqual([
-      { at: 'createUsers', reason: 'unsupported zod type ZodFunction' },
+      { at: 'createUsers', reason: "zod v4 type 'function' has no JSON Schema representation" },
     ]);
   });
 

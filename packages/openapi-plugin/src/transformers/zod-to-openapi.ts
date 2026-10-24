@@ -1,11 +1,9 @@
 /**
  * Zod to OpenAPI 3.1 schema transformer.
  *
- * Supports BOTH zod major versions: v3 is converted by the historical
- * `_def.typeName` recursion; v4 (whose private internals diverged —
- * `_def.typeName` is undefined on every node) is routed through
- * `schema.toJSONSchema()` and adapted from JSON Schema draft 2020-12 to
- * OpenAPI 3.1. Neither version is imported: detection is duck-typed, so the
+ * Supports zod >=4.6.6 <5 through its public `schema.toJSONSchema()`
+ * method, adapted from JSON Schema draft 2020-12 to OpenAPI 3.1.
+ * Zod is never imported: detection is duck-typed, so the
  * transformer stays dependency-free (AI_GUIDELINES §12.2).
  *
  * @module
@@ -59,16 +57,6 @@ export interface OpenApiSchemaObject {
   $ref?: string;
 }
 
-type ZodDef = {
-  typeName: string;
-  [key: string]: unknown;
-};
-
-type ZodSchema = {
-  _def: ZodDef;
-  [key: string]: unknown;
-};
-
 /**
  * A zod v4 schema, recognized structurally by its `toJSONSchema` method.
  * Declared with the exact parameter shape the converter accepts so the
@@ -110,7 +98,7 @@ const LEGITIMATELY_EMPTY_TYPES: ReadonlySet<string> = new Set(['any', 'unknown']
  *
  * On the zod v4 path the hook is bridged onto zod's own `override` callback,
  * which carries the original zod node — so the hook always receives the real
- * Zod schema about to be transformed, on both majors.
+ * Zod schema about to be transformed.
  *
  * @param schema - The Zod schema about to be transformed
  * @returns A replacement schema object, or `undefined` to transform normally
@@ -234,17 +222,15 @@ function isSchemaMap(value: unknown): value is Record<string, unknown> {
  *
  * Draft 2020-12 — and therefore OpenAPI 3.1 — permits both spellings of a
  * type union, and zod's public `toJSONSchema` changed which one it emits
- * WITHIN the declared `>=4.4.0 <5` support range: through 4.4 every union
- * became `anyOf: [{ type: 'string' }, { type: 'null' }]`, and from 4.5 a
+ * across its v4 releases: through 4.4 every union became
+ * `anyOf: [{ type: 'string' }, { type: 'null' }]`, and from 4.5 a
  * union whose every arm is a bare `{ type: X }` collapses to
  * `type: ['string', 'null']`. Measured on 4.4.3 against 4.5.4; an arm
  * carrying anything else (a constraint, a `format`, a `const`, an `items`)
  * keeps the `anyOf` spelling in both.
  *
  * Normalizing rather than passing the collapse through buys three things.
- * The zod v3 path emits `anyOf` for a nullable (see `transformNullable`), so
- * both paths keep describing one schema identically. {@linkcode
- * OpenApiSchemaObject.type} stays a single type name, which is only true
+ * {@linkcode OpenApiSchemaObject.type} stays a single type name, which is only true
  * because nothing downstream of here can see an array. And `anyOf` is the
  * spelling OpenAPI 3.0 downgrade tooling understands, where a `type` array
  * is 3.1-only. Without it an application's zod PATCH version silently
@@ -298,8 +284,7 @@ function expandTypeUnions(node: unknown): void {
     record.type = type[0];
     return;
   }
-  // A zero-member union matches nothing, which is what the v3 path already
-  // spells `anyOf: []` for an empty `z.union([])` — so the two agree here too.
+  // A zero-member union matches nothing, spelled `anyOf: []`.
   const arms = type.map((member) => ({ type: member }));
   if (record.anyOf === undefined) {
     record.anyOf = arms;
@@ -337,13 +322,6 @@ function expandTypeUnions(node: unknown): void {
  * object always has it) and optional in the input view (the client may omit
  * it, which is what a default is FOR).
  *
- * Only the zod v4 path reads this. The v3 path hand-walks `_def` and has no
- * `io` concept; what it produces is already the INPUT view — it marks a
- * `.default()` field optional and documents a `.transform()` by its source
- * type — so v3 request bodies were always right and v3 responses carry the
- * same input-shaped view they always have. Closing that is a v3-transformer
- * change with no consumer asking for it, and is deliberately not done here.
- *
  * @since 0.2.0
  */
 export type SchemaIo = 'input' | 'output';
@@ -351,8 +329,8 @@ export type SchemaIo = 'input' | 'output';
 /**
  * Converts a Zod schema to an OpenAPI 3.1 schema object.
  *
- * Zod v3 and v4 are both supported, detected per schema by duck typing
- * (`toJSONSchema` presence marks v4). An unrecognized schema degrades to `{}`
+ * Zod >=4.6.6 <5 is supported, detected by its public `toJSONSchema`
+ * method. An unrecognized schema, including a legacy Zod v3 schema, degrades to `{}`
  * — never a throw — and, when a diagnostics channel is attached, reports what
  * it could not represent.
  *
@@ -422,74 +400,20 @@ export class ZodToOpenApi {
    * @returns The OpenAPI schema object representation
    */
   transform(schema: unknown, io: SchemaIo = 'output'): OpenApiSchemaObject {
-    // Consulted BEFORE the version dispatch, so a hook sees every node the
+    // Consulted BEFORE recognition, so a hook sees every node the
     // caller asked about — including one it may want to name even though this
     // transformer would degrade it to `{}`.
     const replacement = this.#onSchema?.(schema);
     if (replacement !== undefined) return replacement;
 
-    // Zod v4: recognized by the public `toJSONSchema` method (its private
-    // `_def.typeName` is gone, which is why the v3 recursion below cannot see
-    // these nodes at all).
+    // Recognize schemas by the public conversion method.
     const candidate = schema as Partial<Zod4SchemaLike> | undefined | null;
     if (typeof candidate?.toJSONSchema === 'function') {
       return this.#transformZod4(candidate as Zod4SchemaLike, io);
     }
 
-    const zodSchema = schema as ZodSchema | undefined;
-
-    // Check if it's a Zod schema by looking for _def
-    if (!zodSchema?._def) {
-      // Not a Zod schema, return empty schema
-      this.#channels?.onUnrepresentable?.({ reason: 'not a recognized zod schema' });
-      return {};
-    }
-
-    const def = zodSchema._def;
-    const typeName = def.typeName;
-
-    switch (typeName) {
-      case 'ZodString':
-        return this.transformString(zodSchema, def);
-      case 'ZodNumber':
-        return this.transformNumber(zodSchema, def);
-      case 'ZodBoolean':
-        return { type: 'boolean' };
-      case 'ZodBigInt':
-        return { type: 'integer' };
-      case 'ZodArray':
-        return this.transformArray(zodSchema, def);
-      case 'ZodObject':
-        return this.transformObject(zodSchema, def);
-      case 'ZodOptional':
-        return this.transformOptional(zodSchema, def);
-      case 'ZodNullable':
-        return this.transformNullable(zodSchema, def);
-      case 'ZodEnum':
-        return this.transformEnum(def);
-      case 'ZodLiteral':
-        return this.transformLiteral(def);
-      case 'ZodUnion':
-        return this.transformUnion(zodSchema, def);
-      case 'ZodIntersection':
-        return this.transformIntersection(zodSchema, def);
-      case 'ZodRecord':
-        return this.transformRecord(zodSchema, def);
-      case 'ZodDate':
-        return { type: 'string', format: 'date-time' };
-      case 'ZodEffects':
-        return this.transformEffects(zodSchema, def);
-      case 'ZodPipeline':
-        return this.transformPipeline(zodSchema, def);
-      case 'ZodDefault':
-        return this.transformDefault(zodSchema, def);
-      default:
-        // Unknown Zod type, return empty schema (graceful degradation)
-        this.#channels?.onUnrepresentable?.({
-          reason: `unsupported zod type ${String(typeName)}`,
-        });
-        return {};
-    }
+    this.#channels?.onUnrepresentable?.({ reason: 'not a recognized zod schema' });
+    return {};
   }
 
   /**
@@ -525,8 +449,7 @@ export class ZodToOpenApi {
   }
 
   /**
-   * The `override` bridge. Consults the SAME hook the zod v3 path uses, keyed
-   * on the real zod node identity, and splices any replacement into the
+   * The `override` bridge. Consults the hook keyed on real zod node identity, and splices any replacement into the
    * mutable generated node. Nodes zod left EMPTY (its `unrepresentable: 'any'`
    * behavior) are reported through the diagnostics channel — zod v4.4 offers
    * no handler form for this, so the empty node IS the signal.
@@ -684,231 +607,6 @@ export class ZodToOpenApi {
       return { $ref: `${COMPONENT_REF_PREFIX}${rootName}` };
     }
     return mapped as unknown as OpenApiSchemaObject;
-  }
-
-  private transformString(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const schema: OpenApiSchemaObject = { type: 'string' };
-    // Zod uses 'kind' for the check type, not 'type'
-    const checks = def.checks as
-      readonly { kind: string; value?: number | { value: number }; exact?: boolean }[] | undefined;
-
-    if (checks) {
-      for (const check of checks) {
-        if (check.kind === 'email') {
-          schema.format = 'email';
-        } else if (check.kind === 'uri' || check.kind === 'url') {
-          schema.format = 'uri';
-        } else if (check.kind === 'uuid') {
-          schema.format = 'uuid';
-        } else if (check.kind === 'min') {
-          // Zod 3.x stores min/max value as { value: number, message: string } or plain number
-          const checkValue = check.value;
-          const val =
-            typeof checkValue === 'number'
-              ? checkValue
-              : checkValue && typeof checkValue === 'object' && 'value' in checkValue
-                ? (checkValue as { value: number }).value
-                : undefined;
-          if (typeof val === 'number') schema.minLength = val;
-        } else if (check.kind === 'max') {
-          const checkValue = check.value;
-          const val =
-            typeof checkValue === 'number'
-              ? checkValue
-              : checkValue && typeof checkValue === 'object' && 'value' in checkValue
-                ? (checkValue as { value: number }).value
-                : undefined;
-          if (typeof val === 'number') schema.maxLength = val;
-        }
-      }
-    }
-
-    return schema;
-  }
-
-  private transformNumber(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const schema: OpenApiSchemaObject = { type: 'number' };
-    // Zod uses 'kind' for the check type, not 'type'
-    const checks = def.checks as
-      | readonly {
-          kind: string;
-          value?: number | { value: number; message: string };
-          inclusive?: boolean;
-        }[]
-      | undefined;
-
-    if (checks) {
-      for (const check of checks) {
-        const checkValue = check.value;
-        const val =
-          typeof checkValue === 'number'
-            ? checkValue
-            : checkValue && typeof checkValue === 'object' && 'value' in checkValue
-              ? (checkValue as { value: number }).value
-              : undefined;
-
-        if (check.kind === 'min' && typeof val === 'number') {
-          schema.minimum = val;
-        } else if (check.kind === 'max' && typeof val === 'number') {
-          schema.maximum = val;
-        }
-      }
-    }
-
-    return schema;
-  }
-
-  private transformArray(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const typeDef = def.type as ZodSchema | undefined;
-    const schema: OpenApiSchemaObject = {
-      type: 'array',
-      items: typeDef ? this.transform(typeDef) : {},
-    };
-
-    // ZodArray stores min/max as { value: number, message: string } or just number or null
-    const minLength = def.minLength as { value?: number } | number | null | undefined;
-    const maxLength = def.maxLength as { value?: number } | number | null | undefined;
-
-    const minVal =
-      minLength && typeof minLength === 'object' && minLength.value !== undefined
-        ? minLength.value
-        : typeof minLength === 'number'
-          ? minLength
-          : undefined;
-    const maxVal =
-      maxLength && typeof maxLength === 'object' && maxLength.value !== undefined
-        ? maxLength.value
-        : typeof maxLength === 'number'
-          ? maxLength
-          : undefined;
-
-    if (typeof minVal === 'number') {
-      schema.minItems = minVal;
-    }
-    if (typeof maxVal === 'number') {
-      schema.maxItems = maxVal;
-    }
-
-    return schema;
-  }
-
-  private transformObject(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const shapeFn = def.shape as (() => Record<string, ZodSchema>) | undefined;
-    const shape = typeof shapeFn === 'function' ? shapeFn() : {};
-    const properties: Record<string, OpenApiSchemaObject> = {};
-    const required: string[] = [];
-
-    for (const [key, value] of Object.entries(shape)) {
-      properties[key] = this.transform(value);
-
-      // A field is optional if it's ZodOptional OR ZodDefault (has a default value)
-      const typeName = value._def?.typeName as string | undefined;
-      const isOptional = typeName === 'ZodOptional' || typeName === 'ZodDefault';
-
-      if (!isOptional) {
-        required.push(key);
-      }
-    }
-
-    const schema: OpenApiSchemaObject = {
-      type: 'object',
-      properties,
-    };
-
-    if (required.length > 0) {
-      schema.required = required;
-    }
-
-    const unknownKeys = def.unknownKeys as string | undefined;
-    if (unknownKeys === 'passthrough') {
-      schema.additionalProperties = true;
-    }
-
-    return schema;
-  }
-
-  private transformOptional(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const innerType = def.innerType as ZodSchema | undefined;
-    return innerType ? this.transform(innerType) : {};
-  }
-
-  private transformNullable(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    // OpenAPI 3.1 (JSON Schema 2020-12) removed the 3.0 `nullable` keyword;
-    // nullability is expressed via a `null` type. Represent it as
-    // `anyOf: [<inner>, { type: 'null' }]`, which is valid 3.1 and preserves
-    // the inner schema (plan §3.3: unwrap ZodNullable to its inner type).
-    const innerType = def.innerType as ZodSchema | undefined;
-    const innerSchema = innerType ? this.transform(innerType) : {};
-    return { anyOf: [innerSchema, { type: 'null' as const }] };
-  }
-
-  private transformEnum(def: ZodDef): OpenApiSchemaObject {
-    // ZodEnum stores values in def.values (array)
-    const values = def.values as readonly string[] | undefined;
-
-    if (values && Array.isArray(values)) {
-      return { enum: [...values] };
-    }
-
-    // Fallback: try def.options
-    const options = def.options as readonly string[] | undefined;
-    if (options && Array.isArray(options)) {
-      return { enum: [...options] };
-    }
-
-    return { enum: [] };
-  }
-
-  private transformLiteral(def: ZodDef): OpenApiSchemaObject {
-    const value = def.value as string | number | boolean;
-    return { const: value };
-  }
-
-  private transformUnion(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const options = def.options as readonly ZodSchema[] | undefined;
-    return {
-      anyOf: options ? options.map((option) => this.transform(option)) : [],
-    };
-  }
-
-  private transformIntersection(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const left = def.left as ZodSchema | undefined;
-    const right = def.right as ZodSchema | undefined;
-    return {
-      allOf: [left ? this.transform(left) : {}, right ? this.transform(right) : {}],
-    };
-  }
-
-  private transformRecord(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const valueType = def.valueType as ZodSchema | undefined;
-    return {
-      type: 'object',
-      additionalProperties: valueType ? this.transform(valueType) : {},
-    };
-  }
-
-  private transformEffects(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const innerSchema = def.schema as ZodSchema | undefined;
-    return innerSchema ? this.transform(innerSchema) : {};
-  }
-
-  private transformPipeline(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const outSchema = def.out as ZodSchema | undefined;
-    return outSchema ? this.transform(outSchema) : {};
-  }
-
-  private transformDefault(_zodSchema: ZodSchema, def: ZodDef): OpenApiSchemaObject {
-    const innerType = def.innerType as ZodSchema | undefined;
-    const defaultValue = def.defaultValue as (() => unknown) | undefined;
-    const schema = innerType ? this.transform(innerType) : {};
-    if (defaultValue) {
-      try {
-        schema.default = defaultValue();
-      } catch {
-        // Ignore errors getting default value
-      }
-    }
-    return schema;
   }
 }
 

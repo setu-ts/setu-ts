@@ -8,7 +8,7 @@
     "@setu-ts/common": "workspace:^",
     "@setu-ts/auth-plugin": "workspace:^",
     "@setu-ts/rest-starter": "workspace:^",
-    "zod": "^3.24.0",
+    "zod": "^4.6.6",
     "swagger-ui-dist": "^5",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",

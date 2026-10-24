@@ -47,7 +47,7 @@ describe('functional module hosts and generated test tasks', () => {
             ),
           ) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
           expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
-            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4' : '^4',
+            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
         }
         if (!socket) {
