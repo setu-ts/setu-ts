@@ -93,6 +93,39 @@ describe('README CORS options for keyed SDK calls', () => {
       await app.stop();
     }
   });
+  it('refuses the same navigation POST when acceptNullOriginSameOrigin is false (L2 opt-out)', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({ csrf: { acceptNullOriginSameOrigin: false } }),
+      ],
+    });
+    let handled = 0;
+    app.router.post('/form', (ctx) => {
+      handled++;
+      return ctx.response.json({ ok: true });
+    });
+    await app.start();
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: 'http://internal/form',
+        headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' },
+      });
+      expect(response.statusCode).toBe(403);
+      expect(handled).toBe(0);
+      // Positive control: a real same origin still passes with the opt-out.
+      const own = await app.inject({
+        method: 'POST',
+        url: 'http://internal/form',
+        headers: { Origin: 'http://internal', 'Sec-Fetch-Site': 'same-origin' },
+      });
+      expect(own.statusCode).toBe(200);
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('allows the key in preflight and exposes the replay header on a simple request', async () => {
     const app = createApplication({ plugins: [RuntimePlugin()] });
     app.middleware.add(corsMiddleware(corsOptions));

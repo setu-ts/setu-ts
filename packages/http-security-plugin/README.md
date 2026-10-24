@@ -176,14 +176,17 @@ The browser also sends `Sec-Fetch-Site: same-origin`, which page script cannot s
 accepted — the Fetch Metadata rule Go's `CrossOriginProtection` and Hono's `secFetchSite` use. A
 `null` origin with any other `Sec-Fetch-Site` value, or without the header (older browsers), is
 still refused: a sandboxed frame, a `data:` or `file:` page and a cross-site redirect all report
-`cross-site`. `trustedOrigins: ['null']` is never implied.
+`cross-site`. `trustedOrigins: ['null']` is never implied. To refuse every `null` origin as before
+0.11.0, set `csrf: { acceptNullOriginSameOrigin: false }` (and send a real origin with
+`headers: { referrerPolicy: 'same-origin' }`).
 
-| Option            | Type            | Default | Description                                                      |
-| ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
-| `enabled?`        | `boolean`       | `true`  | Toggle CSRF                                                      |
-| `trustedOrigins?` | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                    |
-| `customHeader?`   | `string`        | —       | Required custom header for unsafe methods                        |
-| `exclude?`        | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test |
+| Option                        | Type            | Default | Description                                                                           |
+| ----------------------------- | --------------- | ------- | ------------------------------------------------------------------------------------- |
+| `enabled?`                    | `boolean`       | `true`  | Toggle CSRF                                                                           |
+| `trustedOrigins?`             | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                                         |
+| `customHeader?`               | `string`        | —       | Required custom header for unsafe methods                                             |
+| `exclude?`                    | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test                      |
+| `acceptNullOriginSameOrigin?` | `boolean`       | `true`  | Accept `Origin: null` with `Sec-Fetch-Site: same-origin`; `false` refuses it (0.11.0) |
 
 **`exclude` is for a protocol endpoint, not an application route.** An excluded path is checked
 FIRST — before the method test — and is never inspected. Use it only where the endpoint's own

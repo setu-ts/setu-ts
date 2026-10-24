@@ -262,9 +262,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
 ## Behind a TLS proxy
 
 React Router actions answer 400 behind TLS termination unless the proxy is trusted. Set
-TRUSTED_PROXIES to a comma-separated list of proxy CIDRs (for example, 127.0.0.1/32). This trusts
-their forwarded client IP, host and protocol headers. Leave it empty for direct access. Using
-0.0.0.0/0 or ::/0 trusts every client and its forwarded headers.
+TRUSTED_PROXIES to a comma-separated list of your proxies (for example, 10.0.0.0/8). This trusts
+their forwarded client IP, host and protocol headers. Leave it empty for direct access. List IPv4
+proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared
+literally and matches nothing. Never use 0.0.0.0/0, which trusts every IPv4 client's forwarded
+headers, so any client can choose its own address and origin.
 `,
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
@@ -273,7 +275,7 @@ their forwarded client IP, host and protocol headers. Leave it empty for direct 
       {
         name: 'TRUSTED_PROXIES',
         description:
-          'Proxy CIDRs for TLS-proxy action 400s; trusts forwarded client IP, host and protocol. 0.0.0.0/0 or ::/0 trusts every client.',
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP, host and protocol, fixing TLS-proxy action 400s. Never 0.0.0.0/0: it trusts every client.',
         develop: '',
       },
       {

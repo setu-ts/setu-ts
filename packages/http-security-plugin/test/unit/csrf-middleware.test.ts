@@ -7,7 +7,7 @@ import { REQUEST_ORIGIN_STATE_KEY } from '@setu-ts/common';
 
 describe('opaque Origin under no-referrer (M119c)', () => {
   for (const origin of [' null', 'null ']) {
-    it(`records Web Headers normalization of ${JSON.stringify(origin)} (blocked wire refusal §8a.1.2)`, async () => {
+    it(`records Web Headers normalization of ${JSON.stringify(origin)} (Headers strips it before the middleware, §8a.1.2)`, async () => {
       const { ctx, response } = createFakeContext({
         request: {
           method: 'POST',
@@ -65,6 +65,37 @@ describe('opaque Origin under no-referrer (M119c)', () => {
       expect(response.statuses).toEqual(allowed ? [] : [403]);
     });
   }
+
+  for (const [setting, allowed] of [
+    [undefined, true],
+    [true, true],
+    [false, false],
+  ] as const) {
+    it(`acceptNullOriginSameOrigin: ${String(setting)} → ${allowed ? 'accepted' : 'refused'}`, async () => {
+      const { ctx, response } = createFakeContext({
+        request: { method: 'POST', headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' } },
+      });
+      let calls = 0;
+      await csrfMiddleware(setting === undefined ? {} : { acceptNullOriginSameOrigin: setting })(
+        ctx,
+        () => {
+          calls++;
+          return Promise.resolve();
+        },
+      );
+      expect(calls).toBe(allowed ? 1 : 0);
+      expect(response.statuses).toEqual(allowed ? [] : [403]);
+    });
+  }
+
+  it.each(['false', 0, null, {}])(
+    'refuses a non-boolean acceptNullOriginSameOrigin (%j) when built',
+    (value) => {
+      expect(() =>
+        csrfMiddleware({ acceptNullOriginSameOrigin: value as unknown as boolean }),
+      ).toThrow(new TypeError('csrfMiddleware: acceptNullOriginSameOrigin must be a boolean.'));
+    },
+  );
 
   it('combines duplicated Fetch Metadata header lines and refuses them', async () => {
     const { ctx, response } = createFakeContext({

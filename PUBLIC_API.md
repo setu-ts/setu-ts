@@ -3501,15 +3501,20 @@ script on a credentialed CORS origin could otherwise name its own host; scripts 
 checked against the URL origin and `trustedOrigins` only: a browser cannot send the target's real
 public origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through
 would otherwise publish a host the attacker then matches. It does not grant proxy trust to other
-consumers. `trustedOrigins` adds further allowed origins. Both headers absent → pass through
-(non-browser clients). Optional `customHeader` requires that header on unsafe methods (403 when
-absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely — checked
-before the method test, so an excluded path is never inspected. It is for a protocol endpoint whose
-own defences make the check redundant (the SAML ACS: its signed assertion, single-use request and
-binding cookie), not for an application form route. An origin allowlist cannot admit an IdP that
-serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with `Origin: null`, and
-`trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so the documented SAML
-recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's form CSRF.
+consumers. Since 0.11.0 (M119c) `Origin: null` passes when the request also carries
+`Sec-Fetch-Site: same-origin` — the pair a browser sends for a same-origin form POST under
+`Referrer-Policy: no-referrer`; `acceptNullOriginSameOrigin?: boolean` (default `true`; a
+non-boolean throws `TypeError` when the middleware is built) set to `false` restores the earlier
+refusal of every `null` origin. `trustedOrigins` adds further allowed origins. Both headers absent →
+pass through (non-browser clients). Optional `customHeader` requires that header on unsafe methods
+(403 when absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely —
+checked before the method test, so an excluded path is never inspected. It is for a protocol
+endpoint whose own defences make the check redundant (the SAML ACS: its signed assertion, single-use
+request and binding cookie), not for an application form route. An origin allowlist cannot admit an
+IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with
+`Origin: null`, and `trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so
+the documented SAML recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's
+form CSRF.
 
 #### Request Size (`requestSizeMiddleware`)
 

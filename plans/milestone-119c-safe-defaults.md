@@ -87,7 +87,9 @@ or the documentation name it.
   (the string the browser sends) is accepted when `Sec-Fetch-Site` is `same-origin`, and refused
   otherwise as today. Nothing else in the origin check changes; `trustedOrigins` is untouched, and
   `null` is never implied for a request without `Sec-Fetch-Site`. The `referrerPolicy` default stays
-  `no-referrer`.
+  `no-referrer`. A new `CsrfOptions.acceptNullOriginSameOrigin?: boolean` (default `true`; a
+  non-boolean throws `TypeError` when the middleware is built) set to `false` restores the
+  pre-0.11.0 refusal — added after the audit's L2, maintainer decision 2026-10-25.
 - **Why:** maintainer decision 2026-10-24, the Fetch Metadata rule of Go's `CrossOriginProtection`
   and Hono's `secFetchSite`, narrowed to the one case the default header policy produces. A
   cross-site page or a sandboxed iframe carries `Sec-Fetch-Site: cross-site`, which page scripts
@@ -184,15 +186,16 @@ or the documentation name it.
 `docs/upgrading.md`: the CSRF check accepts `Origin: null` with `Sec-Fetch-Site: same-origin`;
 generated Node test scripts force exit; `setu add` writes Redis arms in a Redis workspace.
 
-| Exported symbol | Kind | Consumer / real code path that READS it                                                                             |
-| --------------- | ---- | ------------------------------------------------------------------------------------------------------------------- |
-| None (checked)  | —    | No `src/index.ts` export is added or changed; `TransportSpec` and the CLI constants are internal to `packages/cli`. |
+| Exported symbol                          | Kind                                     | Consumer / real code path that READS it                                         |
+| ---------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------- |
+| `CsrfOptions.acceptNullOriginSameOrigin` | optional member of an exported interface | Read by `csrfMiddleware` (§3.2); reached through `HttpSecurityPlugin({ csrf })` |
 
 ### 4.1 Options — every option names its consumer
 
-| Option                                     | Consumer                                                               | Behavior (per implementation)                                                       |
-| ------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `TRUSTED_PROXIES` (generated config value) | the full-stack template's `setu.config.ts` → `httpSecurity.ipSecurity` | Non-empty CIDR list → `trustProxy: true`, `trustedProxies`; empty → IP security off |
+| Option                                     | Consumer                                                               | Behavior (per implementation)                                                                                    |
+| ------------------------------------------ | ---------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `TRUSTED_PROXIES` (generated config value) | the full-stack template's `setu.config.ts` → `httpSecurity.ipSecurity` | Non-empty CIDR list → `trustProxy: true`, `trustedProxies`; empty → IP security off                              |
+| `CsrfOptions.acceptNullOriginSameOrigin`   | `csrfMiddleware` (and `HttpSecurityPlugin({ csrf })`)                  | `true` (default) accepts `Origin: null` + `same-origin`; `false` refuses every `null` origin; non-boolean throws |
 
 ## 5. Implementation files
 
@@ -315,7 +318,9 @@ never the implementing context.
    (`example`, `10.0.0.0/33`, `::1/129`) is compared literally, as the plugin documents, matches no
    address and trusts nothing — the socket peer stays the client. Neither path ever widens trust.
 7. **F2, documented blast radius:** the generated `.env` description and README name what the
-   setting trusts and warn that `0.0.0.0/0` or `::/0` trusts every client's forwarded headers.
+   setting trusts, warn that `0.0.0.0/0` trusts every IPv4 client's forwarded headers, and say IPv6
+   proxies must be listed as single addresses (corrected after the audit, L1: `::/0` is compared
+   literally and trusts nothing).
 8. **F3, no disclosure:** the `DiscoveryUnavailableError` message and the startup warning contain
    the option names and the fixed token path only. With a planted canary in an explicit `token` and
    in `apiServer`, neither value appears in any error message, `cause` rendering or log line; the

@@ -104,7 +104,8 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/http-security-plugin`).** Under the plugin's default `Referrer-Policy: no-referrer` a
   browser sends `Origin: null` on a same-origin HTML form POST, which was refused 403. The pair is
   now accepted (the Fetch Metadata rule Go and Hono use); `null` with any other `Sec-Fetch-Site`
-  value, or without it, is still refused.
+  value, or without it, is still refused. `csrf: { acceptNullOriginSameOrigin: false }` restores the
+  earlier refusal.
 - **Generated Node test scripts force exit (V10-29, M119c, 0.11.0, `@setu-ts/cli`).** `test` and
   `test:e2e` pass `--test-force-exit`, so a test whose application failed to start fails promptly
   instead of hanging CI to its timeout.
@@ -137,7 +138,8 @@ All notable changes to this project are documented here. The format follows
 - **Kubernetes discovery outside a pod names `token` (V10-44, M119c, 0.11.0,
   `@setu-ts/service-discovery-plugin`).** A missing service-account token file now gives one startup
   warning and a `DiscoveryUnavailableError` naming `token` and `apiServer`, instead of a silent
-  `down`; the README no longer lists `token` as Consul-only.
+  `down`; the README no longer lists `token` as Consul-only. Only a missing file is reported that
+  way; any other token read failure inside a pod still reaches the caller as a temporary outage.
 - **Documentation (V10-3, V10-14, M119c, 0.11.0).** The http-security CORS + CSRF example allows the
   `x-csrf-token` header it requires; the session-plugin README says the bearer exemption also skips
   the session commit on a `csrf.exclude`d path and that `exemptBearer: false` restores it.

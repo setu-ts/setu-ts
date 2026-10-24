@@ -17,7 +17,7 @@ import { resolveOptions } from '../options.ts';
 import { createProvider } from '../providers/provider-factory.ts';
 import { ServiceDiscoveryService } from '../services/service-discovery-service.ts';
 import { SelfRegistrationNotSupportedError } from '../errors.ts';
-import { TOKEN_PATH } from '../providers/kubernetes-provider.ts';
+import { isMissingFile, TOKEN_PATH } from '../providers/kubernetes-provider.ts';
 import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
@@ -130,7 +130,10 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
         // at startup; token rotation and reads remain the provider's responsibility.
         return ctx.runtime.fs!.stat(TOKEN_PATH).then(
           () => {},
-          () => {
+          (error: unknown) => {
+            // Only an absent file means "not in a pod"; any other stat failure
+            // is left to the provider's own read, which reports it as it happens.
+            if (!isMissingFile(error)) return;
             ctx.logger?.warn(
               `Cannot inspect Kubernetes token file ${TOKEN_PATH}; set the token and apiServer options outside a pod.`,
             );

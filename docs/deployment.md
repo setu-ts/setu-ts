@@ -62,9 +62,10 @@ public URL to loaders and actions. Without IP security these consumers use `ctx.
 behind a TLS-terminating proxy that makes **every React Router action answer 400**, because React
 Router's own origin check compares the browser's `https` origin with the internal `http` URL
 (V10-41). A `setu new --template full-stack` project reads `TRUSTED_PROXIES` (a comma-separated CIDR
-list of your proxies) and registers IP security from it; empty leaves it off. Set it to your
-proxies' addresses only: `0.0.0.0/0` or `::/0` would let every client choose its own address and
-origin.
+list of your proxies) and registers IP security from it; empty leaves it off. Set it to your proxies
+only — IPv4 addresses or CIDRs, IPv6 proxies as single addresses (an IPv6 CIDR is compared literally
+and matches nothing). Never `0.0.0.0/0`: it trusts every IPv4 client's forwarded headers, so any
+client could choose its own address and origin.
 
 `csrf: {}` implicitly trusts the URL origin, that published public origin, and, when the browser
 sends `Sec-Fetch-Site: same-origin`, the validated leftmost `X-Forwarded-Proto`/`X-Forwarded-Host`

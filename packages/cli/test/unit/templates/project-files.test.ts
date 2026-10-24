@@ -28,11 +28,16 @@ describe('functional module hosts and generated test tasks', () => {
     for (const file of ['.env', '.env.example', 'README.md']) {
       const source = contentsOf(files, file);
       expect(source).toContain('TRUSTED_PROXIES');
-      expect(source).toContain('0.0.0.0/0 or ::/0 trusts every client');
+      expect(source).toContain('0.0.0.0/0');
+      expect(source).toMatch(/single IPv6 addresses|IPv6 proxies as single addresses/);
       expect(source).toContain('forwarded');
       expect(source).toContain('400');
     }
     expect(contentsOf(files, 'README.md')).toContain('## Behind a TLS proxy');
+    // Audit L1: `::/0` is compared literally and trusts nothing, so no file may claim it trusts all.
+    for (const file of ['.env', '.env.example', 'README.md']) {
+      expect(contentsOf(files, file)).not.toContain('::/0');
+    }
   });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {

@@ -55,4 +55,25 @@ describe('Kubernetes token startup guidance (V10-44)', () => {
       }
     }
   }
+
+  it('does not give the outside-a-pod warning for a stat failure other than a missing file', async () => {
+    const warnings: string[] = [];
+    const fs = {
+      stat: () => Promise.reject(Object.assign(new Error('permission denied'), { code: 'EACCES' })),
+    } as unknown as IFileSystem;
+    const ctx = {
+      runtime: createFakeRuntime({ fs }),
+      services: { register: () => {} },
+      health: { register: () => {} },
+      lifecycle: { onClose: () => {}, onBootstrap: () => {}, onStopping: () => {} },
+      logger: { warn: (message: string) => warnings.push(message) },
+    } as unknown as IPluginContext;
+    await ServiceDiscoveryPlugin({
+      provider: 'kubernetes',
+      namespace: 'default',
+      apiServer: 'https://api.invalid',
+      http: createFakeHttp(),
+    }).register(ctx);
+    expect(warnings).toEqual([]);
+  });
 });
