@@ -641,7 +641,7 @@ here.
 - **Milestone 119a** (`packages/messaging-plugin` — shared queue-less NATS groups, an ephemeral
   reply inbox and reaped leaked consumers, the Kafka first-join seek rule, and `PublishTimeoutError`
   with Redis Streams/NATS publish bounds; V10-13, V10-2, V10-21, V10-30, V10-5) — complete (PR
-  pending).
+  #498).
 - **Next milestone** — M119b (`mail`, `health`, `realtime-backplane`, `queue`, `database` —
   readiness that drains replicas for a shared or fan-out problem). M118 and M120–M123 are open in
   the ROADMAP; M120 depends on M118.
