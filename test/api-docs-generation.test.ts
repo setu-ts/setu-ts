@@ -475,7 +475,7 @@ error[private-type-ref]: public type references private type
   });
 
   describe('DOC_LINT_BASELINE constant', () => {
-    it('is the re-measured baseline of 237 on pinned TypeDoc 0.28.20', () => {
+    it('is the re-measured baseline of 236 on pinned TypeDoc 0.28.20', () => {
       // 776 when the plan was written against a pre-M56 tree; merging
       // origin/main brought M56-M61's JSDoc and the real count fell to 775.
       // M59 then added four diagnostics and removed five, so it fell to 774.
@@ -531,7 +531,8 @@ error[private-type-ref]: public type references private type
       // comparable with Deno's, and re-measured it: 554 warnings, of which 317
       // are members of anonymous object types that `deno doc --lint` never
       // required (inRatchetScope) — 237 in scope.
-      expect(DOC_LINT_BASELINE).toBe(237);
+      // M119a documented the messaging publish paths it touched: 236.
+      expect(DOC_LINT_BASELINE).toBe(236);
       // The pin and the baseline are only meaningful together, so the version
       // is asserted beside the count: moving one without the other is exactly
       // the drift this pair exists to make impossible.

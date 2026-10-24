@@ -5875,6 +5875,12 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   deadLetterMaxLen?: number;
   /** Foreign empty consumer inactivity threshold, default 3600000 ms. */
   consumerIdleSweepMs?: number;
+  /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647. Zero disables the bound;
+   * an expired publish may still be delivered. Consumer reads are unaffected.
+   * @defaultValue 15000 @since 0.11.0
+   */
+  publishTimeoutMs?: number;
 }
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
@@ -5923,6 +5929,13 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
 // version:history — the `@since` below records when the member appeared, not the
 // current release; an `@since` is never bumped.
 interface NatsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647. Zero disables the bound;
+   * an expired publish may still be delivered. Passed to the client as its own publish
+   * `timeout` and held by the framework's deadline as well; consumer reads are unaffected.
+   * @defaultValue 15000 @since 0.11.0
+   */
+  publishTimeoutMs?: number;
   /** Lazy connection only: defaults -1 (forever) / 2000 ms. @since 0.10.0 */
   reconnect?: { maxAttempts?: number; waitMs?: number };
   broker: 'nats';
@@ -5949,13 +5962,16 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
    */
   streamSubjects?: readonly string[];
   /**
-   * Default consumer group / queue name. A queue becomes the JetStream durable
-   * consumer name with each character the nats client refuses (`.`, `*`, `>`,
-   * `/`, `\`, whitespace) escaped as `_` + two hex digits — `orders.eu` →
-   * `orders_2eeu` (M101b). A queue whose encoding collides with another queue's,
-   * or that is reused across topics, rejects `subscribe()` with
+   * Shared queue-less group prefix; the group is `<defaultQueue>.<topic>`.
+   * A newly created group starts at new messages; later subscribers resume it.
+   * An explicit queue becomes the JetStream durable consumer name with each
+   * character the nats client refuses (`.`, `*`, `>`, `/`, `\`, whitespace)
+   * escaped as `_` + two hex digits — `orders.eu` → `orders_2eeu` (M101b). A
+   * queue whose encoding collides with another queue's, or that is reused
+   * across topics, rejects `subscribe()` with
    * `NatsConsumerNameCollisionError`. The raw queue is recorded as consumer
    * metadata, which needs NATS 2.10+.
+   * @defaultValue 'messaging-consumers'
    */
   defaultQueue?: string;
 }
@@ -6298,14 +6314,15 @@ respond<TReq, TRes>(
 
 Pass `options.queue` to `respond` to load-balance requests across competing responders.
 
-`request` rejects with one of three exported error classes (import from `@setu-ts/messaging-plugin`
+`request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
 
-| Error                        | Thrown when                                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                             |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
-| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
+| Error                        | Thrown when                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                                                                    |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                                                       |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility.                                        |
+| `PublishTimeoutError`        | The request's publish outlived `publishTimeoutMs`; the message may still be delivered. Carries `topic` and `timeoutMs`. |
 
 Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3). Each
 carries the platform error as `cause` **when there is one** — the absent-stream refusal below is a
@@ -6415,7 +6432,7 @@ export type { PubSubSdkModule, ServiceBusSdkModule } from '@setu-ts/messaging-pl
 export { JsonSerializer } from '@setu-ts/messaging-plugin';
 export type { ISerializer } from '@setu-ts/messaging-plugin';
 
-// Request-reply, gate, and NATS-prerequisite error classes
+// Request-reply, gate, publish-timeout, and NATS-prerequisite error classes
 export {
   ChainGateTimeoutError,
   CloudBrokerUnavailableError,
@@ -6425,6 +6442,7 @@ export {
   MessagingNotSupportedError,
   NatsConsumerNameCollisionError,
   PubSubSubscriptionBoundElsewhereError,
+  PublishTimeoutError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
@@ -6729,11 +6747,14 @@ other numeric code (including 7/16 authorization responses) means true; no numer
 An omitted transport probe means unknown. Unknown still reports up. See the
 [per-broker probe table](packages/messaging-plugin/README.md#health-indicator).
 
-`KafkaOptions` and `PubSubOptions`, as well as both Pub/Sub plugin arms and the Kafka plugin arm,
-accept `publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
-`RangeError` at plugin and broker construction. Both publish entry points, RPC and outbox relay
-publishes use the bound; the timeout error names broker, topic and bound and warns that delivery may
-still occur. It does not cancel the transport.
+The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS plugin arms — and their `KafkaOptions`,
+`PubSubOptions`, `RabbitMqOptions`, `RedisStreamsOptions` and `NatsOptions` shapes — accept
+`publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
+`RangeError` at `MessagingPlugin(...)` and at broker construction. Every publish entry point, RPC
+and outbox relay publishes use the bound; the timeout is the exported `PublishTimeoutError`, which
+names the broker, topic and bound and warns that delivery may still occur. It does not cancel the
+transport. On Redis Streams the bound covers the publish's `XADD` only; on NATS it is passed to the
+client as its own publish `timeout` as well.
 
 Fresh Kafka groups whose every partition offset is `-1` capture high watermarks before `run()`. On
 the first join, members seek assigned, still-uncommitted partitions to the minimum start offset

@@ -61,7 +61,7 @@ const READMES: Readonly<Record<string, number>> = {
   // dual-publish and domain-mapping examples.
   // M107: +3 for the outbox usage, the backend mappings and the Workers wiring.
   // M108: +2 for the inbox usage and the operator release loop.
-  'packages/messaging-plugin/README.md': 16,
+  'packages/messaging-plugin/README.md': 17,
   // M89c: the tenant-in-a-behaviour recipe (`getRepositoryFor`) is the one new
   // fence — gated so it cannot ship uncompilable.
   'packages/multi-tenancy-plugin/README.md': 4,

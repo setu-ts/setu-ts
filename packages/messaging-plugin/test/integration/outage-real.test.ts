@@ -26,6 +26,37 @@ import type { IMessageBroker } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '../../src/interfaces/index.ts';
 import type { MessageBrokerAdapter } from '../../src/brokers/message-broker.ts';
 import { kafkaHealthClientConfig } from '../../src/brokers/kafka-broker.ts';
+import { PublishTimeoutError } from '../../src/errors.ts';
+
+it(
+  'M119a REAL paused Redis rejects at the configured publish bound',
+  { skip: !process.env['REDIS_URL'] },
+  async () => {
+    const url = process.env['REDIS_URL']!;
+    const container = await containerIdForPort(Number(new URL(url).port || 6379));
+    const broker = new RedisStreamsBroker(makeRuntime(), new JsonSerializer(), {
+      url,
+      publishTimeoutMs: 2000,
+    });
+    let paused = false;
+    try {
+      await broker.connect();
+      await broker.publish(`m119a.baseline.${crypto.randomUUID()}`, {});
+      await docker(['pause', container]);
+      paused = true;
+      const started = performance.now();
+      const error = await broker.publish('m119a.paused', {}).catch((error: unknown) => error);
+      const elapsed = performance.now() - started;
+      expect(error).toBeInstanceOf(PublishTimeoutError);
+      expect(error).toMatchObject({ topic: 'm119a.paused', timeoutMs: 2000 });
+      expect(elapsed).toBeGreaterThanOrEqual(2000);
+      expect(elapsed).toBeLessThan(3000);
+    } finally {
+      if (paused) await docker(['unpause', container]);
+      await broker.disconnect();
+    }
+  },
+);
 
 // ── Docker stop/start helpers (inlined; no cross-package dep) ──────────────
 

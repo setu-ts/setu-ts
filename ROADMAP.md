@@ -15152,12 +15152,22 @@ new, and every broker call must have a bound and a named failure.
 - **V10-5** — an outbox relay paused at its `markSent` write ends the sweep `store-failure` although
   the store answered late; the README says only a pause inside the publish does.
 
-**Decisions the plan takes:** the semantics of a queue-less NATS subscription (an ephemeral consumer
-with `deliver_policy: new` — the fan-out meaning every other broker gives a queue-less subscriber —
-or a durable whose name is stable per subscription), and the cleanup of consumers earlier versions
-leaked; how the Kafka seek tells "never committed" from "delivered but not yet committed"; one named
-publish-timeout error class shared by every arm; whether a late `markSent` answer is `store-failure`
-or the late-answer outcome M113j records.
+**Decisions the plan takes:** a queue-less NATS subscription is a SHARED durable group named
+`<defaultQueue>.<topic>` (default prefix `messaging-consumers`) — the maintainer's choice on
+2026-10-24, matching the four arms that share a `defaultQueue` group for queue-less subscribers
+(Redis Streams, Kafka, Pub/Sub and Service Bus) rather than the two that fan out (RabbitMQ and
+in-memory) — so a queue-less responder is answered by one replica, never all of them, and is not
+re-run on restart; a group created for the first time starts at new messages, as a new Kafka group
+does. The `request()` reply inbox is an ephemeral consumer, deleted on shutdown and re-created if
+the server removes it. Consumers earlier versions leaked are not deleted — that would break an older
+replica mid-rollout — but get a 5-minute `inactive_threshold` on `connect()`, so the server reaps
+them once nothing reads from them. The Kafka first-join seek skips a partition already delivered
+from its start, telling "never delivered" from "delivered but not yet committed" without a commit
+round trip. One exported `PublishTimeoutError` (readonly `topic` and `timeoutMs`) is thrown by every
+bounded arm, and `publishTimeoutMs` (default 15000, `0` unbounded) extends to the Redis Streams and
+NATS arms. A late `markSent` answer keeps the sweep's `store-failure` end — the bound fires before
+any answer exists, and the late answer is recorded on top (M113j) — and the README's narrower claim
+is corrected.
 
 ---
 
@@ -15980,7 +15990,7 @@ patch by construction and gains nothing new here.
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
 | 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
-| 119a      | ⬜     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
+| 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ⬜     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
 | 119c      | ⬜     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |
 | 119d      | ⬜     | http-security-plugin — forwarded client identity                                                                                                                                                                                                                                          |

@@ -54,7 +54,7 @@ export const CLEAN_PACKAGES = new Set([
  * In-scope diagnostics on TypeDoc 0.28.20 (554 before excluding anonymous
  * object-type members); the previous Deno count is not comparable.
  */
-export const DOC_LINT_BASELINE = 237;
+export const DOC_LINT_BASELINE = 236;
 /** Exact TypeDoc version on which the diagnostic debt was measured. */
 export const DOC_LINT_BASELINE_TYPEDOC = '0.28.20';
 

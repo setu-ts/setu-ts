@@ -73,6 +73,7 @@ export {
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
+  PublishTimeoutError,
 } from './errors.ts';
 export type { IntegrationEventRejectionReason } from './errors.ts';
 
