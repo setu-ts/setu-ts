@@ -14662,6 +14662,17 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 ## Milestone 115: The `v0.10.0` Client-Brief Run
 
+**Status: complete (2026-10-24).** Relaymark was built by three agents in turn and reached deployed
+acceptance for every non-outage criterion, but one backend outage drains the whole product. The
+security pass found no framework defect. X74 ran in both forms: (a) passed 53/53, and (b) did not
+deliver within 8 hours. The findings are register rows V10-49…V10-63, grouped by shape in M119; the
+generator gaps are M120–M123.
+
+**Correction: rule 1 was missed.** The brief was written on 2026-10-23, after `0.10.0` was
+published, not frozen before the cut. The product shape was fixed in this section beforehand, but
+the author had read the CHANGELOG, so a story that lands on a `0.10.0` fix may be tailored. The
+brief's header and `smoke/M115-FINDINGS.md` record this.
+
 **Package(s):** none — an exercise block against the PUBLISHED `0.10.0` artifacts, the M104 method
 applied to a second, deliberately different product. Its findings become `smoke/DEFECTS.md` rows and
 its defects become the `0.10.0` closeout letters.
@@ -14701,14 +14712,15 @@ since the run is meant to judge them.
 
 **Deliverables**
 
-- [ ] `smoke/v0.10.0/CLIENT-BRIEF.md` written and frozen before the cut, with the time-measure
-      decision
-- [ ] The product built cold against `0.10.0`, with its delivery ledger
-- [ ] Acceptance from a browser and a generated partner client; outage pass; security pass
-- [ ] X74 run on `0.10.0` (both forms)
-- [ ] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
+- [x] `smoke/v0.10.0/CLIENT-BRIEF.md` with the time-measure decision — written AFTER the cut (see
+      the correction above), frozen when the builder started
+- [x] The product built cold against `0.10.0`, with its delivery ledger
+- [x] Acceptance from a browser and a generated partner client; outage pass; security pass (S4,
+      retry after a crash mid-request, not verified)
+- [x] X74 run on `0.10.0` (both forms)
+- [x] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
       M104
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `115`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `115`
 
 ---
 
@@ -15829,7 +15841,7 @@ patch by construction and gains nothing new here.
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
-| 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
+| 115       | ✅     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
 | 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
