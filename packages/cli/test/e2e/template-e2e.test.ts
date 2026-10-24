@@ -447,7 +447,7 @@ describe('template scaffolding — end to end', () => {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const config = await nodeFs.readFile(`${root}/shop/setu.config.ts`, 'utf8');
 
-      expect(config).toContain('(config): FullStackStarterOptions => ({');
+      expect(config).toContain('(config): FullStackStarterOptions => {');
       // A package import naming ONLY types renders in the `import type` form
       // (M98c), which is what this repository writes and what the generated
       // project's own `deno fmt` keeps.

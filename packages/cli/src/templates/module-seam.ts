@@ -17,6 +17,7 @@ import { MODULES_DIR } from '../utils/module-scanner.ts';
 import { MODULES_EXPORT, renderModuleBarrel } from '../schematics/module-barrel.ts';
 import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
+import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
 
 /** Specifier the generated `setu.config.ts` imports the barrel from. */
 const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
@@ -35,7 +36,7 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys', '--allow-read'],
-  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4.6.6' },
+  npmDependencies: { 'swagger-ui-dist': SWAGGER_UI_DIST_VERSION, zod: '^4.6.6' },
   denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4.6.6' },
 };
 

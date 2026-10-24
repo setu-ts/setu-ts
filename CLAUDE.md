@@ -649,12 +649,17 @@ here.
 - **Milestone 119g** (`auth-plugin` + `common` + `idempotency-plugin` + `service-discovery-plugin` —
   failure reasons at `warn` once per state change, `describeError` in `common`, a named discovery
   503; V10-62, V10-63, V10-34) — complete (PR #500).
+- **Milestone 119c** (`cli` + `http-security-plugin` + `service-discovery-plugin` and docs — safe
+  framework, broken default: `TRUSTED_PROXIES` in the full-stack template, CSRF `Origin: null` with
+  `Sec-Fetch-Site: same-origin` plus an opt-out, exact `swagger-ui-dist` pin, telemetry peers and
+  Redis arms from `setu add`, forced test exit, named Kubernetes token fault; V10-17, V10-1, V10-3,
+  V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR #501).
 - **Milestone 119d** (`packages/http-security-plugin` — a malformed `Forwarded` element is a
   boundary the trust walk never crosses, bounds read from the right, one address normalizer; V10-19,
   V10-28) — complete (PR pending).
-- **Next milestone** — M119c (`cli`, `http-security`, `session`, `openapi`, `telemetry`,
-  `service-discovery` — safe framework, broken default). M119e, M119f, M119h, M119i, M118 and
-  M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Next milestone** — M119e (`database-plugin`, `common`, `cloudflare-plugin` — a data contract
+  that is not portable or not checked at startup). M119f, M119h, M119i, M118 and M120–M123 are open
+  in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 

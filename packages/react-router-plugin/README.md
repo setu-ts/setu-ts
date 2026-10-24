@@ -4,8 +4,12 @@ Behind a reverse proxy, the request bridge uses `publicRequestUrl(ctx)` from `@s
 loaders and actions see the public protocol and host when IP security has resolved them. Register
 `HttpSecurityPlugin({ ipSecurity: { trustProxy: true, trustedProxies: [...] } })` with the addresses
 of your proxies; choose `forwardedHeader: 'forwarded'` if they write RFC 7239 instead of
-`X-Forwarded-*`. With no IP security middleware, the bridge uses the original request URL. Use a
-configured base URL for security-sensitive links such as password resets. See
+`X-Forwarded-*`. With no IP security middleware, the bridge uses the original request URL, so behind
+a TLS-terminating proxy **every action answers 400**: React Router's own origin check compares the
+browser's `https` origin with the internal `http` URL (V10-41). A `setu new --template full-stack`
+project reads the `TRUSTED_PROXIES` setting (a comma-separated CIDR list; empty leaves IP security
+off) and configures this for you (M119c). Use a configured base URL for security-sensitive links
+such as password resets. See
 [deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
 
 React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a

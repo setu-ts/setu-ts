@@ -5,6 +5,138 @@ import { csrfMiddleware } from '../../src/middleware/csrf-middleware.ts';
 import { createFakeContext } from '../fixtures/fake-request-context.ts';
 import { REQUEST_ORIGIN_STATE_KEY } from '@setu-ts/common';
 
+describe('opaque Origin under no-referrer (M119c)', () => {
+  for (const origin of [' null', 'null ']) {
+    it(`records Web Headers normalization of ${JSON.stringify(origin)} (Headers strips it before the middleware, §8a.1.2)`, async () => {
+      const { ctx, response } = createFakeContext({
+        request: {
+          method: 'POST',
+          headers: {
+            Origin: origin,
+            'Sec-Fetch-Site': 'same-origin',
+          },
+        },
+      });
+      expect(ctx.request.headers.get('Origin')).toBe('null');
+      let calls = 0;
+      await csrfMiddleware()(ctx, () => {
+        calls++;
+        return Promise.resolve();
+      });
+      expect(calls).toBe(1);
+      expect(response.statuses).toEqual([]);
+    });
+  }
+  const cases = [
+    ['null', 'same-origin', true],
+    ['null', ' Same-Origin ', true],
+    ...[
+      'cross-site',
+      'same-site',
+      'none',
+      undefined,
+      '',
+      'same-origin, cross-site',
+      'same-origin, same-origin',
+    ].map((site) => ['null', site, false] as const),
+    ...[' null', 'NULL', 'null ', '"null"', 'https://foreign.example'].map(
+      (origin) => [origin, 'same-origin', false] as const,
+    ),
+  ] as const;
+
+  for (const [origin, site, allowed] of cases) {
+    it(`${JSON.stringify(origin)} / ${JSON.stringify(site)} → ${allowed}`, async () => {
+      const { ctx, response } = createFakeContext({ request: { method: 'POST' } });
+      // Headers trims HTTP whitespace at construction. Override the read seam
+      // to test the exact source-origin bytes the middleware receives as well.
+      const original = ctx.request.headers.get.bind(ctx.request.headers);
+      ctx.request.headers.get = (name) =>
+        name.toLowerCase() === 'origin'
+          ? origin
+          : name.toLowerCase() === 'sec-fetch-site'
+            ? (site ?? null)
+            : original(name);
+      let calls = 0;
+      await csrfMiddleware()(ctx, () => {
+        calls++;
+        return Promise.resolve();
+      });
+      expect(calls).toBe(allowed ? 1 : 0);
+      expect(response.statuses).toEqual(allowed ? [] : [403]);
+    });
+  }
+
+  for (const [setting, allowed] of [
+    [undefined, true],
+    [true, true],
+    [false, false],
+  ] as const) {
+    it(`acceptNullOriginSameOrigin: ${String(setting)} → ${allowed ? 'accepted' : 'refused'}`, async () => {
+      const { ctx, response } = createFakeContext({
+        request: { method: 'POST', headers: { Origin: 'null', 'Sec-Fetch-Site': 'same-origin' } },
+      });
+      let calls = 0;
+      await csrfMiddleware(setting === undefined ? {} : { acceptNullOriginSameOrigin: setting })(
+        ctx,
+        () => {
+          calls++;
+          return Promise.resolve();
+        },
+      );
+      expect(calls).toBe(allowed ? 1 : 0);
+      expect(response.statuses).toEqual(allowed ? [] : [403]);
+    });
+  }
+
+  it.each(['false', 0, null, {}])(
+    'refuses a non-boolean acceptNullOriginSameOrigin (%j) when built',
+    (value) => {
+      expect(() =>
+        csrfMiddleware({ acceptNullOriginSameOrigin: value as unknown as boolean }),
+      ).toThrow(new TypeError('csrfMiddleware: acceptNullOriginSameOrigin must be a boolean.'));
+    },
+  );
+
+  it('combines duplicated Fetch Metadata header lines and refuses them', async () => {
+    const { ctx, response } = createFakeContext({
+      request: { method: 'POST', headers: { Origin: 'null' } },
+    });
+    ctx.request.headers.append('Sec-Fetch-Site', 'same-origin');
+    ctx.request.headers.append('Sec-Fetch-Site', 'cross-site');
+    let calls = 0;
+    await csrfMiddleware()(ctx, () => {
+      calls++;
+      return Promise.resolve();
+    });
+    expect(calls).toBe(0);
+    expect(response.statuses).toEqual([403]);
+  });
+
+  for (const trustedOrigins of [[], ['https://partner.example'], ['null']]) {
+    for (const origin of ['null', 'https://partner.example', 'https://foreign.example']) {
+      it(`keeps explicit trust ${trustedOrigins.join()} / ${origin}`, async () => {
+        const { ctx, response } = createFakeContext({
+          request: {
+            method: 'POST',
+            headers: {
+              Origin: origin,
+              'Sec-Fetch-Site': 'cross-site',
+            },
+          },
+        });
+        let calls = 0;
+        await csrfMiddleware({ trustedOrigins })(ctx, () => {
+          calls++;
+          return Promise.resolve();
+        });
+        const allowed = trustedOrigins.includes(origin);
+        expect(calls).toBe(allowed ? 1 : 0);
+        expect(response.statuses).toEqual(allowed ? [] : [403]);
+      });
+    }
+  }
+});
+
 describe('CSRF behind a proxy', () => {
   async function check(headers: Record<string, string>, published = false) {
     const { ctx, response } = createFakeContext({

@@ -45,7 +45,7 @@ app.register(
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
       // the browser asked for. List them here to allow only those.
-      allowedHeaders: ['content-type', 'authorization', 'idempotency-key'],
+      allowedHeaders: ['content-type', 'authorization', 'idempotency-key', 'x-csrf-token'],
       exposedHeaders: ['idempotent-replayed'],
       maxAge: 86400,
     },
@@ -169,12 +169,24 @@ only: a browser cannot send the target's real public origin cross-site, and a tr
 passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
 matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
 
-| Option            | Type            | Default | Description                                                      |
-| ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
-| `enabled?`        | `boolean`       | `true`  | Toggle CSRF                                                      |
-| `trustedOrigins?` | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                    |
-| `customHeader?`   | `string`        | —       | Required custom header for unsafe methods                        |
-| `exclude?`        | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test |
+**`Origin: null` is accepted only with `Sec-Fetch-Site: same-origin`** (M119c, V10-1). Under this
+plugin's default `Referrer-Policy: no-referrer`, a browser sends `Origin: null` on a same-origin
+HTML form POST, so before 0.11.0 every such form answered 403 unless `referrerPolicy` was changed.
+The browser also sends `Sec-Fetch-Site: same-origin`, which page script cannot set, so that pair is
+accepted — the Fetch Metadata rule Go's `CrossOriginProtection` and Hono's `secFetchSite` use. A
+`null` origin with any other `Sec-Fetch-Site` value, or without the header (older browsers), is
+still refused: a sandboxed frame, a `data:` or `file:` page and a cross-site redirect all report
+`cross-site`. `trustedOrigins: ['null']` is never implied. To refuse every `null` origin as before
+0.11.0, set `csrf: { acceptNullOriginSameOrigin: false }` (and send a real origin with
+`headers: { referrerPolicy: 'same-origin' }`).
+
+| Option                        | Type            | Default | Description                                                                           |
+| ----------------------------- | --------------- | ------- | ------------------------------------------------------------------------------------- |
+| `enabled?`                    | `boolean`       | `true`  | Toggle CSRF                                                                           |
+| `trustedOrigins?`             | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                                         |
+| `customHeader?`               | `string`        | —       | Required custom header for unsafe methods                                             |
+| `exclude?`                    | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test                      |
+| `acceptNullOriginSameOrigin?` | `boolean`       | `true`  | Accept `Origin: null` with `Sec-Fetch-Site: same-origin`; `false` refuses it (0.11.0) |
 
 **`exclude` is for a protocol endpoint, not an application route.** An excluded path is checked
 FIRST — before the method test — and is never inspected. Use it only where the endpoint's own

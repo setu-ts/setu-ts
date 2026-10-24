@@ -59,7 +59,6 @@
     "@setu-ts/cqrs-plugin": "workspace:^",
     "@setu-ts/database-plugin": "workspace:^",
     "@setu-ts/events-plugin": "workspace:^",
-    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/feature-flags-plugin": "workspace:^",
     "@setu-ts/graphql-plugin": "workspace:^",
     "@setu-ts/grpc-plugin": "workspace:^",

@@ -46,6 +46,10 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import { installSearchDirs } from '../app-loader.ts';
+import { readWorkspaceManifest } from '../workspace/manifest.ts';
+import { transportSpec, renderConnection } from '../workspace/transport.ts';
+import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
   callArguments,
@@ -147,7 +151,21 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
   ['static', { pkg: 'static-plugin' }],
   ['storage', { pkg: 'storage-plugin' }],
   ['testing', { pkg: 'testing', section: 'dev' }],
-  ['telemetry', { pkg: 'telemetry-plugin' }],
+  [
+    'telemetry',
+    {
+      pkg: 'telemetry-plugin',
+      peers: {
+        runtimes: ['node', 'bun', 'deno'],
+        packages: [
+          '@opentelemetry/api',
+          '@opentelemetry/sdk-trace-base',
+          '@opentelemetry/resources',
+          '@opentelemetry/context-async-hooks',
+        ],
+      },
+    },
+  ],
   [
     'validation',
     {
@@ -690,10 +708,38 @@ export function withPluginWiring(source: string, bare: string, seam?: AddSeam): 
   return `${withImport.slice(0, insertion)}${factory}(${seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
 }
 
+/** Reads transport options only for a listed workspace member. */
+async function workspaceAddArgs(
+  deps: AddCommandDependencies,
+  dir: string,
+  bare: string,
+  runtime: TargetRuntime,
+): Promise<string | undefined> {
+  if (!['cache-plugin', 'scheduler-plugin', 'realtime-backplane-plugin'].includes(bare))
+    return undefined;
+  const dirs = await installSearchDirs(deps.fs, dir);
+  if (dirs.length === 1) return undefined;
+  const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
+  if (!read.ok) return undefined;
+  const transport = transportSpec(read.manifest.transport);
+  const builder =
+    bare === 'cache-plugin'
+      ? transport.cacheArgs
+      : bare === 'scheduler-plugin'
+        ? transport.schedulerArgs
+        : transport.backplaneArgs;
+  if (builder === undefined || transport.connection === undefined) return undefined;
+  return builder(
+    renderConnection(transport.connection, workspaceProfile(runtime), read.manifest.transportUrl),
+  );
+}
+
 /**
  * Adds a framework package to the project's manifest. For zero-configuration
  * providers, it also activates the provider in a recognized emitted
  * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
+ * Redis workspace members receive the selected transport's cache, scheduler
+ * lock and realtime backplane options and the optional ioredis driver.
  *
  * Reports the install command rather than spawning it. That is deliberate: on
  * the day of a release `deno install` hits the 24-hour minimum-dependency-age
@@ -799,7 +845,11 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
-  const peerPackages = peerPackagesFor(bare, runtime);
+  const transportArgs = await workspaceAddArgs(deps, dir, bare, runtime);
+  const peerPackages = [
+    ...peerPackagesFor(bare, runtime),
+    ...(transportArgs === undefined ? [] : [{ name: 'ioredis', range: CLIENT_RANGES['ioredis']! }]),
+  ];
   const addedPeers: string[] = [];
 
   for (const target of targets) {
@@ -865,7 +915,18 @@ export async function runAddCommand(
   // config can have arbitrary composition and is not ours to rewrite.
   const installedAfter = new Set(await detectPlugins(deps.fs, dir));
   installedAfter.add(bare);
-  const seam = addSeam(bare, installedAfter);
+  const artifactSeam = addSeam(bare, installedAfter);
+  const seam =
+    transportArgs === undefined
+      ? artifactSeam
+      : {
+          args:
+            artifactSeam === undefined
+              ? transportArgs
+              : `{ ${artifactSeam.args.trim().slice(1, -1)}, ${transportArgs.slice(1, -1)} }`,
+          imports: artifactSeam?.imports ?? [],
+          files: artifactSeam?.files ?? [],
+        };
   // Taken before the config is considered: a manifest edit means a real install.
   const installing = edits.length > 0;
 

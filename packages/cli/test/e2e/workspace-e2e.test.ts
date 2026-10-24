@@ -32,6 +32,7 @@ import {
 } from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import { npmInstall, runIn, startOverlay } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -121,6 +122,86 @@ describe('workspace scaffolding — end to end', () => {
     expect(await run(['g', 'app', 'billing', '--template', 'microservice', '--dir', ws])).toBe(0);
     return ws;
   }
+
+  it.skipIf(!process.env['REDIS_URL'])(
+    'adds Redis cache, scheduler and backplane to a real workspace member, then exits a failed e2e (M119c)',
+    async () => {
+      expect(
+        await run(['new', 'redis-ws', '--workspace', '--runtime', 'node', '--transport', 'redis']),
+      ).toBe(0);
+      const ws = `${root}/redis-ws`;
+      expect(await run(['g', 'app', 'orders', '--template', 'microservice', '--dir', ws])).toBe(0);
+      const project = `${ws}/apps/orders`;
+      // The original workspace already owns ioredis for messaging. Remove its pin
+      // so the subsequent cache add must supply the optional driver itself.
+      const manifestPath = `${project}/package.json`;
+      const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
+        dependencies: Record<string, string>;
+      };
+      delete manifest.dependencies['ioredis'];
+      await nodeFs.writeFile(manifestPath, JSON.stringify(manifest));
+      for (const plugin of ['cache', 'scheduler', 'realtime-backplane']) {
+        expect(await run(['add', plugin, '--dir', project])).toBe(0);
+        if (plugin === 'cache') {
+          const added = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
+            dependencies: Record<string, string>;
+          };
+          expect(added.dependencies['ioredis']).toBe('5.x');
+        }
+      }
+      const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+      for (const arm of ["store: 'redis'", "storage: 'redis'", "transport: 'redis'"])
+        expect(config).toContain(arm);
+      const overlay = await startOverlay();
+      try {
+        const installed = await npmInstall(ws, overlay);
+        expect(installed.code, installed.output).toBe(0);
+        const checked = await runIn(project, 'npm', ['run', 'check']);
+        expect(checked.code, checked.output).toBe(0);
+        await nodeFs.writeFile(
+          `${project}/redis-probe.ts`,
+          `
+import assert from 'node:assert/strict';
+import { CAPABILITIES } from '@setu-ts/common';
+import type { ICacheStore } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+const apps = [await createApp(), await createApp()];
+await apps[0].start();
+await apps[1].start();
+const key = 'm119c-' + crypto.randomUUID();
+try {
+  const health = await apps[0].inject({ method: 'GET', url: 'http://127.0.0.1/health' });
+  assert.equal(health.statusCode, 200, health.body ?? '');
+  const writer = apps[0].services.get<ICacheStore>(CAPABILITIES.CACHE);
+  const reader = apps[1].services.get<ICacheStore>(CAPABILITIES.CACHE);
+  await writer.set(key, { shared: true }, 60);
+  assert.deepEqual(await reader.get(key), { shared: true });
+  await writer.delete(key);
+} finally { await apps[1].stop(); await apps[0].stop(); }
+`,
+        );
+        const booted = await runIn(project, `${ws}/node_modules/.bin/tsx`, ['redis-probe.ts']);
+        expect(booted.code, booted.output).toBe(0);
+        // The same generated test passes with Redis up and fails with it down.
+        const healthy = await runIn(project, 'npm', ['run', 'test:e2e']);
+        expect(healthy.code, healthy.output).toBe(0);
+        const closedPort = await unusedPort();
+        const started = performance.now();
+        const failed = await runProcess('timeout', {
+          args: ['--kill-after=2s', '30s', 'npm', 'run', 'test:e2e'],
+          cwd: project,
+          env: { REDIS_URL: `redis://127.0.0.1:${closedPort}` },
+        });
+        expect(failed.code).not.toBe(0);
+        expect(failed.code).not.toBe(124);
+        expect(new TextDecoder().decode(failed.stdout)).toContain('fail');
+        expect(performance.now() - started).toBeLessThan(30_000);
+      } finally {
+        await overlay.close();
+      }
+    },
+    900_000,
+  );
 
   it('builds and serves a custom-scoped workspace library through SSR, and ignores node_modules', async () => {
     expect(

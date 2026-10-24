@@ -17,6 +17,7 @@ import { resolveOptions } from '../options.ts';
 import { createProvider } from '../providers/provider-factory.ts';
 import { ServiceDiscoveryService } from '../services/service-discovery-service.ts';
 import { SelfRegistrationNotSupportedError } from '../errors.ts';
+import { isMissingFile, TOKEN_PATH } from '../providers/kubernetes-provider.ts';
 import { VERSION } from '../version.ts';
 
 /** Plugin name — matches the package name without the scope. */
@@ -24,6 +25,9 @@ const PLUGIN_NAME = 'service-discovery-plugin';
 
 /**
  * Creates the service discovery plugin.
+ *
+ * Kubernetes without an explicit token checks the projected token path once at
+ * registration and warns when absent, naming token and apiServer for use outside a pod.
  *
  * @example Static instances with failover from reported outcomes
  * ```typescript
@@ -61,7 +65,7 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
     provides: [CAPABILITIES.SERVICE_DISCOVERY],
     priority: PLUGIN_PRIORITY.NORMAL,
 
-    register(ctx: IPluginContext): void {
+    register(ctx: IPluginContext): void | Promise<void> {
       const provider = buildProvider(options, resolved, ctx);
       const registration = resolved.selfRegistration;
 
@@ -120,6 +124,22 @@ export function ServiceDiscoveryPlugin(options: ServiceDiscoveryPluginOptions): 
       ctx.lifecycle.onClose(() => {
         service.close();
       });
+
+      if (options.provider === 'kubernetes' && options.token === undefined) {
+        // The provider factory has already required fs on this arm. Check once
+        // at startup; token rotation and reads remain the provider's responsibility.
+        return ctx.runtime.fs!.stat(TOKEN_PATH).then(
+          () => {},
+          (error: unknown) => {
+            // Only an absent file means "not in a pod"; any other stat failure
+            // is left to the provider's own read, which reports it as it happens.
+            if (!isMissingFile(error)) return;
+            ctx.logger?.warn(
+              `Cannot inspect Kubernetes token file ${TOKEN_PATH}; set the token and apiServer options outside a pod.`,
+            );
+          },
+        );
+      }
     },
   };
 }
