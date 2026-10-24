@@ -137,6 +137,22 @@ describe('ServiceDiscoveryService — cache', () => {
     }
   });
 
+  it('passes a provider configuration error through unbranded on a cold failure', async () => {
+    const { service, provider } = setup();
+    const misconfigured = new DiscoveryUnavailableError(
+      "Service 'billing' exposes several ports (http, grpc); set the 'portName' option to choose one.",
+    );
+    provider.failWith(misconfigured);
+    let thrown: unknown;
+    try {
+      await service.resolve('billing');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(misconfigured);
+    expect(httpStatusHintOf(thrown)).toBeUndefined();
+  });
+
   it('does not brand a configuration error with a status hint', () => {
     const runtime = createFakeRuntime();
     const resolved = resolveOptions({ provider: 'dns', mode: 'srv' });

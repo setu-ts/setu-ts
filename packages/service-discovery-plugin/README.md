@@ -254,11 +254,12 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 `DiscoveryUnavailableError` is thrown when discovery cannot answer. Its **cold-outage** instance — a
 backend read failed and nothing is cached — carries a `503 Service Unavailable` status hint (M119g),
 so `errorHandler` answers a named 503 with the fixed detail "Service discovery is temporarily
-unavailable." rather than a masked 500. Configuration failures (the `'dns'` arm on a runtime with no
-resolver, the `'kubernetes'` arm with neither a token nor `IRuntimeServices.fs`, a multi-port
-service with no `portName`) stay unbranded: a misconfiguration is the operator's to fix and is
-answered as a 500. `SelfRegistrationNotSupportedError` is thrown at `register()` when
-`selfRegistration` is configured on a provider with no registration API.
+unavailable." rather than a masked 500. Configuration failures are not branded: the `'dns'` arm on a
+runtime with no resolver and the `'kubernetes'` arm with neither a token nor `IRuntimeServices.fs`
+are refused at startup, and a multi-port service with no `portName` fails its lookup with an
+unbranded `DiscoveryUnavailableError` that is answered as a 500 — a misconfiguration is the
+operator's to fix, not a temporary outage. `SelfRegistrationNotSupportedError` is thrown at
+`register()` when `selfRegistration` is configured on a provider with no registration API.
 
 ## Related documentation
 

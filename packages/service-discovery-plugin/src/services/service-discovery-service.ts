@@ -231,6 +231,12 @@ export class ServiceDiscoveryService implements IServiceDiscovery {
         this.#degraded = true;
         return stale.instances;
       }
+      // A provider's own DiscoveryUnavailableError is a configuration fault (a
+      // multi-port Kubernetes service with no portName), not an outage: it
+      // passes through unbranded, so it is answered as a 500, not a 503.
+      if (error instanceof DiscoveryUnavailableError) {
+        throw error;
+      }
       throw withHttpStatusHint(
         new DiscoveryUnavailableError(
           `Service discovery could not resolve '${serviceName}' and has nothing cached`,

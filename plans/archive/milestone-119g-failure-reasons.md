@@ -80,7 +80,9 @@ dropped, logged at the wrong level, or masked.
 ### 3.3 Idempotency `describeThrown` delegates to `describeError`
 
 - **Decision:** `describeThrown(value)` returns `describeError(value)` inside its existing `try`;
-  the `typeof value` fallback stays.
+  the `typeof value` fallback stays. As shipped, `describeError` is total, so `Object.create(null)`
+  renders as `Error: [object Object]`; the `typeof` fallback is reached only by a failing renderer
+  (audit L3).
 - **Test home:** `packages/idempotency-plugin/test/unit/safe-log.test.ts` — an aggregate renders its
   inner errors; `Object.create(null)` still yields `'object'`.
 
@@ -135,7 +137,9 @@ dropped, logged at the wrong level, or masked.
 
 - **Decision:** at `service-discovery-service.ts:234` only, throw
   `withHttpStatusHint(new DiscoveryUnavailableError(...), { status: 503, title: 'Service Unavailable', detail: 'Service discovery is temporarily unavailable.' })`.
-  Configuration-error instances stay unbranded (a misconfiguration is a 500).
+  Configuration-error instances stay unbranded (a misconfiguration is a 500). A provider's own
+  `DiscoveryUnavailableError` thrown during a cold lookup (the Kubernetes multi-port case) is
+  rethrown unbranded rather than wrapped (audit finding L2).
 - **Why:** M89b mechanism; the detail carries no service name or backend data.
 - **Test home:** `packages/service-discovery-plugin/test/unit/service-discovery-service.test.ts`
   asserts `httpStatusHintOf(error)` on the cold outage and `undefined` on a config error; an
@@ -211,6 +215,36 @@ pnpm run release:verify <version>
   carry address/port/code only; a test pins repeat → `debug` for an identical aggregate.
 - A `warn` line on an unauthenticated route could become a log-flood vector → state-change de-dup
   per provider (bounded by the configured provider count), fixed reason codes only.
+
+## 8a. Design security review
+
+> Added after the committed-tree audit of `73a71f4e` reported it missing (the audit's blocking
+> finding). Written by the planner, not the auditor; the maintainer waived a re-audit.
+
+- **Reviewed flows:** an unauthenticated `GET <loginPath>` and a signed-in `POST logoutPath`
+  resolving provider endpoints; a bearer token triggering an outside-issuer key-set refresh; a
+  backend driver error reaching `createConnectionErrorReporter` or idempotency `describeThrown`; a
+  discovery lookup with nothing cached reaching `errorHandler`.
+- **Assets:** log integrity and volume (no forged lines, no flood); credentials and payloads inside
+  error text; discovery topology (service names, backend addresses) in response bodies.
+- **Attackers:** an unauthenticated HTTP client (any host, query, path, forged or expired token); a
+  hostile or misrouted discovery or JWKS server; a dependency whose errors carry unusual values.
+- **Budgets:** at most one `warn` per change of reason per CONFIGURED provider or issuer; reporter
+  state keyed only by configuration; a rendered error line capped at 8192 code points.
+- **Audit obligations:** plant canaries in discovery documents, JWKS responses, request host and
+  query, and token claims, and prove their absence from every log line and body; drive repeated
+  failures across cooldown windows and show one `warn`; show unconfigured provider paths add no
+  reporter state; show CR/LF/NUL/bidi characters cannot reach a log line; show the discovery 503
+  body carries no service name, cause or `message`, and that configuration faults stay 500.
+
+| Threat                                                        | Resolution                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Log flood from the unauthenticated login route                | §3.5 state-change reporter keyed by configured provider name                                                                                                                                                                                                                                                          |
+| Attacker data in a log line                                   | Reasons are fixed `RefreshError` codes; messages are built from codes and configured names only                                                                                                                                                                                                                       |
+| Log injection through a rendered error                        | `describeError` collapses whitespace, control and format characters                                                                                                                                                                                                                                                   |
+| Topology in the 503 body                                      | Fixed `detail`; the service name stays in the server-side message                                                                                                                                                                                                                                                     |
+| Credentials in cause or aggregate messages (audit L1)         | ACCEPTED: classifiers are a scalar allowlist, and ioredis/pg/net put credentials in fields outside it; logger-plugin already logs cause chains. A credential embedded in a cause MESSAGE now reaches the line, and field-path redaction cannot mask a substring — an application whose driver does that must scrub it |
+| Configuration fault reported as a temporary outage (audit L2) | FIXED after the audit: a provider's own `DiscoveryUnavailableError` passes through unbranded (§3.6)                                                                                                                                                                                                                   |
 
 ## 9. Out of scope
 
