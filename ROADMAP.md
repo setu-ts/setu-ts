@@ -15115,7 +15115,7 @@ their own (M120–M123), not letters here.
 | **M119e** | design | a data contract that is not portable or not checked at startup | V10-4 (+ V9-26 remainder), V10-32, V10-33, V10-37, V10-45, V10-61                                                             | `database-plugin`, `common`, `cloudflare-plugin`                                                                 |
 | **M119f** | design | optional peers in an npm workspace                             | V10-50, V10-58                                                                                                                | `telemetry-plugin` and every package with optional peers, packaging, docs                                        |
 | **M119g** | fix    | failures that reach the operator without their reason          | V10-62, V10-63, V10-34                                                                                                        | `auth-plugin`, `cache-plugin`, `idempotency-plugin`, `service-discovery-plugin`                                  |
-| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42                     | `cli`                                                                                                            |
+| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42, V10-64             | `cli`                                                                                                            |
 | **M119i** | docs   | documentation that does not match the code, or is missing      | V10-7, V10-8, V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46, V10-47, V10-48, V10-56, V10-57, V9-29 remainder | docs of `openapi`, `service-discovery`, `logger`, `react-router`, `worker-pool`; agent cards; `docs/`; CHANGELOG |
 
 **Sequence.** M119a first — it holds the only High: a NATS subscription with no `queue` replays the
@@ -15340,6 +15340,10 @@ with a 503 status hint (the M89b mechanism).
   parameter; standard decorators reject that (TS1206).
 - **V10-42** — `setu add` and `setu generate migration` print `blob/develop` and `tree/develop`
   links from a published CLI; links must name the CLI's own version tag.
+- **V10-64** — `setu add view` wires `ViewPlugin()` but adds neither `hono` to `package.json` nor
+  the `jsx`/`jsxImportSource` compiler options the view plugin's README says its default arm
+  requires, so the first `.tsx` view fails to compile (found by the view-styling probe,
+  `smoke/v0.10.0/VIEW-STYLING-PROBE.md`).
 
 ---
 
@@ -15545,28 +15549,61 @@ on M120 for the per-member build it calls.
 
 ---
 
-## Milestone 123: A Styling Foundation for the Full-Stack Template
+## Milestone 123: A Styling Foundation and App Shell for Generated UIs
 
-**Package(s):** `packages/cli` (the full-stack template)
+**Package(s):** `packages/cli` (the full-stack template, and `setu add view` for server-rendered
+views); docs (`docs/mvc.md`, the view-plugin README)
 
-**Source:** M115 (Relaymark). Closes **V10-59**.
+**Source:** M115 (Relaymark), the maintainer's review of its UI (`smoke/PRODUCT-DEFECTS.md` RM-2),
+and the view-styling probe on published `0.10.0` (`smoke/v0.10.0/VIEW-STYLING-PROBE.md`). Closes
+**V10-59**.
 
 **The problem.** The full-stack template's whole stylesheet is 13 lines (`color-scheme: light dark`,
 a system font, margins) and the layouts use plain class names. No CSS tooling, design tokens or
 theme switch, so every real product builds its design system from scratch: Relaymark's builders
 added Tailwind 4, shadcn/ui (through the shadcn CLI), tokens and a per-user theme by hand.
 
+**The app shell does not stay put.** Relaymark's UI looked good and was responsive, but its top bar
+and sidebar scrolled away with the page: `.app-frame` used `min-height`, and neither bar was sticky,
+so the whole document scrolled instead of only the content region. That is not what a SaaS UI is
+expected to do, and the template's layouts give a builder no shell to start from. The probe showed
+the expected pattern working with Tailwind: a viewport-height frame (`h-dvh overflow-hidden`), a
+sticky header and sidebar, and an `overflow-y-auto` content region — after a 3,000 px scroll the
+window stayed at 0 while the content scrolled.
+
+**Server-rendered views need a styling story too, and it differs.** The probe measured the view
+plugin with Tailwind and shadcn/ui:
+
+|                                                                               | Result                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tailwind with the `hono-jsx` arm                                              | Works: Tailwind 4 found the classes in `.tsx` views unconfigured; `static-plugin` served the built CSS                                                                                           |
+| shadcn static components (`Card`, `Button`) through a `'custom'` React engine | Render with shadcn's look, once shadcn's theme CSS is present                                                                                                                                    |
+| shadcn interactive components (`Dialog`)                                      | Do not work: the server-rendered path ships no client JavaScript, so Radix never runs                                                                                                            |
+| hono-JSX and React in one project                                             | Every React file, including each file shadcn copies in, needs `/** @jsxImportSource react */`, and the two global JSX type sets conflict in one TypeScript project; separate projects type-check |
+
+So there are two stories: the full-stack template gets Tailwind and, optionally, shadcn/ui
+(interactive components work, because it is React); server-rendered views get Tailwind with shadcn's
+class recipes and theme variables, without React and without interactive components.
+
 **Decisions the plan takes:** whether the template adopts Tailwind (the default most React Router
 starters and shadcn/ui assume) or stays tool-neutral with design tokens in CSS custom properties;
 whether a component library is scaffolded or left to `npx shadcn`, with the template's paths and
-aliases ready for it; light/dark and a persisted user preference without a flash on SSR; and keeping
-the M37c lesson — the landing page must render visible content, asserted by the e2e. Whatever ships
-must survive `deno fmt`/Prettier and the scaffold e2e on every runtime the template supports, and
-the built CSS must reach the M120 image.
+aliases ready for it; for server-rendered views, whether `setu add view` (or a `--style`-like
+option) scaffolds the Tailwind build, the `static-plugin` route for the built CSS and a layout
+component, or the docs carry it as a recipe; whether the docs present a React engine for views at
+all, given the JSX type conflict; light/dark and a persisted user preference without a flash on SSR;
+and keeping the M37c lesson — the landing page must render visible content, asserted by the e2e.
+Whatever ships must survive `deno fmt`/Prettier and the scaffold e2e on every runtime the template
+supports, and the built CSS must reach the M120 image.
 
 **Deliverables:**
 
 - [ ] The chosen styling foundation in the full-stack template, with a theme switch
+- [ ] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
+      only the content region scrolls; the e2e scrolls the content and asserts the header and
+      sidebar have not moved
+- [ ] Server-rendered views: the Tailwind build, the CSS route and a layout, scaffolded or
+      documented as a tested recipe; `docs/mvc.md` states what shadcn/ui can and cannot do there
 - [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
 - [ ] Template README and `docs/` entry; CHANGELOG
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
@@ -15858,4 +15895,4 @@ patch by construction and gains nothing new here.
 | 120       | ⬜     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
-| 123       | ⬜     | cli — a styling foundation for the full-stack template                                                                                                                                                                                                                                    |
+| 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
