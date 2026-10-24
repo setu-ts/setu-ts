@@ -15115,7 +15115,7 @@ their own (M120–M123), not letters here.
 | **M119e** | design | a data contract that is not portable or not checked at startup | V10-4 (+ V9-26 remainder), V10-32, V10-33, V10-37, V10-45, V10-61                                                             | `database-plugin`, `common`, `cloudflare-plugin`                                                                 |
 | **M119f** | design | optional peers in an npm workspace                             | V10-50, V10-58                                                                                                                | `telemetry-plugin` and every package with optional peers, packaging, docs                                        |
 | **M119g** | fix    | failures that reach the operator without their reason          | V10-62, V10-63, V10-34                                                                                                        | `auth-plugin`, `cache-plugin`, `idempotency-plugin`, `service-discovery-plugin`                                  |
-| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42, V10-64             | `cli`                                                                                                            |
+| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42                     | `cli`                                                                                                            |
 | **M119i** | docs   | documentation that does not match the code, or is missing      | V10-7, V10-8, V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46, V10-47, V10-48, V10-56, V10-57, V9-29 remainder | docs of `openapi`, `service-discovery`, `logger`, `react-router`, `worker-pool`; agent cards; `docs/`; CHANGELOG |
 
 **Sequence.** M119a first — it holds the only High: a NATS subscription with no `queue` replays the
@@ -15340,10 +15340,6 @@ with a 503 status hint (the M89b mechanism).
   parameter; standard decorators reject that (TS1206).
 - **V10-42** — `setu add` and `setu generate migration` print `blob/develop` and `tree/develop`
   links from a published CLI; links must name the CLI's own version tag.
-- **V10-64** — `setu add view` wires `ViewPlugin()` but adds neither `hono` to `package.json` nor
-  the `jsx`/`jsxImportSource` compiler options the view plugin's README says its default arm
-  requires, so the first `.tsx` view fails to compile (found by the view-styling probe,
-  `smoke/v0.10.0/VIEW-STYLING-PROBE.md`).
 
 ---
 
@@ -15556,7 +15552,7 @@ views); docs (`docs/mvc.md`, the view-plugin README)
 
 **Source:** M115 (Relaymark), the maintainer's review of its UI (`smoke/PRODUCT-DEFECTS.md` RM-2),
 and the view-styling probe on published `0.10.0` (`smoke/v0.10.0/VIEW-STYLING-PROBE.md`). Closes
-**V10-59**.
+**V10-59** and **V10-64**.
 
 **The problem.** The full-stack template's whole stylesheet is 13 lines (`color-scheme: light dark`,
 a system font, margins) and the layouts use plain class names. No CSS tooling, design tokens or
