@@ -4,7 +4,8 @@ import * as nodeFs from 'node:fs/promises';
  *
  * `template-baseline.json` was captured by the NAMED script
  * `test/fixtures/capture-template-baseline.ts` BEFORE any template change in
- * M99e, refreshed for M101g's reviewed factory and smoke-test changes:
+ * M99e, refreshed for M101g's reviewed factory and smoke-test changes, and
+ * M119c's reviewed Node test-runner flag and `swagger-ui-dist` pin:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

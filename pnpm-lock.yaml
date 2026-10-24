@@ -797,9 +797,6 @@ importers:
       '@setu-ts/events-plugin':
         specifier: workspace:^
         version: link:../events-plugin
-      '@setu-ts/exceptions':
-        specifier: workspace:^
-        version: link:../exceptions
       '@setu-ts/feature-flags-plugin':
         specifier: workspace:^
         version: link:../feature-flags-plugin

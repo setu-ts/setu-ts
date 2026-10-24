@@ -79,6 +79,33 @@ describe('KubernetesProvider — URL', () => {
 });
 
 describe('KubernetesProvider — token resolution', () => {
+  it('names the outside-pod remedy and preserves the failed read as cause (V10-44)', async () => {
+    const failure = Object.assign(new Error('ENOENT: projected token file missing'), {
+      code: 'ENOENT',
+    });
+    const { fs, paths } = tokenFs([]);
+    fs.readFile = (path) => {
+      paths.push(path);
+      return Promise.reject(failure);
+    };
+    const { provider } = setup(
+      { apiServer: 'https://API_SERVER_CANARY.invalid' },
+      createFakeHttp(),
+      createFakeRuntime({ fs }),
+    );
+    let error: unknown;
+    try {
+      await provider.authHeader();
+    } catch (cause) {
+      error = cause;
+    }
+    expect(error).toBeInstanceOf(DiscoveryUnavailableError);
+    expect((error as Error).message).toContain('token');
+    expect((error as Error).message).toContain('apiServer');
+    expect((error as Error).cause).toBe(failure);
+    expect(String(error) + String((error as Error).cause)).not.toContain('API_SERVER_CANARY');
+    expect(paths).toEqual(['/var/run/secrets/kubernetes.io/serviceaccount/token']);
+  });
   it('uses an explicit token verbatim and never touches the file system', async () => {
     const { fs, paths } = tokenFs(['from-disk']);
     const { provider } = setup({ token: 'explicit' }, createFakeHttp(), createFakeRuntime({ fs }));

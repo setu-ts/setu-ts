@@ -24,6 +24,94 @@ import { listSchematics } from '../../../src/schematics/registry.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { EVENTS_SEAM } from '../../../src/seams/events.ts';
 import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
+import { runCli } from '../../../src/cli.ts';
+import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
+
+describe('safe-default additions (M119c)', () => {
+  for (const runtime of ['node', 'bun', 'deno']) {
+    it(`installs only the four console telemetry peers on ${runtime}`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
+          fs: h.fs,
+          cwd: '/app',
+          log: (m) => h.out.push(m),
+          error: (m) => h.err.push(m),
+        }),
+      ).toBe(0);
+      expect(await h.run(['telemetry', '--dir', '/app/api'])).toBe(0);
+      const file = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const manifest = JSON.parse(h.read(`/app/api/${file}`)) as Record<
+        string,
+        Record<string, string>
+      >;
+      const deps = manifest[runtime === 'deno' ? 'imports' : 'dependencies']!;
+      const peers = Object.keys(deps).filter((name) => name.startsWith('@opentelemetry/'));
+      expect(peers.sort()).toEqual([
+        '@opentelemetry/api',
+        '@opentelemetry/context-async-hooks',
+        '@opentelemetry/resources',
+        '@opentelemetry/sdk-trace-base',
+      ]);
+      for (const name of peers) {
+        expect(deps[name]).toBe(
+          runtime === 'deno' ? `npm:${name}@${CLIENT_RANGES[name]}` : CLIENT_RANGES[name],
+        );
+      }
+    });
+  }
+
+  it('preserves an existing telemetry peer pin', async () => {
+    const h = harness({
+      '/app/package.json': JSON.stringify({ dependencies: { '@opentelemetry/api': '1.9.1' } }),
+    });
+    expect(await h.run(['telemetry'])).toBe(0);
+    expect(
+      (JSON.parse(h.read('/app/package.json')) as { dependencies: Record<string, string> })
+        .dependencies['@opentelemetry/api'],
+    ).toBe('1.9.1');
+  });
+
+  for (const transport of ['redis', 'nats', 'http']) {
+    for (const runtime of ['node', 'deno']) {
+      it(`uses the ${transport} workspace transport on ${runtime} and configures scheduler locks`, async () => {
+        const h = harness();
+        const cli = (args: readonly string[]) =>
+          runCli(args, {
+            fs: h.fs,
+            cwd: '/app',
+            now: () => 0,
+            log: (m) => h.out.push(m),
+            error: (m) => h.err.push(m),
+          });
+        expect(
+          await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+        ).toBe(0);
+        expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+        for (const plugin of ['cache', 'scheduler', 'realtime-backplane']) {
+          expect(await h.run([plugin, '--dir', '/app/ws/apps/api'])).toBe(0);
+        }
+        const config = h.read('/app/ws/apps/api/setu.config.ts');
+        if (transport === 'redis') {
+          expect(config).toContain("store: 'redis'");
+          expect(config).toContain("storage: 'redis'");
+          expect(config).toContain("transport: 'redis'");
+          expect(config).toContain(
+            runtime === 'deno' ? "Deno.env.get('REDIS_URL')" : 'process.env.REDIS_URL',
+          );
+          const manifest = h.read(
+            `/app/ws/apps/api/${runtime === 'deno' ? 'deno.json' : 'package.json'}`,
+          );
+          expect(manifest).toContain('ioredis');
+        } else {
+          expect(config).toContain('CachePlugin()');
+          expect(config).toContain('RealtimeBackplanePlugin()');
+          expect(config).not.toContain('distributedLock');
+        }
+      });
+    }
+  }
+});
 
 /** Builds a command harness over a fake filesystem. */
 function harness(files: Readonly<Record<string, string>> = {}) {

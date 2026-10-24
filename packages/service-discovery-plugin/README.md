@@ -54,7 +54,10 @@ const url = await discovery.resolveUrl('billing', '/invoices'); // http://10.0.0
 | `'custom'`     | Your own `DiscoveryProvider`       | Whatever you implement      | Yours               |
 
 ¹ Workers needs an explicit `token`, since it has no file system to read the projected
-service-account token from.
+service-account token from. So does any process outside a pod (a developer machine, a VM): without
+`token` the provider reads `/var/run/secrets/kubernetes.io/serviceaccount/token`, and since M119c a
+missing file is reported by one startup warning and a `DiscoveryUnavailableError` that name `token`
+and `apiServer` (V10-44), rather than a silent `down`.
 
 The `'dns'` arm needs `IRuntimeServices.dns`, which Cloudflare Workers does not supply — its network
 access is `fetch`, which resolves names internally and exposes no lookup surface. Configuring it
@@ -218,7 +221,7 @@ working while the pod is still healthy.
 | `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms               |
 | `services`         | static             | —                            | Unknown name resolves to `[]`                 |
 | `address`          | consul             | —                            | Agent base URL                                |
-| `token`            | consul             | —                            | Sent as `X-Consul-Token`                      |
+| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer  |
 | `datacenter`       | consul             | —                            | Sent as `?dc=`                                |
 | `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`          |
 | `namespace`        | kubernetes         | —                            | Required                                      |

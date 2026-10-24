@@ -850,7 +850,7 @@ describe('runNewCommand', () => {
         expect(pkg.scripts.test).toBe(
           runtime === 'bun'
             ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-            : "tsx --test '**/!(*.e2e).test.ts'",
+            : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
         );
         expect(pkg.scripts.build).toBeUndefined();
         expect(pkg.scripts.start).toBeDefined();

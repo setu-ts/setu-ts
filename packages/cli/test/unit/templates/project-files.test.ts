@@ -16,6 +16,24 @@ import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
 describe('functional module hosts and generated test tasks', () => {
+  it('emits the TLS proxy setting and warns about universal trust (M119c)', () => {
+    const files = [
+      ...projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node')),
+    ];
+    const config = contentsOf(files, 'setu.config.ts');
+    expect(config).toContain("config.get<string>('TRUSTED_PROXIES', { default: '' })");
+    expect(config).toContain(".split(',')");
+    expect(config).toContain('.filter((entry) => entry.length > 0)');
+    expect(config).toContain('trustedProxies.length > 0');
+    for (const file of ['.env', '.env.example', 'README.md']) {
+      const source = contentsOf(files, file);
+      expect(source).toContain('TRUSTED_PROXIES');
+      expect(source).toContain('0.0.0.0/0 or ::/0 trusts every client');
+      expect(source).toContain('forwarded');
+      expect(source).toContain('400');
+    }
+    expect(contentsOf(files, 'README.md')).toContain('## Behind a TLS proxy');
+  });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
       it(`wires modules and splits unit/e2e tasks for ${name} on ${target}`, () => {
@@ -59,13 +77,13 @@ describe('functional module hosts and generated test tasks', () => {
             ? "deno test -A --ignore='**/*.e2e.test.ts'"
             : target === 'bun'
               ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-              : "tsx --test '**/!(*.e2e).test.ts'";
+              : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'";
         const e2e =
           target === 'deno'
             ? "deno test -A '**/*.e2e.test.ts'"
             : target === 'bun'
               ? 'bun test .e2e.test'
-              : "tsx --test '**/*.e2e.test.ts'";
+              : "tsx --test --test-force-exit '**/*.e2e.test.ts'";
         const prefix =
           name !== 'full-stack'
             ? ''

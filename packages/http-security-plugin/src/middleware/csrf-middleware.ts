@@ -60,6 +60,9 @@ export interface CsrfOptions {
 /**
  * CSRF middleware factory.
  *
+ * Accepts the exact Origin sentinel `null` when Fetch Metadata reports
+ * `same-origin`, including navigation POSTs under the default no-referrer policy.
+ *
  * @param options - CSRF configuration
  * @returns A middleware function implementing CSRF protection
  */
@@ -124,6 +127,12 @@ export function csrfMiddleware(options: CsrfOptions = {}): MiddlewareFunction {
     // `X-Forwarded-Host` through would otherwise let a credentialed CORS
     // origin publish, and then match, its own host (M113n audit N1).
     const fetchSite = ctx.request.headers.get('Sec-Fetch-Site')?.trim().toLowerCase();
+    // A no-referrer same-origin navigation can carry an opaque Origin.
+    // Fetch Metadata is browser-owned; only this exact origin sentinel is admitted.
+    if (sourceOrigin === 'null' && fetchSite === 'same-origin') {
+      await next();
+      return;
+    }
     const forwardedCandidates = fetchSite === undefined || fetchSite === 'same-origin';
 
     // The request's own origin is always implicitly trusted

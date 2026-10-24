@@ -45,7 +45,7 @@ app.register(
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
       // the browser asked for. List them here to allow only those.
-      allowedHeaders: ['content-type', 'authorization', 'idempotency-key'],
+      allowedHeaders: ['content-type', 'authorization', 'idempotency-key', 'x-csrf-token'],
       exposedHeaders: ['idempotent-replayed'],
       maxAge: 86400,
     },
@@ -168,6 +168,15 @@ is present and anything but `same-origin` is checked against the URL origin and 
 only: a browser cannot send the target's real public origin cross-site, and a trusted proxy that
 passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
 matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
+
+**`Origin: null` is accepted only with `Sec-Fetch-Site: same-origin`** (M119c, V10-1). Under this
+plugin's default `Referrer-Policy: no-referrer`, a browser sends `Origin: null` on a same-origin
+HTML form POST, so before 0.11.0 every such form answered 403 unless `referrerPolicy` was changed.
+The browser also sends `Sec-Fetch-Site: same-origin`, which page script cannot set, so that pair is
+accepted — the Fetch Metadata rule Go's `CrossOriginProtection` and Hono's `secFetchSite` use. A
+`null` origin with any other `Sec-Fetch-Site` value, or without the header (older browsers), is
+still refused: a sandboxed frame, a `data:` or `file:` page and a cross-site redirect all report
+`cross-site`. `trustedOrigins: ['null']` is never implied.
 
 | Option            | Type            | Default | Description                                                      |
 | ----------------- | --------------- | ------- | ---------------------------------------------------------------- |

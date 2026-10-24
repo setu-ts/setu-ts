@@ -322,6 +322,117 @@ async function advertisedPaths(project: string): Promise<string[]> {
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  it('uses TRUSTED_PROXIES for a full-stack TLS action (V10-17)', async () => {
+    expect(await run(['new', '--runtime', 'node', 'proxy-shop', '--template', 'full-stack'])).toBe(
+      0,
+    );
+    const project = `${root}/proxy-shop`;
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const built = await runIn(project, 'npm', ['run', 'build']);
+      expect(built.code, built.output).toBe(0);
+      await nodeFs.writeFile(
+        `${project}/proxy-probe.ts`,
+        `
+import assert from 'node:assert/strict';
+import { requestOriginOf, CLIENT_IP_STATE_KEY } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+// §8a.1.5-6: unset/empty lists add no IP security; a listed peer is trusted;
+// an unmatched or malformed-but-literal entry (compared literally) trusts nothing.
+const options = [undefined, '', ',', ' , ', '192.0.2.1/32', '127.0.0.1/32', 'example', '10.0.0.0/33', '::1/129'];
+const port = Number(process.argv[2]);
+const origin = 'http://127.0.0.1:' + port;
+for (const proxies of options) {
+  if (proxies === undefined) delete process.env['TRUSTED_PROXIES'];
+  else process.env['TRUSTED_PROXIES'] = proxies;
+  const app = await createApp();
+  const middlewareNames: (string | undefined)[] = [];
+  const addMiddleware = app.middleware.add.bind(app.middleware);
+  app.middleware.add = (fn, options) => { middlewareNames.push(options?.name); addMiddleware(fn, options); };
+  app.router.get('/identity-probe', (ctx) => ctx.response.json({ ip: ctx.state.get(CLIENT_IP_STATE_KEY) ?? ctx.request.ip, origin: requestOriginOf(ctx).origin }));
+  await app.start({ port, hostname: '127.0.0.1' });
+  try {
+    const listed = (proxies ?? '').split(',').some((entry) => entry.trim() !== '');
+    assert.equal(middlewareNames.includes('IpSecurityMiddleware'), listed);
+    const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
+    const trusted = proxies === '127.0.0.1/32';
+    const identity = await fetch(origin + '/identity-probe', { headers });
+    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://public.example' : origin });
+    const page = await fetch(origin + '/login', { headers });
+    assert.equal(page.status, 200);
+    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    assert.ok(token);
+    const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
+    // The scaffold uses the session plugin's secure:true default on both paths.
+    assert.equal(page.headers.getSetCookie().some((line) => /; Secure/i.test(line)), true);
+    const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
+      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+    }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
+    assert.equal(action.status, trusted ? 302 : 400, String(proxies) + ': ' + await action.text());
+    console.log('PROXY_CASE', JSON.stringify(proxies), action.status);
+  } finally { await app.stop(); }
+}
+// §8a.1.6: a CIDR width that is not plain digits fails start() with the named
+// error rather than compiling to a mask that trusts every address.
+for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
+  process.env['TRUSTED_PROXIES'] = proxies;
+  // Refused at construction or at start(), whichever builds the middleware.
+  await assert.rejects(async () => {
+    const app = await createApp();
+    try { await app.start({ port, hostname: '127.0.0.1' }); } finally { await app.stop(); }
+  }, /malformed CIDR width/);
+  console.log('PROXY_CASE', JSON.stringify(proxies), 'refused');
+}
+`,
+      );
+      const proof = await runIn(project, `${project}/node_modules/.bin/tsx`, [
+        'proxy-probe.ts',
+        String(await unusedPort()),
+      ]);
+      expect(proof.code, proof.output).toBe(0);
+      expect(proof.output.match(/PROXY_CASE/g)).toHaveLength(11);
+    } finally {
+      await overlay.close();
+    }
+  }, 900_000);
+
+  it('boots the printed setu add telemetry registration with its installed peers (V10-6)', async () => {
+    expect(await run(['new', '--runtime', 'node', 'traced'])).toBe(0);
+    const project = `${root}/traced`;
+    const output: string[] = [];
+    expect(
+      await runCli(['add', 'telemetry'], {
+        fs,
+        cwd: project,
+        now: () => runtime.now(),
+        log: (line) => output.push(line),
+        error: (line) => output.push(line),
+      }),
+    ).toBe(0);
+    const registration = /Register (TelemetryPlugin\(.+\)) in setu.config.ts\./.exec(
+      output.join('\n'),
+    )?.[1];
+    expect(registration).toBeDefined();
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
+      configPath,
+      `import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';\n` +
+        config.replace('RuntimePlugin(),', `RuntimePlugin(), ${registration},`),
+    );
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const booted = await withNodeServer(project, async (origin) => (await fetch(origin)).status);
+      expect(booted.result, booted.output).toBe(200);
+    } finally {
+      await overlay.close();
+    }
+  }, 900_000);
+
   it('runs two generated migrations twice in one serving app and reflects the ledger in /ready', async () => {
     expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;

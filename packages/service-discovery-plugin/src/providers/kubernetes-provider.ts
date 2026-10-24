@@ -9,7 +9,7 @@ import { DiscoveryUnavailableError } from '../errors.ts';
 import { watchKubernetesService } from './kubernetes-watch.ts';
 
 /** Where the projected service-account token is mounted in every pod. */
-const TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
+export const TOKEN_PATH = '/var/run/secrets/kubernetes.io/serviceaccount/token';
 
 /**
  * How long a token read from disk is reused.
@@ -107,6 +107,8 @@ export class KubernetesProvider implements DiscoveryProvider {
    * token was configured.
    *
    * @returns The `Authorization` header value
+   * @throws {DiscoveryUnavailableError} If the projected token cannot be read;
+   * configure token and apiServer explicitly outside a pod.
    */
   async authHeader(): Promise<string> {
     if (this.#options.token !== undefined) {
@@ -128,7 +130,15 @@ export class KubernetesProvider implements DiscoveryProvider {
           'this runtime supplies neither.',
       );
     }
-    const bytes = await fs.readFile(TOKEN_PATH);
+    let bytes: Uint8Array;
+    try {
+      bytes = await fs.readFile(TOKEN_PATH);
+    } catch (cause) {
+      throw new DiscoveryUnavailableError(
+        `Cannot read Kubernetes token file ${TOKEN_PATH}; set the token and apiServer options outside a pod.`,
+        { cause },
+      );
+    }
     const value = new TextDecoder().decode(bytes).trim();
     this.#cachedToken = { value, stampMs: now };
     return `Bearer ${value}`;
