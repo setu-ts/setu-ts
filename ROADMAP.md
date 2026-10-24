@@ -15622,6 +15622,91 @@ must reach the M120 image.
 
 ---
 
+## Milestone 124: Session and Account Lifecycle
+
+**Package(s):** `packages/auth-plugin`, `packages/session-plugin`, `packages/common` (a per-user
+session stamp contract); docs. The CLI is touched only if the plan scaffolds the session-list screen
+(see "Named, not taken").
+
+**Source:** the maintainer's review of a production React Router application whose API
+authentication uses the cookie session rather than JWTs (2026-10-24). The application keeps a
+server-side session registry, re-checks the account on every request, answers JSON 401/403 to API
+callers while redirecting pages to the sign-in page, and supports forced password resets and admin
+impersonation. Compared against `session-plugin` and `auth-plugin` on `develop`, most of it is
+already covered: encrypted or signed cookie sessions with `SameSite=Lax`, server-authoritative
+absolute and idle expiry, immediate revocation of one session on the store strategy, cookie-session
+API authentication with Problem Details 401/403, session-id rotation at sign-in, CSRF tokens, OIDC
+sign-in, and tenant or organization rules through policies and scoped RBAC. Three pieces are the
+framework's responsibility and missing; three are application or generator material. Register rows:
+**V10-65**, **V10-66**.
+
+**The framework comparison below is from knowledge, not measured** (the M97 precedent). The plan
+re-checks each framework's current behaviour before relying on it.
+
+| Concern                                                            | Laravel                               | Django                                                         | Rails                                        | ASP.NET Core Identity          | Spring Security            | Setu-TS today                                                          |
+| ------------------------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------- |
+| Unauthenticated page redirects to sign-in; an API request gets 401 | `auth` middleware, by `expectsJson()` | `login_required` → `LOGIN_URL`                                 | Devise `authenticate_user!`, by format       | cookie scheme `LoginPath`      | authentication entry point | `requireAuth()` always answers 401                                     |
+| Account re-checked on every request                                | session guard reloads the user        | middleware reloads the user, checks `is_active`                | Warden reloads; `active_for_authentication?` | security stamp, on an interval | loaded at sign-in only     | `refreshPrincipal`, but unreachable for password-only apps without MFA |
+| Sign out all of a user's sessions                                  | `logoutOtherDevices()`                | password change invalidates other sessions (session auth hash) | Devise salts the session with the password   | `UpdateSecurityStampAsync`     | `SessionRegistry`          | none: `ISessionStore` has `read`/`write`/`destroy` by session id only  |
+
+**1. Every session configuration can re-check the account per request (V10-65, defect).** The
+`signIn` arm, which carries the async per-request `refreshPrincipal` (returning `null` makes the
+request anonymous), refuses to start unless it has an outside provider, passkeys or MFA
+(`auth-plugin/src/sign-in/config.ts:333`). A password-only application without MFA therefore falls
+back to `AuthPlugin({ session })`, whose `toPrincipal` is synchronous
+(`strategies/session-strategy.ts:25`) and cannot ask the database whether the account still exists,
+is deactivated, or has lost its access. The mechanism exists; a startup refusal blocks it.
+
+**2. Pages redirect to sign-in, APIs answer 401 (V10-66).** `requireAuth()` takes no options and
+always answers 401 (`guards/index.ts:69`). A server-rendered page (the view plugin, M92) has no
+guard that sends a browser to the sign-in page with a return path, so every such application writes
+one, and getting the return path wrong is an open redirect. React Router loaders can redirect
+themselves; the gap is the server-rendered and plain-route side.
+
+**3. Sign out all of a user's sessions.** Changing a password, an admin revoking access, or a "sign
+out everywhere" button needs every session of one user to stop working. The established way needs no
+session registry: a per-user stamp (a version number or hash) recorded in the session at sign-in and
+compared on each request's re-check; bumping it invalidates every session at once. That also gives
+"revoke on password change" for free.
+
+**Decisions the plan takes:**
+
+- For 1: lift the refusal so `signIn` (and `IAuthSessionService`) can run with no outside provider,
+  or let the session arm take an async `toPrincipal`. One mechanism, not two, and the plan says
+  which and why.
+- For 2: how the guard decides HTML from API — `Accept`, `Sec-Fetch-Dest`/`Sec-Fetch-Mode`, or an
+  explicit per-route choice; where the sign-in path is configured; and that the return path accepts
+  only a same-origin relative path (M100c's `returnTo` rule is the precedent). Whether this is an
+  option on `requireAuth` or a separate guard.
+- For 3: where the stamp lives (a small port in `common` with memory and cache-backed stores, read
+  through the same per-request re-check), its cost per request, and the API that bumps it
+  (`signOutEverywhere(userId)` or similar). How it behaves on the cookie strategy, where the session
+  itself cannot be destroyed server-side.
+
+**Named, not taken.** These are application or generator material; the reviewed application is right
+to own them, and other frameworks mostly leave them to packages or starter kits:
+
+- **Listing a user's sessions with IP and device**, and revoking one from a settings screen —
+  generator material (Laravel's database session driver with Jetstream, the Rails 8 authentication
+  generator). A candidate for the full-stack template once item 3 exists.
+- **Forced password reset** with an allow-list of paths — a recipe over `refreshPrincipal` and a
+  guard.
+- **Admin impersonation**, with changes credited to the real admin — a recipe or a later plugin;
+  among the compared frameworks only Spring ships it (`SwitchUserFilter`).
+
+**Deliverables:**
+
+- [ ] Items 1–3 implemented, each with tests that reproduce the gap first
+- [ ] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
+      authenticating on the next request; a page request redirected to sign-in with a safe return
+      path while the same unauthenticated API request answers 401; and a stamp bump signing out two
+      concurrent sessions of one user on the store strategy
+- [ ] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
+      the three "named, not taken" items or a stated decision not to write them
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `124`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -15908,3 +15993,4 @@ patch by construction and gains nothing new here.
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
+| 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
