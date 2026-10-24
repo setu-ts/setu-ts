@@ -25,6 +25,8 @@ const app = createApplication({
     HealthPlugin({
       endpoints: { health: '/health', live: '/live', ready: '/ready' },
       indicators: [createHttpIndicator('external-api', { url: 'https://api.example.com/health' })],
+      // M119b: force `mail` into readiness and `database` out of it.
+      readiness: { include: ['mail'], exclude: ['database'] },
     }),
   ],
 });
@@ -135,13 +137,40 @@ Every export and option is documented in
 
 ## What `degraded` means
 
-`/ready` runs every registered indicator except `self`, concurrently, each bounded by
-`indicatorTimeoutMs`. A timeout, a throw, or an invalid result counts as `down`. With only `self`
-registered, `/ready` answers 200 with no checks. `/live` runs only `self`.
+`/ready` runs the indicators that count toward readiness (never `self`), concurrently, each bounded
+by `indicatorTimeoutMs`. A timeout, a throw, or an invalid result counts as `down`. When no
+indicator counts toward readiness, `/ready` answers 200 with no checks. `/live` runs only `self`.
 
-`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
-return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+`/ready` returns 200 only when every indicator that counts toward readiness is `up`; `degraded` and
+`down` both return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live`
+remains 200.
 
 Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
 request serving belongs in the indicator's `data`: draining every replica would remove healthy
 serving capacity. Alert on those data fields.
+
+## Readiness membership
+
+Since **M119b** every indicator carries a readiness membership — whether it counts toward `/ready` —
+that the contributing plugin declares and the application overrides by exact name. Absent, an
+indicator counts toward readiness (the previous behaviour); a plugin registers one outside readiness
+with `ctx.health.register(name, fn, { readiness: false })`. The application overrides it with the
+`readiness` option, shown in the [Usage](#usage) example:
+
+`HealthPlugin({ readiness: { include: ['mail'], exclude: ['database'] } })`
+
+- `include` forces a named indicator into readiness; `exclude` forces it out. Each overrides the
+  membership the contributing plugin declared.
+- `HealthPlugin(...)` refuses an invalid list with `TypeError`: a non-array, an empty or non-string
+  name, the name `self`, or a name in both lists — the message names the option and never echoes a
+  name. Names that match no registered indicator produce one warning at startup giving only a count.
+- `/ready` runs only the readiness members (never `self`). An indicator outside readiness still runs
+  on `/health`, where a `down` keeps it 503 and alerts firing; it is absent from the `/ready`
+  report. `/live` is unchanged.
+
+Every framework comparison gives each check this membership — Spring Boot's health groups (its mail
+indicator is not in the readiness group by default), ASP.NET Core's health-check tags, and
+MicroProfile's `@Readiness` — and Setu's default follows them: the `mail` indicator is registered
+outside readiness, so an SMTP outage stays visible on `/health` without draining every replica (see
+the
+[mail-plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/mail-plugin/README.md#health-indicator)).

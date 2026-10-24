@@ -1888,8 +1888,8 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `OutboxRowStateError`                   | class     |
 | `OutboxStoreVerifyTimeoutError`         | class     |
 | `OutboxUnknownTenantError`              | class     |
-| `PubSubSubscriptionBoundElsewhereError` | class     |
 | `PublishTimeoutError`                   | class     |
+| `PubSubSubscriptionBoundElsewhereError` | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |
 | `RemoteHandlerError`                    | class     |

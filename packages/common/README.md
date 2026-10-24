@@ -367,6 +367,7 @@ package fits the plugin architecture.
 | `HealthCheckResult`                   | interface |
 | `HealthDiagnosticsObservation`        | interface |
 | `HealthDiagnosticsSnapshot`           | interface |
+| `HealthIndicatorOptions`              | interface |
 | `HealthReport`                        | interface |
 | `HttpStatusHint`                      | interface |
 | `IAdapterTransaction`                 | interface |

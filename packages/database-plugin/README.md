@@ -504,11 +504,15 @@ ledger probe caches reads for 5 seconds and bounds each read at 2 seconds:
 | Read rejected, timed out, or over 10,000 rows | `down`                                  | `{ state: 'unreadable' }`              |
 
 Additional names from a newer build add `unknown: count` to current data and preserve status, so old
-replicas stay ready during rolling deploys. Names never appear in health data. An already-down
-connection skips the ledger. Expected names must be unique non-empty strings, at most 10,000;
-`ledgerEntity`, when supplied, must be non-empty. Invalid options throw `TypeError` at construction
-without echoing values. This checks migration history, not every application table: an intact ledger
-cannot prove that someone has not independently dropped a business table.
+replicas stay ready during rolling deploys. Names never appear in health data. **Since M119b
+(V10-31)** the ledger is read only when the connection result is not `down` and its `data.reachable`
+is not `false` or `'unknown'`; otherwise the result is returned unchanged with
+`data.migrations.state: 'unknown'` added — an adapter with no reachability check (`reachable`
+omitted) is still checked. A paused database therefore reads `degraded` within one ~2 s bound
+instead of `down` after two stacked bounds. Expected names must be unique non-empty strings, at most
+10,000; `ledgerEntity`, when supplied, must be non-empty. Invalid options throw `TypeError` at
+construction without echoing values. This checks migration history, not every application table: an
+intact ledger cannot prove that someone has not independently dropped a business table.
 
 `createMigrationLedger(database, { entity? })` returns `IMigrationLedger`: `applied()` reads names,
 `record(name, appliedAt)` inserts caller-supplied ISO-8601 time, and `remove(name)` resolves even if

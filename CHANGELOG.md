@@ -25,6 +25,23 @@ All notable changes to this project are documented here. The format follows
   Streams the bound covers the publish's `XADD` only — consumer reads are unaffected. On NATS it is
   passed to the client as its own publish `timeout` and held by the framework's deadline as well.
 
+- **`HealthIndicatorOptions` and per-indicator readiness membership (M119b, 0.11.0,
+  `@setu-ts/common`).** A new exported interface whose only member is `readiness?: boolean`; absent
+  means the indicator counts toward readiness, which is the previous behaviour. It is carried by an
+  optional parameter on both registration surfaces —
+  `IHealthApi.register(name, indicator, options?)` and
+  `IHealthService.registerIndicator(name, indicator, options?)` — and by an optional
+  `IHealthIndicator.readiness?` member. `checkReady()` runs only the indicators that are not `self`
+  and that count toward readiness; an indicator outside readiness still runs in `check()`
+  (`/health`) and is absent from the `/ready` report. `checkLive()` is unchanged.
+
+- **`HealthPluginOptions.readiness` (M119b, 0.11.0, `@setu-ts/health-plugin`).**
+  `{ include?: readonly string[], exclude?: readonly string[] }`, which overrides a contributor's
+  declared membership by exact indicator name: `include` forces a named indicator into readiness,
+  `exclude` forces it out. `HealthPlugin(...)` refuses a non-array, an empty or non-string name, the
+  name `self`, or a name in both lists with `TypeError`; the message names the option and never
+  echoes a name. Names that match no registered indicator produce one count-only warning at startup.
+
 ### Changed
 
 - **BREAKING — Zod 3 support removed (#496, 0.11.0, `@setu-ts/openapi-plugin`,
@@ -57,6 +74,22 @@ All notable changes to this project are documented here. The format follows
   `publishTimeoutMs` (default 15000 ms, `0` unbounded, refused out of range), passed to the client
   as its own publish `timeout` and held by the framework's deadline as well, and an expired publish
   rejects with `PublishTimeoutError`.
+
+- **The `mail` indicator is out of readiness by default (V10-49, M119b, 0.11.0,
+  `@setu-ts/mail-plugin`).** `MailPlugin` now registers its indicator with `readiness: false`. Its
+  status mapping is unchanged — an unreachable mail backend still reads `down`, so `/health` reports
+  the outage (503) and alerts still fire — but `/ready` no longer counts it and stays 200.
+  `HealthPlugin({ readiness: { include: ['mail'] } })` restores the previous behaviour.
+
+- **The gRPC health bridge reads readiness (M119b, 0.11.0, `@setu-ts/grpc-plugin`).**
+  `grpc.health.v1.Health/Check` for the whole server now maps the readiness report (`checkReady()`)
+  instead of the full health report, so it agrees with `/ready`; an indicator that is out of
+  readiness (the `mail` indicator, by default) no longer turns the server `NOT_SERVING`.
+
+- **An unanswered queue reachability check is `up` with `reachable: 'unknown'` (M119b, 0.11.0,
+  `@setu-ts/queue-plugin`).** For EVERY queue adapter, a reachability check that does not answer
+  within its 2 s bound now reports `up` with `reachable: 'unknown'` and no depth counts, instead of
+  `down`; a check that answers `false` still reads `down` at once.
 
 ### Security
 
@@ -119,6 +152,31 @@ All notable changes to this project are documented here. The format follows
   that outlives `storeTimeoutMs` does too, and the store's late answer is still recorded. The
   behaviour is unchanged; the health row now reads "this instance's last sweep ended on a store call
   that was rejected or did not answer within `storeTimeoutMs`".
+
+- **V10-49: a shared mail outage no longer takes every replica out of rotation at once (M119b,
+  0.11.0, `@setu-ts/mail-plugin`, `@setu-ts/health-plugin`).** One SMTP outage stays visible on
+  `/health` (503, alerting) without failing `/ready` on every replica at once, through the `mail`
+  indicator's new readiness membership; the Changed entry above carries the default and the restore
+  lever.
+
+- **V10-20: a paused Redis no longer takes the replica out of rotation through the
+  `realtime-backplane` indicator (M119b, 0.11.0, `@setu-ts/realtime-backplane-plugin`).** The
+  indicator's reachability check is now cached for 5 s and bounded at 2 s; a check that does not
+  answer reports `reachable: 'unknown'` and the status stays `up` (previously the unbounded Redis
+  `PING` outlived the health indicator's 5 s deadline and read `down`).
+
+- **V10-22: the RabbitMQ queue indicator no longer reports `reachable: true` while the broker is
+  paused (M119b, 0.11.0, `@setu-ts/queue-plugin`).** The adapter's reachability check now opens and
+  closes a throwaway AMQP channel on the connection instead of reading a supervisor flag: a refused
+  round trip answers `false`, and a hung one resolves `reachable: 'unknown'` through the queue
+  probe's 2 s bound.
+
+- **V10-31: a paused database no longer reads `down` after two stacked probes (M119b, 0.11.0,
+  `@setu-ts/database-plugin`).** The migration readiness wrapper now skips the ledger read unless
+  the connection result is not `down` and its `data.reachable` is not `false` or `'unknown'`;
+  otherwise it returns the result unchanged with `data.migrations.state: 'unknown'` added (an
+  adapter with no reachability check is still checked). A paused database therefore reads `degraded`
+  within one ~2 s bound instead of `down` after ~4 s.
 
 ## [0.10.0] — 2026-10-22
 
