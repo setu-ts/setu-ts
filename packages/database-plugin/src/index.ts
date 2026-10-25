@@ -112,6 +112,8 @@ export {
   DatabaseUnavailableError,
   DatabaseTimeoutError,
   UnknownPayloadFieldError,
+  MissingKeyColumnError,
+  TenantColumnUnresolvedError,
   MongoTransactionUnavailableError,
   SerializationConflictError,
   UnsupportedFilterOperatorError,

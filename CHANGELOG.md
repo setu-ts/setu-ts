@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Portable database errors (M119e, 0.11.0, `@setu-ts/common`, `@setu-ts/database-plugin`).**
+  `UnknownPayloadFieldError` moves to common, preserving the database-plugin re-export's identity;
+  `InvalidFieldValueError` provides the fixed 400 field-type refusal. `MissingKeyColumnError` and
+  `TenantColumnUnresolvedError` name server configuration faults and their remedies.
+
 - **`PublishTimeoutError` (M119a, 0.11.0, `@setu-ts/messaging-plugin`).** A new exported class for a
   publish that outlived its acknowledgement bound and may still be delivered, so a caller can
   distinguish it from a broker refusal without parsing the message: `name` is
@@ -52,6 +57,15 @@ All notable changes to this project are documented here. The format follows
   echoes a name. Names that match no registered indicator produce one count-only warning at startup.
 
 ### Changed
+
+- **Drizzle tenant columns resolve to properties (M119e, 0.11.0, `@setu-ts/database-plugin`).** The
+  tenant bridge resolves and caches the configured column per entity for every read and write; an
+  absent or ambiguous mapping fails before statement I/O. Payload stamps remain last and update
+  strips the resolved property.
+- **Scoped cursor fingerprints (M119e, 0.11.0, `@setu-ts/common`, `@setu-ts/database-plugin`,
+  `@setu-ts/cloudflare-plugin`).** `sortFingerprint` gains optional entity/key-column scope. Memory,
+  Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1 refuse legacy and cross-entity
+  cursors; restart pagination once on upgrade.
 
 - **BREAKING — Zod 3 support removed (#496, 0.11.0, `@setu-ts/openapi-plugin`,
   `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`).** The supported range is now
@@ -124,6 +138,25 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
+  payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
+  `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing
+  their previous 501. Prisma refusal causes are fresh errors with fixed messages naming only the
+  original name and code; query text and payload values are discarded.
+- **D1 payload refusals are named 400s (M119e, 0.11.0, `@setu-ts/cloudflare-plugin`).** Invalid
+  payload identifiers and SQLite unknown-column errors naming payload fields become
+  `UnknownPayloadFieldError`; STRICT-table type refusals become `InvalidFieldValueError`.
+- **PostgreSQL refused values are 400s through Drizzle (M119e, 0.11.0,
+  `@setu-ts/database-plugin`).** Malformed keys and mistyped payload values become
+  `InvalidFieldValueError` with a scrubbed cause; existing HTTP-hinted errors retain their identity.
+- **Missing configured Drizzle keys fail connect (M119e, 0.11.0, `@setu-ts/database-plugin`).**
+  Registered tables with explicit incorrect primary keys throw `MissingKeyColumnError`. An id-less
+  table registered for the typed query builder remains valid until repository creation.
+- **Unhandled Drizzle pool errors no longer exit the process (M119e, 0.11.0,
+  `@setu-ts/database-plugin`).** The plugin attaches an idle-error reporting listener only when the
+  app's pool has none, using `describeError` and the optional logger's `warn`; without a logger the
+  listener still attaches.
 
 - **A generated full-stack app can run behind a TLS-terminating proxy (V10-17, V10-41, M119c,
   0.11.0, `@setu-ts/cli`).** Every React Router action answered 400 because nothing configured IP

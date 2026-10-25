@@ -53,6 +53,7 @@ await db.transaction(async (uow) => {
   attempts rollback and rejects.
 - Unsupported transaction isolation levels reject rather than silently downgrading.
 - Raw `query` rejects on memory; `migrate` rejects on every current adapter.
+- Give a Drizzle `pg` Pool an `'error'` listener; see the README's Drizzle pool setup.
 
 ## Other options
 

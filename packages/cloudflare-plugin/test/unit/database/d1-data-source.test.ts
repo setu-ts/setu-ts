@@ -18,7 +18,7 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 import type { NormalizedQuery } from '@setu-ts/common';
-import { encodeCursor } from '@setu-ts/common';
+import { encodeCursor, sortFingerprint } from '@setu-ts/common';
 
 import {
   createD1DataSource,
@@ -31,8 +31,12 @@ import { RecordingD1, SqliteD1 } from '../../d1-fakes.ts';
 const SCHEMA = 'CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, age INTEGER, deletedAt TEXT)';
 const COMPOSITE_SCHEMA =
   'CREATE TABLE orders (tenantId TEXT, orderId TEXT, status TEXT, PRIMARY KEY (tenantId, orderId))';
-const TARGET = { table: 'users', primaryKey: ['id'] } as const;
-const COMPOSITE_TARGET = { table: 'orders', primaryKey: ['tenantId', 'orderId'] } as const;
+const TARGET = { entity: 'users', table: 'users', primaryKey: ['id'] } as const;
+const COMPOSITE_TARGET = {
+  entity: 'orders',
+  table: 'orders',
+  primaryKey: ['tenantId', 'orderId'],
+} as const;
 
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
   return { where: {}, orderBy: {}, limit: -1, offset: 0, select: [], ...partial };
@@ -361,7 +365,7 @@ describe('createD1TransactionDataSource — composite keys on the deferred-write
 // ---------------------------------------------------------------------------
 
 const PAGE_SCHEMA = 'CREATE TABLE widgets (id TEXT PRIMARY KEY, score INTEGER, name TEXT)';
-const PAGE_TARGET = { table: 'widgets', primaryKey: ['id'] } as const;
+const PAGE_TARGET = { entity: 'widgets', table: 'widgets', primaryKey: ['id'] } as const;
 
 /**
  * Seed six rows carrying only three distinct `score` values — two rows per
@@ -465,7 +469,13 @@ describe('createD1DataSource — findPage (§3.8 keyset pagination)', () => {
       encodeCursor({
         orderedValues: [20],
         keyValues: ['d'],
-        sortFingerprint: 'score:asc',
+        sortFingerprint: sortFingerprint(
+          { score: 'asc' },
+          {
+            entity: PAGE_TARGET.entity,
+            keyColumns: PAGE_TARGET.primaryKey,
+          },
+        ),
       }),
     );
   });

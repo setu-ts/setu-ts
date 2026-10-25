@@ -657,9 +657,13 @@ here.
 - **Milestone 119d** (`packages/http-security-plugin` — a malformed `Forwarded` element is a
   boundary the trust walk never crosses, bounds read from the right, one address normalizer; V10-19,
   V10-28) — complete (PR #503).
-- **Next milestone** — M119e (`database-plugin`, `common`, `cloudflare-plugin` — a data contract
-  that is not portable or not checked at startup). M119f, M119h, M119i, M118 and M120–M123 are open
-  in the ROADMAP; M120 depends on M118.
+- **Milestone 119e** (`database-plugin` + `common` + `cloudflare-plugin` — the tenant column
+  resolved to its Drizzle property, entity-bound cursor fingerprints, unknown fields refused on
+  every SQL adapter, a refused value as a named 400, a named missing-key-column error checked at
+  connect, and a reporting pool `'error'` listener; V10-4, V10-32, V10-33, V10-37, V10-45, V10-61) —
+  complete (PR #504).
+- **Next milestone** — M119f (telemetry and the optional-peer packages — optional peers in an npm
+  workspace). M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 

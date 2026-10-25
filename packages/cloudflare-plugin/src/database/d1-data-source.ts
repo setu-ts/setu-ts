@@ -1,3 +1,4 @@
+import { InvalidFieldValueError, UnknownPayloadFieldError } from '@setu-ts/common';
 /**
  * The two {@linkcode IDataSource} implementations over a D1 binding.
  *
@@ -122,7 +123,10 @@ async function findD1Page(
 
   // 2. Sort-fingerprint guard — a cross-sort cursor would return a silently
   //    wrong page.
-  const fingerprint = sortFingerprint(query.orderBy);
+  const fingerprint = sortFingerprint(query.orderBy, {
+    entity: target.entity,
+    keyColumns: target.primaryKey,
+  });
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
       new InvalidCursorError(`Entity '${target.table}': cursor fingerprint mismatch.`),
@@ -207,6 +211,75 @@ function projectD1Fields(
   return projected;
 }
 
+/** SQLite's two measured unknown-column message forms; internal test data. @since 0.11.0 */
+export const D1_UNKNOWN_COLUMN_PATTERNS: readonly RegExp[] = [
+  /has no column named ([A-Za-z_][A-Za-z0-9_]*)/,
+  /no such column: ([A-Za-z_][A-Za-z0-9_]*)/,
+];
+
+/** The payload keys of one write, which a SQLite refusal may name. Internal. */
+export interface D1WriteContext {
+  /** The repository entity the write addresses. */
+  readonly entity: string;
+  /** Its physical table, as SQLite names it in a STRICT refusal. */
+  readonly table: string;
+  /** The payload's own keys. */
+  readonly keys: readonly string[];
+}
+
+/**
+ * Map SQLite's refusal of a write to its named 400, or `undefined` when the
+ * error is not one. An unknown-column message counts only when it names a key
+ * of one of `writes`' payloads (a precondition column is not a payload field);
+ * a STRICT-table refusal is attributed by its `table.column`, or to the only
+ * write when the message carries none. One implementation for the direct
+ * writes and the transaction commit, so the two paths cannot drift.
+ *
+ * @param error - The rejection D1 raised
+ * @param writes - The writes the failed statement or batch carried
+ * @returns The named refusal, or `undefined`
+ */
+export function d1WriteRefusal(
+  error: unknown,
+  writes: readonly D1WriteContext[],
+): Error | undefined {
+  if (!(error instanceof Error)) return undefined;
+  for (const pattern of D1_UNKNOWN_COLUMN_PATTERNS) {
+    const field = pattern.exec(error.message)?.[1];
+    if (field === undefined) continue;
+    const write = writes.find((candidate) => candidate.keys.includes(field));
+    if (write !== undefined) return new UnknownPayloadFieldError(write.entity, field);
+  }
+  const strict = /cannot store \w+ value in \w+ column(?: (\w+)\.(\w+))?/.exec(error.message);
+  if (strict === null) return undefined;
+  const [, table, column] = strict;
+  const write =
+    table === undefined || column === undefined
+      ? writes.length === 1
+        ? writes[0]
+        : undefined
+      : writes.find((candidate) => candidate.table === table && candidate.keys.includes(column));
+  return write === undefined ? undefined : new InvalidFieldValueError(write.entity);
+}
+
+/** The refusal context of one write against `target`. */
+function writeContext(target: D1Target, data: Readonly<Record<string, unknown>>): D1WriteContext {
+  return { entity: target.entity, table: target.table, keys: Object.keys(data) };
+}
+
+/** Refuse payload fields and STRICT-table values without exposing values. */
+async function refusedD1Write<T>(
+  target: D1Target,
+  data: Readonly<Record<string, unknown>>,
+  write: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    throw d1WriteRefusal(error, [writeContext(target, data)]) ?? error;
+  }
+}
+
 /**
  * Build a data source that executes every operation immediately against the
  * binding.
@@ -227,7 +300,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     },
 
     async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
-      const row = await prepareStatement(db, buildInsert(target, data)).first();
+      const row = await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildInsert(target, data)).first(),
+      );
       if (row === null) {
         throw new Error(
           `D1: insert into '${target.table}' returned no row. ` +
@@ -243,7 +318,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     ): Promise<Record<string, unknown>> {
       data = { ...data };
       assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
-      const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
+      const row = await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildUpdate(target, id, data)).first(),
+      );
       if (row === null) {
         throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
       }
@@ -261,7 +338,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       where = checked.where;
       data = checked.data;
       assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
-      return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
+      return await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildUpdateWhere(target, id, where, data)).first(),
+      );
     },
     async deleteWhere(id, where) {
       const checked = checkWritePrecondition(where);
@@ -293,17 +372,20 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
  */
 export class D1TransactionBuffer {
   readonly #statements: D1Statement[] = [];
+  readonly #writes: D1WriteContext[] = [];
   #finalized = false;
 
   /**
    * Buffer one statement.
    *
    * @param statement - The built statement to apply at commit
+   * @param write - The payload it carries, for mapping a commit-time refusal
    * @throws {Error} When the transaction has already been committed or rolled back
    */
-  add(statement: D1Statement): void {
+  add(statement: D1Statement, write?: D1WriteContext): void {
     this.assertOpen();
     this.#statements.push(statement);
+    if (write !== undefined) this.#writes.push(write);
   }
 
   /**
@@ -329,6 +411,15 @@ export class D1TransactionBuffer {
    */
   drain(): readonly D1Statement[] {
     return [...this.#statements];
+  }
+
+  /**
+   * The payload-carrying writes buffered so far, in insertion order.
+   *
+   * @returns Each write's refusal context
+   */
+  writes(): readonly D1WriteContext[] {
+    return [...this.#writes];
   }
 }
 
@@ -391,7 +482,7 @@ export function createD1TransactionDataSource(
           );
         }
       }
-      buffer.add(buildInsert(target, data));
+      buffer.add(buildInsert(target, data), writeContext(target, data));
       return { ...data } as Record<string, unknown>;
     },
 
@@ -406,7 +497,7 @@ export function createD1TransactionDataSource(
       if (current === null) {
         throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
       }
-      buffer.add(buildUpdate(target, id, data));
+      buffer.add(buildUpdate(target, id, data), writeContext(target, data));
       return { ...current, ...data };
     },
 

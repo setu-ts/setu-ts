@@ -25,6 +25,7 @@ import {
   createD1DataSource,
   createD1TransactionDataSource,
   D1TransactionBuffer,
+  d1WriteRefusal,
   prepareStatement,
 } from './d1-data-source.ts';
 
@@ -237,7 +238,14 @@ export class D1Adapter implements IDatabaseAdapter {
         // An empty transaction is a no-op rather than an empty batch() —
         // there is nothing to make atomic, and no round trip worth paying for.
         if (statements.length === 0) return;
-        await db.batch(statements.map((s) => prepareStatement(db, s)));
+        const writes = buffer.writes();
+        try {
+          await db.batch(statements.map((s) => prepareStatement(db, s)));
+        } catch (error) {
+          // The batch carries the buffered payloads: a refusal naming one of
+          // their keys, or a STRICT-table value, is the client's 400 here too.
+          throw d1WriteRefusal(error, writes) ?? error;
+        }
       },
 
       rollback: (): Promise<void> => {
@@ -269,6 +277,7 @@ export class D1Adapter implements IDatabaseAdapter {
   private resolveTarget(entity: string): D1Target {
     const mapping = this.#tables[entity];
     return {
+      entity,
       table: mapping?.table ?? entity,
       primaryKey: normalisePrimaryKey(mapping?.primaryKey ?? DEFAULT_PRIMARY_KEY),
     };
