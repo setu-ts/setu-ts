@@ -320,6 +320,9 @@ export interface IRequestContext {
    * Registers cleanup in reverse registration order. Buffered responses wait
    * for cleanup; streaming responses clean up on end, error, or cancellation.
    * Calls after completion run immediately. Failures are reported at warn.
+   * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
+   * continues with the next cleanup. Later settlement is ignored. Synchronous
+   * cleanups stay synchronous and are not timed.
    *
    * @param cleanup - Work to run at completion
    *

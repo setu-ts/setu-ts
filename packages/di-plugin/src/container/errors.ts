@@ -59,12 +59,13 @@ export class ContainerValidationError extends Error {
 }
 
 /**
- * Root resolution requires an explicit or request scope.
+ * Root resolution reaches a scoped provider or creates a disposable transient
+ * outside a singleton dependency graph, requiring an explicit or request scope.
  * @since 0.11.0
  */
 export class ScopeRequiredError extends Error {
   /**
-   * @param token - The scoped graph requested on the root
+   * @param token - The graph requiring a scope requested on the root
    * @since 0.11.0
    */
   constructor(token: ContainerToken) {

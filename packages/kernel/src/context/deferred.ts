@@ -1,7 +1,16 @@
 /** Generic request cleanup; deliberately independent of application features. */
-import { CAPABILITIES, describeError, isPromiseLike } from '@setu-ts/common';
-import type { ILogger, IServiceRegistry } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  describeError,
+  isPromiseLike,
+  resolveProbeTiming,
+  withDeadline,
+} from '@setu-ts/common';
+import type { ILogger, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
 import type { ResponseBuilder } from './response.ts';
+
+/** Fixed bound for one asynchronous cleanup. @since 0.11.0 */
+const DEFERRED_CLEANUP_TIMEOUT_MS = 5000;
 
 /**
  * Internal cleanup callback type.
@@ -44,7 +53,12 @@ export function runDeferred(
     try {
       const pending = cleanup();
       if (isPromiseLike(pending)) {
-        return Promise.resolve(pending)
+        return withDeadline(() => Promise.resolve(pending), {
+          timeoutMs: DEFERRED_CLEANUP_TIMEOUT_MS,
+          timing: resolveProbeTiming(registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+          onTimeout: () =>
+            new Error(`Deferred request cleanup timeout after ${DEFERRED_CLEANUP_TIMEOUT_MS} ms`),
+        })
           .catch((error: unknown) => {
             report(registry, error);
           })

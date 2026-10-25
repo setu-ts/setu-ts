@@ -22,6 +22,8 @@ export interface ResolutionScope {
  */
 export interface CompiledEntry {
   readonly requiresScope: boolean;
+  /** Whether resolution creates disposable transients outside singletons. @since 0.11.0 */
+  readonly createsDisposableTransient: boolean;
   resolve(scope: ResolutionScope): unknown;
 }
 
@@ -172,6 +174,7 @@ export class Compiler {
       const external = this.#external as ExternalResolver;
       const result: CompiledEntry = {
         requiresScope: false,
+        createsDisposableTransient: false,
         resolve: () => {
           if (!created) {
             value = external.resolve(token as string);
@@ -195,7 +198,11 @@ export class Compiler {
         : (provider.inject ?? []).map((inject) => {
             const dep = dependency(inject);
             return dep.optional && !this.has(dep.token)
-              ? { requiresScope: false, resolve: () => undefined }
+              ? {
+                  requiresScope: false,
+                  createsDisposableTransient: false,
+                  resolve: () => undefined,
+                }
               : this.#build(dep.token);
           });
     const create = (scope: ResolutionScope): unknown => {
@@ -217,6 +224,10 @@ export class Compiler {
     let singleton: unknown;
     const result: CompiledEntry = {
       requiresScope: entry.scope === 'scoped' || deps.some((dep) => dep.requiresScope),
+      createsDisposableTransient:
+        entry.scope !== 'singleton' &&
+        ((entry.scope === 'transient' && entry.dispose !== undefined) ||
+          deps.some((dep) => dep.createsDisposableTransient)),
       resolve: (scope) => {
         if (entry.scope === 'singleton') {
           if (!created) {

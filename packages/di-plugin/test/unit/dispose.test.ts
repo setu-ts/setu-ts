@@ -1,5 +1,117 @@
 import { expect, it, vi } from 'vitest';
-import { createContainer, ScopeDisposedError } from '../../src/index.ts';
+import { createToken } from '@setu-ts/common';
+import type { IRequestContext } from '@setu-ts/common';
+import {
+  CircularDetector,
+  createContainer,
+  ProviderRegistry,
+  ScopeDisposedError,
+  ScopeRequiredError,
+} from '../../src/index.ts';
+
+it.each(['on-demand', 'closed'] as const)(
+  'refuses root disposable transient graphs with %s compilation and disposes request scopes only',
+  (mode) => {
+    const c = createContainer();
+    const token = createToken<object>('disposable');
+    const create = vi.fn(() => ({}));
+    const dispose = vi.fn();
+    const rootTrack = vi.spyOn(c, 'track');
+    c.register(token, { useFactory: create }, { scope: 'transient', dispose });
+    c.register(
+      'middle',
+      { useFactory: (value: object) => value, inject: [token] },
+      { scope: 'transient' },
+    );
+    c.register(
+      'outer',
+      { useFactory: (value: object) => value, inject: ['middle'] },
+      { scope: 'transient' },
+    );
+    c.register(
+      'optional',
+      {
+        useFactory: (value: object) => value,
+        inject: [{ token, optional: true }],
+      },
+      { scope: 'transient' },
+    );
+    const singletonCreate = vi.fn((value: object) => ({ value }));
+    c.register('singleton', { useFactory: singletonCreate, inject: ['middle'] });
+    c.register(
+      'via-singleton',
+      {
+        useFactory: (value: object) => value,
+        inject: ['singleton', { token: 'absent', optional: true }],
+      },
+      { scope: 'transient' },
+    );
+    c.register('plain', { useFactory: () => ({}) }, { scope: 'transient' });
+    if (mode === 'closed') c.close();
+    for (const refused of [token, 'middle', 'outer', 'optional']) {
+      expect(() => c.resolve(refused)).toThrow(ScopeRequiredError);
+    }
+    expect(create).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+    expect(c.resolve('plain')).not.toBe(c.resolve('plain'));
+
+    const singleton = c.resolve<{ value: object }>('singleton');
+    expect(c.resolve('via-singleton')).toBe(singleton);
+    expect(c.resolve('singleton')).toBe(singleton);
+    expect(singletonCreate).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledOnce();
+    expect(rootTrack).toHaveBeenCalledOnce();
+    expect(dispose).not.toHaveBeenCalled();
+    // A cached singleton must not allow direct root transient resolution later.
+    expect(() => c.resolve(token)).toThrow(ScopeRequiredError);
+
+    c.close();
+    const lookup = vi.spyOn(ProviderRegistry.prototype, 'get').mockImplementation(() => {
+      throw new Error('runtime graph lookup');
+    });
+    const enter = vi.spyOn(CircularDetector.prototype, 'enter').mockImplementation(() => {
+      throw new Error('runtime graph traversal');
+    });
+    const instances = new Set<object>();
+    try {
+      for (let n = 0; n < 1000; n++) {
+        const cleanups: (() => void | Promise<void>)[] = [];
+        const ctx = {
+          defer: (cleanup: () => void | Promise<void>) => {
+            cleanups.push(cleanup);
+          },
+        } as IRequestContext;
+        const scope = c.forRequest(ctx);
+        const direct = scope.resolve(token);
+        const indirect = scope.resolve<object>('outer');
+        const optional = scope.resolve<object>('optional');
+        instances.add(direct);
+        instances.add(indirect);
+        instances.add(optional);
+        expect(scope.resolve('singleton')).toBe(singleton);
+        expect(cleanups).toHaveLength(1);
+        expect(cleanups[0]!()).toBeUndefined();
+        expect(scope.dispose()).toBeUndefined();
+        expect(dispose).toHaveBeenCalledTimes((n + 1) * 3);
+        expect(() => c.resolve('outer')).toThrow(ScopeRequiredError);
+      }
+      expect(lookup).not.toHaveBeenCalled();
+      expect(enter).not.toHaveBeenCalled();
+    } finally {
+      lookup.mockRestore();
+      enter.mockRestore();
+    }
+    expect(instances.size).toBe(3000);
+    expect(rootTrack).toHaveBeenCalledOnce();
+    expect(dispose.mock.calls.some(([value]) => value === singleton.value)).toBe(false);
+    // Only the singleton's once-created transient remains owned by the root.
+    expect(c.dispose()).toBeUndefined();
+    expect(dispose).toHaveBeenCalledTimes(3001);
+    expect(dispose).toHaveBeenLastCalledWith(singleton.value);
+    expect(c.dispose()).toBeUndefined();
+    expect(dispose).toHaveBeenCalledTimes(3001);
+  },
+);
 
 it('disposes scoped and transient dependencies in reverse creation order exactly once', () => {
   const order: string[] = [];

@@ -200,7 +200,8 @@ export interface IContainer {
    * @param token - The token to resolve
    *
    * @returns The resolved instance
-   * @throws {Error} For invalid wiring, disposed scopes, or root resolution reaching scoped services
+   * @throws {Error} For invalid wiring, disposed scopes, or root resolution reaching scoped
+   * services or creating disposable transients outside singleton dependency graphs
    *
    * @since 0.11.0
    */
@@ -211,7 +212,8 @@ export interface IContainer {
    * @param token - Registered name
    *
    * @returns The constructed or cached value
-   * @throws {Error} For invalid wiring, disposed scopes, or a required scope
+   * @throws {Error} For invalid wiring, disposed scopes, or root resolution reaching scoped
+   * services or creating disposable transients outside singleton dependency graphs
    *
    * @since 0.11.0
    */
@@ -222,7 +224,8 @@ export interface IContainer {
    * @param token - Registered token
    *
    * @returns The constructed or cached value
-   * @throws {Error} For invalid wiring, disposed scopes, or a required scope
+   * @throws {Error} For invalid wiring, disposed scopes, or root resolution reaching scoped
+   * services or creating disposable transients outside singleton dependency graphs
    *
    * @since 0.11.0
    */

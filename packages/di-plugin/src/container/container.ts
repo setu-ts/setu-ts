@@ -154,7 +154,8 @@ export class DiContainer implements IContainer, ResolutionScope {
    *
    * @returns The resolved instance
    * @throws {ContainerValidationError} If wiring is invalid
-   * @throws {ScopeRequiredError} If the root reaches a scoped provider
+   * @throws {ScopeRequiredError} If root resolution reaches a scoped provider or creates a
+   * disposable transient outside a singleton dependency graph
    * @throws {ScopeDisposedError} If this scope or its root is disposed
    *
    * @since 0.11.0
@@ -162,7 +163,11 @@ export class DiContainer implements IContainer, ResolutionScope {
   resolve<T>(token: ContainerToken<T>): T {
     if (this.#disposed || this.root.#disposed) throw new ScopeDisposedError(token);
     const compiled = this.#compiler.compile(token);
-    if (this.#parent === undefined && compiled.requiresScope) throw new ScopeRequiredError(token);
+    if (
+      this.#parent === undefined &&
+      (compiled.requiresScope || compiled.createsDisposableTransient)
+    )
+      throw new ScopeRequiredError(token);
     return compiled.resolve(this) as T;
   }
 

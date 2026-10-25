@@ -10,6 +10,7 @@ async function appFor(
 ) {
   const fake = createFakeRuntime();
   fake.runtime.setTimeout = (fn, ms) => setTimeout(fn, ms) as unknown as TimerHandle;
+  fake.runtime.clearTimeout = (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>);
   const plugin: IPlugin = {
     name: 'runtime-test',
     version: '1.0.0',
@@ -23,12 +24,162 @@ async function appFor(
   const app = createApplication({ plugins: [plugin] });
   register(app);
   await app.start();
-  return { app, adapter: fake.adapter };
+  return { app, adapter: fake.adapter, runtime: fake.runtime };
 }
 
 function request(path = '/'): IRequest {
   return { method: 'GET', url: `http://test${path}`, path, headers: new Headers() } as IRequest;
 }
+
+it.each([
+  'buffered',
+  'sync-failure',
+  'async-failure',
+  'responder-failure',
+  'end',
+  'error',
+  'cancel',
+] as const)('bounds asynchronous deferred cleanup on %s and releases shutdown', async (mode) => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const warn = vi.fn();
+  const logger = { warn, error: vi.fn(), info: vi.fn(), debug: vi.fn() } as unknown as ILogger;
+  const next = vi.fn();
+  let rejectExpired!: (error: Error) => void;
+  const expired = new Promise<void>((_resolve, reject) => {
+    rejectExpired = reject;
+  });
+  let releaseInside!: () => void;
+  const inside = new Promise<void>((resolve) => {
+    releaseInside = resolve;
+  });
+  const { app, adapter, runtime } = await appFor((app) => {
+    app.router.get('/inside', (ctx) => {
+      ctx.defer?.(() => inside);
+      return ctx.response.text('inside');
+    });
+    app.router.get('/', (ctx) => {
+      ctx.defer?.(next);
+      // Two independent bounds prove the timeout is per callback, not per list.
+      ctx.defer?.(() => expired);
+      ctx.defer?.(() => new Promise<void>(() => {}));
+      if (mode === 'sync-failure' || mode === 'async-failure') {
+        if (mode === 'sync-failure') throw new Error('handler failed');
+        return Promise.reject(new Error('handler failed'));
+      }
+      if (mode === 'responder-failure') {
+        ctx.state.set(ERROR_RESPONDER_STATE_KEY, {
+          respond(): void {
+            throw new Error('responder failed');
+          },
+        });
+        throw new Error('handler failed');
+      }
+      if (mode === 'end' || mode === 'error' || mode === 'cancel') {
+        return ctx.response.stream(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              if (mode === 'error') controller.error(new Error('source failed'));
+              else if (mode === 'end') controller.close();
+            },
+          }),
+        );
+      }
+      return ctx.response.status(201).text('unchanged');
+    });
+  }, logger);
+  try {
+    // Positive control: settling within the bound is awaited and clears its timer.
+    let insideReturned = false;
+    const insideResult = Promise.resolve(adapter.handler!(request('/inside'))).then((response) => {
+      insideReturned = true;
+      return response;
+    });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(insideReturned).toBe(false);
+    releaseInside();
+    expect((await insideResult).snapshot().body).toBe('inside');
+    expect(vi.getTimerCount()).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+
+    const timer = vi.spyOn(runtime, 'setTimeout');
+    let completed = false;
+    let outcome: unknown;
+    let completion: Promise<void>;
+    if (mode === 'responder-failure') {
+      expect(() => adapter.handler!(request())).toThrow('responder failed');
+      completion = Promise.resolve();
+    } else {
+      const response = adapter.handler!(request());
+      if (mode === 'end' || mode === 'error' || mode === 'cancel') {
+        const snapshot = (await response).snapshot();
+        if (!snapshot.streaming) throw new Error('expected stream');
+        const reader = snapshot.body.getReader();
+        completion = (mode === 'cancel' ? reader.cancel() : reader.read()).then(
+          (value) => {
+            completed = true;
+            outcome = value;
+          },
+          (error: unknown) => {
+            completed = true;
+            outcome = error;
+          },
+        );
+      } else {
+        completion = Promise.resolve(response).then((value) => {
+          completed = true;
+          outcome = value.snapshot();
+        });
+      }
+    }
+    await vi.advanceTimersByTimeAsync(0);
+    expect(timer).toHaveBeenCalledWith(expect.any(Function), 5000);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(completed).toBe(false);
+    expect(next).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(next).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledOnce();
+
+    // Start draining after the second callback starts: it must release within 5 s.
+    let stopped = false;
+    const stopping = app.stop().then(() => {
+      stopped = true;
+    });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(stopped).toBe(false);
+    expect(next).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(51);
+    expect(next).toHaveBeenCalledOnce();
+    expect(stopped).toBe(true);
+    expect(warn).toHaveBeenCalledTimes(2);
+    for (const call of warn.mock.calls) {
+      expect(call).toEqual([
+        'Deferred request cleanup failed',
+        { error: expect.stringMatching(/timeout.*5000|5000.*timeout/i) },
+      ]);
+    }
+    await completion;
+    await stopping;
+    if (mode === 'buffered') expect(outcome).toMatchObject({ status: 201, body: 'unchanged' });
+    if (mode === 'sync-failure' || mode === 'async-failure')
+      expect(outcome).toMatchObject({ status: 500 });
+    if (mode === 'end') expect(outcome).toMatchObject({ done: true });
+    if (mode === 'error') expect(outcome).toEqual(new Error('source failed'));
+    rejectExpired(new Error('late failure'));
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(next).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    releaseInside();
+    const stopping = app.stop();
+    await vi.advanceTimersByTimeAsync(10_050);
+    await stopping;
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  }
+});
 
 it('keeps captured handler results synchronous without defer and with synchronous cleanups', async () => {
   const order: number[] = [];

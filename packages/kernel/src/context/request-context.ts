@@ -150,7 +150,11 @@ class RequestContext implements IRequestContext {
     this.#params = params;
   }
 
-  /** Registers cleanup lazily; late registrations settle immediately. */
+  /**
+   * Registers cleanup lazily; late registrations run immediately. Asynchronous
+   * cleanup is bounded at 5000 ms; expiry warns once and continues, ignoring
+   * later settlement. Synchronous cleanup stays synchronous and untimed.
+   */
   defer(cleanup: DeferredCleanup): void {
     if (this.#completed) {
       void runDeferred([cleanup], this.#registry);
