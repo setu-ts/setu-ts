@@ -279,7 +279,10 @@ application without `DiPlugin` is unaffected.
   `forRequest` throw `RequestScopeUnavailableError`.
 - **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
   disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
-  `dispose()`) and the rest still run.
+  `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
+  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
+  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
+  settle after the kernel's own 5 s bound.
 - **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
   means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays

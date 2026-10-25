@@ -70,6 +70,13 @@ export interface ContainerConfig {
    * @since 0.11.0
    */
   readonly timing?: ProbeTiming;
+  /**
+   * Reports request-scope disposal failures, inherited by scopes. When omitted,
+   * deferred cleanup throws or rejects so its caller can report the failure.
+   *
+   * @since 0.11.0
+   */
+  readonly reportDisposeError?: (error: unknown) => void;
 }
 
 /**
@@ -230,7 +237,20 @@ export class DiContainer implements IContainer, ResolutionScope {
     if (ctx.defer === undefined) throw new RequestScopeUnavailableError();
     const scope = this.createScope();
     this.#requests.set(ctx, scope);
-    ctx.defer(() => scope.dispose());
+    const report = this.#config.reportDisposeError;
+    ctx.defer((): void | Promise<void> => {
+      try {
+        const pending = scope.dispose();
+        // Observe the scope's outcome even after the kernel's cleanup deadline.
+        if (report !== undefined && isPromiseLike(pending)) {
+          return Promise.resolve(pending).catch(report);
+        }
+        return pending;
+      } catch (error) {
+        if (report === undefined) throw error;
+        report(error);
+      }
+    });
     return scope;
   }
 

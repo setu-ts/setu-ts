@@ -15,7 +15,7 @@ import type {
   IRuntimeServices,
   ServiceScope,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
+import { CAPABILITIES, describeError, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
 
 import { DiContainer } from '../container/container.ts';
 import { tokenName } from '../container/errors.ts';
@@ -86,6 +86,9 @@ export function DiPlugin(options?: DiPluginOptions): IPlugin {
       const container = new DiContainer({
         defaultScope,
         autoRegister,
+        reportDisposeError: (error: unknown): void => {
+          ctx.logger?.warn('Request scope disposal failed', { error: describeError(error) });
+        },
         // The runtime's timers when one is registered; otherwise disposal deadlines
         // fall back to withDeadline's own, so DiPlugin never requires a runtime.
         ...(ctx.services.has(CAPABILITIES.RUNTIME)

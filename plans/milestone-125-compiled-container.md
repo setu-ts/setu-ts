@@ -325,7 +325,10 @@ is finished — without moving a request that never uses it off the kernel's syn
   from `resolveProbeTiming(runtime)` and every scope inherits; a standalone container without it
   uses `withDeadline`'s default timers. Synchronous disposals stay untimed and synchronous, so a
   request scope with synchronous disposal keeps the §3.13 synchronous path. The bound covers root
-  disposal in `DiPlugin`'s `onClose` too, so a hung singleton `dispose` cannot hold `app.stop()`.
+  disposal in `DiPlugin`'s `onClose` too, so a hung singleton `dispose` cannot hold `app.stop()`
+  indefinitely. The bound is per disposal, not a total: k hung disposals take about k × 5000 ms,
+  which can exceed the 10 s drain (audit N2, accepted — a total bound would abandon later disposals,
+  the F1 defect).
 - **Why:** Audit F1 (High): one never-settling `dispose` blocked every later disposal in its scope,
   so sibling resources were never released — §8a T4 and T6. Audit F3 (Medium): the same unbounded
   chain held `app.stop()` and skipped later close hooks.
@@ -347,6 +350,23 @@ is finished — without moving a request that never uses it off the kernel's syn
 - **Test home:** `di-plugin/test/unit/dispose.test.ts` (1000 request scopes each registering a
   `singleton` leaf with `dispose`: the root tracks nothing new, each scope disposes its own, and two
   resolves inside one scope return one instance).
+
+### 3.18 A request scope reports its own disposal outcome (added by audit N1)
+
+- **Decision:** `ContainerConfig` gains an optional `reportDisposeError?: (error: unknown) => void`,
+  inherited by every scope. `forRequest`'s cleanup calls the scope's `dispose()`; when a reporter is
+  configured it catches a synchronous throw and reports it, and for a promise attaches a handler
+  that reports a rejection, then hands the kernel a promise that never rejects. Without a reporter
+  the cleanup rethrows, as before, so the kernel reports it. `DiPlugin` sets the reporter to a
+  `warn` through its logger (read when called): message `Request scope disposal failed`, metadata
+  `{ error: describeError(error) }`. Each failure is therefore logged once, by the container,
+  whenever it settles — also after the kernel's 5000 ms bound has already reported its own timeout.
+- **Why:** Audit N1 (Low): a scope disposal outlasting the kernel's bound lost its named timeouts
+  and dispose errors, because the kernel stops observing the cleanup at the bound.
+- **Test home:** `di-plugin/test/unit/request-scope.test.ts` (with a reporter: a synchronous failure
+  is reported once and the cleanup does not throw; an asynchronous failure settling after the kernel
+  would have given up is still reported; without a reporter the cleanup rethrows);
+  `di-plugin/test/integration/di-plugin.test.ts` (`DiPlugin` wires the reporter to its logger).
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -376,12 +396,14 @@ minor 0.11.0. `IRequestContext.defer` is optional and breaks no implementor.
 
 ### 4.1 Options — every option names its consumer
 
-| Option                              | Consumer                                    | Behavior (per implementation)                                                               |
-| ----------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `ProviderOptions.dispose`           | `DiContainer.dispose()`                     | Called once per created instance, reverse creation order; failures aggregated after all run |
-| `ProviderOptions.scope` (unchanged) | the compiler                                | Selects the compiled resolver; `scoped` gets a slot                                         |
-| `DiPluginOptions.defaultScope`      | `DiPlugin` → builder                        | Unchanged; decorator controllers no longer inherit it (§3.11)                               |
-| `DiPluginOptions.autoRegister`      | the compiler's missing check; external leaf | Unchanged semantics; external tokens validated with `has()` and resolved lazily once        |
+| Option                               | Consumer                                    | Behavior (per implementation)                                                                                              |
+| ------------------------------------ | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `ProviderOptions.dispose`            | `DiContainer.dispose()`                     | Called once per created instance, reverse creation order; failures aggregated after all run                                |
+| `ProviderOptions.scope` (unchanged)  | the compiler                                | Selects the compiled resolver; `scoped` gets a slot                                                                        |
+| `DiPluginOptions.defaultScope`       | `DiPlugin` → builder                        | Unchanged; decorator controllers no longer inherit it (§3.11)                                                              |
+| `DiPluginOptions.autoRegister`       | the compiler's missing check; external leaf | Unchanged semantics; external tokens validated with `has()` and resolved lazily once                                       |
+| `ContainerConfig.timing`             | `DiContainer.dispose()` (§3.16)             | Runtime timers for the per-disposal bound; `DiPlugin` sets it when a runtime is registered, else `withDeadline`'s defaults |
+| `ContainerConfig.reportDisposeError` | `forRequest`'s cleanup (§3.18)              | Reports each request-scope disposal failure once; absent, the cleanup rethrows to the kernel                               |
 
 ## 5. Implementation files
 
@@ -559,6 +581,8 @@ committed code does not yet implement — the audit runs after they land.
 | F2 (audit `d5f0f8c5`, Medium) Scope-registered `singleton` leaves tracked on the root      | FIXED after the audit: §3.17 scope registrations live as long as the scope                                                       |
 | F3 (audit `d5f0f8c5`, Medium) A hung singleton `dispose` holds `app.stop()`                | FIXED after the audit: §3.16 covers root disposal                                                                                |
 | F4 (audit `d5f0f8c5`, Low) The startup warning says an unbacked `Service()` is `undefined` | FIXED after the audit: the warning says the request will fail                                                                    |
+| N1 (re-audit `db1e6bf6`, Low) A slow scope disposal's named errors never reach the log     | FIXED after the re-audit: §3.18 the scope reports its own outcome                                                                |
+| N2 (re-audit `db1e6bf6`, Low) k hung disposals hold `stop()` about k × 5000 ms             | ACCEPTED (maintainer, 2026-10-26): a total bound would abandon later disposals (F1); §3.16 and the docs say so                   |
 
 ## 9. Out of scope
 

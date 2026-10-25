@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
-import type { IContainer, IRuntimeServices } from '@setu-ts/common';
+import type { IContainer, IRequestContext, IRuntimeServices } from '@setu-ts/common';
 
 import { DiPlugin } from '../../src/plugin/di-plugin.ts';
 import type { DiPluginOptions } from '../../src/plugin/di-plugin.ts';
@@ -33,6 +33,123 @@ function getContainer(services: Map<string, unknown>): IContainer {
 }
 
 describe('DiPlugin integration', () => {
+  it.each([true, false])(
+    'reports disposal through the logger read at call time (logger: %s)',
+    (withLogger) => {
+      const { ctx, services } = createFakeContext();
+      const earlyWarn = vi.fn();
+      const warn = vi.fn();
+      let logger: { warn: typeof warn } | undefined = { warn: earlyWarn };
+      Object.defineProperty(ctx, 'logger', { get: () => logger });
+      DiPlugin().register(ctx);
+      const root = getContainer(services);
+      root.register(
+        'failed',
+        { useValue: {} },
+        {
+          scope: 'scoped',
+          dispose: () => {
+            throw new Error('dispose\nfailed');
+          },
+        },
+      );
+      const cleanups: (() => void | Promise<void>)[] = [];
+      root
+        .forRequest({
+          defer: (fn) => {
+            cleanups.push(fn);
+          },
+        } as IRequestContext)
+        .resolve('failed');
+      logger = withLogger ? { warn } : undefined;
+      expect(cleanups[0]!()).toBeUndefined();
+      expect(earlyWarn).not.toHaveBeenCalled();
+      if (withLogger) {
+        expect(warn).toHaveBeenCalledExactlyOnceWith('Request scope disposal failed', {
+          error: 'AggregateError: DI disposal failed [Error: dispose failed]',
+        });
+      } else {
+        expect(warn).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it('logs named scope failures once after the real kernel has timed out cleanup', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const warn = vi.fn();
+    const released = vi.fn();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiPlugin(),
+        {
+          name: 'request-disposal-fixture',
+          version: '1.0.0',
+          dependencies: [CAPABILITIES.DI_CONTAINER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, { warn });
+            const root = ctx.container!;
+            root.register('sibling', { useValue: {} }, { scope: 'scoped', dispose: released });
+            root.register(
+              'failed',
+              { useValue: {} },
+              {
+                scope: 'scoped',
+                dispose: () => {
+                  throw new Error('sibling failed');
+                },
+              },
+            );
+            for (const token of ['hung1', 'hung2']) {
+              root.register(
+                token,
+                { useValue: {} },
+                {
+                  scope: 'scoped',
+                  dispose: () => new Promise<void>(() => {}),
+                },
+              );
+            }
+          },
+        },
+      ],
+    });
+    app.router.get('/', (ctx) => {
+      const scope = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).forRequest(ctx);
+      for (const token of ['sibling', 'failed', 'hung1', 'hung2']) scope.resolve(token);
+      return ctx.response.status(201).text('unchanged');
+    });
+    try {
+      await app.start();
+      const returned = vi.fn();
+      const response = app.inject({ method: 'GET', url: '/' }).then((value) => {
+        returned();
+        return value;
+      });
+      await vi.advanceTimersByTimeAsync(4999);
+      expect(returned).not.toHaveBeenCalled();
+      expect(warn).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await response).toMatchObject({ statusCode: 201, body: 'unchanged' });
+      expect(warn).toHaveBeenCalledExactlyOnceWith('Deferred request cleanup failed', {
+        error: 'Error: Deferred request cleanup timeout after 5000 ms',
+      });
+      expect(released).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(released).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn).toHaveBeenLastCalledWith('Request scope disposal failed', {
+        error:
+          'AggregateError: DI disposal failed [Error: DI disposal of hung2 timed out after 5000 ms; Error: DI disposal of hung1 timed out after 5000 ms; Error: sibling failed]',
+      });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      await vi.advanceTimersByTimeAsync(10_000);
+      await app.stop();
+      vi.useRealTimers();
+    }
+  });
+
   it('bounds hung singleton disposal on runtime timers and reaches later close hooks', async () => {
     vi.useFakeTimers();
     let expire: (() => void) | undefined;

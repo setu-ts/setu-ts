@@ -13530,7 +13530,11 @@ Contract notes:
   request finishes, for the root in `DiPlugin`'s `onClose` hook. Each asynchronous dispose is
   bounded at 5000 ms, on the runtime's timers when a runtime is registered
   (`ContainerConfig.timing`); one that never settles is reported in the `AggregateError` and the
-  rest still run, so `app.stop()` is not held.
+  rest still run, so `app.stop()` is never held indefinitely. The bound is per disposal, not a
+  total: k disposals that never settle take about k × 5000 ms, which can exceed the 10 s shutdown
+  drain. A request scope reports each disposal failure itself, through `DiPlugin`'s logger at `warn`
+  (`ContainerConfig.reportDisposeError`), whenever it settles — also after the kernel's 5000 ms
+  cleanup bound has already reported its own timeout.
 - **Auto-registration** (`autoRegister`, default `true` since 0.9.0): a token not in the container
   falls back to the kernel's `ServiceRegistry`, checked with `has()` during validation and resolved
   lazily once, then cached as a singleton; `false` confines resolution to the container's own
