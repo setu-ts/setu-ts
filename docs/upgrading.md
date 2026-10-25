@@ -17,7 +17,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
 plugin whose optional peers are missing at the root, then run the printed install command from the
 workspace root. The command now records its peers in both root and member `package.json`
-`dependencies`, leaving a peer already declared in any installing section as it is and recording a
+`dependencies`, leaving a peer already in `dependencies` or `optionalDependencies` as it is, moving
+one declared only in `devDependencies` to `dependencies` with its pin unchanged, and recording a
 peer the root `overrides` pins (a string value, or an object's `"."` entry) at the override's own
 spec, since npm refuses a direct dependency whose spec differs from its override. A `$name`
 reference or a conditional override (a version-selector key, or several rules for one package) is

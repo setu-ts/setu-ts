@@ -64,11 +64,12 @@ All notable changes to this project are documented here. The format follows
   declared version range, usually the workspace root. `dependency` and `cause` are unchanged;
   `requiredBy` adds no instance field. `setu add` records its peers in both member and root
   `package.json` `dependencies` for listed Node/Bun Setu workspace members, preserving existing
-  entries (a peer declared in any installing section counts), recording a peer the root `overrides`
-  pins (a string value, or an object's `"."` entry) at that override's spec since npm refuses any
-  other, leaving `$name` references and conditional overrides (a version-selector key, or several
-  rules for one package) to the user, and naming both edited paths. Deno and standalone behavior is
-  unchanged. See
+  entries (a peer in `dependencies` or `optionalDependencies` counts; one only in `devDependencies`
+  is moved to `dependencies`, pin unchanged, since `--omit=dev` would drop it), recording a peer the
+  root `overrides` pins (a string value, or an object's `"."` entry) at that override's spec since
+  npm refuses any other, leaving `$name` references and conditional overrides (a version-selector
+  key, or several rules for one package) to the user, and naming both edited paths. Deno and
+  standalone behavior is unchanged. See
   [the upgrade note](docs/upgrading.md#optional-peers-and-setu-add-workspace-root-entries-m119f-0110-setu-tscommon-setu-tscli).
 
 - **Drizzle tenant columns resolve to properties (M119e, 0.11.0, `@setu-ts/database-plugin`).** The

@@ -603,22 +603,26 @@ function rootOverrides(source: string): ReadonlyMap<string, IRootOverride> {
   return pinned;
 }
 
-/** The npm sections that install a package, any of which means it is already declared. */
-const INSTALLING_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const;
+/**
+ * The npm sections a production install keeps (`npm install --omit=dev` drops
+ * `devDependencies`, not these), any of which means a peer is already declared.
+ */
+const PRODUCTION_SECTIONS = ['dependencies', 'optionalDependencies'] as const;
 
 /**
- * The names a `package.json` already declares in any section that installs a
- * package. Measured with npm 11: a root listing a package in `devDependencies`
- * at one version and in `dependencies` at another installs the
- * `devDependencies` version, so adding a `dependencies` entry beside an
- * existing one changes nothing and would only mislead.
+ * The names a `package.json` already declares in a section a production install
+ * keeps. Measured with npm 11: a root listing a package in `devDependencies` at
+ * one version and in `dependencies` at another installs the `devDependencies`
+ * version, so a second entry beside an existing one changes nothing; a peer
+ * declared only in `devDependencies` is instead MOVED to `dependencies` by
+ * {@linkcode withPeerDependencies}, because `--omit=dev` would drop it.
  *
  * @param parsed - The parsed manifest
  * @returns The declared names
  */
 function declaredNames(parsed: Record<string, unknown>): ReadonlySet<string> {
   const names = new Set<string>();
-  for (const section of INSTALLING_SECTIONS) {
+  for (const section of PRODUCTION_SECTIONS) {
     const entries = parsed[section];
     if (entries !== null && typeof entries === 'object' && !Array.isArray(entries)) {
       for (const name of Object.keys(entries)) names.add(name);
@@ -645,8 +649,12 @@ function withPeerDependencies(
   source: string,
   peers: readonly { readonly name: string; readonly range: string }[],
   section: 'dependencies' | 'imports',
-): { readonly contents: string; readonly added: readonly string[] } {
-  if (peers.length === 0) return { contents: source, added: [] };
+): {
+  readonly contents: string;
+  readonly added: readonly string[];
+  readonly moved: readonly string[];
+} {
+  if (peers.length === 0) return { contents: source, added: [], moved: [] };
   const parsed = JSON.parse(source) as Record<string, unknown>;
   const existing = parsed[section];
   const dependencies =
@@ -654,17 +662,34 @@ function withPeerDependencies(
       ? { ...(existing as Record<string, string>) }
       : {};
   const declared = section === 'dependencies' ? declaredNames(parsed) : new Set<string>();
+  const devSection = parsed['devDependencies'];
+  const dev =
+    section === 'dependencies' &&
+    devSection !== null &&
+    typeof devSection === 'object' &&
+    !Array.isArray(devSection)
+      ? { ...(devSection as Record<string, string>) }
+      : undefined;
   const added: string[] = [];
+  const moved: string[] = [];
   for (const peer of peers) {
     if (peer.name in dependencies || declared.has(peer.name)) continue;
+    const devPin = dev?.[peer.name];
+    if (dev !== undefined && typeof devPin === 'string') {
+      // A runtime peer declared only for development: `--omit=dev` would drop
+      // it, so its existing pin moves to `dependencies` unchanged.
+      dependencies[peer.name] = devPin;
+      delete dev[peer.name];
+      moved.push(peer.name);
+      continue;
+    }
     dependencies[peer.name] = section === 'imports' ? `npm:${peer.name}@${peer.range}` : peer.range;
     added.push(peer.name);
   }
-  if (added.length === 0) return { contents: source, added: [] };
-  return {
-    contents: `${JSON.stringify({ ...parsed, [section]: dependencies }, null, 2)}\n`,
-    added,
-  };
+  if (added.length === 0 && moved.length === 0) return { contents: source, added: [], moved: [] };
+  const rewritten: Record<string, unknown> = { ...parsed, [section]: dependencies };
+  if (moved.length > 0) rewritten['devDependencies'] = dev;
+  return { contents: `${JSON.stringify(rewritten, null, 2)}\n`, added, moved };
 }
 
 /**
@@ -944,6 +969,7 @@ export async function runAddCommand(
     ...(transportArgs === undefined ? [] : [{ name: 'ioredis', range: CLIENT_RANGES['ioredis']! }]),
   ];
   const addedPeers: string[] = [];
+  const movedPeers: { readonly name: string; readonly path: string }[] = [];
 
   for (const target of targets) {
     if (runtime === 'deno' && target.file === 'package.json') continue;
@@ -980,9 +1006,10 @@ export async function runAddCommand(
         peerPackages,
         target.file === 'package.json' ? 'dependencies' : 'imports',
       );
-      if (merged.added.length > 0) {
+      if (merged.added.length > 0 || merged.moved.length > 0) {
         updated = merged.contents;
         addedPeers.push(...merged.added);
+        movedPeers.push(...merged.moved.map((name) => ({ name, path })));
       }
     }
 
@@ -1005,7 +1032,16 @@ export async function runAddCommand(
           // own spec; a `$name` reference is not a spec a dependency can carry,
           // so that peer is left to the override and the reason printed.
           const overridden = rootOverrides(source);
-          const declared = declaredNames(JSON.parse(source) as Record<string, unknown>);
+          const parsedRoot = JSON.parse(source) as Record<string, unknown>;
+          const devRoot = parsedRoot['devDependencies'];
+          // An existing pin in any section wins over the override logic: a
+          // production one is kept, a development one is moved as it stands.
+          const declared = new Set([
+            ...declaredNames(parsedRoot),
+            ...(devRoot !== null && typeof devRoot === 'object' && !Array.isArray(devRoot)
+              ? Object.keys(devRoot)
+              : []),
+          ]);
           const rootPeers: { readonly name: string; readonly range: string }[] = [];
           for (const peer of peerPackages) {
             const override = overridden.get(peer.name);
@@ -1028,9 +1064,10 @@ export async function runAddCommand(
             }
           }
           const merged = withPeerDependencies(source, rootPeers, 'dependencies');
-          if (merged.added.length > 0) {
+          if (merged.added.length > 0 || merged.moved.length > 0) {
             edits.push({ path, contents: merged.contents });
             addedPeers.push(...merged.added);
+            movedPeers.push(...merged.moved.map((name) => ({ name, path })));
             writeRoot = root;
           }
         }
@@ -1178,6 +1215,12 @@ export async function runAddCommand(
     return EXIT_ERROR;
   }
   for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
+  for (const { name, path } of movedPeers) {
+    deps.log(
+      `moved ${name} from devDependencies to dependencies in ${escapeName(path)}: ` +
+        `it is loaded at runtime, and an install with --omit=dev would drop it.`,
+    );
+  }
   if (addedPeers.includes('ws')) {
     deps.log('added ws (the Node WebSocket server, an optional peer of @setu-ts/runtime)');
   }

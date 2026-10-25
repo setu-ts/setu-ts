@@ -270,16 +270,16 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     }
   });
 
-  it('treats a peer declared in devDependencies or optionalDependencies as present, root and member', async () => {
+  it('moves a dev-only peer pin to dependencies and keeps an optional one, root and member', async () => {
     const h = await workspace();
-    // Measured with npm 11: a devDependencies entry wins over a dependencies one
-    // for the same package, so a second entry would change nothing.
+    // `npm install --omit=dev` drops devDependencies, so a runtime peer declared
+    // only there is moved, pin unchanged; optionalDependencies survive it.
     await put(
       h,
       '/app/ws/package.json',
       JSON.stringify({
         workspaces: ['apps/*'],
-        devDependencies: { '@opentelemetry/api': '1.9.0' },
+        devDependencies: { '@opentelemetry/api': '1.9.0', prettier: '^3' },
         optionalDependencies: { '@opentelemetry/resources': '2.9.0' },
       }),
     );
@@ -290,15 +290,27 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
       JSON.stringify({ ...member, devDependencies: { '@opentelemetry/api': '1.9.0' } }),
     );
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
+      const manifest = JSON.parse(h.read(path)) as {
+        dependencies: Record<string, string>;
+        devDependencies: Record<string, string>;
+      };
+      expect(manifest.dependencies['@opentelemetry/api'], path).toBe('1.9.0');
+      expect(manifest.devDependencies['@opentelemetry/api'], path).toBeUndefined();
+      expect(h.out.join('\n')).toContain(
+        `moved @opentelemetry/api from devDependencies to dependencies in ${path}`,
+      );
+    }
     const root = JSON.parse(h.read('/app/ws/package.json')) as {
       dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
     };
-    expect(root.dependencies['@opentelemetry/api']).toBeUndefined();
+    // Unrelated development pins stay where they are.
+    expect(root.devDependencies['prettier']).toBe('^3');
     expect(root.dependencies['@opentelemetry/resources']).toBeUndefined();
     expect(root.dependencies['@opentelemetry/sdk-trace-base']).toBe(
       CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
     );
-    expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBeUndefined();
   });
 
   it('says nothing about a reference override whose root dependency already exists', async () => {
