@@ -79,7 +79,7 @@
   "rest/cloudflare-workers": {
     "README.md": "b432daa2f95f87031177bc22b75ffb2af2df7386c596ccb8f04281ffdf390131",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
-    "test/support/server.ts": "cfd0f56a35e8f6b53f7f15389cb798bae81e487e65ddbcf082cc53fd3122c0c6",
+    "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",
     "test/app.test.ts": "3a38b05bffb7a14eab22b5ca52d7bd63e511f68e1920027ac59b8b87d7450277",
     "deno.json": "7771f47a18b61e96b84cc3449df6666b171a33bcc2cd30c3dad71f3847115342",
@@ -177,7 +177,7 @@
   "microservice/cloudflare-workers": {
     "README.md": "c4bc523b741b57c066192b4c212a7f8b50e2469a577dc10019e5f98fa562f46d",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
-    "test/support/server.ts": "cfd0f56a35e8f6b53f7f15389cb798bae81e487e65ddbcf082cc53fd3122c0c6",
+    "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "07fbe686c627f71c326e96113106d514563d47004ec1e963d9b19402c5ad364e",
     "test/app.test.ts": "3a38b05bffb7a14eab22b5ca52d7bd63e511f68e1920027ac59b8b87d7450277",
     "deno.json": "2a57f35d1aed924a3741ed147150966ab7c1a0dc3849036f95ccfac3724e12ef",
@@ -276,7 +276,7 @@
   "class-based/cloudflare-workers": {
     "README.md": "b432daa2f95f87031177bc22b75ffb2af2df7386c596ccb8f04281ffdf390131",
     ".gitignore": "ded470af7322535c846a768fa514eafdff4fdd46095f349272289cbc8a6f9ef5",
-    "test/support/server.ts": "cfd0f56a35e8f6b53f7f15389cb798bae81e487e65ddbcf082cc53fd3122c0c6",
+    "test/support/server.ts": "689e7511bc8e1ea4267824907896e2d0a3517c0470bf6c77cd8132de3da9aec4",
     "test/e2e/app.e2e.test.ts": "45b88481e10785078791df2b73b0abf5c5a3a432b7c32cd3a987c795e073c533",
     "test/app.test.ts": "3a38b05bffb7a14eab22b5ca52d7bd63e511f68e1920027ac59b8b87d7450277",
     "deno.json": "6eabefa8adbb54e3f2c96dca03edf0b83fb3a7ae68dbce42e448f56667d776d9",
