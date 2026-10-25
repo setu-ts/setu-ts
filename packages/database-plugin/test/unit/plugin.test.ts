@@ -100,3 +100,58 @@ describe('DatabasePlugin', () => {
     });
   });
 });
+
+describe('M119e pool error reporting at registration', () => {
+  for (const loggerMode of ['absent', 'warn', 'no-warn', 'existing'] as const) {
+    it(`attaches only if needed with logger ${loggerMode}`, async () => {
+      const { EventEmitter } = await import('node:events');
+      const { createApplication } = await import('@setu-ts/kernel');
+      const { RuntimePlugin } = await import('@setu-ts/runtime');
+      const pool = new EventEmitter();
+      const logs: unknown[] = [];
+      if (loggerMode === 'existing') pool.on('error', () => {});
+      const db = Object.assign(createFakeDrizzleInstance(), { $client: pool });
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          ...(loggerMode === 'absent'
+            ? []
+            : [
+                {
+                  name: 'logger',
+                  version: '1.0.0',
+                  provides: [CAPABILITIES.LOGGER],
+                  register(ctx: import('@setu-ts/common').IPluginContext) {
+                    ctx.services.register(
+                      CAPABILITIES.LOGGER,
+                      loggerMode === 'no-warn'
+                        ? {}
+                        : {
+                            warn(message: string, meta: unknown) {
+                              logs.push({ message, meta });
+                            },
+                          },
+                    );
+                  },
+                },
+              ]),
+          DatabasePlugin({
+            type: 'drizzle',
+            options: {
+              drizzleInstance: createDrizzleDatabase(db, (database, work) =>
+                database.transaction(work),
+              ),
+              drizzleTables: { User: createFakeDrizzleTable('User') },
+            },
+          }),
+        ],
+      });
+      await app.start();
+      expect(pool.listenerCount('error')).toBe(1);
+      expect(() => pool.emit('error', new Error('idle connection lost'))).not.toThrow();
+      expect(logs.length).toBe(loggerMode === 'warn' ? 1 : 0);
+      await app.stop();
+      expect(pool.listenerCount('error')).toBe(1);
+    });
+  }
+});

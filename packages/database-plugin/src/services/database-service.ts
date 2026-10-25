@@ -24,7 +24,8 @@ import type {
   PageResult,
   TransactionOptions,
 } from '@setu-ts/common';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { FIELD_FOR_COLUMN, ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
+import { httpStatusHintOf, DuplicateKeyError } from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -41,6 +42,7 @@ import {
   UnsupportedRawQueryError,
 } from '../errors.ts';
 import { classifyDriverError } from '../errors/classify.ts';
+import { refusalErrorOf } from '../errors/refusal.ts';
 import { scrubDriverError } from '../errors/scrub.ts';
 
 /**
@@ -87,7 +89,9 @@ function classifiedOrOriginal(
   adapterType: DatabaseAdapterType,
   entity?: string,
 ): unknown {
+  if (httpStatusHintOf(error) !== undefined) return error;
   const kind = classifyDriverError(error, adapterType);
+  const refused = entity === undefined ? undefined : refusalErrorOf(error, entity);
   error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'timeout') {
@@ -107,7 +111,7 @@ function classifiedOrOriginal(
       { cause: error },
     );
   }
-  return error;
+  return refused ?? error;
 }
 
 /**
@@ -231,6 +235,16 @@ export class DatabaseService implements IDatabaseService {
     // symbol key is assigned through the structural provider cast and read
     // back structurally by `readDrizzleQueryHandle` — the runtime shape is
     // unchanged.
+    (
+      this as unknown as {
+        [ENTITY_FIELD_RESOLVER]: (entity: string, name: string) => string | undefined;
+      }
+    )[ENTITY_FIELD_RESOLVER] = (entity, name) => {
+      const source = this._createDataSource(entity) as DataSource & {
+        [FIELD_FOR_COLUMN]?: (name: string) => string | undefined;
+      };
+      return source[FIELD_FOR_COLUMN] === undefined ? name : source[FIELD_FOR_COLUMN](name);
+    };
     (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
       assertDrizzleAdapter(this._adapterType);
       const handle = readDrizzleQueryHandle(this._adapter);

@@ -278,10 +278,12 @@ package fits the plugin architecture.
 | `withValidationMetadata`              | function  |
 | `DuplicateKeyError`                   | class     |
 | `InvalidCursorError`                  | class     |
+| `InvalidFieldValueError`              | class     |
 | `MalformedRequestBodyError`           | class     |
 | `OptionalDependencyUnavailableError`  | class     |
 | `PrimaryKeyChangeError`               | class     |
 | `ReconnectSupervisor`                 | class     |
+| `UnknownPayloadFieldError`            | class     |
 | `UnsupportedFormEncodingError`        | class     |
 | `CAPABILITIES`                        | const     |
 | `CLIENT_IP_STATE_KEY`                 | const     |
@@ -770,3 +772,11 @@ never mutates errors. Command errors such as WRONGTYPE remain unclassified.
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
 `EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
 export; callers cannot mutate the classification vocabulary.
+
+## Portable database refusals (0.11.0)
+
+`UnknownPayloadFieldError(entity, field, options?)` and `InvalidFieldValueError(entity, options?)`
+carry fixed 400 HTTP details without caller field names or values. The former is also re-exported by
+`@setu-ts/database-plugin`. `sortFingerprint(orderBy, { entity, keyColumns })` binds a cursor to its
+entity, key columns and sort; omitting scope preserves the legacy string. The fingerprint checks
+correctness; authorization still comes from the query's tenant predicates.

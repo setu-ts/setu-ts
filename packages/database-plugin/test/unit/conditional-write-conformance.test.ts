@@ -11,6 +11,7 @@ import { createFakeBigtableClient, FakeBigtableStore } from '../fixtures/fake-bi
 import { dynamoFixture } from '../fixtures/conditional-dynamo.ts';
 import { BaseRepository } from '../../src/repositories/base-repository.ts';
 import { UnsupportedQueryFeatureError } from '../../src/errors.ts';
+import { DatabaseService } from '../../src/services/database-service.ts';
 import {
   createD1TransactionDataSource,
   D1TransactionBuffer,
@@ -117,7 +118,7 @@ describe('deferred transaction refuses conditional writes', () => {
   it('d1', async () => {
     const source = createD1TransactionDataSource(
       new SqliteD1('CREATE TABLE users(id TEXT PRIMARY KEY)'),
-      { table: 'users', primaryKey: ['id'] },
+      { entity: 'users', table: 'users', primaryKey: ['id'] },
       new D1TransactionBuffer(),
     );
     expect(source.updateWhere).toBeUndefined();
@@ -193,7 +194,11 @@ describe('conditional writes conjoin key and predicate at every public data sour
     // field map read without an own-property check would resolve them.
     for (const field of ['canary_field', 'constructor', 'toString']) {
       it(`${name}: unknown column '${field}' is ${unknown} and never echoed`, async () => {
-        const ds = make();
+        const source = make();
+        const ds =
+          name === 'prisma'
+            ? new DatabaseService(new MemoryAdapter(), () => source, 'prisma').getRepository('User')
+            : source;
         await ds.create({ id: 'a', role: 'owner', name: 'old' });
         const where = { [field]: 'canary-value' };
         if (unknown === 'throws') {
@@ -211,7 +216,7 @@ describe('conditional writes conjoin key and predicate at every public data sour
             expect(message).not.toContain('canary-payload');
             // D1's unknown-column refusal is SQLite's own driver diagnostic,
             // which names the column (as for every D1 statement).
-            if (name !== 'd1') expect(message).not.toContain(field);
+            if (name !== 'd1' && name !== 'prisma') expect(message).not.toContain(field);
           }
         } else {
           expect(await ds.updateWhere!('a', where, { name: 'bad' })).toBeNull();

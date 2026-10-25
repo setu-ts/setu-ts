@@ -620,7 +620,10 @@ export function createCosmosDataSource(context: CosmosDataSourceContext): IDataS
         }
       }
 
-      const fingerprint = sortFingerprint(normalized.orderBy);
+      const fingerprint = sortFingerprint(normalized.orderBy, {
+        entity: target.entity,
+        keyColumns: [target.primaryKey],
+      });
       if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
         return Promise.reject(
           new InvalidCursorError(`Entity '${target.container}': cursor fingerprint mismatch.`),

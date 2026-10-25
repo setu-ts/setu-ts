@@ -12,6 +12,34 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Portable data contract: tenant columns, cursors, unknown fields and refused values (M119e, 0.11.0, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+Restart pagination once on Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1:
+old cursors are refused with `InvalidCursorError` (400), because new fingerprints bind entity, key
+columns and sort. Treat the cursor as a correctness token; continue enforcing tenant predicates.
+
+On Drizzle, a default tenant column `tenant_id` resolves to the model property `tenantId` when
+declared as `tenantId: text('tenant_id')`. Use model properties in payloads. The bridge caches the
+resolved field per entity, stamps it last, strips it from updates, and uses it for ownership and
+conditional writes. An absent or ambiguous column now throws `TenantColumnUnresolvedError` (500). An
+explicit wrong Drizzle primary-key mapping now fails connect with `MissingKeyColumnError`; fix
+`entities.<Entity>.primaryKey` or the table registration.
+
+D1 unknown payload fields and invalid payload identifiers, and Prisma unknown payload fields now
+answer 400 `UnknownPayloadFieldError`. PostgreSQL field type refusals through Drizzle, Prisma
+validation and `P2007` known-request refusals, and D1 STRICT-table type refusals now answer 400
+`InvalidFieldValueError`. SQL payload restriction is adapter-specific: Memory, MongoDB, DynamoDB,
+Cosmos DB and Bigtable store unknown fields; restrict request fields in the route body schema.
+Existing database-plugin imports of `UnknownPayloadFieldError` keep working; the class is now
+defined in common.
+
+Attach a node-postgres pool `'error'` listener in app setup (see the database-plugin README). The
+framework installs a reporting listener only when the pool has none; the app owns closing it.
+
+Prisma conditional-write validation now uses the same 400 split as ordinary writes, replacing its
+previous 501. Prisma refusal causes contain a fresh error with only the original name and code in a
+fixed message; query text and payload values are discarded.
+
 ### Upgrade `zod` and override `@azure/msal-node` for Azure secrets (0.11.0)
 
 Upgrade Zod to `>=4.6.6 <5` and migrate any Zod 3 API usage. Zod 3 support has been removed;

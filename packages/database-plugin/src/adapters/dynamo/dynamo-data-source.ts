@@ -435,7 +435,10 @@ export function createDynamoDataSource(
         );
       }
       const path = resolveDynamoAccessPath(entity, target, query);
-      const fingerprint = sortFingerprint(query.orderBy);
+      const fingerprint = sortFingerprint(query.orderBy, {
+        entity,
+        keyColumns: path.cursorKeyColumns,
+      });
       let start: DynamoAttributeMap | undefined;
       if (query.cursor !== undefined) {
         const decoded = decodeCursor(query.cursor);
