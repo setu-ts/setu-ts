@@ -313,10 +313,11 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     );
   });
 
-  it('leaves a peer to the user when a member already pins it at another spec', async () => {
+  it('keeps the root entry at the CLI range and names a member pinned at another spec', async () => {
     const h = await workspace();
-    // Measured with npm 11: a member at 5.4.1 beside a root entry at the CLI's
-    // `5.x` installs two copies; without the root entry npm hoists the one pin.
+    // The root entry is what keeps the hoisted framework package inside its peer
+    // range; measured with npm 11, a member at 5.4.1 beside it keeps a second
+    // copy, so the CLI says so instead of staying silent.
     const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as {
       dependencies: Record<string, string>;
     };
@@ -352,22 +353,18 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     );
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
     const root = dependencies(h, '/app/ws/package.json');
-    expect(root['@opentelemetry/api']).toBeUndefined();
-    expect(root['@opentelemetry/resources']).toBeUndefined();
-    expect(root['@opentelemetry/sdk-trace-base']).toBe(
-      CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
-    );
-    expect(root['@opentelemetry/context-async-hooks']).toBe(
-      CLIENT_RANGES['@opentelemetry/context-async-hooks'],
-    );
+    for (const peer of peers) expect(root[peer], peer).toBe(CLIENT_RANGES[peer]);
     // The member keeps its own pin.
     expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBe('1.9.0');
     const out = h.out.join('\n');
     expect(out).toContain(
-      'left @opentelemetry/api out of /app/ws/package.json: /app/ws/apps/api/package.json pins it at 1.9.0',
+      'note: /app/ws/apps/api/package.json pins @opentelemetry/api at 1.9.0; the root entry keeps',
     );
-    expect(out).toContain('/app/ws/apps/worker/package.json pins it at 2.9.0');
-    expect(out).not.toContain('left @opentelemetry/sdk-trace-base');
+    expect(out).toContain(
+      '/app/ws/apps/worker/package.json pins @opentelemetry/resources at 2.9.0',
+    );
+    // A sibling pinned at exactly the CLI range is no conflict and draws no note.
+    expect(out).not.toContain('pins @opentelemetry/sdk-trace-base');
   });
 
   it('treats a peerDependencies pin as present, root and member', async () => {

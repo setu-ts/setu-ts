@@ -1122,23 +1122,26 @@ export async function runAddCommand(
             } else if (override !== undefined) {
               rootPeers.push({ name: peer.name, range: override.spec });
             } else {
-              // Measured with npm 11: a member pinned at 5.4.1 beside a root
-              // entry at the CLI's `5.x` installs a second copy (5.11.1 at the
-              // root, 5.4.1 nested), so this command would CREATE the split it
-              // exists to prevent. A pin that differs is left to the user.
+              // The root entry is what places a version inside the framework's
+              // peer range where the hoisted framework package resolves it; without
+              // one, placement is npm's choice, and V10-50's image (installed from a
+              // lockfile recording the peer nested under a member) crashed on it. A
+              // member pinned at another spec may then keep a second copy — measured
+              // with npm 11: root 5.11.1 beside a nested 5.4.1 — so it is named.
+              rootPeers.push(peer);
               const differing = (pinned.get(peer.name) ?? []).filter(
                 (pin) => pin.spec !== peer.range,
               );
-              if (differing.length === 0) {
-                rootPeers.push(peer);
-              } else {
+              if (differing.length > 0) {
                 deps.log(
-                  `left ${peer.name} out of ${escapeName(path)}: ` +
-                    differing
-                      .map((pin) => `${escapeName(pin.path)} pins it at ${escapeName(pin.spec)}`)
-                      .join('; ') +
-                    `; record one spec for it at the root yourself, so the members and the hoisted ` +
-                    `framework package share one copy.`,
+                  `note: ${differing
+                    .map(
+                      (pin) =>
+                        `${escapeName(pin.path)} pins ${peer.name} at ${escapeName(pin.spec)}`,
+                    )
+                    .join('; ')}; the root entry keeps the hoisted framework package on ` +
+                    `${escapeName(peer.range)}, and npm may install a second copy for that member — ` +
+                    `align the pins if they should share one.`,
                 );
               }
             }
