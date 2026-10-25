@@ -258,14 +258,17 @@ Three things to know:
   which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. Earlier
   releases defaulted it to `false`, so write `di: { autoRegister: true }` there, or every page
   answers 500 with `No provider registered for DI token 'logger'`.
-- **There is no per-request scope.** Nothing creates a scope for each request, so a `scoped` service
-  resolved from the root container acts as a singleton. For one instance per request, call
-  `container.createScope()` in `populateLoadContext` and resolve from the scope.
-- **A DI mistake fails every page, not startup.** An unlisted service, a misspelled token, or a
-  missing `di` arm starts cleanly and answers `/health` with 200, then throws in
-  `populateLoadContext` on every server-rendered request. The smoke test `setu new` generates
-  requests `/` as well as `/health`, so the project's own test script catches it; keep that request
-  in.
+- **Each request has a DI scope.** `container.forRequest(ctx)` returns the request's scope, created
+  on first use and disposed when the response is finished, so a `scoped` service resolved through it
+  is one instance per request. Resolving a `scoped` service on the root container throws
+  `ScopeRequiredError`.
+- **A DI mistake in a resolve of your own fails every page, not startup.** Since 0.11.0 the
+  container refuses a broken graph at `start()` — a missing dependency, a cycle, or a singleton that
+  captures a scoped service. But a token that only `populateLoadContext` resolves is not part of any
+  graph: a misspelled token there, an unlisted service, or a missing `di` arm starts cleanly and
+  answers `/health` with 200, then throws on every server-rendered request. The smoke test
+  `setu new` generates requests `/` as well as `/health`, so the project's own test script catches
+  it; keep that request in.
 
 ## Composing from configuration
 

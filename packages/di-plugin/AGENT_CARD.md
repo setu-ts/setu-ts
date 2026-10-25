@@ -7,18 +7,20 @@
 
 ```ts
 import { CAPABILITIES, createToken } from '@setu-ts/common';
-import type { IContainer } from '@setu-ts/common';
+import type { IContainer, IRequestContext } from '@setu-ts/common';
 
 class Greeting {
   constructor(readonly text: string) {}
 }
 const GREETING = createToken<Greeting>('greeting');
-// During a plugin's register(), onInit or onBootstrap — the container closes after bootstrap.
+// In a plugin's register(); the container closes after bootstrap.
 const container = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
 container.register('greeting-text', { useValue: 'hello' });
 container.register(GREETING, { useClass: Greeting, inject: ['greeting-text'] }, { scope: 'scoped' });
-// In a handler: one Greeting per request, disposed when the request finishes.
-const greeting = container.forRequest(requestCtx).resolve(GREETING);
+// One Greeting per request, disposed when it finishes.
+function greet(request: IRequestContext): Greeting {
+  return container.forRequest(request).resolve(GREETING);
+}
 ```
 
 ## Behaviour the types do not show
@@ -26,23 +28,22 @@ const greeting = container.forRequest(requestCtx).resolve(GREETING);
 - `defaultScope` defaults to `'singleton'`; `'transient'` creates a new instance on every resolve.
 - The graph is validated at boot: a missing dependency, a cycle, or a singleton reaching a scoped
   service (directly or through transients) fails `app.start()` with `ContainerValidationError`.
-- Resolving a `'scoped'` token on the root container throws `ScopeRequiredError`; use
-  `forRequest(ctx)` or `createScope()`.
+- Resolving a `'scoped'` token on the root container throws `ScopeRequiredError`; use `forRequest`
+  or `createScope`.
 - `register` after the container closes throws `ContainerClosedError`. A scope may register new
   tokens but not shadow one its parent has.
-- The plugin defaults `autoRegister` to `true`: unknown tokens fall back to the service registry,
-  and successful results are cached as singletons. Explicit registrations take precedence.
+- `autoRegister` defaults to `true`: unknown tokens fall back to the service registry, cached as
+  singletons.
 - `useFactory` receives its `inject` dependencies as arguments; a factory without `inject` is not
   checked at boot.
-- `forRequest` needs the kernel's request context (`ctx.defer`); a `createTestContext` context
-  throws `RequestScopeUnavailableError` — test request scopes with `createTestApp`.
+- `forRequest` needs the kernel's request context; test request scopes with `createTestApp`.
 
 ## Other options
 
 - `DiPlugin({ autoRegister: false })` disables fallback to framework capabilities.
-- A token is a string, a `createToken<T>()` token, or a class; `inject` entries may be
+- A token is a string, a `createToken` token, or a class; `inject` entries may be
   `{ token, optional: true }`.
-- `register`'s third argument takes `scope` and `dispose`; `dispose()` releases what the container
+- `register`'s third argument takes `scope` and `dispose`; `dispose` releases what the container
   created.
 - `createContainer` builds a standalone container, defaults automatic registration to `false`, and
-  stays open until `close()` on the `DiContainer`.
+  stays open until `close` on the `DiContainer`.

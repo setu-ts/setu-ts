@@ -281,6 +281,39 @@ is finished — without moving a request that never uses it off the kernel's syn
 - **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (structural); PR body
   (measured).
 
+### 3.14 Cleanup is bounded (added by the design security review, §8a)
+
+- **Decision:** The kernel bounds each asynchronous deferred cleanup with `withDeadline` from
+  `@setu-ts/common`, armed through `resolveProbeTiming(runtime)` so it uses the runtime's timers, at
+  a fixed internal `DEFERRED_CLEANUP_TIMEOUT_MS = 5000` (not an option, so no limit can be
+  configured open). On expiry the kernel reports one `warn` naming the timeout — the §3.8 channel —
+  and moves on: the next cleanup runs, the buffered response is handed back, a streaming body
+  closes, and the in-flight count is released. The expired cleanup keeps running unobserved; its
+  later settlement is ignored. Synchronous cleanups are not timed and stay synchronous. 5 s sits
+  inside the 10 s shutdown drain, so one hung cleanup cannot by itself hold `stop()` to its
+  deadline.
+- **Why:** §8a threat T6. A cleanup is application code over a dependency (a connection release); a
+  dependency that never settles must not hold a response, an in-flight slot or a shutdown hostage.
+- **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (a never-settling cleanup: the
+  response arrives after the bound with fake timers, the next cleanup still runs, one `warn`, and
+  `stop()` completes; a cleanup settling inside the bound is awaited as before).
+
+### 3.15 The root does not accumulate disposable transients (added by §8a)
+
+- **Decision:** The compiler records, per compiled entry, whether resolving it creates a
+  **disposable transient** — a `transient` provider with a `dispose` option, directly or through
+  other transients (singleton dependencies excluded, since they are built once). `resolve()` on the
+  root container throws `ScopeRequiredError` for such a token, exactly as it does for a scoped one;
+  the flag is computed at compile time, not walked per resolve. A disposable transient built as a
+  singleton's dependency is created once and stays tracked by the root, as before. Inside a scope
+  nothing changes: the scope tracks and disposes it.
+- **Why:** §8a threat T9. Otherwise every root resolve of a disposable transient appends to the
+  root's cleanup list until application close, so request volume grows process memory without bound
+  — the root-captured-disposable leak .NET is known for.
+- **Test home:** `di-plugin/test/unit/dispose.test.ts` (root resolve refused; the same token
+  resolves inside a scope and is disposed with it; a singleton depending on it is built once and
+  tracked once).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** `IContainer` gains required `forRequest` and `dispose` — ships in
@@ -398,6 +431,96 @@ decorator-plugin and testing; each ≥ 90% on branch, function and line.
   the kernel's loop changes, that test fails before the container closes early.
 - **Decorator controllers in apps using `defaultScope: 'scoped'` change lifetime.** → They were
   always built once; registering them as singletons states that. Upgrade-guide entry.
+
+## 8a. Design security review
+
+**Written after implementation, from this plan's decisions — not from the code.** The review was
+requested once M125 was implemented and committed (`9e847ac3`), so unlike a review written before
+the code it can only bind the audit to the design; it is not evidence the design was reviewed before
+the code existed. Where it found the design incomplete it added decisions §3.14 and §3.15, which the
+committed code does not yet implement — the audit runs after they land.
+
+- **Reviewed flows:**
+  1. An HTTP request whose handler calls `container.forRequest(ctx)` and resolves scoped, transient
+     and singleton services; the response; the kernel settling `ctx.defer` cleanups; the scope's
+     `dispose()`.
+  2. The same through `@Params(Service(token))` on a decorated, singleton controller.
+  3. Those requests running concurrently, interleaving across `await`s, in one or two applications
+     in one process.
+  4. Every way a request ends: buffered success, handler throw (sync and async), `onError` hooks, a
+     throwing error responder, a streaming body that ends, errors, or is cancelled, and a client
+     that stalls a stream.
+  5. Boot: on-demand compiles during plugin registration and `close()` validating the whole graph.
+- **Assets:**
+  - **Per-request isolation** — a scoped instance carrying request A's identity, tenant or open
+    transaction is never observed by request B. Losing it is a Critical cross-request disclosure.
+  - **Lifetime integrity** — no singleton holds a scoped instance (finding 1), including through
+    `@Optional`, factories, class aliases and controllers.
+  - **Availability** — the in-flight count, the shutdown drain, the response itself, and process
+    memory.
+  - **Resource release** — what `dispose` returns to a pool happens once, after the last use.
+  - **Confidentiality of internals** — token names, provider names and dispose-error messages stay
+    out of responses.
+- **Attackers:** a remote HTTP client who chooses request timing, concurrency, aborts, stream
+  cancellation and stalls, and drives request volume, but cannot choose DI tokens or registrations;
+  a second tenant's client doing the same at the same moment; a slow or hostile dependency behind a
+  `dispose` function (never settles, throws, throws a value with CR/LF in its message). Application
+  code and its registrations are trusted; misconfiguration is in scope only where the framework
+  claims to refuse it.
+- **Budgets:**
+  - A request that never calls `forRequest` allocates nothing new and stays synchronous (§3.13).
+  - A request that does allocates one child container and one slot array, both released with it.
+  - No per-request growth of root state (§3.15).
+  - Each asynchronous cleanup is bounded at 5000 ms (§3.14), inside the unchanged 10 s drain.
+- **Audit obligations:**
+  1. **Isolation under concurrency.** Fire at least 50 concurrent requests, each awaiting at least
+     once mid-handler, each planting `canary-req-<n>` into its scoped instance. Every response
+     carries only its own canary; no singleton, cache or captured log holds another's. Positive
+     control: each request's own canary arrives. Repeat with two applications sharing one
+     `createToken` token: each keeps its own instances.
+  2. **Every captive shape is refused at boot.** singleton → scoped; singleton → transient → scoped;
+     a factory with `inject`; an `@Optional` class; a class alias; a controller constructor. Each
+     fails `start()` naming both tokens. Positive control: the same graphs with the dependent made
+     `scoped`, and controllers using `Service(token)`, boot and serve per-request instances.
+  3. **Root refusals.** `scoped`, a transient reaching `scoped`, and a disposable transient (§3.15)
+     each throw `ScopeRequiredError` on the root; each resolves inside `forRequest`.
+  4. **Dispose exactly once, after the last use, on every ending.** For each ending in flow 4, a
+     scoped service with a counting `dispose`: count is 1, and for a stream it is 0 until the last
+     byte or the cancel and 1 after. A `forRequest` first called after completion yields a scope
+     whose `resolve` throws `ScopeDisposedError`, never a live scope nobody disposes.
+  5. **Bounded cleanup (§3.14).** A `dispose` that never settles: the response still arrives (after
+     the bound), later cleanups run, the in-flight count is released and `stop()` completes inside
+     the drain bound. Positive control: a cleanup settling within the bound is awaited.
+  6. **No root growth (§3.15).** Resolve a disposable transient through 1,000 request scopes and
+     confirm the root's tracked set is unchanged afterwards. Positive control: each scope disposed
+     its own.
+  7. **Nothing internal reaches a response.** Name a token `canary-token-<random>`, make a scoped
+     service's construction throw `canary-ctor-<random>` and its `dispose` throw
+     `canary-dispose-<random>`, and trigger `ScopeRequiredError` and `ScopeDisposedError` inside a
+     handler. Search the raw response bytes, with and without `errorHandler`: no canary. Positive
+     control: the operator's log carries each, once.
+  8. **Log lines cannot be forged.** A `dispose` throwing a message containing CR, LF and NUL yields
+     one log record, control characters collapsed (`describeError`).
+  9. **The fast path holds.** With `DiPlugin` registered and `forRequest` unused, the adapter's
+     handler returns synchronously; with a synchronous request scope too.
+  10. **Hostile tokens.** `'__proto__'`, `'constructor'` and `'prototype'` as string tokens register
+      and resolve as ordinary keys without touching any prototype.
+
+| Threat                                                                           | Resolution                                                                                                                       |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| T1 Request B observes request A's scoped instance                                | §3.10: one scope per context in a per-container `WeakMap`; §3.3: scoped values live in that scope's slot array                   |
+| T2 A singleton captures a scoped instance through some indirect path             | §3.2 captive validation over every edge kind; §3.6 visible factory and `@Optional` dependencies; §3.11 controllers as singletons |
+| T3 A scope used after disposal                                                   | §3.7: `ScopeDisposedError`; §3.8: a post-completion `defer` runs at once, so a late scope is born disposed                       |
+| T4 Cleanup skipped on some ending (pool exhaustion by abort or error)            | §3.8 and §3.9 settle on every path; the throwing-responder path fixed during review with a test                                  |
+| T5 Dispose before the last use, or twice                                         | §3.9: a stream settles once, after its last chunk or the cancel; §3.7: `dispose()` is idempotent                                 |
+| T6 A hanging cleanup holds the response, the in-flight slot and `stop()`         | **§3.14 (new)**: 5000 ms bound per asynchronous cleanup                                                                          |
+| T7 Token, provider or dispose-error names disclosed in a 500                     | Kernel and `errorHandler` 500 bodies are opaque; cleanup failures go to the log only (§3.8)                                      |
+| T8 A dispose error forges log lines                                              | §3.8 reports through `describeError`, which collapses control characters                                                         |
+| T9 Root cleanup list grows with request volume                                   | **§3.15 (new)**: disposable transients refused on the root                                                                       |
+| T10 One application's scope or instance reached from another in the same process | Compiled entries, slots and the request `WeakMap` belong to one root container; tokens carry no state (§2 C1)                    |
+| T11 `Service`'s `Symbol.for` brand forged                                        | Accepted: it selects a resolution path for application code, which is trusted; it is not an access decision                      |
+| T12 An opaque factory captures a scoped instance unseen                          | Accepted: unvalidated by construction and listed in the `debug` line (§3.2); the docs prefer `inject`                            |
+| T13 A client stalls a scoped streaming response, holding its scope               | Accepted: the connection is held anyway; the scope is released on cancel, and `stop()` is bounded by the drain                   |
 
 ## 9. Out of scope
 
