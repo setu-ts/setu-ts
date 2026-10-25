@@ -275,7 +275,10 @@ export async function loadPubSubModule(): Promise<PubSubSdkModule> {
   try {
     return (await import('@google-cloud/pubsub')) as unknown as PubSubSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@google-cloud/pubsub', { cause: error });
+    throw new OptionalDependencyUnavailableError('@google-cloud/pubsub', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 

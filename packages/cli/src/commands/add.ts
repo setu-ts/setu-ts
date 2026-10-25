@@ -711,13 +711,12 @@ export function withPluginWiring(source: string, bare: string, seam?: AddSeam): 
 /** Reads transport options only for a listed workspace member. */
 async function workspaceAddArgs(
   deps: AddCommandDependencies,
-  dir: string,
+  dirs: readonly string[],
   bare: string,
   runtime: TargetRuntime,
 ): Promise<string | undefined> {
   if (!['cache-plugin', 'scheduler-plugin', 'realtime-backplane-plugin'].includes(bare))
     return undefined;
-  const dirs = await installSearchDirs(deps.fs, dir);
   if (dirs.length === 1) return undefined;
   const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
   if (!read.ok) return undefined;
@@ -734,12 +733,33 @@ async function workspaceAddArgs(
   );
 }
 
+/** Uses the same JSONC/JSON refusal for a member or workspace root. */
+async function reportManifestRefusal(
+  deps: AddCommandDependencies,
+  path: string,
+  section: string,
+  specifier: string,
+  range: string,
+): Promise<void> {
+  const read = await readJsonManifest(deps.fs, path);
+  if (read.kind === 'ok' && read.format === 'jsonc') {
+    deps.error(
+      `${escapeName(path)} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
+        `Add this line under "${section}" yourself: "${specifier}": "${range}"`,
+    );
+  } else {
+    deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
+  }
+}
+
 /**
  * Adds a framework package to the project's manifest. For zero-configuration
  * providers, it also activates the provider in a recognized emitted
  * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
  * Redis workspace members receive the selected transport's cache, scheduler
  * lock and realtime backplane options and the optional ioredis driver.
+ * In npm/Bun Setu workspaces, optional peers are also recorded in the root's
+ * dependencies so hoisted framework packages can load them (since 0.11.0).
  *
  * Reports the install command rather than spawning it. That is deliberate: on
  * the day of a release `deno install` hits the 24-hour minimum-dependency-age
@@ -845,7 +865,8 @@ export async function runAddCommand(
   const edits: { readonly path: string; readonly contents: string }[] = [];
   let found = false;
   let alreadyPresent = false;
-  const transportArgs = await workspaceAddArgs(deps, dir, bare, runtime);
+  const searchDirs = await installSearchDirs(deps.fs, dir);
+  const transportArgs = await workspaceAddArgs(deps, searchDirs, bare, runtime);
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
     ...(transportArgs === undefined ? [] : [{ name: 'ioredis', range: CLIENT_RANGES['ioredis']! }]),
@@ -870,18 +891,7 @@ export async function runAddCommand(
       try {
         updated = withDependency(source, target.section, specifier, target.range);
       } catch {
-        const read = await readJsonManifest(deps.fs, path);
-        if (read.kind === 'ok' && read.format === 'jsonc') {
-          deps.error(
-            `${escapeName(
-              path,
-            )} is JSONC (comments, trailing commas); rewriting it would discard them. ` +
-              `Add this line under "${target.section}" yourself: ` +
-              `"${specifier}": "${target.range}"`,
-          );
-        } else {
-          deps.error(`Cannot read ${escapeName(path)} as JSON; fix it and run this again.`);
-        }
+        await reportManifestRefusal(deps, path, target.section, specifier, target.range);
         return EXIT_ERROR;
       }
       if (updated === undefined) alreadyPresent = true;
@@ -906,6 +916,30 @@ export async function runAddCommand(
 
     if (updated === undefined) continue;
     edits.push({ path, contents: updated });
+  }
+
+  let writeRoot = dir;
+  if (found && peerPackages.length > 0 && searchDirs.length > 1) {
+    const root = searchDirs[searchDirs.length - 1]!;
+    const workspace = await readWorkspaceManifest(deps.fs, root);
+    if (workspace.ok && workspaceProfile(workspace.manifest.runtime).manifestKind === 'npm') {
+      const path = joinPath(root, 'package.json');
+      try {
+        const source = await readExistingText(deps.fs, path);
+        if (source !== undefined) {
+          const merged = withPeerDependencies(source, peerPackages, 'dependencies');
+          if (merged.added.length > 0) {
+            edits.push({ path, contents: merged.contents });
+            addedPeers.push(...merged.added);
+            writeRoot = root;
+          }
+        }
+      } catch {
+        const peer = peerPackages[0]!;
+        await reportManifestRefusal(deps, path, 'dependencies', peer.name, peer.range);
+        return EXIT_ERROR;
+      }
+    }
   }
 
   // The ingress barrel is already part of a class-based scaffold from project
@@ -1026,7 +1060,9 @@ export async function runAddCommand(
         dir,
         deps.error,
       ),
-      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+      deps.interrupt === undefined
+        ? { root: writeRoot }
+        : { root: writeRoot, signal: deps.interrupt },
     );
   } catch (cause) {
     const interrupted = interruptionMessage(cause);

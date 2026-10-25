@@ -37,7 +37,10 @@ async function loadAmqplib(): Promise<typeof import('amqplib')> {
   try {
     return await import('amqplib');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+    throw new OptionalDependencyUnavailableError('amqplib', {
+      requiredBy: '@setu-ts/queue-plugin',
+      cause: error,
+    });
   }
 }
 

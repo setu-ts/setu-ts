@@ -202,7 +202,10 @@ export function OpenApiPlugin(options: OpenApiPluginOptions = {}): IPlugin {
             const mod = await import('swagger-ui-dist/absolute-path.js');
             directory = mod.default();
           } catch (cause) {
-            const error = new OptionalDependencyUnavailableError('swagger-ui-dist', { cause });
+            const error = new OptionalDependencyUnavailableError('swagger-ui-dist', {
+              requiredBy: '@setu-ts/openapi-plugin',
+              cause,
+            });
             error.message += " Install swagger-ui-dist, or choose swagger: { assets: 'cdn' }.";
             throw error;
           }

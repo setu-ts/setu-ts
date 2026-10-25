@@ -26,6 +26,7 @@ export async function loadConsoleExporter(): Promise<new () => unknown> {
     return mod.ConsoleSpanExporter;
   } catch (error) {
     throw new OptionalDependencyUnavailableError('@opentelemetry/sdk-trace-base', {
+      requiredBy: '@setu-ts/telemetry-plugin',
       cause: error,
     });
   }

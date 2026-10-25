@@ -137,6 +137,143 @@ function harness(files: Readonly<Record<string, string>> = {}) {
   };
 }
 
+describe('setu add — optional peers in a Setu workspace (M119f)', () => {
+  const peers = [
+    '@opentelemetry/api',
+    '@opentelemetry/context-async-hooks',
+    '@opentelemetry/resources',
+    '@opentelemetry/sdk-trace-base',
+  ];
+  async function workspace(runtime = 'node') {
+    const h = harness();
+    const cli = (args: readonly string[]) =>
+      runCli(args, {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: (message) => h.out.push(message),
+        error: (message) => h.err.push(message),
+      });
+    expect(await cli(['new', 'ws', '--workspace', '--runtime', runtime])).toBe(0);
+    expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+    h.out.length = 0;
+    return h;
+  }
+  const put = (h: ReturnType<typeof harness>, path: string, text: string) =>
+    h.fs.writeFile(path, new TextEncoder().encode(text));
+  const dependencies = (h: ReturnType<typeof harness>, path: string) =>
+    (JSON.parse(h.read(path)) as { dependencies: Record<string, string> }).dependencies;
+
+  for (const runtime of ['node', 'bun']) {
+    it(`records the same console peers in root and member dependencies on ${runtime}, idempotently`, async () => {
+      const h = await workspace(runtime);
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
+        const deps = dependencies(h, path);
+        for (const peer of peers) expect(deps[peer], path).toBe(CLIENT_RANGES[peer]);
+        expect(h.out.join('\n')).toContain(`updated ${path}`);
+      }
+      expect(dependencies(h, '/app/ws/package.json')['@setu-ts/telemetry-plugin']).toBeUndefined();
+      const writes = h.fs.writes.length;
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      expect(h.fs.writes.length).toBe(writes);
+    });
+  }
+
+  it('preserves existing root peer pins while adding missing peers, even on re-add', async () => {
+    const h = await workspace();
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        dependencies: { '@opentelemetry/api': '1.9.1' },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/api']).toBe('1.9.1');
+    for (const peer of peers.slice(1)) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+  });
+
+  it('places transport-selected ioredis in root dependencies too', async () => {
+    const h = await workspace();
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/setu.workspace.json',
+      JSON.stringify({ ...manifest, transport: 'redis' }),
+    );
+    expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['ioredis']).toBe(CLIENT_RANGES['ioredis']);
+  });
+
+  it('reports both paths in dry-run and writes nothing', async () => {
+    const h = await workspace();
+    const writes = h.fs.writes.length;
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api', '--dry-run'])).toBe(0);
+    expect(h.fs.writes.length).toBe(writes);
+    expect(h.out).toContain('would update /app/ws/package.json');
+    expect(h.out).toContain('would update /app/ws/apps/api/package.json');
+  });
+
+  it('leaves a Deno workspace root unchanged, even if it carries package.json', async () => {
+    const h = await workspace('deno');
+    await put(h, '/app/ws/package.json', '{}');
+    const before = h.read('/app/ws/deno.json');
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(h.read('/app/ws/package.json')).toBe('{}');
+    expect(h.read('/app/ws/deno.json')).toBe(before);
+    expect(h.read('/app/ws/apps/api/deno.json')).toContain('@opentelemetry/api');
+  });
+
+  it('does not reach an unrelated ancestor from a standalone project', async () => {
+    const h = harness({ '/package.json': '{}', '/app/package.json': '{}' });
+    expect(await h.run(['telemetry'])).toBe(0);
+    expect(h.read('/package.json')).toBe('{}');
+    expect(dependencies(h, '/app/package.json')['@opentelemetry/api']).toBe(
+      CLIENT_RANGES['@opentelemetry/api'],
+    );
+  });
+
+  it('keeps the member-only behavior when the root package.json is missing', async () => {
+    const h = await workspace();
+    await h.fs.rm('/app/ws/package.json');
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(h.fs.has('/app/ws/package.json')).toBe(false);
+    expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBe(
+      CLIENT_RANGES['@opentelemetry/api'],
+    );
+  });
+
+  for (const [source, refusal] of [
+    ['not json', 'Cannot read /app/ws/package.json as JSON'],
+    ['{ /* keep */ "workspaces": ["apps/*"], }', '/app/ws/package.json is JSONC'],
+  ]) {
+    it(`refuses ${refusal} before writing either manifest`, async () => {
+      const h = await workspace();
+      await put(h, '/app/ws/package.json', source!);
+      const writes = h.fs.writes.length;
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
+      expect(h.err.join('\n')).toContain(refusal);
+      expect(h.fs.writes.length).toBe(writes);
+    });
+  }
+
+  it('reports an unreadable root file by name before any writes', async () => {
+    const h = await workspace();
+    const read = h.fs.readFile.bind(h.fs);
+    h.fs.readFile = (path) =>
+      path === '/app/ws/package.json' ? Promise.reject(new Error('access denied')) : read(path);
+    const writes = h.fs.writes.length;
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
+    expect(h.err.join('\n')).toContain('Cannot read /app/ws/package.json as JSON');
+    expect(h.fs.writes.length).toBe(writes);
+  });
+});
+
 const DENO_MANIFEST = JSON.stringify(
   {
     tasks: { start: 'deno run main.ts' },

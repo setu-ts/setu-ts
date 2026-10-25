@@ -58,6 +58,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Optional peers in a workspace (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli` and every
+  optional-peer loader).** `OptionalDependencyUnavailableError` accepts `requiredBy?: string`; all
+  49 loaders name their npm package and direct installation to that package's location within its
+  declared peer range, usually the workspace root. `dependency` and `cause` are unchanged;
+  `requiredBy` adds no instance field. `setu add` records its peers in both member and root
+  `package.json` `dependencies` for listed Node/Bun Setu workspace members, preserving existing
+  entries and naming both edited paths. Deno and standalone behavior is unchanged. See
+  [the upgrade note](docs/upgrading.md#optional-peers-and-setu-add-workspace-root-entries-m119f-0110-setu-tscommon-setu-tscli).
+
 - **Drizzle tenant columns resolve to properties (M119e, 0.11.0, `@setu-ts/database-plugin`).** The
   tenant bridge resolves and caches the configured column per entity for every read and write; an
   absent or ambiguous mapping fails before statement I/O. Payload stamps remain last and update

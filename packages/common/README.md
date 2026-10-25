@@ -24,6 +24,12 @@ deno add npm:@setu-ts/common
 
 ## What's Inside
 
+`OptionalDependencyUnavailableError(dependency, { cause?, requiredBy? })` preserves `dependency` and
+the original `cause`. Since 0.11.0, loaders pass their npm package name as `requiredBy` to make the
+message actionable; it is used only in the message, with no new instance field:
+`Optional dependency 'ioredis' could not be loaded by '@setu-ts/cache-plugin'. Install it where '@setu-ts/cache-plugin' is installed, in the range its peerDependencies declare — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
+Without `requiredBy`, the message says `the package that loads it` generically.
+
 | Area                | Exports                                                                                                                                                                                                                                                                                      |
 | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Capability tokens   | `CAPABILITIES`, `createCapabilityToken()`, `CapabilityToken`, `StandardCapability`                                                                                                                                                                                                           |

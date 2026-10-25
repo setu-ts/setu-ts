@@ -415,7 +415,10 @@ export async function loadServiceBusModule(): Promise<ServiceBusSdkModule> {
   try {
     return (await import('@azure/service-bus')) as unknown as ServiceBusSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@azure/service-bus', { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/service-bus', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 

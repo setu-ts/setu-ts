@@ -51,6 +51,7 @@ export async function loadAsyncLocalStorageContextManager(): Promise<ContextMana
     return new module.AsyncLocalStorageContextManager();
   } catch (error) {
     throw new OptionalDependencyUnavailableError('@opentelemetry/context-async-hooks', {
+      requiredBy: '@setu-ts/telemetry-plugin',
       cause: error,
     });
   }

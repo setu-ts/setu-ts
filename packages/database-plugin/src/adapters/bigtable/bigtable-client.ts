@@ -136,7 +136,10 @@ export function createLazyBigtableLoader(
       try {
         module = (await import('@google-cloud/bigtable')) as unknown as BigtableSdkModule;
       } catch (error) {
-        throw new OptionalDependencyUnavailableError('@google-cloud/bigtable', { cause: error });
+        throw new OptionalDependencyUnavailableError('@google-cloud/bigtable', {
+          requiredBy: '@setu-ts/database-plugin',
+          cause: error,
+        });
       }
       return adaptBigtableSdkModule(module, configuration);
     },

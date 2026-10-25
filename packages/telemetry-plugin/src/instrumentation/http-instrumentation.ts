@@ -61,6 +61,7 @@ export async function loadHttpInstrumentation(
       return await import('@opentelemetry/instrumentation-http');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-http', {
+        requiredBy: '@setu-ts/telemetry-plugin',
         cause: error,
       });
     }
@@ -104,6 +105,7 @@ export async function loadFetchInstrumentation(
       return await import('@opentelemetry/instrumentation-undici');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-undici', {
+        requiredBy: '@setu-ts/telemetry-plugin',
         cause: error,
       });
     }

@@ -35,7 +35,10 @@ export async function loadIoredis(): Promise<RedisCtor> {
     // escapes into the store (AI_GUIDELINES §5.2 external-interop exception).
     return module.Redis as unknown as RedisCtor;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+    throw new OptionalDependencyUnavailableError('ioredis', {
+      requiredBy: '@setu-ts/idempotency-plugin',
+      cause: error,
+    });
   }
 }
 

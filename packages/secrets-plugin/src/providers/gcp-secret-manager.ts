@@ -163,7 +163,10 @@ export async function loadGcpModule(): Promise<GcpSdkModule> {
   try {
     return (await import('@google-cloud/secret-manager')) as unknown as GcpSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@google-cloud/secret-manager', { cause: error });
+    throw new OptionalDependencyUnavailableError('@google-cloud/secret-manager', {
+      requiredBy: '@setu-ts/secrets-plugin',
+      cause: error,
+    });
   }
 }
 

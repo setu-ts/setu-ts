@@ -198,7 +198,10 @@ export function createLazyDynamoLoader(
       try {
         module = (await import('@aws-sdk/client-dynamodb')) as unknown as DynamoSdkModule;
       } catch (error) {
-        throw new OptionalDependencyUnavailableError('@aws-sdk/client-dynamodb', { cause: error });
+        throw new OptionalDependencyUnavailableError('@aws-sdk/client-dynamodb', {
+          requiredBy: '@setu-ts/database-plugin',
+          cause: error,
+        });
       }
       return adaptDynamoSdkModule(module, configuration);
     },

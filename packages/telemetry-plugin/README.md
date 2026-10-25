@@ -6,6 +6,12 @@ OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPAB
 Without an `exporter` the plugin runs in noop mode. With an exporter, install the optional peers for
 the features you enable; the SDK is loaded during registration.
 
+Install peers within the ranges declared by this package's `peerDependencies`, where this package is
+installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
+be loaded by a root-hoisted plugin. `setu add telemetry` records the four console-exporter peers in
+both manifests in a Node or Bun Setu workspace. See
+[Optional peers in a workspace](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-peers-in-a-workspace).
+
 ## Installation
 
 | Feature                                               | Optional peer packages loaded                                                      |
@@ -28,7 +34,7 @@ npm install @setu-ts/telemetry-plugin @opentelemetry/sdk-trace-base @opentelemet
 
 A missing common SDK peer makes `app.start()` reject with `OptionalDependencyUnavailableError`
 naming the package; it does not switch to noop. For example, without the SDK on Node:
-`Optional dependency '@opentelemetry/sdk-trace-base' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+`Optional dependency '@opentelemetry/sdk-trace-base' could not be loaded by '@setu-ts/telemetry-plugin'. Install it where '@setu-ts/telemetry-plugin' is installed, in the range its peerDependencies declare — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
 A missing instrumentation package is instead a logged no-op, as described below; a missing context
 manager leaves spans unnested, as described under Propagation.
 

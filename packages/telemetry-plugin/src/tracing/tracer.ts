@@ -437,6 +437,7 @@ export async function loadOtelTracerProvider(
     sdkMod = await import('@opentelemetry/sdk-trace-base');
   } catch (error) {
     throw new OptionalDependencyUnavailableError('@opentelemetry/sdk-trace-base', {
+      requiredBy: '@setu-ts/telemetry-plugin',
       cause: error,
     });
   }
@@ -445,7 +446,10 @@ export async function loadOtelTracerProvider(
   try {
     resourcesMod = await import('@opentelemetry/resources');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@opentelemetry/resources', { cause: error });
+    throw new OptionalDependencyUnavailableError('@opentelemetry/resources', {
+      requiredBy: '@setu-ts/telemetry-plugin',
+      cause: error,
+    });
   }
   // Lazy-load the OTel API (transitive dep of sdk-trace-base) for span parenting.
   // F2 fix: typed import — properly cast to OtelApi interface.
@@ -453,7 +457,10 @@ export async function loadOtelTracerProvider(
   try {
     apiMod = await import('@opentelemetry/api');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@opentelemetry/api', { cause: error });
+    throw new OptionalDependencyUnavailableError('@opentelemetry/api', {
+      requiredBy: '@setu-ts/telemetry-plugin',
+      cause: error,
+    });
   }
   setOtelApi(apiMod as OtelApi);
 

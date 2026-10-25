@@ -662,8 +662,12 @@ here.
   every SQL adapter, a refused value as a named 400, a named missing-key-column error checked at
   connect, and a reporting pool `'error'` listener; V10-4, V10-32, V10-33, V10-37, V10-45, V10-61) —
   complete (PR #504).
-- **Next milestone** — M119f (telemetry and the optional-peer packages — optional peers in an npm
-  workspace). M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 119f** (`common` + `cli` + the 16 packages with optional peers — optional peers in an
+  npm workspace: the load error names who loads the peer and that it belongs where that package is
+  installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
+  V10-58) — complete (PR pending).
+- **Next milestone** — M119h (`cli` — CLI output and commands that are wrong). M119i, M118 and
+  M120–M123 are open in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 
