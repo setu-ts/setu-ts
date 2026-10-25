@@ -560,7 +560,11 @@ function peerPackagesFor(
 interface IRootOverride {
   /** The spec the override names (a string value, or an object's `"."` entry). */
   readonly spec: string;
-  /** Whether the key carried a version selector (`ioredis@5`): it applies only to matching versions. */
+  /**
+   * Whether the override is conditional: its key carried a version selector
+   * (`ioredis@5`), or the package has more than one rule. It then applies only
+   * to matching versions, which this command cannot evaluate.
+   */
   readonly selector: boolean;
 }
 
@@ -590,7 +594,11 @@ function rootOverrides(source: string): ReadonlyMap<string, IRootOverride> {
           : undefined;
     if (typeof spec !== 'string') continue;
     const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
-    pinned.set(at === -1 ? key : key.slice(0, at), { spec, selector: at !== -1 });
+    const name = at === -1 ? key : key.slice(0, at);
+    // npm applies the first rule that matches the chosen version, so several
+    // rules for one package (`x@1` and `x@2`, or `x` beside `x@2`) cannot be
+    // reduced to one spec here: the name is treated as conditional.
+    pinned.set(name, { spec, selector: at !== -1 || pinned.has(name) });
   }
   return pinned;
 }

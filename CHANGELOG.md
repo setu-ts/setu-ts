@@ -66,8 +66,9 @@ All notable changes to this project are documented here. The format follows
   `package.json` `dependencies` for listed Node/Bun Setu workspace members, preserving existing
   entries (a peer declared in any installing section counts), recording a peer the root `overrides`
   pins (a string value, or an object's `"."` entry) at that override's spec since npm refuses any
-  other, leaving `$name` references and version-selector keys to the user, and naming both edited
-  paths. Deno and standalone behavior is unchanged. See
+  other, leaving `$name` references and conditional overrides (a version-selector key, or several
+  rules for one package) to the user, and naming both edited paths. Deno and standalone behavior is
+  unchanged. See
   [the upgrade note](docs/upgrading.md#optional-peers-and-setu-add-workspace-root-entries-m119f-0110-setu-tscommon-setu-tscli).
 
 - **Drizzle tenant columns resolve to properties (M119e, 0.11.0, `@setu-ts/database-plugin`).** The

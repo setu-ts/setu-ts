@@ -254,6 +254,22 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     );
   });
 
+  it('treats several override rules for one peer as conditional, whatever their order', async () => {
+    for (const overrides of [
+      { '@opentelemetry/resources@1': '1.30.0', '@opentelemetry/resources@2': '2.9.0' },
+      { '@opentelemetry/resources': '2.9.0', '@opentelemetry/resources@1': '1.30.0' },
+      { '@opentelemetry/resources@1': '1.30.0', '@opentelemetry/resources': '2.9.0' },
+    ]) {
+      const h = await workspace();
+      await put(h, '/app/ws/package.json', JSON.stringify({ workspaces: ['apps/*'], overrides }));
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/resources']).toBeUndefined();
+      expect(h.out.join('\n')).toContain(
+        'left @opentelemetry/resources out of /app/ws/package.json: its "overrides" pins it only for some versions',
+      );
+    }
+  });
+
   it('treats a peer declared in devDependencies or optionalDependencies as present, root and member', async () => {
     const h = await workspace();
     // Measured with npm 11: a devDependencies entry wins over a dependencies one
