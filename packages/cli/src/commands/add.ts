@@ -557,6 +557,27 @@ function peerPackagesFor(
 }
 
 /**
+ * The package names a root manifest's npm `overrides` names at its top level,
+ * with any `@<range>` selector on a key removed (`ioredis@5` → `ioredis`).
+ *
+ * @param source - The root `package.json` text
+ * @returns The overridden package names
+ * @throws {SyntaxError} When the text is not JSON
+ */
+function overriddenNames(source: string): ReadonlySet<string> {
+  const overrides = (JSON.parse(source) as { overrides?: unknown }).overrides;
+  if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) {
+    return new Set();
+  }
+  return new Set(
+    Object.keys(overrides).map((key) => {
+      const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
+      return at === -1 ? key : key.slice(0, at);
+    }),
+  );
+}
+
+/**
  * Adds optional peer packages to a manifest's `dependencies`, never replacing
  * an existing pin.
  *
@@ -927,7 +948,22 @@ export async function runAddCommand(
       try {
         const source = await readExistingText(deps.fs, path);
         if (source !== undefined) {
-          const merged = withPeerDependencies(source, peerPackages, 'dependencies');
+          // npm refuses (EOVERRIDE) a direct dependency whose spec differs from
+          // a root override of the same package, so a peer the root overrides
+          // is left to that override rather than recorded beside it.
+          const overridden = overriddenNames(source);
+          for (const peer of peerPackages) {
+            if (!overridden.has(peer.name)) continue;
+            deps.log(
+              `left ${peer.name} out of ${escapeName(path)}: its "overrides" already pins it, ` +
+                `and npm refuses a direct dependency whose spec differs from its override.`,
+            );
+          }
+          const merged = withPeerDependencies(
+            source,
+            peerPackages.filter((peer) => !overridden.has(peer.name)),
+            'dependencies',
+          );
           if (merged.added.length > 0) {
             edits.push({ path, contents: merged.contents });
             addedPeers.push(...merged.added);

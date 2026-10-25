@@ -49,8 +49,9 @@ export class OptionalDependencyUnavailableError extends Error {
 
   /**
    * Builds the error. The `message` names the dependency and states both
-   * remedies: install it where the loading package is installed, in its peer
-   * range, or choose an option that does not need it on this runtime.
+   * remedies: install it where the loading package is installed, in the version
+   * range that package declares for it, or choose an option that does not need
+   * it on this runtime.
    *
    * @param dependency - The bare package name the load failed for
    * @param options - The original rejection as `cause` and the loading package's
@@ -58,7 +59,7 @@ export class OptionalDependencyUnavailableError extends Error {
    */
   constructor(dependency: string, options?: { cause?: unknown; requiredBy?: string }) {
     super(
-      `Optional dependency '${dependency}' could not be loaded${options?.requiredBy === undefined ? '' : ` by '${options.requiredBy}'`}. Install it where '${options?.requiredBy ?? 'the package that loads it'}' is installed, in the range its peerDependencies declare — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`,
+      `Optional dependency '${dependency}' could not be loaded${options?.requiredBy === undefined ? '' : ` by '${options.requiredBy}'`}. Install it where '${options?.requiredBy ?? 'the package that loads it'}' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`,
       options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.dependency = dependency;

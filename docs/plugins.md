@@ -46,21 +46,25 @@ exporter); any other arm you select by hand needs its driver installed as above.
 ### Optional peers in a workspace
 
 Install an optional peer **where the framework package that loads it is installed**, within the
-range that package's `peerDependencies` declares. In an npm, Yarn or Bun workspace this is usually
-the workspace root. A hoisted framework package resolves imports from its own location: a peer
-nested under a member is invisible to it. Conflicting member pins can also produce two copies of a
-peer, including incompatible versions.
+version range that package declares for it (in its `peerDependencies`, or `dependencies` for the few
+loaders that declare their package as a regular dependency). In an npm, Yarn or Bun workspace this
+is usually the workspace root. A hoisted framework package resolves imports from its own location: a
+peer nested under a member is invisible to it. Conflicting member pins can also produce two copies
+of a peer, including incompatible versions.
 
 The startup symptom is `Optional dependency '<d>' could not be loaded by '<package>'`, followed by
 the instruction to install it where that package is installed. Check the installed framework
 package's `package.json` for its peer ranges rather than installing the latest upstream major.
 
 Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
-the peers it supplies in both the member's and root's `package.json` `dependencies`. It preserves
-existing entries and prints both edited paths; run the printed install command from the workspace
-root. The member entry also supports building the member outside the workspace. Deno workspaces,
-standalone projects, pnpm workspaces and hand-built Yarn workspaces keep their existing behavior;
-place peers manually when needed. `setu add` still refuses a workspace root as its target.
+the peers it supplies in the member's `package.json` `dependencies` and, when the root has a
+`package.json`, in the root's too. It preserves existing entries, leaves a peer the root's
+`overrides` already names to that override (npm refuses a direct dependency whose spec differs from
+its override), refuses a root `package.json` that is JSONC or invalid JSON by name, and prints every
+edited path; run the printed install command from the workspace root. The member entry also supports
+building the member outside the workspace. Deno workspaces, standalone projects, pnpm workspaces and
+hand-built Yarn workspaces keep their existing behavior; place peers manually when needed.
+`setu add` still refuses a workspace root as its target.
 
 Three packages carry a real (non-optional) dependency beyond their siblings: `kernel` depends on
 `hono` (its router), `runtime` on `@hono/node-server` (the Node adapter), and `view-plugin` on

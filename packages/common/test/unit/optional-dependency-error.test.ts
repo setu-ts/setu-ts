@@ -17,7 +17,7 @@ describe('OptionalDependencyUnavailableError', () => {
 
     expect(error.dependency).toBe('ioredis');
     expect(error.message).toBe(
-      "Optional dependency 'ioredis' could not be loaded. Install it where 'the package that loads it' is installed, in the range its peerDependencies declare — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.",
+      "Optional dependency 'ioredis' could not be loaded. Install it where 'the package that loads it' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.",
     );
   });
 
@@ -29,7 +29,7 @@ describe('OptionalDependencyUnavailableError', () => {
     });
 
     expect(error.message).toBe(
-      "Optional dependency 'ioredis' could not be loaded by '@setu-ts/cache-plugin'. Install it where '@setu-ts/cache-plugin' is installed, in the range its peerDependencies declare — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.",
+      "Optional dependency 'ioredis' could not be loaded by '@setu-ts/cache-plugin'. Install it where '@setu-ts/cache-plugin' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.",
     );
     expect(error.dependency).toBe('ioredis');
     expect(error.name).toBe('OptionalDependencyUnavailableError');

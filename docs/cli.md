@@ -639,12 +639,16 @@ content.
 
 ### Workspaces
 
-`setu add <plugin> --dir apps/<member>` records its optional peers in both the member and root
-`package.json` `dependencies` in a listed Node or Bun Setu workspace (since 0.11.0). Existing root
-entries are preserved; both edited paths are printed. Run the install command from the root, where
-hoisted framework packages resolve their peers. Deno workspaces and standalone projects keep their
-existing behavior. See [Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace)
-for placement, peer ranges and conflicting pins.
+`setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records its optional
+peers in the member's `package.json` `dependencies` and, when the workspace root has a
+`package.json`, in the root's as well (since 0.11.0). Existing root entries are preserved; a peer
+the root's `overrides` already names is left to that override, because npm refuses a direct
+dependency whose spec differs from its override; every edited path is printed. A root `package.json`
+that is JSONC or not valid JSON is refused by name, and a workspace with no root `package.json` gets
+the member entry only. Run the install command from the root, where hoisted framework packages
+resolve their peers. Deno workspaces and standalone projects keep their existing behavior. See
+[Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace) for placement, peer
+ranges and conflicting pins.
 
 In a workspace, `setu agents` may be run from the root or from any member directory: it finds the
 workspace root and writes the root's `AGENTS.md` **and** every member's `apps/<name>/AGENTS.md`.

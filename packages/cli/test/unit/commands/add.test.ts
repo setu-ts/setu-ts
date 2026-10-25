@@ -198,6 +198,48 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     }
   });
 
+  it('leaves a peer the root overrides out of the root dependencies, and says so', async () => {
+    const h = await workspace();
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        // A plain key and a versioned key: both name a package npm would refuse
+        // as a direct dependency with a different spec (EOVERRIDE).
+        overrides: { '@opentelemetry/api': '1.9.1', '@opentelemetry/resources@2': '2.9.0' },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies?: Record<string, string>;
+      overrides: Record<string, string>;
+    };
+    expect(root.dependencies?.['@opentelemetry/api']).toBeUndefined();
+    expect(root.dependencies?.['@opentelemetry/resources']).toBeUndefined();
+    expect(root.overrides['@opentelemetry/api']).toBe('1.9.1');
+    for (const peer of ['@opentelemetry/sdk-trace-base', '@opentelemetry/context-async-hooks']) {
+      expect(root.dependencies?.[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+    // The member still records every peer; only the root defers to its override.
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/apps/api/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+    const out = h.out.join('\n');
+    expect(out).toContain('left @opentelemetry/api out of /app/ws/package.json');
+    expect(out).toContain('left @opentelemetry/resources out of /app/ws/package.json');
+  });
+
+  it('ignores an overrides value that is not an object', async () => {
+    const h = await workspace();
+    await put(h, '/app/ws/package.json', JSON.stringify({ workspaces: ['apps/*'], overrides: [] }));
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+    expect(h.out.join('\n')).not.toContain('left ');
+  });
+
   it('places transport-selected ioredis in root dependencies too', async () => {
     const h = await workspace();
     const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
