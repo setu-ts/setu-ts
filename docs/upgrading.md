@@ -17,13 +17,14 @@ cutting a release renames that heading to the version and is a rename, not a rec
 In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
 plugin whose optional peers are missing at the root, then run the printed install command from the
 workspace root. The command now records its peers in both root and member `package.json`
-`dependencies`, leaving a peer already in `dependencies` or `optionalDependencies` as it is, moving
-one declared only in `devDependencies` to `dependencies` with its pin unchanged, and recording a
-peer the root `overrides` pins (a string value, or an object's `"."` entry) at the override's own
-spec, since npm refuses a direct dependency whose spec differs from its override. A `$name`
-reference or a conditional override (a version-selector key, or several rules for one package) is
-left to you with a printed line. Both edited paths are printed. No framework pin is added at the
-root, and `setu add` still targets a member.
+`dependencies`, leaving a peer already in `dependencies`, `optionalDependencies` or
+`peerDependencies` as it is, moving one declared only in `devDependencies` to `dependencies` with
+its pin unchanged, and recording a peer the root `overrides` pins (a string value, or an object's
+`"."` entry) at the override's own spec, since npm refuses a direct dependency whose spec differs
+from its override. A `$name` reference or a conditional override (a version-selector key, or several
+rules for one package) is left to you with a printed line, and so is a root entry for a peer a
+workspace member already pins at a different spec, since it would install a second copy. Both edited
+paths are printed. No framework pin is added at the root, and `setu add` still targets a member.
 
 For manually selected drivers, install peers where the framework package is installed, within the
 version range it declares for them. Avoid conflicting member pins: they can produce nested copies

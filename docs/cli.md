@@ -641,19 +641,21 @@ content.
 
 `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records its optional
 peers in the member's `package.json` `dependencies` and, when the workspace root has a
-`package.json`, in the root's as well (since 0.11.0). A peer already declared in `dependencies` or
-`optionalDependencies` is left as it is, and one declared only in `devDependencies` is moved to
-`dependencies` with its pin unchanged, because an `npm install --omit=dev` would drop it; a peer the
-root's `overrides` pins (a string value, or an object's `"."` entry) is recorded at the override's
-own spec, because npm refuses a direct dependency whose spec differs from its override. A `$name`
-reference, or an override that is conditional (a key with a version selector such as `ioredis@5`, or
-several rules for one package), is left to you and printed, since either spec can be refused; every
-edited path is printed. A root `package.json` that is JSONC or not valid JSON is refused by name,
-and a workspace with no root `package.json` gets the member entry only. Run the install command from
-the root, where hoisted framework packages resolve their peers. Deno workspaces and standalone
-projects keep their existing behavior. See
-[Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace) for placement, peer
-ranges and conflicting pins.
+`package.json`, in the root's as well (since 0.11.0). A peer already declared in `dependencies`,
+`optionalDependencies` or `peerDependencies` is left as it is, and one declared only in
+`devDependencies` is moved to `dependencies` with its pin unchanged, because an
+`npm install --omit=dev` would drop it; a peer the root's `overrides` pins (a string value, or an
+object's `"."` entry) is recorded at the override's own spec, because npm refuses a direct
+dependency whose spec differs from its override. A `$name` reference, or an override that is
+conditional (a key with a version selector such as `ioredis@5`, or several rules for one package),
+is left to you and printed, since either spec can be refused. When a workspace member already pins
+the peer at a different spec, the root entry is left out and the member and its pin are printed: a
+second entry at another spec would install a second copy. Every edited path is printed. A root
+`package.json` that is JSONC or not valid JSON is refused by name, and a workspace with no root
+`package.json` gets the member entry only. Run the install command from the root, where hoisted
+framework packages resolve their peers. Deno workspaces and standalone projects keep their existing
+behavior. See [Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace) for
+placement, peer ranges and conflicting pins.
 
 In a workspace, `setu agents` may be run from the root or from any member directory: it finds the
 workspace root and writes the root's `AGENTS.md` **and** every member's `apps/<name>/AGENTS.md`.

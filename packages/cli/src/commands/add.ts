@@ -47,7 +47,7 @@ import { composingStarter } from '../utils/starter-arms.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
 import { installSearchDirs } from '../app-loader.ts';
-import { readWorkspaceManifest } from '../workspace/manifest.ts';
+import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
 import { transportSpec, renderConnection } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
@@ -606,8 +606,10 @@ function rootOverrides(source: string): ReadonlyMap<string, IRootOverride> {
 /**
  * The npm sections a production install keeps (`npm install --omit=dev` drops
  * `devDependencies`, not these), any of which means a peer is already declared.
+ * `peerDependencies` is one: measured with npm 11 and Bun 1.4, both install a
+ * project's own peer entry, so a second entry beside it would replace its pin.
  */
-const PRODUCTION_SECTIONS = ['dependencies', 'optionalDependencies'] as const;
+const PRODUCTION_SECTIONS = ['dependencies', 'optionalDependencies', 'peerDependencies'] as const;
 
 /**
  * The names a `package.json` already declares in a section a production install
@@ -629,6 +631,57 @@ function declaredNames(parsed: Record<string, unknown>): ReadonlySet<string> {
     }
   }
   return names;
+}
+
+/** Every npm section a workspace member can pin a package in. */
+const PIN_SECTIONS = [...PRODUCTION_SECTIONS, 'devDependencies'] as const;
+
+/** One existing pin of a package somewhere in the workspace. */
+interface IWorkspacePin {
+  /** The manifest that pins it. */
+  readonly path: string;
+  /** The spec it is pinned at. */
+  readonly spec: string;
+}
+
+/**
+ * The pins the workspace's members already hold for the given packages, in any
+ * section, read before this command writes anything. A member whose manifest
+ * cannot be read is skipped: it cannot conflict with what npm will not install.
+ *
+ * @param fs - The filesystem to read through
+ * @param root - The workspace root
+ * @param members - The workspace's members
+ * @param names - The package names to look for
+ * @returns Each package's existing pins
+ */
+async function workspacePins(
+  fs: IFileSystem,
+  root: string,
+  members: readonly WorkspaceMember[],
+  names: ReadonlySet<string>,
+): Promise<ReadonlyMap<string, readonly IWorkspacePin[]>> {
+  const pins = new Map<string, IWorkspacePin[]>();
+  for (const member of members) {
+    const path = joinPath(root, joinPath(MEMBERS_DIR, joinPath(member.name, 'package.json')));
+    let parsed: Record<string, unknown>;
+    try {
+      const text = await readExistingText(fs, path);
+      if (text === undefined) continue;
+      parsed = JSON.parse(text.replace(/^\uFEFF/, '')) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    for (const section of PIN_SECTIONS) {
+      const entries = parsed[section];
+      if (entries === null || typeof entries !== 'object' || Array.isArray(entries)) continue;
+      for (const [name, spec] of Object.entries(entries as Record<string, unknown>)) {
+        if (!names.has(name) || typeof spec !== 'string') continue;
+        pins.set(name, [...(pins.get(name) ?? []), { path, spec }]);
+      }
+    }
+  }
+  return pins;
 }
 
 /**
@@ -1024,7 +1077,8 @@ export async function runAddCommand(
     if (workspace.ok && workspaceProfile(workspace.manifest.runtime).manifestKind === 'npm') {
       const path = joinPath(root, 'package.json');
       try {
-        const source = await readExistingText(deps.fs, path);
+        // A leading BOM is valid to npm and Bun alike; JSON.parse refuses it.
+        const source = (await readExistingText(deps.fs, path))?.replace(/^\uFEFF/, '');
         if (source !== undefined) {
           // npm refuses (EOVERRIDE) a direct dependency whose spec differs from
           // a root override of the same package, and an override alone installs
@@ -1042,25 +1096,51 @@ export async function runAddCommand(
               ? Object.keys(devRoot)
               : []),
           ]);
+          const pinned = await workspacePins(
+            deps.fs,
+            root,
+            workspace.manifest.members,
+            new Set(peerPackages.map((peer) => peer.name)),
+          );
           const rootPeers: { readonly name: string; readonly range: string }[] = [];
           for (const peer of peerPackages) {
             const override = overridden.get(peer.name);
-            if (override === undefined || declared.has(peer.name)) {
+            if (declared.has(peer.name)) {
               rootPeers.push(peer);
-            } else if (override.selector) {
+            } else if (override?.selector === true) {
               // Whether `name@<range>` applies depends on the version npm picks,
               // which this command cannot evaluate: either spec can be refused.
               deps.log(
                 `left ${peer.name} out of ${escapeName(path)}: its "overrides" pins it only for ` +
                   `some versions; add it at the root yourself, at a spec that agrees with that override.`,
               );
-            } else if (override.spec.startsWith('$')) {
+            } else if (override?.spec.startsWith('$') === true) {
               deps.log(
                 `left ${peer.name} out of ${escapeName(path)}: its "overrides" pins it by reference ` +
                   `(${escapeName(override.spec)}); add the referenced dependency at the root yourself.`,
               );
-            } else {
+            } else if (override !== undefined) {
               rootPeers.push({ name: peer.name, range: override.spec });
+            } else {
+              // Measured with npm 11: a member pinned at 5.4.1 beside a root
+              // entry at the CLI's `5.x` installs a second copy (5.11.1 at the
+              // root, 5.4.1 nested), so this command would CREATE the split it
+              // exists to prevent. A pin that differs is left to the user.
+              const differing = (pinned.get(peer.name) ?? []).filter(
+                (pin) => pin.spec !== peer.range,
+              );
+              if (differing.length === 0) {
+                rootPeers.push(peer);
+              } else {
+                deps.log(
+                  `left ${peer.name} out of ${escapeName(path)}: ` +
+                    differing
+                      .map((pin) => `${escapeName(pin.path)} pins it at ${escapeName(pin.spec)}`)
+                      .join('; ') +
+                    `; record one spec for it at the root yourself, so the members and the hoisted ` +
+                    `framework package share one copy.`,
+                );
+              }
             }
           }
           const merged = withPeerDependencies(source, rootPeers, 'dependencies');

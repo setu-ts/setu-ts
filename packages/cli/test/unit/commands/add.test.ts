@@ -313,6 +313,102 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     );
   });
 
+  it('leaves a peer to the user when a member already pins it at another spec', async () => {
+    const h = await workspace();
+    // Measured with npm 11: a member at 5.4.1 beside a root entry at the CLI's
+    // `5.x` installs two copies; without the root entry npm hoists the one pin.
+    const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    await put(
+      h,
+      '/app/ws/apps/api/package.json',
+      JSON.stringify({
+        ...member,
+        dependencies: { ...member.dependencies, '@opentelemetry/api': '1.9.0' },
+      }),
+    );
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as {
+      members: Record<string, unknown>[];
+    };
+    const worker = { ...manifest.members[0]!, name: 'worker', port: 4999 };
+    await put(
+      h,
+      '/app/ws/setu.workspace.json',
+      JSON.stringify({ ...manifest, members: [...manifest.members, worker] }),
+    );
+    await put(
+      h,
+      '/app/ws/apps/worker/package.json',
+      JSON.stringify({
+        name: 'worker',
+        // A sibling's dev pin is installed too, and so splits the copy as well.
+        devDependencies: { '@opentelemetry/resources': '2.9.0' },
+        // Equal to the CLI range: no conflict, so the root entry is still written.
+        dependencies: {
+          '@opentelemetry/sdk-trace-base': CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+        },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = dependencies(h, '/app/ws/package.json');
+    expect(root['@opentelemetry/api']).toBeUndefined();
+    expect(root['@opentelemetry/resources']).toBeUndefined();
+    expect(root['@opentelemetry/sdk-trace-base']).toBe(
+      CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+    );
+    expect(root['@opentelemetry/context-async-hooks']).toBe(
+      CLIENT_RANGES['@opentelemetry/context-async-hooks'],
+    );
+    // The member keeps its own pin.
+    expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBe('1.9.0');
+    const out = h.out.join('\n');
+    expect(out).toContain(
+      'left @opentelemetry/api out of /app/ws/package.json: /app/ws/apps/api/package.json pins it at 1.9.0',
+    );
+    expect(out).toContain('/app/ws/apps/worker/package.json pins it at 2.9.0');
+    expect(out).not.toContain('left @opentelemetry/sdk-trace-base');
+  });
+
+  it('treats a peerDependencies pin as present, root and member', async () => {
+    const h = await workspace();
+    // Measured with npm 11 and Bun 1.4: both install a project's own peer entry,
+    // so a dependencies entry beside it would replace its pin.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        peerDependencies: { '@opentelemetry/api': '1.9.0' },
+      }),
+    );
+    const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/apps/api/package.json',
+      JSON.stringify({ ...member, peerDependencies: { '@opentelemetry/resources': '2.9.0' } }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+    };
+    expect(root.dependencies['@opentelemetry/api']).toBeUndefined();
+    expect(root.peerDependencies['@opentelemetry/api']).toBe('1.9.0');
+    expect(
+      dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/resources'],
+    ).toBeUndefined();
+  });
+
+  it('reads a root package.json that starts with a byte-order mark', async () => {
+    const h = await workspace();
+    await put(h, '/app/ws/package.json', `\uFEFF${JSON.stringify({ workspaces: ['apps/*'] })}`);
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+  });
+
   it('says nothing about a reference override whose root dependency already exists', async () => {
     const h = await workspace();
     await put(
