@@ -179,6 +179,43 @@ describe('setu generate --module reports an inactive module', () => {
     }
   });
 
+  it('keeps the statement after a semicolonless import when reading the config', async () => {
+    const h = functionalHarness(
+      [
+        "import { registerModules } from './src/modules/index.ts'",
+        '',
+        'export function createApp(app) {',
+        '  registerModules(app.router, app.services);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+    expect((await runStep(h, ['module', 'orders'])).code).toBe(0);
+
+    const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
+
+    expect(step.code).toBe(0);
+    expect(step.err).not.toContain('does not reference registerModules');
+    expect(step.err).not.toContain(INACTIVE_HEADER);
+  });
+
+  it('reports a class-based module referenced in the barrel but left out of MODULES', async () => {
+    const h = classHarness(CONFIG_CLASS_WIRED);
+    expect((await runStep(h, ['module', 'orders'])).code).toBe(0);
+    const barrel = h.fs.read('/app/src/modules/index.ts');
+    // Out of MODULES, but still exported under another name: not activation.
+    const edited =
+      barrel.replace(/(export const MODULES[^=]*= \[)[^\]]*\]/, '$1]') +
+      '\nexport const ORDERS = OrdersModule;\n';
+    expect(edited).toContain('export const ORDERS = OrdersModule;');
+    await h.fs.writeFile('/app/src/modules/index.ts', new TextEncoder().encode(edited));
+
+    const step = await runStep(h, ['service', 'pricing', '--module', 'orders']);
+
+    expect(step.code).toBe(0);
+    expect(step.err).toContain(INACTIVE_HEADER);
+  });
+
   it('prints the same report in --dry-run without writing', async () => {
     const h = functionalHarness(CONFIG_FUNCTIONAL_WIRED);
     expect((await runStep(h, ['module', 'orders'])).code).toBe(0);

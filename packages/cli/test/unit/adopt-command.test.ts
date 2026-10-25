@@ -340,6 +340,35 @@ describe('runAdoptCommand', () => {
       expect(read).not.toContain(`${member}/package.json`);
     });
 
+    it('never reads a member manifest that is itself a link out of the project', async () => {
+      const fs = createFakeFs({
+        '/work/svc/setu.config.ts': 'export function createApp() {}\n',
+        '/work/svc/apps/svc/package.json': JSON.stringify({
+          dependencies: { '@setu-ts/health-plugin': '^0.9.0' },
+        }),
+      });
+      const manifest = '/work/svc/apps/svc/package.json';
+      const linked: IFileSystem = {
+        ...fs,
+        realPath: (path) =>
+          path === manifest ? Promise.resolve('/elsewhere/package.json') : fs.realPath!(path),
+      };
+      await runAdoptCommand(parseArgs([]), {
+        fs: linked,
+        cwd: '/work/svc',
+        log: () => {},
+        error: () => {},
+      });
+      // Later steps (unchanged by M119h) may still touch the moved file; what the
+      // probes must not do is let a foreign manifest decide the persisted support.
+      const written = fs.has(`/work/svc/${WORKSPACE_MANIFEST}`)
+        ? (JSON.parse(fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+            members: { healthProbes?: boolean }[];
+          })
+        : undefined;
+      expect(written?.members[0]?.healthProbes ?? false).toBe(false);
+    });
+
     it('keeps a Deno workspace Deno when the manifest already moved', async () => {
       const h = interrupted({
         '/work/svc/apps/svc/deno.json': '{ "tasks": {} }\n',

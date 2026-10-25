@@ -127,6 +127,48 @@ function printUsage(log: (message: string) => void): void {
   log('  --dry-run           Print what would happen, change nothing');
 }
 
+/** The marker files the plugin and runtime probes read in a member directory. */
+const MEMBER_PROBE_FILES = ['deno.json', 'deno.jsonc', 'package.json', 'bun.lock', 'bun.lockb'];
+
+/**
+ * Whether an interrupted adoption's member directory may feed the probes.
+ *
+ * The directory and every marker file present in it must resolve exactly to its
+ * place in the project: a link planted at `apps/<member>`, or at a manifest
+ * inside it, would otherwise feed a foreign manifest into the persisted runtime
+ * and probe support. An absent marker is simply absent. Any refusal drops the
+ * member directory from the probes; the planning that follows still refuses the
+ * move on its own terms.
+ *
+ * @param fs - The filesystem to probe
+ * @param project - The project directory (absolute)
+ * @param memberRoot - The planned member, relative to the project
+ * @returns Whether the member directory may be probed
+ */
+async function memberProbeInsideProject(
+  fs: IFileSystem,
+  project: string,
+  memberRoot: string,
+): Promise<boolean> {
+  const member = joinPath(project, memberRoot);
+  try {
+    await assertInsideProject(fs, project, member);
+    for (const name of MEMBER_PROBE_FILES) {
+      const path = joinPath(member, name);
+      try {
+        await fs.stat(path);
+      } catch (cause) {
+        if (isMissingPath(cause)) continue;
+        return false;
+      }
+      await assertInsideProject(fs, project, path);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Runs `setu adopt`.
  *
@@ -193,13 +235,9 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
   // union is the root's own answer. The member is read only when it is really
   // inside the project: a link planted at `apps/<member>` must not feed a foreign
   // manifest into the probes, so it is ignored here and the planning below refuses.
-  const memberCandidate = joinPath(project, memberRoot);
-  let memberDir: string | undefined = memberCandidate;
-  try {
-    await assertInsideProject(deps.fs, project, memberCandidate);
-  } catch {
-    memberDir = undefined;
-  }
+  const memberDir = (await memberProbeInsideProject(deps.fs, project, memberRoot))
+    ? joinPath(project, memberRoot)
+    : undefined;
   const plugins = new Set([
     ...(await detectPlugins(deps.fs, project)),
     ...(memberDir === undefined ? [] : await detectPlugins(deps.fs, memberDir)),

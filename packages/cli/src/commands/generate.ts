@@ -664,16 +664,34 @@ export async function runGenerateCommand(
 
 /**
  * Drops import declarations from masked source, so a binding that is imported
- * but never called or listed does not count as wiring. Strings are already
- * masked, so no `;` inside a module specifier can end a declaration early; an
- * import written without its semicolon swallows the next statement and is
- * reported, which fails toward reporting.
+ * but never called or listed does not count as wiring.
+ *
+ * The mask blanks every string literal, module specifiers included, so a
+ * declaration ends at its `from` keyword; matching up to that keyword rather than
+ * a `;` keeps a statement after a semicolonless import intact.
  *
  * @param code - Masked source, or undefined when it could not be classified
- * @returns The code without its import declarations
+ * @returns The code without its import clauses
  */
 function withoutImports(code: string | undefined): string | undefined {
-  return code?.replace(/\bimport\b[^;]*;/g, '');
+  return code?.replace(/\bimport\b[^;]*?\bfrom\b/g, '');
+}
+
+/**
+ * Whether masked barrel code activates the module: the functional registrar is
+ * CALLED, or the class-based module is an element of the `MODULES` array. A
+ * reference anywhere else — an export, an alias, another array — activates
+ * nothing.
+ *
+ * @param code - The masked barrel, import clauses removed
+ * @param symbol - The module's registrar or module class name
+ * @param mode - The project's generator mode
+ * @returns Whether the barrel activates the module
+ */
+function activatesModule(code: string, symbol: string, mode: GeneratorMode): boolean {
+  if (mode !== 'class-based') return new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+  const modules = new RegExp(`\\b${MODULES_EXPORT}\\b[^=]*=\\s*\\[([^\\]]*)\\]`).exec(code);
+  return modules !== null && new RegExp(`\\b${symbol}\\b`).test(modules[1] ?? '');
 }
 
 /**
@@ -716,7 +734,9 @@ async function reportInactiveModule(
     barrel = undefined;
   }
   const barrelCode = barrel === undefined ? undefined : withoutImports(maskSourceCode(barrel));
-  if (barrelCode !== undefined && new RegExp(`\\b${symbol}\\b`).test(barrelCode)) {
+  // `symbol` is built from an identifier-safe kebab (`deriveNames`), so it carries
+  // no regular-expression metacharacters.
+  if (barrelCode !== undefined && activatesModule(barrelCode, symbol, mode)) {
     // Active: the remaining gap is the developer's config, which the CLI cannot
     // edit. An absent config reports nothing — there is no file to point at.
     const config = await readConfigModule(fs, dir);

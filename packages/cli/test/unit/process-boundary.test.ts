@@ -285,6 +285,46 @@ describe('the shell logical working directory', () => {
     }
   });
 
+  it('threads a trusted PWD into the run, so a symlinked member is refused', async () => {
+    const root = await nodeFs.realpath(await tempDir({ prefix: 'm119h-pwd-link-' }));
+    const real = `${root}/real`;
+    const link = `${root}/ws/apps/a`;
+    await nodeFs.mkdir(real);
+    await nodeFs.mkdir(`${root}/ws/apps`, { recursive: true });
+    await nodeFs.symlink(real, link);
+    const previous = process.env['PWD'];
+    try {
+      process.env['PWD'] = link;
+      const fs = createFakeFs({
+        [`${root}/ws/setu.workspace.json`]: JSON.stringify({
+          version: 1,
+          basePort: 3000,
+          runtime: 'node',
+          transport: 'http',
+          members: [{ name: 'a', port: 3000 }],
+        }),
+        [`${real}/package.json`]: '{}',
+      });
+      const errors: string[] = [];
+      const host: MainProcess = {
+        args: ['agents'],
+        cwd: () => real,
+        isTerminal: () => false,
+        prompt: () => Promise.resolve(null),
+        log: () => {},
+        error: (message) => errors.push(message),
+        portAvailable: () => Promise.resolve(true),
+      };
+      expect(await runMain({ fs, now: () => 0 }, host)).toBe(1);
+      expect(errors.join('\n')).toContain('is a symlinked member of the workspace at');
+      expect(fs.writes).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env['PWD'];
+      else process.env['PWD'] = previous;
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('threads a trusted PWD into the run instead of dropping it', async () => {
     const root = await tempDir({ prefix: 'm119h-pwd-thread-' });
     const previous = process.env['PWD'];
