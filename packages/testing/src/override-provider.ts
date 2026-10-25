@@ -1,6 +1,8 @@
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type {
   IContainer,
+  ContainerToken,
+  IRequestContext,
   IPlugin,
   IPluginContext,
   Provider,
@@ -24,10 +26,15 @@ import { VERSION } from './version.ts';
  */
 class OverridingContainer implements IContainer {
   readonly #inner: IContainer;
-  readonly #token: string;
+  readonly #token: ContainerToken;
   readonly #claim: { claimed: boolean };
+  readonly #requests = new WeakMap<IRequestContext, IContainer>();
 
-  constructor(inner: IContainer, token: string, claim: { claimed: boolean } = { claimed: false }) {
+  constructor(
+    inner: IContainer,
+    token: ContainerToken,
+    claim: { claimed: boolean } = { claimed: false },
+  ) {
     this.#inner = inner;
     this.#token = token;
     this.#claim = claim;
@@ -38,7 +45,7 @@ class OverridingContainer implements IContainer {
     return this.#claim.claimed;
   }
 
-  register<T>(token: string, provider: Provider<T>, options?: ProviderOptions): void {
+  register<T>(token: ContainerToken<T>, provider: Provider<T>, options?: ProviderOptions<T>): void {
     if (token === this.#token) {
       this.#claim.claimed = true;
       return;
@@ -46,14 +53,14 @@ class OverridingContainer implements IContainer {
     this.#inner.register(token, provider, options);
   }
 
-  resolve<T>(token: string): T {
+  resolve<T>(token: ContainerToken<T>): T {
     if (token === this.#token) {
       this.#claim.claimed = true;
     }
     return this.#inner.resolve<T>(token);
   }
 
-  has(token: string): boolean {
+  has(token: ContainerToken): boolean {
     if (token === this.#token) {
       this.#claim.claimed = true;
     }
@@ -62,6 +69,18 @@ class OverridingContainer implements IContainer {
 
   createScope(): IContainer {
     return new OverridingContainer(this.#inner.createScope(), this.#token, this.#claim);
+  }
+
+  forRequest(ctx: IRequestContext): IContainer {
+    const cached = this.#requests.get(ctx);
+    if (cached !== undefined) return cached;
+    const scope = new OverridingContainer(this.#inner.forRequest(ctx), this.#token, this.#claim);
+    this.#requests.set(ctx, scope);
+    return scope;
+  }
+
+  dispose(): void | Promise<void> {
+    return this.#inner.dispose();
   }
 }
 
@@ -84,8 +103,11 @@ class OverridingContainer implements IContainer {
  *
  * @param token - The container token to replace: an `@Injectable({ token })`
  * value, or the token the decorator derived for the class.
+ *
  * @param provider - The double: `{ useValue }`, `{ useFactory }` or `{ useClass }`
+ *
  * @param options - Lifecycle scope for the double
+ *
  * @returns A plugin to append to `createTestApp`'s `overrides`, or to pass to
  * `app.register()` on an un-started application
  * @throws {Error} During `start()`. From `register()` if the application has no
@@ -102,15 +124,17 @@ class OverridingContainer implements IContainer {
  *   overrides: [overrideProvider('pricing-service', { useValue: { price: () => 0 } })],
  * });
  * ```
+ *
  * @since 0.9.0
  */
 export function overrideProvider<T>(
-  token: string,
+  token: ContainerToken<T>,
   provider: Provider<T>,
-  options?: ProviderOptions,
+  options?: ProviderOptions<T>,
 ): IPlugin {
+  const name = typeof token === 'string' ? token : token.name;
   return {
-    name: `test-provider-override.${token}`,
+    name: `test-provider-override.${name}`,
     version: VERSION,
     dependencies: [CAPABILITIES.DI_CONTAINER],
     priority: PLUGIN_PRIORITY.NORMAL,
@@ -118,7 +142,7 @@ export function overrideProvider<T>(
       const container = ctx.container;
       if (container === undefined) {
         throw new Error(
-          `Cannot override provider '${token}': the application has no DI container. ` +
+          `Cannot override provider '${name}': the application has no DI container. ` +
             `overrideProvider() replaces a DiPlugin provider; use overrideCapability() for a ` +
             `capability in the service registry.`,
         );
@@ -127,10 +151,10 @@ export function overrideProvider<T>(
         container.register(token, provider, options);
       } catch (cause) {
         throw new Error(
-          `Cannot override provider '${token}': it was registered on the container before ` +
+          `Cannot override provider '${name}': it was registered on the container before ` +
             `the override ran, so the application has already been built with the real ` +
             `provider. Register overrideProvider() after DiPlugin and before the plugin that ` +
-            `registers '${token}'.`,
+            `registers '${name}'.`,
           { cause },
         );
       }
@@ -140,7 +164,7 @@ export function overrideProvider<T>(
       ctx.lifecycle.onInit(() => {
         if (!overriding.claimed) {
           throw new Error(
-            `Cannot override provider '${token}': nothing in the application registers or ` +
+            `Cannot override provider '${name}': nothing in the application registers or ` +
               `injects it. Check the token for a typo — an @Injectable class's token is its ` +
               `@Injectable({ token }) value, or the one the decorator derived from its name.`,
           );

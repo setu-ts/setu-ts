@@ -12,6 +12,13 @@ import * as common from '../../src/index.ts';
 import type { RequestOrigin } from '../../src/index.ts';
 import type { HealthIndicatorOptions, IHealthApi, IHealthService } from '../../src/index.ts';
 
+it('exports typed container tokens and dependency entries', () => {
+  const token: common.InjectionToken<number> = common.createToken<number>('count');
+  const key: common.ContainerToken<number> = token;
+  const dependency: common.InjectEntry = { token: key, optional: true };
+  expect(dependency.token).toBe(token);
+});
+
 it('exports optional health readiness contracts from the barrel', async () => {
   const options: HealthIndicatorOptions = { readiness: false };
   const indicator: common.IHealthIndicator = {

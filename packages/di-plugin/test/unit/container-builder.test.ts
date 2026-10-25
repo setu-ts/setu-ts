@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { IContainer } from '@setu-ts/common';
+import { createToken } from '@setu-ts/common';
 
 import { ContainerBuilder, createContainer } from '../../src/container/container-builder.ts';
 import type { ExternalResolver } from '../../src/container/container.ts';
@@ -21,6 +22,25 @@ function makeResolver(services: Record<string, unknown>): ExternalResolver {
 }
 
 describe('ContainerBuilder', () => {
+  it('builds typed tokens with disposal and exposes the owner close method', () => {
+    const token = createToken<number>('count');
+    const values: number[] = [];
+    const c = new ContainerBuilder()
+      .register(
+        token,
+        { useValue: 7 },
+        {
+          dispose: (value) => {
+            values.push(value);
+          },
+        },
+      )
+      .build();
+    c.close();
+    expect(c.resolve(token)).toBe(7);
+    c.dispose();
+    expect(values).toEqual([7]);
+  });
   describe('fluent API', () => {
     it('returns this for chaining', () => {
       const b = new ContainerBuilder();

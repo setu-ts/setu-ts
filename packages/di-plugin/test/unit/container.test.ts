@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import { createToken } from '@setu-ts/common';
 
 import { DiContainer } from '../../src/container/container.ts';
 import type { ExternalResolver } from '../../src/container/container.ts';
@@ -34,6 +35,86 @@ function makeResolver(services: Record<string, unknown>): ExternalResolver {
 }
 
 describe('DiContainer', () => {
+  it('infers typed and class tokens, including distinct tokens with the same name', () => {
+    const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+    const first = createToken<number>('same');
+    const second = createToken<string>('same');
+    c.register(first, { useValue: 1 });
+    c.register(second, { useValue: 'two' });
+    c.register(SimpleService, { useClass: SimpleService });
+    expectTypeOf(c.resolve(first)).toEqualTypeOf<number>();
+    expectTypeOf(c.resolve(SimpleService)).toEqualTypeOf<SimpleService>();
+    expect(c.resolve(first)).toBe(1);
+    expect(c.resolve(second)).toBe('two');
+    expect(c.resolve(SimpleService)).toBeInstanceOf(SimpleService);
+    expect(c.has(first)).toBe(true);
+  });
+
+  it('shares a compiled class alias and resolves minified classes by identity', () => {
+    const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+    const a = class {
+      readonly value = 1;
+    };
+    const provider = { useClass: a };
+    c.register('service', provider);
+    c.register(a, provider);
+    expect(c.resolve(a)).toBe(c.resolve('service'));
+    expect(c.resolve(a).value).toBe(1);
+  });
+
+  it('passes factory dependencies in order and absent optional values as undefined', () => {
+    const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+    c.register('a', { useValue: 1 });
+    c.register('factory', {
+      useFactory: (a: number, missing: unknown) => [a, missing],
+      inject: ['a', { token: 'missing', optional: true }],
+    });
+    expect(c.resolve('factory')).toEqual([1, undefined]);
+  });
+
+  it('refuses a transient reaching scoped on the root and gives nested scopes fresh slots', () => {
+    const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+    c.register('scoped', { useFactory: () => ({}) }, { scope: 'scoped' });
+    c.register(
+      'transient',
+      { useFactory: (value: unknown) => value, inject: ['scoped'] },
+      { scope: 'transient' },
+    );
+    expect(() => c.resolve('transient')).toThrow(/transient.*requires a scope/);
+    const scope = c.createScope();
+    expect(scope.resolve('transient')).toBe(scope.resolve('scoped'));
+    expect(scope.createScope().resolve('scoped')).not.toBe(scope.resolve('scoped'));
+  });
+
+  it('caches undefined singleton and scoped values and retries failed constructors', () => {
+    const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+    let calls = 0;
+    c.register('retry', {
+      useFactory: () => {
+        if (++calls === 1) throw new Error('retry');
+        return undefined;
+      },
+    });
+    expect(() => c.resolve('retry')).toThrow('retry');
+    expect(c.resolve('retry')).toBeUndefined();
+    expect(c.resolve('retry')).toBeUndefined();
+    expect(calls).toBe(2);
+    let scoped = 0;
+    c.register(
+      'undefined',
+      {
+        useFactory: () => {
+          scoped++;
+          return undefined;
+        },
+      },
+      { scope: 'scoped' },
+    );
+    const scope = c.createScope();
+    scope.resolve('undefined');
+    scope.resolve('undefined');
+    expect(scoped).toBe(1);
+  });
   // ---- Value provider ----
 
   describe('value provider', () => {
@@ -160,14 +241,10 @@ describe('DiContainer', () => {
       const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
       c.register('s', { useClass: SimpleService }, { scope: 'scoped' });
 
-      // Same container = same instance
-      expect(c.resolve('s')).toBe(c.resolve('s'));
-
-      // Different scope = different instance
+      expect(() => c.resolve('s')).toThrow(/requires a scope/);
       const child = c.createScope();
-      expect(child.resolve<SimpleService>('s')).not.toBe(c.resolve<SimpleService>('s'));
-
-      // Child caches its own
+      const second = c.createScope();
+      expect(child.resolve('s')).not.toBe(second.resolve('s'));
       expect(child.resolve('s')).toBe(child.resolve('s'));
     });
   });
@@ -195,17 +272,17 @@ describe('DiContainer', () => {
   describe('circular dependency', () => {
     it('throws on a direct self-cycle', () => {
       const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
-      c.register('self', { useFactory: () => c.resolve('self') });
+      c.register('self', { useFactory: (value: unknown) => value, inject: ['self'] });
 
-      expect(() => c.resolve('self')).toThrow(/Circular dependency detected/);
+      expect(() => c.resolve('self')).toThrow(/cycle: self → self/);
     });
 
     it('throws on an indirect cycle', () => {
       const c = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
-      c.register('a', { useFactory: () => c.resolve('b') });
-      c.register('b', { useFactory: () => c.resolve('a') });
+      c.register('a', { useFactory: (value: unknown) => value, inject: ['b'] });
+      c.register('b', { useFactory: (value: unknown) => value, inject: ['a'] });
 
-      expect(() => c.resolve('a')).toThrow(/Circular dependency detected: a → b → a/);
+      expect(() => c.resolve('a')).toThrow(/cycle: a → b → a/);
     });
   });
 

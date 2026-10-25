@@ -11,6 +11,8 @@ import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
+import { runDeferred } from './deferred.ts';
+import type { DeferredCleanup } from './deferred.ts';
 
 /**
  * Internal result of {@linkcode createRequestContext}: the immutable
@@ -18,12 +20,20 @@ import { ResponseBuilder } from './response.ts';
  * to install matched route parameters after routing. This shape is NOT
  * exported from the package public API — only the kernel dispatch path
  * uses `setParams`.
+ * @since 0.11.0
+ * @internal
  */
 export interface RequestContextHandle {
   /** The per-request context. */
   readonly ctx: IRequestContext;
   /** Replaces the params exposed by `ctx.params` (used after route match). */
   setParams(params: Record<string, string>): void;
+  /**
+   * Marks completion and takes ownership of the lazily allocated cleanup list.
+   * @returns The registered callbacks, or undefined for an unused context
+   * @since 0.11.0
+   */
+  takeDeferred(): DeferredCleanup[] | undefined;
 }
 
 /** Shared empty params — replaced by `setParams` once a route matches. */
@@ -59,6 +69,8 @@ class RequestContext implements IRequestContext {
   #state: Map<string, unknown> | undefined;
   #query: Readonly<Record<string, string>> | undefined;
   #signal: AbortSignal | undefined;
+  #deferred: DeferredCleanup[] | undefined;
+  #completed = false;
 
   constructor(request: IRequest, registry: ServiceRegistry, runtime: IRuntimeServices) {
     this.request = request;
@@ -137,6 +149,23 @@ class RequestContext implements IRequestContext {
   setParams(params: Record<string, string>): void {
     this.#params = params;
   }
+
+  /** Registers cleanup lazily; late registrations settle immediately. */
+  defer(cleanup: DeferredCleanup): void {
+    if (this.#completed) {
+      void runDeferred([cleanup], this.#registry);
+      return;
+    }
+    (this.#deferred ??= []).push(cleanup);
+  }
+
+  /** Internal completion handoff; no list is allocated for an unused request. */
+  takeDeferred(): DeferredCleanup[] | undefined {
+    this.#completed = true;
+    const cleanups = this.#deferred;
+    this.#deferred = undefined;
+    return cleanups;
+  }
 }
 
 /**
@@ -152,6 +181,8 @@ class RequestContext implements IRequestContext {
  *   on first `ctx.services` read)
  * @param runtime - Runtime services for uuid and hrtime
  * @returns The request context handle
+ * @since 0.11.0
+ * @internal
  */
 export function createRequestContext(
   request: IRequest,
@@ -165,5 +196,6 @@ export function createRequestContext(
     setParams(next: Record<string, string>): void {
       ctx.setParams(next);
     },
+    takeDeferred: () => ctx.takeDeferred(),
   };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IContainer } from '@setu-ts/common';
@@ -7,6 +7,8 @@ import { DiPlugin } from '../../src/plugin/di-plugin.ts';
 import type { DiPluginOptions } from '../../src/plugin/di-plugin.ts';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import manifest from '../../deno.json' with { type: 'json' };
+import { createApplication } from '@setu-ts/kernel';
+import { RuntimePlugin } from '@setu-ts/runtime';
 
 // --- Test doubles for autoRegister ---
 
@@ -31,6 +33,64 @@ function getContainer(services: Map<string, unknown>): IContainer {
 }
 
 describe('DiPlugin integration', () => {
+  it('accepts a later plugin bootstrap registration in the real kernel and disposes on stop', async () => {
+    const dispose = vi.fn();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DiPlugin(),
+        {
+          name: 'bootstrap-provider',
+          version: '1.0.0',
+          dependencies: [CAPABILITIES.DI_CONTAINER],
+          register(ctx) {
+            ctx.lifecycle.onBootstrap(() => {
+              ctx.container!.register('late-boot', { useValue: 42 }, { dispose });
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    try {
+      const c = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+      expect(c.resolve('late-boot')).toBe(42);
+      expect(() => c.register('after-start', { useValue: 0 })).toThrow(/closed/);
+    } finally {
+      await app.stop();
+    }
+    expect(dispose).toHaveBeenCalledExactlyOnceWith(42);
+  });
+  it('closes after bootstrap registrations, logs opaque tokens once, and disposes on close', async () => {
+    const { ctx, services } = createFakeContext();
+    const bootstrap: (() => void | Promise<void>)[] = [];
+    const close: (() => void | Promise<void>)[] = [];
+    ctx.lifecycle.onBootstrap = (fn) => {
+      bootstrap.push(fn);
+    };
+    ctx.lifecycle.onClose = (fn) => {
+      close.push(fn);
+    };
+    const debug = vi.fn();
+    Object.defineProperty(ctx, 'logger', { value: { debug } });
+    DiPlugin().register(ctx);
+    const container = getContainer(services);
+    const dispose = vi.fn();
+    bootstrap.push(() => {
+      container.register('boot', { useValue: {} }, { dispose });
+    });
+    bootstrap.push(() => {
+      container.register('opaque', { useFactory: () => 1 });
+    });
+    for (const hook of bootstrap) await hook();
+    expect(container.resolve('boot')).toEqual({});
+    expect(() => container.register('late', { useValue: 0 })).toThrow(/closed/);
+    expect(debug).toHaveBeenCalledExactlyOnceWith('DI factories without inject are unchecked', {
+      tokens: ['opaque'],
+    });
+    for (const hook of close) await hook();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
   describe('plugin contract', () => {
     it('has the correct name', () => {
       expect(DiPlugin().name).toBe('di-plugin');

@@ -316,6 +316,18 @@ export interface IResponse {
  * @since 0.1.0
  */
 export interface IRequestContext {
+  /**
+   * Registers cleanup in reverse registration order. Buffered responses wait
+   * for cleanup; streaming responses clean up on end, error, or cancellation.
+   * Calls after completion run immediately. Failures are reported at warn.
+   *
+   * @param cleanup - Work to run at completion
+   *
+   * @returns Nothing
+   *
+   * @since 0.11.0
+   */
+  defer?(cleanup: () => void | Promise<void>): void;
   /** Unique request ID (generated or propagated by middleware). */
   readonly id: string;
   /** The incoming request. */

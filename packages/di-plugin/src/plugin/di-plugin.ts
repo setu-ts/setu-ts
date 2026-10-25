@@ -13,6 +13,7 @@ import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 
 import { ContainerBuilder } from '../container/container-builder.ts';
 import type { ExternalResolver } from '../container/container.ts';
+import { tokenName } from '../container/errors.ts';
 import { VERSION } from '../version.ts';
 
 /**
@@ -58,8 +59,12 @@ const PLUGIN_NAME = 'di-plugin';
  *
  * app.register(DiPlugin({ defaultScope: 'singleton' }));
  * ```
+ *
  * @param options - Plugin configuration
+ *
  * @returns The plugin instance
+ * @throws {Error} During bootstrap for invalid dependency graphs; on close for disposal failures
+ *
  * @since 0.1.0
  */
 export function DiPlugin(options?: DiPluginOptions): IPlugin {
@@ -87,6 +92,18 @@ export function DiPlugin(options?: DiPluginOptions): IPlugin {
 
       const container = builder.build();
       ctx.services.register<IContainer>(CAPABILITIES.DI_CONTAINER, container);
+      ctx.lifecycle.onBootstrap(() => {
+        ctx.lifecycle.onBootstrap(() => {
+          container.close();
+          const opaque = container.opaqueTokens();
+          if (opaque.length > 0) {
+            ctx.logger?.debug('DI factories without inject are unchecked', {
+              tokens: opaque.map(tokenName),
+            });
+          }
+        });
+      });
+      ctx.lifecycle.onClose(() => container.dispose());
     },
   };
 }

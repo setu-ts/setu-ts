@@ -7,8 +7,14 @@
  *
  * @module
  */
-import type { IRequestContext, ValidationTarget } from '@setu-ts/common';
-import { parseCookie, validatedStateKey } from '@setu-ts/common';
+import type {
+  ContainerToken,
+  IContainer,
+  IRequestContext,
+  ValidationTarget,
+} from '@setu-ts/common';
+import { CAPABILITIES, parseCookie, validatedStateKey } from '@setu-ts/common';
+import { serviceParameterToken } from '../decorators/params.ts';
 
 import { isContextParameter } from '../decorators/security.ts';
 import type { ParameterMetadata } from '../metadata/metadata-store.ts';
@@ -138,6 +144,7 @@ function resolveRaw(
  * @param ctx - The request context
  * @param param - The parameter metadata
  * @returns The resolved value (may be a promise for `body`/custom)
+ * @throws {Error} If a Service source lacks a container, request cleanup, or valid wiring
  * @since 0.1.0
  */
 export function resolveParameter(
@@ -177,6 +184,7 @@ export function resolveParameter(
  * means no rule matches, so the handler would receive `undefined`.
  */
 type CustomResolution =
+  | { readonly kind: 'service'; readonly token: ContainerToken }
   | { readonly kind: 'context' }
   | { readonly kind: 'current-user' }
   | { readonly kind: 'registered'; readonly resolver: CustomParameterResolver }
@@ -188,6 +196,8 @@ type CustomResolution =
  * cannot disagree about what resolves.
  */
 function classifyCustom(param: ParameterMetadata): CustomResolution {
+  const token = serviceParameterToken(param.metadata);
+  if (token !== undefined) return { kind: 'service', token };
   if (isContextParameter(param.metadata)) {
     return { kind: 'context' };
   }
@@ -214,14 +224,19 @@ function classifyCustom(param: ParameterMetadata): CustomResolution {
  * Internal — not exported from the package barrel.
  *
  * @param params - The handler's parameter metadata
+ * @param hasContainer - Whether Service parameters can reach a DI container
  * @returns The unresolvable parameters, in declaration order
+ * @since 0.11.0
  */
 export function findUnresolvableParameters(
   params: readonly ParameterMetadata[],
+  hasContainer = true,
 ): readonly ParameterMetadata[] {
-  return params.filter(
-    (param) => param.type === 'custom' && classifyCustom(param).kind === 'unresolvable',
-  );
+  return params.filter((param) => {
+    if (param.type !== 'custom') return false;
+    const resolution = classifyCustom(param);
+    return resolution.kind === 'unresolvable' || (resolution.kind === 'service' && !hasContainer);
+  });
 }
 
 /**
@@ -232,6 +247,11 @@ export function findUnresolvableParameters(
 async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Promise<unknown> {
   const resolution = classifyCustom(param);
   switch (resolution.kind) {
+    case 'service':
+      return ctx.services
+        .get<IContainer>(CAPABILITIES.DI_CONTAINER)
+        .forRequest(ctx)
+        .resolve(resolution.token);
     case 'context':
       return ctx;
     case 'current-user':
@@ -251,6 +271,7 @@ async function resolveCustom(ctx: IRequestContext, param: ParameterMetadata): Pr
  * @param ctx - The request context
  * @param params - The handler's parameter metadata
  * @returns The resolved arguments, indexed to match the handler signature
+ * @throws {Error} If a Service source lacks a container, request cleanup, or valid wiring
  * @since 0.1.0
  */
 export async function resolveParameters(

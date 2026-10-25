@@ -1,3 +1,4 @@
+import type { ContainerToken } from '@setu-ts/common';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ClassProvider, IContainer, Provider, ProviderOptions } from '@setu-ts/common';
@@ -39,14 +40,21 @@ function routeDef(route: RegisteredRoute['route']): {
 /** A recording DI container. */
 function recordingContainer(): {
   container: IContainer;
-  registered: { token: string; provider: Provider<unknown>; options?: ProviderOptions }[];
+  registered: { token: ContainerToken; provider: Provider<unknown>; options?: ProviderOptions }[];
 } {
-  const registered: { token: string; provider: Provider<unknown>; options?: ProviderOptions }[] =
-    [];
-  const instances = new Map<string, unknown>();
+  const registered: {
+    token: ContainerToken;
+    provider: Provider<unknown>;
+    options?: ProviderOptions;
+  }[] = [];
+  const instances = new Map<ContainerToken, unknown>();
   const container: IContainer = {
-    register<T>(token: string, provider: Provider<T>, options?: ProviderOptions): void {
-      const entry: { token: string; provider: Provider<unknown>; options?: ProviderOptions } = {
+    register<T>(token: ContainerToken<T>, provider: Provider<T>, options?: ProviderOptions): void {
+      const entry: {
+        token: ContainerToken;
+        provider: Provider<unknown>;
+        options?: ProviderOptions;
+      } = {
         token,
         provider: provider as Provider<unknown>,
       };
@@ -55,10 +63,10 @@ function recordingContainer(): {
       }
       registered.push(entry);
     },
-    has(token: string): boolean {
+    has(token: ContainerToken): boolean {
       return registered.some((r) => r.token === token);
     },
-    resolve<T>(token: string): T {
+    resolve<T>(token: ContainerToken<T>): T {
       const entry = registered.find((r) => r.token === token);
       if (entry === undefined) {
         throw new Error(`not registered: ${token}`);
@@ -69,6 +77,10 @@ function recordingContainer(): {
       }
       return instances.get(token) as T;
     },
+    forRequest(): IContainer {
+      return container;
+    },
+    dispose(): void {},
     createScope(): IContainer {
       return container;
     },
