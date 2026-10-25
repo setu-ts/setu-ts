@@ -191,9 +191,14 @@ describe('M119a REAL NATS delivery bounds', { skip: natsUrl === undefined }, () 
     let paused = false;
     try {
       const { broker } = await f.boot(200);
-      const result = await runProcess('docker', {
-        args: ['ps', '-q', '--filter', `publish=${new URL(f.url).port || 4222}`],
-      });
+      // Under `ci:local` the backend publishes nothing on the host; its shard
+      // labels identify it instead (the other outage suites' lookup).
+      const port = new URL(f.url).port || '4222';
+      const shard = process.env['SETU_CI_SHARD'];
+      const filters = shard
+        ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+        : ['--filter', `publish=${port}`];
+      const result = await runProcess('docker', { args: ['ps', '-q', ...filters] });
       expect(result.success).toBe(true);
       container = new TextDecoder().decode(result.stdout).trim().split('\n')[0]!;
       expect(container).not.toBe('');
