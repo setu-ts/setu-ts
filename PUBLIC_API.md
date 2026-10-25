@@ -12517,11 +12517,12 @@ contract changed in 0.11.0:
 **`IRequestContext.defer?(cleanup)`** (M125) — registers per-request cleanup. The kernel runs
 cleanups in reverse registration order once the request finishes: before a buffered response is
 handed back (awaiting any that return a promise), and when a streaming body ends, errors or is
-cancelled; on the failure path, after the 500 is written. A cleanup's throw or rejection is reported
-at `warn` through the logger capability when one is registered, and never changes the response; a
-`defer` after completion runs at once. The member is optional, so no implementor breaks: the
-kernel's context implements it, `createTestContext` does not. A request that never calls it stays on
-the synchronous path.
+cancelled; on the failure path, after the 500 is written. Each asynchronous cleanup is bounded at
+5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later outcome is ignored. A
+cleanup's throw or rejection is reported at `warn` through the logger capability when one is
+registered, and never changes the response; a `defer` after completion runs at once. The member is
+optional, so no implementor breaks: the kernel's context implements it, `createTestContext` does
+not. A request that never calls it stays on the synchronous path.
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and

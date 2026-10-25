@@ -260,8 +260,9 @@ application without `DiPlugin` is unaffected.
 - **A boot failure naming a `missing` dependency or a `cycle`** used to surface on the first request
   that resolved it; it now fails `app.start()`, listing every finding at once.
 - **`ScopeRequiredError`** replaces the old behaviour of a `scoped` token resolved on the root
-  container quietly acting as a singleton. Resolve it through `forRequest(ctx)` or a scope from
-  `createScope()`.
+  container quietly acting as a singleton. It is also thrown for a `transient` with a `dispose`
+  option resolved on the root, which the root would otherwise keep until the application closes.
+  Resolve it through `forRequest(ctx)` or a scope from `createScope()`.
 - **`ContainerClosedError`**: `DiPlugin` closes the container after the last bootstrap hook. Move a
   `register` that runs after `app.start()` into a plugin's `register()`, `onInit` or `onBootstrap`.
   A scope may still register tokens its parent does not have, but registering one the parent has now
@@ -276,6 +277,8 @@ application without `DiPlugin` is unaffected.
 - **Unit tests of a request-scoped handler** need the kernel's request context, which implements
   `ctx.defer`: test them through `createTestApp` and `inject()`. A `createTestContext` context makes
   `forRequest` throw `RequestScopeUnavailableError`.
+- **A `dispose` that takes longer than 5 s** no longer holds the response: the kernel reports it at
+  `warn` and moves on.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
   in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
 

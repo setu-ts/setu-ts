@@ -17,12 +17,13 @@ All notable changes to this project are documented here. The format follows
   `IContainer.forRequest(ctx)` returns the request's scope, created on first call and disposed when
   the request finishes; `IContainer.dispose()` and `ProviderOptions.dispose` release what the
   container created. `IRequestContext.defer?(cleanup)` is the kernel's per-request cleanup
-  primitive: cleanups run before a buffered response is returned, or when a streamed body ends, and
-  a request that never calls it stays on the synchronous path. `@Params(Service(token))`
-  (`@setu-ts/decorator-plugin`) resolves from the request scope on every call. `DiContainer.close()`
-  ends registration; `DiPlugin` calls it after the last bootstrap hook. New errors in
-  `@setu-ts/di-plugin`: `ContainerValidationError` (with `findings`), `ScopeRequiredError`,
-  `ScopeDisposedError`, `ContainerClosedError` and `RequestScopeUnavailableError`.
+  primitive: cleanups run before a buffered response is returned, or when a streamed body ends, each
+  asynchronous one bounded at 5000 ms, and a request that never calls it stays on the synchronous
+  path. `@Params(Service(token))` (`@setu-ts/decorator-plugin`) resolves from the request scope on
+  every call. `DiContainer.close()` ends registration; `DiPlugin` calls it after the last bootstrap
+  hook. New errors in `@setu-ts/di-plugin`: `ContainerValidationError` (with `findings`),
+  `ScopeRequiredError`, `ScopeDisposedError`, `ContainerClosedError` and
+  `RequestScopeUnavailableError`.
 
 - **Portable database errors (M119e, 0.11.0, `@setu-ts/common`, `@setu-ts/database-plugin`).**
   `UnknownPayloadFieldError` moves to common, preserving the database-plugin re-export's identity;
@@ -132,9 +133,10 @@ All notable changes to this project are documented here. The format follows
   `transient`s, fails the boot with `ContainerValidationError`, as do a missing dependency and a
   cycle — previously the singleton silently kept the first scope's instance, and the others failed
   on the first resolve that reached them. Resolving a `scoped` token on the root container, or a
-  `transient` there that reaches one, throws `ScopeRequiredError` instead of quietly behaving as a
-  singleton. Reach scoped services through `container.forRequest(ctx)` or `@Params(Service(token))`,
-  or `createScope()` for a scope of your own.
+  `transient` there that reaches one, or a `transient` with a `dispose` option, throws
+  `ScopeRequiredError` instead of quietly behaving as a singleton. Reach scoped services through
+  `container.forRequest(ctx)` or `@Params(Service(token))`, or `createScope()` for a scope of your
+  own.
 - **BREAKING — DI registration closes at boot (M125, 0.11.0, `@setu-ts/di-plugin`).** `DiPlugin`
   closes the container after the last bootstrap hook; `register` on it afterwards throws
   `ContainerClosedError`. Register providers during `register()`, `onInit` or `onBootstrap`. A scope
