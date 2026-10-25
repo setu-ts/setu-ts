@@ -47,6 +47,7 @@ export async function loadIORedisInstrumentation(
       return await import('@opentelemetry/instrumentation-ioredis');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-ioredis', {
+        requiredBy: '@setu-ts/telemetry-plugin',
         cause: error,
       });
     }

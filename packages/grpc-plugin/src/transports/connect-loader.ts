@@ -176,7 +176,10 @@ export const DEFAULT_IMPORTERS: ConnectImporters = {
     try {
       return await import('@connectrpc/connect');
     } catch (error) {
-      throw new OptionalDependencyUnavailableError('@connectrpc/connect', { cause: error });
+      throw new OptionalDependencyUnavailableError('@connectrpc/connect', {
+        requiredBy: '@setu-ts/grpc-plugin',
+        cause: error,
+      });
     }
   },
   protocol: async () => {
@@ -184,6 +187,7 @@ export const DEFAULT_IMPORTERS: ConnectImporters = {
       return await import('@connectrpc/connect/protocol');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@connectrpc/connect/protocol', {
+        requiredBy: '@setu-ts/grpc-plugin',
         cause: error,
       });
     }
@@ -192,14 +196,20 @@ export const DEFAULT_IMPORTERS: ConnectImporters = {
     try {
       return await import('@bufbuild/protobuf');
     } catch (error) {
-      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf', { cause: error });
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf', {
+        requiredBy: '@setu-ts/grpc-plugin',
+        cause: error,
+      });
     }
   },
   wkt: async () => {
     try {
       return await import('@bufbuild/protobuf/wkt');
     } catch (error) {
-      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf/wkt', { cause: error });
+      throw new OptionalDependencyUnavailableError('@bufbuild/protobuf/wkt', {
+        requiredBy: '@setu-ts/grpc-plugin',
+        cause: error,
+      });
     }
   },
 };

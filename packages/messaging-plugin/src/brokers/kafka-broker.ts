@@ -80,7 +80,10 @@ async function loadKafkajs(): Promise<typeof import('kafkajs')> {
   try {
     return await import('kafkajs');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('kafkajs', { cause: error });
+    throw new OptionalDependencyUnavailableError('kafkajs', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 

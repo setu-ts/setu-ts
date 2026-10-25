@@ -666,8 +666,12 @@ here.
   `setu agents --check --strict`, dry-run parity and symlinked-member refusal, fixed module 404,
   Worker name rule, interrupted `adopt` re-read, version-tagged links; V10-18, V10-23…V10-27,
   V10-35, V10-9, V10-10, V10-11, V10-42) — complete (PR #506).
-- **Next milestone** — M119f (telemetry and the optional-peer packages — optional peers in an npm
-  workspace). M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 119f** (`common` + `cli` + the 16 packages with optional peers — optional peers in an
+  npm workspace: the load error names who loads the peer and that it belongs where that package is
+  installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
+  V10-58) — complete (PR #505).
+- **Next milestone** — M119i (documentation that does not match the code, or is missing). M118 and
+  M120–M123 are open in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 

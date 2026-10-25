@@ -75,7 +75,10 @@ async function loadNats(): Promise<typeof import('nats')> {
   try {
     return await import('nats');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('nats', { cause: error });
+    throw new OptionalDependencyUnavailableError('nats', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 

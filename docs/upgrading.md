@@ -12,6 +12,32 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Optional peers and `setu add` workspace root entries (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli`)
+
+In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
+plugin whose optional peers are missing at the root, then run the printed install command from the
+workspace root. The command now records its peers in both root and member `package.json`
+`dependencies`, leaving a peer already in `dependencies`, `optionalDependencies` or a non-optional
+`peerDependencies` as it is, adding an optional peer to `dependencies` at its own spec, moving one
+declared only in `devDependencies` to `dependencies` with its pin unchanged, and recording a peer
+the root `overrides` pins (a string value, or an object's `"."` entry) at the override's own spec,
+since npm refuses a direct dependency whose spec differs from its override. A `$name` reference or a
+conditional override (a version-selector key, or several rules for one package) is left to you with
+a printed line. When a workspace member pins the peer at a different spec, the root entry is still
+written at the CLI's range and a note names that member, since npm may install a second copy for it.
+Both edited paths are printed. No framework pin is added at the root, and `setu add` still targets a
+member.
+
+For manually selected drivers, install peers where the framework package is installed, within the
+version range it declares for them. Avoid conflicting member pins: they can produce nested copies
+that a hoisted plugin cannot load. Existing pins are never corrected automatically. An absent root
+`package.json` keeps the member-only behavior; JSONC or invalid JSON is refused by filename before
+writing. Deno workspaces and standalone projects keep their existing behavior.
+
+The startup error now names the loading package and the placement rule via the optional `requiredBy`
+constructor option. Its `dependency` and `cause` are unchanged. See
+[Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace).
+
 ### Portable data contract: tenant columns, cursors, unknown fields and refused values (M119e, 0.11.0, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
 
 Restart pagination once on Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1:

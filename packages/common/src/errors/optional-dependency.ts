@@ -32,7 +32,9 @@
  * try {
  *   const mod = await import('ioredis');
  * } catch (error) {
- *   throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+ *   throw new OptionalDependencyUnavailableError('ioredis', {
+ *     cause: error, requiredBy: '@setu-ts/cache-plugin',
+ *   });
  * }
  * ```
  *
@@ -47,15 +49,17 @@ export class OptionalDependencyUnavailableError extends Error {
 
   /**
    * Builds the error. The `message` names the dependency and states both
-   * remedies: install it, or choose an option that does not need it on this
-   * runtime.
+   * remedies: install it where the loading package is installed, in the version
+   * range that package declares for it, or choose an option that does not need
+   * it on this runtime.
    *
    * @param dependency - The bare package name the load failed for
-   * @param options - The original rejection as `cause`
+   * @param options - The original rejection as `cause` and the loading package's
+   * npm name as `requiredBy` (added in 0.11.0); omitted names use generic wording
    */
-  constructor(dependency: string, options?: { cause?: unknown }) {
+  constructor(dependency: string, options?: { cause?: unknown; requiredBy?: string }) {
     super(
-      `Optional dependency '${dependency}' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`,
+      `Optional dependency '${dependency}' could not be loaded${options?.requiredBy === undefined ? '' : ` by '${options.requiredBy}'`}. Install it where '${options?.requiredBy ?? 'the package that loads it'}' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`,
       options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.dependency = dependency;

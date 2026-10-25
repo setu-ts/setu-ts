@@ -137,6 +137,399 @@ function harness(files: Readonly<Record<string, string>> = {}) {
   };
 }
 
+describe('setu add — optional peers in a Setu workspace (M119f)', () => {
+  const peers = [
+    '@opentelemetry/api',
+    '@opentelemetry/context-async-hooks',
+    '@opentelemetry/resources',
+    '@opentelemetry/sdk-trace-base',
+  ];
+  async function workspace(runtime = 'node') {
+    const h = harness();
+    const cli = (args: readonly string[]) =>
+      runCli(args, {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: (message) => h.out.push(message),
+        error: (message) => h.err.push(message),
+      });
+    expect(await cli(['new', 'ws', '--workspace', '--runtime', runtime])).toBe(0);
+    expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+    h.out.length = 0;
+    return h;
+  }
+  const put = (h: ReturnType<typeof harness>, path: string, text: string) =>
+    h.fs.writeFile(path, new TextEncoder().encode(text));
+  const dependencies = (h: ReturnType<typeof harness>, path: string) =>
+    (JSON.parse(h.read(path)) as { dependencies: Record<string, string> }).dependencies;
+
+  for (const runtime of ['node', 'bun']) {
+    it(`records the same console peers in root and member dependencies on ${runtime}, idempotently`, async () => {
+      const h = await workspace(runtime);
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
+        const deps = dependencies(h, path);
+        for (const peer of peers) expect(deps[peer], path).toBe(CLIENT_RANGES[peer]);
+        expect(h.out.join('\n')).toContain(`updated ${path}`);
+      }
+      expect(dependencies(h, '/app/ws/package.json')['@setu-ts/telemetry-plugin']).toBeUndefined();
+      const writes = h.fs.writes.length;
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      expect(h.fs.writes.length).toBe(writes);
+    });
+  }
+
+  it('preserves existing root peer pins while adding missing peers, even on re-add', async () => {
+    const h = await workspace();
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        dependencies: { '@opentelemetry/api': '1.9.1' },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/api']).toBe('1.9.1');
+    for (const peer of peers.slice(1)) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+  });
+
+  it('records a root-overridden peer at the override spec, so npm installs it without EOVERRIDE', async () => {
+    const h = await workspace();
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        overrides: {
+          // A string value and an object's "." entry pin the peer itself:
+          // npm accepts a direct dependency only at the override's exact spec.
+          '@opentelemetry/api': '1.9.1',
+          '@opentelemetry/resources': { '.': '2.9.0' },
+          // Overrides only a CHILD of the peer, not the peer: the CLI range applies.
+          '@opentelemetry/sdk-trace-base': { '@opentelemetry/core': '2.0.0' },
+          // A reference to a root dependency that does not exist: not a usable spec.
+          '@opentelemetry/context-async-hooks': '$@opentelemetry/context-async-hooks',
+        },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = dependencies(h, '/app/ws/package.json');
+    expect(root['@opentelemetry/api']).toBe('1.9.1');
+    expect(root['@opentelemetry/resources']).toBe('2.9.0');
+    expect(root['@opentelemetry/sdk-trace-base']).toBe(
+      CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+    );
+    expect(root['@opentelemetry/context-async-hooks']).toBeUndefined();
+    // The member keeps the CLI ranges even where they differ from the root
+    // override (`~1.9.0` against `1.9.1`): the root entry is what places one copy.
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/apps/api/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+    const out = h.out.join('\n');
+    expect(out).toContain('left @opentelemetry/context-async-hooks out of /app/ws/package.json');
+    expect(out).not.toContain('left @opentelemetry/api');
+  });
+
+  it('leaves a peer pinned by a version-selector override to the user, writing nothing for it', async () => {
+    const h = await workspace();
+    // Measured with npm 11: whether `name@<range>` applies depends on the version
+    // chosen — `~1.9.0` beside `@opentelemetry/api@1` is refused (EOVERRIDE), and
+    // `1.9.1` beside `@opentelemetry/api@2` is refused too — so neither spec is safe.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({ workspaces: ['apps/*'], overrides: { '@opentelemetry/api@1': '1.9.1' } }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = dependencies(h, '/app/ws/package.json');
+    expect(root['@opentelemetry/api']).toBeUndefined();
+    expect(root['@opentelemetry/resources']).toBe(CLIENT_RANGES['@opentelemetry/resources']);
+    expect(h.out.join('\n')).toContain(
+      'left @opentelemetry/api out of /app/ws/package.json: its "overrides" pins it only for some versions',
+    );
+  });
+
+  it('treats several override rules for one peer as conditional, whatever their order', async () => {
+    for (const overrides of [
+      { '@opentelemetry/resources@1': '1.30.0', '@opentelemetry/resources@2': '2.9.0' },
+      { '@opentelemetry/resources': '2.9.0', '@opentelemetry/resources@1': '1.30.0' },
+      { '@opentelemetry/resources@1': '1.30.0', '@opentelemetry/resources': '2.9.0' },
+    ]) {
+      const h = await workspace();
+      await put(h, '/app/ws/package.json', JSON.stringify({ workspaces: ['apps/*'], overrides }));
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+      expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/resources']).toBeUndefined();
+      expect(h.out.join('\n')).toContain(
+        'left @opentelemetry/resources out of /app/ws/package.json: its "overrides" pins it only for some versions',
+      );
+    }
+  });
+
+  it('moves a dev-only peer pin to dependencies and keeps an optional one, root and member', async () => {
+    const h = await workspace();
+    // `npm install --omit=dev` drops devDependencies, so a runtime peer declared
+    // only there is moved, pin unchanged; optionalDependencies survive it.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        devDependencies: { '@opentelemetry/api': '1.9.0', prettier: '^3' },
+        optionalDependencies: { '@opentelemetry/resources': '2.9.0' },
+      }),
+    );
+    const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/apps/api/package.json',
+      JSON.stringify({ ...member, devDependencies: { '@opentelemetry/api': '1.9.0' } }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
+      const manifest = JSON.parse(h.read(path)) as {
+        dependencies: Record<string, string>;
+        devDependencies: Record<string, string>;
+      };
+      expect(manifest.dependencies['@opentelemetry/api'], path).toBe('1.9.0');
+      expect(manifest.devDependencies['@opentelemetry/api'], path).toBeUndefined();
+      expect(h.out.join('\n')).toContain(
+        `moved @opentelemetry/api from devDependencies to dependencies in ${path}`,
+      );
+    }
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies: Record<string, string>;
+      devDependencies: Record<string, string>;
+    };
+    // Unrelated development pins stay where they are.
+    expect(root.devDependencies['prettier']).toBe('^3');
+    expect(root.dependencies['@opentelemetry/resources']).toBeUndefined();
+    expect(root.dependencies['@opentelemetry/sdk-trace-base']).toBe(
+      CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+    );
+  });
+
+  it('keeps the root entry at the CLI range and names a member pinned at another spec', async () => {
+    const h = await workspace();
+    // The root entry is what keeps the hoisted framework package inside its peer
+    // range; measured with npm 11, a member at 5.4.1 beside it keeps a second
+    // copy, so the CLI says so instead of staying silent.
+    const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as {
+      dependencies: Record<string, string>;
+    };
+    await put(
+      h,
+      '/app/ws/apps/api/package.json',
+      JSON.stringify({
+        ...member,
+        dependencies: { ...member.dependencies, '@opentelemetry/api': '1.9.0' },
+      }),
+    );
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as {
+      members: Record<string, unknown>[];
+    };
+    const worker = { ...manifest.members[0]!, name: 'worker', port: 4999 };
+    await put(
+      h,
+      '/app/ws/setu.workspace.json',
+      JSON.stringify({ ...manifest, members: [...manifest.members, worker] }),
+    );
+    await put(
+      h,
+      '/app/ws/apps/worker/package.json',
+      JSON.stringify({
+        name: 'worker',
+        // A sibling's dev pin is installed too, and so splits the copy as well.
+        devDependencies: { '@opentelemetry/resources': '2.9.0' },
+        // Equal to the CLI range: no conflict, so the root entry is still written.
+        dependencies: {
+          '@opentelemetry/sdk-trace-base': CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+        },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = dependencies(h, '/app/ws/package.json');
+    for (const peer of peers) expect(root[peer], peer).toBe(CLIENT_RANGES[peer]);
+    // The member keeps its own pin.
+    expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBe('1.9.0');
+    const out = h.out.join('\n');
+    expect(out).toContain(
+      'note: /app/ws/apps/api/package.json pins @opentelemetry/api at 1.9.0; the root entry keeps',
+    );
+    expect(out).toContain(
+      '/app/ws/apps/worker/package.json pins @opentelemetry/resources at 2.9.0',
+    );
+    // A sibling pinned at exactly the CLI range is no conflict and draws no note.
+    expect(out).not.toContain('pins @opentelemetry/sdk-trace-base');
+  });
+
+  it('treats a peerDependencies pin as present, root and member', async () => {
+    const h = await workspace();
+    // Measured with npm 11 and Bun 1.4: both install a project's own peer entry,
+    // so a dependencies entry beside it would replace its pin.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        peerDependencies: { '@opentelemetry/api': '1.9.0' },
+      }),
+    );
+    const member = JSON.parse(h.read('/app/ws/apps/api/package.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/apps/api/package.json',
+      JSON.stringify({ ...member, peerDependencies: { '@opentelemetry/resources': '2.9.0' } }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+    };
+    expect(root.dependencies['@opentelemetry/api']).toBeUndefined();
+    expect(root.peerDependencies['@opentelemetry/api']).toBe('1.9.0');
+    expect(
+      dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/resources'],
+    ).toBeUndefined();
+  });
+
+  it('adds an optional peer declaration to dependencies at its own spec, keeping the declaration', async () => {
+    const h = await workspace();
+    // Measured with npm 11 and Bun 1.4: a peer marked optional in
+    // peerDependenciesMeta installs nothing, so it is not yet a dependency.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        peerDependencies: { '@opentelemetry/api': '1.9.0' },
+        peerDependenciesMeta: { '@opentelemetry/api': { optional: true } },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+    };
+    expect(root.dependencies['@opentelemetry/api']).toBe('1.9.0');
+    expect(root.peerDependencies['@opentelemetry/api']).toBe('1.9.0');
+  });
+
+  it('reads a root package.json that starts with a byte-order mark', async () => {
+    const h = await workspace();
+    await put(h, '/app/ws/package.json', `\uFEFF${JSON.stringify({ workspaces: ['apps/*'] })}`);
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+  });
+
+  it('says nothing about a reference override whose root dependency already exists', async () => {
+    const h = await workspace();
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        dependencies: { '@opentelemetry/api': '1.9.1' },
+        overrides: { '@opentelemetry/api': '$@opentelemetry/api' },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/api']).toBe('1.9.1');
+    expect(h.out.join('\n')).not.toContain('left ');
+  });
+
+  it('ignores an overrides value that is not an object', async () => {
+    const h = await workspace();
+    await put(h, '/app/ws/package.json', JSON.stringify({ workspaces: ['apps/*'], overrides: [] }));
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const peer of peers) {
+      expect(dependencies(h, '/app/ws/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
+    }
+    expect(h.out.join('\n')).not.toContain('left ');
+  });
+
+  it('places transport-selected ioredis in root dependencies too', async () => {
+    const h = await workspace();
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/setu.workspace.json',
+      JSON.stringify({ ...manifest, transport: 'redis' }),
+    );
+    expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['ioredis']).toBe(CLIENT_RANGES['ioredis']);
+  });
+
+  it('reports both paths in dry-run and writes nothing', async () => {
+    const h = await workspace();
+    const writes = h.fs.writes.length;
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api', '--dry-run'])).toBe(0);
+    expect(h.fs.writes.length).toBe(writes);
+    expect(h.out).toContain('would update /app/ws/package.json');
+    expect(h.out).toContain('would update /app/ws/apps/api/package.json');
+  });
+
+  it('leaves a Deno workspace root unchanged, even if it carries package.json', async () => {
+    const h = await workspace('deno');
+    await put(h, '/app/ws/package.json', '{}');
+    const before = h.read('/app/ws/deno.json');
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(h.read('/app/ws/package.json')).toBe('{}');
+    expect(h.read('/app/ws/deno.json')).toBe(before);
+    expect(h.read('/app/ws/apps/api/deno.json')).toContain('@opentelemetry/api');
+  });
+
+  it('does not reach an unrelated ancestor from a standalone project', async () => {
+    const h = harness({ '/package.json': '{}', '/app/package.json': '{}' });
+    expect(await h.run(['telemetry'])).toBe(0);
+    expect(h.read('/package.json')).toBe('{}');
+    expect(dependencies(h, '/app/package.json')['@opentelemetry/api']).toBe(
+      CLIENT_RANGES['@opentelemetry/api'],
+    );
+  });
+
+  it('keeps the member-only behavior when the root package.json is missing', async () => {
+    const h = await workspace();
+    await h.fs.rm('/app/ws/package.json');
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(h.fs.has('/app/ws/package.json')).toBe(false);
+    expect(dependencies(h, '/app/ws/apps/api/package.json')['@opentelemetry/api']).toBe(
+      CLIENT_RANGES['@opentelemetry/api'],
+    );
+  });
+
+  for (const [source, refusal] of [
+    ['not json', 'Cannot read /app/ws/package.json as JSON'],
+    ['{ /* keep */ "workspaces": ["apps/*"], }', '/app/ws/package.json is JSONC'],
+  ]) {
+    it(`refuses ${refusal} before writing either manifest`, async () => {
+      const h = await workspace();
+      await put(h, '/app/ws/package.json', source!);
+      const writes = h.fs.writes.length;
+      expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
+      expect(h.err.join('\n')).toContain(refusal);
+      expect(h.fs.writes.length).toBe(writes);
+    });
+  }
+
+  it('reports an unreadable root file by name before any writes', async () => {
+    const h = await workspace();
+    const read = h.fs.readFile.bind(h.fs);
+    h.fs.readFile = (path) =>
+      path === '/app/ws/package.json' ? Promise.reject(new Error('access denied')) : read(path);
+    const writes = h.fs.writes.length;
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(1);
+    expect(h.err.join('\n')).toContain('Cannot read /app/ws/package.json as JSON');
+    expect(h.fs.writes.length).toBe(writes);
+  });
+});
+
 const DENO_MANIFEST = JSON.stringify(
   {
     tasks: { start: 'deno run main.ts' },

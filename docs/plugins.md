@@ -31,8 +31,8 @@ yours to install.
 
 **A package manager never installs an optional peer.** Installing `@setu-ts/messaging-plugin` brings
 none of its six broker clients; selecting the Kafka arm without `kafkajs` installed fails at startup
-with the runtime's module-not-found error naming the package. Install the driver for the arm you
-select, beside the plugin:
+with `OptionalDependencyUnavailableError` naming the package and its installation location. Install
+the driver for the arm you select, beside the plugin:
 
 ```bash
 npm install @setu-ts/messaging-plugin kafkajs
@@ -40,8 +40,38 @@ npm install @setu-ts/messaging-plugin kafkajs
 ```
 
 `setu new --broker`/`--queue` and a workspace's `--transport` already add the client for the arm
-they wire. `setu add` installs the plugin alone, and any arm you select by hand needs its driver
-installed as above.
+they wire. `setu add` records peers for the default arm it wires (for example the console telemetry
+exporter); any other arm you select by hand needs its driver installed as above.
+
+### Optional peers in a workspace
+
+Install an optional peer **where the framework package that loads it is installed**, within the
+version range that package declares for it (in its `peerDependencies`, or `dependencies` for the few
+loaders that declare their package as a regular dependency). In an npm, Yarn or Bun workspace this
+is usually the workspace root. A hoisted framework package resolves imports from its own location: a
+peer nested under a member is invisible to it. Conflicting member pins can also produce two copies
+of a peer, including incompatible versions.
+
+The startup symptom is `Optional dependency '<d>' could not be loaded by '<package>'`, followed by
+the instruction to install it where that package is installed. Check the installed framework
+package's `package.json` for its peer ranges rather than installing the latest upstream major.
+
+Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
+the peers it supplies in the member's `package.json` `dependencies` and, when the root has a
+`package.json`, in the root's too. It leaves a peer already declared in `dependencies`,
+`optionalDependencies` or a non-optional `peerDependencies` as it is, adds a peer marked optional in
+`peerDependenciesMeta` to `dependencies` at its own spec (it installs nothing otherwise), moves one
+declared only in `devDependencies` to `dependencies` with its pin unchanged (`--omit=dev` would drop
+it), records a peer the root's `overrides` pins (a string value, or an object's `"."` entry) at the
+override's own spec (npm refuses a direct dependency whose spec differs from its override), leaves a
+`$name` reference or a conditional override (a version-selector key such as `ioredis@5`, or several
+rules for one package) to you with a printed line, still writes the root entry at the CLI's range
+when a workspace member pins the peer at a different spec, printing a note that names the member and
+its pin since npm may install a second copy for it, refuses a root `package.json` that is JSONC or
+invalid JSON by name, and prints every edited path; run the printed install command from the
+workspace root. The member entry also supports building the member outside the workspace. Deno
+workspaces, standalone projects, pnpm workspaces and hand-built Yarn workspaces keep their existing
+behavior; place peers manually when needed. `setu add` still refuses a workspace root as its target.
 
 Three packages carry a real (non-optional) dependency beyond their siblings: `kernel` depends on
 `hono` (its router), `runtime` on `@hono/node-server` (the Node adapter), and `view-plugin` on

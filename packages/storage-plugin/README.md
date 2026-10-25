@@ -26,7 +26,7 @@ startup reject with `OptionalDependencyUnavailableError` naming that package. In
 `@aws-sdk/client-s3` is insufficient.
 
 With only the S3 client installed, Node startup reports:
-`OptionalDependencyUnavailableError: Optional dependency '@aws-sdk/s3-request-presigner' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+`OptionalDependencyUnavailableError: Optional dependency '@aws-sdk/s3-request-presigner' could not be loaded by '@setu-ts/storage-plugin'. Install it where '@setu-ts/storage-plugin' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
 
 ## Usage
 
