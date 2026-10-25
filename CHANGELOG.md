@@ -144,6 +144,28 @@ All notable changes to this project are documented here. The format follows
   `x-csrf-token` header it requires; the session-plugin README says the bearer exemption also skips
   the session commit on a `csrf.exclude`d path and that `exemptBearer: false` restores it.
 
+- **A malformed or oversized `Forwarded` header no longer erases the client behind an appending
+  proxy (V10-19, M119d, 0.11.0, `@setu-ts/http-security-plugin`).** `parseForwarded` refused the
+  whole field, so with `forwardedHeader: 'forwarded'` behind a proxy that appends its element a
+  client sending one malformed element, more than 64 elements or more than 8 KiB resolved to no
+  client — and then to the shared rate-limit/audit fallback bucket. A malformed element is now a
+  boundary: the elements to its right are still read and the trust walk stops at the boundary
+  instead of crossing into client-written text. An over-bound field is re-read from the right within
+  8 KiB and 64 elements. A direct client keeps its socket peer, and a boundary with only trusted
+  entries to its right still resolves no client. A trusted proxy that writes a comma inside a quoted
+  value to the right of malformed input loses that element to the boundary and resolves no client
+  (fail closed).
+
+- **IPv4-mapped and non-canonical IPv6 clients have one normalized identity (V10-28, M119d, 0.11.0,
+  `@setu-ts/http-security-plugin`).** IP security published a forwarded client exactly as the proxy
+  wrote it while the runtime un-mapped the socket peer, so one client could key the rate limiter and
+  audit under two forms. Every published address is now normalized — IPv4-mapped becomes dotted
+  IPv4, and IPv6 becomes canonical lowercase compressed — and trusted literals are normalized the
+  same way before comparison. Every spelling of a mapped address — dotted tail, hexadecimal tail
+  (`::ffff:c633:6407`) or uncompressed — is one identity. Clients arriving in IPv4-mapped
+  (`::ffff:198.51.100.7`) or non-canonical IPv6 (`2001:DB8::1`) form therefore get a NEW
+  rate-limit/audit key after upgrading; the limiter windows are short-lived.
+
 - **Connection-error lines no longer read `error: ""` for an `AggregateError` (V10-63, M119g,
   0.11.0, `@setu-ts/common`).** `createConnectionErrorReporter` logged `error.message` only, and an
   ioredis `AggregateError` carries an empty message, so a two-address `ECONNREFUSED` outage produced

@@ -620,3 +620,82 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
     });
   });
 });
+
+describe('malformed Forwarded elements are boundaries (M119d §3.1)', () => {
+  async function inspectForwarded(
+    headerValue: string,
+    options: IpSecurityOptions,
+    ip?: string,
+  ): Promise<{ readonly ip: unknown; readonly origin: string }> {
+    const { ctx } = createFakeContext({
+      request: {
+        url: 'http://internal:8080/a',
+        headers: { Forwarded: headerValue },
+        ...(ip === undefined ? {} : { ip }),
+      },
+    });
+    await ipSecurityMiddleware({ trustProxy: true, forwardedHeader: 'forwarded', ...options })(
+      ctx,
+      () => Promise.resolve(),
+    );
+    return { ip: ctx.state.get(CLIENT_IP_STATE_KEY), origin: requestOriginOf(ctx).origin };
+  }
+
+  it('trustedProxies reads the appended client to the right of a malformed prefix', async () => {
+    expect(
+      (
+        await inspectForwarded(
+          'garbage, for=198.51.100.7',
+          { trustedProxies: ['10.0.0.0/8'] },
+          '10.1.2.3',
+        )
+      ).ip,
+    ).toBe('198.51.100.7');
+  });
+
+  it('trustedProxies stops at a boundary instead of walking into client-written text', async () => {
+    expect(
+      (
+        await inspectForwarded(
+          'for=203.0.113.9, garbage, for=10.0.0.2',
+          { trustedProxies: ['10.0.0.0/8'] },
+          '10.0.0.3',
+        )
+      ).ip,
+    ).toBeUndefined();
+  });
+
+  it('an untrusted direct peer is still the client whatever it sends', async () => {
+    expect(
+      (await inspectForwarded('garbage', { trustedProxies: ['10.0.0.0/8'] }, '203.0.113.9')).ip,
+    ).toBe('203.0.113.9');
+  });
+
+  it('proxyHops refuses a selection at or left of a boundary', async () => {
+    // A boundary at the selected index, or anywhere to its right, means the
+    // walk would have had to cross it.
+    expect(
+      (await inspectForwarded('for=203.0.113.9, garbage, for=198.51.100.7', { proxyHops: 2 })).ip,
+    ).toBeUndefined();
+    expect(
+      (await inspectForwarded('for=203.0.113.9, garbage, for=198.51.100.7', { proxyHops: 1 })).ip,
+    ).toBeUndefined();
+    expect((await inspectForwarded('garbage, for=198.51.100.7', { proxyHops: 0 })).ip).toBe(
+      '198.51.100.7',
+    );
+  });
+
+  it('leftmost resolves no client when the chain carries a boundary', async () => {
+    expect((await inspectForwarded('garbage, for=198.51.100.7', {})).ip).toBeUndefined();
+  });
+
+  it('takes the forwarded origin from the selected element after recovery', async () => {
+    expect(
+      await inspectForwarded(
+        'garbage, for=198.51.100.7;proto=https;host=app.example',
+        { trustedProxies: ['10.0.0.0/8'] },
+        '10.1.2.3',
+      ),
+    ).toEqual({ ip: '198.51.100.7', origin: 'https://app.example' });
+  });
+});

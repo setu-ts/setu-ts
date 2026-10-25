@@ -654,8 +654,12 @@ here.
   `Sec-Fetch-Site: same-origin` plus an opt-out, exact `swagger-ui-dist` pin, telemetry peers and
   Redis arms from `setu add`, forced test exit, named Kubernetes token fault; V10-17, V10-1, V10-3,
   V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR #501).
-- **Next milestone** — M119d (`http-security-plugin` — forwarded client identity). M119e, M119f,
-  M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 119d** (`packages/http-security-plugin` — a malformed `Forwarded` element is a
+  boundary the trust walk never crosses, bounds read from the right, one address normalizer; V10-19,
+  V10-28) — complete (PR #503).
+- **Next milestone** — M119e (`database-plugin`, `common`, `cloudflare-plugin` — a data contract
+  that is not portable or not checked at startup). M119f, M119h, M119i, M118 and M120–M123 are open
+  in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 
