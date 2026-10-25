@@ -11030,7 +11030,7 @@ published-interface reason, and are supplied only when `--module` names an admit
 | Export             | Kind      | Purpose                                                                                                                                                  |
 | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                                                                                          |
-| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption.                                                                    |
+| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting, interruption and the verified logical working directory.                            |
 | `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                                                                                     |
 | `DerivedNames`     | type      | The result of `deriveNames`.                                                                                                                             |
 | `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                                                                                    |
@@ -11047,7 +11047,9 @@ published-interface reason, and are supplied only when `--module` names an admit
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is
-testable without terminating the runner.
+testable without terminating the runner. Its optional `logicalCwd` member carries the shell's `PWD`
+only when it is absolute and resolves to the physical working directory; `setu agents` uses it
+solely to refuse a write through a symlinked workspace member, never to authorize one.
 
 ### Not in this release
 

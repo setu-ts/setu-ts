@@ -176,8 +176,14 @@ describe('the injectable service JSDoc names the right resolution route', () => 
     expect(injectable()).toContain("services.get('billing-service')");
   });
 
-  it('says @Inject works either way', () => {
-    expect(injectable()).toContain('whether or not a container is registered');
+  it('names the class-level @Inject and its one-token-per-argument rule', () => {
+    const src = injectable();
+    expect(src).toContain("Consumers reach it by listing `'billing-service'` in their");
+    expect(src).toContain(
+      'class-level `@Inject(...)`, one token per constructor argument in order',
+    );
+    expect(src).toContain('whether or not a container is registered');
+    expect(src).not.toContain('on a constructor parameter');
   });
 
   it('records that scope is ignored without a container and honored with one', () => {

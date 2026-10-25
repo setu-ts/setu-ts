@@ -700,7 +700,10 @@ describe('runGenerateCommand', () => {
     ]);
     expect(h.out.text()).toContain('readiness: { migrations: MIGRATION_NAMES }');
     expect(h.out.text()).toContain('./src/migrations/index.ts');
-    expect(h.out.text()).toContain('setu_migrations table: https://');
+    expect(h.out.text()).toContain(
+      `setu_migrations table: https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/database-plugin/README.md#migrations-and-readiness`,
+    );
+    expect(h.out.text()).not.toContain('/tree/develop/');
   });
 
   it('prints no migration hint for other schematics or dry runs', async () => {

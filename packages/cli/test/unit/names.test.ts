@@ -6,6 +6,8 @@ import {
   hasControlCharacter,
   isIdentifierSafe,
   isPathSegmentSafe,
+  isWorkerNameSafe,
+  WORKER_NAME_RULE,
 } from '../../src/utils/names.ts';
 
 describe('deriveNames', () => {
@@ -342,5 +344,27 @@ describe('bidirectional format characters', () => {
     const family = '\u{1F468}\u200D\u{1F469}';
     expect(escapeTerminalControls(family)).toBe(family);
     expect(hasControlCharacter(family)).toBe(false);
+  });
+});
+
+describe('isWorkerNameSafe — the wrangler name rule', () => {
+  it.each([
+    ['shop', true],
+    ['my-shop', true],
+    ['a1', true],
+    ['a.b', false],
+    ['café', false],
+    ['-shop', false],
+    ['shop-', false],
+    ['a'.repeat(63), true],
+    ['a'.repeat(64), false],
+  ] as const)('%j → %s', (raw, safe) => {
+    expect(isWorkerNameSafe(raw)).toBe(safe);
+  });
+
+  it('states the rule the refusal prints', () => {
+    expect(WORKER_NAME_RULE).toBe(
+      'wrangler accepts only lowercase letters, digits and -, at most 63 characters.',
+    );
   });
 });

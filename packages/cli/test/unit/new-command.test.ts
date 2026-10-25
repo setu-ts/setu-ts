@@ -58,6 +58,41 @@ describe('the duplicate-path guard', () => {
   });
 });
 
+describe('Workers project names', () => {
+  it('refuses a name wrangler refuses, writing nothing', async () => {
+    const h = harness();
+    expect(await h.run(['a.b', '--runtime', 'cloudflare-workers'])).toBe(2);
+    expect(h.err.text()).toBe(
+      'Invalid Workers project name: "a.b". wrangler accepts only lowercase letters, digits and -, at most 63 characters.',
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('refuses a control character as typed, before whitespace folding, on every runtime', async () => {
+    for (const raw of ['a\nb', 'a\rb', 'a\tb', 'a\u0000b', 'a\u007fb']) {
+      for (const runtime of ['cloudflare-workers', 'node']) {
+        const h = harness();
+        expect(await h.run([raw, '--runtime', runtime])).toBe(2);
+        expect(h.err.text()).toMatch(/^Invalid project name: ".*"\. It must start/);
+        expect(h.err.text()).not.toMatch(/\p{Cc}/u);
+        expect(h.fs.writes).toEqual([]);
+      }
+    }
+  });
+
+  it('still folds a space and an underscore into a Workers name', async () => {
+    const h = harness();
+    expect(await h.run(['my shop_api', '--runtime', 'cloudflare-workers'])).toBe(0);
+    expect(h.fs.read('/work/my-shop-api/wrangler.toml')).toContain('name = "my-shop-api"');
+  });
+
+  it('still scaffolds a dotted name on Node', async () => {
+    const h = harness();
+    expect(await h.run(['a.b', '--runtime', 'node'])).toBe(0);
+    expect(h.fs.has('/work/a.b/package.json')).toBe(true);
+  });
+});
+
 // Node's built-in TypeScript support ERASES types without transforming code, so
 // `node --experimental-strip-types main.ts` — what this CLI emitted through
 // alpha.5 — cannot run a legacy decorator or a constructor parameter property.

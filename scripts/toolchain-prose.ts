@@ -258,6 +258,11 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
+      path: 'packages/cli/test/unit/generate-inactive-module.test.ts',
+      category: 'deno-target',
+      reason: 'Builds Deno projects for the feature-scoped generation command tests.',
+    },
+    {
       path: 'packages/cli/test/unit/generate-module-command.test.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',

@@ -50,6 +50,17 @@ export interface CliDependencies {
   readonly fs: IFileSystem;
   /** The working directory commands resolve relative paths against (absolute). */
   readonly cwd: string;
+  /**
+   * The shell's logical working directory, when it is absolute and its real path
+   * equals the real path of {@linkcode cwd} — the shell's `pwd -L` rule.
+   *
+   * `cwd` is physical, so from inside a symlinked workspace member it names the
+   * link target and the workspace is invisible. This lets a command notice that
+   * the logical path is a listed member and REFUSE to write through the link; it
+   * never authorizes a write. Omit it when the shell supplies no such path
+   * (Windows, a forged or stale `PWD`, or a programmatic caller).
+   */
+  readonly logicalCwd?: string;
   /** Wall-clock milliseconds, for timestamped output. */
   readonly now: () => number;
   /** Writes a line of normal output. */

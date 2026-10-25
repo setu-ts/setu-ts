@@ -56,6 +56,26 @@ All notable changes to this project are documented here. The format follows
   name `self`, or a name in both lists with `TypeError`; the message names the option and never
   echoes a name. Names that match no registered indicator produce one count-only warning at startup.
 
+- **`setu agents --check --strict` (V10-24, M119h, 0.11.0, `@setu-ts/cli`).** `--strict` is accepted
+  only with `--check` (alone: usage error, exit 2, `--strict requires --check.`). With it, each
+  agent-card warning becomes `<AGENTS.md path>: <warning>` and the command exits 1, so a CI step run
+  after `install` fails when a package's `AGENT_CARD.md` was not delivered. Plain `--check` still
+  answers without an install.
+
+- **Generated Workers projects carry `test` and `test:e2e` (V10-23, M119h, 0.11.0,
+  `@setu-ts/cli`).** A `cloudflare-workers` scaffold now gets both scripts, run through `tsx --test`
+  against the real Worker on workerd via wrangler's `createTestHarness`, plus
+  `test/support/server.ts` (which locates `wrangler.toml` from its own path, never the working
+  directory), a smoke test, an e2e test and fetch-based module tests. `package.json` records `tsx`
+  and `@types/node`, `tsconfig.json` adds `node` to `types`, the `deno.json` `test` task that
+  permitted an empty suite is dropped, and the generated README's Testing section names both
+  commands. The upgrade guide shows how to add them to a project scaffolded before this release.
+
+- **`CliDependencies.logicalCwd` (V10-25, M119h, 0.11.0, `@setu-ts/cli`).** One additive optional
+  member on the exported type. The executable supplies the shell's `PWD` only when it is absolute
+  and resolves to the physical working directory; `setu agents` uses it solely to refuse a write
+  through a symlinked workspace member, never to authorize one.
+
 ### Changed
 
 - **Drizzle tenant columns resolve to properties (M119e, 0.11.0, `@setu-ts/database-plugin`).** The
@@ -126,6 +146,34 @@ All notable changes to this project are documented here. The format follows
 - **`setu add cache|scheduler|realtime-backplane` write the Redis arm in a Redis-transport workspace
   (M119c, 0.11.0, `@setu-ts/cli`).** The registration reads the workspace's `REDIS_URL` and
   `ioredis` is installed; elsewhere the in-memory default is unchanged.
+
+- **`setu agents --dry-run` reports what the real run will do (V10-26, M119h, 0.11.0,
+  `@setu-ts/cli`).** A brief whose spliced bytes equal the file is `unchanged`: the real run prints
+  that and no longer rewrites the file, and the dry run prints `would create` / `would update` /
+  `unchanged` through the same reporter as every other command. Both modes check every changed brief
+  for writability before the first byte and refuse the whole run when one target is unwritable —
+  `<path>: not writable by you; nothing was written`, or
+  `WOULD REFUSE: <path> is not writable by you` in a dry run — exiting 1 with nothing written. A
+  temp-file open refused with `EACCES`/`EPERM` now reports
+  `<path>: permission denied creating a file in <directory>` instead of naming the temp file, for
+  every CLI write.
+
+- **`setu generate … --module` names a module that is not activated (V10-18, M119h, 0.11.0,
+  `@setu-ts/cli`).** The scanner admits a module from its files, never from its activation, so a
+  module whose `src/modules/index.ts` entry was removed accepted new artifacts and left them
+  unreachable without a word. After the write (and after the plan in `--dry-run`), the command reads
+  the activation barrel and, when the masked code does not name the module's registrar or `MODULES`
+  entry, prints the exact import and registration line to add. When the module is active but
+  `setu.config.ts` does not reference the barrel's export, it prints the config lines instead. A
+  comment-only mention does not count; the files are still written and the exit status is unchanged.
+
+- **A workspace ownership refusal names a remedy for its reason (V10-27, M119h, 0.11.0,
+  `@setu-ts/cli`).** A symlink says to replace it with the directory it points at or to run
+  `setu agents` from its real path (named in parentheses when resolvable); a non-directory member
+  path says to fix the workspace layout; only a directory owned by another user, or one whose
+  ownership cannot be checked, still says to run in a workspace you own. From inside a symlinked
+  member, the verified logical path is walked and refused in every mode rather than writing into the
+  link target.
 
 ### Security
 
@@ -299,6 +347,40 @@ All notable changes to this project are documented here. The format follows
   otherwise it returns the result unchanged with `data.migrations.state: 'unknown'` added (an
   adapter with no reachability check is still checked). A paused database therefore reads `degraded`
   within one ~2 s bound instead of `down` after ~4 s.
+
+- **`setu new --runtime cloudflare-workers` refuses a name wrangler refuses (V10-9, M119h, 0.11.0,
+  `@setu-ts/cli`).** The project name is written into `wrangler.toml`, and wrangler accepts only
+  lowercase letters, digits and `-`, at most 63 characters;
+  `setu new a.b --runtime cloudflare-workers` therefore scaffolded a Worker that wrangler refused to
+  build or run. The name is now checked before any write (exit 2,
+  `Invalid Workers project name: "<raw>". wrangler accepts only lowercase letters, digits and -, at most 63 characters.`),
+  for the flag and the interactive answer alike. Other runtimes keep the path-segment rule. On every
+  runtime, a name containing a control character (CR, LF, TAB, NUL, DEL) is now refused as typed
+  rather than folded to `-`, as `PROJECT_NAME_RULE` already said.
+
+- **A re-run of an interrupted `setu adopt` reads the manifest where the interruption left it
+  (V10-10, M119h, 0.11.0, `@setu-ts/cli`).** Plugin and runtime detection read only the original
+  project root, so a SIGKILL after the manifest moved to `apps/<member>/` recorded
+  `healthProbes`/`metricsEndpoint: false`, and a moved `deno.json` turned a Deno workspace into a
+  Node one. Both probes now read the root and the planned member directory: plugins are their union,
+  and a runtime marker counts when present in either. The member directory is read only when it is
+  really inside the project, never through a link planted at `apps/<member>`. A fresh adoption is
+  unchanged.
+
+- **A generated module's 404 no longer echoes the caller's id (V10-35, M119h, 0.11.0,
+  `@setu-ts/cli`).** `GET`/`PATCH /<module>/:id` rendered `<Pascal> <id> was not found.` into the
+  Problem Details body and the warn log, so a caller-supplied value — including markup or control
+  characters — was reflected back. The detail is now the fixed `<Pascal> not found.`; the request
+  logger still records the path.
+
+- **The generated injectable-service comment names the class-level `@Inject(...)` (V10-11, M119h,
+  0.11.0, `@setu-ts/cli`).** It said the token goes "on a constructor parameter", where the
+  decorator does not apply; it now says consumers list the token in their class-level
+  `@Inject(...)`, one token per constructor argument in order.
+
+- **Documentation links printed by the CLI name its own version tag (V10-42, M119h, 0.11.0,
+  `@setu-ts/cli`).** The migration readiness link and the starter README link pointed at `develop`,
+  which can move ahead of the installed release. Both now use `blob/v<version>/…`.
 
 ## [0.10.0] — 2026-10-22
 

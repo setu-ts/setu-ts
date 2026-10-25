@@ -76,19 +76,33 @@ describe('agents workspace ownership', () => {
   });
 
   it.each([
-    ['/work/apps/b', { uid: 456 }, 'not owned by you'],
-    ['/work/apps/b', { isSymbolicLink: true }, 'symlink'],
-    ['/work/apps/b', { isDirectory: false }, 'not a directory'],
-    ['/', { uid: 456 }, 'not owned by you'],
-  ] as const)('refuses %s (%j), writes nothing and exits 1', async (path, override, reason) => {
-    const h = harness({ [path]: override });
-    expect(await h.run()).toBe(1);
-    expect(h.fs.writes).toEqual([]);
-    expect(h.fs.mkdirs).toEqual([]);
-    expect(h.error.lines).toEqual([
-      `${path}: ${reason}; run \`setu agents\` in a workspace you own`,
-    ]);
-  });
+    ['/work/apps/b', { uid: 456 }, 'not owned by you', 'run `setu agents` in a workspace you own'],
+    [
+      '/work/apps/b',
+      { isSymbolicLink: true },
+      'symlink',
+      'replace the link with the directory it points at, or run setu agents from its real path (/work/apps/b)',
+    ],
+    [
+      '/work/apps/b',
+      { isDirectory: false },
+      'not a directory',
+      'fix the workspace layout so every member path is a directory',
+    ],
+    ['/', { uid: 456 }, 'not owned by you', 'run `setu agents` in a workspace you own'],
+  ] as const)(
+    'refuses %s (%j), writes nothing and exits 1',
+    async (path, override, reason, remedy) => {
+      const h = harness({ [path]: override });
+      expect(await h.run()).toBe(1);
+      expect(h.fs.writes).toEqual([]);
+      expect(h.fs.mkdirs).toEqual([]);
+      expect(h.error.lines).toEqual([`${path}: ${reason}; ${remedy}`]);
+      // A symlink is not about ownership, so its remedy must not send the
+      // developer to "a workspace you own" — they are already in it.
+      if (reason === 'symlink') expect(h.error.text()).not.toContain('workspace you own');
+    },
+  );
 
   it('trusts owned directories whatever their permission bits (the git model)', async () => {
     // The seam reports no mode at all: only owner and symlink-ness decide.
@@ -303,5 +317,22 @@ describe('agents workspace ownership', () => {
     ).toBe(0);
     expect(seen).toEqual([]);
     expect(base.writes).toEqual(['/project/AGENTS.md']);
+  });
+
+  it('names a symlink remedy without a path when its real path cannot be resolved', async () => {
+    const base = createFakeFs({});
+    const fs: ICliFileSystem = {
+      ...base,
+      invokingUid: 123,
+      directoryOwnership: (path) =>
+        Promise.resolve(
+          path === '/work/apps/b' ? { uid: 123, isSymbolicLink: true, isDirectory: false } : owned,
+        ),
+      realPath: () => Promise.reject(new Error('ENOENT')),
+    };
+    await expect(assertAgentWorkspaceOwnership(fs, ['/work/apps/b'])).rejects.toThrow(
+      '/work/apps/b: symlink; replace the link with the directory it points at, ' +
+        'or run setu agents from its real path',
+    );
   });
 });

@@ -36,6 +36,7 @@ import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { detectProject } from '../utils/project-detector.ts';
 import {
   findExisting,
+  readExistingText,
   reportDryRunPlan,
   type GeneratedFile,
   joinPath,
@@ -56,14 +57,16 @@ import {
   type ModuleLoader,
 } from '../schematics/custom.ts';
 import { scanModules, scanModuleArtifacts } from '../utils/module-scanner.ts';
-import { generatorMode } from '../utils/generator-mode.ts';
-import { REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
+import { generatorMode, type GeneratorMode } from '../utils/generator-mode.ts';
+import { REGISTER_MODULES_EXPORT, registerModuleSymbol } from '../seams/modules.ts';
+import { MODULES_EXPORT } from '../schematics/module-barrel.ts';
 import { serviceSeamToken } from '../seams/services.ts';
 import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
 import { decoratorExportFor, decoratorKeyFor } from '../templates/seam.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
+import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { maskSourceCode } from '../devtool/sources.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
 import {
@@ -591,6 +594,7 @@ export async function runGenerateCommand(
     if (dryRun) {
       const code = await reportDryRunPlan(deps, formatted);
       reportAdoptions(adoptions, 'Would adopt', deps.error);
+      if (module !== undefined) await reportInactiveModule(deps.fs, dir, module, mode, deps.error);
       return code;
     }
     const outcomes = await writeFiles(
@@ -601,7 +605,7 @@ export async function runGenerateCommand(
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (schematicName === 'migration' && customName === undefined) {
       deps.log(
-        'Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: https://github.com/setu-ts/setu-ts/tree/develop/packages/database-plugin#migrations-and-readiness',
+        `Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: ${repositoryFileUrl('packages/database-plugin/README.md#migrations-and-readiness')}`,
       );
     }
     if (installed.has('validation-plugin') && ['module', 'schema'].includes(schematicName)) {
@@ -631,6 +635,10 @@ export async function runGenerateCommand(
     // The CLI cannot edit that config (M101g), so it prints the exact line instead
     // of letting the file appear wired when nothing registers it.
     await reportUnwiredSeams(deps.fs, dir, generated, installed, deps.error);
+    // Only a `--module` run asks whether the module is active; a run that wrote
+    // the activation barrel is covered by `reportUnwiredSeams` above, so the two
+    // never print for the same run.
+    if (module !== undefined) await reportInactiveModule(deps.fs, dir, module, mode, deps.error);
     if (module !== undefined && mode === 'class-based' && schematicName !== 'schema') {
       deps.log(
         `Add ${names.pascal}${schematicName === 'service' ? 'Service' : 'Controller'} to @Module({ ${schematicName === 'service' ? 'providers' : 'controllers'} }) in src/modules/${module}/${module}.module.ts`,
@@ -652,6 +660,112 @@ export async function runGenerateCommand(
   }
 
   return EXIT_OK;
+}
+
+/**
+ * Drops import declarations from masked source, so a binding that is imported
+ * but never called or listed does not count as wiring.
+ *
+ * The mask blanks every string literal, module specifiers included, so a
+ * declaration ends at its `from` keyword; matching up to that keyword rather than
+ * a `;` keeps a statement after a semicolonless import intact.
+ *
+ * @param code - Masked source, or undefined when it could not be classified
+ * @returns The code without its import clauses
+ */
+function withoutImports(code: string | undefined): string | undefined {
+  return code?.replace(/\bimport\b[^;]*?\bfrom\b/g, '');
+}
+
+/**
+ * Whether masked barrel code activates the module: the functional registrar is
+ * CALLED, or the class-based module is an element of the `MODULES` array. A
+ * reference anywhere else — an export, an alias, another array — activates
+ * nothing.
+ *
+ * @param code - The masked barrel, import clauses removed
+ * @param symbol - The module's registrar or module class name
+ * @param mode - The project's generator mode
+ * @returns Whether the barrel activates the module
+ */
+function activatesModule(code: string, symbol: string, mode: GeneratorMode): boolean {
+  if (mode !== 'class-based') return new RegExp(`\\b${symbol}\\s*\\(`).test(code);
+  const modules = new RegExp(`\\b${MODULES_EXPORT}\\b[^=]*=\\s*\\[([^\\]]*)\\]`).exec(code);
+  return modules !== null && new RegExp(`\\b${symbol}\\b`).test(modules[1] ?? '');
+}
+
+/**
+ * Reports a feature module whose routes cannot be reached from the project.
+ *
+ * `setu generate` admits a module from its files, never from its activation, so
+ * a module whose barrel entry was removed still accepts generated artifacts and
+ * silently leaves them unreachable. Only existing files are read — the run's
+ * write set is irrelevant — and the exit status is unchanged: the developer got
+ * the files they asked for, and a warning matches every other "written but not
+ * wired" report here.
+ *
+ * The barrel and the config are masked first, so a mention inside a string or a
+ * comment does not count as wiring. A missing, unreadable or unclassifiable
+ * barrel is reported as inactive; that fails toward reporting, the same rule
+ * {@linkcode reportUnwiredSeams} follows.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project directory
+ * @param module - The kebab-case module named by `--module`
+ * @param mode - The project's generator mode
+ * @param error - The command's error channel
+ */
+async function reportInactiveModule(
+  fs: IFileSystem,
+  dir: string,
+  module: string,
+  mode: GeneratorMode,
+  error: (message: string) => void,
+): Promise<void> {
+  const names = deriveNames(module);
+  const symbol = mode === 'class-based' ? `${names.pascal}Module` : registerModuleSymbol(names);
+  const barrelPath = joinPath(dir, 'src/modules/index.ts');
+  let barrel: string | undefined;
+  try {
+    barrel = await readExistingText(fs, barrelPath);
+  } catch {
+    // Unreadable is treated as inactive, not as a run failure: the module may
+    // still be active, and warning is recoverable while silence is not.
+    barrel = undefined;
+  }
+  const barrelCode = barrel === undefined ? undefined : withoutImports(maskSourceCode(barrel));
+  // `symbol` is built from an identifier-safe kebab (`deriveNames`), so it carries
+  // no regular-expression metacharacters.
+  if (barrelCode !== undefined && activatesModule(barrelCode, symbol, mode)) {
+    // Active: the remaining gap is the developer's config, which the CLI cannot
+    // edit. An absent config reports nothing — there is no file to point at.
+    const config = await readConfigModule(fs, dir);
+    if (config === '') return;
+    const code = withoutImports(maskSourceCode(config));
+    if (mode === 'class-based') {
+      if (code !== undefined && new RegExp(`\\b${MODULES_EXPORT}\\b`).test(code)) return;
+      error(`setu.config.ts does not reference ${MODULES_EXPORT}; add it to DecoratorPlugin:`);
+      error(`  modules: [...${MODULES_EXPORT}]`);
+      error(`  import { ${MODULES_EXPORT} } from './src/modules/index.ts';`);
+      return;
+    }
+    if (code !== undefined && new RegExp(`\\b${REGISTER_MODULES_EXPORT}\\b`).test(code)) return;
+    error(`setu.config.ts does not reference ${REGISTER_MODULES_EXPORT}; add:`);
+    error(`  import { ${REGISTER_MODULES_EXPORT} } from './src/modules/index.ts';`);
+    error(`  ${REGISTER_MODULES_EXPORT}(app.router, app.services);`);
+    return;
+  }
+  error(
+    `Module "${escapeName(module)}" is not activated in src/modules/index.ts, so its routes are unreachable; add:`,
+  );
+  error(
+    mode === 'class-based'
+      ? `  import { ${symbol} } from './${names.kebab}/${names.kebab}.module.ts';`
+      : `  import { ${symbol} } from './${names.kebab}/index.ts';`,
+  );
+  error(
+    mode === 'class-based' ? `  ${symbol} in ${MODULES_EXPORT}` : `  ${symbol}(router, services);`,
+  );
 }
 
 /**

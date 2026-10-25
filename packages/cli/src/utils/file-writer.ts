@@ -27,6 +27,13 @@ export interface ICliFileSystem extends IFileSystem {
   ): Promise<{ before: Uint8Array | undefined }>;
   /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
   readonly invokingUid?: number;
+  /**
+   * Whether the invoking user may write this path: `access(path, W_OK)` for an
+   * existing file, else `access` on its directory. Advisory only — the writer's
+   * own mapped refusal covers a permission change after the probe. Absent on
+   * fakes, where the preflight is skipped.
+   */
+  canWrite?(path: string): Promise<boolean>;
   /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
   directoryOwnership?(path: string): Promise<{
     readonly uid: number;
