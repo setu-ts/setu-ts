@@ -207,13 +207,18 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
         workspaces: ['apps/*'],
         // A plain key and a versioned key: both name a package npm would refuse
         // as a direct dependency with a different spec (EOVERRIDE).
-        overrides: { '@opentelemetry/api': '1.9.1', '@opentelemetry/resources@2': '2.9.0' },
+        overrides: {
+          '@opentelemetry/api': '1.9.1',
+          '@opentelemetry/resources@2': { '.': '2.9.0' },
+          // Overrides only a CHILD of the peer, not the peer: it must still be added.
+          '@opentelemetry/sdk-trace-base': { '@opentelemetry/core': '2.0.0' },
+        },
       }),
     );
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
     const root = JSON.parse(h.read('/app/ws/package.json')) as {
       dependencies?: Record<string, string>;
-      overrides: Record<string, string>;
+      overrides: Record<string, unknown>;
     };
     expect(root.dependencies?.['@opentelemetry/api']).toBeUndefined();
     expect(root.dependencies?.['@opentelemetry/resources']).toBeUndefined();
@@ -228,6 +233,7 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     const out = h.out.join('\n');
     expect(out).toContain('left @opentelemetry/api out of /app/ws/package.json');
     expect(out).toContain('left @opentelemetry/resources out of /app/ws/package.json');
+    expect(out).not.toContain('left @opentelemetry/sdk-trace-base');
   });
 
   it('ignores an overrides value that is not an object', async () => {

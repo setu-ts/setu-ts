@@ -59,12 +59,12 @@ package's `package.json` for its peer ranges rather than installing the latest u
 Since 0.11.0, `setu add <plugin> --dir apps/<member>` in a listed Node or Bun Setu workspace records
 the peers it supplies in the member's `package.json` `dependencies` and, when the root has a
 `package.json`, in the root's too. It preserves existing entries, leaves a peer the root's
-`overrides` already names to that override (npm refuses a direct dependency whose spec differs from
-its override), refuses a root `package.json` that is JSONC or invalid JSON by name, and prints every
-edited path; run the printed install command from the workspace root. The member entry also supports
-building the member outside the workspace. Deno workspaces, standalone projects, pnpm workspaces and
-hand-built Yarn workspaces keep their existing behavior; place peers manually when needed.
-`setu add` still refuses a workspace root as its target.
+`overrides` already pins (a string value, or an object's `"."` entry) to that override (npm refuses
+a direct dependency whose spec differs from its override), refuses a root `package.json` that is
+JSONC or invalid JSON by name, and prints every edited path; run the printed install command from
+the workspace root. The member entry also supports building the member outside the workspace. Deno
+workspaces, standalone projects, pnpm workspaces and hand-built Yarn workspaces keep their existing
+behavior; place peers manually when needed. `setu add` still refuses a workspace root as its target.
 
 Three packages carry a real (non-optional) dependency beyond their siblings: `kernel` depends on
 `hono` (its router), `runtime` on `@hono/node-server` (the Node adapter), and `view-plugin` on

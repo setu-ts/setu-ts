@@ -557,11 +557,14 @@ function peerPackagesFor(
 }
 
 /**
- * The package names a root manifest's npm `overrides` names at its top level,
- * with any `@<range>` selector on a key removed (`ioredis@5` → `ioredis`).
+ * The package names a root manifest's npm `overrides` pins THEMSELVES at its
+ * top level, with any `@<range>` selector on a key removed (`ioredis@5` →
+ * `ioredis`). A string value pins the package; an object value pins it only
+ * through its `"."` entry — an object without one overrides the package's
+ * children, not the package, so a direct dependency on it is not refused.
  *
  * @param source - The root `package.json` text
- * @returns The overridden package names
+ * @returns The package names the overrides pin
  * @throws {SyntaxError} When the text is not JSON
  */
 function overriddenNames(source: string): ReadonlySet<string> {
@@ -569,8 +572,13 @@ function overriddenNames(source: string): ReadonlySet<string> {
   if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) {
     return new Set();
   }
+  const pinned = Object.entries(overrides as Record<string, unknown>).filter(
+    ([, value]) =>
+      typeof value === 'string' ||
+      (value !== null && typeof value === 'object' && Object.hasOwn(value, '.')),
+  );
   return new Set(
-    Object.keys(overrides).map((key) => {
+    pinned.map(([key]) => {
       const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
       return at === -1 ? key : key.slice(0, at);
     }),
