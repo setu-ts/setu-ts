@@ -661,7 +661,7 @@ here.
   resolved to its Drizzle property, entity-bound cursor fingerprints, unknown fields refused on
   every SQL adapter, a refused value as a named 400, a named missing-key-column error checked at
   connect, and a reporting pool `'error'` listener; V10-4, V10-32, V10-33, V10-37, V10-45, V10-61) —
-  complete (PR pending).
+  complete (PR #504).
 - **Next milestone** — M119f (telemetry and the optional-peer packages — optional peers in an npm
   workspace). M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
 
