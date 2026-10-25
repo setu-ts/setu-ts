@@ -198,7 +198,7 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
 const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
 
 /** Opt-in agent brief creation and read-only freshness checking. */
-const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'dir', 'dry-run'], [], {
+const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-run'], [], {
   fixed: 1,
   taken: 0,
   noun: 'no arguments',

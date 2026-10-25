@@ -246,7 +246,9 @@ Eleven local defects in what `@setu-ts/cli` generates and how its commands behav
   member root (`<project>/apps/<member>`): plugins are the union of `detectPlugins` on both
   directories; `detectProjectRuntime` gains an optional second directory, and a marker file counts
   when present in at least one of them. A fresh adoption has no member directory, so its result is
-  unchanged.
+  unchanged. The member root is read only after `assertInsideProject(fs, project, memberRoot)`
+  passes; when it throws (a link at `apps/<member>`), the probes use the project root alone and
+  planning continues to its existing refusals.
 - **Why:** a SIGKILL after some moves leaves the manifest under `apps/<member>/`; the re-run then
   recorded `healthProbes`/`metricsEndpoint: false`, and a Deno project whose `deno.json` had moved
   would be re-detected as Node.
@@ -373,26 +375,41 @@ also driven by hand: `npm install`, `npm test`, `npm run test:e2e`, then the mou
 
 - **Reviewed flows:** an HTTP client requesting a generated module's `GET/PATCH /:id`; a developer
   running `setu agents` in a workspace whose directories another user or a symlink controls; a
-  developer running `setu new`/`adopt`/`add`/`generate` and reading the printed guidance.
+  re-run of `setu adopt` reading manifests from `apps/<member>/` (§3.9); a developer running a
+  generated Workers project's `test`/`test:e2e`; a developer running `setu new`/`adopt`/`add`/
+  `generate` and reading the printed guidance.
 - **Assets:** the generated application's responses and logs (no reflected input); the integrity of
   files outside the developer's own tree (no write through a link or into another user's directory);
   terminal output integrity.
 - **Attackers:** an unauthenticated HTTP client sending a hostile id; another local user owning or
-  linking a directory in the workspace chain; a hostile `PWD` value in the environment.
-- **Budgets:** none new.
+  linking a directory in the workspace chain, or planting a link at `apps/<member>` before a re-run
+  of `adopt`; a hostile `PWD` value in the environment; a project name chosen to break out of the
+  `wrangler.toml` string.
+- **Budgets:** the §3.4 `canWrite` preflight adds one `access` call per brief that would change
+  (bounded by the workspace member count); the §3.5 logical walk adds one bounded manifest read per
+  ancestor of the logical path, only when the physical walk found no workspace and `logicalCwd`
+  differs; §3.9 adds one manifest read set for the member root.
 - **Audit obligations:** a hostile id (`"><img src=x>`, CR/LF, a 10 KB value) never reaches the 404
   body or the thrown error's message; a logical path never authorizes a write (§3.5 refusal-only);
   an unwritable target is refused before any byte is written in both modes and the message names no
   temp file; the symlink remedy never suggests running in "a workspace you own"; printed links carry
-  no unescaped project input.
+  no unescaped project input; a link at `apps/<member>` contributes nothing to the §3.9 probes (the
+  member root is checked with `assertInsideProject` before it is read, and skipped when the check
+  fails); the generated Workers `test/support/server.ts` loads only `wrangler` and the project's own
+  `./wrangler.toml`, and starts no process beyond wrangler's local workerd; a Workers project name
+  carrying a quote, backslash, newline or `.` is refused before anything is written, so nothing but
+  `[a-z0-9-]` reaches `wrangler.toml`.
 
-| Threat                                 | Resolution                                                   |
-| -------------------------------------- | ------------------------------------------------------------ |
-| Reflected id in the 404 body and log   | §3.7 fixed detail                                            |
-| Write through a symlinked member       | §3.5 refusal; existing ownership and containment checks stay |
-| Forged `PWD` steering writes           | §3.5: validated against the physical cwd, refusal-only       |
-| Partial write into an unwritable tree  | §3.4 preflight before the first write                        |
-| Temp-file name and raw errno in output | §3.4 (4) mapped message                                      |
+| Threat                                                   | Resolution                                                               |
+| -------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Reflected id in the 404 body and log                     | §3.7 fixed detail                                                        |
+| Write through a symlinked member                         | §3.5 refusal; existing ownership and containment checks stay             |
+| Forged `PWD` steering writes                             | §3.5: validated against the physical cwd, refusal-only                   |
+| Partial write into an unwritable tree                    | §3.4 preflight before the first write                                    |
+| Temp-file name and raw errno in output                   | §3.4 (4) mapped message                                                  |
+| Planted link at `apps/<member>` feeding the adopt probes | §3.9: member root checked with `assertInsideProject`, skipped on failure |
+| TOML injection through the Workers project name          | §3.8 name rule `[a-z0-9-]`, at most 63 characters                        |
+| Generated test harness running foreign code              | §3.2: harness reads only the project's own `wrangler.toml`               |
 
 ## 9. Out of scope
 

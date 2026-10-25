@@ -176,9 +176,10 @@ describe('a scaffolded npm project runs its own scripts', () => {
       async () => {
         const project = await scaffoldAndInstall(args);
 
-        // A socket target carries a composition-root smoke test (M101g); a Workers
-        // project serves no socket and carries none.
-        const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test', 'test:e2e'] : [])];
+        // Every target carries generated tests: a socket target runs them in
+        // process, a Workers target boots the real Worker on workerd (V10-23).
+        // Only a socket target is then served on a local port.
+        const scripts = ['check', 'lint', 'format:check', 'test', 'test:e2e'];
         const manifest = JSON.parse(await nodeFs.readFile(`${project}/package.json`, 'utf8')) as {
           scripts?: Record<string, string>;
         };

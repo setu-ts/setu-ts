@@ -58,6 +58,23 @@ describe('the duplicate-path guard', () => {
   });
 });
 
+describe('Workers project names', () => {
+  it('refuses a name wrangler refuses, writing nothing', async () => {
+    const h = harness();
+    expect(await h.run(['a.b', '--runtime', 'cloudflare-workers'])).toBe(2);
+    expect(h.err.text()).toBe(
+      'Invalid Workers project name: "a.b". wrangler accepts only lowercase letters, digits and -, at most 63 characters.',
+    );
+    expect(h.fs.writes).toEqual([]);
+  });
+
+  it('still scaffolds a dotted name on Node', async () => {
+    const h = harness();
+    expect(await h.run(['a.b', '--runtime', 'node'])).toBe(0);
+    expect(h.fs.has('/work/a.b/package.json')).toBe(true);
+  });
+});
+
 // Node's built-in TypeScript support ERASES types without transforming code, so
 // `node --experimental-strip-types main.ts` — what this CLI emitted through
 // alpha.5 — cannot run a legacy decorator or a constructor parameter property.

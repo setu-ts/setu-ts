@@ -44,6 +44,7 @@ import { readJsonManifest } from '../utils/manifest-reader.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
+import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
 import { installSearchDirs } from '../app-loader.ts';
@@ -335,9 +336,7 @@ function printWiringNote(
           log(`  Import ${item.symbols.join(', ')} from '${item.from}' for it.`);
         }
       }
-      log(
-        `  See https://github.com/setu-ts/setu-ts/blob/develop/packages/starters/${starter.pkg}/README.md`,
-      );
+      log(`  See ${repositoryFileUrl(`packages/starters/${starter.pkg}/README.md`)}`);
       log(
         '  Once that arm is configured, registering a second instance with app.register fails' +
           ' with a duplicate plugin name.',

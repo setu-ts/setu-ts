@@ -1237,18 +1237,23 @@ function denoTasks(
       ? `deno serve ${denoPermissions(manifest)} ${entry}`
       : `deno run ${denoPermissions(manifest)} ${entry}`;
 
-  // A3: every template emits a `test` task now. `setu generate module` writes a
-  // `<name>.test.ts`, and NO template declared a task that runs it — so the
-  // generated test sat beside the generated service, unreachable from
+  // A3: every Deno template emits a `test` task now. `setu generate module`
+  // writes a `<name>.test.ts`, and NO template declared a task that runs it — so
+  // the generated test sat beside the generated service, unreachable from
   // `deno check main.ts setu.config.ts`, and both stayed broken through a full
   // green run of every gate a developer had.
-  const test = {
-    test:
-      runtime === 'cloudflare-workers'
-        ? 'deno test -A --permit-no-files'
-        : "deno test -A --ignore='**/*.e2e.test.ts'",
-    ...(runtime === 'cloudflare-workers' ? {} : { 'test:e2e': "deno test -A '**/*.e2e.test.ts'" }),
-  };
+  //
+  // Workers has no Deno test task: its tests run the real Worker on workerd
+  // through wrangler under `tsx --test`, so `npm test` is the only command that
+  // executes them (V10-23). A `deno test --permit-no-files` task beside it was
+  // the defect's visible symptom — a "test" command that ran nothing.
+  const test =
+    runtime === 'deno'
+      ? {
+          test: "deno test -A --ignore='**/*.e2e.test.ts'",
+          'test:e2e': "deno test -A '**/*.e2e.test.ts'",
+        }
+      : undefined;
 
   if (manifest?.npmBuild === undefined) {
     return { start, ...test, ...host.extraTasks };
@@ -1266,10 +1271,8 @@ function denoTasks(
     // The generated smoke test boots `createApp()`, which loads the server
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
-    test: `deno task build && ${test.test}`,
-    ...(test['test:e2e'] === undefined
-      ? {}
-      : { 'test:e2e': `deno task build && ${test['test:e2e']}` }),
+    ...(test === undefined ? {} : { test: `deno task build && ${test.test}` }),
+    ...(test === undefined ? {} : { 'test:e2e': `deno task build && ${test['test:e2e']}` }),
     // The development entry runs Vite in-process and needs it installed, but
     // not the production build: Vite serves the route modules itself.
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
@@ -1445,10 +1448,11 @@ function tsconfigOptions(
           lib: template?.['lib'] ?? ['ES2022'],
           types: [
             WORKERS_TYPES_PACKAGE,
-            // The template's npm build (Vite) imports `node:fs`, and the same
-            // `tsconfig.json` type-checks it. A Workers project without one
-            // names no Node declarations at all.
-            ...(manifest?.npmBuild === undefined ? [] : ['node']),
+            // Every Workers project now emits tests that run under `tsx --test`
+            // with `node:test` and `node:assert`, so the Node declarations are
+            // always named. A full-stack project's single `tsconfig.json` also
+            // type-checks a `vite.config.ts` that imports `node:fs`.
+            'node',
             ...templateTypes(template),
           ],
           // The Workers entry statically imports the compiled React Router
@@ -1543,18 +1547,25 @@ function denoCompilerOptions(
 }
 
 /**
- * The `scripts` a generated `package.json` carries.
+ * The `test` and `test:e2e` scripts a generated npm project runs.
  *
- * A template with a frontend build gets a `build` script, and its `start` and
- * `test` run it first, because neither can work until the build has produced
- * the server bundle the SSR plugin loads.
+ * One owner for both manifest paths: a Node or Bun project merges them through
+ * {@linkcode npmScripts}, and a Workers project — whose manifest comes from
+ * `standaloneNpmFiles` — gets the same commands there (V10-23). Workers keeps
+ * `node:test` as its harness, so its scripts are the Node arm's verbatim; the
+ * generated tests themselves start the Worker on workerd through wrangler.
+ *
+ * A template with a frontend build builds first in both scripts, because the
+ * entry a test boots imports the compiled server module.
  *
  * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
- * @returns The scripts block
+ * @returns The `test` and `test:e2e` scripts
  */
-function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
-  const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
+function generatedTestScripts(
+  runtime: TargetRuntime,
+  manifest?: TemplateManifest,
+): Record<string, string> {
   // A3 applies to every target, not just the Deno ones: `setu generate module`
   // emits a `<name>.test.ts` here too, and before this nothing could run it.
   // Each runtime's own runner, matching the harness the schematic emits — `bun
@@ -1568,22 +1579,39 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
     runtime === 'bun'
       ? 'bun test .e2e.test'
       : `${NODE_RUNNER} --test --test-force-exit '**/*.e2e.test.ts'`;
-  // With a frontend build both scripts boot an app that loads the server
-  // bundle, so both build first, as the Deno `start` and `test` tasks do. A
-  // `start` without it is what the next-step hint and the README tell a new
-  // user to run, and it crashed with "Failed to load React Router server
-  // build" on a fresh Node or Bun project. The build runs FIRST, so `start`
-  // still begins with `bun` on Bun, which is how `detectTargetRuntime` tells a
-  // Bun project from a Node one.
+  const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
+  return manifest?.npmBuild === undefined
+    ? { test, 'test:e2e': e2e }
+    : { test: `${build} && ${test}`, 'test:e2e': `${build} && ${e2e}` };
+}
+
+/**
+ * The `scripts` a generated `package.json` carries.
+ *
+ * A template with a frontend build gets a `build` script, and its `start` and
+ * `test` run it first, because neither can work until the build has produced
+ * the server bundle the SSR plugin loads.
+ *
+ * @param runtime - The selected runtime target
+ * @param manifest - The template's manifest contributions, when it declares them
+ * @returns The scripts block
+ */
+function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
+  const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
+  // With a frontend build `start` boots an app that loads the server bundle, so
+  // it builds first, as the Deno `start` task does. A `start` without it is what
+  // the next-step hint and the README tell a new user to run, and it crashed
+  // with "Failed to load React Router server build" on a fresh Node or Bun
+  // project. The build runs FIRST, so `start` still begins with `bun` on Bun,
+  // which is how `detectTargetRuntime` tells a Bun project from a Node one.
   const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
   const devEntry = manifest?.npmBuild?.devEntry;
   return manifest?.npmBuild === undefined
-    ? { start, test, 'test:e2e': e2e }
+    ? { start, ...generatedTestScripts(runtime, manifest) }
     : {
         build: manifest.npmBuild.script,
         start: `${build} && ${start}`,
-        test: `${build} && ${test}`,
-        'test:e2e': `${build} && ${e2e}`,
+        ...generatedTestScripts(runtime, manifest),
         // No build first: Vite serves the route modules itself in development.
         ...(devEntry === undefined
           ? {}
@@ -1629,18 +1657,14 @@ const NODE_TYPES_RANGE = '^24.0.0';
  *
  * Kept apart from {@linkcode TemplateManifest.npmDevDependencies}, which is a
  * per-template concern, because this one is per-target: every Node project
- * needs it and no Bun, Deno or Workers project does. Bun compiles TypeScript
- * outright, and the Workers and Deno targets never invoke {@linkcode
- * NODE_RUNNER}.
+ * needs it, and every Workers project needs it too now that its tests run under
+ * {@linkcode NODE_RUNNER}. Bun compiles TypeScript outright and the Deno target
+ * never invokes that runner.
  *
  * @param runtime - The selected runtime target
- * @param manifest - The template's manifest contributions, when it declares them
- * @returns devDependencies to merge, empty for every target but Node
+ * @returns devDependencies to merge, empty for Deno
  */
-function runtimeDevDependencies(
-  runtime: TargetRuntime,
-  manifest?: TemplateManifest,
-): Readonly<Record<string, string>> {
+function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
   // Node: see NODE_RUNNER — the start script invokes it, so it must be
   // installed. `@types/node` is what declares the `process` the entry's shutdown
   // listener registers on; without it a generated project's own `tsc` reports an
@@ -1677,12 +1701,13 @@ function runtimeDevDependencies(
     return {
       wrangler: '~4.148.0',
       [WORKERS_TYPES_PACKAGE]: '^5.20261006.1',
-      // A full-stack Workers project runs ONE `tsconfig.json` over both the
-      // Worker source and `vite.config.ts`, which imports `node:fs` — so the
-      // Node declarations have to be present for its own `npm run check` to
-      // pass. A rest or microservice Workers project has no such file and gets
-      // nothing extra.
-      ...(manifest?.npmBuild === undefined ? {} : { '@types/node': NODE_TYPES_RANGE }),
+      // The generated tests boot the Worker through wrangler's test harness
+      // under `tsx --test`, so the runner must be installed. `@types/node`
+      // declares the `node:test`, `node:assert` and `process` surfaces those
+      // tests use; it also covers a full-stack project's `vite.config.ts`,
+      // which imports `node:fs`.
+      '@types/node': NODE_TYPES_RANGE,
+      tsx: '^4.20.0',
     };
   }
   return {};
@@ -1739,7 +1764,7 @@ function standaloneNpmFiles(
     // Through the same helper the Node branch uses, so runtime-level
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
-    ...runtimeDevDependencies(runtime, manifest),
+    ...runtimeDevDependencies(runtime),
     ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
     ...manifest?.npmDevDependencies,
   };
@@ -1748,6 +1773,9 @@ function standaloneNpmFiles(
     ...(onWorkers
       ? {
           ...NPM_TOOLING_SCRIPTS,
+          // The same commands the Node arm runs (V10-23): the generated tests
+          // use `node:test` under `tsx`, and boot the Worker on workerd.
+          ...generatedTestScripts(runtime, manifest),
           // A template with a build has its Workers entry import the compiled
           // server module, which does not exist until that build runs. The
           // check therefore builds first, the same order `start` and `test`
@@ -1963,43 +1991,62 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
   if (runtime === 'cloudflare-workers') {
     files[0] = {
       path: 'README.md',
-      contents: `${readme}\n## Testing\n\nThe application needs the platform environment to boot. No smoke test is emitted here;\n\`deno task test\` permits an empty suite until you add platform-aware tests.\n`,
+      contents: `${readme}\n## Testing\n\nThe tests boot the real Worker on workerd through wrangler, so they run in the platform\nenvironment with the bindings \`wrangler.toml\` declares:\n\n\`\`\`bash\nnpm test\nnpm run test:e2e\n\`\`\`\n`,
     };
-  } else {
-    files.push(
-      { path: 'test/support/server.ts', managed: true, contents: renderTestServer() },
-      {
-        path: 'test/e2e/app.e2e.test.ts',
-        contents: renderAppE2e(runtime, [
-          ...(host.appFactory !== undefined || host.plugins.some((p) => p.pkg === 'health-plugin')
-            ? ['/health', '/ready']
-            : ['/']),
-          ...host.routes
-            .filter((route) => route.path.startsWith('/greetings'))
-            .map((route) => route.path.replace(':name', 'Setu')),
-        ]),
-      },
-    );
-    const hasAppFactory = host.appFactory !== undefined;
-    const path =
-      hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin') ? '/health' : '/';
-    // A factory host composes a starter that serves SSR pages (full-stack
-    // today). `/health` stays 200 when `populateLoadContext` throws, so the
-    // smoke test also requests `/` — through `fetch`, because an SSR body
-    // streams and `inject()` refuses one, with the body consumed so the
-    // test's resource sanitizer does not report a leak.
-    const ssrProbe = hasAppFactory
-      ? `
+  }
+
+  files.push(
+    { path: 'test/support/server.ts', managed: true, contents: renderTestServer(runtime) },
+    {
+      path: 'test/e2e/app.e2e.test.ts',
+      contents: renderAppE2e(runtime, [
+        ...(host.appFactory !== undefined || host.plugins.some((p) => p.pkg === 'health-plugin')
+          ? ['/health', '/ready']
+          : ['/']),
+        ...host.routes
+          .filter((route) => route.path.startsWith('/greetings'))
+          .map((route) => route.path.replace(':name', 'Setu')),
+      ]),
+    },
+  );
+  const hasAppFactory = host.appFactory !== undefined;
+  const path =
+    hasAppFactory || host.plugins.some((p) => p.pkg === 'health-plugin') ? '/health' : '/';
+  // A factory host composes a starter that serves SSR pages (full-stack
+  // today). `/health` stays 200 when `populateLoadContext` throws, so the
+  // smoke test also requests `/` — through `fetch`, because an SSR body
+  // streams and `inject()` refuses one, with the body consumed so the
+  // test's resource sanitizer does not report a leak.
+  const ssrProbe = hasAppFactory
+    ? `
       // The SSR home page streams, which inject() refuses — request it
       // through fetch, and consume the body so the resource sanitizer
       // does not report a leak.
       const page = await app.fetch(new Request('http://localhost/'));
       ${renderEquals(runtime, 'page.status', '200')}
       await page.text();`
-      : '';
-    files.push({
-      path: 'test/app.test.ts',
-      contents: `${testHarnessFor(runtime).imports}
+    : '';
+  // A Workers app boots through workerd rather than in process, because a
+  // template may need the bindings its `wrangler.toml` declares (V10-23). The
+  // same exported `startTestServer()` hides the difference from every caller.
+  const appTest =
+    runtime === 'cloudflare-workers'
+      ? `${testHarnessFor(runtime).imports}
+import { startTestServer } from './support/server.ts';
+
+describe('application composition', () => {
+  it('serves its smoke-test endpoint', async () => {
+    const server = await startTestServer();
+    try {
+      const response = await fetch(server.baseUrl + '${path}');
+      ${renderEquals(runtime, 'response.status', '200')}
+    } finally {
+      await server.stop();
+    }
+  });
+});
+`
+      : `${testHarnessFor(runtime).imports}
 import { createTestApp } from '@setu-ts/testing';
 import { createApp } from '../setu.config.ts';
 
@@ -2014,9 +2061,8 @@ describe('application composition', () => {
     }
   });
 });
-`,
-    });
-  }
+`;
+  files.push({ path: 'test/app.test.ts', contents: appTest });
 
   if (runtime === 'deno' || runtime === 'cloudflare-workers') {
     // A workspace member is the only caller that passes a port, and a member's
@@ -2093,7 +2139,7 @@ describe('application composition', () => {
           // rather than left as a branch no input can take.
           devDependencies: {
             ...npmDevFrameworkDependencies(host, runtime),
-            ...runtimeDevDependencies(runtime, manifest),
+            ...runtimeDevDependencies(runtime),
             ...NPM_TOOLING_DEV_DEPENDENCIES,
             ...host.extraDevDependencies,
             ...manifest?.npmDevDependencies,

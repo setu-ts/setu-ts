@@ -126,9 +126,22 @@ describe('feature module generated tasks', () => {
             expect(await missing.json(), method).toMatchObject({
               status: 404,
               title: 'Not Found',
-              detail: 'Invoices missing was not found.',
+              detail: 'Invoices not found.',
             });
           }
+          // A hostile id must not be reflected into the Problem Details body:
+          // the detail is fixed, so neither the tag nor its attribute survives.
+          const echoed = await fetch(`${origin}/invoices/${encodeURIComponent('"><img src=x>')}`);
+          expect(echoed.status).toBe(404);
+          expect(echoed.headers.get('content-type')).toContain('application/problem+json');
+          const echoedBody = await echoed.text();
+          expect(echoedBody).not.toContain('<img');
+          expect(echoedBody).not.toContain('src=x');
+          expect(JSON.parse(echoedBody)).toMatchObject({
+            status: 404,
+            title: 'Not Found',
+            detail: 'Invoices not found.',
+          });
           const summary = await fetch(`${origin}/invoices/summary`);
           expect(summary.status).toBe(200);
           expect(await summary.json()).toEqual({ items: [] });

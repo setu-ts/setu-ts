@@ -282,21 +282,31 @@ export function isWorkspaceRuntime(runtime: TargetRuntime): boolean {
  * either — only the emitted commands differ, and `npm` is the safer default for a
  * project that has never been installed.
  *
+ * A second directory is probed as well. An adoption interrupted after some moves
+ * leaves the manifest under the planned member (`apps/<member>`); reading only the
+ * original root then re-detects a Deno project as Node, and the workspace's root
+ * manifest pins commands its members cannot run.
+ *
  * @param fs - The filesystem to probe
  * @param project - The project directory (absolute)
+ * @param member - The planned member directory to probe beside it (absolute)
  * @returns The runtime it is built with
  */
 export async function detectProjectRuntime(
   fs: IFileSystem,
   project: string,
+  member?: string,
 ): Promise<TargetRuntime> {
   const has = async (name: string): Promise<boolean> => {
-    try {
-      await fs.stat(`${project}/${name}`);
-      return true;
-    } catch {
-      return false;
+    for (const dir of member === undefined ? [project] : [project, member]) {
+      try {
+        await fs.stat(`${dir}/${name}`);
+        return true;
+      } catch {
+        // Absent here; the other directory may still hold it.
+      }
     }
+    return false;
   };
 
   if ((await has('deno.json')) || (await has('deno.jsonc'))) return 'deno';

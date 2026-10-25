@@ -723,6 +723,10 @@ describe('runAddCommand', () => {
       const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await h.run(['auth'])).toBe(0);
       expect(h.out.join('\n')).toContain('configure its auth arm');
+      expect(h.out.join('\n')).toContain(
+        `https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/starters/${pkg}/README.md`,
+      );
+      expect(h.out.join('\n')).not.toContain('/blob/develop/');
       const grpc = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
       expect(await grpc.run(['grpc'])).toBe(0);
       expect(grpc.out.join('\n')).toContain(

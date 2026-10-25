@@ -188,12 +188,28 @@ export async function runAdoptCommand(args: ParsedArgs, deps: AdoptDependencies)
   // Read from the project's own manifest BEFORE anything moves, and persisted in
   // the member record: the Kubernetes renderer has only the manifest, and later
   // `generate app` / `ports --reallocate` re-renders must keep the same answer.
-  const support = probeSupport(await detectPlugins(deps.fs, project));
+  // An interrupted adoption may already have moved the manifest under the planned
+  // member, so both locations are probed; a fresh adoption has no member and the
+  // union is the root's own answer. The member is read only when it is really
+  // inside the project: a link planted at `apps/<member>` must not feed a foreign
+  // manifest into the probes, so it is ignored here and the planning below refuses.
+  const memberCandidate = joinPath(project, memberRoot);
+  let memberDir: string | undefined = memberCandidate;
+  try {
+    await assertInsideProject(deps.fs, project, memberCandidate);
+  } catch {
+    memberDir = undefined;
+  }
+  const plugins = new Set([
+    ...(await detectPlugins(deps.fs, project)),
+    ...(memberDir === undefined ? [] : await detectPlugins(deps.fs, memberDir)),
+  ]);
+  const support = probeSupport(plugins);
 
   // The toolchain the project already uses, not a choice: a project with a
   // package.json is a Node or Bun one, and converting it into a Deno workspace
   // would leave a root whose members its toolchain cannot install.
-  const profile = workspaceProfile(await detectProjectRuntime(deps.fs, project));
+  const profile = workspaceProfile(await detectProjectRuntime(deps.fs, project, memberDir));
 
   const manifest = {
     version: WORKSPACE_VERSION,

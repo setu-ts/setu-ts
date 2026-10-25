@@ -114,6 +114,34 @@ describe('Node regular-file writer', () => {
     await expect(writeRegularFile(root, bytes('new'), MAX_EXISTING_FILE_BYTES)).rejects.toThrow();
   });
 
+  it.skipIf(process.getuid?.() === 0)(
+    'maps a permission failure creating the temp file without naming the temp file',
+    async () => {
+      const dir = `${root}/locked`;
+      await mkdir(dir);
+      await chmod(dir, 0o555);
+      const target = `${dir}/file`;
+      try {
+        const failure = await writeRegularFile(target, bytes('new'), MAX_EXISTING_FILE_BYTES).then(
+          () => undefined,
+          (cause: unknown) => cause,
+        );
+        expect(failure).toBeInstanceOf(Error);
+        expect((failure as Error).message).toBe(
+          `${target}: permission denied creating a file in ${dir}`,
+        );
+        expect((failure as Error).message).not.toMatch(/\.setu-[a-f0-9]+\.tmp/);
+        // `RegularFileWriteError` wraps the mapped message, which keeps the raw
+        // errno one level deeper for diagnosis.
+        expect((failure as { cause?: { cause?: { code?: string } } }).cause?.cause?.code).toBe(
+          'EACCES',
+        );
+      } finally {
+        await chmod(dir, 0o755);
+      }
+    },
+  );
+
   it.skipIf(process.platform === 'win32')(
     'refuses a symlink to an outside file and preserves the outside bytes',
     async () => {

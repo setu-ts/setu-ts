@@ -48,7 +48,7 @@ describe.skipIf(process.platform === 'win32')(
           expect(result.killed, 'CLI must finish within the subprocess deadline').toBe(false);
           if (name === 'wrangler.toml') {
             expect(result.code).toBe(0);
-            expect(result.stdout).toContain(`would write ${dir}/AGENTS.md`);
+            expect(result.stdout).toContain(`would create ${dir}/AGENTS.md`);
           } else {
             expect(result.code).toBe(1);
             expect(result.stderr).toContain('expected a regular file at most 1 MiB');

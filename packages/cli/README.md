@@ -140,7 +140,8 @@ end the command without rollback. Re-running `setu adopt` converges; an interrup
 ```bash
 setu agents              # write or refresh this project's AGENTS.md
 setu agents --check      # report a missing or stale section and exit 1, writing nothing
-setu agents --dry-run    # print the paths that would be written
+setu agents --check --strict  # also exit 1 when an installed package's agent card is missing
+setu agents --dry-run    # print what the real run would do
 setu new my-app --agents # scaffold, then write the brief
 ```
 
@@ -150,20 +151,24 @@ runtime and scripts; everything outside the markers is never touched. In a works
 root file and every member's `apps/<name>/AGENTS.md`, run from the root or from a member's own
 directory. The brief points each installed package at its `AGENT_CARD.md`, which every published
 library package ships in its npm tarball, so a normal install delivers it. `setu agents --check` is
-the CI step. After a successful `setu add` the CLI prints a reminder to run `agents` through the
-project's pinned CLI invocation (for example `npx @setu-ts/cli@<version> agents`) when the project
-already has a sectioned brief.
+the CI step; it deliberately answers without an install, and `--strict` (valid only with `--check`)
+adds card presence so a run whose cards were not delivered fails. A brief whose bytes already match
+is reported `unchanged` and is not rewritten; `--dry-run` prints `would create`, `would update` or
+`unchanged`, and both modes refuse an unwritable target before writing anything. After a successful
+`setu add` the CLI prints a reminder to run `agents` through the project's pinned CLI invocation
+(for example `npx @setu-ts/cli@<version> agents`) when the project already has a sectioned brief.
 
 Writing a workspace on POSIX, from its root or a member, checks every target's directory chain up to
 `/`: each directory must belong to the invoking user or root and must not be a symlink, the same
 ownership rule as git's `safe.directory`. Permission bits are not checked, so a directory you own
 but others can write is trusted. `--check` writes nothing and skips the check; `--dry-run` applies
-it. A failure exits `1`, names the directory and reason, writes nothing, and asks you to run
-`setu agents` in a workspace you own; it never falls back to standalone. This check is skipped when
-ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
-against another process running as the same user. Missing directories pass ownership validation only
-when their nearest existing ancestor and its chain pass; a missing member still exits `1` with
-`<member>: not a project`, writing nothing. Standalone projects are unchecked.
+it. A failure exits `1`, names the directory and reason, writes nothing, and names a remedy chosen
+for the reason — replacing a link with the directory it points at, fixing a member path that is not
+a directory, or running in a workspace you own — so it never falls back to standalone. This check is
+skipped when ownership metadata or the invoking uid is unavailable (including Windows); it does not
+protect against another process running as the same user. Missing directories pass ownership
+validation only when their nearest existing ancestor and its chain pass; a missing member still
+exits `1` with `<member>: not a project`, writing nothing. Standalone projects are unchecked.
 
 The full behavior is in
 [the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#agent-briefs-setu-agents).

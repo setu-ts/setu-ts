@@ -587,7 +587,8 @@ re-run it after `setu add` or a framework upgrade.
 ```bash
 setu agents                      # write or refresh AGENTS.md
 setu agents --check              # CI: exit 1 when a section is missing or stale, write nothing
-setu agents --dry-run            # print the paths that would be written
+setu agents --check --strict     # CI: also exit 1 when an agent card is not installed
+setu agents --dry-run            # print what the real run would do
 setu agents --dir ./services/orders
 ```
 
@@ -621,15 +622,24 @@ A path that is not a regular file, or is over 1 MiB, is refused the same way.
   nothing. Exit `0` when every file matches; exit `1` naming each file that is missing a section or
   whose section differs, including after a framework version change. Card presence is deliberately
   not part of the check, so the result does not depend on whether `install` has run — which is what
-  makes `setu agents --check` a CI step on a checkout before installing.
+  makes `setu agents --check` a CI step on a checkout before installing. Add `--strict` to include
+  card presence.
+- **`--strict`** is accepted only with `--check`; on its own it is a usage error (exit `2`,
+  `--strict requires --check.`). It adds card presence to the check: after the freshness comparison
+  every card warning is reported as `<AGENTS.md path>: <warning>` and the command exits `1`.
 - **`--dir <path>`** operates on that project or workspace instead of the working directory. A
   relative path is resolved against the working directory.
-- **`--dry-run`** prints `would write <path>` for each file it would write, and writes nothing. It
-  is refused together with `--check` (exit `2`).
+- **`--dry-run`** prints what the real run would do — `would create <path>`, `would update <path>`
+  or `unchanged <path>` — and writes nothing. A brief whose bytes already match is reported
+  `unchanged` and is not rewritten by the real run either. Before writing anything, the real run and
+  the dry run both check the changed briefs for writability: a target the invoking user cannot write
+  refuses the whole run with `WOULD REFUSE: <path> is not writable by you` (dry run) or
+  `<path>: not writable by you; nothing was written`, exits `1`, and writes nothing. It is refused
+  together with `--check` (exit `2`).
 
-A write prints one line per file — `created`, `updated` or `unchanged`, followed by the path. The
-command takes no positionals, and an extra one is a usage error (exit `2`). Outside a Setu-TS
-project it exits `2` with
+A write prints one line per file — `created`, `updated` or `unchanged`, followed by the path; an
+unchanged brief is reported and left untouched. The command takes no positionals, and an extra one
+is a usage error (exit `2`). Outside a Setu-TS project it exits `2` with
 `<dir> holds no Setu-TS project manifest; run inside a project or pass --dir.`; an unreadable
 manifest or a runtime marker whose metadata it cannot inspect exits `1` naming the file, because a
 brief built on a guessed runtime would name the wrong commands. Manifest content must be a regular
@@ -650,12 +660,28 @@ Writing a workspace on POSIX, from its root or a member, checks every target's d
 `/`: each directory must belong to the invoking user or root and must not be a symlink, the same
 ownership rule as git's `safe.directory`. Permission bits are not checked, so a directory you own
 but others can write is trusted. `--check` writes nothing and skips the check; `--dry-run` applies
-it. A failure exits `1`, names the directory and reason, writes nothing, and asks you to run
-`setu agents` in a workspace you own; it never falls back to standalone. This check is skipped when
-ownership metadata or the invoking uid is unavailable (including Windows); it does not protect
-against another process running as the same user. Missing directories pass ownership validation only
-when their nearest existing ancestor and its chain pass; a missing member still exits `1` with
+it. A failure exits `1`, names the directory and reason, writes nothing, and names a remedy for that
+reason: `replace the link with the directory it points at, or run setu agents from its real path`
+(with the real path in parentheses when it can be resolved) for a symlink,
+`fix the workspace layout so every member path is a directory` for a non-directory, and
+`run setu agents in a workspace you own` for a directory owned by another user or one whose
+ownership cannot be checked. It never falls back to standalone. This check is skipped when ownership
+metadata or the invoking uid is unavailable (including Windows); it does not protect against another
+process running as the same user. Missing directories pass ownership validation only when their
+nearest existing ancestor and its chain pass; a missing member still exits `1` with
 `<member>: not a project`, writing nothing. Standalone projects are unchecked.
+
+A workspace member reached through a symlink is refused from inside the link too. When the shell's
+logical working directory (`PWD`) is absolute and resolves to the same place as the physical working
+directory, `setu agents` walks the logical ancestors; a manifest listing that logical path as a
+member refuses in every mode, writes nothing, and says:
+
+```text
+<logical target> is a symlinked member of the workspace at <root>; Setu will not write through links
+inside a workspace. Replace the link with the directory it points at, then run setu agents from <root>.
+```
+
+The logical path is used only to refuse; it never authorizes a write.
 
 ### Where cards come from
 
@@ -667,9 +693,10 @@ generates installs at the root.
 
 After writing, the command checks each card it named and prints one advisory line per missing one:
 `card not found: node_modules/@setu-ts/<pkg>/AGENT_CARD.md — run install` (prefixed with `../../` in
-a workspace member). The exit status is unchanged. When the project has no `node_modules` directory
-at all and the manifest asks for Yarn Plug'n'Play or a Deno project without `nodeModulesDir`, the
-warning names the setting instead —
+a workspace member). The exit status is unchanged by a plain run; `--check --strict` turns each of
+these lines into a failure prefixed with the brief's path. When the project has no `node_modules`
+directory at all and the manifest asks for Yarn Plug'n'Play or a Deno project without
+`nodeModulesDir`, the warning names the setting instead —
 `cards require node_modules — set nodeLinker: node-modules and run install`, or
 `cards require node_modules — set "nodeModulesDir": "auto" and run install`. Cards are never copied
 into the project; the fix is always to install.

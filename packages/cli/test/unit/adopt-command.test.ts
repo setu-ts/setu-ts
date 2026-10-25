@@ -283,6 +283,75 @@ describe('runAdoptCommand', () => {
     });
   });
 
+  describe('an interrupted adoption re-reads the moved manifest (V10-10)', () => {
+    const interrupted = (manifest: Readonly<Record<string, string>>) =>
+      harness({
+        '/work/svc/setu.config.ts': 'export function createApp() {}\n',
+        ...manifest,
+      });
+    const memberOf = (h: Harness) =>
+      (
+        JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+          runtime: string;
+          members: { healthProbes?: boolean; metricsEndpoint?: boolean }[];
+        }
+      ).members[0]!;
+
+    it('records support declared by a package.json already under the member', async () => {
+      const h = interrupted({
+        '/work/svc/apps/svc/package.json': JSON.stringify({
+          dependencies: {
+            '@setu-ts/health-plugin': '^0.9.0',
+            '@setu-ts/metrics-plugin': '^0.9.0',
+          },
+        }),
+      });
+      expect(await h.run([])).toBe(0);
+      expect(memberOf(h)).toMatchObject({ healthProbes: true, metricsEndpoint: true });
+      expect(h.fs.read('/work/svc/k8s/members.yaml')).toContain('prometheus.io/scrape');
+    });
+
+    it('never reads a manifest through a link planted at the member root', async () => {
+      const fs = createFakeFs({
+        '/work/svc/setu.config.ts': 'export function createApp() {}\n',
+        '/work/svc/apps/svc/package.json': JSON.stringify({
+          dependencies: { '@setu-ts/health-plugin': '^0.9.0' },
+        }),
+      });
+      const member = '/work/svc/apps/svc';
+      const read: string[] = [];
+      const linked: IFileSystem = {
+        ...fs,
+        readFile: (path) => {
+          read.push(path);
+          return fs.readFile(path);
+        },
+        realPath: (path) =>
+          path === member || path.startsWith(`${member}/`)
+            ? Promise.resolve(`/elsewhere${path.slice(member.length)}`)
+            : fs.realPath!(path),
+      };
+      await runAdoptCommand(parseArgs([]), {
+        fs: linked,
+        cwd: '/work/svc',
+        log: () => {},
+        error: () => {},
+      });
+      expect(read).not.toContain(`${member}/package.json`);
+    });
+
+    it('keeps a Deno workspace Deno when the manifest already moved', async () => {
+      const h = interrupted({
+        '/work/svc/apps/svc/deno.json': '{ "tasks": {} }\n',
+      });
+      expect(await h.run([])).toBe(0);
+      const persisted = JSON.parse(h.fs.read(`/work/svc/${WORKSPACE_MANIFEST}`)) as {
+        runtime: string;
+      };
+      expect(persisted.runtime).toBe('deno');
+    });
+  });
+
   describe('the configured dotenv pair (V9-39)', () => {
     /** A config naming one env path, plus the files the pair needs. */
     const withEnv = (envFilePath: string, files: Readonly<Record<string, string>>) =>
