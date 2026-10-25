@@ -251,7 +251,10 @@ export function refusedInputOf(
     ({ code, name }) =>
       (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
       name === 'PrismaClientValidationError' ||
-      (name === 'PrismaClientKnownRequestError' && (code === 'P2023' || code === 'P2007')),
+      // P2007 is the measured code for a value the database refused (Prisma
+      // 7.10.1, malformed uuid). P2023 is not mapped: Prisma also raises it for
+      // stored data it cannot read, which is a server fault, not caller input.
+      (name === 'PrismaClientKnownRequestError' && code === 'P2007'),
   )
     ? { kind: 'value' }
     : null;

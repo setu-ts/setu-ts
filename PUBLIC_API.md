@@ -1898,10 +1898,10 @@ Its message is `Entity '<entity>': the database refused a supplied value for its
 supplied value, key or field is included. Repository mappings retain a scrubbed driver error as
 cause. Drizzle PostgreSQL repositories map the four supplied-value SQLSTATE codes; D1 maps
 STRICT-table type refusals. Prisma validation errors containing ``Unknown argument `<field>` `` map
-to `UnknownPayloadFieldError`; other validation errors and known-request `P2023`/`P2007` errors map
-to `InvalidFieldValueError`. This includes conditional writes, which now answer 400 rather than 501
-for these refusals. A Prisma refusal cause is a new `Error` whose copied `name` and fixed message
-name only the original name and code, for example
+to `UnknownPayloadFieldError`; other validation errors and known-request `P2007` errors map to
+`InvalidFieldValueError`. This includes conditional writes, which now answer 400 rather than 501 for
+these refusals. A Prisma refusal cause is a new `Error` whose copied `name` and fixed message name
+only the original name and code, for example
 `Prisma refused the input (PrismaClientKnownRequestError P2007).`; the original object, query and
 payload are discarded.
 

@@ -590,12 +590,6 @@ describe('M119e Prisma refusal diagnostics contain no supplied values', () => {
       'Invalid input value: invalid input syntax for type uuid: private-prisma-canary',
       false,
     ],
-    [
-      'PrismaClientKnownRequestError',
-      'P2023',
-      'Inconsistent column data: private-prisma-canary',
-      false,
-    ],
   ] as const) {
     it(`${name} ${code ?? (unknownField ? 'unknown field' : 'value')} drops the original object and cause chain`, async () => {
       const { inspect } = await import('node:util');

@@ -141,9 +141,9 @@ All notable changes to this project are documented here. The format follows
 
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
-  `P2023`/`P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping,
-  replacing their previous 501. Prisma refusal causes are fresh errors with fixed messages naming
-  only the original name and code; query text and payload values are discarded.
+  `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing
+  their previous 501. Prisma refusal causes are fresh errors with fixed messages naming only the
+  original name and code; query text and payload values are discarded.
 - **D1 payload refusals are named 400s (M119e, 0.11.0, `@setu-ts/cloudflare-plugin`).** Invalid
   payload identifiers and SQLite unknown-column errors naming payload fields become
   `UnknownPayloadFieldError`; STRICT-table type refusals become `InvalidFieldValueError`.

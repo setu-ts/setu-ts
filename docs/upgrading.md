@@ -27,11 +27,11 @@ explicit wrong Drizzle primary-key mapping now fails connect with `MissingKeyCol
 
 D1 unknown payload fields and invalid payload identifiers, and Prisma unknown payload fields now
 answer 400 `UnknownPayloadFieldError`. PostgreSQL field type refusals through Drizzle, Prisma
-validation and `P2023`/`P2007` known-request refusals, and D1 STRICT-table type refusals now answer
-400 `InvalidFieldValueError`. SQL payload restriction is adapter-specific: Memory, MongoDB,
-DynamoDB, Cosmos DB and Bigtable store unknown fields; restrict request fields in the route body
-schema. Existing database-plugin imports of `UnknownPayloadFieldError` keep working; the class is
-now defined in common.
+validation and `P2007` known-request refusals, and D1 STRICT-table type refusals now answer 400
+`InvalidFieldValueError`. SQL payload restriction is adapter-specific: Memory, MongoDB, DynamoDB,
+Cosmos DB and Bigtable store unknown fields; restrict request fields in the route body schema.
+Existing database-plugin imports of `UnknownPayloadFieldError` keep working; the class is now
+defined in common.
 
 Attach a node-postgres pool `'error'` listener in app setup (see the database-plugin README). The
 framework installs a reporting listener only when the pool has none; the app owns closing it.

@@ -454,14 +454,14 @@ describe('M119e measured Prisma input refusals', () => {
       expect(refusedInputOf(new Error('wrapper', { cause: error }))).toEqual(expected);
     });
   }
-  it('matches P2023 and P2007 only on known-request errors and leaves other codes alone', async () => {
+  it('matches P2007 only on known-request errors and leaves other codes alone', async () => {
     const { refusedInputOf } = await import('../../src/errors/classify.ts');
-    for (const code of ['P2023', 'P2007']) {
-      expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code })).toEqual({
-        kind: 'value',
-      });
-      expect(refusedInputOf({ name: 'OtherError', code })).toBeNull();
-    }
+    expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2007' })).toEqual({
+      kind: 'value',
+    });
+    expect(refusedInputOf({ name: 'OtherError', code: 'P2007' })).toBeNull();
+    // P2023 also reports stored data Prisma cannot read: a server fault, kept unmapped.
+    expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2023' })).toBeNull();
     expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2002' })).toBeNull();
     expect(refusedInputOf({ name: 'PrismaClientValidationError' })).toEqual({ kind: 'value' });
     expect(refusedInputOf({ message: 'Unknown argument `surprise`' })).toBeNull();
