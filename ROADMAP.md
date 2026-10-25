@@ -15724,6 +15724,150 @@ to own them, and other frameworks mostly leave them to packages or starter kits:
 
 ---
 
+## Milestone 125: A Compiled Container and a Request Scope
+
+**Package(s):** `packages/di-plugin`, `packages/common` (`container.ts`, `IRequestContext`),
+`packages/kernel` (request completion), `packages/decorator-plugin` (registration and a
+request-scoped parameter source), `packages/testing` (`OverridingContainer`), `apps/di-decorators`;
+docs.
+
+**Source:** the maintainer's review of the DI container against Elysia, NestJS, ASP.NET Core,
+Spring, Awilix, Angular and Encore.ts (2026-10-25), and a read of `di-plugin` on `develop` made for
+it. One finding is a defect in merged code and would ordinarily be a `fix/` branch; it ships here by
+the maintainer's direction, because the request scope below is unsafe without it.
+
+**Where things stand (checked against source, 2026-10-25).**
+
+1. **A singleton captures a scoped service (defect).** A child scope shares its parent's singleton
+   map and owns only its scoped map (`di-plugin/src/container/scope-manager.ts:96-97`). A singleton
+   first resolved inside scope X is built with X's scoped instances and cached for the whole
+   application, so every later scope receives X's instance through it. Resolving a `scoped` token on
+   the root container caches it in the root's own scoped map, so it silently behaves as a singleton.
+   No test covers either case.
+2. **`@Optional` classes resolve from the registering container.** `ClassProvider.inject` is a bare
+   token list, so a class with an `@Optional` argument registers a `useFactory` that closes over the
+   container it was registered on (`decorator-plugin/src/plugin/decorator-plugin.ts:240-276`, which
+   documents this). Its dependencies resolve from the root, never from the resolving scope: the same
+   capture by another door.
+3. **Controllers are built once, at registration** (`decorator-plugin.ts:997`). A controller is
+   therefore singleton-lived, and any scoped dependency it takes is captured. The example app
+   reaches scoped services only by calling `createScope()` by hand inside a handler
+   (`apps/di-decorators/src/modules/lifetimes/lifetimes.controller.ts:26`).
+4. **No request scope.** `ServiceScope`'s JSDoc says so (`common/src/container.ts:24`). It also says
+   the application "disposes" a scope explicitly, and `IContainer` has no dispose member: that
+   sentence describes nothing.
+5. **Everything is decided per resolve.** `#resolveToken` enters the cycle detector before any
+   lookup, cache hits included (`di-plugin/src/container/container.ts:169`), and walks the registry
+   chain by string. Cycles and missing providers surface on the first request that reaches them, not
+   at boot. Nothing is validated when the application starts.
+6. **Tokens are untyped strings.** `resolve<T>(token: string)` takes `T` on trust, so a wrong or
+   mistyped token compiles. NestJS has the same weakness for its string and symbol tokens; its class
+   tokens carry their type.
+
+**The framework comparison below is from the 2026-10-25 review, partly from knowledge** (the M97
+precedent). The plan re-checks each row before relying on it.
+
+| Concern                    | NestJS                                  | ASP.NET Core                                 | Awilix / `@fastify/awilix`      | Spring                           | Elysia / Encore.ts                          | Setu-TS today     |
+| -------------------------- | --------------------------------------- | -------------------------------------------- | ------------------------------- | -------------------------------- | ------------------------------------------- | ----------------- |
+| Per-request scope          | `Scope.REQUEST`, bubbling up the chain  | a scope per request                          | `scopePerRequest` / `diScope`   | request scope via scoped proxies | per-request values, no container            | none              |
+| Its cost                   | controller subtree rebuilt per request  | one scope per request                        | one child container per request | a proxy hop per call             | none                                        | —                 |
+| Singleton holding a scoped | silently made request-scoped (bubbling) | refused (`ValidateScopes`, Development only) | not refused                     | proxied                          | not applicable                              | silently captured |
+| Graph checked at boot      | yes                                     | `ValidateOnBuild`                            | no                              | yes                              | not applicable                              | no                |
+| Typed tokens               | class tokens only                       | types are tokens                             | no (string names)               | types are tokens                 | inferred context (Elysia), codegen (Encore) | no                |
+| Scope disposal             | per request                             | `IDisposable` at scope end                   | `disposeOnResponse`             | destruction callbacks            | not applicable                              | none              |
+
+**Rejected, with the reason recorded:** NestJS's scope bubbling (it rebuilds the controller subtree
+on every request, the cost NestJS's own durable providers exist to avoid), Spring-style proxies (a
+hop on every call, and they need `AsyncLocalStorage` to find the current request), and an ambient
+`currentRequest()`-style lookup as the default (its `AsyncLocalStorage` cost lands on every request,
+used or not). Per-request data — user, tenant, locale — stays on typed state keys; the scope is for
+the few things that need a per-request instance, such as a unit of work.
+
+**Decisions the plan takes:**
+
+1. **Close and compile the graph at start.** Registration closes when the application starts. The
+   container then validates once — missing providers, cycles, and any singleton reaching a scoped
+   service on any path — and compiles each provider into a direct factory: singletons captured,
+   scoped dependencies as numbered slots. The per-resolve cycle detector goes; a closed, validated
+   graph cannot contain a cycle. Build-time generation (Dagger, Wire) is not taken: start-up
+   compilation gives the same safety on Bun, Deno and Workers, which M120 gives no build step, and
+   costs microseconds per provider once per process. The plan states what start-up compilation costs
+   on a Workers cold start.
+2. **Typed tokens.** `createToken<T>(name)` returns a frozen object — its `name` and a numeric `id`
+   unique in the process, assigned at creation — that `resolve` infers `T` from. A token is created
+   at module load, before any container exists, so it cannot carry a container's slot; instead each
+   compiled container indexes its plan by `id`, and a resolve is an array read whichever container
+   compiled it (several applications or test containers in one process share the ids, not the
+   slots). A branded string is rejected: it cannot carry an id, so every resolve would need a `Map`
+   lookup again. A class is also accepted as its own token, matched by identity through one
+   `WeakMap` read; a bare string through one `Map` read. Both keep working and stay the slower path.
+   Bundling and minification cannot break class tokens (identity only; `constructor.name` appears in
+   error messages and nowhere else).
+3. **Dependencies that can be seen.** `ClassProvider.inject` and a new optional
+   `FactoryProvider.inject` accept `{ token, optional: true }`, and a factory receives its resolved
+   dependencies as arguments. That retires the `@Optional` closure (finding 2). A factory without
+   `inject` stays legal but opaque: it is resolved by the slower runtime path and the boot
+   validation names it as unchecked.
+4. **A kernel-owned, lazy request scope, on by default.** When `CAPABILITIES.DI_CONTAINER` is
+   registered, the kernel exposes `ctx.scope()` (name decided in the plan). The first call in a
+   request creates the scope — one slot array — and caches it on the request's context handle. A
+   request that never calls it allocates nothing. Completion — fast path, full path and error path —
+   checks `handle.scope !== undefined` and disposes only then. This is NOT an `onResponse` hook: any
+   registered hook moves every request off the M87 synchronous path
+   (`kernel/src/application/application.ts:1221`), which would tax every DI application whether or
+   not it uses a scope. Disposal runs after the response is handed back and logs its failures; a
+   transaction's commit is not disposal and stays in the handler or middleware.
+5. **Disposal is real.** A scoped provider may declare a dispose function (or the instance may carry
+   `Symbol.dispose` / `Symbol.asyncDispose` — the plan picks one), and `IContainer` gains the
+   dispose member `ServiceScope`'s JSDoc already promises. The compiled plan records which scoped
+   providers are disposable, so a request that creates none skips the loop.
+6. **Scoped services reach decorated handlers per request.** A controller stays singleton-lived;
+   NestJS-style bubbling is rejected above. A request-scoped parameter source (the `@Params(Ctx())`
+   shape — `@Params(Scoped(TOKEN))` or similar, named in the plan) resolves from `ctx.scope()` on
+   each call. A controller constructor that injects a scoped service is refused at boot (decision
+   1), naming this source as the fix.
+7. **The defect fix (finding 1).** Inside `ctx.scope()` the captive refusal is enforced from the
+   first release: it is new surface with nothing to stay compatible with. For the existing paths —
+   hand-made `createScope()`, resolving `scoped` from the root, registering after start — the
+   Versioning Policy applies: they warn for one release and are refused in the next minor, and the
+   plan names that minor. `IContainer`'s new members ship optional per the same policy, with the
+   required form deferred to that minor; `OverridingContainer` in `packages/testing` implements them
+   either way.
+
+**Measured, not estimated.** The review's figures are estimates and the plan replaces them. The
+benchmark harness runs three configurations against the `develop` baseline: no DI; DI registered and
+`ctx.scope()` never called (must match the baseline — the fast path is the property under test); and
+a request resolving scoped services. The plan sets the acceptance threshold for the third.
+
+**Coordination, not dependency.** Independent of M118 and M120. Whichever of M120 and this milestone
+lands second runs the scaffold e2e with the other in place: compiled output booting with DI and the
+request scope in use, decorators lowered by whatever M120 bundles with.
+
+**Named, not taken:**
+
+- **Static validation in `setu check`** of a generated `@Module` graph, so a missing provider fails
+  CI before anything boots. A follow-up once M118 and this milestone have both shipped; M118
+  compares name sets and reads no types.
+- **Tenant-keyed scopes** (NestJS durable providers grouped by tenant), over the multi-tenancy
+  plugin. Only if a consumer needs it.
+- **An ambient `currentScope()`** over `AsyncLocalStorage`, opt-in and behind `packages/runtime`.
+
+**Deliverables:**
+
+- [ ] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
+- [ ] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
+- [ ] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
+      sees the other's; a scoped service is disposed after its request, including a request that
+      throws; a singleton reaching a scoped service fails the boot with both names; and a request
+      that never calls `ctx.scope()` stays on the synchronous path
+- [ ] The three-configuration benchmark, results in the PR
+- [ ] `apps/di-decorators` moved off hand-made scopes onto the request scope
+- [ ] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
+      refusals marked for their minor), and `docs/upgrading.md`
+- [ ] **ROADMAP.md** — this section and the Progress Tracking row `125`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -16011,3 +16155,4 @@ patch by construction and gains nothing new here.
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
+| 125       | ⬜     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
