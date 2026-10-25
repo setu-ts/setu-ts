@@ -466,4 +466,22 @@ describe('M119e measured Prisma input refusals', () => {
     expect(refusedInputOf({ name: 'PrismaClientValidationError' })).toEqual({ kind: 'value' });
     expect(refusedInputOf({ message: 'Unknown argument `surprise`' })).toBeNull();
   });
+  it('names the key from Prisma summary line, never from a rendered payload value (audit F-2)', async () => {
+    const { refusedInputOf } = await import('../../src/errors/classify.ts');
+    // The measured shape, with a payload value carrying the summary text: the
+    // rendered value sits indented after its key, above Prisma's own line.
+    const message =
+      '\nInvalid `client.portableValue.create()` invocation:\n\n{\n  data: {\n' +
+      '    id: "Unknown argument `forged_by_value`",\n    age: 1,\n' +
+      '    real_unknown_key: 2\n    ~~~~~~~~~~~~~~~~\n  }\n}\n\n' +
+      'Unknown argument `real_unknown_key`. Available options are marked with ?.';
+    const error = Object.assign(new Error(message), { name: 'PrismaClientValidationError' });
+    expect(refusedInputOf(error)).toEqual({ kind: 'unknown-field', field: 'real_unknown_key' });
+    // A value alone, with no summary line of Prisma's, names no field.
+    const valueOnly = Object.assign(
+      new Error('\n  data: {\n    id: "Unknown argument `forged_by_value`"\n  }\n'),
+      { name: 'PrismaClientValidationError' },
+    );
+    expect(refusedInputOf(valueOnly)).toEqual({ kind: 'value' });
+  });
 });

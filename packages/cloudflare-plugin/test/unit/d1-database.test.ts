@@ -175,3 +175,78 @@ it('M119e limits SQLite unknown-column mapping to payload keys for both message 
     ).rejects.toBe(error);
   }
 });
+
+it('M119e maps a refusal raised at transaction commit like a direct write (audit F-1)', async () => {
+  const { UnknownPayloadFieldError, InvalidFieldValueError, httpStatusHintOf } =
+    await import('@setu-ts/common');
+  const adapter = new D1Adapter(
+    new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, age INTEGER) STRICT'),
+    { tables: { User: { table: 'users' } } },
+  );
+  await adapter.connect();
+  try {
+    const commitWith = async (
+      write: (source: ReturnType<typeof adapter.createDataSource>) => Promise<unknown>,
+    ): Promise<unknown> => {
+      const transaction = await adapter.beginTransaction();
+      await write(transaction.createDataSource('User'));
+      return transaction.commit().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    };
+    await adapter.createDataSource('User').create({ id: '1', age: 1 });
+
+    const unknown = await commitWith((source) =>
+      source.create({ id: '2', missing: 'canary-value' }),
+    );
+    expect(unknown).toBeInstanceOf(UnknownPayloadFieldError);
+    expect((unknown as Error).message).toContain("Entity 'User'");
+    expect(httpStatusHintOf(unknown)?.status).toBe(400);
+
+    const strict = await commitWith((source) => source.update('1', { age: 'canary-value' }));
+    expect(strict).toBeInstanceOf(InvalidFieldValueError);
+    expect((strict as Error).message).not.toContain('canary-value');
+    expect(httpStatusHintOf(strict)?.status).toBe(400);
+
+    // The batch is atomic: neither refused write landed. Positive control: a
+    // clean transaction still commits through the same path.
+    expect(await adapter.createDataSource('User').findById('2')).toBeNull();
+    expect(await commitWith((source) => source.create({ id: '3', age: 3 }))).toBeUndefined();
+    expect(await adapter.createDataSource('User').findById('1')).toEqual({ id: '1', age: 1 });
+    expect(await adapter.createDataSource('User').findById('3')).toEqual({ id: '3', age: 3 });
+  } finally {
+    await adapter.disconnect();
+  }
+});
+
+it('M119e attributes a D1 refusal to the write whose payload it names', async () => {
+  const { d1WriteRefusal } = await import('../../src/database/d1-data-source.ts');
+  const { UnknownPayloadFieldError, InvalidFieldValueError } = await import('@setu-ts/common');
+  const writes = [
+    { entity: 'User', table: 'users', keys: ['id', 'age'] },
+    { entity: 'Order', table: 'orders', keys: ['id', 'total'] },
+  ];
+  const unknown = d1WriteRefusal(new Error('D1_ERROR: no such column: total'), writes);
+  expect(unknown).toBeInstanceOf(UnknownPayloadFieldError);
+  expect(unknown?.message).toContain("Entity 'Order'");
+  const strict = d1WriteRefusal(
+    new Error(
+      'D1_ERROR: cannot store TEXT value in INTEGER column orders.total: SQLITE_CONSTRAINT',
+    ),
+    writes,
+  );
+  expect(strict).toBeInstanceOf(InvalidFieldValueError);
+  expect(strict?.message).toContain("Entity 'Order'");
+  // No table.column in the message: attributable only when one write was sent.
+  const bare = new Error('cannot store TEXT value in INTEGER column');
+  expect(d1WriteRefusal(bare, writes)).toBeUndefined();
+  expect(d1WriteRefusal(bare, [writes[0]!])).toBeInstanceOf(InvalidFieldValueError);
+  // A STRICT refusal on a column no write carried, an unknown column no payload
+  // names, and a non-Error rejection all stay unmapped.
+  expect(
+    d1WriteRefusal(new Error('cannot store TEXT value in INTEGER column users.total'), writes),
+  ).toBeUndefined();
+  expect(d1WriteRefusal(new Error('no such column: other'), writes)).toBeUndefined();
+  expect(d1WriteRefusal('rejection', writes)).toBeUndefined();
+});

@@ -239,7 +239,11 @@ export function refusedInputOf(
   const candidates = causeChainMembers(error);
   for (const { name, message } of candidates) {
     if (name === 'PrismaClientValidationError' && typeof message === 'string') {
-      const field = /Unknown argument `([^`]+)`/.exec(message)?.[1];
+      // Prisma renders the whole invocation, payload values included, above
+      // its summary line, so only a match that STARTS a line is Prisma's own:
+      // a rendered value sits indented after its key, and its newlines are
+      // escaped. The last such line wins (M119e audit F-2).
+      const field = [...message.matchAll(/^Unknown argument `([^`]+)`/gm)].at(-1)?.[1];
       if (field !== undefined) return { kind: 'unknown-field', field };
     }
   }
