@@ -1,8 +1,8 @@
 # Milestone 119h — CLI Output and Commands That Are Wrong (`@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `fix/m119h-cli-output` (a **fix** letter of M119, so a `fix/…`
-> branch; one branch for all eleven rows, the M113h and M119g precedent). `develop` and `main` are
-> protected — all work stays on this branch until it merges via a single PR.
+> **Status:** Complete (archived). Branch: `fix/m119h-cli-output` (a **fix** letter of M119, so a
+> `fix/…` branch; one branch for all eleven rows, the M113h and M119g precedent). `develop` and
+> `main` are protected — all work stays on this branch until it merges via a single PR.
 
 ## 0. Objective & scope
 
