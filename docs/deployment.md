@@ -44,12 +44,17 @@ application where possible.
 The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
 `X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when
 your proxy writes RFC 7239 `Forwarded`; this reads only that family and conflicts with `ipHeader`.
-Its `proto` and `host` come from the selected client's element. Malformed input, over 8 KiB, or over
-64 elements contributes no hops and no forwarded origin, so the socket peer is still checked: a
-direct client keeps its own address, and a trusted proxy sending it yields no client. Unknown and
-obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain, or
-a chain of only trusted proxies, yields no client in either family; with `trustedProxies`, so does a
-trusted proxy that sends no forwarding header. Only `http`/`https` protocols, and DNS-name or
+Its `proto` and `host` come from the selected client's element. A malformed element is a boundary,
+not a void: the elements to its right were written by later hops and are still read, while the walk
+stops at the boundary and never continues left of it. An oversized field (over 8 KiB or 64 elements)
+is read from the right within those bounds instead of voiding the field, so a trusted proxy that
+appends its element still resolves the client behind a padded or malformed prefix. A trusted proxy
+that writes a comma inside a quoted value to the right of malformed input loses that element to the
+boundary and resolves no client (fail closed). A direct client keeps its own address, and a boundary
+with only trusted entries to its right yields no client rather than the proxy's own address. Unknown
+and obfuscated hops cannot be returned as clients, and a `proxyHops` header too short for the chain,
+or a chain of only trusted proxies, yields no client in either family; with `trustedProxies`, so
+does a trusted proxy that sends no forwarding header. Only `http`/`https` protocols, and DNS-name or
 bracketed-IPv6 hosts with an optional numeric port, are accepted; missing or rejected components use
 the request URL.
 

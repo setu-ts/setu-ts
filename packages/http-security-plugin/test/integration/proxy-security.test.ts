@@ -221,4 +221,80 @@ describe('proxy security through a kernel application', () => {
       await app.stop();
     }
   });
+
+  it('V10-19: two clients behind one appending proxy keep distinct identities', async () => {
+    // A trusted proxy APPENDS its element, so a client's malformed prefix must
+    // be a boundary rather than erasing the appended client (the 0.10.0
+    // defect: both callers fell into one shared fallback bucket).
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({
+          ipSecurity: {
+            trustProxy: true,
+            trustedProxies: ['10.0.0.0/8'],
+            forwardedHeader: 'forwarded',
+          },
+        }),
+      ],
+    });
+    app.router.get('/', (ctx) => ctx.response.json({ client: ctx.state.get(CLIENT_IP_STATE_KEY) }));
+    await app.start();
+    const clientFor = (forwarded: string) =>
+      app.inject({
+        method: 'GET',
+        url: 'http://internal/',
+        ip: '10.1.2.3',
+        headers: { Forwarded: forwarded },
+      });
+    try {
+      const first = await clientFor('garbage, for=198.51.100.7');
+      const second = await clientFor('for="unterminated, for=198.51.100.8');
+      expect(first.json()).toEqual({ client: '198.51.100.7' });
+      expect(second.json()).toEqual({ client: '198.51.100.8' });
+    } finally {
+      await app.stop();
+    }
+  });
+  it('V10-28: mapped and unmapped forwarded forms of one client publish one value', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        HttpSecurityPlugin({
+          ipSecurity: {
+            trustProxy: true,
+            trustedProxies: ['10.0.0.0/8'],
+            forwardedHeader: 'forwarded',
+          },
+        }),
+      ],
+    });
+    app.router.get('/', (ctx) => ctx.response.json({ client: ctx.state.get(CLIENT_IP_STATE_KEY) }));
+    await app.start();
+    try {
+      const mapped = await app.inject({
+        method: 'GET',
+        url: 'http://internal/',
+        ip: '10.1.2.3',
+        headers: { Forwarded: 'for="[::ffff:198.51.100.7]"' },
+      });
+      const plain = await app.inject({
+        method: 'GET',
+        url: 'http://internal/',
+        ip: '10.1.2.3',
+        headers: { Forwarded: 'for=198.51.100.7' },
+      });
+      const hexTail = await app.inject({
+        method: 'GET',
+        url: 'http://internal/',
+        ip: '10.1.2.3',
+        headers: { Forwarded: 'for="[::ffff:c633:6407]"' },
+      });
+      expect(mapped.json()).toEqual({ client: '198.51.100.7' });
+      expect(plain.json()).toEqual({ client: '198.51.100.7' });
+      expect(hexTail.json()).toEqual({ client: '198.51.100.7' });
+    } finally {
+      await app.stop();
+    }
+  });
 });
