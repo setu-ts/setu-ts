@@ -284,8 +284,15 @@ describe('proxy security through a kernel application', () => {
         ip: '10.1.2.3',
         headers: { Forwarded: 'for=198.51.100.7' },
       });
+      const hexTail = await app.inject({
+        method: 'GET',
+        url: 'http://internal/',
+        ip: '10.1.2.3',
+        headers: { Forwarded: 'for="[::ffff:c633:6407]"' },
+      });
       expect(mapped.json()).toEqual({ client: '198.51.100.7' });
       expect(plain.json()).toEqual({ client: '198.51.100.7' });
+      expect(hexTail.json()).toEqual({ client: '198.51.100.7' });
     } finally {
       await app.stop();
     }

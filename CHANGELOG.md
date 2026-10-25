@@ -161,9 +161,10 @@ All notable changes to this project are documented here. The format follows
   wrote it while the runtime un-mapped the socket peer, so one client could key the rate limiter and
   audit under two forms. Every published address is now normalized — IPv4-mapped becomes dotted
   IPv4, and IPv6 becomes canonical lowercase compressed — and trusted literals are normalized the
-  same way before comparison. Clients arriving in IPv4-mapped (`::ffff:198.51.100.7`) or
-  non-canonical IPv6 (`2001:DB8::1`) form therefore get a NEW rate-limit/audit key after upgrading;
-  the limiter windows are short-lived.
+  same way before comparison. Every spelling of a mapped address — dotted tail, hexadecimal tail
+  (`::ffff:c633:6407`) or uncompressed — is one identity. Clients arriving in IPv4-mapped
+  (`::ffff:198.51.100.7`) or non-canonical IPv6 (`2001:DB8::1`) form therefore get a NEW
+  rate-limit/audit key after upgrading; the limiter windows are short-lived.
 
 - **Connection-error lines no longer read `error: ""` for an `AggregateError` (V10-63, M119g,
   0.11.0, `@setu-ts/common`).** `createConnectionErrorReporter` logged `error.message` only, and an

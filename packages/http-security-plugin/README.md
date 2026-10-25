@@ -237,11 +237,12 @@ Node, Deno and Bun populate `IRequest.ip` with the **socket peer**, which behind
 proxy. Without `trustProxy`, that peer is published as `CLIENT_IP_STATE_KEY`. With `trustedProxies`,
 the peer is appended to the chain before walking right to left: a direct client cannot choose its
 identity by forging `X-Forwarded-For`. Every published address is normalized: an IPv4-mapped peer or
-hop such as `::ffff:10.1.2.3` becomes `10.1.2.3`, and an IPv6 address is published in canonical
-lowercase compressed form (`2001:DB8:0::1` becomes `2001:db8::1`). Native IPv6 proxies must be
-listed literally; a literal is normalized the same way before comparison. IPv6 CIDR expansion is not
-supported. `proxyHops` and the leftmost default keep their header-only selection and do not check
-the peer; prefer `trustedProxies` for stable proxy addresses.
+hop such as `::ffff:10.1.2.3` (or its hexadecimal spelling `::ffff:a01:203`) becomes `10.1.2.3`, and
+an IPv6 address is published in canonical lowercase compressed form (`2001:DB8:0::1` becomes
+`2001:db8::1`). Native IPv6 proxies must be listed literally; a literal is normalized the same way
+before comparison. IPv6 CIDR expansion is not supported. `proxyHops` and the leftmost default keep
+their header-only selection and do not check the peer; prefer `trustedProxies` for stable proxy
+addresses.
 
 `forwardedHeader: 'forwarded'` reads only RFC 7239 `Forwarded`, including quoted IPv6 addresses and
 ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-*` only. A malformed

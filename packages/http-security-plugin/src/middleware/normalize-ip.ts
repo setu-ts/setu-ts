@@ -8,8 +8,12 @@
  * @module
  */
 
-/** An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`). */
-const MAPPED_IPV4 = /^::ffff:([0-9]{1,3}(?:\.[0-9]{1,3}){3})$/i;
+/**
+ * An IPv4-mapped IPv6 address as `new URL` canonicalizes it: the embedded
+ * IPv4 address is always rendered as two hexadecimal groups, whether the input
+ * was written `::ffff:192.0.2.1`, `::ffff:c000:201` or `0:0:0:0:0:ffff:c000:201`.
+ */
+const CANONICAL_MAPPED_IPV4 = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/;
 
 /** The characters an IPv6 literal (including an embedded dotted quad) may contain. */
 const IPV6_CHARS = /^[0-9A-Fa-f:.]{2,45}$/;
@@ -17,38 +21,43 @@ const IPV6_CHARS = /^[0-9A-Fa-f:.]{2,45}$/;
 /**
  * Normalizes an address to the form IP security publishes and compares.
  *
- * 1. `::ffff:a.b.c.d` with a valid dotted quad becomes `a.b.c.d`, as the runtime
- *    adapters already emit for a mapped socket peer.
- * 2. Any other value containing `:` is parsed as a bracketed IPv6 URL host and
- *    returned in canonical lowercase compressed form (`2001:DB8:0:0::1` →
- *    `2001:db8::1`).
- * 3. Everything else — a dotted quad, a zone id such as `fe80::1%eth0`, or
- *    garbage — is returned unchanged.
- *
- * Rule 1 must run before rule 2: `new URL` renders `::ffff:1.2.3.4` as
- * `::ffff:102:304`, which is no longer the mapped form.
+ * 1. Any value containing `:` and only IPv6 characters is parsed as a bracketed
+ *    IPv6 URL host, giving the canonical lowercase compressed form
+ *    (`2001:DB8:0:0::1` → `2001:db8::1`).
+ * 2. When that canonical form is IPv4-mapped (`::ffff:<hex>:<hex>`), it becomes
+ *    the dotted IPv4 address, as the runtime adapters already emit for a mapped
+ *    socket peer. Every spelling of one mapped address — dotted tail
+ *    (`::ffff:192.0.2.1`), hexadecimal tail (`::ffff:c000:201`) or uncompressed
+ *    — therefore yields one identity, `192.0.2.1`.
+ * 3. Everything else — a dotted quad, a zone id such as `fe80::1%eth0`, an
+ *    invalid literal such as `::ffff:999.1.1.1`, or garbage — is returned
+ *    unchanged.
  *
  * @param value - An address as written by a runtime or a proxy
  * @returns The canonical form, or the input unchanged when it is not an address
  * @internal
  */
 export function normalizeIp(value: string): string {
-  const match = MAPPED_IPV4.exec(value);
-  const address = match?.[1];
-  if (address !== undefined && ipv4ToNumber(address) !== null) return address;
   // Only IPv6 characters reach the URL parser: an attacker-written entry such as
   // `::1]@host/[x` must stay as written, never be rewritten into another value.
-  if (value.includes(':') && IPV6_CHARS.test(value)) {
-    try {
-      const hostname = new URL(`http://[${value}]`).hostname;
-      if (hostname.startsWith('[') && hostname.endsWith(']')) {
-        return hostname.slice(1, -1);
-      }
-    } catch {
-      // A zone id or a non-address stays exactly as written.
-    }
+  if (!value.includes(':') || !IPV6_CHARS.test(value)) return value;
+  let canonical: string;
+  try {
+    // With only IPv6 characters inside the brackets the parser either throws or
+    // returns a bracketed IPv6 host, so stripping the brackets is always safe.
+    canonical = new URL(`http://[${value}]`).hostname.slice(1, -1);
+  } catch {
+    // A zone id or a non-address stays exactly as written.
+    return value;
   }
-  return value;
+  if (!CANONICAL_MAPPED_IPV4.test(canonical)) return canonical;
+  let address = 0;
+  for (const group of canonical.slice('::ffff:'.length).split(':')) {
+    address = address * 0x10000 + Number.parseInt(group, 16);
+  }
+  return [address >>> 24, (address >>> 16) & 0xff, (address >>> 8) & 0xff, address & 0xff].join(
+    '.',
+  );
 }
 
 /** Converts a dotted-quad IPv4 literal to its numeric value, or `null`. */
