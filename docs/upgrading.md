@@ -180,6 +180,59 @@ health bridge.
 - **Generated tests:** add `--test-force-exit` to an existing Node project's `test` and `test:e2e`
   scripts to stop a failed start hanging CI.
 
+### Workers tests, `setu agents` output and module 404 details (M119h, 0.11.0, `@setu-ts/cli`)
+
+- **Workers projects can run tests.** A `cloudflare-workers` project scaffolded before 0.11.0 has no
+  test scripts, and its `deno.json` `test` task permits an empty suite. Add the two scripts and the
+  devDependencies new scaffolds ship:
+
+  ```json
+  "scripts": {
+    "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "@types/node": "^24.0.0"
+  }
+  ```
+
+  Prefix both commands with `npm run build && ` when the tests need the built Worker, and add
+  `"node"` to `types` in `tsconfig.json`. Then add `test/support/server.ts`, which boots the Worker
+  on workerd through wrangler's `createTestHarness` (the `wrangler` dependency the project already
+  has supplies it), and write tests that call `startTestServer()` and
+  `fetch(server.baseUrl + path)`:
+
+  ```ts
+  import { createTestHarness } from 'wrangler';
+
+  export async function startTestServer(): Promise<{
+    readonly baseUrl: string;
+    readonly stop: () => Promise<void>;
+  }> {
+    // Located from this file: a relative path would resolve from the working directory.
+    const harness = createTestHarness({
+      workers: [{ configPath: new URL('../../wrangler.toml', import.meta.url) }],
+    });
+    const { url } = await harness.listen();
+    return {
+      baseUrl: url.origin,
+      stop: async () => {
+        await harness.close();
+      },
+    };
+  }
+  ```
+
+- **`setu agents --dry-run` speaks in `would create` / `would update` / `unchanged`.** A script that
+  matched the old `would write <path>` line must match the verb; an unchanged brief is reported and
+  no longer rewritten by the real run. Add `--strict` to `setu agents --check` where CI should also
+  fail on a missing agent card.
+- **A pre-0.11.0 generated module still echoes the id in its 404.** New modules answer
+  `<Pascal> not found.`; an existing module keeps its text until you edit the detail in its
+  controller or routes. A test that asserted the old `<Pascal> <id> was not found.` must assert the
+  fixed detail instead, and should not assert that the id is echoed.
+
 ## 0.10.0
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)

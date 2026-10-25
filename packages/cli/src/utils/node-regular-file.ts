@@ -131,7 +131,20 @@ export async function writeRegularFile(
       temp,
       regularFileWriteFlags(constants),
       existing === undefined ? 0o666 : 0o600,
-    );
+    ).catch((cause: unknown) => {
+      // The temp name is ours, not the developer's: naming it in a refusal is
+      // noise, and it must never be mistaken for the target. The raw errno is
+      // kept as the cause for anyone diagnosing it.
+      if (
+        cause instanceof Error &&
+        'code' in cause &&
+        (cause.code === 'EACCES' || cause.code === 'EPERM')
+      )
+        throw new Error(`${path}: permission denied creating a file in ${dirname(path)}`, {
+          cause,
+        });
+      throw cause;
+    });
     created = true;
     try {
       let written = 0;
@@ -187,6 +200,22 @@ export function withRegularFileReads(fs: IFileSystem): ICliFileSystem {
     ...(fs.readStream === undefined ? {} : { readStream: fs.readStream.bind(fs) }),
     readRegularFile,
     writeRegularFile,
+    canWrite: async (path: string) => {
+      // The writer always creates a temp file beside the target and renames it
+      // over, so the directory must be writable even when the target is.
+      try {
+        await access(dirname(path), constants.W_OK);
+      } catch {
+        return false;
+      }
+      try {
+        await access(path, constants.W_OK);
+        return true;
+      } catch (cause) {
+        // A missing target is created; any other error on it is a refusal.
+        return cause instanceof Error && 'code' in cause && cause.code === 'ENOENT';
+      }
+    },
     ...(typeof process.getuid !== 'function'
       ? {}
       : {

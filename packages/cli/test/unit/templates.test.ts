@@ -20,12 +20,37 @@ describe('the scaffolded application smoke test', () => {
         const files = projectFiles('probe', runtime, resolveHost(host, runtime));
         const test = files.find((file) => file.path === 'test/app.test.ts');
         if (runtime === 'cloudflare-workers') {
-          expect(test).toBeUndefined();
-          expect(files.find((file) => file.path === 'deno.json')!.contents).toContain(
-            'deno test -A --permit-no-files',
+          expect(test?.contents).toContain("from 'node:test'");
+          expect(test?.contents).toContain(
+            "import { startTestServer } from './support/server.ts';",
           );
+          expect(test?.contents).toContain('const server = await startTestServer();');
+          expect(test?.contents).toContain('await fetch(server.baseUrl + ');
+          expect(
+            files.find((file) => file.path === 'test/e2e/app.e2e.test.ts')?.contents,
+          ).toContain('startTestServer');
+          const deno = files.find((file) => file.path === 'deno.json')!.contents;
+          expect(deno).not.toContain('deno test');
           expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
-            'platform environment',
+            'npm run test:e2e',
+          );
+          const parsed = JSON.parse(files.find((file) => file.path === 'package.json')!.contents);
+          const buildsFirst = host.manifest?.npmBuild !== undefined;
+          expect(parsed.scripts.test.startsWith('npm run build && ')).toBe(buildsFirst);
+          expect(
+            parsed.scripts.test.endsWith("tsx --test --test-force-exit '**/!(*.e2e).test.ts'"),
+          ).toBe(true);
+          expect(
+            parsed.scripts['test:e2e'].endsWith("tsx --test --test-force-exit '**/*.e2e.test.ts'"),
+          ).toBe(true);
+          expect(parsed.devDependencies.tsx).toBe('^4.20.0');
+          expect(parsed.devDependencies['@types/node']).toBe('^24.0.0');
+          expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
+          const tsconfig = JSON.parse(
+            files.find((file) => file.path === 'tsconfig.json')!.contents,
+          );
+          expect(tsconfig.compilerOptions.types).toEqual(
+            expect.arrayContaining(['@cloudflare/workers-types', 'node']),
           );
           return;
         }

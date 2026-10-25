@@ -78,20 +78,18 @@ export function generateModule(
       ? [{ path: `${dir}/${names.kebab}.schemas.ts`, contents: moduleSchemas(names) }]
       : []),
   ];
-  if (options.runtime !== 'cloudflare-workers') {
-    files.push(
-      { path: `${dir}/${names.kebab}.test.ts`, contents: renderModuleTest(names, options.runtime) },
-      {
-        path: `${dir}/${names.kebab}.e2e.test.ts`,
-        contents: renderModuleE2e(
-          names,
-          options.runtime,
-          validation,
-          options.plugins.has('openapi-plugin'),
-        ),
-      },
-      { path: 'test/support/server.ts', managed: true, contents: renderTestServer() },
-    );
-  }
+  files.push(
+    { path: `${dir}/${names.kebab}.test.ts`, contents: renderModuleTest(names, options.runtime) },
+    {
+      path: `${dir}/${names.kebab}.e2e.test.ts`,
+      contents: renderModuleE2e(
+        names,
+        options.runtime,
+        validation,
+        options.plugins.has('openapi-plugin'),
+      ),
+    },
+    { path: 'test/support/server.ts', managed: true, contents: renderTestServer(options.runtime) },
+  );
   return files;
 }

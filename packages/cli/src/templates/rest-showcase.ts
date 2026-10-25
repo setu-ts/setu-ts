@@ -96,7 +96,31 @@ describe('greeting e2e', () => {
 });
 `
             : file.path.endsWith('.test.ts')
-              ? `${testHarnessFor(runtime).imports}
+              ? runtime === 'cloudflare-workers'
+                ? `${testHarnessFor(runtime).imports}
+import { startTestServer } from '../../../test/support/server.ts';
+
+describe('greeting module', () => {
+  it('greets through the Worker routes', async () => {
+    const server = await startTestServer();
+    try {
+      for (
+        const [path, message] of [['/greetings', 'Hello, world!'], [
+          '/greetings/ada',
+          'Hello, ada!',
+        ]]
+      ) {
+        const response = await fetch(server.baseUrl + path);
+        ${renderEquals(runtime, 'response.status', '200')}
+        ${renderEquals(runtime, 'await response.json()', '{ message }')}
+      }
+    } finally {
+      await server.stop();
+    }
+  });
+});
+`
+                : `${testHarnessFor(runtime).imports}
 import { createTestApp } from '@setu-ts/testing';
 import { createApp } from '../../../setu.config.ts';
 

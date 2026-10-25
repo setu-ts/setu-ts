@@ -69,7 +69,14 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
+import {
+  deriveNames,
+  escapeName,
+  isPathSegmentSafe,
+  isWorkerNameSafe,
+  PROJECT_NAME_RULE,
+  WORKER_NAME_RULE,
+} from '../utils/names.ts';
 import {
   findExisting,
   reportDryRunPlan,
@@ -700,6 +707,14 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'node';
 
+  // Checked on the name as TYPED: `deriveNames` folds whitespace, so a bare CR,
+  // LF or TAB would otherwise become `-` and scaffold silently, although the
+  // rule says no control character (M119h audit F3; create-cloudflare refuses
+  // such a name rather than converting it).
+  if (/\p{Cc}/u.test(rawName)) {
+    deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
+    return EXIT_USAGE;
+  }
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
   // an identifier, so it passes the PATH rules every name-taking verb shares — a
@@ -711,6 +726,14 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     // control character in the refusal would forge a standalone line in the
     // rendered message.
     deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
+    return EXIT_USAGE;
+  }
+  // `wrangler.toml` carries the kebab as the Worker's `name`, and wrangler
+  // refuses a name outside `[a-z0-9-]` — a narrower rule than the portable path
+  // one above, which admits `.` and Unicode letters. Checked after it so a
+  // Workers project gets the reason that actually applies.
+  if (runtime === 'cloudflare-workers' && !isWorkerNameSafe(names.kebab)) {
+    deps.error(`Invalid Workers project name: "${escapeName(rawName)}". ${WORKER_NAME_RULE}`);
     return EXIT_USAGE;
   }
   const projectName = names.kebab;

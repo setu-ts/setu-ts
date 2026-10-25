@@ -92,8 +92,9 @@ export class ${names.pascal}Service {
  * \`DecoratorPlugin({ services: [...${APP_SERVICES_EXPORT}] })\`, or a starter does
  * through its \`decorators: { services: … }\` arm. \`setu generate\` reports when the
  * config references neither, so this class is never claimed wired without it.
- * Consumers reach it with \`@Inject('${serviceSeamToken(names.kebab)}')\` on a
- * constructor parameter, which works whether or not a container is registered.
+ * Consumers reach it by listing \`'${serviceSeamToken(names.kebab)}'\` in their
+ * class-level \`@Inject(...)\`, one token per constructor argument in order, which
+ * works whether or not a container is registered.
  *
  * Resolving it BY HAND depends on the composition, because the two paths register
  * in different places:

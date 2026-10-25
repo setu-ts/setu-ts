@@ -12,9 +12,11 @@ import {
   joinPath,
   resolveDir,
   writeFiles,
+  reportDryRunPlan,
   assertInsideProject,
   readExistingText,
   type GeneratedFile,
+  type ICliFileSystem,
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { escapeName } from '../utils/names.ts';
@@ -29,10 +31,16 @@ import {
 
 /** The same dependencies used when new invokes this writer after scaffolding. */
 export interface IAgentsDependencies {
-  readonly fs: IFileSystem;
+  readonly fs: ICliFileSystem;
   readonly cwd: string;
   readonly log: (message: string) => void;
   readonly error: (message: string) => void;
+  /**
+   * The shell's logical working directory, when it is absolute and resolves to
+   * the same place as the physical `cwd`. Used ONLY to refuse a write through a
+   * symlinked workspace member; it never authorizes one.
+   */
+  readonly logicalCwd?: string;
   readonly interrupt?: AbortSignal;
 }
 
@@ -55,6 +63,72 @@ async function agentWorkspace(
   return read.ok ? read.manifest : undefined;
 }
 
+/**
+ * Finds a workspace manifest that lists a LOGICAL path as a member.
+ *
+ * The physical walk cannot see a workspace from inside a symlinked member: the
+ * manifest is at the child's logical ancestor, while every filesystem call
+ * resolves to the link target. This walk answers one question only — is this
+ * logical target a member of a workspace? — and its answer is a refusal.
+ *
+ * @param fs - The filesystem to read manifests through
+ * @param logicalCwd - The shell's verified logical working directory
+ * @param dir - The `--dir` value, resolved against the logical directory
+ * @returns The refusal message, or undefined when no manifest lists the target
+ */
+async function symlinkedMemberRefusal(
+  fs: IFileSystem,
+  logicalCwd: string,
+  dir: string | undefined,
+): Promise<string | undefined> {
+  const logicalDir = resolveDir(logicalCwd, dir);
+  for (let current = logicalDir; ; current = dirName(current)) {
+    const candidate = await agentWorkspace(fs, current);
+    if (
+      candidate !== undefined &&
+      candidate.members.some(
+        (member) =>
+          memberPath(joinPath(current, MEMBERS_DIR, member.name)) === memberPath(logicalDir),
+      )
+    )
+      return (
+        `${logicalDir} is a symlinked member of the workspace at ${current}; Setu will not ` +
+        `write through links inside a workspace. Replace the link with the directory it points ` +
+        `at, then run setu agents from ${current}.`
+      );
+    if (dirName(current) === current || dirName(current) === '') return undefined;
+  }
+}
+
+/**
+ * The planned briefs whose bytes differ from what is on disk.
+ *
+ * A brief whose spliced bytes match the file exactly is not rewritten; the real
+ * run reports it `unchanged`, which is what the file's write outcome would say.
+ */
+function changedBriefs(
+  files: readonly GeneratedFile[],
+  unchanged: ReadonlySet<string>,
+): readonly GeneratedFile[] {
+  return files.filter((file) => !unchanged.has(file.path));
+}
+
+/**
+ * The changed briefs whose target the invoking user cannot write.
+ *
+ * Advisory: the Node writer maps a permission failure after this probe too. A
+ * filesystem without `canWrite` (the fakes) skips the preflight.
+ */
+async function unwritableBriefs(
+  fs: ICliFileSystem,
+  files: readonly GeneratedFile[],
+): Promise<readonly string[]> {
+  if (fs.canWrite === undefined) return [];
+  const refused: string[] = [];
+  for (const file of files) if (!(await fs.canWrite(file.path))) refused.push(file.path);
+  return refused;
+}
+
 /** Render all affected files before touching any of them. */
 export async function runAgentsCommand(
   args: ParsedArgs,
@@ -63,12 +137,20 @@ export async function runAgentsCommand(
   if (args.flags['help'] === true || args.flags['h'] === true) {
     deps.log('Usage: setu agents [--check] [--dir <path>] [--dry-run]');
     deps.log('  --check     Refuse missing or stale sections, writing nothing');
+    deps.log('  --strict    With --check, also refuse a brief whose agent cards are not installed');
     deps.log('  --dir <path> Operate on this project or workspace');
     deps.log('  --dry-run   Print the paths that would be written');
     return EXIT_OK;
   }
   if (args.flags['check'] === true && args.flags['dry-run'] === true) {
     deps.error('--check cannot be combined with --dry-run.');
+    return EXIT_USAGE;
+  }
+  // `--check` deliberately answers without an install (C1): the card probe is
+  // opt-in, and naming it without the mode it extends is a usage error rather
+  // than a silently ignored flag.
+  if (args.flags['strict'] === true && args.flags['check'] !== true) {
+    deps.error('--strict requires --check.');
     return EXIT_USAGE;
   }
   if (args.flags['dir'] !== undefined && typeof args.flags['dir'] !== 'string') {
@@ -96,6 +178,21 @@ export async function runAgentsCommand(
         break;
       }
       if (dirName(current) === current || dirName(current) === '') break;
+    }
+    // The physical walk cannot find a workspace from inside a symlinked member.
+    // When the shell's logical path differs, ask whether that path is a member:
+    // a yes refuses in every mode and never authorizes a write.
+    if (
+      workspaceRoot === undefined &&
+      deps.logicalCwd !== undefined &&
+      deps.logicalCwd !== deps.cwd
+    ) {
+      const refusal = await symlinkedMemberRefusal(
+        deps.fs,
+        deps.logicalCwd,
+        stringFlag(args.flags, 'dir'),
+      );
+      if (refusal !== undefined) throw new Error(refusal);
     }
     const briefs: { dir: string; section: string; facts?: ProjectFacts }[] = [];
     if (workspaceRoot !== undefined && workspace !== undefined) {
@@ -127,6 +224,7 @@ export async function runAgentsCommand(
       briefs.push({ dir, section: renderBrief(facts), facts });
     }
     const files: GeneratedFile[] = [];
+    const unchanged = new Set<string>();
     const stale: string[] = [];
     for (const brief of briefs) {
       const path = joinPath(brief.dir, 'AGENTS.md');
@@ -136,7 +234,9 @@ export async function runAgentsCommand(
         const range = briefSection(before);
         if (range === undefined || before.slice(range.start, range.end) !== brief.section)
           stale.push(path);
-        files.push({ path, contents: spliceBrief(before, brief.section), managed: true });
+        const contents = spliceBrief(before, brief.section);
+        if (contents === before) unchanged.add(path);
+        files.push({ path, contents, managed: true });
       } catch (cause) {
         throw new Error(`${path}: ${cause instanceof Error ? cause.message : String(cause)}`, {
           cause,
@@ -146,17 +246,50 @@ export async function runAgentsCommand(
     if (args.flags['check'] === true) {
       for (const path of stale)
         deps.error(`${escapeName(path)}: missing or stale setu agents section`);
-      return stale.length === 0 ? EXIT_OK : EXIT_ERROR;
+      let cardRefusals = 0;
+      if (args.flags['strict'] === true) {
+        for (const brief of briefs) {
+          if (brief.facts === undefined) continue;
+          const briefPath = joinPath(brief.dir, 'AGENTS.md');
+          for (const warning of await cardWarnings(
+            deps.fs,
+            brief.dir,
+            brief.facts.installed,
+            workspaceRoot,
+          )) {
+            deps.error(`${escapeName(briefPath)}: ${escapeName(warning)}`);
+            cardRefusals++;
+          }
+        }
+      }
+      return stale.length === 0 && cardRefusals === 0 ? EXIT_OK : EXIT_ERROR;
     }
+    const changed = changedBriefs(files, unchanged);
+    const refused = await unwritableBriefs(deps.fs, changed);
     if (args.flags['dry-run'] === true) {
-      for (const file of files) deps.log(`would write ${escapeName(file.path)}`);
-      return EXIT_OK;
+      if (refused.length > 0) {
+        for (const path of refused)
+          deps.error(`WOULD REFUSE: ${escapeName(path)} is not writable by you`);
+        return EXIT_ERROR;
+      }
+      return await reportDryRunPlan(deps, files);
     }
-    const outcomes = await writeFiles(deps.fs, files, {
-      root,
-      ...(deps.interrupt === undefined ? {} : { signal: deps.interrupt }),
-    });
-    for (const result of outcomes) deps.log(`${result.outcome} ${escapeName(result.path)}`);
+    // Before the first byte: a partial batch is worse than a named refusal.
+    if (refused.length > 0) {
+      for (const path of refused)
+        deps.error(`${escapeName(path)}: not writable by you; nothing was written`);
+      return EXIT_ERROR;
+    }
+    const outcomes =
+      changed.length === 0
+        ? []
+        : await writeFiles(deps.fs, changed, {
+            root,
+            ...(deps.interrupt === undefined ? {} : { signal: deps.interrupt }),
+          });
+    const outcomeFor = new Map(outcomes.map((result) => [result.path, result.outcome]));
+    for (const file of files)
+      deps.log(`${outcomeFor.get(file.path) ?? 'unchanged'} ${escapeName(file.path)}`);
     for (const brief of briefs) {
       if (brief.facts === undefined) continue;
       for (const warning of await cardWarnings(

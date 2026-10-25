@@ -52,14 +52,15 @@ describe('functional module hosts and generated test tasks', () => {
         expect(contentsOf(files, 'src/modules/index.ts')).toContain(
           'export function registerModules',
         );
-        const socket = target !== 'cloudflare-workers';
-        expect(files.some((file) => file.path === 'test/support/server.ts')).toBe(socket);
-        expect(files.some((file) => file.path === 'test/e2e/app.e2e.test.ts')).toBe(socket);
+        // V10-23: every target, Workers included, emits socket test support and
+        // the app-level e2e smoke test. Workers boots the real Worker on workerd
+        // through the same `startTestServer()`.
+        expect(files.some((file) => file.path === 'test/support/server.ts')).toBe(true);
+        expect(files.some((file) => file.path === 'test/e2e/app.e2e.test.ts')).toBe(true);
+        // Deno runs its tasks from `deno.json`; every npm-manifest target,
+        // Workers included, declares its test scripts in `package.json`.
         const manifest = JSON.parse(
-          contentsOf(
-            files,
-            target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
-          ),
+          contentsOf(files, target === 'deno' ? 'deno.json' : 'package.json'),
         ) as { scripts?: Record<string, string>; tasks?: Record<string, string> };
         const tasks = manifest.tasks ?? manifest.scripts!;
         if (name === 'full-stack' || name === 'rest' || name === 'microservice') {
@@ -72,10 +73,6 @@ describe('functional module hosts and generated test tasks', () => {
           expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
             target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
-        }
-        if (!socket) {
-          expect(tasks['test:e2e']).toBeUndefined();
-          return;
         }
         const unit =
           target === 'deno'
@@ -643,7 +640,7 @@ describe('the Cloudflare Workers target', () => {
     // this it was installed and read by nothing.
     expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBe(true);
     expect(tsconfig.compilerOptions['noEmit']).toBe(true);
-    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'node']);
     expect(tsconfig.compilerOptions['lib']).toEqual(['ES2022']);
   });
 
@@ -666,7 +663,7 @@ describe('the Cloudflare Workers target', () => {
     expect(tsconfig.compilerOptions['allowJs']).toBe(true);
   });
 
-  it('declares @types/node for a Workers project with an npm build (V9-9)', () => {
+  it('declares @types/node for every Workers project (V9-9, V10-23)', () => {
     const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
     const pkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
@@ -675,25 +672,27 @@ describe('the Cloudflare Workers target', () => {
     };
 
     expect(pkg.devDependencies['@types/node']).toBe('^24.0.0');
-    // A Workers project with no npm build has no `node:` import to type.
+    // V10-23: a Workers project with no npm build now emits tests too, so it
+    // needs the Node declarations and the `tsx` runner regardless of a build.
     const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
     const restPkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', rest)], 'package.json'),
     ) as {
       devDependencies: Record<string, string>;
     };
-    expect(restPkg.devDependencies['@types/node']).toBeUndefined();
+    expect(restPkg.devDependencies['@types/node']).toBe('^24.0.0');
+    expect(restPkg.devDependencies['tsx']).toBe('^4.20.0');
     expect(restPkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
 
-  it('adds no Node types or build ignores where the Workers template has no npm build', () => {
+  it('adds no build ignores where the Workers template has no npm build', () => {
     const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
     const files = [...projectFiles('edge', 'cloudflare-workers', rest)];
     const tsconfig = JSON.parse(contentsOf(files, 'tsconfig.json')) as {
       compilerOptions: Record<string, unknown>;
     };
 
-    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'node']);
     expect(tsconfig.compilerOptions['allowJs']).toBeUndefined();
     expect(contentsOf(files, 'eslint.config.js')).not.toContain("'build/'");
     expect(contentsOf(files, '.prettierignore')).not.toContain('build/');
