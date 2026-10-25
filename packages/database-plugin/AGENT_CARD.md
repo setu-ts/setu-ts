@@ -53,32 +53,9 @@ await db.transaction(async (uow) => {
   attempts rollback and rejects.
 - Unsupported transaction isolation levels reject rather than silently downgrading.
 - Raw `query` rejects on memory; `migrate` rejects on every current adapter.
+- Give a Drizzle `pg` Pool an `'error'` listener; see the README's Drizzle pool setup.
 
 ## Other options
-
-Drizzle uses an application-owned node-postgres pool. Attach an error listener before registration:
-
-```ts
-import { Pool } from 'pg';
-import { drizzle } from 'drizzle-orm/node-postgres';
-import { describeError } from '@setu-ts/common';
-import { createDrizzleDatabase, DatabasePlugin } from '@setu-ts/database-plugin';
-
-const pool = new Pool({ connectionString: process.env['DATABASE_URL']! });
-pool.on('error', (error) => logger.warn('Database pool error', { error: describeError(error) }));
-const database = drizzle(pool);
-const plugin = DatabasePlugin({ type: 'drizzle', options: {
-  drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
-  drizzleTables: { User: users },
-} });
-```
-
-The framework attaches a reporting listener only when the pool has none (also without a logger). The
-app owns pool shutdown. Drizzle tenant columns resolve to model properties once per entity;
-ambiguous or absent columns are server configuration faults (`TenantColumnUnresolvedError`). Drizzle
-and D1 refuse unknown payload fields; schema-less adapters store them. Validate route body fields
-explicitly. PostgreSQL field type refusals on Drizzle and D1 STRICT-table type refusals are
-`InvalidFieldValueError` (400).
 
 - `type` also selects `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'`
   or `'custom'`.

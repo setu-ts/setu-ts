@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Portable data contract (M119e, 0.11.0)
+### Portable data contract: tenant columns, cursors, unknown fields and refused values (M119e, 0.11.0, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
 
 Restart pagination once on Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1:
 old cursors are refused with `InvalidCursorError` (400), because new fingerprints bind entity, key
