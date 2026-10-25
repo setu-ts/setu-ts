@@ -198,42 +198,57 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     }
   });
 
-  it('leaves a peer the root overrides out of the root dependencies, and says so', async () => {
+  it('records a root-overridden peer at the override spec, so npm installs it without EOVERRIDE', async () => {
     const h = await workspace();
     await put(
       h,
       '/app/ws/package.json',
       JSON.stringify({
         workspaces: ['apps/*'],
-        // A plain key and a versioned key: both name a package npm would refuse
-        // as a direct dependency with a different spec (EOVERRIDE).
         overrides: {
+          // A plain key and a versioned key with a "." entry pin the peer itself:
+          // npm accepts a direct dependency only at the override's exact spec.
           '@opentelemetry/api': '1.9.1',
           '@opentelemetry/resources@2': { '.': '2.9.0' },
-          // Overrides only a CHILD of the peer, not the peer: it must still be added.
+          // Overrides only a CHILD of the peer, not the peer: the CLI range applies.
           '@opentelemetry/sdk-trace-base': { '@opentelemetry/core': '2.0.0' },
+          // A reference to a root dependency that does not exist: not a usable spec.
+          '@opentelemetry/context-async-hooks': '$@opentelemetry/context-async-hooks',
         },
       }),
     );
     expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
-    const root = JSON.parse(h.read('/app/ws/package.json')) as {
-      dependencies?: Record<string, string>;
-      overrides: Record<string, unknown>;
-    };
-    expect(root.dependencies?.['@opentelemetry/api']).toBeUndefined();
-    expect(root.dependencies?.['@opentelemetry/resources']).toBeUndefined();
-    expect(root.overrides['@opentelemetry/api']).toBe('1.9.1');
-    for (const peer of ['@opentelemetry/sdk-trace-base', '@opentelemetry/context-async-hooks']) {
-      expect(root.dependencies?.[peer]).toBe(CLIENT_RANGES[peer]);
-    }
-    // The member still records every peer; only the root defers to its override.
+    const root = dependencies(h, '/app/ws/package.json');
+    expect(root['@opentelemetry/api']).toBe('1.9.1');
+    expect(root['@opentelemetry/resources']).toBe('2.9.0');
+    expect(root['@opentelemetry/sdk-trace-base']).toBe(
+      CLIENT_RANGES['@opentelemetry/sdk-trace-base'],
+    );
+    expect(root['@opentelemetry/context-async-hooks']).toBeUndefined();
+    // The member keeps the CLI ranges even where they differ from the root
+    // override (`~1.9.0` against `1.9.1`): the root entry is what places one copy.
     for (const peer of peers) {
       expect(dependencies(h, '/app/ws/apps/api/package.json')[peer]).toBe(CLIENT_RANGES[peer]);
     }
     const out = h.out.join('\n');
-    expect(out).toContain('left @opentelemetry/api out of /app/ws/package.json');
-    expect(out).toContain('left @opentelemetry/resources out of /app/ws/package.json');
-    expect(out).not.toContain('left @opentelemetry/sdk-trace-base');
+    expect(out).toContain('left @opentelemetry/context-async-hooks out of /app/ws/package.json');
+    expect(out).not.toContain('left @opentelemetry/api');
+  });
+
+  it('says nothing about a reference override whose root dependency already exists', async () => {
+    const h = await workspace();
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        dependencies: { '@opentelemetry/api': '1.9.1' },
+        overrides: { '@opentelemetry/api': '$@opentelemetry/api' },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(dependencies(h, '/app/ws/package.json')['@opentelemetry/api']).toBe('1.9.1');
+    expect(h.out.join('\n')).not.toContain('left ');
   });
 
   it('ignores an overrides value that is not an object', async () => {

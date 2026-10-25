@@ -557,32 +557,45 @@ function peerPackagesFor(
 }
 
 /**
- * The package names a root manifest's npm `overrides` pins THEMSELVES at its
- * top level, with any `@<range>` selector on a key removed (`ioredis@5` →
- * `ioredis`). A string value pins the package; an object value pins it only
- * through its `"."` entry — an object without one overrides the package's
- * children, not the package, so a direct dependency on it is not refused.
+ * The specs a root manifest's npm `overrides` pins packages THEMSELVES to, at
+ * its top level, keyed by package name with any `@<range>` selector on a key
+ * removed (`ioredis@5` → `ioredis`). A string value is the spec; an object
+ * value pins the package only through its `"."` entry — an object without one
+ * overrides the package's children, not the package, so it is not returned.
  *
  * @param source - The root `package.json` text
- * @returns The package names the overrides pin
+ * @returns Each pinned package and the spec its override names
  * @throws {SyntaxError} When the text is not JSON
  */
-function overriddenNames(source: string): ReadonlySet<string> {
+function overrideSpecs(source: string): ReadonlyMap<string, string> {
   const overrides = (JSON.parse(source) as { overrides?: unknown }).overrides;
-  if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) {
-    return new Set();
+  const specs = new Map<string, string>();
+  if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) return specs;
+  for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
+    const spec =
+      typeof value === 'string'
+        ? value
+        : value !== null && typeof value === 'object' && Object.hasOwn(value, '.')
+          ? (value as Record<string, unknown>)['.']
+          : undefined;
+    if (typeof spec !== 'string') continue;
+    const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
+    specs.set(at === -1 ? key : key.slice(0, at), spec);
   }
-  const pinned = Object.entries(overrides as Record<string, unknown>).filter(
-    ([, value]) =>
-      typeof value === 'string' ||
-      (value !== null && typeof value === 'object' && Object.hasOwn(value, '.')),
-  );
-  return new Set(
-    pinned.map(([key]) => {
-      const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
-      return at === -1 ? key : key.slice(0, at);
-    }),
-  );
+  return specs;
+}
+
+/**
+ * The names a root manifest already lists in `dependencies`.
+ *
+ * @param source - The root `package.json` text
+ * @returns The dependency names
+ */
+function rootDependencyNames(source: string): ReadonlySet<string> {
+  const dependencies = (JSON.parse(source) as { dependencies?: unknown }).dependencies;
+  return dependencies !== null && typeof dependencies === 'object' && !Array.isArray(dependencies)
+    ? new Set(Object.keys(dependencies))
+    : new Set();
 }
 
 /**
@@ -957,21 +970,28 @@ export async function runAddCommand(
         const source = await readExistingText(deps.fs, path);
         if (source !== undefined) {
           // npm refuses (EOVERRIDE) a direct dependency whose spec differs from
-          // a root override of the same package, so a peer the root overrides
-          // is left to that override rather than recorded beside it.
-          const overridden = overriddenNames(source);
+          // a root override of the same package, and an override alone installs
+          // nothing. So a peer the root overrides is recorded at the override's
+          // own spec; a `$name` reference is not a spec a dependency can carry,
+          // so that peer is left to the override and the reason printed.
+          const overridden = overrideSpecs(source);
+          const rootPeers: { readonly name: string; readonly range: string }[] = [];
           for (const peer of peerPackages) {
-            if (!overridden.has(peer.name)) continue;
-            deps.log(
-              `left ${peer.name} out of ${escapeName(path)}: its "overrides" already pins it, ` +
-                `and npm refuses a direct dependency whose spec differs from its override.`,
-            );
+            const spec = overridden.get(peer.name);
+            if (spec === undefined) {
+              rootPeers.push(peer);
+            } else if (spec.startsWith('$')) {
+              // The reference names a root dependency; present, there is nothing to add.
+              if (rootDependencyNames(source).has(peer.name)) continue;
+              deps.log(
+                `left ${peer.name} out of ${escapeName(path)}: its "overrides" pins it by reference ` +
+                  `(${escapeName(spec)}); add the referenced dependency at the root yourself.`,
+              );
+            } else {
+              rootPeers.push({ name: peer.name, range: spec });
+            }
           }
-          const merged = withPeerDependencies(
-            source,
-            peerPackages.filter((peer) => !overridden.has(peer.name)),
-            'dependencies',
-          );
+          const merged = withPeerDependencies(source, rootPeers, 'dependencies');
           if (merged.added.length > 0) {
             edits.push({ path, contents: merged.contents });
             addedPeers.push(...merged.added);
