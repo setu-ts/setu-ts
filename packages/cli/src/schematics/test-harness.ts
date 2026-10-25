@@ -105,11 +105,19 @@ export function renderTestServer(runtime: TargetRuntime): string {
   if (runtime === 'cloudflare-workers') {
     return `import { createTestHarness } from 'wrangler';
 
-/** Boots the real Worker on workerd, with the bindings \`wrangler.toml\` declares. */
+/**
+ * Boots the real Worker on workerd, with the bindings \`wrangler.toml\` declares.
+ *
+ * The config is located from this file, not the working directory: wrangler
+ * resolves a relative path from \`process.cwd()\`, so tests started elsewhere would
+ * load that directory's \`wrangler.toml\`, build command included.
+ */
 export async function startTestServer(): Promise<
   { readonly baseUrl: string; readonly stop: () => Promise<void> }
 > {
-  const harness = createTestHarness({ workers: [{ configPath: './wrangler.toml' }] });
+  const harness = createTestHarness({
+    workers: [{ configPath: new URL('../../wrangler.toml', import.meta.url) }],
+  });
   const { url } = await harness.listen();
   return {
     baseUrl: url.origin,

@@ -179,7 +179,9 @@ describe('generated Workers test server', () => {
   it('boots the real Worker through wrangler and keeps the shared signature', () => {
     const server = renderTestServer('cloudflare-workers');
     expect(server).toContain("import { createTestHarness } from 'wrangler';");
-    expect(server).toContain("createTestHarness({ workers: [{ configPath: './wrangler.toml' }] })");
+    // Anchored to the file, never the working directory (M119h audit F2).
+    expect(server).toContain("configPath: new URL('../../wrangler.toml', import.meta.url)");
+    expect(server).not.toContain("configPath: './wrangler.toml'");
     expect(server).toContain('const { url } = await harness.listen();');
     expect(server).toContain('baseUrl: url.origin');
     expect(server).toContain('await harness.close();');

@@ -65,11 +65,11 @@ All notable changes to this project are documented here. The format follows
 - **Generated Workers projects carry `test` and `test:e2e` (V10-23, M119h, 0.11.0,
   `@setu-ts/cli`).** A `cloudflare-workers` scaffold now gets both scripts, run through `tsx --test`
   against the real Worker on workerd via wrangler's `createTestHarness`, plus
-  `test/support/server.ts`, a smoke test, an e2e test and fetch-based module tests. `package.json`
-  records `tsx` and `@types/node`, `tsconfig.json` adds `node` to `types`, the `deno.json` `test`
-  task that permitted an empty suite is dropped, and the generated README's Testing section names
-  both commands. The upgrade guide shows how to add them to a project scaffolded before this
-  release.
+  `test/support/server.ts` (which locates `wrangler.toml` from its own path, never the working
+  directory), a smoke test, an e2e test and fetch-based module tests. `package.json` records `tsx`
+  and `@types/node`, `tsconfig.json` adds `node` to `types`, the `deno.json` `test` task that
+  permitted an empty suite is dropped, and the generated README's Testing section names both
+  commands. The upgrade guide shows how to add them to a project scaffolded before this release.
 
 - **`CliDependencies.logicalCwd` (V10-25, M119h, 0.11.0, `@setu-ts/cli`).** One additive optional
   member on the exported type. The executable supplies the shell's `PWD` only when it is absolute
@@ -354,7 +354,9 @@ All notable changes to this project are documented here. The format follows
   `setu new a.b --runtime cloudflare-workers` therefore scaffolded a Worker that wrangler refused to
   build or run. The name is now checked before any write (exit 2,
   `Invalid Workers project name: "<raw>". wrangler accepts only lowercase letters, digits and -, at most 63 characters.`),
-  for the flag and the interactive answer alike. Other runtimes keep the path-segment rule.
+  for the flag and the interactive answer alike. Other runtimes keep the path-segment rule. On every
+  runtime, a name containing a control character (CR, LF, TAB, NUL, DEL) is now refused as typed
+  rather than folded to `-`, as `PROJECT_NAME_RULE` already said.
 
 - **A re-run of an interrupted `setu adopt` reads the manifest where the interruption left it
   (V10-10, M119h, 0.11.0, `@setu-ts/cli`).** Plugin and runtime detection read only the original

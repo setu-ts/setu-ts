@@ -707,6 +707,14 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'node';
 
+  // Checked on the name as TYPED: `deriveNames` folds whitespace, so a bare CR,
+  // LF or TAB would otherwise become `-` and scaffold silently, although the
+  // rule says no control character (M119h audit F3; create-cloudflare refuses
+  // such a name rather than converting it).
+  if (/\p{Cc}/u.test(rawName)) {
+    deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
+    return EXIT_USAGE;
+  }
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
   // an identifier, so it passes the PATH rules every name-taking verb shares — a

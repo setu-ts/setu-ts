@@ -186,7 +186,10 @@ health bridge.
     readonly baseUrl: string;
     readonly stop: () => Promise<void>;
   }> {
-    const harness = createTestHarness({ workers: [{ configPath: './wrangler.toml' }] });
+    // Located from this file: a relative path would resolve from the working directory.
+    const harness = createTestHarness({
+      workers: [{ configPath: new URL('../../wrangler.toml', import.meta.url) }],
+    });
     const { url } = await harness.listen();
     return {
       baseUrl: url.origin,

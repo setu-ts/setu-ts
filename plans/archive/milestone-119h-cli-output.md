@@ -220,7 +220,10 @@ Eleven local defects in what `@setu-ts/cli` generates and how its commands behav
 ### 3.7 V10-35 — a fixed 404 detail
 
 - **Decision:** `notFoundStatement` renders the fixed detail `'<Pascal> not found.'` at all four
-  sites; the id is not interpolated anywhere in the response or the thrown error.
+  sites; the id is not interpolated into the detail or the thrown error. The Problem Details
+  `instance` member still carries the percent-encoded request path, set by `@setu-ts/exceptions`
+  (audit F1, accepted: Spring sets `instance` to the request path, and Fastify and Express echo the
+  encoded path in their default 404).
 - **Why:** the caller-supplied id reached the Problem Details body and the warn log. The request
   logger already records the path.
 - **Test home:** `packages/cli/test/unit/schematics/module.test.ts` (both arms, with and without
@@ -390,15 +393,18 @@ also driven by hand: `npm install`, `npm test`, `npm run test:e2e`, then the mou
   ancestor of the logical path, only when the physical walk found no workspace and `logicalCwd`
   differs; §3.9 adds one manifest read set for the member root.
 - **Audit obligations:** a hostile id (`"><img src=x>`, CR/LF, a 10 KB value) never reaches the 404
-  body or the thrown error's message; a logical path never authorizes a write (§3.5 refusal-only);
-  an unwritable target is refused before any byte is written in both modes and the message names no
-  temp file; the symlink remedy never suggests running in "a workspace you own"; printed links carry
-  no unescaped project input; a link at `apps/<member>` contributes nothing to the §3.9 probes (the
-  member root is checked with `assertInsideProject` before it is read, and skipped when the check
-  fails); the generated Workers `test/support/server.ts` loads only `wrangler` and the project's own
-  `./wrangler.toml`, and starts no process beyond wrangler's local workerd; a Workers project name
-  carrying a quote, backslash, newline or `.` is refused before anything is written, so nothing but
-  `[a-z0-9-]` reaches `wrangler.toml`.
+  detail or the thrown error's message (the `instance` member echoes the encoded path, F1); a
+  logical path never authorizes a write (§3.5 refusal-only); an unwritable target is refused before
+  any byte is written in both modes and the message names no temp file; the symlink remedy never
+  suggests running in "a workspace you own"; printed links carry no unescaped project input; a link
+  at `apps/<member>` contributes nothing to the §3.9 probes (the member root is checked with
+  `assertInsideProject` before it is read, and skipped when the check fails); the generated Workers
+  `test/support/server.ts` loads only `wrangler` and the project's own `wrangler.toml`, located from
+  the file itself rather than the working directory (F2), and starts no process beyond wrangler's
+  local workerd; a project name carrying a control character (CR, LF, TAB, NUL, DEL) is refused as
+  typed, before whitespace folding, on every runtime (F3), and a Workers name carrying a quote,
+  backslash or `.` is refused before anything is written, so nothing but `[a-z0-9-]` reaches
+  `wrangler.toml`.
 
 | Threat                                                   | Resolution                                                               |
 | -------------------------------------------------------- | ------------------------------------------------------------------------ |
@@ -410,6 +416,14 @@ also driven by hand: `npm install`, `npm test`, `npm run test:e2e`, then the mou
 | Planted link at `apps/<member>` feeding the adopt probes | §3.9: member root checked with `assertInsideProject`, skipped on failure |
 | TOML injection through the Workers project name          | §3.8 name rule `[a-z0-9-]`, at most 63 characters                        |
 | Generated test harness running foreign code              | §3.2: harness reads only the project's own `wrangler.toml`               |
+
+**Committed-tree audit of `2527ea36` (fresh Claude agent): three Low findings.**
+
+| Finding                                                                                                                                                            | Disposition                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F1 — Problem Details `instance` echoes the percent-encoded request path                                                                                            | ACCEPTED: existing `@setu-ts/exceptions` behaviour; Spring sets `instance` to the request path, Fastify 5 and Express 5 echo the encoded path in their default 404 (measured). §3.7 and the obligations above corrected |
+| F2 — the generated harness resolved `./wrangler.toml` from the working directory, so a foreign config (and its `[build] command`) ran when tests started elsewhere | FIXED after the audit: `configPath: new URL('../../wrangler.toml', import.meta.url)`                                                                                                                                    |
+| F3 — a bare CR/LF/TAB in a project name was folded to `-`, not refused                                                                                             | FIXED after the audit: control characters are refused on the name as typed, on every runtime (create-cloudflare refuses rather than converts)                                                                           |
 
 ## 9. Out of scope
 
