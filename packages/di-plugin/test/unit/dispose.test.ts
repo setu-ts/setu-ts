@@ -1,13 +1,129 @@
 import { expect, it, vi } from 'vitest';
 import { createToken } from '@setu-ts/common';
-import type { IRequestContext } from '@setu-ts/common';
+import type { IRequestContext, ProbeTiming } from '@setu-ts/common';
 import {
   CircularDetector,
   createContainer,
+  DiContainer,
   ProviderRegistry,
   ScopeDisposedError,
   ScopeRequiredError,
 } from '../../src/index.ts';
+
+it.each([
+  ['ambient', 'resolve'],
+  ['ambient', 'reject'],
+  ['injected', 'resolve'],
+  ['injected', 'reject'],
+] as const)('bounds each disposal with %s timers and ignores a late %s', async (timers, late) => {
+  vi.useFakeTimers();
+  let expire: (() => void) | undefined;
+  const timing: ProbeTiming = {
+    hrtime: () => 0,
+    setTimer: vi.fn((fn, ms) => {
+      expect(ms).toBe(5000);
+      expire = fn;
+      return 7;
+    }),
+    clearTimer: vi.fn(),
+  };
+  let release = (): void => {};
+  const hung = new Promise<void>((resolve, reject) => {
+    release = () => (late === 'resolve' ? resolve() : reject(new Error('late failure')));
+  });
+  const root = new DiContainer({
+    defaultScope: 'scoped',
+    autoRegister: false,
+    ...(timers === 'injected' ? { timing } : {}),
+  });
+  const order: string[] = [];
+  const token = createToken<object>('hung-service');
+  root.register('first', { useValue: {} }, { dispose: () => void order.push('first') });
+  root.register(token, { useValue: {} }, { dispose: () => hung });
+  root.register('last', { useValue: {} }, { dispose: () => void order.push('last') });
+  const scope = root.createScope();
+  for (const key of ['first', token, 'last']) scope.resolve(key);
+  let outcome: unknown;
+  const done = Promise.resolve(scope.dispose()).then(
+    () => {
+      outcome = 'unexpected success';
+    },
+    (error: unknown) => {
+      outcome = error;
+    },
+  );
+  try {
+    expect(order).toEqual(['last']);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(outcome).toBeUndefined();
+    expect(order).toEqual(['last']);
+    if (timers === 'injected') expire?.();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(outcome).toBeInstanceOf(AggregateError);
+    await done;
+    expect((outcome as AggregateError).errors).toEqual([
+      new Error('DI disposal of hung-service timed out after 5000 ms'),
+    ]);
+    expect(order).toEqual(['last', 'first']);
+    expect(scope.dispose()).toBeUndefined();
+    if (timers === 'injected') {
+      expect(timing.setTimer).toHaveBeenCalledOnce();
+      expect(timing.clearTimer).toHaveBeenCalledExactlyOnceWith(7);
+    }
+    // Synchronous disposal remains synchronous and never arms a deadline.
+    const sync = root.createScope();
+    sync.resolve('first');
+    expect(sync.dispose()).toBeUndefined();
+    expect(vi.getTimerCount()).toBe(0);
+    if (timers === 'injected') expect(timing.setTimer).toHaveBeenCalledOnce();
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect((outcome as AggregateError).errors).toHaveLength(1);
+    expect(order).toEqual(['last', 'first', 'first']);
+  } finally {
+    release();
+    await done;
+    vi.useRealTimers();
+  }
+});
+
+it.each([
+  ['request', 'default'],
+  ['request', 'explicit'],
+  ['manual', 'default'],
+  ['manual', 'explicit'],
+] as const)('owns 1000 %s scope leaves with %s singleton lifetime', (kind, lifetime) => {
+  const root = createContainer();
+  const rootTrack = vi.spyOn(root, 'track');
+  const dispose = vi.fn();
+  const create = vi.fn(() => ({}));
+  for (let n = 0; n < 1000; n++) {
+    const cleanups: (() => void | Promise<void>)[] = [];
+    const ctx = {
+      defer: (cleanup: () => void | Promise<void>) => void cleanups.push(cleanup),
+    } as IRequestContext;
+    const scope = kind === 'request' ? root.forRequest(ctx) : root.createScope();
+    scope.register(
+      'leaf',
+      { useFactory: create },
+      {
+        dispose,
+        ...(lifetime === 'explicit' ? { scope: 'singleton' as const } : {}),
+      },
+    );
+    expect(scope.resolve('leaf')).toBe(scope.resolve('leaf'));
+    expect(root.has('leaf')).toBe(false);
+    if (kind === 'request') {
+      expect(cleanups).toHaveLength(1);
+      expect(cleanups[0]!()).toBeUndefined();
+    } else expect(scope.dispose()).toBeUndefined();
+  }
+  expect(create).toHaveBeenCalledTimes(1000);
+  expect(dispose).toHaveBeenCalledTimes(1000);
+  expect(rootTrack).not.toHaveBeenCalled();
+  expect(root.dispose()).toBeUndefined();
+  expect(dispose).toHaveBeenCalledTimes(1000);
+});
 
 it.each(['on-demand', 'closed'] as const)(
   'refuses root disposable transient graphs with %s compilation and disposes request scopes only',

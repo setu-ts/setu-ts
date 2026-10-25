@@ -277,8 +277,11 @@ application without `DiPlugin` is unaffected.
 - **Unit tests of a request-scoped handler** need the kernel's request context, which implements
   `ctx.defer`: test them through `createTestApp` and `inject()`. A `createTestContext` context makes
   `forRequest` throw `RequestScopeUnavailableError`.
-- **A `dispose` that takes longer than 5 s** no longer holds the response: the kernel reports it at
-  `warn` and moves on.
+- **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
+  disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
+  `dispose()`) and the rest still run.
+- **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
+  means once per scope; it is no longer created and kept on the root.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
   in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
 

@@ -52,7 +52,11 @@ import type {
   ServiceMetadata,
 } from '../metadata/metadata-store.ts';
 import { discoverControllers } from '../discovery/controller-discovery.ts';
-import { findUnresolvableParameters, resolveParameters } from '../resolvers/parameter-resolver.ts';
+import {
+  classifyCustom,
+  findUnresolvableParameters,
+  resolveParameters,
+} from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
 import { VERSION } from '../version.ts';
 
@@ -938,17 +942,24 @@ function warnUnresolvableParameters(
     return;
   }
   for (const param of findUnresolvableParameters(route.params, ctx.container !== undefined)) {
-    ctx.logger.warn('Decorated parameter cannot be resolved and will be undefined', {
-      controller: className(target),
-      handler: route.handler,
-      parameterIndex: param.index,
-      customType: param.customType ?? '(none)',
-      hint:
-        'Register a resolver with registerParameterResolver() for this custom type. ' +
-        'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
-        'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
-        'registration.',
-    });
+    const service = classifyCustom(param).kind === 'service';
+    ctx.logger.warn(
+      service
+        ? 'Decorated Service parameter cannot be resolved: the request will fail because no DI container is registered'
+        : 'Decorated parameter cannot be resolved and will be undefined',
+      {
+        controller: className(target),
+        handler: route.handler,
+        parameterIndex: param.index,
+        customType: param.customType ?? '(none)',
+        hint: service
+          ? 'Register DiPlugin to provide the DI container used by @Params(Service(...)).'
+          : 'Register a resolver with registerParameterResolver() for this custom type. ' +
+            'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
+            'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
+            'registration.',
+      },
+    );
   }
 }
 

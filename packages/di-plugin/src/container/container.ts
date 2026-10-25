@@ -3,11 +3,12 @@ import type {
   ContainerToken,
   IContainer,
   IRequestContext,
+  ProbeTiming,
   Provider,
   ProviderOptions,
   ServiceScope,
 } from '@setu-ts/common';
-import { isPromiseLike } from '@setu-ts/common';
+import { isPromiseLike, withDeadline } from '@setu-ts/common';
 import { Compiler } from './compiler.ts';
 import type { ResolutionScope } from './compiler.ts';
 import {
@@ -15,9 +16,13 @@ import {
   RequestScopeUnavailableError,
   ScopeDisposedError,
   ScopeRequiredError,
+  tokenName,
 } from './errors.ts';
 import { ProviderRegistry } from './provider-registry.ts';
 import type { ProviderEntry } from './provider-registry.ts';
+
+/** Fixed bound for one asynchronous disposal. @since 0.11.0 */
+const DISPOSAL_TIMEOUT_MS = 5000;
 
 /**
  * External resolver used for auto-registration fallback. A subset of
@@ -58,6 +63,13 @@ export interface ContainerConfig {
    * external resolver and caches the result as a singleton.
    */
   readonly autoRegister: boolean;
+  /**
+   * Timer surface for asynchronous disposal deadlines, inherited by scopes.
+   * Omit to use withDeadline's default timers.
+   *
+   * @since 0.11.0
+   */
+  readonly timing?: ProbeTiming;
 }
 
 /**
@@ -79,7 +91,10 @@ export class DiContainer implements IContainer, ResolutionScope {
   readonly #parent: DiContainer | undefined;
   readonly #requests = new WeakMap<IRequestContext, IContainer>();
   readonly #providers = new WeakMap<Provider<unknown>, ProviderEntry>();
-  readonly #cleanups: (() => void | Promise<void>)[] = [];
+  readonly #cleanups: {
+    readonly token: ContainerToken;
+    readonly run: () => void | Promise<void>;
+  }[] = [];
   #closed = false;
   #disposed = false;
   /** Internal slot storage, allocated on first scoped resolution. @internal */
@@ -108,6 +123,8 @@ export class DiContainer implements IContainer, ResolutionScope {
 
   /**
    * Registers a provider while open; a scope may add only new leaf tokens.
+   * Singleton registrations on a scope are stored as scoped, so their instances
+   * and disposals belong to that scope rather than the root.
    *
    * @param token - Identity or string token
    *
@@ -128,7 +145,9 @@ export class DiContainer implements IContainer, ResolutionScope {
         `DI token '${typeof token === 'string' ? token : token.name}' is already registered.`,
       );
     }
-    const scope = options?.scope ?? this.#config.defaultScope;
+    const requestedScope = options?.scope ?? this.#config.defaultScope;
+    const scope =
+      this.#parent !== undefined && requestedScope === 'singleton' ? 'scoped' : requestedScope;
     const existing =
       typeof token === 'function' && 'useClass' in provider && provider.useClass === token
         ? this.#providers.get(provider as Provider<unknown>)
@@ -246,21 +265,27 @@ export class DiContainer implements IContainer, ResolutionScope {
    *
    * @param cleanup - Disposal of a just-created instance
    *
+   * @param token - Provider identity used to name a disposal timeout
+   *
    * @returns Nothing
    *
    * @since 0.11.0
    *
    * @internal
    */
-  track(cleanup: () => void | Promise<void>): void {
-    this.#cleanups.push(cleanup);
+  track(cleanup: () => void | Promise<void>, token: ContainerToken): void {
+    this.#cleanups.push({ run: cleanup, token });
   }
 
   /**
    * Runs all owned cleanups in reverse creation order, once.
+   * Each asynchronous disposal has a fixed 5000 ms deadline; timeouts are
+   * recorded with the provider's name and later disposals still run. A timed-out
+   * disposal's later outcome is ignored. Synchronous disposals remain untimed
+   * and synchronous.
    *
    * @returns A promise only when cleanup is asynchronous
-   * @throws {AggregateError} After every cleanup runs, if any failed
+   * @throws {AggregateError} After every cleanup runs, if any failed or timed out
    *
    * @since 0.11.0
    */
@@ -274,11 +299,18 @@ export class DiContainer implements IContainer, ResolutionScope {
     };
     const run = (): void | Promise<void> => {
       while (this.#cleanups.length > 0) {
-        const cleanup = this.#cleanups.pop() as () => void | Promise<void>;
+        const cleanup = this.#cleanups.pop()!;
         try {
-          const pending = cleanup();
+          const pending = cleanup.run();
           if (isPromiseLike(pending))
-            return Promise.resolve(pending)
+            return withDeadline(() => Promise.resolve(pending), {
+              timeoutMs: DISPOSAL_TIMEOUT_MS,
+              ...(this.#config.timing === undefined ? {} : { timing: this.#config.timing }),
+              onTimeout: () =>
+                new Error(
+                  `DI disposal of ${tokenName(cleanup.token)} timed out after ${DISPOSAL_TIMEOUT_MS} ms`,
+                ),
+            })
               .catch((error: unknown) => {
                 errors.push(error);
               })

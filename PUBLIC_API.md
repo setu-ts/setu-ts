@@ -12506,9 +12506,10 @@ contract changed in 0.11.0:
   call and disposed through `ctx.defer` when the request finishes. Without `ctx.defer` it throws.
 - **`dispose(): void | Promise<void>`** disposes what the container created — on a scope its scoped
   instances and the transients it built, on the root its singletons — in reverse creation order,
-  each even if an earlier one failed, then throws (or rejects with) one `AggregateError`. It returns
-  a promise only when a dispose function did. Repeat calls are no-ops; a disposed scope refuses
-  further resolves. Instances from the service-registry fallback are never disposed.
+  each even if an earlier one failed — an asynchronous one bounded at 5000 ms, recorded as a named
+  timeout when it expires — then throws (or rejects with) one `AggregateError`. It returns a promise
+  only when a dispose function did. Repeat calls are no-ops; a disposed scope refuses further
+  resolves. Instances from the service-registry fallback are never disposed.
 - **`ServiceScope`.** `scoped` means one instance per scope; a request reaches its scope through
   `forRequest`. Resolving a `scoped` token on the root container is refused, and so is a `transient`
   there whose graph reaches a `scoped` provider.
@@ -13519,13 +13520,17 @@ Contract notes:
 - **Compiled resolution**: no resolve runs the cycle detector or looks up a dependency by token; a
   top-level `resolve(token)` reads one `Map`. Singletons are still created lazily, on first resolve.
 - **Scopes**: `createScope()` and `forRequest(ctx)` return child containers that share singletons
-  with their parent. A scope may register tokens its parent chain does not have; registering one it
-  has throws, because the parent's compiled graph cannot be rebound from below.
+  with their parent. A scope may register tokens its parent chain does not have, and they live as
+  long as the scope (a `singleton` lifetime there is stored as `scoped`); registering one it has
+  throws, because the parent's compiled graph cannot be rebound from below.
 - **Request scope**: `forRequest(ctx)` creates the scope on first call for that request, caches it
   per container, and registers its disposal with `ctx.defer`. A request that never calls it pays one
   `undefined` check and stays on the kernel's synchronous path.
 - **Disposal**: `ProviderOptions.dispose` runs from `dispose()` — for a request scope when the
-  request finishes, for the root in `DiPlugin`'s `onClose` hook.
+  request finishes, for the root in `DiPlugin`'s `onClose` hook. Each asynchronous dispose is
+  bounded at 5000 ms, on the runtime's timers when a runtime is registered
+  (`ContainerConfig.timing`); one that never settles is reported in the `AggregateError` and the
+  rest still run, so `app.stop()` is not held.
 - **Auto-registration** (`autoRegister`, default `true` since 0.9.0): a token not in the container
   falls back to the kernel's `ServiceRegistry`, checked with `has()` during validation and resolved
   lazily once, then cached as a singleton; `false` confines resolution to the container's own

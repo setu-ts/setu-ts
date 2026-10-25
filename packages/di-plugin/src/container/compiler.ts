@@ -13,7 +13,7 @@ import type { ProviderEntry, ProviderRegistry } from './provider-registry.ts';
 export interface ResolutionScope {
   slots: unknown[] | undefined;
   readonly root: ResolutionScope;
-  track(cleanup: () => void | Promise<void>): void;
+  track(cleanup: () => void | Promise<void>, token: ContainerToken): void;
 }
 
 /**
@@ -215,7 +215,7 @@ export class Compiler {
             : provider.useFactory(...args);
       if (entry.dispose !== undefined) {
         const dispose = entry.dispose;
-        scope.track(() => dispose(value));
+        scope.track(() => dispose(value), token);
       }
       return value;
     };

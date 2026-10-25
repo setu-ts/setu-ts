@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { CAPABILITIES } from '@setu-ts/common';
-import type { IContainer } from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { IContainer, IRuntimeServices } from '@setu-ts/common';
 
 import { DiPlugin } from '../../src/plugin/di-plugin.ts';
 import type { DiPluginOptions } from '../../src/plugin/di-plugin.ts';
@@ -33,6 +33,88 @@ function getContainer(services: Map<string, unknown>): IContainer {
 }
 
 describe('DiPlugin integration', () => {
+  it('bounds hung singleton disposal on runtime timers and reaches later close hooks', async () => {
+    vi.useFakeTimers();
+    let expire: (() => void) | undefined;
+    const setTimer = vi.fn((fn: () => void, ms: number) => {
+      expect(ms).toBe(5000);
+      expire = fn;
+      return 19;
+    });
+    const clearTimer = vi.fn();
+    const order: string[] = [];
+    let release = (): void => {};
+    const hung = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'injected-timers',
+          version: '1.0.0',
+          dependencies: [CAPABILITIES.RUNTIME],
+          priority: PLUGIN_PRIORITY.HIGH,
+          register(ctx) {
+            const runtime = ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+            vi.spyOn(runtime, 'setTimeout').mockImplementation(setTimer);
+            vi.spyOn(runtime, 'clearTimeout').mockImplementation(clearTimer);
+          },
+        },
+        DiPlugin(),
+        {
+          name: 'disposable-singletons',
+          version: '1.0.0',
+          dependencies: [CAPABILITIES.DI_CONTAINER],
+          register(ctx) {
+            ctx.container!.register(
+              'first',
+              { useValue: {} },
+              { dispose: () => void order.push('first') },
+            );
+            ctx.container!.register('hung-singleton', { useValue: {} }, { dispose: () => hung });
+            ctx.lifecycle.onClose(() => {
+              order.push('later-close');
+            });
+          },
+        },
+      ],
+    });
+    let stop: Promise<void> | undefined;
+    let outcome: unknown;
+    try {
+      await app.start();
+      const root = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+      root.resolve('first');
+      root.resolve('hung-singleton');
+      stop = app.stop().then(
+        () => {
+          outcome = 'unexpected success';
+        },
+        (error: unknown) => {
+          outcome = error;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      expect(setTimer).toHaveBeenCalledOnce();
+      expect(outcome).toBeUndefined();
+      expect(order).toEqual([]);
+      expire!();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(outcome).toBeInstanceOf(AggregateError);
+      await stop;
+      expect((outcome as AggregateError).errors).toEqual([
+        new Error('DI disposal of hung-singleton timed out after 5000 ms'),
+      ]);
+      expect(order).toEqual(['first', 'later-close']);
+      expect(clearTimer).toHaveBeenCalledExactlyOnceWith(19);
+    } finally {
+      release();
+      await stop;
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
   it('accepts a later plugin bootstrap registration in the real kernel and disposes on stop', async () => {
     const dispose = vi.fn();
     const app = createApplication({
@@ -113,6 +195,49 @@ describe('DiPlugin integration', () => {
       expect(container).toBeDefined();
       expect(typeof container.resolve).toBe('function');
       expect(typeof container.register).toBe('function');
+    });
+
+    it('registers without a runtime and still bounds a hung disposal on default timers', async () => {
+      vi.useFakeTimers();
+      try {
+        const { ctx, services } = createFakeContext();
+        services.delete(CAPABILITIES.RUNTIME);
+        DiPlugin().register(ctx);
+        const container = getContainer(services);
+        const order: string[] = [];
+        container.register(
+          'first',
+          { useValue: 'first' },
+          { dispose: () => void order.push('first') },
+        );
+        container.register(
+          'hung',
+          { useValue: 'hung' },
+          { dispose: () => new Promise<void>(() => {}) },
+        );
+        const scope = container.createScope();
+        scope.register(
+          'scoped-first',
+          { useValue: 1 },
+          { dispose: () => void order.push('scoped') },
+        );
+        scope.register(
+          'scoped-hung',
+          { useValue: 2 },
+          { dispose: () => new Promise<void>(() => {}) },
+        );
+        scope.resolve('scoped-first');
+        scope.resolve('scoped-hung');
+        const settled = Promise.resolve(scope.dispose()).then(
+          () => 'resolved',
+          (error: unknown) => (error instanceof AggregateError ? error.errors.length : 'other'),
+        );
+        await vi.advanceTimersByTimeAsync(5000);
+        await expect(settled).resolves.toBe(1);
+        expect(order).toEqual(['scoped']);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

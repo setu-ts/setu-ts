@@ -19,6 +19,7 @@ import {
   Get,
   Params,
   registerParameterResolver,
+  Service,
 } from '../../src/index.ts';
 import { DecoratorPlugin } from '../../src/plugin/decorator-plugin.ts';
 import { metadataStore } from '../../src/metadata/metadata-store.ts';
@@ -92,6 +93,34 @@ describe('startup warnings', () => {
   beforeEach(() => {
     metadataStore.clear();
     clearParameterResolvers();
+  });
+
+  it('warns that an unbacked Service request fails while custom name collisions stay undefined', async () => {
+    @Controller('/unbacked')
+    class UnbackedController {
+      @Get('/')
+      @Params(Service('missing'), Custom('service'))
+      read(_service: unknown, _custom: unknown) {
+        throw new Error('handler must not run');
+      }
+    }
+    const warnings = await startWith([UnbackedController]);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]?.message).toBe(
+      'Decorated Service parameter cannot be resolved: the request will fail because no DI container is registered',
+    );
+    expect(warnings[0]?.metadata).toMatchObject({
+      controller: 'UnbackedController',
+      handler: 'read',
+      parameterIndex: 0,
+      customType: 'service',
+    });
+    expect(String(warnings[0]?.metadata?.['hint'])).toContain('DiPlugin');
+    expect(warnings[1]?.message).toBe(
+      'Decorated parameter cannot be resolved and will be undefined',
+    );
+    expect(warnings[1]?.metadata?.['parameterIndex']).toBe(1);
+    expect(String(warnings[1]?.metadata?.['hint'])).toContain('registerParameterResolver()');
   });
 
   it('warns when an explicitly listed controller carries no @Controller metadata', async () => {

@@ -314,6 +314,40 @@ is finished — without moving a request that never uses it off the kernel's syn
   resolves inside a scope and is disposed with it; a singleton depending on it is built once and
   tracked once).
 
+### 3.16 Each disposal is bounded too (added by the security audit, finding F1/F3)
+
+- **Decision:** `DiContainer.dispose()` bounds each asynchronous `dispose` function with
+  `withDeadline` at the same fixed internal 5000 ms as §3.14. On expiry it records a named timeout
+  error (`DI disposal of <token> timed out after 5000 ms`) among the failures and continues with the
+  next disposal, so every disposal still runs; the final `AggregateError` carries the timeouts with
+  the other failures, and the expired disposal's later outcome is ignored. Timers come from a new
+  optional `ContainerConfig.timing` (`ProbeTiming` from `@setu-ts/common`), which `DiPlugin` sets
+  from `resolveProbeTiming(runtime)` and every scope inherits; a standalone container without it
+  uses `withDeadline`'s default timers. Synchronous disposals stay untimed and synchronous, so a
+  request scope with synchronous disposal keeps the §3.13 synchronous path. The bound covers root
+  disposal in `DiPlugin`'s `onClose` too, so a hung singleton `dispose` cannot hold `app.stop()`.
+- **Why:** Audit F1 (High): one never-settling `dispose` blocked every later disposal in its scope,
+  so sibling resources were never released — §8a T4 and T6. Audit F3 (Medium): the same unbounded
+  chain held `app.stop()` and skipped later close hooks.
+- **Test home:** `di-plugin/test/unit/dispose.test.ts` (a hung dispose between two others: both
+  others run, one timeout in the aggregate, nothing waits past the bound, with fake timers; a
+  synchronous scope stays synchronous); `di-plugin/test/integration/di-plugin.test.ts` (a hung
+  singleton dispose: `app.stop()` completes and a later `onClose` hook still runs).
+
+### 3.17 A provider a scope registers lives as long as that scope (added by audit F2)
+
+- **Decision:** `register` on a scope (from `createScope` or `forRequest`) stores a `singleton`
+  lifetime as `scoped`, so the instance is created once per that scope, held in its slots and
+  disposed by it. `transient` and `scoped` registrations on a scope are unchanged. The root never
+  creates or tracks anything a scope registered.
+- **Why:** Audit F2 (Medium): a scope-registered leaf with the default `singleton` lifetime and a
+  `dispose` was built and tracked on the root, one root cleanup per request until shutdown — the §8a
+  "no per-request growth of root state" budget. A token only one scope can see cannot outlive that
+  scope.
+- **Test home:** `di-plugin/test/unit/dispose.test.ts` (1000 request scopes each registering a
+  `singleton` leaf with `dispose`: the root tracks nothing new, each scope disposes its own, and two
+  resolves inside one scope return one instance).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** `IContainer` gains required `forRequest` and `dispose` — ships in
@@ -506,21 +540,25 @@ committed code does not yet implement — the audit runs after they land.
   10. **Hostile tokens.** `'__proto__'`, `'constructor'` and `'prototype'` as string tokens register
       and resolve as ordinary keys without touching any prototype.
 
-| Threat                                                                           | Resolution                                                                                                                       |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| T1 Request B observes request A's scoped instance                                | §3.10: one scope per context in a per-container `WeakMap`; §3.3: scoped values live in that scope's slot array                   |
-| T2 A singleton captures a scoped instance through some indirect path             | §3.2 captive validation over every edge kind; §3.6 visible factory and `@Optional` dependencies; §3.11 controllers as singletons |
-| T3 A scope used after disposal                                                   | §3.7: `ScopeDisposedError`; §3.8: a post-completion `defer` runs at once, so a late scope is born disposed                       |
-| T4 Cleanup skipped on some ending (pool exhaustion by abort or error)            | §3.8 and §3.9 settle on every path; the throwing-responder path fixed during review with a test                                  |
-| T5 Dispose before the last use, or twice                                         | §3.9: a stream settles once, after its last chunk or the cancel; §3.7: `dispose()` is idempotent                                 |
-| T6 A hanging cleanup holds the response, the in-flight slot and `stop()`         | **§3.14 (new)**: 5000 ms bound per asynchronous cleanup                                                                          |
-| T7 Token, provider or dispose-error names disclosed in a 500                     | Kernel and `errorHandler` 500 bodies are opaque; cleanup failures go to the log only (§3.8)                                      |
-| T8 A dispose error forges log lines                                              | §3.8 reports through `describeError`, which collapses control characters                                                         |
-| T9 Root cleanup list grows with request volume                                   | **§3.15 (new)**: disposable transients refused on the root                                                                       |
-| T10 One application's scope or instance reached from another in the same process | Compiled entries, slots and the request `WeakMap` belong to one root container; tokens carry no state (§2 C1)                    |
-| T11 `Service`'s `Symbol.for` brand forged                                        | Accepted: it selects a resolution path for application code, which is trusted; it is not an access decision                      |
-| T12 An opaque factory captures a scoped instance unseen                          | Accepted: unvalidated by construction and listed in the `debug` line (§3.2); the docs prefer `inject`                            |
-| T13 A client stalls a scoped streaming response, holding its scope               | Accepted: the connection is held anyway; the scope is released on cancel, and `stop()` is bounded by the drain                   |
+| Threat                                                                                     | Resolution                                                                                                                       |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| T1 Request B observes request A's scoped instance                                          | §3.10: one scope per context in a per-container `WeakMap`; §3.3: scoped values live in that scope's slot array                   |
+| T2 A singleton captures a scoped instance through some indirect path                       | §3.2 captive validation over every edge kind; §3.6 visible factory and `@Optional` dependencies; §3.11 controllers as singletons |
+| T3 A scope used after disposal                                                             | §3.7: `ScopeDisposedError`; §3.8: a post-completion `defer` runs at once, so a late scope is born disposed                       |
+| T4 Cleanup skipped on some ending (pool exhaustion by abort or error)                      | §3.8 and §3.9 settle on every path; the throwing-responder path fixed during review with a test                                  |
+| T5 Dispose before the last use, or twice                                                   | §3.9: a stream settles once, after its last chunk or the cancel; §3.7: `dispose()` is idempotent                                 |
+| T6 A hanging cleanup holds the response, the in-flight slot and `stop()`                   | **§3.14 (new)**: 5000 ms bound per asynchronous cleanup                                                                          |
+| T7 Token, provider or dispose-error names disclosed in a 500                               | Kernel and `errorHandler` 500 bodies are opaque; cleanup failures go to the log only (§3.8)                                      |
+| T8 A dispose error forges log lines                                                        | §3.8 reports through `describeError`, which collapses control characters                                                         |
+| T9 Root cleanup list grows with request volume                                             | **§3.15 (new)**: disposable transients refused on the root                                                                       |
+| T10 One application's scope or instance reached from another in the same process           | Compiled entries, slots and the request `WeakMap` belong to one root container; tokens carry no state (§2 C1)                    |
+| T11 `Service`'s `Symbol.for` brand forged                                                  | Accepted: it selects a resolution path for application code, which is trusted; it is not an access decision                      |
+| T12 An opaque factory captures a scoped instance unseen                                    | Accepted: unvalidated by construction and listed in the `debug` line (§3.2); the docs prefer `inject`                            |
+| T13 A client stalls a scoped streaming response, holding its scope                         | Accepted: the connection is held anyway; the scope is released on cancel, and `stop()` is bounded by the drain                   |
+| F1 (audit `d5f0f8c5`, High) A hung `dispose` blocks later disposals in its scope           | FIXED after the audit: §3.16 per-disposal 5000 ms bound                                                                          |
+| F2 (audit `d5f0f8c5`, Medium) Scope-registered `singleton` leaves tracked on the root      | FIXED after the audit: §3.17 scope registrations live as long as the scope                                                       |
+| F3 (audit `d5f0f8c5`, Medium) A hung singleton `dispose` holds `app.stop()`                | FIXED after the audit: §3.16 covers root disposal                                                                                |
+| F4 (audit `d5f0f8c5`, Low) The startup warning says an unbacked `Service()` is `undefined` | FIXED after the audit: the warning says the request will fail                                                                    |
 
 ## 9. Out of scope
 

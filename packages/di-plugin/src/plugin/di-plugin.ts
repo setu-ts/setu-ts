@@ -8,11 +8,16 @@
  *
  * @module
  */
-import type { IContainer, IPlugin, IPluginContext, ServiceScope } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type {
+  IContainer,
+  IPlugin,
+  IPluginContext,
+  IRuntimeServices,
+  ServiceScope,
+} from '@setu-ts/common';
+import { CAPABILITIES, PLUGIN_PRIORITY, resolveProbeTiming } from '@setu-ts/common';
 
-import { ContainerBuilder } from '../container/container-builder.ts';
-import type { ExternalResolver } from '../container/container.ts';
+import { DiContainer } from '../container/container.ts';
 import { tokenName } from '../container/errors.ts';
 import { VERSION } from '../version.ts';
 
@@ -78,19 +83,23 @@ export function DiPlugin(options?: DiPluginOptions): IPlugin {
     priority: PLUGIN_PRIORITY.NORMAL,
 
     register(ctx: IPluginContext): void {
-      const builder = new ContainerBuilder()
-        .setDefaultScope(defaultScope)
-        .setAutoRegister(autoRegister);
-
-      if (autoRegister) {
-        const resolver: ExternalResolver = {
-          has: (token: string): boolean => ctx.services.has(token),
-          resolve: (token: string): unknown => ctx.services.get<object>(token),
-        };
-        builder.setExternalResolver(resolver);
-      }
-
-      const container = builder.build();
+      const container = new DiContainer({
+        defaultScope,
+        autoRegister,
+        // The runtime's timers when one is registered; otherwise disposal deadlines
+        // fall back to withDeadline's own, so DiPlugin never requires a runtime.
+        ...(ctx.services.has(CAPABILITIES.RUNTIME)
+          ? { timing: resolveProbeTiming(ctx.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME)) }
+          : {}),
+        ...(autoRegister
+          ? {
+              externalResolver: {
+                has: (token: string): boolean => ctx.services.has(token),
+                resolve: (token: string): unknown => ctx.services.get<object>(token),
+              },
+            }
+          : {}),
+      });
       ctx.services.register<IContainer>(CAPABILITIES.DI_CONTAINER, container);
       ctx.lifecycle.onBootstrap(() => {
         ctx.lifecycle.onBootstrap(() => {

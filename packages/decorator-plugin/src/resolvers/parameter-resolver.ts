@@ -194,8 +194,13 @@ type CustomResolution =
  * Classifies a `custom` parameter against the resolution rules. Single source
  * of truth for both request-time resolution and the startup check, so the two
  * cannot disagree about what resolves.
+ *
+ * @param param - Custom parameter metadata
+ * @returns Its resolution category and any resolution data
+ * @since 0.11.0
+ * @internal
  */
-function classifyCustom(param: ParameterMetadata): CustomResolution {
+export function classifyCustom(param: ParameterMetadata): CustomResolution {
   const token = serviceParameterToken(param.metadata);
   if (token !== undefined) return { kind: 'service', token };
   if (isContextParameter(param.metadata)) {

@@ -16,7 +16,8 @@ All notable changes to this project are documented here. The format follows
   `T` from either. `InjectEntry` is one `inject` element, a token or `{ token, optional: true }`.
   `IContainer.forRequest(ctx)` returns the request's scope, created on first call and disposed when
   the request finishes; `IContainer.dispose()` and `ProviderOptions.dispose` release what the
-  container created. `IRequestContext.defer?(cleanup)` is the kernel's per-request cleanup
+  container created, each asynchronous disposal bounded at 5000 ms; `ContainerConfig.timing`
+  supplies the timers. `IRequestContext.defer?(cleanup)` is the kernel's per-request cleanup
   primitive: cleanups run before a buffered response is returned, or when a streamed body ends, each
   asynchronous one bounded at 5000 ms, and a request that never calls it stays on the synchronous
   path. `@Params(Service(token))` (`@setu-ts/decorator-plugin`) resolves from the request scope on
@@ -140,8 +141,9 @@ All notable changes to this project are documented here. The format follows
 - **BREAKING — DI registration closes at boot (M125, 0.11.0, `@setu-ts/di-plugin`).** `DiPlugin`
   closes the container after the last bootstrap hook; `register` on it afterwards throws
   `ContainerClosedError`. Register providers during `register()`, `onInit` or `onBootstrap`. A scope
-  may register a token its parent chain does not have, but no longer shadow one it has — register
-  the replacement on the root, or use `overrideProvider` in tests.
+  may register a token its parent chain does not have — it lives as long as the scope, a `singleton`
+  lifetime there being stored as `scoped` — but no longer shadow one it has — register the
+  replacement on the root, or use `overrideProvider` in tests.
 - **BREAKING — factories receive their dependencies (M125, 0.11.0, `@setu-ts/common`).**
   `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
   `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
