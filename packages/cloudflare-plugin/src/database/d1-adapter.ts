@@ -269,6 +269,7 @@ export class D1Adapter implements IDatabaseAdapter {
   private resolveTarget(entity: string): D1Target {
     const mapping = this.#tables[entity];
     return {
+      entity,
       table: mapping?.table ?? entity,
       primaryKey: normalisePrimaryKey(mapping?.primaryKey ?? DEFAULT_PRIMARY_KEY),
     };

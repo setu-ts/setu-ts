@@ -425,7 +425,10 @@ export function createBigtableDataSource(
     },
 
     async findPage(query: NormalizedQuery): Promise<PageResult> {
-      const fingerprint = sortFingerprint(query.orderBy);
+      const fingerprint = sortFingerprint(query.orderBy, {
+        entity: target.entity,
+        keyColumns: target.keyFields,
+      });
       const after = decodeStartKey(target, query, fingerprint);
       const project = (row: Record<string, unknown>): Record<string, unknown> =>
         projectFields(row, query.select) as Record<string, unknown>;

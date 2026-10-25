@@ -62,7 +62,9 @@ export const sources: readonly {
           } else if (!['id', 'role', 'name'].includes(field)) {
             // Real Prisma's validation error is named so and renders the
             // whole query, values included — which is what M105 must not echo.
-            const error = new Error(`Unknown argument in User.update ${JSON.stringify(where)}`);
+            const error = new Error(
+              `Unknown argument \`${field}\`. User.update ${JSON.stringify(where)}`,
+            );
             error.name = 'PrismaClientValidationError';
             throw error;
           }
@@ -134,7 +136,7 @@ export const sources: readonly {
           new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
           calls,
         ),
-        { table: 'users', primaryKey: ['id'] },
+        { entity: 'users', table: 'users', primaryKey: ['id'] },
       ),
   },
 ];

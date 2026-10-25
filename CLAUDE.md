@@ -654,8 +654,13 @@ here.
   `Sec-Fetch-Site: same-origin` plus an opt-out, exact `swagger-ui-dist` pin, telemetry peers and
   Redis arms from `setu add`, forced test exit, named Kubernetes token fault; V10-17, V10-1, V10-3,
   V10-36, V10-6, V10-29, V10-44, V10-14, V10-41) — complete (PR #501).
-- **Next milestone** — M119d (`http-security-plugin` — forwarded client identity). M119e, M119f,
-  M119h, M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 119e** (`database-plugin` + `common` + `cloudflare-plugin` — the tenant column
+  resolved to its Drizzle property, entity-bound cursor fingerprints, unknown fields refused on
+  every SQL adapter, a refused value as a named 400, a named missing-key-column error checked at
+  connect, and a reporting pool `'error'` listener; V10-4, V10-32, V10-33, V10-37, V10-45, V10-61) —
+  complete (PR pending).
+- **Next milestone** — M119d (`http-security-plugin` — forwarded client identity). M119f, M119h,
+  M119i, M118 and M120–M123 are open in the ROADMAP; M120 depends on M118.
 
 ## Verification (run before declaring any work done)
 

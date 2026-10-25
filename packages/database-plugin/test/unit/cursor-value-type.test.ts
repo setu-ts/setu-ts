@@ -24,7 +24,7 @@ const orderBy = { id: 'asc' as const };
 const forged = encodeCursor({
   orderedValues: [PRIVATE],
   keyValues: [PRIVATE],
-  sortFingerprint: sortFingerprint(orderBy),
+  sortFingerprint: sortFingerprint(orderBy, { entity: 'item', keyColumns: ['id'] }),
 });
 
 function page(cursor?: string): NormalizedQuery {
@@ -63,7 +63,7 @@ function drizzleSource(error: unknown) {
 
 function prismaSource(error: unknown) {
   const client = { item: { findMany: () => Promise.reject(error) } };
-  return createPrismaDataSource(client as never, 'Item', 'postgresql');
+  return createPrismaDataSource(client as never, 'item', 'postgresql');
 }
 
 function messagesOf(error: unknown): string {

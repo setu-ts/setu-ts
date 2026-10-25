@@ -66,6 +66,7 @@ interface GeneratedPrismaClient {
   tenantMember: ModelDelegate;
   enrollment: ModelDelegate;
   auditEvent: ModelDelegate;
+  portableValue: ModelDelegate;
   $connect(): Promise<void>;
   $disconnect(): Promise<void>;
 }
@@ -673,3 +674,99 @@ describe('PrismaAdapter against live PostgreSQL — duplicate key', () => {
     },
   );
 });
+
+it(
+  'M119e maps all three measured Prisma input refusals and serves fixed 400 details',
+  { skip: skipReal },
+  async () => {
+    const { createApplication } = await import('@setu-ts/kernel');
+    const { RuntimePlugin } = await import('@setu-ts/runtime');
+    const { errorHandler } = await import('@setu-ts/exceptions');
+    const { InvalidFieldValueError, UnknownPayloadFieldError } = await import('@setu-ts/common');
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: url });
+    try {
+      await pool.query(
+        'CREATE TABLE IF NOT EXISTS "PortableValue" (id uuid PRIMARY KEY, age integer NOT NULL)',
+      );
+    } finally {
+      await pool.end();
+    }
+    const client = await connectPrisma();
+    const adapter = new PrismaAdapter({ prismaClient: client });
+    await adapter.connect();
+    const service = new DatabaseService(
+      adapter,
+      (entity) => adapter.createDataSource(entity),
+      'prisma',
+    );
+    const repo = service.getRepository('PortableValue');
+    const app = createApplication({ plugins: [RuntimePlugin()] });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0 });
+    const cases = [
+      {
+        path: '/bad-key',
+        work: () => repo.findById('abc'),
+        errorClass: InvalidFieldValueError,
+        causeMessage: 'Prisma refused the input (PrismaClientKnownRequestError P2007).',
+        detail: 'A supplied value does not fit the type of its field.',
+      },
+      {
+        path: '/bad-value',
+        work: () => repo.create({ id: crypto.randomUUID(), age: 'canary-value' }),
+        errorClass: InvalidFieldValueError,
+        causeMessage: 'Prisma refused the input (PrismaClientValidationError).',
+        detail: 'A supplied value does not fit the type of its field.',
+      },
+      {
+        path: '/unknown-field',
+        work: () => repo.create({ id: crypto.randomUUID(), age: 1, surprise: 'canary-value' }),
+        errorClass: UnknownPayloadFieldError,
+        causeMessage: 'Prisma refused the input (PrismaClientValidationError).',
+        detail: 'The request names a field this resource does not have.',
+      },
+    ];
+    for (const row of cases)
+      app.router.get(row.path, async (ctx) => ctx.response.json(await row.work()));
+    try {
+      const source = adapter.createDataSource('PortableValue');
+      const uuid: unknown = await source.findById('abc').catch((error: unknown) => error);
+      expect(uuid).toMatchObject({ name: 'PrismaClientKnownRequestError', code: 'P2007' });
+      expect((uuid as Error).message).toContain('invalid input syntax for type uuid');
+      const integer: unknown = await source
+        .create({ id: crypto.randomUUID(), age: 'canary-value' })
+        .catch((error: unknown) => error);
+      expect(integer).toHaveProperty('name', 'PrismaClientValidationError');
+      expect(integer).not.toHaveProperty('code');
+      expect((integer as Error).message).toContain('Expected Int, provided String');
+      const field: unknown = await source
+        .create({ id: crypto.randomUUID(), age: 1, surprise: 'canary-value' })
+        .catch((error: unknown) => error);
+      expect(field).toHaveProperty('name', 'PrismaClientValidationError');
+      expect(field).not.toHaveProperty('code');
+      expect((field as Error).message).toContain('Unknown argument `surprise`');
+      await app.start();
+      for (const row of cases) {
+        const mapped: unknown = await row.work().catch((error: unknown) => error);
+        expect(mapped).toBeInstanceOf(row.errorClass);
+        expect((mapped as Error).cause).toBeInstanceOf(Error);
+        expect(((mapped as Error).cause as Error).message).toBe(row.causeMessage);
+        expect((mapped as Error).cause).not.toHaveProperty('cause');
+        const response = await app.inject({ method: 'GET', url: row.path });
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail: row.detail,
+          instance: row.path,
+        });
+        expect(response.body).not.toContain('canary-value');
+      }
+    } finally {
+      await app.stop();
+      await adapter.disconnect();
+      await client.$disconnect();
+    }
+  },
+);

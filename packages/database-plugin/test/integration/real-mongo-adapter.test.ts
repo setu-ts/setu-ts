@@ -855,3 +855,27 @@ it(
     }
   },
 );
+
+it('M119e stores and returns unknown payload fields on MongoDB', { skip: skipReal }, async () => {
+  const adapter = new MongoAdapter({
+    url,
+    database: 'm119e',
+    collections: {
+      User: { collection: `m119e_${crypto.randomUUID().replaceAll('-', '')}`, primaryKey: 'id' },
+    },
+  });
+  await adapter.connect();
+  try {
+    const source = adapter.createDataSource('User');
+    await source.create({ id: '1', extra: 'created' });
+    expect(await source.findById('1')).toMatchObject({ extra: 'created' });
+    await source.update('1', { extra: 'updated' });
+    expect(await source.findById('1')).toMatchObject({ extra: 'updated' });
+    await source.updateWhere!('1', { extra: 'updated' }, { extra: 'conditional' });
+    expect(await source.findById('1')).toMatchObject({ extra: 'conditional' });
+    await source.delete('1');
+    expect(await source.findById('1')).toBeNull();
+  } finally {
+    await adapter.disconnect();
+  }
+});

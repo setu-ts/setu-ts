@@ -4,6 +4,27 @@ import { createD1DataSource } from '../../src/database/d1-data-source.ts';
 import { SqliteD1 } from '../d1-fakes.ts';
 import { D1Adapter } from '../../src/database/d1-adapter.ts';
 
+it('D1 binds cursors to entity names even when both entities share a table', async () => {
+  const adapter = new D1Adapter(new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY)'), {
+    tables: { First: { table: 'users' }, Second: { table: 'users' } },
+  });
+  await adapter.connect();
+  try {
+    const first = adapter.createDataSource('First');
+    const second = adapter.createDataSource('Second');
+    await first.create({ id: '1' });
+    await first.create({ id: '2' });
+    const query = { where: {}, orderBy: { id: 'asc' as const }, select: [], limit: 1, offset: 0 };
+    const page = await first.findPage!(query);
+    expect(page.nextCursor).toEqual(expect.any(String));
+    const next = { ...query, cursor: page.nextCursor! };
+    expect((await first.findPage!(next)).rows).toEqual([{ id: '2' }]);
+    await expect(second.findPage!(next)).rejects.toBeInstanceOf(InvalidCursorError);
+  } finally {
+    await adapter.disconnect();
+  }
+});
+
 for (const transactional of [false, true]) {
   for (const safeReads of [1, 2]) {
     it(`D1 ${transactional ? 'transaction' : 'direct'} update snapshots a getter payload once (${safeReads} safe reads)`, async () => {
@@ -42,7 +63,7 @@ for (const transactional of [false, true]) {
 it('D1 refuses changed primary keys on real SQLite and leaves the row unmoved', async () => {
   const source = createD1DataSource(
     new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT)'),
-    { table: 'users', primaryKey: ['id'] },
+    { entity: 'users', table: 'users', primaryKey: ['id'] },
   );
   await source.create({ id: '5', name: 'before' });
   await expect(source.update('5', { id: 'private-new', name: 'after' })).rejects.toBeInstanceOf(
@@ -57,6 +78,7 @@ it('D1 refuses changed primary keys on real SQLite and leaves the row unmoved', 
 
 it('D1 cursor content errors are InvalidCursorError', async () => {
   const source = createD1DataSource(new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY)'), {
+    entity: 'users',
     table: 'users',
     primaryKey: ['id'],
   });
@@ -68,5 +90,88 @@ it('D1 cursor content errors are InvalidCursorError', async () => {
     await expect(
       source.findPage!({ where: {}, orderBy: {}, select: [], limit: 1, offset: 0, cursor }),
     ).rejects.toBeInstanceOf(InvalidCursorError);
+  }
+});
+
+it('M119e refuses unknown payload fields and STRICT values with fixed 400 details', async () => {
+  const { UnknownPayloadFieldError, InvalidFieldValueError, httpStatusHintOf } =
+    await import('@setu-ts/common');
+  const source = createD1DataSource(
+    new SqliteD1('CREATE TABLE users (id TEXT PRIMARY KEY, age INTEGER) STRICT'),
+    { entity: 'users', table: 'users', primaryKey: ['id'] },
+  );
+  await source.create({ id: '1', age: 1 });
+  for (const payload of [
+    { missing: 'canary-value' },
+    { 'invalid-canary-field!': 'canary-value' },
+  ]) {
+    for (const write of [
+      () => source.create({ id: '2', ...payload }),
+      () => source.update('1', payload),
+      () => source.updateWhere!('1', { age: 1 }, payload),
+    ]) {
+      const error: unknown = await write().catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(UnknownPayloadFieldError);
+      expect(httpStatusHintOf(error)).toEqual({
+        status: 400,
+        title: 'Bad Request',
+        detail: 'The request names a field this resource does not have.',
+      });
+      expect(JSON.stringify(httpStatusHintOf(error))).not.toContain('canary');
+      expect((error as Error).message).not.toContain('canary-value');
+    }
+  }
+  for (const write of [
+    () => source.create({ id: '2', age: 'canary-value' }),
+    () => source.update('1', { age: 'canary-value' }),
+    () => source.updateWhere!('1', { age: 1 }, { age: 'canary-value' }),
+  ]) {
+    const error: unknown = await write().catch((error: unknown) => error);
+    expect(error).toBeInstanceOf(InvalidFieldValueError);
+    expect(httpStatusHintOf(error)).toEqual({
+      status: 400,
+      title: 'Bad Request',
+      detail: 'A supplied value does not fit the type of its field.',
+    });
+    expect((error as Error).message).not.toContain('canary-value');
+  }
+  expect(await source.findById('1')).toEqual({ id: '1', age: 1 });
+  expect(await source.findById('2')).toBeNull();
+});
+
+it('M119e limits SQLite unknown-column mapping to payload keys for both message forms', async () => {
+  const { D1_UNKNOWN_COLUMN_PATTERNS } = await import('../../src/database/d1-data-source.ts');
+  const { UnknownPayloadFieldError } = await import('@setu-ts/common');
+  const { RecordingD1 } = await import('../d1-fakes.ts');
+  const messages = [
+    'D1_ERROR: table users has no column named missing',
+    'D1_ERROR: no such column: missing',
+  ];
+  expect(D1_UNKNOWN_COLUMN_PATTERNS).toHaveLength(messages.length);
+  for (const [index, message] of messages.entries()) {
+    expect(D1_UNKNOWN_COLUMN_PATTERNS[index]!.exec(message)?.[1]).toBe('missing');
+    const db = new RecordingD1();
+    const error = new Error(message);
+    db.prepare = () => {
+      throw error;
+    };
+    const source = createD1DataSource(db, { entity: 'users', table: 'users', primaryKey: ['id'] });
+    await expect(source.create({ missing: 'private' })).rejects.toThrow(UnknownPayloadFieldError);
+    await expect(source.updateWhere!('1', { missing: 'private' }, { age: 2 })).rejects.toBe(error);
+  }
+  for (const error of [
+    new Error('connection unavailable'),
+    'foreign rejection',
+    new Error('no such column: not_payload'),
+  ]) {
+    const db = new RecordingD1();
+    db.prepare = () => {
+      throw error;
+    };
+    await expect(
+      createD1DataSource(db, { entity: 'users', table: 'users', primaryKey: ['id'] }).create({
+        age: 2,
+      }),
+    ).rejects.toBe(error);
   }
 });

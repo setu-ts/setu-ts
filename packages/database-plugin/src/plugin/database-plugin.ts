@@ -35,6 +35,9 @@ import type {
 import { DatabaseService } from '../services/database-service.ts';
 import { MemoryAdapter } from '../adapters/memory/memory-adapter.ts';
 import { PrismaAdapter } from '../adapters/prisma/prisma-adapter.ts';
+import { attachPoolErrorListener } from '../adapters/drizzle/pool-error-listener.ts';
+import { readDrizzleDatabase } from '../query/drizzle-database.ts';
+import type { DrizzleAdapterOptions } from '../interfaces/index.ts';
 import { DrizzleAdapter } from '../adapters/drizzle/drizzle-adapter.ts';
 import { MongoAdapter } from '../adapters/mongo/mongo-adapter.ts';
 import { DynamoAdapter } from '../adapters/dynamo/dynamo-adapter.ts';
@@ -142,6 +145,11 @@ export function DatabasePlugin(options?: DatabasePluginOptions): IPlugin {
 
       // Optional logger resolution.
       const logger = resolveLogger(ctx);
+      if (adapterType === 'drizzle') {
+        const identity = (adapterOptions as DrizzleAdapterOptions).drizzleInstance;
+        const database = readDrizzleDatabase(identity).database;
+        attachPoolErrorListener(database, (message, meta) => logger?.warn(message, meta));
+      }
 
       // Monotonic clock from runtime (NEVER Date.now()).
       const now = (): number => ctx.runtime.hrtime();
@@ -448,12 +456,18 @@ function buildAdapterOptions(opts?: DatabaseAdapterOptions): DatabaseAdapterOpti
  * @param ctx - Plugin context
  * @returns The logger if available, otherwise `undefined`
  */
-function resolveLogger(
-  ctx: IPluginContext,
-): { debug(msg: string, meta?: Record<string, unknown>): void } | undefined {
+function resolveLogger(ctx: IPluginContext):
+  | {
+      debug(msg: string, meta?: Record<string, unknown>): void;
+      warn(msg: string, meta?: Record<string, unknown>): void;
+    }
+  | undefined {
   if (ctx.services.has('logger')) {
     const logger = ctx.services.get<Record<string, unknown>>('logger');
     return {
+      warn: (msg: string, meta?: Record<string, unknown>): void => {
+        if (typeof logger?.warn === 'function') (logger as unknown as ILogger).warn(msg, meta);
+      },
       debug: (msg: string, meta?: Record<string, unknown>): void => {
         if (typeof logger?.debug !== 'function') return;
         // Called as a member, so `this` is the logger and its private fields

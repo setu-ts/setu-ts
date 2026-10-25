@@ -16,6 +16,7 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 import type { NormalizedQuery } from '@setu-ts/common';
+import { UnknownPayloadFieldError } from '@setu-ts/common';
 
 import { CloudflareUnsupportedError } from '../../../src/index.ts';
 import {
@@ -29,8 +30,12 @@ import {
   quoteIdentifier,
 } from '../../../src/database/d1-sql.ts';
 
-const TARGET = { table: 'users', primaryKey: ['id'] } as const;
-const COMPOSITE_TARGET = { table: 'orders', primaryKey: ['tenantId', 'orderId'] } as const;
+const TARGET = { entity: 'users', table: 'users', primaryKey: ['id'] } as const;
+const COMPOSITE_TARGET = {
+  entity: 'orders',
+  table: 'orders',
+  primaryKey: ['tenantId', 'orderId'],
+} as const;
 
 /** A normalized query with every field at its documented default. */
 function query(partial: Partial<NormalizedQuery> = {}): NormalizedQuery {
@@ -219,7 +224,7 @@ describe('buildSelect', () => {
 
   it('rejects an injected table, filter, order and select identifier', () => {
     const bad = 'x" OR "1"="1';
-    expect(() => buildSelect({ table: bad, primaryKey: ['id'] }, query())).toThrow(
+    expect(() => buildSelect({ entity: bad, table: bad, primaryKey: ['id'] }, query())).toThrow(
       CloudflareUnsupportedError,
     );
     expect(() => buildSelect(TARGET, query({ where: { [bad]: 1 } }))).toThrow(
@@ -247,14 +252,16 @@ describe('buildSelect', () => {
 
 describe('buildSelectById', () => {
   it('filters on the configured primary key with a scalar key', () => {
-    expect(buildSelectById({ table: 'users', primaryKey: ['id'] }, 'u1')).toEqual({
+    expect(buildSelectById({ entity: 'users', table: 'users', primaryKey: ['id'] }, 'u1')).toEqual({
       sql: 'SELECT * FROM "users" WHERE "id" = ?1 LIMIT 1',
       params: ['u1'],
     });
   });
 
   it('filters on the configured primary key with a custom name', () => {
-    expect(buildSelectById({ table: 'users', primaryKey: ['user_id'] }, 'u1')).toEqual({
+    expect(
+      buildSelectById({ entity: 'users', table: 'users', primaryKey: ['user_id'] }, 'u1'),
+    ).toEqual({
       sql: 'SELECT * FROM "users" WHERE "user_id" = ?1 LIMIT 1',
       params: ['u1'],
     });
@@ -290,7 +297,9 @@ describe('buildSelectById', () => {
     const keys = Array.from({ length: 101 }, (_, i) => `c${i}`);
     // A record with 101 string columns, each requiring a bound value.
     const wide = Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, string | number>;
-    expect(() => buildSelectById({ table: 'x', primaryKey: keys }, wide)).toThrow(/key predicate/);
+    expect(() => buildSelectById({ entity: 'x', table: 'x', primaryKey: keys }, wide)).toThrow(
+      /key predicate/,
+    );
   });
 });
 
@@ -307,7 +316,7 @@ describe('buildInsert', () => {
   });
 
   it('rejects an injected column name', () => {
-    expect(() => buildInsert(TARGET, { 'a" , "b': 1 })).toThrow(CloudflareUnsupportedError);
+    expect(() => buildInsert(TARGET, { 'a" , "b': 1 })).toThrow(UnknownPayloadFieldError);
   });
 
   it('refuses a row wider than the parameter budget', () => {
@@ -359,7 +368,7 @@ describe('buildUpdate', () => {
 
 describe('buildDelete', () => {
   it('returns the key, which is how a delete reports whether anything matched', () => {
-    expect(buildDelete({ table: 'users', primaryKey: ['user_id'] }, 7)).toEqual({
+    expect(buildDelete({ entity: 'users', table: 'users', primaryKey: ['user_id'] }, 7)).toEqual({
       sql: 'DELETE FROM "users" WHERE "user_id" = ?1 RETURNING "user_id"',
       params: [7],
     });

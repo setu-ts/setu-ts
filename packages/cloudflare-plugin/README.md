@@ -632,3 +632,11 @@ The store takes `namespace` (required), `keyPrefix` (default `'idempotency:'`), 
 messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecordBytes` of 120,000 —
 under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
 create and bill an object.
+
+## D1 payload refusals (M119e, 0.11.0)
+
+D1 `create`, `update` and `updateWhere` refuse invalid payload identifiers or unknown payload
+columns with `UnknownPayloadFieldError` from `@setu-ts/common` (400). The SQLite unknown-column
+mapping applies only when the reported column belongs to the payload; precondition-column errors
+keep their existing behavior. A STRICT-table type refusal becomes `InvalidFieldValueError` (400).
+Both HTTP details are fixed and contain no field names or supplied values.

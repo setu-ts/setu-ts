@@ -70,6 +70,50 @@ await db.transaction(async (uow) => {
 
 ## The repository surface
 
+### Portable data guarantees (M119e, 0.11.0)
+
+| Operation / condition                                                              | Guarantee                                                                                                                                                       |
+| ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unknown payload field on Drizzle, Prisma or D1 `create` / `update` / `updateWhere` | `UnknownPayloadFieldError` (400); no field or value in the HTTP detail                                                                                          |
+| Unknown payload field on Memory, MongoDB, DynamoDB, Cosmos DB or Bigtable          | Stored and returned; restrict fields with the route's body schema                                                                                               |
+| PostgreSQL refused field value through Drizzle repositories                        | `InvalidFieldValueError` (400), including malformed UUID keys; fixed detail, scrubbed cause                                                                     |
+| Prisma validation other than unknown arguments, or known-request `P2023` / `P2007` | `InvalidFieldValueError` (400), including malformed UUID keys and conditional writes                                                                            |
+| D1 STRICT-table field type refusal                                                 | `InvalidFieldValueError` (400)                                                                                                                                  |
+| Tenant column on Drizzle                                                           | Resolve the property first, otherwise a unique SQL column name; unresolved or ambiguous mappings throw `TenantColumnUnresolvedError` (500) before statement I/O |
+| Explicit Drizzle `entities.<Entity>.primaryKey` missing from a registered table    | `MissingKeyColumnError` at connect; an id-less query-only table without an override remains valid until repository creation                                     |
+| Scoped keyset cursors (all eight adapters)                                         | Bound to entity, key columns and sort; a fingerprint is a correctness check, and tenant predicates still authorize access                                       |
+
+`UnknownPayloadFieldError` is defined in `@setu-ts/common` and re-exported by this package as the
+same class. Prisma conditional-write validation uses the same 400 split as ordinary writes,
+replacing its previous 501. Prisma refusal causes are new errors with the original name and a fixed
+message naming only the name and code; the original query and payload are discarded.
+
+### Drizzle pool setup
+
+The application owns the pool and should report its idle-client errors:
+
+```typescript
+import { Pool } from 'pg';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { describeError } from '@setu-ts/common';
+import { createDrizzleDatabase, DatabasePlugin } from '@setu-ts/database-plugin';
+
+const pool = new Pool({ connectionString: process.env['DATABASE_URL']! });
+pool.on('error', (error) => logger.warn('Database pool error', { error: describeError(error) }));
+const database = drizzle(pool);
+const plugin = DatabasePlugin({
+  type: 'drizzle',
+  options: {
+    drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+    drizzleTables: { User: users },
+  },
+});
+```
+
+When the pool has no `'error'` listener, the framework attaches one after connect, reporting through
+the optional logger's `warn`. Without a logger it still attaches the listener. Existing app
+listeners are preserved. The listener remains for the pool's lifetime; the app closes its pool.
+
 `IDatabaseService.getRepository<Entity, Id>(name)` returns `IRepository<Entity, Id>`. This table
 describes the port and `BaseRepository`; see the backend restrictions below rather than assuming
 every backend supports every query.
@@ -1436,12 +1480,14 @@ imperative begin/commit.
 | `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
 | `MigrationLedgerError`                    | class     |
+| `MissingKeyColumnError`                   | class     |
 | `MongoAdapter`                            | class     |
 | `MongoTransactionUnavailableError`        | class     |
 | `OutboxStoreUnavailableError`             | class     |
 | `PrismaAdapter`                           | class     |
 | `PrismaRepository`                        | class     |
 | `SerializationConflictError`              | class     |
+| `TenantColumnUnresolvedError`             | class     |
 | `TenantStoreStrategyUnsupportedError`     | class     |
 | `TransactionalStoreUnavailableError`      | class     |
 | `UnitOfWork`                              | class     |

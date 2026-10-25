@@ -24,7 +24,13 @@ import type {
   PageResult,
   TransactionOptions,
 } from '@setu-ts/common';
-import { DuplicateKeyError } from '@setu-ts/common';
+import { FIELD_FOR_COLUMN, ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
+import {
+  httpStatusHintOf,
+  InvalidFieldValueError,
+  UnknownPayloadFieldError,
+  DuplicateKeyError,
+} from '@setu-ts/common';
 import {
   assertDrizzleAdapter,
   DRIZZLE_QUERY_HANDLE,
@@ -40,7 +46,7 @@ import {
   UnsupportedMigrationError,
   UnsupportedRawQueryError,
 } from '../errors.ts';
-import { classifyDriverError } from '../errors/classify.ts';
+import { classifyDriverError, refusedInputOf, prismaRefusalCause } from '../errors/classify.ts';
 import { scrubDriverError } from '../errors/scrub.ts';
 
 /**
@@ -87,7 +93,11 @@ function classifiedOrOriginal(
   adapterType: DatabaseAdapterType,
   entity?: string,
 ): unknown {
+  if (httpStatusHintOf(error) !== undefined) return error;
+  const refusal = refusedInputOf(error);
   const kind = classifyDriverError(error, adapterType);
+  const refusalCause =
+    entity !== undefined && refusal !== null ? prismaRefusalCause(error) : undefined;
   error = scrubDriverError(error);
   if (kind === 'duplicate') return duplicateKeyError(error, entity);
   if (kind === 'timeout') {
@@ -106,6 +116,12 @@ function classifiedOrOriginal(
       'The database or its connection pool is temporarily unavailable.',
       { cause: error },
     );
+  }
+  if (entity !== undefined && refusal !== null) {
+    const options = { cause: refusalCause ?? error };
+    return refusal.kind === 'unknown-field'
+      ? new UnknownPayloadFieldError(entity, refusal.field, options)
+      : new InvalidFieldValueError(entity, options);
   }
   return error;
 }
@@ -231,6 +247,16 @@ export class DatabaseService implements IDatabaseService {
     // symbol key is assigned through the structural provider cast and read
     // back structurally by `readDrizzleQueryHandle` — the runtime shape is
     // unchanged.
+    (
+      this as unknown as {
+        [ENTITY_FIELD_RESOLVER]: (entity: string, name: string) => string | undefined;
+      }
+    )[ENTITY_FIELD_RESOLVER] = (entity, name) => {
+      const source = this._createDataSource(entity) as DataSource & {
+        [FIELD_FOR_COLUMN]?: (name: string) => string | undefined;
+      };
+      return source[FIELD_FOR_COLUMN] === undefined ? name : source[FIELD_FOR_COLUMN](name);
+    };
     (this as unknown as DrizzleQueryHandleProvider)[DRIZZLE_QUERY_HANDLE] = () => {
       assertDrizzleAdapter(this._adapterType);
       const handle = readDrizzleQueryHandle(this._adapter);

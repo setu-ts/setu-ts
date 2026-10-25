@@ -776,3 +776,21 @@ describe('decodeCursor refuses a token carrying junk (outside-diff review, M79)'
     expect(decodeCursor(token + '==')).not.toBeNull();
   });
 });
+
+describe('M119e scoped fingerprints', () => {
+  it('preserves legacy strings and binds entity, keys and sort unambiguously', () => {
+    const sort = { age: 'desc' as const, id: 'asc' as const };
+    expect(sortFingerprint(sort)).toBe('age:desc,id:asc');
+    expect(sortFingerprint(sort, { entity: 'User', keyColumns: ['id'] })).toBe(
+      JSON.stringify(['User', ['id'], 'age:desc,id:asc']),
+    );
+    const scopes = [
+      { entity: 'a|b,c', keyColumns: ['d'] },
+      { entity: 'a', keyColumns: ['b,c|d'] },
+      { entity: 'User', keyColumns: ['id'] },
+      { entity: 'Other', keyColumns: ['id'] },
+      { entity: 'User', keyColumns: ['other'] },
+    ];
+    expect(new Set(scopes.map((scope) => sortFingerprint(sort, scope))).size).toBe(scopes.length);
+  });
+});

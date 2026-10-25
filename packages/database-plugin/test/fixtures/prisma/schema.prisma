@@ -60,3 +60,9 @@ model AuditEvent {
 
   @@index([run])
 }
+
+// M119e refused-value measurements against real PostgreSQL.
+model PortableValue {
+  id String @id @db.Uuid
+  age Int
+}

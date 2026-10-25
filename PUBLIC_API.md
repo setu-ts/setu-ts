@@ -1217,6 +1217,17 @@ app.register(
 
 ## DatabasePlugin() (`@setu-ts/database-plugin`)
 
+### Portable data refusals and tenant resolution (M119e, since 0.11.0)
+
+`UnknownPayloadFieldError` is defined in `@setu-ts/common` and re-exported unchanged here.
+`MissingKeyColumnError(entity: string, column: string)` names a missing Drizzle primary-key column
+and the `entities.<Entity>.primaryKey` remedy. Explicit configured keys are checked at connect for
+registered tables; query-only tables without a key override are checked when a repository is
+requested. `TenantColumnUnresolvedError(entity: string, column: string)` names a tenant column that
+resolves to no property or multiple properties, with a `ColumnStrategy` remedy. Both configuration
+errors carry no HTTP hint (masked 500). The tenant bridge resolves its own configured column to the
+Drizzle property once per entity; caller payload keys are never translated.
+
 The database driver's existing unavailable-errno classification uses the shared
 `isConnectionFaultCode(code)` predicate from `@setu-ts/common`. The eight-code set is
 module-private; status classification is unchanged.
@@ -1861,11 +1872,36 @@ from `@setu-ts/common`.
 | `encodeCursor`      | function  | Encodes a `CursorPayload` as an opaque base64url token.                                                                                                                                                                                                                                                                                                                                                                    |
 | `decodeCursor`      | function  | Decodes a token, or returns `null` when it is malformed — it never throws, because the token is untrusted caller input.                                                                                                                                                                                                                                                                                                    |
 | `keysetPredicate`   | function  | Builds the "row after this one" comparison as a portable `FilterExpression`.                                                                                                                                                                                                                                                                                                                                               |
-| `sortFingerprint`   | function  | The stable fingerprint embedded in every cursor.                                                                                                                                                                                                                                                                                                                                                                           |
+| `sortFingerprint`   | function  | The stable fingerprint embedded in every cursor; optional scope binds entity and key columns (since 0.11.0).                                                                                                                                                                                                                                                                                                               |
 | `mintNextCursor`    | function  | Mints the next-page cursor from the last row of a non-terminal page. Refuses a value that cannot survive the wire — `null`/`undefined`, a non-finite number, an invalid `Date`, or a non-scalar — naming the field, because each of those otherwise fails on the NEXT request or one frame from its cause.                                                                                                                 |
 | `resolveKeysetSort` | function  | The sort a keyset comparison is expanded over: the caller's `orderBy` plus any key columns it lacks, appended ascending. **A backend must order by this, not by `orderBy`** — ordering by the caller's fields alone leaves tied rows in an order the database picks freely, and the predicate then skips or repeats them. `keysetPredicate` derives its own comparison from the same function, so the two cannot disagree. |
 
 #### Composite keys
+
+**Scoped fingerprints (since 0.11.0).**
+`sortFingerprint(orderBy: Readonly<Record<string, OrderDirection>>, scope?: { readonly entity: string; readonly keyColumns: readonly string[] }): string`
+returns the byte-identical legacy `field:direction` pairs without scope. With scope it returns
+`JSON.stringify([scope.entity, scope.keyColumns, pairs])`. Memory, Prisma, Drizzle, MongoDB,
+DynamoDB, Cosmos DB, Bigtable and D1 pass the resolved entity and key columns on mint and decode.
+Scope is a correctness check, not authorization; tenant predicates remain required.
+
+**Portable refusal classes (`@setu-ts/common`, since 0.11.0).**
+`UnknownPayloadFieldError(entity: string, field: string, options?: ErrorOptions)` has name
+`UnknownPayloadFieldError`, a capped, single-line field diagnostic and the fixed hint
+`{ status: 400, title: 'Bad Request', detail: 'The request names a field this resource does not have.' }`.
+`InvalidFieldValueError(entity: string, options?: ErrorOptions)` has name `InvalidFieldValueError`
+and hint
+`{ status: 400, title: 'Bad Request', detail: 'A supplied value does not fit the type of its field.' }`.
+Its message is `Entity '<entity>': the database refused a supplied value for its field type.` No
+supplied value, key or field is included. Repository mappings retain a scrubbed driver error as
+cause. Drizzle PostgreSQL repositories map the four supplied-value SQLSTATE codes; D1 maps
+STRICT-table type refusals. Prisma validation errors containing ``Unknown argument `<field>` `` map
+to `UnknownPayloadFieldError`; other validation errors and known-request `P2023`/`P2007` errors map
+to `InvalidFieldValueError`. This includes conditional writes, which now answer 400 rather than 501
+for these refusals. A Prisma refusal cause is a new `Error` whose copied `name` and fixed message
+name only the original name and code, for example
+`Prisma refused the input (PrismaClientKnownRequestError P2007).`; the original object, query and
+payload are discarded.
 
 `findById`, `update` and `delete` accept a composite record. Each adapter learns its key columns
 from a per-entity mapping whose primary-key field accepts a column list:
@@ -2421,7 +2457,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
 | `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                            |
-| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`                                                                                                                                                                                                            | classes                            |
+| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`                                                                                                                                                    | classes                            |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |

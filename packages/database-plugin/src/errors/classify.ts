@@ -227,6 +227,50 @@ export function isValueTypeRefusal(error: unknown): boolean {
   );
 }
 
+/**
+ * PostgreSQL or Prisma refused repository input, separate from transient classification.
+ * @param error - The thrown driver rejection
+ * @returns The input refusal, or null for other driver conditions
+ * @since 0.11.0
+ */
+export function refusedInputOf(
+  error: unknown,
+): { kind: 'unknown-field'; field: string } | { kind: 'value' } | null {
+  const candidates = causeChainMembers(error);
+  for (const { name, message } of candidates) {
+    if (name === 'PrismaClientValidationError' && typeof message === 'string') {
+      const field = /Unknown argument `([^`]+)`/.exec(message)?.[1];
+      if (field !== undefined) return { kind: 'unknown-field', field };
+    }
+  }
+  return candidates.some(
+    ({ code, name }) =>
+      (typeof code === 'string' && VALUE_REFUSAL_CODES.has(code)) ||
+      name === 'PrismaClientValidationError' ||
+      (name === 'PrismaClientKnownRequestError' && (code === 'P2023' || code === 'P2007')),
+  )
+    ? { kind: 'value' }
+    : null;
+}
+
+/**
+ * Replace Prisma's query-rendering diagnostic with a value-free refusal cause.
+ * Internal; other drivers retain the service's existing scrubber.
+ * @param error - The thrown driver rejection
+ * @returns A fresh diagnostic carrying only Prisma's name and code, when present
+ */
+export function prismaRefusalCause(error: unknown): Error | undefined {
+  const prisma = causeChainMembers(error).find(
+    ({ name }) =>
+      name === 'PrismaClientValidationError' || name === 'PrismaClientKnownRequestError',
+  );
+  if (prisma === undefined) return undefined;
+  const code = typeof prisma.code === 'string' ? ` ${prisma.code}` : '';
+  return Object.assign(new Error(`Prisma refused the input (${String(prisma.name)}${code}).`), {
+    name: String(prisma.name),
+  });
+}
+
 /** Fixed pg timeout messages are authoritative only on a chain without string codes. */
 function classifyPgTimeout(
   message: unknown,

@@ -1,3 +1,4 @@
+import { InvalidFieldValueError, UnknownPayloadFieldError } from '@setu-ts/common';
 /**
  * The two {@linkcode IDataSource} implementations over a D1 binding.
  *
@@ -122,7 +123,10 @@ async function findD1Page(
 
   // 2. Sort-fingerprint guard — a cross-sort cursor would return a silently
   //    wrong page.
-  const fingerprint = sortFingerprint(query.orderBy);
+  const fingerprint = sortFingerprint(query.orderBy, {
+    entity: target.entity,
+    keyColumns: target.primaryKey,
+  });
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
       new InvalidCursorError(`Entity '${target.table}': cursor fingerprint mismatch.`),
@@ -207,6 +211,33 @@ function projectD1Fields(
   return projected;
 }
 
+/** SQLite's two measured unknown-column message forms; internal test data. @since 0.11.0 */
+export const D1_UNKNOWN_COLUMN_PATTERNS: readonly RegExp[] = [
+  /has no column named ([A-Za-z_][A-Za-z0-9_]*)/,
+  /no such column: ([A-Za-z_][A-Za-z0-9_]*)/,
+];
+
+/** Refuse payload fields and STRICT-table values without exposing values. */
+async function refusedD1Write<T>(
+  target: D1Target,
+  data: Readonly<Record<string, unknown>>,
+  write: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (!(error instanceof Error)) throw error;
+    for (const pattern of D1_UNKNOWN_COLUMN_PATTERNS) {
+      const field = pattern.exec(error.message)?.[1];
+      if (field !== undefined && Object.hasOwn(data, field))
+        throw new UnknownPayloadFieldError(target.entity, field);
+    }
+    if (/cannot store \w+ value in \w+ column/.test(error.message))
+      throw new InvalidFieldValueError(target.entity);
+    throw error;
+  }
+}
+
 /**
  * Build a data source that executes every operation immediately against the
  * binding.
@@ -227,7 +258,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     },
 
     async create(data: Partial<Record<string, unknown>>): Promise<Record<string, unknown>> {
-      const row = await prepareStatement(db, buildInsert(target, data)).first();
+      const row = await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildInsert(target, data)).first(),
+      );
       if (row === null) {
         throw new Error(
           `D1: insert into '${target.table}' returned no row. ` +
@@ -243,7 +276,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
     ): Promise<Record<string, unknown>> {
       data = { ...data };
       assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
-      const row = await prepareStatement(db, buildUpdate(target, id, data)).first();
+      const row = await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildUpdate(target, id, data)).first(),
+      );
       if (row === null) {
         throw new Error(`Entity '${target.table}' with id '${JSON.stringify(id)}' not found`);
       }
@@ -261,7 +296,9 @@ export function createD1DataSource(db: ID1Database, target: D1Target): IDataSour
       where = checked.where;
       data = checked.data;
       assertPrimaryKeyUnchanged(target.table, target.primaryKey, id, data);
-      return await prepareStatement(db, buildUpdateWhere(target, id, where, data)).first();
+      return await refusedD1Write(target, data, () =>
+        prepareStatement(db, buildUpdateWhere(target, id, where, data)).first(),
+      );
     },
     async deleteWhere(id, where) {
       const checked = checkWritePrecondition(where);
