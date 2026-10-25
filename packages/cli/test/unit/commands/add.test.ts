@@ -397,6 +397,28 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     ).toBeUndefined();
   });
 
+  it('adds an optional peer declaration to dependencies at its own spec, keeping the declaration', async () => {
+    const h = await workspace();
+    // Measured with npm 11 and Bun 1.4: a peer marked optional in
+    // peerDependenciesMeta installs nothing, so it is not yet a dependency.
+    await put(
+      h,
+      '/app/ws/package.json',
+      JSON.stringify({
+        workspaces: ['apps/*'],
+        peerDependencies: { '@opentelemetry/api': '1.9.0' },
+        peerDependenciesMeta: { '@opentelemetry/api': { optional: true } },
+      }),
+    );
+    expect(await h.run(['telemetry', '--dir', '/app/ws/apps/api'])).toBe(0);
+    const root = JSON.parse(h.read('/app/ws/package.json')) as {
+      dependencies: Record<string, string>;
+      peerDependencies: Record<string, string>;
+    };
+    expect(root.dependencies['@opentelemetry/api']).toBe('1.9.0');
+    expect(root.peerDependencies['@opentelemetry/api']).toBe('1.9.0');
+  });
+
   it('reads a root package.json that starts with a byte-order mark', async () => {
     const h = await workspace();
     await put(h, '/app/ws/package.json', `\uFEFF${JSON.stringify({ workspaces: ['apps/*'] })}`);

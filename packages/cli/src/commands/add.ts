@@ -623,13 +623,45 @@ const PRODUCTION_SECTIONS = ['dependencies', 'optionalDependencies', 'peerDepend
  */
 function declaredNames(parsed: Record<string, unknown>): ReadonlySet<string> {
   const names = new Set<string>();
+  const optional = optionalPeerPins(parsed);
   for (const section of PRODUCTION_SECTIONS) {
     const entries = parsed[section];
     if (entries !== null && typeof entries === 'object' && !Array.isArray(entries)) {
-      for (const name of Object.keys(entries)) names.add(name);
+      for (const name of Object.keys(entries)) {
+        // An optional peer installs nothing (measured: npm 11 and Bun 1.4), so
+        // it is not a declaration of an installed package.
+        if (section === 'peerDependencies' && optional.has(name)) continue;
+        names.add(name);
+      }
     }
   }
   return names;
+}
+
+/**
+ * The `peerDependencies` entries `peerDependenciesMeta` marks optional, with
+ * their specs. Measured with npm 11 and Bun 1.4: neither installs such a peer,
+ * so a runtime peer declared only this way is added to `dependencies` at the
+ * declared spec, leaving the peer declaration as it is.
+ *
+ * @param parsed - The parsed manifest
+ * @returns Each optional peer and its declared spec
+ */
+function optionalPeerPins(parsed: Record<string, unknown>): ReadonlyMap<string, string> {
+  const peers = parsed['peerDependencies'];
+  const meta = parsed['peerDependenciesMeta'];
+  const pins = new Map<string, string>();
+  if (peers === null || typeof peers !== 'object' || Array.isArray(peers)) return pins;
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return pins;
+  for (const [name, spec] of Object.entries(peers as Record<string, unknown>)) {
+    const entry = (meta as Record<string, unknown>)[name];
+    const isOptional =
+      entry !== null &&
+      typeof entry === 'object' &&
+      (entry as Record<string, unknown>)['optional'] === true;
+    if (isOptional && typeof spec === 'string') pins.set(name, spec);
+  }
+  return pins;
 }
 
 /** Every npm section a workspace member can pin a package in. */
@@ -714,6 +746,7 @@ function withPeerDependencies(
       ? { ...(existing as Record<string, string>) }
       : {};
   const declared = section === 'dependencies' ? declaredNames(parsed) : new Set<string>();
+  const optionalPins = optionalPeerPins(parsed);
   const devSection = parsed['devDependencies'];
   const dev =
     section === 'dependencies' &&
@@ -726,6 +759,12 @@ function withPeerDependencies(
   const moved: string[] = [];
   for (const peer of peers) {
     if (peer.name in dependencies || declared.has(peer.name)) continue;
+    const optionalPin = section === 'dependencies' ? optionalPins.get(peer.name) : undefined;
+    if (optionalPin !== undefined) {
+      dependencies[peer.name] = optionalPin;
+      added.push(peer.name);
+      continue;
+    }
     const devPin = dev?.[peer.name];
     if (dev !== undefined && typeof devPin === 'string') {
       // A runtime peer declared only for development: `--omit=dev` would drop
@@ -1088,12 +1127,14 @@ export async function runAddCommand(
           const parsedRoot = JSON.parse(source) as Record<string, unknown>;
           const devRoot = parsedRoot['devDependencies'];
           // An existing pin in any section wins over the override logic: a
-          // production one is kept, a development one is moved as it stands.
+          // production one is kept, a development one is moved as it stands, and
+          // an optional peer's spec is added to `dependencies` beside it.
           const declared = new Set([
             ...declaredNames(parsedRoot),
             ...(devRoot !== null && typeof devRoot === 'object' && !Array.isArray(devRoot)
               ? Object.keys(devRoot)
               : []),
+            ...optionalPeerPins(parsedRoot).keys(),
           ]);
           const pinned = await workspacePins(
             deps.fs,
