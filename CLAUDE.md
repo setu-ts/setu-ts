@@ -665,7 +665,7 @@ here.
 - **Milestone 119f** (`common` + `cli` + the 16 packages with optional peers — optional peers in an
   npm workspace: the load error names who loads the peer and that it belongs where that package is
   installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
-  V10-58) — complete (PR pending).
+  V10-58) — complete (PR #505).
 - **Next milestone** — M119h (`cli` — CLI output and commands that are wrong). M119i, M118 and
   M120–M123 are open in the ROADMAP; M120 depends on M118.
 
