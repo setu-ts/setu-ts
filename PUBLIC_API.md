@@ -1787,9 +1787,11 @@ copy is what gets validated and written, so an input that changes between reads 
 send something other than what passed. An own `__proto__` key is refused, in the predicate and in
 the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
 implementation validates direct calls as well as repository calls. `checkWritePrecondition`'s
-refusal reasons quote no caller field name or value, and Prisma's validation message — which renders
-the whole query — is replaced with a fixed sentence. No other guarantee is made about message text:
-key handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
+refusal reasons quote no caller field name or value, and a Prisma validation refusal — whose message
+renders the whole query — becomes `UnknownPayloadFieldError` or `InvalidFieldValueError` with a
+fixed-message cause, on a direct data-source call as through a repository (M119e; it was
+`UnsupportedQueryFeatureError` before 0.11.0). No other guarantee is made about message text: key
+handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
 driver or server errors (a type the column rejects, an unknown column) may quote caller keys, field
 names or values, as for every other repository operation. Responses mask them (X12-3), so they reach
 server logs only. Invalid inputs reject with `UnsupportedQueryFeatureError` feature

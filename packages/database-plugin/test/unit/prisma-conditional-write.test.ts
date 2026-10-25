@@ -29,11 +29,19 @@ describe('Prisma conditional translation', () => {
       await adapter.connect();
       try {
         const source = adapter.createDataSource('User');
-        // The adapter preserves the rejection for the one shared service mapping.
-        await expect(source.updateWhere!('a', { name: 'old' }, { name: 'new' })).rejects.toBe(
-          error,
-        );
-        await expect(source.deleteWhere!('a', { name: 'old' })).rejects.toBe(error);
+        // A direct call bypasses the service, so the data source names the
+        // refusal itself: Prisma's rendered query never leaves in a message.
+        for (const write of [
+          () => source.updateWhere!('a', { name: 'old' }, { name: 'new' }),
+          () => source.deleteWhere!('a', { name: 'old' }),
+        ]) {
+          const direct: unknown = await write().catch((caught: unknown) => caught);
+          expect(direct).toBeInstanceOf(
+            unknownField ? UnknownPayloadFieldError : InvalidFieldValueError,
+          );
+          expect((direct as Error).message).not.toContain('private-canary-value');
+          expect(((direct as Error).cause as Error).message).not.toContain('private-canary-value');
+        }
         const service = new DatabaseService(
           adapter,
           (entity) => adapter.createDataSource(entity),

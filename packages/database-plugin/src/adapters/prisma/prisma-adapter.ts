@@ -37,6 +37,7 @@ import {
   sortFingerprint,
 } from '@setu-ts/common';
 import { isValueTypeRefusal } from '../../errors/classify.ts';
+import { refusalErrorOf } from '../../errors/refusal.ts';
 import type { DataSource } from '../../repositories/base-repository.ts';
 import {
   UnsupportedFilterOperatorError,
@@ -915,7 +916,9 @@ function createPrismaDataSourceInner(
         });
       } catch (error) {
         if ((error as { code?: string } | null)?.code === 'P2025') return null;
-        throw error;
+        // A direct call bypasses the service classifier; Prisma's message
+        // renders the whole query, so the refusal is named here too.
+        throw refusalErrorOf(error, entity) ?? error;
       }
     },
     async deleteWhere(id, where) {
@@ -935,7 +938,7 @@ function createPrismaDataSourceInner(
         return true;
       } catch (error) {
         if ((error as { code?: string } | null)?.code === 'P2025') return false;
-        throw error;
+        throw refusalErrorOf(error, entity) ?? error;
       }
     },
     count: (where, filter) => {
