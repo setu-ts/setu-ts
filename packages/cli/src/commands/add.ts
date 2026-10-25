@@ -556,21 +556,31 @@ function peerPackagesFor(
   });
 }
 
+/** One root override that pins a package itself. */
+interface IRootOverride {
+  /** The spec the override names (a string value, or an object's `"."` entry). */
+  readonly spec: string;
+  /** Whether the key carried a version selector (`ioredis@5`): it applies only to matching versions. */
+  readonly selector: boolean;
+}
+
 /**
- * The specs a root manifest's npm `overrides` pins packages THEMSELVES to, at
- * its top level, keyed by package name with any `@<range>` selector on a key
- * removed (`ioredis@5` → `ioredis`). A string value is the spec; an object
- * value pins the package only through its `"."` entry — an object without one
- * overrides the package's children, not the package, so it is not returned.
+ * The root overrides in a manifest's npm `overrides` that pin packages
+ * THEMSELVES, at its top level, keyed by package name with any `@<range>`
+ * selector on a key removed (`ioredis@5` → `ioredis`). A string value is the
+ * spec; an object value pins the package only through its `"."` entry — an
+ * object without one overrides the package's children, not the package, so it
+ * is not returned.
  *
  * @param source - The root `package.json` text
- * @returns Each pinned package and the spec its override names
+ * @returns Each pinned package's override
  * @throws {SyntaxError} When the text is not JSON
  */
-function overrideSpecs(source: string): ReadonlyMap<string, string> {
+function rootOverrides(source: string): ReadonlyMap<string, IRootOverride> {
   const overrides = (JSON.parse(source) as { overrides?: unknown }).overrides;
-  const specs = new Map<string, string>();
-  if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides)) return specs;
+  const pinned = new Map<string, IRootOverride>();
+  if (overrides === null || typeof overrides !== 'object' || Array.isArray(overrides))
+    return pinned;
   for (const [key, value] of Object.entries(overrides as Record<string, unknown>)) {
     const spec =
       typeof value === 'string'
@@ -580,22 +590,33 @@ function overrideSpecs(source: string): ReadonlyMap<string, string> {
           : undefined;
     if (typeof spec !== 'string') continue;
     const at = key.indexOf('@', key.startsWith('@') ? 1 : 0);
-    specs.set(at === -1 ? key : key.slice(0, at), spec);
+    pinned.set(at === -1 ? key : key.slice(0, at), { spec, selector: at !== -1 });
   }
-  return specs;
+  return pinned;
 }
 
+/** The npm sections that install a package, any of which means it is already declared. */
+const INSTALLING_SECTIONS = ['dependencies', 'devDependencies', 'optionalDependencies'] as const;
+
 /**
- * The names a root manifest already lists in `dependencies`.
+ * The names a `package.json` already declares in any section that installs a
+ * package. Measured with npm 11: a root listing a package in `devDependencies`
+ * at one version and in `dependencies` at another installs the
+ * `devDependencies` version, so adding a `dependencies` entry beside an
+ * existing one changes nothing and would only mislead.
  *
- * @param source - The root `package.json` text
- * @returns The dependency names
+ * @param parsed - The parsed manifest
+ * @returns The declared names
  */
-function rootDependencyNames(source: string): ReadonlySet<string> {
-  const dependencies = (JSON.parse(source) as { dependencies?: unknown }).dependencies;
-  return dependencies !== null && typeof dependencies === 'object' && !Array.isArray(dependencies)
-    ? new Set(Object.keys(dependencies))
-    : new Set();
+function declaredNames(parsed: Record<string, unknown>): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const section of INSTALLING_SECTIONS) {
+    const entries = parsed[section];
+    if (entries !== null && typeof entries === 'object' && !Array.isArray(entries)) {
+      for (const name of Object.keys(entries)) names.add(name);
+    }
+  }
+  return names;
 }
 
 /**
@@ -624,9 +645,10 @@ function withPeerDependencies(
     existing !== null && typeof existing === 'object'
       ? { ...(existing as Record<string, string>) }
       : {};
+  const declared = section === 'dependencies' ? declaredNames(parsed) : new Set<string>();
   const added: string[] = [];
   for (const peer of peers) {
-    if (peer.name in dependencies) continue;
+    if (peer.name in dependencies || declared.has(peer.name)) continue;
     dependencies[peer.name] = section === 'imports' ? `npm:${peer.name}@${peer.range}` : peer.range;
     added.push(peer.name);
   }
@@ -974,21 +996,27 @@ export async function runAddCommand(
           // nothing. So a peer the root overrides is recorded at the override's
           // own spec; a `$name` reference is not a spec a dependency can carry,
           // so that peer is left to the override and the reason printed.
-          const overridden = overrideSpecs(source);
+          const overridden = rootOverrides(source);
+          const declared = declaredNames(JSON.parse(source) as Record<string, unknown>);
           const rootPeers: { readonly name: string; readonly range: string }[] = [];
           for (const peer of peerPackages) {
-            const spec = overridden.get(peer.name);
-            if (spec === undefined) {
+            const override = overridden.get(peer.name);
+            if (override === undefined || declared.has(peer.name)) {
               rootPeers.push(peer);
-            } else if (spec.startsWith('$')) {
-              // The reference names a root dependency; present, there is nothing to add.
-              if (rootDependencyNames(source).has(peer.name)) continue;
+            } else if (override.selector) {
+              // Whether `name@<range>` applies depends on the version npm picks,
+              // which this command cannot evaluate: either spec can be refused.
+              deps.log(
+                `left ${peer.name} out of ${escapeName(path)}: its "overrides" pins it only for ` +
+                  `some versions; add it at the root yourself, at a spec that agrees with that override.`,
+              );
+            } else if (override.spec.startsWith('$')) {
               deps.log(
                 `left ${peer.name} out of ${escapeName(path)}: its "overrides" pins it by reference ` +
-                  `(${escapeName(spec)}); add the referenced dependency at the root yourself.`,
+                  `(${escapeName(override.spec)}); add the referenced dependency at the root yourself.`,
               );
             } else {
-              rootPeers.push({ name: peer.name, range: spec });
+              rootPeers.push({ name: peer.name, range: override.spec });
             }
           }
           const merged = withPeerDependencies(source, rootPeers, 'dependencies');
