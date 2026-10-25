@@ -392,17 +392,17 @@ export class PerScopeService {}
 **Scopes:**
 
 - `'singleton'` (default): one instance for the application lifetime
-- `'scoped'`: one instance per `IContainer.createScope()` scope
+- `'scoped'`: one instance per scope — each request gets its own scope from
+  `container.forRequest(ctx)`, created on first use and disposed when the request finishes
 - `'transient'`: a new instance per resolution
 
-**A scope is not a request.** A scope is a child container the application creates and disposes
-itself, and **the framework creates no scope per request** — so a `'scoped'` service is not
-re-created on every HTTP request, and behaves as a singleton until something calls `createScope()`.
-This is what `ServiceScope` in `@setu-ts/common` and the
-[DI plugin README](https://github.com/setu-ts/setu-ts/blob/main/packages/di-plugin/README.md) both
-state, and it is the one place the lifecycle differs from the framework you may be arriving from.
+**Lifetimes are checked at boot.** The container validates its whole graph when the application
+starts: a `'singleton'` that reaches a `'scoped'` service — directly or through `'transient'`
+services — fails the boot with `ContainerValidationError`, instead of silently keeping the first
+scope's instance for the life of the application. Resolving a `'scoped'` service outside a scope
+throws `ScopeRequiredError`.
 
-To get per-request instances, create the scope yourself in middleware and resolve through it:
+A handler written without decorators reaches the request's scope through the container:
 
 ```typescript
 import { CAPABILITIES, type IContainer } from '@setu-ts/common';
@@ -410,23 +410,21 @@ import { createApplication } from '@setu-ts/kernel';
 
 const app = createApplication();
 
-app.middleware.add(async (ctx, next) => {
-  const root = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
-  const scope = root.createScope();
-  ctx.state.set('app:request-scope', scope);
-  await next();
+app.router.get('/reports', (ctx) => {
+  const scope = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).forRequest(ctx);
+  const reports = scope.resolve<{ readonly rows: string[] }>('per-scope');
+  return ctx.response.json({ rows: reports.rows.length });
 });
 ```
 
-**Storing the scope is not enough for a decorated controller.** `registerController` instantiates a
-controller **once**, during route registration, and resolves its constructor arguments from the root
-container at that moment — before any request exists. Constructor injection therefore cannot reach a
-per-request scope, whatever `scope` the dependency declares. A handler that wants a request-local
-instance resolves it from the scope the middleware stored:
+**A decorated controller takes scoped services as handler parameters.** `registerController` builds
+a controller **once**, during route registration, before any request exists, so it is a singleton
+and its constructor cannot take a `'scoped'` service — the boot refuses that graph, and the error
+names the fix. Declare the service as a handler parameter with `Service(token)`, which resolves it
+from the request's scope on every call:
 
 ```typescript
-import { Controller, Ctx, Get, Injectable, Params } from '@setu-ts/decorator-plugin';
-import type { IContainer, IRequestContext } from '@setu-ts/common';
+import { Controller, Get, Injectable, Params, Service } from '@setu-ts/decorator-plugin';
 
 @Injectable({ scope: 'scoped', token: 'per-scope' })
 export class ScopedReportService {
@@ -435,21 +433,18 @@ export class ScopedReportService {
 
 @Controller('/reports')
 export class ReportController {
-  // NOT `constructor(private readonly reports: ScopedReportService)` — that
-  // argument is resolved once, from the root container, at registration.
+  // NOT `constructor(private readonly reports: ScopedReportService)` — a
+  // controller is a singleton, and boot validation refuses that dependency.
   @Get()
-  @Params(Ctx())
-  today(ctx: IRequestContext) {
-    const scope = ctx.state.get('app:request-scope') as IContainer;
-    const reports = scope.resolve<ScopedReportService>('per-scope');
+  @Params(Service<ScopedReportService>('per-scope'))
+  today(reports: ScopedReportService) {
     return { rows: reports.rows.length };
   }
 }
 ```
 
 [`apps/di-decorators`](https://github.com/setu-ts/setu-ts/tree/main/apps/di-decorators) serves a
-`/lifetimes` route that demonstrates the difference between the three lifetimes across two explicit
-scopes.
+`/lifetimes` route that demonstrates the difference between the three lifetimes across two requests.
 
 ## Request Data Access
 
