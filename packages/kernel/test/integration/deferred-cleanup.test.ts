@@ -3,6 +3,7 @@ import { CAPABILITIES, ERROR_RESPONDER_STATE_KEY } from '@setu-ts/common';
 import type { ILogger, IPlugin, IRequest, IRequestContext, TimerHandle } from '@setu-ts/common';
 import { createApplication } from '../../src/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { ResponseBuilder } from '../../src/context/response.ts';
 
 async function appFor(
   register: (app: ReturnType<typeof createApplication>) => void,
@@ -30,6 +31,82 @@ async function appFor(
 function request(path = '/'): IRequest {
   return { method: 'GET', url: `http://test${path}`, path, headers: new Headers() } as IRequest;
 }
+
+it('M125 fast cleanup: buffered synchronous completion takes no snapshot and releases in-flight once', async () => {
+  const cleanups: number[] = [];
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const { app, adapter, runtime } = await appFor((app) => {
+    app.router.get('/', (ctx) => {
+      ctx.defer?.(() => {
+        cleanups.push(1);
+      });
+      ctx.defer?.(() => {
+        cleanups.push(2);
+      });
+      return ctx.response.text('ready');
+    });
+    app.router.get('/held', (ctx) => {
+      ctx.defer?.(() => {
+        entered();
+        return held;
+      });
+      return ctx.response.text('held');
+    });
+  });
+  const snapshot = vi.spyOn(ResponseBuilder.prototype, 'snapshot');
+  try {
+    const first = adapter.handler!(request());
+    const second = adapter.handler!(request());
+    expect(first).not.toBeInstanceOf(Promise);
+    expect(second).not.toBeInstanceOf(Promise);
+    expect(cleanups).toEqual([2, 1, 2, 1]);
+    expect(snapshot).not.toHaveBeenCalled();
+    snapshot.mockRestore();
+    expect((await first).snapshot().body).toBe('ready');
+    // If either request was counted twice, the held request below would not drain.
+    const result = adapter.handler!(request('/held'));
+    await started;
+    const polling = vi.spyOn(runtime, 'setTimeout');
+    let stopped = false;
+    const stopping = app.stop().then(() => {
+      stopped = true;
+    });
+    await vi.waitFor(() => {
+      expect(polling).toHaveBeenCalled();
+    });
+    expect(stopped).toBe(false);
+    release();
+    await result;
+    await stopping;
+    expect(polling).toHaveBeenCalledTimes(1);
+    polling.mockRestore();
+  } finally {
+    release();
+    snapshot.mockRestore();
+    await app.stop();
+  }
+});
+
+it('M125 response streaming body: exposes the body without creating a snapshot', () => {
+  const response = new ResponseBuilder();
+  expect(response.streamingBody).toBeUndefined();
+  response.text('buffered');
+  expect(response.streamingBody).toBeUndefined();
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.close();
+    },
+  });
+  response.stream(body);
+  expect(response.streamingBody).toBe(body);
+});
 
 it.each([
   'buffered',
@@ -298,7 +375,7 @@ it('reports failed cleanup at warn once and preserves the response and late regi
   }
 });
 
-it.each(['end', 'error', 'cancel', 'cancel-error', 'end-sync'] as const)(
+it.each(['end', 'error', 'cancel', 'cancel-error', 'cancel-pending', 'end-sync'] as const)(
   'settles streaming cleanup once on %s and forwards bytes/cancellation',
   async (mode) => {
     const dispose = vi.fn(() => (mode === 'end-sync' ? undefined : Promise.resolve()));
@@ -341,8 +418,15 @@ it.each(['end', 'error', 'cancel', 'cancel-error', 'end-sync'] as const)(
       else if (mode === 'error') await expect(reader.read()).rejects.toThrow('source failed');
       else {
         const reason = new Error('cancelled');
+        const pendingRead = mode === 'cancel-pending' ? reader.read() : undefined;
+        if (pendingRead !== undefined) {
+          await vi.waitFor(() => {
+            expect(pulls).toBe(2);
+          });
+        }
         if (mode === 'cancel-error') await expect(reader.cancel(reason)).rejects.toBe(reason);
         else await reader.cancel(reason);
+        if (pendingRead !== undefined) expect((await pendingRead).done).toBe(true);
         expect(cancel).toHaveBeenCalledWith(reason);
       }
       expect(dispose).toHaveBeenCalledOnce();

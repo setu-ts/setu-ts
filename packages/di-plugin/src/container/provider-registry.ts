@@ -40,12 +40,12 @@ export interface ProviderEntry {
  */
 export class ProviderRegistry {
   readonly #entries = new Map<ContainerToken, ProviderEntry>();
-  readonly #parent: ProviderRegistry | undefined;
+  readonly #parent: ProviderRegistry | (() => ProviderRegistry) | undefined;
 
   /**
-   * @param parent - Optional parent registry for inherited lookups.
+   * @param parent - Parent registry or a lazy lookup of the nearest ancestor registry
    */
-  constructor(parent?: ProviderRegistry) {
+  constructor(parent?: ProviderRegistry | (() => ProviderRegistry)) {
     this.#parent = parent;
   }
 
@@ -82,7 +82,7 @@ export class ProviderRegistry {
     if (local !== undefined) {
       return local;
     }
-    return this.#parent?.get(token);
+    return this.#parentRegistry()?.get(token);
   }
 
   /**
@@ -95,7 +95,12 @@ export class ProviderRegistry {
    * @since 0.11.0
    */
   has(token: ContainerToken): boolean {
-    return this.#entries.has(token) || (this.#parent?.has(token) ?? false);
+    return this.#entries.has(token) || (this.#parentRegistry()?.has(token) ?? false);
+  }
+
+  /** Keeps registrations added later by a previously untouched ancestor visible. */
+  #parentRegistry(): ProviderRegistry | undefined {
+    return typeof this.#parent === 'function' ? this.#parent() : this.#parent;
   }
 
   /**

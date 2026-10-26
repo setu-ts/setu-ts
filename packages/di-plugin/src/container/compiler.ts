@@ -12,6 +12,8 @@ import type { ProviderEntry, ProviderRegistry } from './provider-registry.ts';
  */
 export interface ResolutionScope {
   slots: unknown[] | undefined;
+  /** Scope-registered instances, separate from the fixed root slot indexes. @since 0.11.0 */
+  localInstances: Map<ProviderEntry, unknown> | undefined;
   readonly root: ResolutionScope;
   track(cleanup: () => void | Promise<void>, token: ContainerToken): void;
 }
@@ -41,8 +43,8 @@ function dependency(entry: InjectEntry): { token: ContainerToken; optional: bool
 export class Compiler {
   readonly #registry: ProviderRegistry;
   readonly #external: ExternalResolver | undefined;
-  readonly #parent: Compiler | undefined;
-  readonly #slots: { next: number };
+  readonly #parent: Compiler | (() => Compiler) | undefined;
+  #nextSlot = 0;
   readonly #compiled = new Map<ContainerToken, CompiledEntry>();
   readonly #entries = new Map<ProviderEntry, CompiledEntry>();
 
@@ -51,15 +53,18 @@ export class Compiler {
    *
    * @param external - Optional lazy singleton leaf resolver
    *
-   * @param parent - Compiler owning inherited recipes and slots
+   * @param parent - Ancestor compiler, looked up lazily when scopes can register later
    *
    * @since 0.11.0
    */
-  constructor(registry: ProviderRegistry, external?: ExternalResolver, parent?: Compiler) {
+  constructor(
+    registry: ProviderRegistry,
+    external?: ExternalResolver,
+    parent?: Compiler | (() => Compiler),
+  ) {
     this.#registry = registry;
     this.#external = external;
     this.#parent = parent;
-    this.#slots = parent === undefined ? { next: 0 } : parent.#slots;
   }
 
   /**
@@ -109,10 +114,15 @@ export class Compiler {
   compile(token: ContainerToken): CompiledEntry {
     const cached = this.#compiled.get(token);
     if (cached !== undefined) return cached;
-    if (this.#parent !== undefined && this.#parent.#registry.has(token))
-      return this.#parent.compile(token);
+    const parent = this.#parentCompiler();
+    if (parent !== undefined && parent.#registry.has(token)) return parent.compile(token);
     this.#validate([token]);
     return this.#build(token);
+  }
+
+  /** Finds a newly materialized ancestor without allocating registries on empty scopes. */
+  #parentCompiler(): Compiler | undefined {
+    return typeof this.#parent === 'function' ? this.#parent() : this.#parent;
   }
 
   #validate(tokens: readonly ContainerToken[]): void {
@@ -164,8 +174,8 @@ export class Compiler {
   #build(token: ContainerToken): CompiledEntry {
     const cached = this.#compiled.get(token);
     if (cached !== undefined) return cached;
-    if (this.#parent !== undefined && this.#parent.#registry.has(token))
-      return this.#parent.compile(token);
+    const parent = this.#parentCompiler();
+    if (parent !== undefined && parent.#registry.has(token)) return parent.compile(token);
     const entry = this.#registry.get(token);
     if (entry === undefined) {
       // Validation already established that this is an external string leaf.
@@ -219,7 +229,7 @@ export class Compiler {
       }
       return value;
     };
-    const slot = entry.scope === 'scoped' ? this.#slots.next++ : -1;
+    const slot = entry.scope === 'scoped' && this.#parent === undefined ? this.#nextSlot++ : -1;
     let created = false;
     let singleton: unknown;
     const result: CompiledEntry = {
@@ -237,6 +247,11 @@ export class Compiler {
           return singleton;
         }
         if (entry.scope === 'scoped') {
+          if (slot === -1) {
+            const instances = (scope.localInstances ??= new Map());
+            if (!instances.has(entry)) instances.set(entry, create(scope));
+            return instances.get(entry);
+          }
           const slots = (scope.slots ??= []);
           if (!(slot in slots)) slots[slot] = create(scope);
           return slots[slot];

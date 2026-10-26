@@ -7,7 +7,6 @@ import {
   withDeadline,
 } from '@setu-ts/common';
 import type { ILogger, IRuntimeServices, IServiceRegistry } from '@setu-ts/common';
-import type { ResponseBuilder } from './response.ts';
 
 /** Fixed bound for one asynchronous cleanup. @since 0.11.0 */
 const DEFERRED_CLEANUP_TIMEOUT_MS = 5000;
@@ -71,9 +70,10 @@ export function runDeferred(
 }
 
 /**
- * Wraps without prefetching; completion includes cleanup and drain accounting.
+ * Wraps a streaming body without prefetching. Cleanup and drain accounting run
+ * once when the source ends, errors, or the consumer cancels.
  *
- * @param response - Final buffered or streaming response
+ * @param body - Source streaming body
  *
  * @param cleanups - Work owned by this response
  *
@@ -81,58 +81,54 @@ export function runDeferred(
  *
  * @param complete - Releases in-flight accounting after cleanup
  *
- * @returns Buffered cleanup completion; streams complete through their body
+ * @returns The wrapped streaming body
  *
  * @since 0.11.0
  *
  * @internal
  */
-export function deferResponse(
-  response: ResponseBuilder,
+export function wrapDeferredStream(
+  body: ReadableStream<Uint8Array>,
   cleanups: DeferredCleanup[],
   registry: IServiceRegistry,
   complete: () => void,
-): void | Promise<void> {
+): ReadableStream<Uint8Array> {
   const finish = (): void | Promise<void> => {
     const pending = runDeferred(cleanups, registry);
     if (pending instanceof Promise) return pending.then(complete);
     complete();
   };
-  const snapshot = response.snapshot();
-  if (!snapshot.streaming) return finish();
-  const reader = snapshot.body.getReader();
+  const reader = body.getReader();
   let completed = false;
   const once = (): void | Promise<void> => {
     if (completed) return;
     completed = true;
     return finish();
   };
-  response.stream(
-    new ReadableStream<Uint8Array>(
-      {
-        async pull(controller): Promise<void> {
-          try {
-            const chunk = await reader.read();
-            if (chunk.done) {
-              await once();
-              controller.close();
-            } else {
-              controller.enqueue(chunk.value);
-            }
-          } catch (error) {
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller): Promise<void> {
+        try {
+          const chunk = await reader.read();
+          if (chunk.done) {
             await once();
-            controller.error(error);
+            controller.close();
+          } else {
+            controller.enqueue(chunk.value);
           }
-        },
-        async cancel(reason: unknown): Promise<void> {
-          try {
-            await reader.cancel(reason);
-          } finally {
-            await once();
-          }
-        },
+        } catch (error) {
+          await once();
+          controller.error(error);
+        }
       },
-      { highWaterMark: 0 },
-    ),
+      async cancel(reason: unknown): Promise<void> {
+        try {
+          await reader.cancel(reason);
+        } finally {
+          await once();
+        }
+      },
+    },
+    { highWaterMark: 0 },
   );
 }

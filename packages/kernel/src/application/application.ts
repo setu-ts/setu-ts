@@ -57,7 +57,7 @@ import type { RouteEntry } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
-import { deferResponse } from '../context/deferred.ts';
+import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { coerceInjectBody } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
@@ -1738,12 +1738,26 @@ class Application implements IKernelApplication {
       this.#completeRequest(ctx, outcome);
       return response;
     }
+    const body = response.streamingBody;
+    if (body === undefined) {
+      const pending = runDeferred(cleanups, this.#registry);
+      if (pending === undefined) {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      }
+      return pending.then(() => {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      });
+    }
     const complete = (): void => {
       this.#inFlight--;
       this.#completeRequest(ctx, outcome);
     };
-    const pending = deferResponse(response, cleanups, this.#registry, complete);
-    return pending instanceof Promise ? pending.then(() => response) : response;
+    response.stream(wrapDeferredStream(body, cleanups, this.#registry, complete));
+    return response;
   }
 
   /**

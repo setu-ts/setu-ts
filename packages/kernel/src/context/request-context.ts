@@ -71,6 +71,9 @@ class RequestContext implements IRequestContext {
   #signal: AbortSignal | undefined;
   #deferred: DeferredCleanup[] | undefined;
   #completed = false;
+  #slotKey: object | undefined;
+  #slotValue: unknown;
+  #slotOverflow: { readonly key: object; readonly value: unknown }[] | undefined;
 
   constructor(request: IRequest, registry: ServiceRegistry, runtime: IRuntimeServices) {
     this.request = request;
@@ -148,6 +151,32 @@ class RequestContext implements IRequestContext {
   /** Installs matched route parameters after routing. */
   setParams(params: Record<string, string>): void {
     this.#params = params;
+  }
+
+  /**
+   * Gets an owner-keyed request value without allocating storage for the first key.
+   * `create` must not call `slot` with its own key.
+   * @param key - The owner's private identity key
+   * @param create - Factory used when the key is absent
+   * @returns The value held for this key
+   * @throws {Error} If creation fails; no entry is stored
+   * @since 0.11.0
+   */
+  slot<T>(key: object, create: () => T): T {
+    if (this.#slotKey === key) return this.#slotValue as T;
+    if (this.#slotOverflow !== undefined) {
+      for (const entry of this.#slotOverflow) {
+        if (entry.key === key) return entry.value as T;
+      }
+    }
+    const value = create();
+    if (this.#slotKey === undefined) {
+      this.#slotKey = key;
+      this.#slotValue = value;
+    } else {
+      (this.#slotOverflow ??= []).push({ key, value });
+    }
+    return value;
   }
 
   /**

@@ -93,19 +93,28 @@ export interface ContainerConfig {
  */
 export class DiContainer implements IContainer, ResolutionScope {
   readonly #config: ContainerConfig;
-  readonly #registry: ProviderRegistry;
-  readonly #compiler: Compiler;
+  #registry: ProviderRegistry | undefined;
+  #compiler: Compiler | undefined;
   readonly #parent: DiContainer | undefined;
-  readonly #requests = new WeakMap<IRequestContext, IContainer>();
-  readonly #providers = new WeakMap<Provider<unknown>, ProviderEntry>();
-  readonly #cleanups: {
-    readonly token: ContainerToken;
-    readonly run: () => void | Promise<void>;
-  }[] = [];
+  #requestKey: object | undefined;
+  #requests: WeakMap<IRequestContext, IContainer> | undefined;
+  #providers: WeakMap<Provider<unknown>, ProviderEntry> | undefined;
+  #cleanups:
+    | {
+        readonly token: ContainerToken;
+        readonly run: () => void | Promise<void>;
+      }[]
+    | undefined;
   #closed = false;
   #disposed = false;
   /** Internal slot storage, allocated on first scoped resolution. @internal */
   slots: unknown[] | undefined;
+  /**
+   * Instances of scope-local registrations, allocated on first local resolve.
+   * @since 0.11.0
+   * @internal
+   */
+  localInstances: Map<ProviderEntry, unknown> | undefined;
   /** Internal owner of singleton instances. @internal */
   readonly root: DiContainer;
 
@@ -120,12 +129,37 @@ export class DiContainer implements IContainer, ResolutionScope {
     this.#config = config;
     this.#parent = parent;
     this.root = parent?.root ?? this;
-    this.#registry = parent === undefined ? new ProviderRegistry() : parent.#registry.createChild();
-    this.#compiler = new Compiler(
-      this.#registry,
-      config.autoRegister ? config.externalResolver : undefined,
-      parent === undefined ? undefined : parent.#compiler,
-    );
+    if (parent === undefined) {
+      this.#registry = new ProviderRegistry();
+      this.#compiler = new Compiler(
+        this.#registry,
+        config.autoRegister ? config.externalResolver : undefined,
+      );
+    }
+  }
+
+  /** Materializes local registration state without materializing empty ancestors. */
+  #ownRegistry(): ProviderRegistry {
+    if (this.#registry === undefined) {
+      const parent = this.#parent!;
+      this.#registry = new ProviderRegistry(() => parent.#activeRegistry());
+      this.#compiler = new Compiler(
+        this.#registry,
+        this.#config.autoRegister ? this.#config.externalResolver : undefined,
+        () => parent.#activeCompiler(),
+      );
+    }
+    return this.#registry;
+  }
+
+  /** Reads through untouched scopes to the nearest registry with registrations. */
+  #activeRegistry(): ProviderRegistry {
+    return this.#registry ?? this.#parent!.#activeRegistry();
+  }
+
+  /** Reads through untouched scopes without creating compiler or registry state. */
+  #activeCompiler(): Compiler {
+    return this.#compiler ?? this.#parent!.#activeCompiler();
   }
 
   /**
@@ -157,7 +191,7 @@ export class DiContainer implements IContainer, ResolutionScope {
       this.#parent !== undefined && requestedScope === 'singleton' ? 'scoped' : requestedScope;
     const existing =
       typeof token === 'function' && 'useClass' in provider && provider.useClass === token
-        ? this.#providers.get(provider as Provider<unknown>)
+        ? this.#providers?.get(provider as Provider<unknown>)
         : undefined;
     const entry: ProviderEntry =
       existing !== undefined && existing.scope === scope
@@ -169,8 +203,8 @@ export class DiContainer implements IContainer, ResolutionScope {
               ? {}
               : { dispose: options.dispose as (instance: unknown) => void | Promise<void> }),
           };
-    this.#registry.register(token, entry);
-    this.#providers.set(provider as Provider<unknown>, entry);
+    this.#ownRegistry().register(token, entry);
+    (this.#providers ??= new WeakMap()).set(provider as Provider<unknown>, entry);
   }
 
   /**
@@ -188,7 +222,7 @@ export class DiContainer implements IContainer, ResolutionScope {
    */
   resolve<T>(token: ContainerToken<T>): T {
     if (this.#disposed || this.root.#disposed) throw new ScopeDisposedError(token);
-    const compiled = this.#compiler.compile(token);
+    const compiled = this.#activeCompiler().compile(token);
     if (
       this.#parent === undefined &&
       (compiled.requiresScope || compiled.createsDisposableTransient)
@@ -207,7 +241,7 @@ export class DiContainer implements IContainer, ResolutionScope {
    * @since 0.11.0
    */
   has(token: ContainerToken): boolean {
-    return this.#compiler.has(token);
+    return this.#activeCompiler().has(token);
   }
 
   /**
@@ -232,13 +266,22 @@ export class DiContainer implements IContainer, ResolutionScope {
    * @since 0.11.0
    */
   forRequest(ctx: IRequestContext): IContainer {
-    const cached = this.#requests.get(ctx);
-    if (cached !== undefined) return cached;
     if (ctx.defer === undefined) throw new RequestScopeUnavailableError();
+    if (ctx.slot !== undefined) {
+      return ctx.slot((this.#requestKey ??= {}), () => this.#createRequestScope(ctx));
+    }
+    const cached = this.#requests?.get(ctx);
+    if (cached !== undefined) return cached;
+    const scope = this.#createRequestScope(ctx);
+    (this.#requests ??= new WeakMap()).set(ctx, scope);
+    return scope;
+  }
+
+  /** Creates the scope and keeps observing its disposal beyond kernel cleanup bounds. */
+  #createRequestScope(ctx: IRequestContext): IContainer {
     const scope = this.createScope();
-    this.#requests.set(ctx, scope);
     const report = this.#config.reportDisposeError;
-    ctx.defer((): void | Promise<void> => {
+    ctx.defer!((): void | Promise<void> => {
       try {
         const pending = scope.dispose();
         // Observe the scope's outcome even after the kernel's cleanup deadline.
@@ -263,7 +306,7 @@ export class DiContainer implements IContainer, ResolutionScope {
    * @since 0.11.0
    */
   close(): void {
-    this.#compiler.compileAll();
+    this.#activeCompiler().compileAll();
     this.#closed = true;
   }
 
@@ -277,7 +320,7 @@ export class DiContainer implements IContainer, ResolutionScope {
    * @internal
    */
   opaqueTokens(): readonly ContainerToken[] {
-    return this.#compiler.opaqueTokens();
+    return this.#activeCompiler().opaqueTokens();
   }
 
   /**
@@ -294,7 +337,7 @@ export class DiContainer implements IContainer, ResolutionScope {
    * @internal
    */
   track(cleanup: () => void | Promise<void>, token: ContainerToken): void {
-    this.#cleanups.push({ run: cleanup, token });
+    (this.#cleanups ??= []).push({ run: cleanup, token });
   }
 
   /**
@@ -312,13 +355,20 @@ export class DiContainer implements IContainer, ResolutionScope {
   dispose(): void | Promise<void> {
     if (this.#disposed) return;
     this.#disposed = true;
+    if (this.#cleanups === undefined) {
+      this.slots = undefined;
+      this.localInstances = undefined;
+      return;
+    }
     const errors: unknown[] = [];
     const finish = (): void => {
       this.slots = undefined;
+      this.localInstances = undefined;
+      this.#cleanups = undefined;
       if (errors.length > 0) throw new AggregateError(errors, 'DI disposal failed');
     };
     const run = (): void | Promise<void> => {
-      while (this.#cleanups.length > 0) {
+      while (this.#cleanups !== undefined && this.#cleanups.length > 0) {
         const cleanup = this.#cleanups.pop()!;
         try {
           const pending = cleanup.run();

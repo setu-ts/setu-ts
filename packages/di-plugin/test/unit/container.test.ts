@@ -1,8 +1,135 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import { createToken } from '@setu-ts/common';
 
 import { DiContainer } from '../../src/container/container.ts';
 import type { ExternalResolver } from '../../src/container/container.ts';
+import { Compiler } from '../../src/container/compiler.ts';
+import { ProviderRegistry } from '../../src/container/provider-registry.ts';
+
+it('M125 lazy scope: untouched scopes resolve, inspect and validate through the ancestor compiler', () => {
+  const root = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+  root.register('root', { useValue: 42 });
+  const compile = vi.spyOn(Compiler.prototype, 'compile');
+  const validate = vi.spyOn(Compiler.prototype, 'compileAll');
+  const inspect = vi.spyOn(Compiler.prototype, 'has');
+  const childRegistry = vi.spyOn(ProviderRegistry.prototype, 'createChild');
+  try {
+    root.resolve('root');
+    const compiler = compile.mock.contexts[0];
+    compile.mockClear();
+    const parent = root.createScope() as DiContainer;
+    const child = parent.createScope() as DiContainer;
+    expect(childRegistry).not.toHaveBeenCalled();
+    expect(child.resolve('root')).toBe(42);
+    expect(compile.mock.contexts).toEqual([compiler]);
+    expect(child.has('root')).toBe(true);
+    expect(inspect.mock.contexts).toEqual([compiler]);
+    child.close();
+    expect(validate.mock.contexts).toEqual([compiler]);
+    expect(child.opaqueTokens()).toEqual([]);
+    expect(childRegistry).not.toHaveBeenCalled();
+    expect(child.dispose()).toBeUndefined();
+  } finally {
+    compile.mockRestore();
+    validate.mockRestore();
+    inspect.mockRestore();
+    childRegistry.mockRestore();
+  }
+});
+
+it('M125 lazy scope: registering after inherited resolution keeps root slots separate from local instances', () => {
+  const root = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+  root.register('root', { useFactory: () => ({ root: true }) }, { scope: 'scoped' });
+  root.close();
+  const parent = root.createScope() as DiContainer;
+  const child = parent.createScope() as DiContainer;
+  const inherited = child.resolve('root');
+  expect(child.localInstances).toBeUndefined();
+  child.register('local', { useFactory: () => ({ local: true }) }, { scope: 'scoped' });
+  const local = child.resolve('local');
+  expect(child.resolve('root')).toBe(inherited);
+  expect(child.resolve('local')).toBe(local);
+  let undefinedCreates = 0;
+  child.register(
+    'undefined-local',
+    {
+      useFactory: () => {
+        undefinedCreates++;
+        return undefined;
+      },
+    },
+    { scope: 'scoped' },
+  );
+  child.resolve('undefined-local');
+  child.resolve('undefined-local');
+  expect(undefinedCreates).toBe(1);
+  class LocalService {}
+  const recipe = { useClass: LocalService };
+  const dispose = vi.fn();
+  child.register('class-local', recipe, { scope: 'scoped', dispose });
+  child.register(LocalService, recipe, { scope: 'scoped', dispose });
+  expect(child.resolve(LocalService)).toBe(child.resolve('class-local'));
+  expect(child.localInstances?.size).toBe(3);
+  expect(child.slots).toEqual([inherited]);
+  expect(parent.slots).toBeUndefined();
+  child.dispose();
+  expect(child.slots).toBeUndefined();
+  expect(child.localInstances).toBeUndefined();
+  expect(dispose).toHaveBeenCalledOnce();
+});
+
+it('M125 obligation 13: parent registrations after child creation cannot collide with child registrations', () => {
+  const root = new DiContainer({ defaultScope: 'singleton', autoRegister: false });
+  const parent = root.createScope();
+  const child = parent.createScope();
+  // Register in the child first: a still-empty parent must remain visible when it registers later.
+  child.register('child', { useFactory: () => ({ owner: 'child' }) }, { scope: 'scoped' });
+  parent.register('parent', { useFactory: () => ({ owner: 'parent' }) }, { scope: 'scoped' });
+  const parentValue = parent.resolve('parent');
+  const inherited = child.resolve('parent');
+  const childValue = child.resolve('child');
+  expect(inherited).not.toBe(parentValue);
+  expect(inherited).not.toBe(childValue);
+  expect(child.resolve('parent')).toBe(inherited);
+  expect(child.resolve('child')).toBe(childValue);
+  const nested = child.createScope();
+  expect(nested.resolve('parent')).not.toBe(inherited);
+  expect(nested.resolve('child')).not.toBe(childValue);
+  expect(parent.has('child')).toBe(false);
+  nested.dispose();
+  child.dispose();
+  parent.dispose();
+  root.dispose();
+});
+
+it('M125 untouched scope: inherited lifetime refusals, isolation and disposal remain unchanged', () => {
+  const root = new DiContainer({
+    defaultScope: 'singleton',
+    autoRegister: true,
+    externalResolver: makeResolver({ external: {} }),
+  });
+  const dispose = vi.fn();
+  root.register('scoped', { useFactory: () => ({}) }, { scope: 'scoped', dispose });
+  root.register('single', { useFactory: () => ({}) });
+  root.register('transient', { useFactory: () => ({}) }, { scope: 'transient', dispose });
+  root.close();
+  const scope = root.createScope();
+  const nested = scope.createScope();
+  expect(() => root.resolve('scoped')).toThrow(/requires a scope/);
+  expect(() => root.resolve('transient')).toThrow(/requires a scope/);
+  expect(scope.has('scoped')).toBe(true);
+  expect(scope.has('absent')).toBe(false);
+  expect(scope.resolve('single')).toBe(root.resolve('single'));
+  expect(nested.resolve('external')).toBe(scope.resolve('external'));
+  expect(nested.resolve('scoped')).not.toBe(scope.resolve('scoped'));
+  scope.resolve('transient');
+  nested.dispose();
+  scope.dispose();
+  expect(dispose).toHaveBeenCalledTimes(3);
+  expect(() => scope.resolve('single')).toThrow(/disposed/);
+  root.dispose();
+  expect(() => root.createScope().resolve('single')).toThrow(/disposed/);
+});
 
 // --- Test doubles ---
 

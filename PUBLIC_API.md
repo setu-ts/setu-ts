@@ -12525,6 +12525,14 @@ registered, and never changes the response; a `defer` after completion runs at o
 optional, so no implementor breaks: the kernel's context implements it, `createTestContext` does
 not. A request that never calls it stays on the synchronous path.
 
+**`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
+value this request holds under `key`, compared by object identity, and on the first call for that
+key stores and returns `create()`; a throwing `create` stores nothing, so a later call retries.
+Entries cannot be enumerated or deleted and live as long as the context, so a key the owner keeps
+private gives it storage no other code can read or replace. `create` must not call `slot` with its
+own key. The kernel's context keeps the first entry without allocating; the member is optional, and
+`createTestContext` does not implement it. `forRequest` keeps each request's scope here.
+
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
 `@setu-ts/runtime` both use it on the request path to decide whether a handler result needed
@@ -13523,9 +13531,12 @@ Contract notes:
   with their parent. A scope may register tokens its parent chain does not have, and they live as
   long as the scope (a `singleton` lifetime there is stored as `scoped`); registering one it has
   throws, because the parent's compiled graph cannot be rebound from below.
-- **Request scope**: `forRequest(ctx)` creates the scope on first call for that request, caches it
-  per container, and registers its disposal with `ctx.defer`. A request that never calls it pays one
-  `undefined` check and stays on the kernel's synchronous path.
+- **Request scope**: `forRequest(ctx)` creates the scope on first call for that request, keeps it in
+  `ctx.slot` under a key private to the container (a context without `slot` falls back to a
+  per-container `WeakMap`), and registers its disposal with `ctx.defer`. A request that never calls
+  it pays one `undefined` check and stays on the kernel's synchronous path. A scope allocates its
+  own registry only when it registers a token, and instances of its own registrations are held by
+  the scope that resolves them, so request volume never grows anything the root holds.
 - **Disposal**: `ProviderOptions.dispose` runs from `dispose()` — for a request scope when the
   request finishes, for the root in `DiPlugin`'s `onClose` hook. Each asynchronous dispose is
   bounded at 5000 ms, on the runtime's timers when a runtime is registered

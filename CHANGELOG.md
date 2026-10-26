@@ -22,11 +22,12 @@ All notable changes to this project are documented here. The format follows
   `IRequestContext.defer?(cleanup)` is the kernel's per-request cleanup primitive: cleanups run
   before a buffered response is returned, or when a streamed body ends, each asynchronous one
   bounded at 5000 ms, and a request that never calls it stays on the synchronous path.
-  `@Params(Service(token))` (`@setu-ts/decorator-plugin`) resolves from the request scope on every
-  call. `DiContainer.close()` ends registration; `DiPlugin` calls it after the last bootstrap hook.
-  New errors in `@setu-ts/di-plugin`: `ContainerValidationError` (with `findings`),
-  `ScopeRequiredError`, `ScopeDisposedError`, `ContainerClosedError` and
-  `RequestScopeUnavailableError`.
+  `IRequestContext.slot?(key, create)` is owner-keyed per-request storage under a key only its owner
+  holds; `forRequest` keeps the scope there. `@Params(Service(token))` (`@setu-ts/decorator-plugin`)
+  resolves from the request scope on every call. `DiContainer.close()` ends registration; `DiPlugin`
+  calls it after the last bootstrap hook. New errors in `@setu-ts/di-plugin`:
+  `ContainerValidationError` (with `findings`), `ScopeRequiredError`, `ScopeDisposedError`,
+  `ContainerClosedError` and `RequestScopeUnavailableError`.
 
 - **Portable database errors (M119e, 0.11.0, `@setu-ts/common`, `@setu-ts/database-plugin`).**
   `UnknownPayloadFieldError` moves to common, preserving the database-plugin re-export's identity;
