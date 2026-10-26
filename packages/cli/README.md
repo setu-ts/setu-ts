@@ -135,6 +135,24 @@ Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill 
 end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
 `generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
 
+## Wiring check
+
+```bash
+setu check            # exit 1 when a seam artifact, barrel or config is not wired; writes nothing
+setu check --strict   # warnings fail too
+setu sync             # rewrite every CLI-managed barrel from its directory
+setu sync --dry-run   # print the barrels it would write
+```
+
+`setu check` reads the project and never loads or starts it. It reports an artifact its barrel does
+not list (or a barrel listing one that is gone), a barrel `setu.config.ts` does not reference, an
+artifact registered both by its barrel and by hand, an artifact or module the scan skips, and a
+module nothing activates. Each finding has a stable id (`setu.E003`); errors exit `1`, warnings
+print and exit `0` unless `--strict`. Silence an accepted finding in `.setu-ts/check.json`, by id or
+by id and path. From a workspace root it checks every member. Generated projects carry
+`@setu-ts/cli` as a development dependency and run `setu check` from their `check` script. See
+[the CLI guide](https://github.com/setu-ts/setu-ts/blob/main/docs/cli.md#wiring-check-setu-check-and-setu-sync).
+
 ## Agent briefs
 
 ```bash

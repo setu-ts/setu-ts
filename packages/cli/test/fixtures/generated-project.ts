@@ -117,10 +117,17 @@ export async function useWorkspacePackages(root: string): Promise<void> {
   const manifestPath = `${root}/deno.json`;
   const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
     imports?: Record<string, string>;
+    scopes?: Record<string, Record<string, string>>;
     compilerOptions?: Record<string, unknown>;
   };
   // The project's own entries win: they are what the CLI emitted.
-  const imports: Record<string, string> = await frameworkImports();
+  const framework = await frameworkImports();
+  // Extra framework mappings belong to source resolution, not the project's
+  // installed plugin inventory. In particular, exposing decorator-plugin at
+  // the top level would switch a functional fixture to class-based generation.
+  const imports: Record<string, string> = Object.fromEntries(
+    Object.entries(framework).filter(([specifier]) => !specifier.startsWith('@setu-ts/')),
+  );
   for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
     // Only framework specifiers are repointed. A template may also declare a
     // project-local alias (`~/` → `./app/`), and rewriting that to a package
@@ -132,6 +139,10 @@ export async function useWorkspacePackages(root: string): Promise<void> {
     imports[specifier] = workspaceEntrypoint(specifier.slice('@setu-ts/'.length));
   }
   manifest.imports = imports;
+  manifest.scopes = {
+    ...manifest.scopes,
+    [new URL('../../../../', import.meta.url).href]: framework,
+  };
   manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
   // Trailing newline, or a later `deno fmt --check` on the repointed project
   // would flag the fixture's own rewrite rather than anything the CLI emitted.

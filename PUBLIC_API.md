@@ -10108,6 +10108,12 @@ setu add @setu-ts/auth-plugin                  # full specifier — all three ar
 setu add cache --dir ./services/orders
 setu add cache --dry-run                       # report the manifest edits, write nothing
 
+# Check that every seam artifact is wired (read-only), or rewrite the managed barrels
+setu check                                     # exit 1 on an error finding; standalone or workspace
+setu check --strict                            # warnings fail too
+setu sync                                      # rewrite CLI-managed barrels from their directories
+setu sync --dry-run                            # print the barrels it would write
+
 # Write or check this project's AGENTS.md brief
 setu agents                                    # standalone, workspace root or member
 setu agents --check                            # exit 1 when a section is missing or stale

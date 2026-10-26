@@ -16,6 +16,7 @@ import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
 import { deriveNames, isKebabIdentifier } from './names.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
+import { isMissingPath } from './filesystem-errors.ts';
 
 /**
  * A file the barrel is claiming that the CLI did not generate.
@@ -89,6 +90,21 @@ export interface SkippedArtifact {
   readonly invalidName?: true;
 }
 
+/**
+ * A candidate whose contents could not be read, so its exports are unknown.
+ *
+ * Kept apart from {@linkcode SkippedArtifact}: the file may be a perfectly good
+ * artifact, so `setu generate` leaves it out of the barrel as before, while
+ * `setu check` reports it and `setu sync` refuses to rewrite its barrel — dropping
+ * an import it cannot verify is not a repair (M118 audit F7).
+ */
+export interface UnreadableArtifact {
+  /** The path, relative to the project root. */
+  readonly path: string;
+  /** Why it could not be read. */
+  readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
+}
+
 /** One family's scan result. */
 export interface ArtifactScan {
   /** The admitted artifact names, sorted. */
@@ -99,6 +115,8 @@ export interface ArtifactScan {
   readonly adopted: readonly AdoptedArtifact[];
   /** Candidates left out because the project registers them by hand. */
   readonly manual: readonly ManuallyWiredArtifact[];
+  /** Candidates whose contents could not be read. */
+  readonly unreadable: readonly UnreadableArtifact[];
 }
 
 /** Every family's scan result. */
@@ -111,6 +129,8 @@ export interface ArtifactScanAll {
   readonly adopted: readonly AdoptedArtifact[];
   /** Every hand-registered candidate across every family. */
   readonly manual: readonly ManuallyWiredArtifact[];
+  /** Every candidate whose contents could not be read, across every family. */
+  readonly unreadable: readonly UnreadableArtifact[];
 }
 
 /**
@@ -220,7 +240,7 @@ export async function readArtifactNames(
     entries = await fs.readdir(root);
   } catch {
     // The directory does not exist yet, or is unreadable: no artifacts to list.
-    return { names: [], skipped: [], adopted: [], manual: [] };
+    return { names: [], skipped: [], adopted: [], manual: [], unreadable: [] };
   }
 
   const barrelSource = await readTextOrEmpty(fs, joinPath(dir, spec.barrel));
@@ -229,6 +249,7 @@ export async function readArtifactNames(
   const skipped: SkippedArtifact[] = [];
   const adopted: AdoptedArtifact[] = [];
   const manual: ManuallyWiredArtifact[] = [];
+  const unreadable: UnreadableArtifact[] = [];
 
   for (const entry of entries) {
     if (!entry.endsWith(spec.suffix)) continue;
@@ -243,12 +264,24 @@ export async function readArtifactNames(
     let source: string;
     try {
       const stat = await fs.stat(path);
-      if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) continue;
+      // A directory named like an artifact is unrelated and never was one; only a
+      // file-like entry the scanner cannot read (a FIFO, a device link, an oversized
+      // file) leaves an artifact's wiring unknown.
+      if (stat.isDirectory) continue;
+      if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) {
+        unreadable.push({
+          path: joinPath(spec.dir, entry),
+          reason: stat.isFile ? 'too-large' : 'not-a-file',
+        });
+        continue;
+      }
       source = decoder.decode(await fs.readFile(path));
-    } catch {
-      // Vanished or unreadable between the listing and the read — skip it rather than
-      // failing the whole command over one entry. Not reported as a rejection: nothing
-      // is wrong with the artifact, the filesystem simply moved under us.
+    } catch (cause) {
+      // Vanished between the listing and the read: the filesystem moved under us,
+      // and there is nothing to report. Anything else is a file that exists and
+      // could not be read, which is reported rather than silently left out.
+      if (!isMissingPath(cause))
+        unreadable.push({ path: joinPath(spec.dir, entry), reason: 'unclassifiable' });
       continue;
     }
 
@@ -289,7 +322,7 @@ export async function readArtifactNames(
     names.push(name);
   }
 
-  return { names: names.sort(), skipped, adopted, manual };
+  return { names: names.sort(), skipped, adopted, manual, unreadable };
 }
 
 /**
@@ -318,6 +351,7 @@ export async function scanArtifacts(
   const skipped: SkippedArtifact[] = [];
   const adopted: AdoptedArtifact[] = [];
   const manual: ManuallyWiredArtifact[] = [];
+  const unreadable: UnreadableArtifact[] = [];
   // Read once for the whole scan: ten families would otherwise re-read one file ten
   // times against a path that is the same for all of them.
   const wiring = await readProjectWiring(fs, dir);
@@ -327,6 +361,7 @@ export async function scanArtifacts(
     skipped.push(...scan.skipped);
     adopted.push(...scan.adopted);
     manual.push(...scan.manual);
+    unreadable.push(...scan.unreadable);
   }
-  return { artifacts, skipped, adopted, manual };
+  return { artifacts, skipped, adopted, manual, unreadable };
 }

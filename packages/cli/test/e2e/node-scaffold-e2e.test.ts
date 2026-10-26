@@ -161,6 +161,27 @@ async function scaffoldAndInstall(args: readonly string[]): Promise<string> {
 }
 
 describe('a scaffolded npm project runs its own scripts', () => {
+  it(
+    'fails its own check script for a copied, unregistered controller',
+    { timeout: INSTALL_TIMEOUT_MS },
+    async () => {
+      const project = await scaffoldAndInstall(['--template', 'rest']);
+      expect(await run(['generate', 'controller', 'original', '--dir', project])).toBe(0);
+      expect((await npmRun(project, 'check')).code).toBe(0);
+      const original = await nodeFs.readFile(
+        `${project}/src/controllers/original.controller.ts`,
+        'utf8',
+      );
+      await nodeFs.writeFile(
+        `${project}/src/controllers/extra.controller.ts`,
+        original.replaceAll('Original', 'Extra').replaceAll('original', 'extra'),
+      );
+      const result = await npmRun(project, 'check');
+      expect(result.code, result.output).not.toBe(0);
+      expect(result.output).toContain('extra.controller.ts');
+      expect(result.output).toContain('setu.E003');
+    },
+  );
   it('scaffolds Node when no target is named', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     expect(await run(['new', 'shop'])).toBe(0);
     await nodeFs.stat(`${root}/shop/package.json`);

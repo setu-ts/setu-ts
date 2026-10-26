@@ -674,8 +674,11 @@ here.
   container and a request scope: typed tokens, boot-time graph validation, `forRequest` kept in
   `ctx.slot` and disposed through `ctx.defer`, the singleton-captures-scoped fix) — complete (PR
   #508).
-- **Next milestone** — M119i (documentation that does not match the code, or is missing). M118 and
-  M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 118** (`packages/cli` — `setu check`, a read-only wiring gate run by every generated
+  `check` script, plus `setu sync`, stable finding ids and `.setu-ts/check.json` silencing) —
+  complete (PR #510).
+- **Next milestone** — M119i (documentation that does not match the code, or is missing). M120–M123
+  are open in the ROADMAP; M120's dependency on M118 is met.
 
 ## Verification (run before declaring any work done)
 

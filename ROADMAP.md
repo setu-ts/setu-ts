@@ -15020,9 +15020,10 @@ What is missing is a way to run that detection on its own, and three gaps in it:
   classified, and a gate that fails on them gets switched off. Wired passes, not wired fails,
   unclassifiable warns and names the import line to check.
 - **Severity.** Errors (exit `1`): a skipped artifact, barrel drift, an unwired barrel, a duplicate
-  hand registration, a legacy layout still in use. Warnings (exit `0`): adoption of a hand-written
-  file that matches a family's naming convention (usually intended, and the M70g report already
-  treats it as information) and an unclassifiable config. `--strict` turns warnings into errors.
+  hand registration, a legacy layout still in use. Warnings (exit `0`): an unclassifiable config.
+  `--strict` turns warnings into errors. A hand-written file in a seam directory that its barrel
+  does not list is barrel drift, an error: `check` writes nothing, so it adopts nothing, and the
+  "adopted" notice stays `generate`'s, printed when a write actually adopts (M118 plan §2 C1).
 - **Scope.**
   - Standalone projects and workspace members. At a workspace root it checks every member and
     reports per member, as `setu agents --check` does; it refuses a directory that is not a project,
@@ -15049,15 +15050,21 @@ advice, which is gap 1 again. So:
   version, the pin `setu new` already writes for the framework). Today projects reach the CLI
   through `npx @setu-ts/cli@<version>`, which in a Docker build stage would download it on every
   build. A devDependency is installed by the build stage and stays out of the runtime image.
-- **The generated `check` script runs it** beside the type check, and a generated CI workflow (if
-  one exists) runs that script. The `dev` and `debug` scripts do not, so the edit loop is never
-  blocked.
+- **The generated `check` script runs it** beside the type check. The CLI generates no CI workflow,
+  so a project's own CI runs that script (M118 plan §2 C3). The `dev` and `debug` scripts do not, so
+  the edit loop is never blocked.
 - **Only errors fail it.** Warnings print and exit `0`, as the severity rule above says.
 - **The production build runs it too, before compiling** — M120 wires that, so M120 depends on this
   milestone. Bun and Deno projects have no build step today; for them the `check` script and CI are
   the gate. Workers projects are built by wrangler, so their `check` script carries it.
-- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script
-  through `setu add` or an upgrade-guide entry; nothing rewrites a developer's existing script.
+- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script from
+  an upgrade-guide entry; nothing rewrites a developer's existing script, and `setu add` has no
+  script-editing path (M118 plan §2 C2).
+- **Added at plan time (maintainer decision, 2026-10-26, after comparing Django `check`, ESLint, Nx
+  `sync:check`/`sync` and Rails `zeitwerk:check`):** `setu sync`, which rewrites every CLI-managed
+  barrel from its directory so drift has a command that fixes it; a stable id per finding
+  (`setu.E001`…, `setu.W001`…); and silencing by id, or by id and path, in `.setu-ts/check.json`. DI
+  graph validation stays at boot in `di-plugin` (M125); `check` does not boot the application.
 
 **Open questions for the plan.**
 
@@ -15071,20 +15078,20 @@ dependency on M117.
 
 **Deliverables**
 
-- [ ] `plans/milestone-118-setu-check.md`, settling the open questions above
-- [ ] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
-- [ ] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
+- [x] `plans/archive/milestone-118-setu-check.md`, settling the open questions above
+- [x] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
+- [x] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
       codes above
-- [ ] Barrel-drift and all-barrel config-wiring detection, comparing name sets
-- [ ] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
+- [x] Barrel-drift and all-barrel config-wiring detection, comparing name sets
+- [x] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
       each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
       removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
       naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
-- [ ] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
-      script (and CI, where generated); the scaffold e2e proves a fresh project's `check` passes and
-      a broken seam fails it
-- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `118`
+- [x] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
+      script; the scaffold e2e proves a fresh project's `check` passes and a broken seam fails it
+- [x] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
+- [x] `setu sync`, finding ids and `.setu-ts/check.json` silencing (added at plan time)
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `118`
 
 ## Milestone 119: The `v0.10.0` Smoke Closeout
 
@@ -16141,7 +16148,7 @@ patch by construction and gains nothing new here.
 | 115       | ✅     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
-| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
+| 118       | ✅     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |

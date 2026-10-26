@@ -47,6 +47,64 @@ import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/nod
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+for (const target of ['deno', 'bun'] as const) {
+  it(
+    `runs the ${target} scaffold check task and catches a removed barrel import`,
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', 'shop', '--runtime', target, '--template', 'rest'])).toBe(0);
+      const project = `${root}/shop`;
+      const overlay = await startOverlay();
+      try {
+        const install = await runIn(project, target, ['install'], overlay);
+        expect(install.code, install.output).toBe(0);
+        const args = target === 'deno' ? ['task', 'check'] : ['run', 'check'];
+        const fresh = await runIn(project, target, args, overlay);
+        expect(fresh.code, fresh.output).toBe(0);
+        const path = `${project}/src/modules/greeting/index.ts`;
+        const source = await nodeFs.readFile(path, 'utf8');
+        const removed = source.replace(
+          /import\s+\{[^}]*\}\s+from\s*[\x27\x22]\.\/greeting\.routes\.ts[\x27\x22];?/,
+          '',
+        );
+        expect(removed).not.toBe(source);
+        // Keep the barrel type-correct so the wiring gate is the failing half.
+        await nodeFs.writeFile(
+          path,
+          removed.replace(
+            /registerGreetingRoutes\(router, services\);/,
+            'void router;\n  void services;',
+          ),
+        );
+        const broken = await runIn(project, target, args, overlay);
+        expect(broken.code, broken.output).not.toBe(0);
+        expect(broken.output).toContain('setu.E003');
+        expect(broken.output).toContain('greeting.routes.ts');
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
+// The full-stack Deno manifest is the other `denoTasks` arm (it has an npm
+// build), so its `check` task is proven separately: it must pass on a fresh
+// install without a prior build, and say it found no CLI-owned seams.
+it('runs the deno full-stack scaffold check task', { timeout: 900_000 }, async () => {
+  expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'full-stack'])).toBe(0);
+  const project = `${root}/shop`;
+  const overlay = await startOverlay();
+  try {
+    const install = await runIn(project, 'deno', ['task', 'install'], overlay);
+    expect(install.code, install.output).toBe(0);
+    const checked = await runIn(project, 'deno', ['task', 'check'], overlay);
+    expect(checked.code, checked.output).toBe(0);
+    expect(checked.output).toContain('setu check: 0 error(s)');
+  } finally {
+    await overlay.close();
+  }
+});
+
 /** Templates that wire an HTTP surface and boot without an npm build. */
 // X5-3's fix and its gate are the same change: `full-stack` was excluded from
 // this list because it could not boot — it had no `build` task, so `deno task
