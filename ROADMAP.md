@@ -15856,17 +15856,17 @@ request scope in use, decorators lowered by whatever M120 bundles with.
 
 **Deliverables:**
 
-- [ ] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
-- [ ] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
-- [ ] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
+- [x] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
+- [x] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
+- [x] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
       sees the other's; a scoped service is disposed after its request, including a request that
       throws; a singleton reaching a scoped service fails the boot with both names; and a request
       that never calls `forRequest` stays on the synchronous path
-- [ ] The three-configuration benchmark, results in the PR
-- [ ] `apps/di-decorators` moved off hand-made scopes onto the request scope
-- [ ] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
+- [x] The three-configuration benchmark, results in the PR
+- [x] `apps/di-decorators` moved off hand-made scopes onto the request scope
+- [x] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
       refusals marked for their minor), and `docs/upgrading.md`
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `125`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `125`
 
 ---
 
@@ -16157,4 +16157,4 @@ patch by construction and gains nothing new here.
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
-| 125       | ⬜     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
+| 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |

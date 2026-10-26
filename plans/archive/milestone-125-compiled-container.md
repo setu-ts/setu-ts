@@ -292,6 +292,13 @@ is finished — without moving a request that never uses it off the kernel's syn
   build: §3.19 alone gave −5.3% and p99 913 µs; with §3.20 and §3.21, −3.0% (p = 0.007), p99 913
   against 884 µs, and a 100 ns `forRequest` cycle; configuration 2 re-run +3.3% (p ≈ 0.38). A heap
   test (200,000 requests, after GC) showed no growth in any build.
+- **Final (2026-10-26, `09121dca` against `develop` at `92e8b52a`, both built locally, 21 paired
+  passes):** configuration 1 −2.9% median per-pass (p ≈ 0.66), medians 122,306 against 122,973 rps,
+  p99 873 against 849 µs. Configuration 3 against configuration 2 −2.0% median per-pass (8/21, p ≈
+  0.38), medians 116,072 against 118,356 rps, p99 873 against 852 µs (+2.5%): **passes**. The
+  configuration 2 run against `develop` was stopped part-way at the maintainer's direction; its bar
+  rests on the two runs against 0.10.0 above (p ≈ 0.19 on `4ccf701c`, p ≈ 0.38 with §3.19), the
+  request path that configuration being unchanged since.
 - **Why:** The fast path is the property most likely to regress silently, so it gets a test, not
   only a measurement.
 - **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (structural); PR body
