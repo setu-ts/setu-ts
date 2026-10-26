@@ -10,6 +10,13 @@
 
 import type { ISseConnection, SseChannel, SseMessage } from '@setu-ts/common';
 
+/** Membership resolver used by registry-backed handles. */
+interface IChannelMembership {
+  members(): ReadonlySet<ISseConnection> | undefined;
+  add(conn: ISseConnection): void;
+  remove(conn: ISseConnection): void;
+}
+
 /**
  * Forwards a local publish to peers on other replicas.
  *
@@ -30,7 +37,7 @@ export type ChannelPublisher = (name: string, msg: SseMessage) => void;
  * @since 0.1.0
  */
 export class SseChannelImpl implements SseChannel {
-  #members = new Set<ISseConnection>();
+  readonly #membership: IChannelMembership;
   readonly #name: string;
   readonly #publish: ChannelPublisher | undefined;
 
@@ -39,10 +46,21 @@ export class SseChannelImpl implements SseChannel {
    *   channel on the wire
    * @param publish - Forwards publishes to other replicas. Omit for a channel
    *   that stays in-process.
+   * @param membership - Internal registry membership resolver; omitted for a standalone channel
    */
-  constructor(name = '', publish?: ChannelPublisher) {
+  constructor(name = '', publish?: ChannelPublisher, membership?: IChannelMembership) {
     this.#name = name;
     this.#publish = publish;
+    const members = new Set<ISseConnection>();
+    this.#membership = membership ?? {
+      members: () => members,
+      add: (conn): void => {
+        members.add(conn);
+      },
+      remove: (conn): void => {
+        members.delete(conn);
+      },
+    };
   }
 
   /** The channel name. */
@@ -51,15 +69,15 @@ export class SseChannelImpl implements SseChannel {
   }
 
   get size(): number {
-    return this.#members.size;
+    return this.#membership.members()?.size ?? 0;
   }
 
   add(conn: ISseConnection): void {
-    this.#members.add(conn);
+    this.#membership.add(conn);
   }
 
   remove(conn: ISseConnection): void {
-    this.#members.delete(conn);
+    this.#membership.remove(conn);
   }
 
   publish(msg: SseMessage): void {
@@ -82,7 +100,9 @@ export class SseChannelImpl implements SseChannel {
    * @since 0.2.0
    */
   publishLocal(msg: SseMessage): void {
-    for (const conn of this.#members) {
+    const members = this.#membership.members();
+    if (members === undefined) return;
+    for (const conn of members) {
       if (conn.isOpen) {
         try {
           conn.send(msg);
@@ -106,7 +126,8 @@ export const SSE_HWM_BYTES: number = 64 * 1024; // 64 KiB
  * @since 0.1.0
  */
 export class ChannelRegistry {
-  #channels = new Map<string, SseChannelImpl>();
+  readonly #channels = new Map<string, { channel: SseChannelImpl; members: Set<ISseConnection> }>();
+  #joined = new WeakMap<ISseConnection, Set<string>>();
   readonly #publish: ChannelPublisher | undefined;
 
   /**
@@ -119,35 +140,34 @@ export class ChannelRegistry {
   }
 
   /**
-   * Returns or creates a named channel.
+   * Returns a handle resolving current membership by name. Empty handles are
+   * not retained by the registry and remain usable after reclamation.
    *
    * @param name - Channel name
    * @returns The named channel
    * @since 0.1.0
    */
   get(name: string): SseChannelImpl {
-    let channel = this.#channels.get(name);
-    if (!channel) {
-      channel = new SseChannelImpl(name, this.#publish);
-      this.#channels.set(name, channel);
-    }
+    const existing = this.#channels.get(name);
+    if (existing !== undefined) return existing.channel;
+    const channel = new SseChannelImpl(name, this.#publish, {
+      members: () => this.#channels.get(name)?.members,
+      add: (conn) => this.#add(name, conn, channel),
+      remove: (conn) => this.#remove(name, conn),
+    });
     return channel;
   }
 
   /**
-   * Returns the named channel if one already exists, without creating it.
-   *
-   * The non-allocating counterpart to {@linkcode ChannelRegistry.get}. It
-   * matters more here than in the WebSocket plugin's room registry: this map
-   * has no reclamation path at all, so a channel `get` creates lives until
-   * {@linkcode ChannelRegistry.clear} runs at shutdown.
+   * Returns a channel with members, without creating an entry. Empty channels
+   * are reclaimed when their last member leaves.
    *
    * @param name - Channel name
-   * @returns The channel, or `undefined` when no channel of that name exists
+   * @returns The channel, or `undefined` when it has no members
    * @since 0.4.0
    */
   peek(name: string): SseChannelImpl | undefined {
-    return this.#channels.get(name);
+    return this.#channels.get(name)?.channel;
   }
 
   /**
@@ -164,10 +184,10 @@ export class ChannelRegistry {
    * @since 0.2.0
    */
   deliverRemote(name: string, msg: SseMessage): void {
-    this.#channels.get(name)?.publishLocal(msg);
+    this.#channels.get(name)?.channel.publishLocal(msg);
   }
 
-  /** Total number of registered channels. */
+  /** Total number of channels with members. */
   get size(): number {
     return this.#channels.size;
   }
@@ -179,13 +199,40 @@ export class ChannelRegistry {
    * @since 0.1.0
    */
   removeFromAll(conn: ISseConnection): void {
-    for (const channel of this.#channels.values()) {
-      channel.remove(conn);
-    }
+    const names = this.#joined.get(conn);
+    if (names === undefined) return;
+    for (const name of names) this.#remove(name, conn);
   }
 
   /** Clears all channels. */
   clear(): void {
     this.#channels.clear();
+    this.#joined = new WeakMap();
+  }
+
+  #add(name: string, conn: ISseConnection, channel: SseChannelImpl): void {
+    let entry = this.#channels.get(name);
+    if (entry === undefined) {
+      entry = { channel, members: new Set() };
+      this.#channels.set(name, entry);
+    }
+    entry.members.add(conn);
+    let names = this.#joined.get(conn);
+    if (names === undefined) {
+      names = new Set();
+      this.#joined.set(conn, names);
+    }
+    names.add(name);
+  }
+
+  #remove(name: string, conn: ISseConnection): void {
+    const entry = this.#channels.get(name);
+    if (entry === undefined) return;
+    entry.members.delete(conn);
+    if (entry.members.size === 0) this.#channels.delete(name);
+    const names = this.#joined.get(conn);
+    if (names === undefined) return;
+    names.delete(name);
+    if (names.size === 0) this.#joined.delete(conn);
   }
 }

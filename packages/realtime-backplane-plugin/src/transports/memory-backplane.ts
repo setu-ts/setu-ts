@@ -5,10 +5,15 @@
  * @since 0.2.0
  */
 
-import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
+import type {
+  IRealtimeBackplane,
+  IRealtimeHandlerErrorReporter,
+  RealtimeFrame,
+  RealtimeFrameHandler,
+} from '@setu-ts/common';
+import { dispatchRealtimeFrame } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
-import { dispatchFrame } from './dispatch.ts';
-import { recordHandlerError } from './handler-errors.ts';
+import { createTransportHandlerReporter } from './handler-errors.ts';
 
 /**
  * A process-wide bus. Named buses stay isolated from one another, so
@@ -42,22 +47,22 @@ export class MemoryBackplane implements IRealtimeBackplane {
   readonly #handlers = new Set<RealtimeFrameHandler>();
   #connected = false;
   /**
-   * The most recent 100 errors thrown by subscribers, oldest first.
-   *
-   * The in-process transport has no logger and no driver callback to surface a
-   * throw to, so it records rather than swallows: a test — or an operator
-   * inspecting the instance — can see that a consumer failed even though the
-   * fan-out correctly continued to the others.
+   * The most recent 100 subscriber throws and rejections, oldest first.
+   * Retained with or without an application reporter, so directly constructed
+   * transports still expose consumer failures while fan-out continues.
    */
   readonly #handlerErrors: Error[] = [];
+  readonly #handlerReporter: IRealtimeHandlerErrorReporter;
 
   /**
    * @param origin - This instance's identity
    * @param bus - The process-wide bus name to join
+   * @param reporter - Optional subscriber failure and recovery sink; history is always retained
    */
-  constructor(origin: string, bus = 'default') {
+  constructor(origin: string, bus = 'default', reporter?: IRealtimeHandlerErrorReporter) {
     this.origin = origin;
     this.#bus = bus;
+    this.#handlerReporter = createTransportHandlerReporter(this.#handlerErrors, reporter);
   }
 
   /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
@@ -148,9 +153,7 @@ export class MemoryBackplane implements IRealtimeBackplane {
     if (frame.origin === this.origin) {
       return;
     }
-    const delivered = dispatchFrame(this.#handlers, frame, (error) => {
-      recordHandlerError(this.#handlerErrors, error);
-    });
+    const delivered = dispatchRealtimeFrame(this.#handlers, frame, this.#handlerReporter);
     // M98l: counted only after the own-origin filter admitted the frame.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }

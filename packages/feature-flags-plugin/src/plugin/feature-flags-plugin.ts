@@ -50,7 +50,7 @@ export function createProvider(
 
     case 'launchdarkly': {
       // Narrowed by switch discriminant — no cast needed.
-      return new LaunchDarklyProvider(options.options, ctx.logger);
+      return new LaunchDarklyProvider(options.options, ctx.logger, options.maxCachedContexts);
     }
 
     case 'custom': {

@@ -48,20 +48,14 @@ const deploys = sse.channel('deploys');
 deploys.publish({ data: JSON.stringify({ build: 412, status: 'live' }) });
 ```
 
-**`channel(name)` is get-or-create; `peek(name)` is the read that is not.** The first call to
-`channel(name)` creates the channel and every later call with the same name returns it — so reading
-`channel(name).size` for an arbitrary caller-supplied name registers one channel per distinct name
-polled. **Nothing reclaims a channel before shutdown**: the registry has no removal path outside the
-one that runs when the application stops, so unlike a WebSocket room (which is swept on the next
-disconnection) a leaked channel lives for the life of the process.
+`channel(name)` returns a reusable handle. Membership is allocated when a connection joins and
+reclaimed when the last member leaves. A held handle keeps working after reclamation: publishing
+resolves current members by name, including connections that joined through a later handle.
+Disconnect cleanup visits only the channels the connection joined.
 
-`channelCount` is the operator-visible side of this, reported by the `sse` health indicator as
-`channels`: because nothing reclaims a channel, the number only rises for the life of a running
-application, so a steadily climbing value means names are being derived from unbounded input. Only
-shutdown lowers it — `onClose` discards every channel.
-
-Use `peek` wherever the name comes from a request. It returns the channel if one exists and
-`undefined` otherwise, and registers nothing:
+`channelCount`, reported as `channels` by the health indicator, counts channels with members.
+`peek(name)` returns `undefined` for an empty channel and allocates nothing. Use it for presence
+reads:
 
 ```typescript
 app.router.get('/subscribers/:build', (ctx) => {

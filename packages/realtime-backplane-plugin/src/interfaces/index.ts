@@ -9,6 +9,7 @@ import type {
   ConnectionErrorReporter,
   IRealtimeBackplane,
   RealtimeDiagnosticsOptions,
+  RealtimeFrame,
 } from '@setu-ts/common';
 
 /**
@@ -109,6 +110,12 @@ export interface IRedisModule {
  * Options shared by every transport arm.
  */
 export interface BackplaneCommonOptions {
+  /**
+   * Receives every subscriber throw or rejection instead of default logging.
+   * Hook failures are swallowed; the bounded handlerErrors history is retained.
+   * @since 0.11.0
+   */
+  readonly onHandlerError?: (error: unknown, frame: RealtimeFrame) => void;
   /**
    * M70n X3-4: when the resolved transport is `'memory'`, the plugin logs a
    * process-local notice at `register()` — frames fan out only within this

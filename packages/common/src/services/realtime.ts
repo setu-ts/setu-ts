@@ -78,6 +78,8 @@ export interface RealtimeFrame {
 
 /**
  * Receives frames published by other instances.
+ * Returned promises and thenables are observed by dispatchRealtimeFrame:
+ * rejection is reported per subscriber without escaping the transport callback.
  *
  * @param frame - The arriving frame, already filtered of own-origin echoes
  * @since 0.2.0

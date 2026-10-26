@@ -31,6 +31,7 @@ export class EjectionTracker {
   readonly #runtime: IRuntimeServices;
   readonly #options: Required<EjectionOptions>;
   readonly #states = new Map<string, InstanceState>();
+  #sweepAt = 64;
 
   /**
    * @param runtime - Supplies the monotonic clock
@@ -73,6 +74,8 @@ export class EjectionTracker {
   ): void {
     const key = this.#key(serviceName, instance.id);
     const now = this.#runtime.hrtime();
+
+    this.#sweepExpired(now);
 
     if (outcome === 'success') {
       this.#states.delete(key);
@@ -117,6 +120,22 @@ export class EjectionTracker {
   /** Drops all tracked state. */
   clear(): void {
     this.#states.clear();
+    this.#sweepAt = 64;
+  }
+
+  /** Amortised sweep: never discard a live window or an ongoing ejection. */
+  #sweepExpired(now: number): void {
+    if (this.#states.size < this.#sweepAt) return;
+    const windowStart = now - this.#options.windowMs;
+    for (const [key, state] of this.#states) {
+      if (
+        (state.ejectedUntilMs === null || state.ejectedUntilMs <= now) &&
+        state.failures.every((stamp) => stamp <= windowStart)
+      ) {
+        this.#states.delete(key);
+      }
+    }
+    this.#sweepAt = Math.max(64, this.#states.size * 2);
   }
 
   #key(serviceName: string, id: string): string {

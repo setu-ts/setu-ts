@@ -205,6 +205,7 @@ package fits the plugin architecture.
 | `createConnectionErrorReporter`       | function  |
 | `createMaskRedactor`                  | function  |
 | `createPathMatcher`                   | function  |
+| `createRealtimeHandlerErrorReporter`  | function  |
 | `createRealtimeObservationCollector`  | function  |
 | `createRedactionService`              | function  |
 | `createToken`                         | function  |
@@ -212,6 +213,7 @@ package fits the plugin architecture.
 | `decodeCursor`                        | function  |
 | `decodeFrameData`                     | function  |
 | `describeError`                       | function  |
+| `dispatchRealtimeFrame`               | function  |
 | `encodeCursor`                        | function  |
 | `encodeFrameData`                     | function  |
 | `eraseRedactor`                       | function  |
@@ -469,6 +471,7 @@ package fits the plugin architecture.
 | `IQueueDiagnosticsSource`             | interface |
 | `IRealtimeBackplane`                  | interface |
 | `IRealtimeDiagnosticsSource`          | interface |
+| `IRealtimeHandlerErrorReporter`       | interface |
 | `IRealtimeObservationCollector`       | interface |
 | `IRedactionService`                   | interface |
 | `IRequest`                            | interface |
@@ -556,6 +559,7 @@ package fits the plugin architecture.
 | `RealtimeDiagnosticsSnapshot`         | interface |
 | `RealtimeFrame`                       | interface |
 | `RealtimeGaugeReading`                | interface |
+| `RealtimeHandlerErrorReporterOptions` | interface |
 | `RealtimeObservationCollectorInit`    | interface |
 | `ReconnectSupervisorOptions`          | interface |
 | `RecurringOptions`                    | interface |

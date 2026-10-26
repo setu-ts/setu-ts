@@ -151,27 +151,20 @@ export interface ISseService {
    */
   open(ctx: IRequestContext): ISseConnection;
   /**
-   * Returns or creates a named channel.
-   *
-   * Creating is the point: the first call for a name registers a channel that
-   * lives until the process stops. Use {@linkcode ISseService.peek} to read a
-   * caller-supplied name without registering anything.
+   * Returns a reusable named channel handle. Membership is allocated on add
+   * and reclaimed when the last member leaves. Held handles resolve members
+   * by name and remain usable after reclamation.
    *
    * @param name - Channel name
    * @returns The named channel
    */
   channel(name: string): SseChannel;
   /**
-   * Returns the named channel if one already exists, without creating it.
-   *
-   * The non-allocating counterpart to {@linkcode ISseService.channel}. A
-   * presence or dashboard endpoint that reports `size` for a name taken from a
-   * request must use this: `channel(name)` would register one channel per
-   * distinct name polled, and an SSE channel is never reclaimed before
-   * shutdown.
+   * Returns the named channel when it has members, without creating a handle
+   * or membership entry. Empty channels return undefined.
    *
    * @param name - Channel name
-   * @returns The channel, or `undefined` when no channel of that name exists
+   * @returns The channel, or `undefined` when it has no members
    * @example
    * ```typescript
    * const subscribers = sse.peek(`build:${id}`)?.size ?? 0;
@@ -182,18 +175,8 @@ export interface ISseService {
   /** Current number of open connections. */
   readonly connectionCount: number;
   /**
-   * Number of channels the registry currently holds.
-   *
-   * The counterpart to {@linkcode IWebSocketService.roomCount}, and worth
-   * watching rather than merely reporting: a channel is created by
-   * {@linkcode ISseService.channel} and nothing reclaims it, so **for the life
-   * of a running application this number only rises**. A steadily climbing
-   * count means channel names are being derived from unbounded input — use
-   * {@linkcode ISseService.peek} on any path that reads a caller-supplied name.
-   *
-   * The one thing that lowers it is shutdown: the plugin's `onClose` discards
-   * every channel, so a probe racing teardown reads `0` rather than the last
-   * live value.
+   * Number of channels with members. Drops when a last member leaves and
+   * becomes zero when shutdown clears the registry.
    *
    * @since 0.4.0
    */

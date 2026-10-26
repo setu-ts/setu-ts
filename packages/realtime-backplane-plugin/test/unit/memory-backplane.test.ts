@@ -4,9 +4,74 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 import type { RealtimeFrame } from '@setu-ts/common';
 import { MemoryBackplane } from '../../src/transports/memory-backplane.ts';
+
+it('captures asynchronous non-coercible rejection values without a history-sink rejection', async () => {
+  const sender = new MemoryBackplane('sender', 'non-coercible-error');
+  const receiver = new MemoryBackplane('receiver', 'non-coercible-error');
+  const unhandled: unknown[] = [];
+  const listener = (error: unknown): void => {
+    unhandled.push(error);
+  };
+  const error: unknown = Object.create(null);
+  process.on('unhandledRejection', listener);
+  try {
+    await sender.connect();
+    await receiver.connect();
+    await receiver.subscribe(async () => {
+      await Promise.resolve();
+      throw error;
+    });
+    await sender.publish({ kind: 'ws-room', origin: 'sender', name: 'room', data: 'hi' });
+    await setImmediate();
+    expect(unhandled).toEqual([]);
+    expect(receiver.handlerErrors).toHaveLength(1);
+    expect(receiver.handlerErrors[0]).toBeInstanceOf(Error);
+  } finally {
+    await sender.close();
+    await receiver.close();
+    process.off('unhandledRejection', listener);
+  }
+});
+
+it('captures asynchronous memory subscriber errors in bounded history and reporter', async () => {
+  const failed = vi.fn();
+  const succeeded = vi.fn();
+  const sender = new MemoryBackplane('sender', 'async-errors');
+  const receiver = new MemoryBackplane('receiver', 'async-errors', { failed, succeeded });
+  const unhandled: unknown[] = [];
+  const listener = (error: unknown): void => {
+    unhandled.push(error);
+  };
+  process.on('unhandledRejection', listener);
+  try {
+    await sender.connect();
+    await receiver.connect();
+    const error = new Error('async subscriber');
+    const bad = async (): Promise<void> => {
+      await Promise.resolve();
+      throw error;
+    };
+    await receiver.subscribe(bad);
+    const good = (): void => {};
+    await receiver.subscribe(good);
+    const frame: RealtimeFrame = { kind: 'ws-room', origin: 'sender', name: 'room', data: 'hi' };
+    for (let i = 0; i < 101; i++) await sender.publish(frame);
+    await setImmediate();
+    expect(unhandled).toEqual([]);
+    expect(receiver.handlerErrors).toHaveLength(100);
+    expect(failed).toHaveBeenCalledTimes(101);
+    expect(failed).toHaveBeenCalledWith(bad, error, frame);
+    expect(succeeded).toHaveBeenCalledWith(good);
+  } finally {
+    await sender.close();
+    await receiver.close();
+    process.off('unhandledRejection', listener);
+  }
+});
 
 /** Builds a frame with a caller-chosen origin. */
 function frame(origin: string, name = 'lobby'): RealtimeFrame {

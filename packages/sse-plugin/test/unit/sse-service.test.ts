@@ -66,6 +66,7 @@ describe('SseService', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
     const ch1 = service.channel('room');
+    ch1.add(service.open(createFakeContext({ runtime })));
     const ch2 = service.channel('room');
     expect(ch1).toBe(ch2);
   });
@@ -177,6 +178,7 @@ describe('SseService.peek (M74 / X3-8)', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
     const created = service.channel('deploys');
+    created.add(service.open(createFakeContext({ runtime })));
 
     expect(service.peek('deploys')).toBe(created);
   });
@@ -197,14 +199,14 @@ describe('SseService.peek (M74 / X3-8)', () => {
 });
 
 describe('SseService.channelCount (M74)', () => {
-  it('starts at zero and counts each distinct channel created', () => {
+  it('starts at zero and counts each distinct channel with members', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
 
     expect(service.channelCount).toBe(0);
 
-    service.channel('deploys');
-    service.channel('builds');
+    service.channel('deploys').add(service.open(createFakeContext({ runtime })));
+    service.channel('builds').add(service.open(createFakeContext({ runtime })));
     service.channel('deploys');
 
     expect(service.channelCount).toBe(2);
@@ -219,27 +221,25 @@ describe('SseService.channelCount (M74)', () => {
     expect(service.channelCount).toBe(0);
   });
 
-  it('does not fall while the application runs — an emptied channel is still counted', () => {
-    // The property that makes this number worth watching rather than merely
-    // reporting. Nothing reclaims an SSE channel while the app is up.
+  it('falls when the last member disconnects while held handles remain usable', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
-    service.channel('deploys');
+    const channel = service.channel('deploys');
+    const conn = service.open(createFakeContext({ runtime }));
+    channel.add(conn);
 
     expect(service.channelCount).toBe(1);
-    expect(service.peek('deploys')?.size).toBe(0);
-    expect(service.channelCount).toBe(1);
+    conn.close();
+    expect(service.peek('deploys')).toBeUndefined();
+    expect(service.channelCount).toBe(0);
+    expect(channel.size).toBe(0);
   });
 
-  it('is reset to zero by closeAll, which is the one thing that lowers it', () => {
-    // Pins the single exception the contract names. `SseService` is barrel
-    // exported, so `closeAll` is publicly reachable as well as being what the
-    // plugin's onClose calls — an unqualified "never decreases" would be a
-    // documentation lie, and this is the case that makes it one.
+  it('is reset to zero by closeAll', () => {
     const runtime = createFakeRuntime({ uuidPrefix: 'svc' });
     const service = new SseService({}, runtime);
-    service.channel('a');
-    service.channel('b');
+    service.channel('a').add(service.open(createFakeContext({ runtime })));
+    service.channel('b').add(service.open(createFakeContext({ runtime })));
     expect(service.channelCount).toBe(2);
 
     service.closeAll();
