@@ -85,13 +85,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // One more since M114: the `--module` placement section shows a shell fence.
     // Two more since M116: the `setu agents` section shows a shell fence and the
     // reminder line `setu add` prints. One more since M119h: the symlinked-member
-    // refusal text fence.
-    total: 17,
+    // refusal text fence. Three more since M118: the wiring-check section shows a
+    // shell fence, a text fence of its output and a JSON silence-file fence.
+    total: 20,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 16,
+    skipped: 19,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -253,12 +254,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M116: +2 skipped fences in docs/cli.md's `setu agents` section.
   // Examples layout cleanup: +2 skipped fences in docs/examples.md.
   // M119h: +1 skipped text fence in docs/cli.md's `setu agents` section.
-  total: 301,
+  // M118: +3 skipped fences in docs/cli.md's wiring-check section.
+  total: 304,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 72,
+  skipped: 75,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

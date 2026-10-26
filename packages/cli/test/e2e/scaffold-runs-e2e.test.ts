@@ -64,7 +64,7 @@ for (const target of ['deno', 'bun'] as const) {
         const path = `${project}/src/modules/greeting/index.ts`;
         const source = await nodeFs.readFile(path, 'utf8');
         const removed = source.replace(
-          /import\s+\{[^}]*\}\s+from\s*['"]\.\/greeting\.routes\.ts['"];?/,
+          /import\s+\{[^}]*\}\s+from\s*[\x27\x22]\.\/greeting\.routes\.ts[\x27\x22];?/,
           '',
         );
         expect(removed).not.toBe(source);
