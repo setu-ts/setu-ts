@@ -28,7 +28,6 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
-import { readProjectWiring } from './artifact-scanner.ts';
 import { escapeName } from './names.ts';
 import { HTTP_SEAM_BARREL, HTTP_SEAM_DIR, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 
@@ -80,17 +79,6 @@ export function legacyLayoutNotice(files: readonly string[]): readonly string[] 
 
 /** The application file that wires the generated barrel into the app. */
 export const CONFIG_MODULE = 'setu.config.ts';
-
-/**
- * Reads a project's `setu.config.ts`.
- *
- * @param fs - The filesystem to read through
- * @param dir - The project directory
- * @returns The source, or an empty string when the file is absent
- */
-export async function readConfigModule(fs: IFileSystem, dir: string): Promise<string> {
-  return (await readProjectWiring(fs, dir))?.source ?? '';
-}
 
 /**
  * Renders the migration notice for a config still calling the registrar with

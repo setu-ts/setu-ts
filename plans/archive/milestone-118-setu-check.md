@@ -511,6 +511,61 @@ pnpm run release:verify 0.11.0
 - **Deno's `deno check` task runs the CLI through `-A`.** → The same grant `cliInvocation` already
   documents for every Deno `setu` command; `check` reads only.
 
+## 8a. Design security review
+
+**Written after the committed-tree audit failed M118, from the design — not before the code.** The
+plan as first approved had no security review: it treated `setu check` as a local developer tool,
+and the verification report repeated that the diff "crosses no trust boundary". It does. The
+milestone's purpose is a CI gate, and CI runs it on pull requests from anyone, so every file it
+reads is attacker-controlled. The audit of `5322c3f7` found this (F0) together with F1–F6; the
+decisions below are what the fixes implement, and the obligations bind the re-audit to them.
+
+- **Reviewed flows:**
+  1. `setu check` in CI on a checkout of an untrusted pull request, standalone and from a workspace
+     root.
+  2. `setu sync`, with and without `--dry-run`, run by a developer on a checkout they did not write.
+  3. `setu generate`, which shares `diagnoseProject` and now runs the same parsers.
+  4. A generated project's `check` script or task (`npm run check`, `deno task check`).
+- **Assets:** the CI runner's availability (a gate that hangs is switched off, or blocks merges);
+  the developer's and runner's filesystem outside the project; the integrity of the gate's verdict
+  (a finding must not be dropped by a malformed input); the terminal and CI log the output reaches.
+- **Attackers:** a pull-request author who controls every file in the checkout — seam barrels,
+  artifacts, `setu.config.ts`, `.setu-ts/check.json`, `setu.workspace.json`, directory and file
+  names, and symbolic links — but not the CLI, its dependencies or the runner. Out of scope: a
+  maintainer who merges that code (it then runs as the application anyway).
+- **Decisions:**
+  - **D-S1 Linear parsing (F1, F3).** Every parser on the `check` path runs in time linear in its
+    input. The barrel parser (`declarationSpecifiers`), `withoutImports`, class-based `moduleActive`
+    and `exportsSymbol`'s clause scan are rewritten without backtracking; each keeps the semantics
+    of the expression it replaces, except that a barrel brace list may not contain `{` or `;`.
+    Budget: under 1 s per 1 MiB file, against a measured tens of milliseconds.
+  - **D-S2 No reads or writes through a linked member (F2).** `check` and `sync` refuse an
+    `apps/<member>` that does not resolve to its own place under the workspace root, with the
+    `setu agents` refusal wording; the member is skipped and the run fails.
+  - **D-S3 An unreadable config fails (F4).** A `setu.config.ts` that exists but is a directory, a
+    special file, over 1 MiB or unreadable is `setu.E012`, an error; `setu.W002` stays for an absent
+    one.
+  - **D-S4 `check` executes nothing; `sync` and `generate` load the formatter (F5).** `check`
+    neither imports project code nor loads its Prettier configuration. `sync` and `generate`,
+    `--dry-run` included, format through the project's Prettier configuration, which runs project
+    code; that is documented as "do not run on unreviewed code", matching `generate`'s existing
+    behaviour, rather than changed in one of the two.
+  - **D-S5 The Deno task keeps `-A` (F6, accepted risk, maintainer decision 2026-10-26).** The
+    measured minimum is `--allow-read=. --allow-sys=hostname,uid --allow-env=PWD`; `-A` is kept for
+    consistency with every documented Deno `setu` invocation. The CLI is first-party with no install
+    scripts, and the task runs only the CLI.
+- **Audit obligations (re-audit):**
+  1. Each F1/F3 shape at 1 MiB, through the real CLI and per function, under 1 s; positive control:
+     the pre-fix code exceeds it (the regression tests record both).
+  2. A symlinked member and a symlinked `apps` directory: `sync` writes nothing outside the
+     workspace (sentinel unchanged) and both commands exit `1` naming the member; positive control:
+     a real member still checks and syncs.
+  3. `setu.config.ts` as a directory, FIFO, link to `/dev/zero`, over 1 MiB, mode 000: `E012`, exit
+     `1`; absent: `W002`, exit `0`.
+  4. The rewritten functions return what the replaced expressions returned on a table of inputs.
+  5. Re-confirm the passed areas against the fixed tree: read limits, silencing, output escaping,
+     read-only `check`.
+
 ## 9. Out of scope
 
 - DI container graph validation (missing, cycle, captive) inside `setu check` — it stays at boot in

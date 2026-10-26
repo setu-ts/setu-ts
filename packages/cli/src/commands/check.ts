@@ -2,7 +2,13 @@
 import type { IFileSystem } from '@setu-ts/common';
 import { stringFlag, type ParsedArgs } from '../args.ts';
 import { detectProject } from '../utils/project-detector.ts';
-import { joinPath, readExistingText, resolveDir } from '../utils/file-writer.ts';
+import {
+  assertInsideProject,
+  joinPath,
+  PathEscapesProjectError,
+  readExistingText,
+  resolveDir,
+} from '../utils/file-writer.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
 import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { escapeName } from '../utils/names.ts';
@@ -59,6 +65,21 @@ export async function forEachProject(
       error: (line) => deps.error(`${escapeName(member.name)}: ${line}`),
     };
     const memberDir = joinPath(dir, 'apps', member.name);
+    // A member reached through a link would let `sync` write wherever the link
+    // points, and the writer would accept it: it resolves the member root it is
+    // handed. The member must resolve to its own place under the workspace.
+    try {
+      await assertInsideProject(deps.fs, dir, memberDir);
+    } catch (cause) {
+      if (!(cause instanceof PathEscapesProjectError)) throw cause;
+      memberDeps.error(
+        `${escapeName(memberDir)} is a symlinked member of the workspace at ${escapeName(dir)}; ` +
+          'Setu will not read or write through links inside a workspace. Replace the link with ' +
+          'the directory it points at, then run this again.',
+      );
+      code = Math.max(code, EXIT_ERROR);
+      continue;
+    }
     const detected = await detectProject(deps.fs, memberDir);
     if (detected.kind !== 'project') {
       memberDeps.error(`${escapeName(memberDir)} is not a readable project (${detected.kind}).`);

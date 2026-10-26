@@ -331,9 +331,22 @@ export function exportsSymbol(source: string, symbol: string): boolean {
   // unreachable, so it would sit permanently uncovered. Including the `export {` and `}`
   // in the tested text is harmless, because a symbol is always a derived identifier and
   // never the reserved word itself.
+  //
+  // The clauses are found in one forward pass, the linear form of
+  // `/export\s*\{[^}]*\}/g`: that expression rescanned to the next `}` from every
+  // `export {`, so one 1 MiB artifact of `export{` took 50 s, and `setu check`
+  // reads artifacts from a pull request (M118 audit F3). Matches still do not
+  // overlap: the search resumes after each clause's `}`.
   const word = new RegExp(`\\b${pattern}\\b`);
-  for (const clause of source.matchAll(/export\s*\{[^}]*\}/g)) {
-    if (word.test(clause[0])) return true;
+  let close = -1;
+  for (let at = source.indexOf('export'); at >= 0; at = source.indexOf('export', at + 1)) {
+    let open = at + 'export'.length;
+    while (/\s/.test(source.charAt(open))) open++;
+    if (source[open] !== '{') continue;
+    if (close < open) close = source.indexOf('}', open);
+    if (close < 0) return false;
+    if (word.test(source.slice(at, close + 1))) return true;
+    at = close;
   }
   return false;
 }

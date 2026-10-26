@@ -14,11 +14,15 @@ All notable changes to this project are documented here. The format follows
   barrel on disk, an artifact is registered both by its barrel and by hand, a feature module is
   skipped or not activated, or the old `src/routes/` layout is still in use. It never loads the
   application. Barrels are compared as sets of names, so a reformatted barrel passes. Every finding
-  carries a stable id (`setu.E001`…`setu.E011`, `setu.W001`…`setu.W004`); warnings exit `0` unless
-  `--strict`. `.setu-ts/check.json` silences an id everywhere or for one path, and an invalid file
-  silences nothing (`setu.E011`). From a workspace root both commands run over every member.
-  `setu sync [--dir] [--dry-run]` rewrites every CLI-managed barrel from its directory with the
-  renderer `setu generate` uses, writes nothing else, and then reports what it could not fix.
+  carries a stable id (`setu.E001`…`setu.E012`, `setu.W001`…`setu.W004`); warnings exit `0` unless
+  `--strict`. A `setu.config.ts` that exists but cannot be read is an error, not a missing config.
+  `.setu-ts/check.json` silences an id everywhere or for one path, and an invalid file silences
+  nothing (`setu.E011`). From a workspace root both commands run over every member, and refuse a
+  member that is a symbolic link. `check` executes no project code and parses in linear time, so it
+  is safe on an untrusted pull request; `sync` and `generate` load the project's Prettier
+  configuration. `setu sync [--dir] [--dry-run]` rewrites every CLI-managed barrel from its
+  directory with the renderer `setu generate` uses, writes nothing else, and then reports what it
+  could not fix.
 
 - **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
   `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The

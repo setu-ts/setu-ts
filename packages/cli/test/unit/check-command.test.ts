@@ -57,9 +57,10 @@ it('renders each stable id with its severity and strict counts', () => {
     'src/routes/ still holds 1 file(s): old.routes.ts.',
     'Invalid .setu-ts/check.json: invalid JSON. Nothing was silenced.',
     'setu.config.ts does not reference registerGeneratedRoutes; consume the barrel exports: (src/controllers/index.ts; config is unclassifiable)',
-    'Cannot read setu.config.ts; check wiring for src/controllers/index.ts.',
+    'No setu.config.ts; cannot check wiring for src/controllers/index.ts.',
     'setu.config.ts calls registerGeneratedRoutes(app.router) without the service registry.',
     'Silence entry "setu.E003" matched no finding.',
+    'Cannot read setu.config.ts: not-a-file, so its wiring cannot be checked.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {

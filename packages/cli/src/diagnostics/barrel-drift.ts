@@ -27,6 +27,117 @@ export async function readBarrel(
   }
 }
 
+const WHITESPACE = /\s/;
+const IDENTIFIER_START = /[A-Za-z_$]/;
+const IDENTIFIER_PART = /[\w$]/;
+
+function isWhitespace(char: string | undefined): boolean {
+  return char !== undefined && WHITESPACE.test(char);
+}
+
+/**
+ * For every index, the position of the next character in `stops` at or after it
+ * (`-1` when none). Built once, right to left, so a lookup is constant time:
+ * the parser below never rescans text to find a closing brace or quote.
+ */
+function nextStops(text: string, stops: string): Int32Array {
+  const next = new Int32Array(text.length + 1).fill(-1);
+  for (let index = text.length - 1; index >= 0; index--)
+    next[index] = stops.includes(text.charAt(index)) ? index : (next[index + 1] ?? -1);
+  return next;
+}
+
+/** Whether a keyword at `at` begins a statement: preceded by start, `;` or a line break. */
+function atStatementStart(text: string, at: number): boolean {
+  let index = at - 1;
+  for (; index >= 0 && isWhitespace(text[index]); index--)
+    if (text[index] === '\n' || text[index] === '\r') return true;
+  return index < 0 || text[index] === ';';
+}
+
+/**
+ * Lists the module specifiers of a barrel's `import … from` and `export … from`
+ * declarations, in linear time.
+ *
+ * `setu check` runs in CI over files a pull request controls, so a parse that
+ * backtracks is a denial of service: the regular expression this replaces took
+ * minutes on a 1 MiB barrel of blank lines (M118 audit F1). Keywords are found
+ * once in the string-masked view (`code`); each declaration is then read forward
+ * from its keyword with one token step at a time, and a closing brace or quote is
+ * a table lookup. A brace list may not contain `{` or `;` — no import list does —
+ * which is what keeps each `{` resolving to at most one `}`.
+ *
+ * @param source - The barrel with comments masked (string literals kept)
+ * @param code - The same text with strings masked too, the same length
+ * @returns The specifiers, in source order
+ */
+export function declarationSpecifiers(source: string, code: string): readonly string[] {
+  const braceStop = nextStops(source, '{};');
+  const quoteStop = nextStops(source, '\'"\r\n');
+  const skip = (from: number): number => {
+    let index = from;
+    while (isWhitespace(source[index])) index++;
+    return index;
+  };
+  // At least one whitespace character, as `\s+` required; -1 when there is none.
+  const skipSome = (from: number): number => (isWhitespace(source[from]) ? skip(from) : -1);
+  const identifierEnd = (from: number): number => {
+    if (!IDENTIFIER_START.test(source.charAt(from))) return -1;
+    let index = from + 1;
+    while (IDENTIFIER_PART.test(source.charAt(index))) index++;
+    return index;
+  };
+  const braceEnd = (from: number): number => {
+    const close = braceStop[from + 1] ?? -1;
+    return source[from] === '{' && close >= 0 && source[close] === '}' ? close + 1 : -1;
+  };
+  const namespaceEnd = (from: number): number => {
+    const as = skipSome(from + 1);
+    if (as < 0 || !source.startsWith('as', as)) return -1;
+    const name = skipSome(as + 2);
+    return name < 0 ? -1 : identifierEnd(name);
+  };
+  // Every way the clause after the keyword can end, as the alternation could.
+  const clauseEnds = (from: number): readonly number[] => {
+    if (source[from] === '{') return [braceEnd(from)];
+    if (source[from] === '*') return [namespaceEnd(from), from + 1];
+    const name = identifierEnd(from);
+    if (name < 0) return [];
+    const comma = skip(name);
+    if (source[comma] !== ',') return [name];
+    const next = skip(comma + 1);
+    return [
+      source[next] === '{' ? braceEnd(next) : source[next] === '*' ? namespaceEnd(next) : -1,
+      name,
+    ];
+  };
+  const specifier = (from: number): string | undefined => {
+    const keyword = skipSome(from);
+    if (keyword < 0 || !source.startsWith('from', keyword)) return undefined;
+    const open = skip(keyword + 4);
+    const quote = source[open];
+    if (quote !== "'" && quote !== '"') return undefined;
+    const close = quoteStop[open + 1] ?? -1;
+    return close > open + 1 && source[close] === quote ? source.slice(open + 1, close) : undefined;
+  };
+  const found: string[] = [];
+  for (const match of code.matchAll(/\b(?:import|export)\b/g)) {
+    if (!atStatementStart(source, match.index)) continue;
+    const clause = skipSome(match.index + match[0].length);
+    if (clause < 0) continue;
+    // `type` is a modifier only when a clause follows it; `import type from` names `type`.
+    const typed = source.startsWith('type', clause) ? skipSome(clause + 4) : -1;
+    const starts = typed >= 0 ? [typed, clause] : [clause];
+    const resolved = starts
+      .flatMap(clauseEnds)
+      .filter((end) => end >= 0)
+      .map(specifier)
+      .find((value) => value !== undefined);
+    if (resolved !== undefined) found.push(resolved);
+  }
+  return found;
+}
+
 /** Compares import/export specifier name sets, merging families sharing a barrel. */
 export async function diagnoseBarrels(
   fs: IFileSystem,
@@ -55,16 +166,7 @@ export async function diagnoseBarrels(
     // to occupy code in the string-masked view as well. A semicolon inside a
     // string must not turn import-looking prose into a stale artifact.
     const code = maskSourceCode(source) ?? '';
-    const imports = [
-      ...source.matchAll(
-        /(?:^|[;\r\n])\s*(?:import|export)\s+(?:type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*(['"])([^'"\r\n]+)\1/g,
-      ),
-    ]
-      .filter((match) => {
-        const offset = match[0].search(/\b(?:import|export)\b/);
-        return /^(?:import|export)\b/.test(code.slice(match.index + offset));
-      })
-      .map((match) => match[2]);
+    const imports = declarationSpecifiers(source, code);
     const unlisted = new Set<string>();
     const stale = new Set<string>();
     for (const family of families) {

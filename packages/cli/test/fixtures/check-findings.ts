@@ -49,4 +49,5 @@ export const CHECK_FINDINGS: readonly Finding[] = [
   { kind: 'no-config', barrels: ['src/controllers/index.ts'] },
   { kind: 'legacy-registrar' },
   { kind: 'silence-unmatched', entry: '"setu.E003"' },
+  { kind: 'config-unreadable', path: 'setu.config.ts', reason: 'not-a-file' },
 ];

@@ -1,7 +1,7 @@
 /** The read-only owner of generated-project diagnostics. @module */
 import type { IFileSystem } from '@setu-ts/common';
 import type { ArtifactScanAll } from '../utils/artifact-scanner.ts';
-import { readProjectWiring, scanArtifacts } from '../utils/artifact-scanner.ts';
+import { scanArtifacts } from '../utils/artifact-scanner.ts';
 import { scanModuleArtifacts, scanModules } from '../utils/module-scanner.ts';
 import { generatorMode, type GeneratorMode } from '../utils/generator-mode.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
@@ -62,6 +62,11 @@ export type Finding =
       readonly mode: GeneratorMode;
     }
   | { readonly kind: 'no-config'; readonly barrels: readonly string[] }
+  | {
+      readonly kind: 'config-unreadable';
+      readonly path: string;
+      readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
+    }
   | { readonly kind: 'check-config-invalid'; readonly path: string; readonly entry: string }
   | { readonly kind: 'silence-unmatched'; readonly entry: string };
 
@@ -88,7 +93,11 @@ export async function diagnoseProject(
   installed: ReadonlySet<string>,
   options?: { readonly module?: string },
 ): Promise<ProjectDiagnosis> {
-  const config = (await readProjectWiring(fs, dir))?.source ?? '';
+  // Read with the barrels' bounded reader so an unreadable config (a directory,
+  // a FIFO, a link to a device, over 1 MiB, no permission) stays distinct from
+  // an absent one: treating it as absent would drop every wiring finding.
+  const configRead = await readBarrel(fs, joinPath(dir, 'setu.config.ts'));
+  const config = configRead.kind === 'source' ? configRead.source : '';
   // The existing scanners own admission and hand-registration detection. Supply
   // their config reads from this bounded snapshot, including module scans, so
   // every finding in one diagnosis sees the same wiring and opens it only once.
@@ -163,7 +172,9 @@ export async function diagnoseProject(
     const finding = wiringFinding(config, barrel, site.symbols, site.site);
     if (finding !== undefined) findings.push(finding);
   }
-  if (config === '' && wiredBarrels.length > 0)
+  if (configRead.kind === 'unreadable')
+    findings.push({ kind: 'config-unreadable', path: 'setu.config.ts', reason: configRead.reason });
+  else if (config === '' && wiredBarrels.length > 0)
     findings.push({ kind: 'no-config', barrels: wiredBarrels });
   const activation = await readBarrel(fs, joinPath(dir, 'src/modules/index.ts'));
   const moduleArtifacts = new Map<string, ArtifactScanAll['artifacts']>();

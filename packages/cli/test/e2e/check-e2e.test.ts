@@ -169,3 +169,38 @@ it('checks two workspace members and names the broken member', async () => {
   expect((await run(['sync', '--dir', workspace])).code).toBe(0);
   expect((await run(['check', '--dir', workspace])).code).toBe(0);
 });
+
+it('refuses a workspace member reached through a symbolic link, writing nothing through it', async () => {
+  expect((await run(['new', 'workspace', '--workspace'])).code).toBe(0);
+  const workspace = `${root}/workspace`;
+  expect(
+    (await run(['generate', 'app', 'orders', '--template', 'rest', '--dir', workspace])).code,
+  ).toBe(0);
+  // The member's real files move outside the workspace; a link takes their place.
+  const outside = `${root}/outside`;
+  await nodeFs.rename(`${workspace}/apps/orders`, outside);
+  await nodeFs.symlink(outside, `${workspace}/apps/orders`);
+  const sentinel = `${outside}/src/controllers/index.ts`;
+  await nodeFs.writeFile(sentinel, 'sentinel\n');
+  for (const command of ['sync', 'check']) {
+    const result = await run([command, '--dir', workspace]);
+    expect(result.code, command).toBe(1);
+    expect(result.err).toContain('orders: ');
+    expect(result.err).toContain('is a symlinked member of the workspace');
+  }
+  expect(await nodeFs.readFile(sentinel, 'utf8')).toBe('sentinel\n');
+});
+
+it('fails on a setu.config.ts it cannot read, and only warns when there is none', async () => {
+  expect((await run(['new', 'shop', '--template', 'rest'])).code).toBe(0);
+  const project = `${root}/shop`;
+  await nodeFs.rm(`${project}/setu.config.ts`);
+  const missing = await run(['check', '--dir', project]);
+  expect(missing.code).toBe(0);
+  expect(missing.err).toContain('warning setu.W002:');
+  await nodeFs.mkdir(`${project}/setu.config.ts`);
+  const unreadable = await run(['check', '--dir', project]);
+  expect(unreadable.code).toBe(1);
+  expect(unreadable.err).toContain('error setu.E012: Cannot read setu.config.ts: not-a-file');
+  expect(unreadable.err).not.toContain('setu.W002');
+});

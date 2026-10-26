@@ -76,9 +76,14 @@ function lines(finding: Finding): readonly string[] {
         `Cannot check ${escapeName(f.barrel)}: ${f.reason}.`,
         '  Restore a regular, classifiable barrel under 1 MiB, then run `setu sync`.',
       ];
+    case 'config-unreadable':
+      return [
+        `Cannot read ${escapeName(f.path)}: ${f.reason}, so its wiring cannot be checked.`,
+        '  Restore a regular, readable setu.config.ts under 1 MiB.',
+      ];
     case 'no-config':
       return [
-        `Cannot read setu.config.ts; check wiring for ${escapeName(f.barrels.join(', '))}.`,
+        `No setu.config.ts; cannot check wiring for ${escapeName(f.barrels.join(', '))}.`,
         '  Import and consume these barrels in your application wiring.',
       ];
     case 'check-config-invalid':
