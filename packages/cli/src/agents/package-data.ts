@@ -261,7 +261,7 @@ export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, I
   [
     'react-router-plugin',
     {
-      description: 'React Router v7 framework-mode SSR with file-based routing, as a plugin',
+      description: 'React Router 8 framework-mode SSR with file-based routing, as a plugin',
       tokens: ['SSR'],
     },
   ],

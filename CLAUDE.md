@@ -670,8 +670,12 @@ here.
   npm workspace: the load error names who loads the peer and that it belongs where that package is
   installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
   V10-58) — complete (PR #505).
-- **Next milestone** — M119i (documentation that does not match the code, or is missing). M118 and
-  M120–M123 are open in the ROADMAP; M120 depends on M118.
+- **Milestone 119i** (docs + agent cards + `scripts/check-docs.ts` — documentation that matches the
+  code, every package README compiled, release-breaking repository links refused; V10-7, V10-8,
+  V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46…V10-48, V10-56, V10-57, V9-29) —
+  complete (PR pending).
+- **Next milestone** — not yet chosen: M118 and M120–M123 are open in the ROADMAP; M120 depends on
+  M118. M119 closes its rows on a published 0.11.0 re-run.
 
 ## Verification (run before declaring any work done)
 

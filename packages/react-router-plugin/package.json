@@ -1,7 +1,7 @@
 {
   "name": "@setu-ts/react-router-plugin",
   "version": "0.10.0",
-  "description": "React Router v7 framework-mode SSR with file-based routing, as a plugin",
+  "description": "React Router 8 framework-mode SSR with file-based routing, as a plugin",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/setu-ts/setu-ts.git",

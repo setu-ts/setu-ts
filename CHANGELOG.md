@@ -205,13 +205,15 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 
 - **Documentation that matches the code (M119i).** The upgrade guide, guides, READMEs, agent cards
-  and `PUBLIC_API.md` now state what the code does: `swagger-ui-dist` on Deno (§3.3), the Workers
-  full-stack `allowJs` repair, which 4xx paths log, the module-scoped service token
-  `<module>.<name>-service`, the three 0.10.0 omissions, the service-discovery `RetryPolicy`
-  example, the request logger's unscrubbed path, the agent cards' `setu add` wording, React Router
-  8, unrepresentable Zod types, the worker-pool overshoot, and the resilience timeout. Every package
-  README is now compiled by the fence gate, and links that a release renames or points into this
-  repository by absolute URL are checked.
+  and `PUBLIC_API.md` now state what the code does: links into the released `0.10.0` sections
+  (V10-7), generated Kubernetes probes (V10-8), `swagger-ui-dist` on Deno (V10-15), the Workers
+  full-stack `allowJs` repair (V10-16), which 4xx paths log (V10-39), the module-scoped service
+  token `<module>.<name>-service` (V10-38), three missing 0.10.0 upgrade entries (V10-46, V10-47,
+  V10-48), the service-discovery `RetryPolicy` example (V10-12), the request logger's unscrubbed
+  path (V10-40), the agent cards' `setu add` wording (V10-43), React Router 8 (V10-56),
+  unrepresentable Zod types (V10-57), the worker-pool overshoot (V9-29) and the resilience timeout.
+  Every package README is now compiled by the fence gate, and absolute repository links and links to
+  a heading a release renames are checked.
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
   `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing
