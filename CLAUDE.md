@@ -676,7 +676,7 @@ here.
   #508).
 - **Milestone 118** (`packages/cli` — `setu check`, a read-only wiring gate run by every generated
   `check` script, plus `setu sync`, stable finding ids and `.setu-ts/check.json` silencing) —
-  complete (PR pending).
+  complete (PR #510).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M120–M123
   are open in the ROADMAP; M120's dependency on M118 is met.
 

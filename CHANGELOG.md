@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`setu check` and `setu sync` (M118, 0.11.0, `@setu-ts/cli`).** `setu check [--dir] [--strict]`
+- **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).** `setu check [--dir] [--strict]`
   is a read-only wiring gate: it exits `1` when a seam artifact is skipped, a barrel does not list
   an artifact in its directory or lists one that is gone, `setu.config.ts` does not reference a
   barrel on disk, an artifact is registered both by its barrel and by hand, a feature module is
@@ -116,7 +116,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Generated projects run `setu check` (M118, 0.11.0, `@setu-ts/cli`).** Node, Bun and Workers
+- **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and Workers
   scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their `check`
   script is `tsc --noEmit && setu check` (`npm run build && tsc --noEmit && setu check` for a
   Workers project with a build). Deno scaffolds gain a `check` task:
