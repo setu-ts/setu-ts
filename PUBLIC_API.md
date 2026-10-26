@@ -12529,9 +12529,10 @@ not. A request that never calls it stays on the synchronous path.
 value this request holds under `key`, compared by object identity, and on the first call for that
 key stores and returns `create()`; a throwing `create` stores nothing, so a later call retries.
 Entries cannot be enumerated or deleted and live as long as the context, so a key the owner keeps
-private gives it storage no other code can read or replace. `create` must not call `slot` with its
-own key. The kernel's context keeps the first entry without allocating; the member is optional, and
-`createTestContext` does not implement it. `forRequest` keeps each request's scope here.
+private gives it storage no other code can read or replace through `slot`. `create` must not call
+`slot` with its own key. The kernel's context keeps the first entry without allocating; the member
+is optional, and `createTestContext` does not implement it. `forRequest` keeps each request's scope
+here.
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and

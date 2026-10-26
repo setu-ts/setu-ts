@@ -434,11 +434,13 @@ is finished — without moving a request that never uses it off the kernel's syn
 
 ### 3.21 A buffered response with synchronous cleanups settles without allocating (added by §3.13)
 
-- **Decision:** `#settleRequest` checks a kernel-internal `isStreaming` getter on `ResponseBuilder`;
-  for a buffered response it runs the cleanups with `runDeferred` directly and, when that returns
-  synchronously, releases the in-flight count and completes the request inline — no snapshot object,
-  no closures. An asynchronous result and every streaming response take the existing path unchanged.
-  §3.8, §3.9 and §3.14 are unchanged in behaviour.
+- **Decision:** `#settleRequest` reads a kernel-internal `streamingBody` accessor on
+  `ResponseBuilder` (the streaming body, or `undefined`). For a buffered response it runs the
+  cleanups with `runDeferred` directly: when that returns synchronously it releases the in-flight
+  count and completes the request inline — no snapshot object, no closures — and when it returns a
+  promise it does the same once the promise settles. A streaming response's body is wrapped by
+  `wrapDeferredStream`, which is streaming-only (the helper's former buffered branch had no caller
+  left). §3.8, §3.9 and §3.14 are unchanged in behaviour.
 - **Why:** After §3.19 and §3.20 the remaining per-request cost included a response snapshot and two
   closures allocated for every request with a cleanup.
 - **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (existing §3.9 cases unchanged;
@@ -492,7 +494,7 @@ implementor.
 | `packages/common/src/http.ts`                                   | `IRequestContext.defer?`, `IRequestContext.slot?` (§3.19)                                                              |
 | `packages/common/src/index.ts`                                  | Barrel: `createToken`, new types                                                                                       |
 | `packages/kernel/src/context/request-context.ts`                | `defer`, the private list and an internal `takeDeferred()` on the handle; `slot` (§3.19)                               |
-| `packages/kernel/src/context/response.ts`                       | Internal `isStreaming` getter (§3.21)                                                                                  |
+| `packages/kernel/src/context/response.ts`                       | Internal `streamingBody` accessor (§3.21)                                                                              |
 | `packages/kernel/src/application/application.ts`                | Completion settles deferred cleanup (§3.8–§3.9, §3.21), stream wrapping                                                |
 | `packages/kernel/src/context/deferred.ts` (new, internal)       | Runs cleanups, wraps a stream, reports failures — not exported                                                         |
 | `packages/di-plugin/src/container/container.ts`                 | Open/closed lifecycle, token-keyed registry use, `forRequest`, `dispose`, `close`; lazy scope internals (§3.19–§3.20)  |
