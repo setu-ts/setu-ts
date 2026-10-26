@@ -3071,7 +3071,7 @@ what changed is that the refusal is legible.
 | `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry on get and amortised expiry sweeps on save and rotate; unexpired revoked records are retained for reuse detection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -3175,6 +3175,12 @@ To invalidate an access credential at logout before its regular expiry, construc
 shared implementation. Custom `RefreshTokenStore` implementations must preserve `familyId` and make
 `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family: family revocation must
 durably block later rotations and include any earlier successor.
+
+`MemoryRefreshTokenStore` expires records lazily on `get()` and through amortised sweeps on
+`save()`, starting at 1,024 entries and doubling the surviving size for the next sweep (minimum
+1,024). Only expired records are removed; unexpired revoked records remain for rotation reuse
+detection. `MemoryRateLimitStore` follows the same sweep rule on `increment()`, retaining each
+entry's window duration and dropping only expired windows; live limits are never evicted for a cap.
 
 ```typescript
 import {
@@ -4273,7 +4279,9 @@ ws.route(
   never does. `IWebSocketService.peek(name): WebSocketRoom | undefined` returns the room when one
   exists and `undefined` otherwise, registering nothing, and is what a presence or dashboard
   endpoint reading a request-supplied name should call. Added in M74; a **required** member, so a
-  replacement implementation of `IWebSocketService` must supply it.
+  replacement implementation of `IWebSocketService` must supply it. At the registry level,
+  `RoomRegistry.get(name)` creates on lookup too; use `RoomRegistry.peek(name)` for reads of
+  client-supplied room names.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -4349,6 +4357,9 @@ Registering the plugin **bare** is not a scaling fix: the default `'memory'` tra
 but a single-process one, and before the `localNotice` existed a bare registration also silenced the
 consumers' startup notices without fanning anything out. The notice now comes from the plugin that
 knows its own transport.
+
+The memory, messaging, and Redis transports retain the most recent 100 subscriber errors in
+`handlerErrors`, oldest first.
 
 ### Transports
 
@@ -5100,6 +5111,10 @@ remain usable.
 ---
 
 ## Diagnostics Connector (`@setu-ts/diagnostics-plugin`)
+
+Authenticated promotion periodically reclaims per-session rate buckets that have refilled to their
+full burst. Sweeps use doubling thresholds starting at 64; drained and partially refilled buckets
+keep their limits.
 
 An authenticated local connector between a native devtool client and M98a's kernel diagnostics,
 served over a runtime-owned IPv4 loopback listener. Deno and bounded polling only; no browser UI, no
@@ -8506,11 +8521,11 @@ app.router.post('/users', async (ctx) => {
   provider is never reached.
 - `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
   because `IViewEngine.render` may answer a promise); every refusal is a rejection.
-- `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
-  and logs via `ctx.logger`. Like every provider, it refuses a send outside `connect()`..
-  `disconnect()` with `'LogProvider is not connected'`, so a send after `app.stop()` rejects.
-  `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only; `SendGridProvider` is the
-  Cloudflare Workers-portable path.
+- `LogProvider` never sends real email — `.messages` retains the most recent 1,000 messages in send
+  order, while `sink` receives every message and logging uses `ctx.logger`. Like every provider, it
+  refuses a send outside `connect()`.. `disconnect()` with `'LogProvider is not connected'`, so a
+  send after `app.stop()` rejects. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
+  `SendGridProvider` is the Cloudflare Workers-portable path.
 
 ---
 
@@ -9185,6 +9200,10 @@ wire shape and inspector manifest are in `docs/diagnostics-protocol.md`.
 ---
 
 ## Metrics (`@setu-ts/metrics-plugin`)
+
+Built-in HTTP series carry `method` and `status` labels. The method label preserves `GET`, `HEAD`,
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`, and `PATCH`, compared case-sensitively; all
+other methods use `_OTHER` on both success and error paths.
 
 Provides Prometheus metrics.
 

@@ -5,6 +5,7 @@
  */
 
 import type { IPrincipal, IRuntimeServices } from '@setu-ts/common';
+import { sweepExpired } from './sweep-expired.ts';
 
 /**
  * A refresh token record stored on the server.
@@ -86,21 +87,30 @@ export interface RefreshTokenStore {
 /**
  * In-memory implementation of RefreshTokenStore.
  *
- * Entries are lazily expired on get() — when runtime.now() >= expiresAt the
- * entry is deleted and null is returned. This keeps the map bounded without
- * requiring a background cleanup job.
+ * Entries expire lazily on get() and through amortised sweeps on save() and rotate(),
+ * deleting records whose expiresAt <= runtime.now(). Unexpired revoked records
+ * remain available for rotation reuse detection. No background job is needed;
+ * memory follows unexpired records plus the doubling-threshold sweep slack.
  */
 export class MemoryRefreshTokenStore implements RefreshTokenStore {
   #map: Map<string, RefreshTokenRecord> = new Map();
   #runtime: IRuntimeServices;
+  #sweepAt = 1_024;
 
   constructor(runtime: IRuntimeServices) {
     this.#runtime = runtime;
   }
 
   save(record: RefreshTokenRecord): Promise<void> {
-    this.#map.set(record.jti, record);
+    this.#write(record);
     return Promise.resolve();
+  }
+
+  /** Every write path sweeps first, so a store that only rotates stays bounded too. */
+  #write(record: RefreshTokenRecord): void {
+    const now = this.#runtime.now();
+    this.#sweepAt = sweepExpired(this.#map, this.#sweepAt, (entry) => entry.expiresAt <= now);
+    this.#map.set(record.jti, record);
   }
 
   get(jti: string): Promise<RefreshTokenRecord | null> {
@@ -138,7 +148,7 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
     }
 
     record.revoked = true;
-    this.#map.set(successor.jti, successor);
+    this.#write(successor);
     return Promise.resolve<IRefreshTokenRotation>({ record, rotated: true });
   }
 

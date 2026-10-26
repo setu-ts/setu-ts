@@ -18,6 +18,7 @@ import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
 const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
+import { recordHandlerError } from './handler-errors.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
 import { loadRedisModule } from './redis-module.ts';
 
@@ -47,7 +48,7 @@ export class RedisBackplane implements IRealtimeBackplane {
   /** The resolved per-command timeout; `0` means unbounded. */
   readonly #commandTimeoutMs: number;
   readonly #handlers = new Set<RealtimeFrameHandler>();
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
 
   #publisher: IRedisBackplaneClient | undefined;
@@ -128,7 +129,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#topic = topic;
   }
 
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;
   }
@@ -455,7 +456,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     // where a throw would be unhandled, and the WebSocket and SSE plugins share
     // this subscription so one must not starve the other.
     const delivered = dispatchFrame(this.#handlers, parsed, (error) => {
-      this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+      recordHandlerError(this.#handlerErrors, error);
     });
     // M98l: counted only after the parse, shape and own-origin filters.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
