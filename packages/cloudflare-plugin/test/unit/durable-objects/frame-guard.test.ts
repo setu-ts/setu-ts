@@ -8,7 +8,7 @@ afterAll(() => {
   globalThis.Response = nativeResponse;
 });
 /**
- * The local copy of the frame validator and dispatcher.
+ * Wire validation for the Durable Object backplane.
  *
  * Both matter for the same reason: a Durable Object namespace is shared
  * infrastructure, and this loop runs inside a socket event listener where an
@@ -18,8 +18,8 @@ afterAll(() => {
 
 import { describe, expect, it } from 'vitest';
 
-import type { RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
-import { dispatchFrame, isRealtimeFrame } from '../../../src/durable-objects/frame-dispatch.ts';
+import type { RealtimeFrame } from '@setu-ts/common';
+import { isRealtimeFrame } from '../../../src/durable-objects/frame-guard.ts';
 
 const FRAME: RealtimeFrame = {
   kind: 'ws-room',
@@ -58,53 +58,5 @@ describe('isRealtimeFrame', () => {
   it('rejects a mistyped optional field rather than ignoring it', () => {
     expect(isRealtimeFrame({ ...FRAME, binary: 'yes' })).toBe(false);
     expect(isRealtimeFrame({ ...FRAME, exceptId: 5 })).toBe(false);
-  });
-});
-
-describe('dispatchFrame', () => {
-  it('delivers to every handler', () => {
-    const seen: string[] = [];
-    const handlers: RealtimeFrameHandler[] = [
-      (f) => seen.push(`a:${f.name}`),
-      (f) => seen.push(`b:${f.name}`),
-    ];
-
-    dispatchFrame(handlers, FRAME, () => {});
-
-    expect(seen).toEqual(['a:lobby', 'b:lobby']);
-  });
-
-  it('a throwing handler does not starve the handlers after it', () => {
-    const seen: string[] = [];
-    const errors: unknown[] = [];
-    const handlers: RealtimeFrameHandler[] = [
-      () => {
-        throw new Error('subscriber exploded');
-      },
-      (f) => seen.push(f.name),
-    ];
-
-    dispatchFrame(handlers, FRAME, (error) => errors.push(error));
-
-    expect(seen).toEqual(['lobby']);
-    expect((errors[0] as Error).message).toBe('subscriber exploded');
-  });
-
-  it('snapshots handlers, so one unsubscribing mid-dispatch cannot skip another', () => {
-    const seen: string[] = [];
-    const set = new Set<RealtimeFrameHandler>();
-    const second: RealtimeFrameHandler = (f) => seen.push(`second:${f.name}`);
-    const first: RealtimeFrameHandler = (f) => {
-      seen.push(`first:${f.name}`);
-      // Without the snapshot this deletion would shorten the live iteration
-      // and `second` would never run.
-      set.delete(second);
-    };
-    set.add(first);
-    set.add(second);
-
-    dispatchFrame(set, FRAME, () => {});
-
-    expect(seen).toEqual(['first:lobby', 'second:lobby']);
   });
 });

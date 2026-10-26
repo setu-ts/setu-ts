@@ -177,6 +177,14 @@ export interface LaunchDarklyProviderOptions {
   provider: 'launchdarkly';
   /** LaunchDarkly configuration. */
   options: LaunchDarklyProviderConfig;
+  /**
+   * Maximum retained context snapshots, evicted least recently used first.
+   * Defaults to 10,000. Must be a positive integer; invalid limits throw a
+   * RangeError naming maxCachedContexts when the provider is constructed.
+   * An evicted context returns the fallback once while refilling in the background.
+   * @since 0.11.0
+   */
+  readonly maxCachedContexts?: number;
 }
 
 /** Options for the `'custom'` provider arm. */

@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Realtime subscriber reporting (0.11.0, `@setu-ts/common`, `@setu-ts/realtime-backplane-plugin`,
+  `@setu-ts/cloudflare-plugin`).** `dispatchRealtimeFrame` and `createRealtimeHandlerErrorReporter`
+  share subscriber isolation and per-handler warning, repeat and recovery diagnostics, with
+  `IRealtimeHandlerErrorReporter` and `RealtimeHandlerErrorReporterOptions` as their contracts.
+  `onHandlerError(error, frame)` replaces default logging on built-in backplane plugin options and
+  `DurableObjectBackplaneOptions`.
+- **Bounded LaunchDarkly snapshots (0.11.0, `@setu-ts/feature-flags-plugin`).**
+  `LaunchDarklyProviderOptions.maxCachedContexts` caps the least recently used context snapshots;
+  default 10,000, validated as a positive integer at provider construction.
+
 - **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
   `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The
   container compiles its graph into direct factories and validates it once at boot.
@@ -255,6 +265,19 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **Realtime subscriber failures (`@setu-ts/realtime-backplane-plugin`,
+  `@setu-ts/cloudflare-plugin`).** Async subscriber rejections are captured and reported without an
+  unhandled rejection; synchronous throws reach the logger by default. Repeated failures debug after
+  the first warning, recovery logs once at info, and `describeError` collapses CR/LF in diagnostics.
+  Transport `handlerErrors` remains bounded to the latest 100 failures in either mode.
+- **Long-lived instance growth (`@setu-ts/service-discovery-plugin`,
+  `@setu-ts/feature-flags-plugin`, `@setu-ts/sse-plugin`).** Amortised discovery sweeps drop fully
+  expired ejection state without shortening an active ejection. LaunchDarkly evicts least recently
+  used snapshots; an evicted context returns fallback while refilling. SSE membership is reclaimed
+  when the last member leaves, held handles continue working by name, and disconnect cleanup visits
+  only joined channels. `peek(name)` now returns `undefined` for an empty channel, and
+  `channelCount` counts channels with members.
 
 - **Expired in-memory auth state is reclaimed (0.11.0, `@setu-ts/auth-plugin`).**
   `MemoryRateLimitStore.increment()` sweeps expired per-key windows without evicting live limits;

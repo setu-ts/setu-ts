@@ -17,6 +17,7 @@ import {
   CAPABILITIES,
   compileRealtimeDiagnosticsAlias,
   createConnectionErrorReporter,
+  createRealtimeHandlerErrorReporter,
   createCachedProbe,
   createRealtimeObservationCollector,
   PLUGIN_PRIORITY,
@@ -109,7 +110,19 @@ export function RealtimeBackplanePlugin(
               }),
             }
           : options;
-      const backplane = createBackplane(resolved, ctx.services, ctx.runtime.uuid());
+      const handlerReporter = createRealtimeHandlerErrorReporter({
+        source: `realtime-backplane-plugin: ${options.transport ?? 'memory'} transport`,
+        logger: () => ctx.logger,
+        ...(options.transport !== 'custom' && options.onHandlerError !== undefined
+          ? { onHandlerError: options.onHandlerError }
+          : {}),
+      });
+      const backplane = createBackplane(
+        resolved,
+        ctx.services,
+        ctx.runtime.uuid(),
+        handlerReporter,
+      );
 
       // Awaited, so the subscription is live before the first request and
       // before either consumer plugin registers its handler.

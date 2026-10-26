@@ -104,15 +104,16 @@ describe('ChannelRegistry', () => {
     expect(registry.size).toBe(0);
   });
 
-  it('should create a channel on get', () => {
+  it('should allocate membership on add', () => {
     const registry = new ChannelRegistry();
-    registry.get('room');
+    registry.get('room').add(makeFakeConn('member'));
     expect(registry.size).toBe(1);
   });
 
   it('should return the same channel on repeated get', () => {
     const registry = new ChannelRegistry();
     const ch1 = registry.get('room');
+    ch1.add(makeFakeConn('member'));
     const ch2 = registry.get('room');
     expect(ch1).toBe(ch2);
   });
@@ -121,6 +122,8 @@ describe('ChannelRegistry', () => {
     const registry = new ChannelRegistry();
     const ch1 = registry.get('room1');
     const ch2 = registry.get('room2');
+    ch1.add(makeFakeConn('one'));
+    ch2.add(makeFakeConn('two'));
     expect(ch1).not.toBe(ch2);
     expect(registry.size).toBe(2);
   });
@@ -141,8 +144,8 @@ describe('ChannelRegistry', () => {
 
   it('should clear all channels', () => {
     const registry = new ChannelRegistry();
-    registry.get('room1');
-    registry.get('room2');
+    registry.get('room1').add(makeFakeConn('one'));
+    registry.get('room2').add(makeFakeConn('two'));
     expect(registry.size).toBe(2);
     registry.clear();
     expect(registry.size).toBe(0);
@@ -160,16 +163,14 @@ describe('ChannelRegistry.peek (M74 / X3-8)', () => {
   it('returns the identical instance a prior get() created', () => {
     const registry = new ChannelRegistry();
     const created = registry.get('deploys');
+    created.add(makeFakeConn('member'));
 
     expect(registry.peek('deploys')).toBe(created);
   });
 
   it('creates nothing across many lookups of distinct unknown names', () => {
-    // Worse here than in the room registry: ChannelRegistry has NO reclamation
-    // path, so every channel `get` creates lives until clear() at shutdown.
-    // `peek` is the only non-allocating read.
     const registry = new ChannelRegistry();
-    registry.get('deploys');
+    registry.get('deploys').add(makeFakeConn('member'));
 
     for (let i = 0; i < 50; i++) {
       expect(registry.peek(`build:${i}`)).toBeUndefined();
@@ -178,9 +179,7 @@ describe('ChannelRegistry.peek (M74 / X3-8)', () => {
     expect(registry.size).toBe(1);
   });
 
-  it('still reports a channel whose members have all left', () => {
-    // Pins the documented behaviour rather than an aspiration: removing every
-    // member does NOT dispose the channel, so peek keeps finding it.
+  it('reclaims a channel whose members have all left', () => {
     const registry = new ChannelRegistry();
     const conn = makeFakeConn('c1');
     const channel = registry.get('deploys');
@@ -188,7 +187,7 @@ describe('ChannelRegistry.peek (M74 / X3-8)', () => {
     registry.removeFromAll(conn);
 
     expect(channel.size).toBe(0);
-    expect(registry.peek('deploys')).toBe(channel);
-    expect(registry.size).toBe(1);
+    expect(registry.peek('deploys')).toBeUndefined();
+    expect(registry.size).toBe(0);
   });
 });

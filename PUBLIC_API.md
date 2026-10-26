@@ -4062,21 +4062,17 @@ Omitting an option disables that behaviour (no timer created).
 
 - `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
   connection with `result` (`HandlerResult`) the handler must return.
-- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel. First call
-  creates, so reading `size` for a caller-supplied name is a write, and **nothing reclaims a channel
-  before shutdown** — the registry has no removal path outside the one that runs when the
-  application stops.
+- `ISseService.channel(name): SseChannel` — returns a reusable named broadcast handle. Membership is
+  allocated on add and reclaimed when the last member leaves. A held handle resolves current members
+  by name, including members who joined after reclamation. Empty handles are not retained.
 - `ISseService.peek(name): SseChannel | undefined` — the non-allocating counterpart. Returns the
-  channel when one exists and `undefined` otherwise, registering nothing. Use it wherever the name
-  comes from a request. Added in M74; a **required** member, so a replacement implementation of
+  channel when it has members and `undefined` otherwise, registering nothing. Use it wherever the
+  name comes from a request. Added in M74; a **required** member, so a replacement implementation of
   `ISseService` must supply it.
 - `ISseService.connectionCount: number` — current open connections.
-- `ISseService.channelCount: number` — channels the registry currently holds; the counterpart to
-  `IWebSocketService.roomCount`, reported by the `sse` health indicator as `channels`. Nothing
-  reclaims a channel, so the value **only rises for the life of a running application** and a
-  steadily climbing one is the operator-visible signal that channel names are being derived from
-  unbounded input. Shutdown is the sole exception: `onClose` discards every channel, so a probe
-  racing teardown reads `0`. Added in M74; a **required** member, like `peek`.
+- `ISseService.channelCount: number` — channels with members, reported by the health indicator as
+  `channels`. Drops when the last member leaves and becomes zero at shutdown. Disconnect cleanup
+  visits only channels joined by that connection. Added in M74; a **required** member, like `peek`.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
 - `ISseConnection.comment(text)` — enqueue a comment frame (`: text\n\n`).
@@ -4337,6 +4333,15 @@ registers and subscribes.
 ### Options
 
 Discriminated on `transport`.
+
+`BackplaneCommonOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void` (0.11.0)
+replaces default subscriber logging for every sync throw and async rejection on built-in transports.
+Hook failures are swallowed. Without it, a call-time logger warns on the first failure per handler,
+debugs repeats with a count and logs recovery once at info. Descriptions use `describeError`, with
+frame kind and name metadata but no frame data. The latest 100 failures are retained in
+`handlerErrors` in either mode. Direct transport constructors accept an optional trailing
+`IRealtimeHandlerErrorReporter`; omitted, they retain history only. Custom transports are used as
+supplied and own their reporting.
 
 | Option                    | Applies to         | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------- | ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -8725,19 +8730,20 @@ app.router.get('/beta', {
 
 ### Options
 
-| Option                       | Provider(s)            | Required                | Description                                                                         |
-| ---------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
-| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'` |
-| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                   |
-| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                     |
-| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                   |
-| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`         |
-| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                      |
-| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                            |
-| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                  |
-| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws        |
-| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                              |
-| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                   |
+| Option                       | Provider(s)            | Required                | Description                                                                                                                                                                       |
+| ---------------------------- | ---------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'`                                                                                               |
+| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                                                                                                                 |
+| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                                                                                                                   |
+| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                                                                                                                 |
+| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`                                                                                                       |
+| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                                                                                                                    |
+| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                                                                                                                          |
+| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                                                                                                                |
+| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws                                                                                                      |
+| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                                                                                                                            |
+| `maxCachedContexts`          | `'launchdarkly'`       | no                      | Wrapper option: LRU snapshot cap, default 10,000; positive integer or RangeError at provider construction. Hits refresh recency; evicted contexts return fallback while refilling |
+| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                                                                                                                 |
 
 ### Exports
 
@@ -12331,6 +12337,23 @@ export; callers cannot mutate the classification vocabulary.
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
+### Realtime subscriber dispatch (0.11.0)
+
+`dispatchRealtimeFrame(handlers: Iterable<RealtimeFrameHandler>, frame: RealtimeFrame, reporter: IRealtimeHandlerErrorReporter): boolean`
+snapshots subscribers, isolates synchronous throws and returned thenable rejections, and reports
+each completion. It returns `false` only for synchronous throws; asynchronous outcomes are unknown
+at return, preserving the M98l receive count.
+
+`IRealtimeHandlerErrorReporter` exposes `failed(handler, error, frame): void` and
+`succeeded(handler): void`; implementations must not throw. `createRealtimeHandlerErrorReporter`
+accepts `RealtimeHandlerErrorReporterOptions` (`source`, call-time `logger`, optional
+`onHandlerError(error, frame)`) and returns that interface. A WeakMap tracks failures per handler:
+first failure warns, subsequent failures debug with `repeats` starting at 1, the next success logs
+`subscriber recovered after N failures` at info and rearms the warning. Diagnostics use
+`describeError` and metadata `{ source, error, frameKind, frameName }`, never frame data. The hook
+replaces all default logging and receives every failure. Logger and hook failures are swallowed; no
+clock or timers are involved. Both backplane provider packages consume these exports.
+
 ### Diagnostics alias character policy
 
 `hasForbiddenAliasCharacter(value: string): boolean` returns true for any Unicode control (Cc),
@@ -14860,6 +14883,13 @@ asserted verbatim, and the whole surface is driven against a real SQLite engine 
 runs), including batch rollback.
 
 ### Durable Objects — realtime backplane and distributed lock
+
+`DurableObjectBackplaneOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void`
+(0.11.0) receives every subscriber throw or rejection instead of default logging. The default
+reporter uses common's shared dispatch, `describeError`, a call-time logger, first failure at warn,
+repeats at debug with a count, and recovery at info. Metadata includes frame kind and name, never
+data. Hook and logger failures are swallowed. This option belongs to direct backplane construction;
+the `CloudflarePlugin` arm uses default reporting.
 
 Both need a Durable Object class the **application** exports plus a wrangler stanza; no plugin
 option can export a class on an application's behalf. This package ships the behaviour as two plain

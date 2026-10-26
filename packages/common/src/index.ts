@@ -37,6 +37,12 @@ export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
 // One bounded diagnostic line for string-only log sinks (M119g)
 export { describeError } from './errors/describe-error.ts';
+export { dispatchRealtimeFrame } from './realtime/dispatch.ts';
+export { createRealtimeHandlerErrorReporter } from './realtime/handler-errors.ts';
+export type {
+  IRealtimeHandlerErrorReporter,
+  RealtimeHandlerErrorReporterOptions,
+} from './realtime/handler-errors.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';

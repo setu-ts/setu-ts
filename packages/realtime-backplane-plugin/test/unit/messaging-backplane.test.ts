@@ -4,7 +4,8 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 import type { IMessageBroker, ISubscription, MessageHandler, RealtimeFrame } from '@setu-ts/common';
 import { isRealtimeFrame, MessagingBackplane } from '../../src/transports/messaging-backplane.ts';
 
@@ -55,6 +56,28 @@ class FakeBroker implements IMessageBroker {
 }
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
+
+it('captures asynchronous messaging subscriber errors in history and reporter', async () => {
+  const broker = new FakeBroker();
+  const failed = vi.fn();
+  const succeeded = vi.fn();
+  const backplane = new MessagingBackplane(broker, 'node-a', 'realtime', { failed, succeeded });
+  const error = new Error('async messaging');
+  const bad = async (): Promise<void> => {
+    await Promise.resolve();
+    throw error;
+  };
+  await backplane.connect();
+  try {
+    await backplane.subscribe(bad);
+    broker.deliver(FRAME);
+    await setImmediate();
+    expect(backplane.handlerErrors).toEqual([error]);
+    expect(failed).toHaveBeenCalledExactlyOnceWith(bad, error, FRAME);
+  } finally {
+    await backplane.close();
+  }
+});
 
 describe('isRealtimeFrame', () => {
   it('accepts a well-formed frame of each kind', () => {

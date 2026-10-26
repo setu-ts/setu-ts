@@ -8,9 +8,11 @@
 import type {
   ILogger,
   IRealtimeBackplane,
+  IRealtimeHandlerErrorReporter,
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
+import { createRealtimeHandlerErrorReporter, dispatchRealtimeFrame } from '@setu-ts/common';
 
 import type { IDurableObjectNamespace } from '../bindings/facades.ts';
 import type {
@@ -18,7 +20,7 @@ import type {
   IDurableObjectClientSocket,
 } from '../durable-objects/do-facades.ts';
 import { asUpgradeResponse } from '../durable-objects/do-facades.ts';
-import { dispatchFrame, isRealtimeFrame } from '../durable-objects/frame-dispatch.ts';
+import { isRealtimeFrame } from '../durable-objects/frame-guard.ts';
 
 /** The synthetic URL the stub is fetched with. Only the path is meaningful. */
 const CONNECT_URL = 'https://realtime-backplane.internal/connect';
@@ -55,6 +57,12 @@ export interface DurableObjectBackplaneOptions {
    * would silence every report for that application.
    */
   readonly logger?: () => ILogger | undefined;
+  /**
+   * Receives every subscriber throw or rejection instead of default logging.
+   * Hook failures are swallowed.
+   * @since 0.11.0
+   */
+  readonly onHandlerError?: (error: unknown, frame: RealtimeFrame) => void;
 }
 
 /**
@@ -89,6 +97,7 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
   readonly #namespace: IDurableObjectNamespace;
   readonly #options: DurableObjectBackplaneOptions;
   readonly #handlers = new Set<RealtimeFrameHandler>();
+  readonly #handlerReporter: IRealtimeHandlerErrorReporter;
 
   #socket: IDurableObjectClientSocket | undefined;
   /**
@@ -113,6 +122,11 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
     this.#namespace = namespace;
     this.#options = options;
     this.origin = options.origin;
+    this.#handlerReporter = createRealtimeHandlerErrorReporter({
+      source: 'cloudflare: backplane',
+      logger: () => options.logger?.(),
+      ...(options.onHandlerError === undefined ? {} : { onHandlerError: options.onHandlerError }),
+    });
   }
 
   /**
@@ -283,11 +297,6 @@ export class DurableObjectBackplane implements IRealtimeBackplane {
     if (!isRealtimeFrame(parsed) || parsed.origin === this.origin) {
       return;
     }
-    dispatchFrame(this.#handlers, parsed, (error) => {
-      this.#options.logger?.()?.warn('cloudflare: backplane subscriber threw', {
-        topic: this.#options.topic,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    dispatchRealtimeFrame(this.#handlers, parsed, this.#handlerReporter);
   }
 }
