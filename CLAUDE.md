@@ -673,7 +673,7 @@ here.
 - **Milestone 125** (`di-plugin` + `common` + `kernel` + `decorator-plugin` + `testing` — a compiled
   container and a request scope: typed tokens, boot-time graph validation, `forRequest` kept in
   `ctx.slot` and disposed through `ctx.defer`, the singleton-captures-scoped fix) — complete (PR
-  pending).
+  #508).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M118 and
   M120–M123 are open in the ROADMAP; M120 depends on M118.
 
