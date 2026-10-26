@@ -102,14 +102,22 @@ service account — it signs an RS256 JWT assertion with `runtime.subtle` (no np
 Workers) and caches the token until shortly before it expires.
 
 ```typescript
-push: {
-  provider: 'fcm',
-  options: {
-    projectId: config.get('FCM_PROJECT_ID'),
-    clientEmail: config.get('FCM_CLIENT_EMAIL'),
-    privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8 from the service-account JSON
-  },
-},
+import { NotificationPlugin } from '@setu-ts/notification-plugin';
+
+app.register(
+  NotificationPlugin({
+    channels: {
+      push: {
+        provider: 'fcm',
+        options: {
+          projectId: config.get('FCM_PROJECT_ID'),
+          clientEmail: config.get('FCM_CLIENT_EMAIL'),
+          privateKey: config.get('FCM_PRIVATE_KEY'), // PEM PKCS#8 from the service-account JSON
+        },
+      },
+    },
+  }),
+);
 ```
 
 The three fields come from the service-account JSON you download from the Firebase console

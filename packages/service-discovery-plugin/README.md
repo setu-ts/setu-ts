@@ -130,7 +130,7 @@ const call = resilience.wrap(
       throw error;
     }
   },
-  { retry: { maxAttempts: 3 } },
+  { retry: { limit: 3, delay: 100, backoff: 'exponential' } },
 );
 ```
 
@@ -152,6 +152,8 @@ than the freshness mechanism for watched ones.
 ## Self-registration (Consul only)
 
 ```typescript
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
+
 ServiceDiscoveryPlugin({
   provider: 'consul',
   address: 'http://127.0.0.1:8500',

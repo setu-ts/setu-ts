@@ -1,6 +1,6 @@
 # @setu-ts/localization-plugin — translate for the request locale
 
-**Add it:** `setu add localization` installs it and prints the registration for `setu.config.ts`.
+**Add it:** `setu add localization` adds it and prints the registration for `setu.config.ts`.
 `LocalizationPlugin` provides `CAPABILITIES.LOCALIZATION` (`ILocalizer`).
 
 ## Configure the supported languages

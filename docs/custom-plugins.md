@@ -268,7 +268,7 @@ ctx.lifecycle.onClose(() => {
 ### CLI Commands
 
 ```typescript
-ctx.cli.register('my-command', async (args) => {
+ctx.cli.register('my-plugin:greet', async (args) => {
   console.log('Command executed with args:', args);
 });
 ```

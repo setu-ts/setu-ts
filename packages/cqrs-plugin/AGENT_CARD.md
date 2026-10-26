@@ -1,7 +1,7 @@
 # @setu-ts/cqrs-plugin — command and query dispatch
 
-**Add it:** `setu add cqrs` installs it and wires `CqrsPlugin()` in a recognized functional config.
-It provides `CAPABILITIES.CQRS` (`ICqrsFacade`), `CAPABILITIES.COMMAND_BUS` (`ICommandBus`) and
+**Add it:** `setu add cqrs` adds it and wires `CqrsPlugin()` in a recognized functional config. It
+provides `CAPABILITIES.CQRS` (`ICqrsFacade`), `CAPABILITIES.COMMAND_BUS` (`ICommandBus`) and
 `CAPABILITIES.QUERY_BUS` (`IQueryBus`).
 
 ## Register a handler in setu.config.ts

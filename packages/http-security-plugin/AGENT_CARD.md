@@ -1,7 +1,7 @@
 # @setu-ts/http-security-plugin — browser and transport protections
 
-**Add it:** `setu add http-security` installs it; register `HttpSecurityPlugin()` in
-`setu.config.ts` for the default security headers. It provides middleware, with no capability token.
+**Add it:** `setu add http-security` adds it; register `HttpSecurityPlugin()` in `setu.config.ts`
+for the default security headers. It provides middleware, with no capability token.
 
 ## Admit a browser frontend and check unsafe requests
 

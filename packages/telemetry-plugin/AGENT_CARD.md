@@ -1,6 +1,6 @@
 # @setu-ts/telemetry-plugin — trace requests and application work
 
-**Add it:** `setu add telemetry` installs it and prints the registration for `setu.config.ts`.
+**Add it:** `setu add telemetry` adds it and prints the registration for `setu.config.ts`.
 `TelemetryPlugin` provides `CAPABILITIES.TELEMETRY` (`ITelemetryService`); without an exporter it
 registers a no-op service.
 

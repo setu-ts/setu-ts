@@ -695,13 +695,16 @@ app.middleware.add(
 The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child logger bound to
 `requestId`, and logs:
 
-- Incoming request (method, path)
+- Incoming request (method, path) — the concrete path as the client sent it, not a route template
 - Outgoing response (status, duration in ms), including a request that threw: the status is the one
   `errorHandler`'s responder predicts through `statusFor` (`500` without it), so a custom `respond`
   hook that chooses another status is not reflected
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
-It does not log the error itself; `errorHandler` logs it once (V9-80).
+It does not log the error itself; `errorHandler` logs it once (V9-80). The database-plugin scrub
+covers database errors only, so an identifier in a path segment reaches the log; keep it out with
+`excludePaths`, a `redaction` field redactor for `path`, or `redact` (which replaces the default
+secret patterns, so re-list them).
 
 ---
 
@@ -4642,7 +4645,7 @@ package README's "What `SameSite` does not separate".
 
 ## ReactRouterPlugin() (`@setu-ts/react-router-plugin`)
 
-Embeds **React Router v7 framework mode** as a first-party plugin so a Setu-TS application can serve
+Embeds **React Router 8 framework mode** as a first-party plugin so a Setu-TS application can serve
 a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
@@ -5023,8 +5026,12 @@ worker the pool terminates (on a timeout, a startup deadline or a hand-over) lea
 once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
 CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
 `maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
-CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
-resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+CPU. A slot is released to the budget before its thread has exited, and the next waiter spawns at
+once, so at a hand-over the terminated thread and its replacement can briefly be alive together:
+measured on Node 24 with 20 ms sampling and `maxWorkers: 3`, a cold first burst peaked at 6 threads
+in 3 of 3 runs, one burst above the bound for about 0.7 s. Treat a task timeout as a correctness
+bound rather than a resource bound for CPU-bound code that can loop, and have long tasks check a
+deadline and return.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.
@@ -9889,7 +9896,10 @@ method; the plugin does not import Zod.
   ```
 
   `at` names the operationId, so the affected route is identifiable without diffing documents. The
-  extension is absent when every schema is representable.
+  extension is absent when every schema is representable. Nothing is logged when a node degrades:
+  the document is built on the first `getSpec()` / `/openapi.json` request, not at startup, so
+  inspect it (or test for `x-setu-unrepresentable`) in CI. For dates, `z.iso.datetime()` represents
+  a date-time in JSON Schema.
 
 - **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
   `{}` and report the existing `not a recognized zod schema` diagnostic through
@@ -10134,7 +10144,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`            | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--env-file <path>`                             | `new`, `generate app`                                 | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                   |
 | `--depends-on <member>`                         | `generate app`                                        | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `--module <name>`                               | `generate`                                            | Place a `service`, `route`, `controller` or `schema` inside the named feature module, instead of the top-level folder. The name must be a module already admitted by the project's style, else the refusal lists the admitted modules. Functional: the file lands in `src/modules/<name>/` and the module's CLI-owned `index.ts` is regenerated to register it; a module-scoped route or controller mounts at `/<module>/<name>`. Class-based: the file is written and the `@Module({ providers \| controllers })` line to add is printed — the developer-owned declaration is never edited — and a module-scoped service registers under the token `<module>-<name>-service`. `route --module` is functional-only (a class-based module has no imperative registration point); every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                   |
+| `--module <name>`                               | `generate`                                            | Place a `service`, `route`, `controller` or `schema` inside the named feature module, instead of the top-level folder. The name must be a module already admitted by the project's style, else the refusal lists the admitted modules. Functional: the file lands in `src/modules/<name>/` and the module's CLI-owned `index.ts` is regenerated to register it; a module-scoped route or controller mounts at `/<module>/<name>`. Class-based: the file is written and the `@Module({ providers \| controllers })` line to add is printed — the developer-owned declaration is never edited — and a module-scoped service registers under the token `<module>.<name>-service` (for example `billing.invoice-service`). `route --module` is functional-only (a class-based module has no imperative registration point); every other schematic is app-wide and refuses the flag.                                                                                                                                                           |
 | `--devtool`                                     | `new`, `generate app`                                 | Opts the project (or member) into the local diagnostics connector: emits a `main.dev.ts` development entry the production graph never imports, adds `dev` and `check` tasks, and — for a workspace member — records a `devtoolPort`. Refused by name on a non-Deno runtime, on a starter-composed template (kernel diagnostics must be enabled at construction), and, for `--devtool-port`, when the port is already used. The generated entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from the environment and refuses to start without a valid pair; it never generates, writes or prints one. In a workspace the launcher also sets `SETU_DEVTOOL_MEMBER` to the member it is inspecting, and the generated `scripts/dev.ts` forwards all three to that member's child alone, blanking them for every sibling. **All three names are published CLI surface**: renaming one is a breaking change to every scaffolded project, and the root workspace `dev` task's `--allow-env` grant is scoped to exactly them. |
 | `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`               | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `--transport <name>`                            | `new --workspace`                                     | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
@@ -10808,7 +10818,8 @@ admitted module: in functional mode the file lands in `src/modules/<name>/` and 
 CLI-owned `index.ts` is regenerated to register it, with a module-scoped route or controller
 mounting at `/<module>/<name>`; in class-based mode the file is written and the
 `@Module({ providers | controllers })` line to add is printed — the declaration is never edited —
-and a module-scoped service registers under the token `<module>-<name>-service`.
+and a module-scoped service registers under the token `<module>.<name>-service` (for example
+`billing.invoice-service`).
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
 setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their

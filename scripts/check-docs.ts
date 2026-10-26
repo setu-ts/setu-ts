@@ -667,6 +667,30 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
     });
   }
 
+  // Rule 3: a released section of `CHANGELOG.md` (any `## [x.y.z]`) that names
+  // `upgrading.md` together with `Unreleased` is refused. The `Unreleased`
+  // heading is renamed at each release, so a released entry that points at it
+  // describes a state that no longer exists.
+  if (file.endsWith('CHANGELOG.md')) {
+    let inReleasedSection = false;
+    for (const [index, line] of lines.entries()) {
+      const section = line.match(/^##\s+\[(\d+\.\d+\.\d+)\]/);
+      if (/^##\s/.test(line)) {
+        inReleasedSection = section !== null;
+        continue;
+      }
+      if (inReleasedSection && line.includes('upgrading.md') && line.includes('Unreleased')) {
+        findings.push({
+          file,
+          line: index + 1,
+          message:
+            `Released section names "upgrading.md" and "Unreleased": the Unreleased heading is ` +
+            `renamed at each release, so a released entry cannot point at it.`,
+        });
+      }
+    }
+  }
+
   const hasToc = headings.some((h) => /^table of contents$/i.test(h.text.trim()));
   if (hasToc) {
     const linked = new Set(collectAnchorLinks(lines, fenced).map((l) => l.target));
@@ -909,6 +933,21 @@ export async function checkLocalLinks(
     for (const match of line.matchAll(linkPattern)) {
       let link = match[2] as string;
 
+      // Rule 1: a link to the repository's own GitHub tree/blob is checked as a
+      // local link to the named path, so a file or heading that moves before
+      // release is caught here (the current tree stands in for the `<ref>`).
+      // A `tree/` directory resolves to its `README.md` by the ordinary
+      // resolution below. Rewriting to a root-relative path lets the existing
+      // resolver (and its README fallback) do the work.
+      const repoLink = link.match(
+        /^https:\/\/github\.com\/setu-ts\/setu-ts\/(?:blob|tree)\/[^/]+\/(.+?)(?:#(.+))?$/,
+      );
+      if (repoLink) {
+        const repoPath = decodeURIComponent(repoLink[1] as string);
+        const repoAnchor = repoLink[2] !== undefined ? decodeURIComponent(repoLink[2]) : null;
+        link = `/${repoPath}${repoAnchor !== null ? `#${repoAnchor}` : ''}`;
+      }
+
       // Skip external links and mailto/tel. A bare `#anchor` is a same-file
       // anchor that must be validated against the current document's headings.
       if (
@@ -947,6 +986,21 @@ export async function checkLocalLinks(
             });
           }
         }
+        continue;
+      }
+
+      // Rule 2: the `#unreleased` heading is renamed to the version at each
+      // release, so a link to it from any file is broken by the very next
+      // `release:publish`. Refuse it wherever it points.
+      if (
+        anchor === 'unreleased' &&
+        (linkPath.endsWith('docs/upgrading.md') || linkPath.endsWith('CHANGELOG.md'))
+      ) {
+        findings.push({
+          file,
+          line: index + 1,
+          message: `Link to "${linkPath}#unreleased" is refused: that heading is renamed at each release, so the link breaks on the next publish.`,
+        });
         continue;
       }
 

@@ -1,6 +1,6 @@
 # @setu-ts/storage-plugin — file and object storage
 
-**Add it:** `setu add storage` installs it and wires `StoragePlugin()` in a recognized functional
+**Add it:** `setu add storage` adds it and wires `StoragePlugin()` in a recognized functional
 config. It provides `CAPABILITIES.STORAGE` (`IStorage`); the default provider is memory.
 
 ## Accept a multipart upload in a route

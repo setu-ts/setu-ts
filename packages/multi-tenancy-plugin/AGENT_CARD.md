@@ -1,6 +1,6 @@
 # @setu-ts/multi-tenancy-plugin — resolve tenants and scope data
 
-**Add it:** `setu add multi-tenancy` installs it and prints the registration for `setu.config.ts`.
+**Add it:** `setu add multi-tenancy` adds it and prints the registration for `setu.config.ts`.
 `MultiTenancyPlugin` provides `CAPABILITIES.MULTI_TENANCY` (`IMultiTenancyService`).
 
 ## Require a tenant from the request host

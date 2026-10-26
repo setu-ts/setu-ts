@@ -307,6 +307,20 @@ export const FRAGMENT_GLOBALS = new Set([
   'readableStream',
   'userRepository',
   'createCache',
+  // Cloudflare README app-defined names (must match APP_DECLARATIONS keys).
+  'waitUntil',
+  'Settings',
+  'loadSettings',
+  'recordCacheMiss',
+  'listCatalog',
+  'mailer',
+  // Database README app-defined names (must match APP_DECLARATIONS keys).
+  'drizzleDb',
+  'newUser',
+  'drizzleDatabase',
+  'drizzleTables',
+  // A type a README names in a cast without importing it.
+  'IDurableObjectNamespace',
 ]);
 
 /**
@@ -386,6 +400,9 @@ const TYPE_EXPORTS: Readonly<Record<string, string>> = {
   IRedisBackplaneClient: '@setu-ts/realtime-backplane-plugin',
   WebSocketHandlers: '@setu-ts/common',
   ISessionStore: '@setu-ts/common',
+  ID1Database: '@setu-ts/cloudflare-plugin',
+  IDurableObjectNamespace: '@setu-ts/cloudflare-plugin',
+  DrizzleDatabaseIdentity: '@setu-ts/database-plugin',
 };
 
 /**
@@ -415,6 +432,7 @@ const VALUE_EXPORTS: Readonly<Record<string, string>> = {
   SecretsPlugin: '@setu-ts/secrets-plugin',
   OpenApiPlugin: '@setu-ts/openapi-plugin',
   CloudflarePlugin: '@setu-ts/cloudflare-plugin',
+  createMessagingHandler: '@setu-ts/cloudflare-plugin',
   ServiceDiscoveryPlugin: '@setu-ts/service-discovery-plugin',
   createDrizzleDatabase: '@setu-ts/database-plugin',
   Controller: '@setu-ts/decorator-plugin',
@@ -496,7 +514,11 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   api: 'declare const api: Record<string, (...args: readonly unknown[]) => Promise<unknown>>',
   isGetUserByIdError:
     'declare function isGetUserByIdError(e: unknown): e is { status: number; body: { code: string } }',
-  User: 'declare type User = { readonly id: string; readonly name: string }',
+  // `email`/`active` are optional so the database README's
+  // `create({ email })` / `update(id, { active })` type-check against
+  // `Partial<User>`; they are absent in every other README's use of `User`,
+  // so the widening is backward-compatible.
+  User: 'declare type User = { readonly id: string; readonly name: string; email?: string; active?: boolean }',
   CreateUserCommand:
     'declare class CreateUserCommand { constructor(name: string); readonly name: string }',
   mockMyService: 'declare const mockMyService: { findAll(): Promise<unknown[]> }',
@@ -554,6 +576,25 @@ const APP_DECLARATIONS: Readonly<Record<string, string>> = {
   readableStream: 'declare const readableStream: ReadableStream<Uint8Array>',
   createCache:
     'declare function createCache(config: Record<string, unknown>): { get(key: string): unknown; set(key: string, value: unknown): void; close(): Promise<void> }',
+  // Cloudflare README app-defined names, typed against the real contract.
+  waitUntil: 'declare function waitUntil(promise: Promise<unknown>): void',
+  Settings: 'declare type Settings = Record<string, unknown>',
+  loadSettings: 'declare function loadSettings(d1: ID1Database): Promise<Settings>',
+  recordCacheMiss: 'declare function recordCacheMiss(): Promise<unknown>',
+  listCatalog: 'declare const listCatalog: RouteHandler',
+  mailer: 'declare const mailer: IMailer',
+  // Database README app-defined names. `drizzleDb` is structural so the
+  // `createDrizzleDatabase`/`getDrizzleDatabase`/`getDrizzleTransaction` calls
+  // type-check against the real opaque-configuration contract without a real
+  // pool; `users`/`teams` are declared in the fence itself (real `pgTable`s).
+  // `transaction` is generic so the README's `(database, work) =>
+  // database.transaction(work)` bridge satisfies `DrizzleTransactionBridge`
+  // (which must return `Promise<T>` for the `work` it receives).
+  drizzleDb:
+    'declare const drizzleDb: { transaction<T>(work: (transaction: { select(query?: unknown): { from(table: unknown): { innerJoin(table: unknown, on: unknown): Promise<unknown[]> } } }) => Promise<T>): Promise<T>; select(query?: unknown): { from(table: unknown): { innerJoin(table: unknown, on: unknown): Promise<unknown[]> } } }',
+  drizzleDatabase: 'declare const drizzleDatabase: DrizzleDatabaseIdentity',
+  drizzleTables: 'declare const drizzleTables: Record<string, unknown>',
+  newUser: 'declare const newUser: Partial<User>',
 };
 
 /**
@@ -855,6 +896,17 @@ export async function writeProjectStubs(scratchDir: string): Promise<void> {
     '}\n';
   await writeFile(`${parent}/setu.config.ts`, source);
   await writeFile(`${scratchDir}/setu.config.ts`, source);
+  // The database README's Prisma example imports the build-generated client
+  // (`./generated/prisma/client.ts`), which is not in this repository. Stub it
+  // beside the scratch directory so the import resolves. `options.prismaClient`
+  // is typed `unknown`, so a minimal class is enough to type-check the
+  // `new PrismaClient({ adapter })` call without weakening the check.
+  const prisma =
+    'export class PrismaClient {\n' +
+    '  constructor(_options?: Record<string, unknown>) {}\n' +
+    '}\n';
+  await mkdir(`${scratchDir}/generated/prisma`, { recursive: true });
+  await writeFile(`${scratchDir}/generated/prisma/client.ts`, prisma);
 }
 
 /**
@@ -1063,10 +1115,13 @@ export function buildPrelude(globals: readonly string[], code: string): string {
   }
 
   // App-defined names the fence assumes but does not declare. Declare ONLY
-  // those the fence body does NOT itself declare, to avoid duplicate-
-  // declaration errors that would mask the real API check.
+  // those the fence body does NOT itself declare OR import, to avoid
+  // duplicate-declaration errors that would mask the real API check. The
+  // import check matters for `env`: a Workers README imports it from
+  // `cloudflare:workers`, and declaring a second `env` here would shadow the
+  // imported one and fail the very `RuntimePlugin({ env })` call it documents.
   for (const [name, decl] of Object.entries(APP_DECLARATIONS)) {
-    if (present.has(name) && !fenceDeclares(name)) {
+    if (present.has(name) && !fenceDeclares(name) && !importsIdentifier(code, name)) {
       lines.push(decl + ';');
     }
   }

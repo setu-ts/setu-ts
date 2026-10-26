@@ -1,7 +1,7 @@
 # @setu-ts/messaging-plugin — publish and consume broker messages
 
-**Add it:** `setu add messaging` installs it and wires `MessagingPlugin()` in a recognized
-functional config. It provides `CAPABILITIES.MESSAGING` (`IMessageBroker`).
+**Add it:** `setu add messaging` adds it and wires `MessagingPlugin()` in a recognized functional
+config. It provides `CAPABILITIES.MESSAGING` (`IMessageBroker`).
 
 ## Publish an order from a route
 

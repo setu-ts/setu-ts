@@ -1,8 +1,7 @@
 # @setu-ts/feature-flags-plugin — control feature rollout and route access
 
-**Add it:** `setu add feature-flags` installs it and prints the registration for `setu.config.ts`;
-add `FeatureFlagsPlugin` with a provider. It provides `CAPABILITIES.FEATURE_FLAGS`
-(`IFeatureFlags`).
+**Add it:** `setu add feature-flags` adds it and prints the registration for `setu.config.ts`; add
+`FeatureFlagsPlugin` with a provider. It provides `CAPABILITIES.FEATURE_FLAGS` (`IFeatureFlags`).
 
 ## Define a targeted rollout
 

@@ -263,7 +263,7 @@ registers nothing. A class-based module is extended by a printed `@Module` line 
 edited one. See [Domain modules — `--module`](#--module-place-a-file-inside-a-feature).
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
-and names the `setu add` command that installs it:
+and names the `setu add` command that adds it:
 
 ```
 The "guard" schematic requires @setu-ts/auth-plugin, which is not installed in /path/to/app.
@@ -398,7 +398,7 @@ top-level folder.
 - **Class-based:** the file is written and the CLI prints the line to add to
   `@Module({ providers | controllers })` in `src/modules/<module>/<module>.module.ts`; it never
   edits the module declaration. A module-scoped service is registered under the token
-  `<module>-<name>-service`.
+  `<module>.<name>-service` (for example `billing.invoice-service`).
 - `route --module` is **functional-only**: a class-based module has no imperative registration
   point, and the refusal names top-level `g route` instead.
 

@@ -472,7 +472,7 @@ ctx.openapi.addSchema('User', {
 Register a CLI command.
 
 ```typescript
-ctx.cli.register('my-command', async (args) => {
+ctx.cli.register('my-plugin:greet', async (args) => {
   console.log('Command executed with args:', args);
 });
 ```

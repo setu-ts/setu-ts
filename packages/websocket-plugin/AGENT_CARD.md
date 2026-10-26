@@ -1,8 +1,7 @@
 # @setu-ts/websocket-plugin — bidirectional socket messaging
 
-**Add it:** `setu add websocket` installs it and wires `WebSocketPlugin()` in a recognized
-functional config; Node also gets the `ws` peer. It provides `CAPABILITIES.WEBSOCKET`
-(`IWebSocketService`).
+**Add it:** `setu add websocket` adds it and wires `WebSocketPlugin()` in a recognized functional
+config; Node also gets the `ws` peer. It provides `CAPABILITIES.WEBSOCKET` (`IWebSocketService`).
 
 ## Put clients in a chat room
 

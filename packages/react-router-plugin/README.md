@@ -12,7 +12,7 @@ off) and configures this for you (M119c). Use a configured base URL for security
 such as password resets. See
 [deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
 
-React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a
+React SSR and file-based routing, by embedding **React Router 8 framework mode** as a plugin over a
 kernel catch-all handler. Registers an `SsrService` under `CAPABILITIES.SSR` (`'ssr'`).
 
 Your React routes and your API routes live in one application, on one port, sharing the same plugin

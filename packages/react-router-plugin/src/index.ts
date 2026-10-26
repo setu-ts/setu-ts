@@ -1,7 +1,7 @@
 /**
  * @module
  *
- * React Router v7 plugin — embeds React Router framework mode as a first-party
+ * React Router 8 plugin — embeds React Router framework mode as a first-party
  * plugin so a Setu-TS application can serve a React frontend with SSR
  * and file-based routing.
  *

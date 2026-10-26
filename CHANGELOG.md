@@ -204,6 +204,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Documentation that matches the code (M119i).** The upgrade guide, guides, READMEs, agent cards
+  and `PUBLIC_API.md` now state what the code does: `swagger-ui-dist` on Deno (§3.3), the Workers
+  full-stack `allowJs` repair, which 4xx paths log, the module-scoped service token
+  `<module>.<name>-service`, the three 0.10.0 omissions, the service-discovery `RetryPolicy`
+  example, the request logger's unscrubbed path, the agent cards' `setu add` wording, React Router
+  8, unrepresentable Zod types, the worker-pool overshoot, and the resilience timeout. Every package
+  README is now compiled by the fence gate, and links that a release renames or points into this
+  repository by absolute URL are checked.
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
   `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing
@@ -689,7 +697,7 @@ All notable changes to this project are documented here. The format follows
   `get-users` remain valid OpenAPI, but the SDK refuses their sanitized method-name collision with
   `Duplicate operation name`. **Migration:** check existing declarations, choose distinct nonblank
   ids, regenerate clients and update callers and references to renamed types, components and
-  diagnostics. See `docs/upgrading.md` Unreleased.
+  diagnostics. See `docs/upgrading.md`, `## 0.10.0`.
 
 - **Environment secrets use the config snapshot as a fallback (V9-77, #485, 0.10.0,
   `@setu-ts/secrets-plugin`).** The default `EnvProvider` reads the environment first, then string
@@ -1143,14 +1151,15 @@ All notable changes to this project are documented here. The format follows
   the module's `index.ts`, mounting a module-scoped route or controller at `/<module>/<name>`;
   class-based mode writes the file and prints the `@Module({ providers | controllers })` line to add
   — it never edits the declaration — registering a module-scoped service under the token
-  `<module>-<name>-service`. Every other schematic is app-wide and refuses the flag. A new `schema`
-  schematic (requires `validation-plugin`) writes `src/shared/schemas/<name>.schemas.ts` — or
-  `src/modules/<module>/<name>.schemas.ts` with `--module` — and never edits an existing file; a
-  second run is the ordinary overwrite refusal. `SchematicOptions` gains the optional
-  `targetModule?` and `moduleArtifacts?` fields for custom schematics. `zod` is declared by every
-  template that installs `validation-plugin`, `setu add validation` adds it on every runtime, and
-  `g module`/`g schema` print the runtime's install command (`npm install zod@^4`, `bun add zod@^4`,
-  `deno add npm:zod@^4`) in a project that lacks it.
+  `<module>.<name>-service` (for example `billing.invoice-service`). Every other schematic is
+  app-wide and refuses the flag. A new `schema` schematic (requires `validation-plugin`) writes
+  `src/shared/schemas/<name>.schemas.ts` — or `src/modules/<module>/<name>.schemas.ts` with
+  `--module` — and never edits an existing file; a second run is the ordinary overwrite refusal.
+  `SchematicOptions` gains the optional `targetModule?` and `moduleArtifacts?` fields for custom
+  schematics. `zod` is declared by every template that installs `validation-plugin`,
+  `setu add validation` adds it on every runtime, and `g module`/`g schema` print the runtime's
+  install command (`npm install zod@^4`, `bun add zod@^4`, `deno add npm:zod@^4`) in a project that
+  lacks it.
 - **Generated e2e tests and the `test:e2e` task (M114, `@setu-ts/cli`).** `setu new` emits
   `test/support/server.ts` (CLI-owned; boots the real `createApp()` on a free loopback port) and
   `test/e2e/app.e2e.test.ts` on every socket target; `setu g module` adds
@@ -9463,7 +9472,9 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.8.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0
+[0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0
 [0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0
 [0.7.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.7.0
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0

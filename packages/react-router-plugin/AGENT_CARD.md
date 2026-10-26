@@ -1,6 +1,6 @@
 # @setu-ts/react-router-plugin — serve React Router pages
 
-**Add it:** `setu add react-router` installs it and prints the registration for `setu.config.ts`.
+**Add it:** `setu add react-router` adds it and prints the registration for `setu.config.ts`.
 `ReactRouterPlugin` provides `CAPABILITIES.SSR` (`ISsrService`); the application supplies a React
 Router 8 server build and installs its runtime.
 

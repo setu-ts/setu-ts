@@ -1,6 +1,6 @@
 # @setu-ts/realtime-backplane-plugin — share room and channel broadcasts
 
-**Add it:** `setu add realtime-backplane` installs it and wires `RealtimeBackplanePlugin()` in a
+**Add it:** `setu add realtime-backplane` adds it and wires `RealtimeBackplanePlugin()` in a
 recognized functional config. It provides `CAPABILITIES.REALTIME_BACKPLANE` (`IRealtimeBackplane`);
 use a cross-process transport for replicas.
 

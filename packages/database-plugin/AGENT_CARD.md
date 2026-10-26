@@ -1,6 +1,6 @@
 # @setu-ts/database-plugin — repositories and transactions
 
-**Add it:** `setu add database` installs it; add `DatabasePlugin({ type: 'memory' })` to
+**Add it:** `setu add database` adds it; add `DatabasePlugin({ type: 'memory' })` to
 `setu.config.ts`. It provides `CAPABILITIES.DATABASE` (`IDatabaseService`).
 
 ## Create and read an entity from routes

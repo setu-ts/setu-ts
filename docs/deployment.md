@@ -476,6 +476,15 @@ workspace root, the base image tag is pinned, the user is numeric, the grace per
 the generated entry handles `SIGTERM`, and the start writes no lockfile — so the generated
 manifest's own read-only root filesystem cannot crash it.
 
+Probes follow the member's declared health support. A member whose record has `healthProbes` gets
+`httpGet` on `/ready` (readiness) and `/live` (liveness); one without it keeps `tcpSocket`, because
+an HTTP probe against a member that serves neither path would fail readiness forever. A record with
+`metricsEndpoint` additionally carries the `prometheus.io/scrape`, `prometheus.io/port` and
+`prometheus.io/path` annotations. `setu generate app --template <name>` records both flags, because
+every named template registers `HealthPlugin` and `MetricsPlugin`; `setu adopt` records each from
+the installed health or metrics plugin, or from a starter package, which registers both. To switch a
+TCP member to HTTP probes, add `HealthPlugin` and `healthProbes: true` to its record.
+
 ### The default Node workspace image
 
 A workspace defaults to Node. Its generated `docker/Dockerfile` uses `node:24-alpine`, selects a
@@ -559,9 +568,6 @@ address as the fallback.
   applies cleanly and routes nothing.
 - **The broker, in Kubernetes.** For a cluster that is a managed service or a StatefulSet with
   storage, not the single dev container Compose runs.
-- **HTTP probes.** The generated probes are `tcpSocket`, because `/live` and `/ready` exist only
-  when the member registers `HealthPlugin`. Switch them once it does — it is the better signal,
-  since it waits for the plugins rather than for the socket.
 
 ### A standalone project
 

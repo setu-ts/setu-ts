@@ -3,9 +3,10 @@
 Circuit breaker, retry, timeout, and bulkhead. Registers an `IResilienceService` under
 `CAPABILITIES.RESILIENCE` (`'resilience'`).
 
-Zero dependencies. `wrap()` composes the four patterns around any `() => Promise<T>` in a fixed
-order — **bulkhead → circuitBreaker → retry → timeout → fn** — and builds them once per `wrap` into
-a state-preserving closure, so the breaker and bulkhead accumulate state across calls.
+Zero dependencies. `wrap()` composes the four patterns around any
+`(signal: AbortSignal) => Promise<T>` in a fixed order — **bulkhead → circuitBreaker → retry →
+timeout → fn** — and builds them once per `wrap` into a state-preserving closure, so the breaker and
+bulkhead accumulate state across calls.
 
 ## Installation
 
@@ -69,9 +70,11 @@ itself the retryable signal (RFC 9110). The rate limiter's `Retry-After` is the 
 ## Semantics
 
 - The circuit breaker uses a monotonic rolling failure window with an open → half-open cooldown.
-- **`timeout` does not cancel the underlying work.** It races the promise and cleans up its timer in
-  a `finally`; the wrapped function keeps running. Pass an `AbortSignal` yourself if the operation
-  supports cancellation.
+- **`timeout` cancels the attempt.** The wrapped function receives an `AbortSignal` that the timeout
+  aborts when the deadline elapses, with the `TimeoutError` as its `reason`; the timer is cleared in
+  a `finally`. Forward the signal to your I/O (`fetch(url, { signal })`) and the call is genuinely
+  cancelled. Work that ignores the signal keeps running in the background while the caller's `await`
+  rejects — a property of the supplied function, not of the wrapper.
 - The bulkhead is a bounded FIFO queue; overflow rejects with `BulkheadFullError`.
 
 ## Exports

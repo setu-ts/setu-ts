@@ -1,7 +1,7 @@
 # @setu-ts/service-discovery-plugin — locate and select service instances
 
-**Add it:** `setu add service-discovery` installs it and prints the registration for
-`setu.config.ts`. It provides `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
+**Add it:** `setu add service-discovery` adds it and prints the registration for `setu.config.ts`.
+It provides `CAPABILITIES.SERVICE_DISCOVERY` (`IServiceDiscovery`).
 
 ## Configure a static service pool
 
