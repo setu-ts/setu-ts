@@ -15,8 +15,9 @@ export function moduleActive(source: string, symbol: string, mode: GeneratorMode
   const code = withoutImports(maskSourceCode(source));
   if (code === undefined) return false;
   if (mode !== 'class-based') return new RegExp(`\\b${symbol}\\s*\\(`).test(code);
-  const modules = new RegExp(`\\b${MODULES_EXPORT}\\b[^=]*=\\s*\\[([^\\]]*)\\]`).exec(code);
-  return modules !== null && new RegExp(`\\b${symbol}\\b`).test(modules[1] ?? '');
+  // A match always has its capture group, so `undefined` means only "no MODULES array".
+  const listed = new RegExp(`\\b${MODULES_EXPORT}\\b[^=]*=\\s*\\[([^\\]]*)\\]`).exec(code)?.[1];
+  return listed !== undefined && new RegExp(`\\b${symbol}\\b`).test(listed);
 }
 
 /** The mode-specific symbol declared by a feature module. */
