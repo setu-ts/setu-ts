@@ -8,22 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).** `setu check [--dir] [--strict]`
-  is a read-only wiring gate: it exits `1` when a seam artifact is skipped, a barrel does not list
-  an artifact in its directory or lists one that is gone, `setu.config.ts` does not reference a
-  barrel on disk, an artifact is registered both by its barrel and by hand, a feature module is
-  skipped or not activated, or the old `src/routes/` layout is still in use. It never loads the
-  application. Barrels are compared as sets of names, so a reformatted barrel passes. Every finding
-  carries a stable id (`setu.E001`…`setu.E013`, `setu.W001`…`setu.W004`); warnings exit `0` unless
-  `--strict`. A `setu.config.ts` or seam artifact that exists but cannot be read is an error, and
-  `sync` leaves an artifact's barrel unchanged rather than drop an import it cannot verify.
-  `.setu-ts/check.json` silences an id everywhere or for one path, and an invalid file silences
-  nothing (`setu.E011`). From a workspace root both commands run over every member, and refuse a
-  member that is a symbolic link. `check` executes no project code and parses in linear time, so it
-  is safe on an untrusted pull request; `sync` and `generate` load the project's Prettier
-  configuration. `setu sync [--dir] [--dry-run]` rewrites every CLI-managed barrel from its
-  directory with the renderer `setu generate` uses, writes nothing else, and then reports what it
-  could not fix.
+- **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
+  `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
+  skipped, a barrel does not list an artifact in its directory or lists one that is gone,
+  `setu.config.ts` does not reference a barrel on disk, an artifact is registered both by its barrel
+  and by hand, a feature module is skipped or not activated, or the old `src/routes/` layout is
+  still in use. It never loads the application. Barrels are compared as sets of names, so a
+  reformatted barrel passes. Every finding carries a stable id (`setu.E001`…`setu.E013`,
+  `setu.W001`…`setu.W004`); warnings exit `0` unless `--strict`. A `setu.config.ts` or seam artifact
+  that exists but cannot be read is an error, and `sync` leaves an artifact's barrel unchanged
+  rather than drop an import it cannot verify. `.setu-ts/check.json` silences an id everywhere or
+  for one path, and an invalid file silences nothing (`setu.E011`). From a workspace root both
+  commands run over every member, and refuse a member that is a symbolic link. `check` executes no
+  project code and parses in linear time, so it is safe on an untrusted pull request; `sync` and
+  `generate` load the project's Prettier configuration. `setu sync [--dir] [--dry-run]` rewrites
+  every CLI-managed barrel from its directory with the renderer `setu generate` uses, writes nothing
+  else, and then reports what it could not fix.
 
 - **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
   `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The
@@ -116,10 +116,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and Workers
-  scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their `check`
-  script is `tsc --noEmit && setu check` (`npm run build && tsc --noEmit && setu check` for a
-  Workers project with a build). Deno scaffolds gain a `check` task:
+- **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and
+  Workers scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their
+  `check` script is `tsc --noEmit && setu check` (`npm run build && tsc --noEmit && setu check` for
+  a Workers project with a build). Deno scaffolds gain a `check` task:
   `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check`; the devtool
   form adds `main.dev.ts`, and `setu devtool enable` replaces the scaffold's own `check` task with
   it. `check` and `sync` are built-in verbs and now shadow a plugin command of the same name.
