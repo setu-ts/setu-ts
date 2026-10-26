@@ -19,7 +19,8 @@ const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
 /** A directory stat. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
 /** A stat rejection shaped like a real runtime's missing-path error. */
-const MISSING = new Error('NotFound');
+// The shape the real adapters throw for a vanished path (`filesystem-errors.ts`).
+const MISSING = Object.assign(new Error('gone'), { code: 'ENOENT' });
 
 const ROUTES = seamSpecFor('route')!;
 const PLUGINS = seamSpecFor('plugin')!;
@@ -126,6 +127,10 @@ describe('readArtifactNames', () => {
     const scan = await readArtifactNames(fs, '/app', ROUTES);
     expect(scan.names).toEqual(['user']);
     expect(opened).toEqual(['user.routes.ts']);
+    // Left out of the barrel, as before, but reported rather than silently dropped.
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/huge.routes.ts`, reason: 'too-large' },
+    ]);
   });
 
   it('returns names sorted, with the suffix stripped', async () => {
@@ -198,6 +203,7 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not reported: the filesystem moved under us, the artifact is not at fault.
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('skips an entry whose source cannot be read', async () => {
@@ -210,6 +216,9 @@ describe('readArtifactNames', () => {
     );
     expect(scan.names).toEqual(['user']);
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/locked.routes.ts`, reason: 'unclassifiable' },
+    ]);
   });
 
   // The regression that motivated the export check. `middleware` and `metric` each gained

@@ -50,4 +50,5 @@ export const CHECK_FINDINGS: readonly Finding[] = [
   { kind: 'legacy-registrar' },
   { kind: 'silence-unmatched', entry: '"setu.E003"' },
   { kind: 'config-unreadable', path: 'setu.config.ts', reason: 'not-a-file' },
+  { kind: 'artifact-unreadable', path: 'src/controllers/huge.controller.ts', reason: 'too-large' },
 ];

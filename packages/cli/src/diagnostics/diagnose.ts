@@ -63,6 +63,11 @@ export type Finding =
     }
   | { readonly kind: 'no-config'; readonly barrels: readonly string[] }
   | {
+      readonly kind: 'artifact-unreadable';
+      readonly path: string;
+      readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
+    }
+  | {
       readonly kind: 'config-unreadable';
       readonly path: string;
       readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
@@ -136,12 +141,15 @@ export async function diagnoseProject(
           : { kind: 'artifact-skipped', path: skip.path, missing: skip.missing },
       );
     for (const manual of value.manual) findings.push({ kind: 'manual-registration', ...manual });
+    for (const unreadable of value.unreadable)
+      findings.push({ kind: 'artifact-unreadable', ...unreadable });
   };
   addScan(scan);
   const legacy = await readLegacyHttpFiles(fs, dir);
   if (legacy.length > 0) findings.push({ kind: 'legacy-layout', files: legacy });
   if (legacyRegistrarNotice(config).length > 0) findings.push({ kind: 'legacy-registrar' });
-  const generateFindings = [...findings];
+  // `generate` reports what it always reported; an unreadable artifact is check's.
+  const generateFindings = findings.filter((finding) => finding.kind !== 'artifact-unreadable');
   findings.push(...(await diagnoseBarrels(fs, dir, specs, scan.artifacts)));
   const presentBarrels = new Set<string>();
   let hasSeams = false;

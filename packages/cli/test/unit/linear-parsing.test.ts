@@ -118,6 +118,41 @@ describe('the linear forms keep the expressions they replaced', () => {
     );
   });
 
+  // The expression `declarationSpecifiers` replaced, with its code-position check.
+  const oldSpecifiers = (text: string): readonly string[] => {
+    const source = maskComments(text) ?? '';
+    const code = maskSourceCode(source) ?? '';
+    return [
+      ...source.matchAll(
+        /(?:^|[;\r\n])\s*(?:import|export)\s+(?:type\s+)?(?:\{[^}]*\}|\*(?:\s+as\s+[A-Za-z_$][\w$]*)?|[A-Za-z_$][\w$]*(?:\s*,\s*(?:\{[^}]*\}|\*\s+as\s+[A-Za-z_$][\w$]*))?)\s+from\s*([\x27\x22])([^\x27\x22\r\n]+)\1/g,
+      ),
+    ]
+      .filter((match) => {
+        const offset = match[0].search(/\b(?:import|export)\b/);
+        return /^(?:import|export)\b/.test(code.slice(match.index + offset));
+      })
+      .map((match) => match[2] ?? '');
+  };
+  it.each([
+    'import { a } from \'./a.controller.ts\';\nexport { b } from "./b.controller.ts";',
+    "import {\n  a,\n  b,\n} from './a.controller.ts';",
+    "import x, * as y from './x.controller.ts';\nexport * from './z.controller.ts';",
+    "import type { T } from './t.controller.ts';\nimport type from './type.controller.ts';",
+    "const s = 'import { a } from \"./fake.controller.ts\"';\nimport { r } from './real.controller.ts';",
+    "// import { c } from './comment.controller.ts';\nimport{ n } from './no-space.controller.ts';",
+    "foo; import { a } from './after-semicolon.controller.ts';",
+  ])('declarationSpecifiers agrees with the replaced expression on %j', (text) => {
+    expect(specifiers(text)).toEqual(oldSpecifiers(text));
+  });
+
+  // The one deliberate difference, pinned so it cannot widen unnoticed: a brace list
+  // holding `{` or `;` is not read, which no import list does.
+  it('differs only for a brace list holding a brace or a semicolon', () => {
+    const braced = "import { a; b } from './semi.controller.ts';";
+    expect(oldSpecifiers(braced)).toEqual(['./semi.controller.ts']);
+    expect(specifiers(braced)).toEqual([]);
+  });
+
   it('reads type-only, default-named-type and namespace declarations', () => {
     expect(
       specifiers(

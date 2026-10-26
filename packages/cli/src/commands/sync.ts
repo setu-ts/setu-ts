@@ -40,7 +40,23 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
         const plan = (path: string, contents: string): void => {
           files.set(path, { path: joinPath(dir, path), contents, managed: true });
         };
+        // A barrel whose family holds an artifact that could not be read is left as
+        // it is: rewriting it from the scan would drop an import nobody can verify
+        // (M118 audit F7). The E013 finding printed below names the file.
+        const unreadable = diagnosis.findings.flatMap((finding) =>
+          finding.kind === 'artifact-unreadable' ? [finding.path] : [],
+        );
+        const held = new Set(
+          scanSeamSpecs(installed)
+            .filter((spec) =>
+              unreadable.some(
+                (path) => path.startsWith(`${spec.dir}/`) && path.endsWith(spec.suffix),
+              ),
+            )
+            .map((spec) => spec.barrel),
+        );
         for (const spec of scanSeamSpecs(installed)) {
+          if (held.has(spec.barrel)) continue;
           if (
             diagnosis.presentBarrels.has(spec.barrel) ||
             (diagnosis.artifacts[spec.schematic]?.length ?? 0) > 0
@@ -55,13 +71,14 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
               : renderFunctionalModuleBarrel(diagnosis.modules),
           );
         for (const [module, artifacts] of diagnosis.moduleArtifacts)
-          plan(
-            `src/modules/${module}/index.ts`,
-            renderFunctionalModuleIndex(deriveNames(module), {
-              controller: artifacts.controller,
-              route: artifacts.route,
-            }),
-          );
+          if (!unreadable.some((path) => path.startsWith(`src/modules/${module}/`)))
+            plan(
+              `src/modules/${module}/index.ts`,
+              renderFunctionalModuleIndex(deriveNames(module), {
+                controller: artifacts.controller,
+                route: artifacts.route,
+              }),
+            );
         const formatted = await formatForTarget(
           [...files.values()],
           await detectTargetRuntime(deps.fs, dir),

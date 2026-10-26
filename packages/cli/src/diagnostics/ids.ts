@@ -18,6 +18,7 @@ export const FINDING_IDS = {
   'legacy-registrar': 'setu.W003',
   'silence-unmatched': 'setu.W004',
   'config-unreadable': 'setu.E012',
+  'artifact-unreadable': 'setu.E013',
 } as const;
 
 /** Looks up an identity without parsing rendered prose. */

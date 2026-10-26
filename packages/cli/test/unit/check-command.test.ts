@@ -61,6 +61,7 @@ it('renders each stable id with its severity and strict counts', () => {
     'setu.config.ts calls registerGeneratedRoutes(app.router) without the service registry.',
     'Silence entry "setu.E003" matched no finding.',
     'Cannot read setu.config.ts: not-a-file, so its wiring cannot be checked.',
+    'Cannot read src/controllers/huge.controller.ts: too-large, so whether it is wired cannot be checked.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {

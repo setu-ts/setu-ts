@@ -76,6 +76,11 @@ function lines(finding: Finding): readonly string[] {
         `Cannot check ${escapeName(f.barrel)}: ${f.reason}.`,
         '  Restore a regular, classifiable barrel under 1 MiB, then run `setu sync`.',
       ];
+    case 'artifact-unreadable':
+      return [
+        `Cannot read ${escapeName(f.path)}: ${f.reason}, so whether it is wired cannot be checked.`,
+        '  Restore a regular, readable file under 1 MiB; `setu sync` will not rewrite its barrel until then.',
+      ];
     case 'config-unreadable':
       return [
         `Cannot read ${escapeName(f.path)}: ${f.reason}, so its wiring cannot be checked.`,

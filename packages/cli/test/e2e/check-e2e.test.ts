@@ -204,3 +204,26 @@ it('fails on a setu.config.ts it cannot read, and only warns when there is none'
   expect(unreadable.err).toContain('error setu.E012: Cannot read setu.config.ts: not-a-file');
   expect(unreadable.err).not.toContain('setu.W002');
 });
+
+it('reports an unreadable artifact, and sync keeps the barrel import it cannot verify', async () => {
+  expect((await run(['new', 'shop', '--template', 'rest'])).code).toBe(0);
+  const project = `${root}/shop`;
+  expect((await run(['generate', 'controller', 'orders', '--dir', project])).code).toBe(0);
+  const barrelPath = `${project}/src/controllers/index.ts`;
+  const barrel = await nodeFs.readFile(barrelPath, 'utf8');
+  // Over the 1 MiB read cap: the scanner cannot tell what it exports.
+  const artifact = `${project}/src/controllers/orders.controller.ts`;
+  await nodeFs.appendFile(artifact, `// ${'x'.repeat(1024 * 1024)}\n`);
+  const checked = await run(['check', '--dir', project]);
+  expect(checked.code).toBe(1);
+  expect(checked.err).toContain(
+    'error setu.E013: Cannot read src/controllers/orders.controller.ts: too-large',
+  );
+  const synced = await run(['sync', '--dir', project]);
+  expect(synced.code).toBe(1);
+  expect(synced.err).toContain('setu.E013');
+  expect(await nodeFs.readFile(barrelPath, 'utf8')).toBe(barrel);
+  // Unlisted, the same file is still reported: it is never silently passed.
+  await nodeFs.writeFile(barrelPath, '');
+  expect((await run(['check', '--dir', project])).err).toContain('setu.E013');
+});

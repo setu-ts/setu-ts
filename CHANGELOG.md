@@ -14,8 +14,9 @@ All notable changes to this project are documented here. The format follows
   barrel on disk, an artifact is registered both by its barrel and by hand, a feature module is
   skipped or not activated, or the old `src/routes/` layout is still in use. It never loads the
   application. Barrels are compared as sets of names, so a reformatted barrel passes. Every finding
-  carries a stable id (`setu.E001`…`setu.E012`, `setu.W001`…`setu.W004`); warnings exit `0` unless
-  `--strict`. A `setu.config.ts` that exists but cannot be read is an error, not a missing config.
+  carries a stable id (`setu.E001`…`setu.E013`, `setu.W001`…`setu.W004`); warnings exit `0` unless
+  `--strict`. A `setu.config.ts` or seam artifact that exists but cannot be read is an error, and
+  `sync` leaves an artifact's barrel unchanged rather than drop an import it cannot verify.
   `.setu-ts/check.json` silences an id everywhere or for one path, and an invalid file silences
   nothing (`setu.E011`). From a workspace root both commands run over every member, and refuse a
   member that is a symbolic link. `check` executes no project code and parses in linear time, so it

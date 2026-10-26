@@ -554,6 +554,13 @@ decisions below are what the fixes implement, and the obligations bind the re-au
     measured minimum is `--allow-read=. --allow-sys=hostname,uid --allow-env=PWD`; `-A` is kept for
     consistency with every documented Deno `setu` invocation. The CLI is first-party with no install
     scripts, and the task runs only the CLI.
+  - **D-S6 An unreadable artifact fails closed (re-audit F7).** The scanner reports an artifact it
+    cannot read (special file, over 1 MiB, read error other than a vanished path) as `setu.E013`
+    instead of skipping it silently; `sync` leaves that family's barrel unchanged rather than drop
+    an import it cannot verify. `generate` keeps its behaviour, so its pinned output is unchanged.
+  - **D-S7 The CI guidance is exact (re-audit O3, O7).** The docs say which links each command
+    refuses, and that on an unreviewed pull request CI must run a pinned CLI installed outside the
+    checkout, before its dependencies, with `--strict`.
 - **Audit obligations (re-audit):**
   1. Each F1/F3 shape at 1 MiB, through the real CLI and per function, under 1 s; positive control:
      the pre-fix code exceeds it (the regression tests record both).

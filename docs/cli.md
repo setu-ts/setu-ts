@@ -770,29 +770,31 @@ setu check: 1 error(s), 0 warning(s), 0 silenced in /work/shop.
 ```
 
 From a workspace root it checks every `apps/<member>`, prefixing each line with the member's name,
-and exits with the worst result. A member that is a symbolic link is refused by name and fails the
-run: neither command reads or writes through a link inside a workspace. A project with no seam
-directories (a `full-stack` project, or one that has never generated anything) prints
-`No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
+and exits with the worst result. A member that is a symbolic link, or that is reached through a
+linked `apps/` directory, is refused by name and fails the run, so neither command reaches files
+outside the workspace through it. Inside a project, `sync` also refuses to write through a link;
+`check` reads through one. A project with no seam directories (a `full-stack` project, or one that
+has never generated anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits `0`.
 
-| Id          | Severity | Finding                                                                                               |
-| ----------- | -------- | ----------------------------------------------------------------------------------------------------- |
-| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                                 |
-| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                              |
-| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                   |
-| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                |
-| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                          |
-| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                                  |
-| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                            |
-| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                      |
-| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                           |
-| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them       |
-| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                      |
-| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission |
-| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown          |
-| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                    |
-| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                   |
-| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                      |
+| Id          | Severity | Finding                                                                                                                 |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                                                   |
+| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                                                |
+| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there                                     |
+| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                                                  |
+| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                                            |
+| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                                                    |
+| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                                              |
+| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                                        |
+| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                                             |
+| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them                         |
+| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                                        |
+| `setu.E012` | error    | `setu.config.ts` exists but cannot be read: a directory, a special file, over 1 MiB, or no permission                   |
+| `setu.E013` | error    | An artifact in a seam directory cannot be read (a special file, over 1 MiB, or no permission), so its wiring is unknown |
+| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown                            |
+| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                                                      |
+| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`                                     |
+| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                                        |
 
 Barrels are compared as **sets of names**, read from their import and export declarations, so a
 barrel your formatter rewrote, reordered or re-quoted still passes. Ids are never reused: a retired
@@ -803,13 +805,25 @@ and each functional module's `index.ts` — with the same renderer `setu generat
 barrel is byte-identical to the one the next `generate` would write. It writes a barrel only when it
 exists or its family has an artifact, and never touches `setu.config.ts`, a manifest or an artifact.
 It cannot fix a finding that is not a barrel (a skipped artifact, an unwired config, an inactive
-module), so afterwards it prints whatever remains and exits `1` if an error does.
+module), so afterwards it prints whatever remains and exits `1` if an error does. A barrel whose
+family holds an artifact it cannot read (`setu.E013`) is left as it is rather than rewritten without
+that artifact's import.
 
 **Run `setu check` on code you have not reviewed; do not run `setu sync` or `setu generate` on it.**
 `check` executes nothing from the project and its parsers are linear in the size of what they read,
-so it is safe as a CI step on a pull request from anyone. `sync` and `generate` — including with
-`--dry-run` — format what they plan with the project's own Prettier configuration, and loading that
-configuration runs the project's `prettier.config.*` and any plugin it names.
+so it is safe as a CI step on a pull request from anyone — with one condition. On a pull request you
+have not reviewed, the project's own `check` script, and the CLI version its lockfile resolves, are
+the author's to change. Run a CLI your CI pins, installed outside the checkout and before the
+checkout's dependencies are installed, and use `--strict` so a configuration the check cannot
+classify fails rather than warns:
+
+```bash
+npx --yes @setu-ts/cli@<version> check --strict --dir <checkout>
+```
+
+`sync` and `generate` — including with `--dry-run` — format what they plan with the project's own
+Prettier configuration, and loading that configuration runs the project's `prettier.config.*` and
+any plugin it names.
 
 ### Silencing a finding
 
