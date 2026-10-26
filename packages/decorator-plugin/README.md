@@ -230,7 +230,7 @@ schema and a description the declaration does not carry.
 - **Routing** — `@Controller`, `@Version`,
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
-  `CurrentUser`, `Ctx`, `Custom`
+  `CurrentUser`, `Ctx`, `Service` (a DI service from the request's scope), `Custom`
 - **Modules** — `@Module({ controllers, providers, imports })`
 - **Non-HTTP ingress** — `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`,
   `@CommandHandler`, `@QueryHandler`, `@Gateway` (+ `@OnOpen`/`@OnMessage`/`@OnClose`)
@@ -452,6 +452,7 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 | `Roles`                      | function  |
 | `ScopedPermissions`          | function  |
 | `ScopedRoles`                | function  |
+| `Service`                    | function  |
 | `Subscribe`                  | function  |
 | `UseFilters`                 | function  |
 | `UseGuards`                  | function  |

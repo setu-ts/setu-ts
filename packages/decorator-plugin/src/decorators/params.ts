@@ -28,7 +28,7 @@
  */
 import '../metadata/symbol-metadata.ts';
 
-import type { IRequestContext } from '@setu-ts/common';
+import type { ContainerToken, IRequestContext } from '@setu-ts/common';
 
 import { defer } from '../metadata/pending.ts';
 import { requireDecoratorMetadata } from '../metadata/symbol-metadata.ts';
@@ -205,6 +205,46 @@ export function Ctx(): ParamSource<IRequestContext> {
     customType: 'context',
     metadata: CONTEXT_PARAMETER_METADATA,
   });
+}
+
+/** Internal stable brand shared by duplicated package copies. */
+const SERVICE_PARAMETER = Symbol.for('@setu-ts/decorator-plugin/service-parameter');
+
+/**
+ * Binds a service from the lazily created request scope.
+ *
+ * @param token - A string, typed token, or injectable class
+ *
+ * @returns A request-scoped service source
+ * @throws {Error} At resolution when DI or request cleanup is unavailable
+ * @example
+ * ```typescript
+ * @Params(Service(UserService))
+ * list(users: UserService) { return users.list(); }
+ * ```
+ *
+ * @since 0.11.0
+ */
+export function Service<T>(token: ContainerToken<T>): ParamSource<T> {
+  return source<T>({
+    type: 'custom',
+    customType: 'service',
+    metadata: { serviceParameter: SERVICE_PARAMETER, token },
+  });
+}
+
+/**
+ * Internal marker reader shared by startup and request resolution.
+ * @param metadata - Custom parameter metadata
+ * @returns The token for a branded Service descriptor, otherwise undefined
+ * @since 0.11.0
+ * @internal
+ */
+export function serviceParameterToken(
+  metadata?: Readonly<Record<string, unknown>>,
+): ContainerToken | undefined {
+  if (metadata?.['serviceParameter'] !== SERVICE_PARAMETER) return undefined;
+  return metadata['token'] as ContainerToken;
 }
 
 /**

@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
+import type { ContainerToken } from '@setu-ts/common';
+import { describe, expect, it, vi } from 'vitest';
+import { CAPABILITIES, createToken, PLUGIN_PRIORITY } from '@setu-ts/common';
 import type { IContainer, IPlugin, IPluginContext, Provider } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { overrideProvider } from '../../src/override-provider.ts';
@@ -19,8 +20,8 @@ function runtimePlugin(): IPlugin {
 
 /** A minimal container that refuses a second registration, like DiPlugin's. */
 class FakeContainer implements IContainer {
-  readonly values = new Map<string, unknown>();
-  register<T>(token: string, provider: Provider<T>): void {
+  readonly values = new Map<ContainerToken, unknown>();
+  register<T>(token: ContainerToken<T>, provider: Provider<T>): void {
     if (this.values.has(token)) {
       throw new Error(`DI token '${token}' is already registered.`);
     }
@@ -29,15 +30,19 @@ class FakeContainer implements IContainer {
     }
     this.values.set(token, provider.useValue);
   }
-  resolve<T>(token: string): T {
+  resolve<T>(token: ContainerToken<T>): T {
     if (!this.values.has(token)) {
       throw new Error(`No provider registered for DI token '${token}'.`);
     }
     return this.values.get(token) as T;
   }
-  has(token: string): boolean {
+  has(token: ContainerToken): boolean {
     return this.values.has(token);
   }
+  forRequest(): IContainer {
+    return this;
+  }
+  dispose(): void {}
   createScope(): IContainer {
     return this;
   }
@@ -78,6 +83,45 @@ function realProvider(
 }
 
 describe('overrideProvider', () => {
+  it('forwards typed request scopes and dispose through the published wrapper', async () => {
+    const token = createToken<number>('count');
+    const inner = new FakeContainer();
+    const dispose = vi.spyOn(inner, 'dispose');
+    const requestScope = vi.spyOn(inner, 'forRequest');
+    let published: IContainer | undefined;
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        containerPlugin(inner),
+        overrideProvider(token, { useValue: 42 }),
+        {
+          name: 'consumer',
+          version: '1.0.0',
+          priority: PLUGIN_PRIORITY.LOW,
+          register(ctx) {
+            published = ctx.container;
+            expect(published?.has(token)).toBe(true);
+          },
+        },
+      ],
+    });
+    app.router.get('/count', (ctx) => {
+      const scope = published!.forRequest(ctx);
+      expect(published!.forRequest(ctx)).toBe(scope);
+      scope.register(token, { useValue: 0 });
+      expect(scope.resolve(token)).toBe(42);
+      scope.dispose();
+      return ctx.response.text('ok');
+    });
+    await app.start();
+    try {
+      expect((await app.inject({ method: 'GET', url: '/count' })).body).toBe('ok');
+    } finally {
+      await app.stop();
+    }
+    expect(requestScope).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
   it('depends on the container and registers ahead of a LOW-priority provider', () => {
     const plugin = overrideProvider('svc', { useValue: {} });
     expect(plugin.name).toBe('test-provider-override.svc');

@@ -316,6 +316,40 @@ export interface IResponse {
  * @since 0.1.0
  */
 export interface IRequestContext {
+  /**
+   * Returns this request's value for an owner key, creating it on first use.
+   * Keys compare by object identity. Entries cannot be enumerated or deleted
+   * and live only as long as this context; calls after completion work alike.
+   * A throwing factory stores nothing, so a later call can retry.
+   * `create` must not call `slot` with its own key.
+   *
+   * @typeParam T - The stored value type
+   * @param key - A private object identifying the owner of the value
+   * @param create - Factory called only when this key has no stored value
+   * @returns The cached or newly created value, including undefined
+   * @throws {Error} If the factory throws; its error propagates unchanged
+   * @example
+   * ```typescript
+   * const value = ctx.slot?.(ownerKey, () => createRequestResource());
+   * ```
+   * @since 0.11.0
+   */
+  slot?<T>(key: object, create: () => T): T;
+  /**
+   * Registers cleanup in reverse registration order. Buffered responses wait
+   * for cleanup; streaming responses clean up on end, error, or cancellation.
+   * Calls after completion run immediately. Failures are reported at warn.
+   * Each asynchronous cleanup is bounded at 5000 ms; expiry warns once and
+   * continues with the next cleanup. Later settlement is ignored. Synchronous
+   * cleanups stay synchronous and are not timed.
+   *
+   * @param cleanup - Work to run at completion
+   *
+   * @returns Nothing
+   *
+   * @since 0.11.0
+   */
+  defer?(cleanup: () => void | Promise<void>): void;
   /** Unique request ID (generated or propagated by middleware). */
   readonly id: string;
   /** The incoming request. */

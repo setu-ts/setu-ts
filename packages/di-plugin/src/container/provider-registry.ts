@@ -7,10 +7,13 @@
  *
  * @module
  */
-import type { Provider, ServiceScope } from '@setu-ts/common';
+import type { ContainerToken, Provider, ProviderOptions, ServiceScope } from '@setu-ts/common';
+import { tokenName } from './errors.ts';
 
 /**
  * A provider paired with its resolved lifecycle scope.
+ *
+ * @since 0.1.0
  *
  * @internal
  */
@@ -19,6 +22,11 @@ export interface ProviderEntry {
   readonly provider: Provider<unknown>;
   /** Lifecycle scope resolved from options or the container default. */
   readonly scope: ServiceScope;
+  /**
+   * Instance cleanup owned by this provider.
+   * @since 0.11.0
+   */
+  readonly dispose?: ProviderOptions['dispose'];
 }
 
 /**
@@ -31,13 +39,13 @@ export interface ProviderEntry {
  * @since 0.1.0
  */
 export class ProviderRegistry {
-  readonly #entries = new Map<string, ProviderEntry>();
-  readonly #parent: ProviderRegistry | undefined;
+  readonly #entries = new Map<ContainerToken, ProviderEntry>();
+  readonly #parent: ProviderRegistry | (() => ProviderRegistry) | undefined;
 
   /**
-   * @param parent - Optional parent registry for inherited lookups.
+   * @param parent - Parent registry or a lazy lookup of the nearest ancestor registry
    */
-  constructor(parent?: ProviderRegistry) {
+  constructor(parent?: ProviderRegistry | (() => ProviderRegistry)) {
     this.#parent = parent;
   }
 
@@ -45,12 +53,17 @@ export class ProviderRegistry {
    * Registers a provider entry under a token.
    *
    * @param token - The capability token
+   *
    * @param entry - Provider and scope
-   * @throws {Error} If the token is already registered in this registry
+   *
+   * @returns Nothing
+   * @throws {Error} If the token is already registered in this chain
+   *
+   * @since 0.11.0
    */
-  register(token: string, entry: ProviderEntry): void {
-    if (this.#entries.has(token)) {
-      throw new Error(`DI token '${token}' is already registered. Use a child scope to override.`);
+  register(token: ContainerToken, entry: ProviderEntry): void {
+    if (this.has(token)) {
+      throw new Error(`DI token '${tokenName(token)}' is already registered.`);
     }
     this.#entries.set(token, entry);
   }
@@ -59,24 +72,35 @@ export class ProviderRegistry {
    * Looks up a provider entry, walking the parent chain.
    *
    * @param token - The capability token
+   *
    * @returns The entry, or `undefined` when not found in this chain
+   *
+   * @since 0.11.0
    */
-  get(token: string): ProviderEntry | undefined {
+  get(token: ContainerToken): ProviderEntry | undefined {
     const local = this.#entries.get(token);
     if (local !== undefined) {
       return local;
     }
-    return this.#parent?.get(token);
+    return this.#parentRegistry()?.get(token);
   }
 
   /**
    * Reports whether a token is registered anywhere in this chain.
    *
    * @param token - The capability token
+   *
    * @returns `true` if registered locally or in a parent
+   *
+   * @since 0.11.0
    */
-  has(token: string): boolean {
-    return this.#entries.has(token) || (this.#parent?.has(token) ?? false);
+  has(token: ContainerToken): boolean {
+    return this.#entries.has(token) || (this.#parentRegistry()?.has(token) ?? false);
+  }
+
+  /** Keeps registrations added later by a previously untouched ancestor visible. */
+  #parentRegistry(): ProviderRegistry | undefined {
+    return typeof this.#parent === 'function' ? this.#parent() : this.#parent;
   }
 
   /**
@@ -86,5 +110,16 @@ export class ProviderRegistry {
    */
   createChild(): ProviderRegistry {
     return new ProviderRegistry(this);
+  }
+
+  /**
+   * Lists local registrations for boot compilation.
+   *
+   * @returns Local token-entry pairs
+   *
+   * @since 0.11.0
+   */
+  entries(): IterableIterator<[ContainerToken, ProviderEntry]> {
+    return this.#entries.entries();
   }
 }

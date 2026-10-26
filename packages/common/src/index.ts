@@ -207,7 +207,11 @@ export type {
   ProviderOptions,
   ServiceScope,
   ValueProvider,
+  InjectionToken,
+  ContainerToken,
+  InjectEntry,
 } from './container.ts';
+export { createToken } from './container.ts';
 
 // Plugin contract
 export type {

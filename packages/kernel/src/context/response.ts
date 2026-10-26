@@ -136,6 +136,16 @@ export class ResponseBuilder implements IResponse {
   }
 
   /**
+   * Reads the streaming body without allocating a snapshot.
+   * @returns The streaming body, or undefined for a buffered response
+   * @since 0.11.0
+   * @internal
+   */
+  get streamingBody(): ReadableStream<Uint8Array> | undefined {
+    return this.#streaming ? (this.#body as ReadableStream<Uint8Array>) : undefined;
+  }
+
+  /**
    * The response status as currently set, defaulted to 200 — the value a
    * completed request's diagnostics record reports. Read-only by design:
    * status is set through {@linkcode ResponseBuilder.status}.

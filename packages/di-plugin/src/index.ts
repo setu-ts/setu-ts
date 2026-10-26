@@ -28,4 +28,10 @@ export type { ContainerConfig, ExternalResolver } from './container/container.ts
 export { CircularDetector } from './container/circular-detector.ts';
 export { ProviderRegistry } from './container/provider-registry.ts';
 export type { ProviderEntry } from './container/provider-registry.ts';
-export { ScopeManager } from './container/scope-manager.ts';
+export {
+  ContainerValidationError,
+  ScopeRequiredError,
+  ScopeDisposedError,
+  ContainerClosedError,
+  RequestScopeUnavailableError,
+} from './container/errors.ts';

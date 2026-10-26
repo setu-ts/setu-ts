@@ -57,6 +57,7 @@ import type { RouteEntry } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
+import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { coerceInjectBody } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
@@ -1052,6 +1053,10 @@ class Application implements IKernelApplication {
     // draining the live stream, which would consume it. Say so explicitly
     // rather than reporting `body: null`, which reads as "empty response".
     if (snapshot.streaming) {
+      // Cancel the unread body first: a response with deferred cleanup settles
+      // only when its stream ends or is cancelled, so an abandoned body would
+      // never run that cleanup or release its in-flight count.
+      await snapshot.body.cancel().catch(() => undefined);
       throw new Error(
         'inject() cannot read a streaming response body. Call app.fetch() with a web Request ' +
           'and read the returned Response body stream instead.',
@@ -1154,20 +1159,14 @@ class Application implements IKernelApplication {
     try {
       const pending = this.#runRequest(ctx, handle, path, request);
       if (pending === undefined) {
-        this.#inFlight--;
-        this.#completeRequest(ctx, 'ok');
-        return ctx.response as ResponseBuilder;
+        return this.#settleRequest(ctx, handle, 'ok');
       }
       return pending.then(
-        () => {
-          this.#inFlight--;
-          this.#completeRequest(ctx, 'ok');
-          return ctx.response as ResponseBuilder;
-        },
-        (error: unknown) => this.#failRequest(error, ctx),
+        () => this.#settleRequest(ctx, handle, 'ok'),
+        (error: unknown) => this.#failRequest(error, ctx, handle),
       );
     } catch (error) {
-      return this.#failRequest(error, ctx);
+      return this.#failRequest(error, ctx, handle);
     }
   }
 
@@ -1676,11 +1675,15 @@ class Application implements IKernelApplication {
    * @param ctx - The live request context
    * @returns The response, directly or once the hooks have run
    */
-  #failRequest(error: unknown, ctx: IRequestContext): ResponseBuilder | Promise<ResponseBuilder> {
+  #failRequest(
+    error: unknown,
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
     const err = error instanceof Error ? error : new Error(String(error));
     const hooks = this.#lifecycle.getErrorHooks();
     if (hooks.length === 0) {
-      return this.#finishFailure(err, ctx);
+      return this.#finishFailure(err, ctx, handle);
     }
     const parentOperationId = this.#collector?.requestOperationIdOf(ctx);
     return (async () => {
@@ -1691,7 +1694,7 @@ class Application implements IKernelApplication {
           this.#reportSuppressedHookError(hookError);
         }
       }
-      return this.#finishFailure(err, ctx);
+      return this.#finishFailure(err, ctx, handle);
     })();
   }
 
@@ -1708,17 +1711,57 @@ class Application implements IKernelApplication {
    * @param ctx - The live request context
    * @returns The response builder carrying the 500
    */
-  #finishFailure(err: Error, ctx: IRequestContext): ResponseBuilder {
-    // Decrement FIRST: the original body did this in a `finally`, so a throw
-    // from the reporting or responder call could not leak the counter and
-    // stall the shutdown drain. Ordering it ahead of both preserves that.
-    this.#inFlight--;
-    this.#reportUnhandledError(err, ctx);
-    respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
-    // Recorded AFTER the response is final, so the status in the record is
-    // the status that was actually served.
-    this.#completeRequest(ctx, 'error');
-    return ctx.response as ResponseBuilder;
+  #finishFailure(
+    err: Error,
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
+    try {
+      this.#reportUnhandledError(err, ctx);
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+    } catch (failure) {
+      // A throwing responder must still release the request — its cleanups
+      // and its in-flight count — or the shutdown drain stalls until its
+      // deadline. The throw itself still surfaces, as it did before M125.
+      void this.#settleRequest(ctx, handle, 'error');
+      throw failure;
+    }
+    return this.#settleRequest(ctx, handle, 'error');
+  }
+
+  /** Settles generic cleanup before releasing the request from shutdown drain. */
+  #settleRequest(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    outcome: DiagnosticsEventOutcome,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
+    const response = ctx.response as ResponseBuilder;
+    const cleanups = handle.takeDeferred();
+    if (cleanups === undefined) {
+      this.#inFlight--;
+      this.#completeRequest(ctx, outcome);
+      return response;
+    }
+    const body = response.streamingBody;
+    if (body === undefined) {
+      const pending = runDeferred(cleanups, this.#registry);
+      if (pending === undefined) {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      }
+      return pending.then(() => {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      });
+    }
+    const complete = (): void => {
+      this.#inFlight--;
+      this.#completeRequest(ctx, outcome);
+    };
+    response.stream(wrapDeferredStream(body, cleanups, this.#registry, complete));
+    return response;
   }
 
   /**

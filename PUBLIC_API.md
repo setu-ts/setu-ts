@@ -12384,6 +12384,7 @@ reaches `redactors[<string>]`):
 | `isWorkerTaskRequest(m)`                               | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `isWorkerTaskReply(m)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `PLUGIN_PRIORITY`                                      | const                                                                                                                                                                                                                                                                                                                                                                                                                                     | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `createToken<T>(name)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Creates a typed DI token (M125): a frozen `{ name }` object that `IContainer.register`, `resolve` and `has` accept and match by identity, and from which `resolve` infers `T` with no type argument. Pure — it keeps no counter or other state, so two calls with one name are two distinct tokens. A DI token, not a capability token: it is never checked against the capability-token grammar.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ok(value)` / `err(error)`                             | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | `Result` constructors                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `isOk(r)` / `isErr(r)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | `Result` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `unwrap(r)`                                            | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -12445,7 +12446,7 @@ reaches `redactors[<string>]`):
 | Service registry       | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | HTTP                   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`                                                                                                                                                                                                                      |
 | Runtime                | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions<T>`, `InjectionToken<T>`, `ContainerToken<T>` — `string \| InjectionToken<T> \| Constructor<T>`, the token any `IContainer` method accepts — and `InjectEntry`, one `inject` element: a `ContainerToken` or `{ token, optional: true }`. See "DI container contract (M125)" below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Logging                | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Config                 | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Validation             | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -12486,6 +12487,52 @@ reaches `redactors[<string>]`):
 | Outbox                 | `IOutboxStore`, `IOutboxWriteScope`, `OutboxRecord`, `OutboxStatus`, `OutboxKey`, `OutboxTransition`, `OutboxStoreStats`, `OUTBOX_RECORD_KIND` — the transactional-outbox store port (`append`, `scanPending`, `failedKeys`, `claim`, `markInvalid`, `markSent`, `markFailure`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws), the row shape (every field a JSON scalar, times as epoch ms; `claimVersion` starts at zero and is claimable in `[0, Number.MAX_SAFE_INTEGER - 1]`, `leaseUntil` starts at zero; PostgreSQL `bigint`, SQLite/D1 64-bit `INTEGER`, JSON numbers elsewhere), the conditional-transition outcome (`applied` / `missing` / `not-pending` / `not-failed` / `claim-lost`), and the `'setu-outbox'` discriminator every row carries and every read requires (M107)                                                                                                                                 |
 | Inbox                  | `IInboxStore`, `InboxRecord`, `InboxStatus`, `InboxIds`, `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, `INBOX_RECORD_KIND` — the consumer-inbox store port (`find`, `run`, `recordFailure`, `park`, `parked`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws; `run` creates the marker first in one transaction), the row shape (every field a JSON scalar, times as epoch ms), the release outcome (`applied` / `missing` / `not-parked`), and the `'setu-inbox'` discriminator every row carries and every read requires (M108)                                                                                                                                                                                                                                                                                                                                                                         |
 | Idempotency            | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                                                                                                                                                                                                                                       |
+
+**DI container contract (M125).** The container is optional (no plugin may require it), and its
+contract changed in 0.11.0:
+
+- **Tokens.** Every `IContainer` method takes a `ContainerToken<T>`: a string, an
+  `InjectionToken<T>` from `createToken<T>(name)`, or a class (`Constructor<T>`). Object tokens are
+  matched by identity. `resolve` on an `InjectionToken<T>` or a class returns `T` without a type
+  argument; `resolve<T>(token: string)` is unchanged.
+- **Visible dependencies.** `ClassProvider.inject` and the new `FactoryProvider.inject` are
+  `readonly InjectEntry[]`. `FactoryProvider.useFactory` is `(...deps: never[]) => T` and is called
+  with the resolved dependencies in `inject` order; an absent optional dependency arrives as
+  `undefined`. A factory without `inject` is opaque to boot validation.
+- **`ProviderOptions<T>`** (generic, default `unknown`) adds
+  `dispose?: (instance: T) => void | Promise<void>`, called by `dispose()` for each instance the
+  container created.
+- **`forRequest(ctx: IRequestContext): IContainer`** returns the request's scope, created on first
+  call and disposed through `ctx.defer` when the request finishes. Without `ctx.defer` it throws.
+- **`dispose(): void | Promise<void>`** disposes what the container created — on a scope its scoped
+  instances and the transients it built, on the root its singletons — in reverse creation order,
+  each even if an earlier one failed — an asynchronous one bounded at 5000 ms, recorded as a named
+  timeout when it expires — then throws (or rejects with) one `AggregateError`. It returns a promise
+  only when a dispose function did. Repeat calls are no-ops; a disposed scope refuses further
+  resolves. Instances from the service-registry fallback are never disposed.
+- **`ServiceScope`.** `scoped` means one instance per scope; a request reaches its scope through
+  `forRequest`. Resolving a `scoped` token on the root container is refused, and so is a `transient`
+  there whose graph reaches a `scoped` provider.
+- **Breaking for implementors:** `forRequest` and `dispose` are required members (0.11.0).
+
+**`IRequestContext.defer?(cleanup)`** (M125) — registers per-request cleanup. The kernel runs
+cleanups in reverse registration order once the request finishes: before a buffered response is
+handed back (awaiting any that return a promise), and when a streaming body ends, errors or is
+cancelled; on the failure path, after the 500 is written. Each asynchronous cleanup is bounded at
+5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later outcome is ignored. A
+cleanup's throw or rejection is reported at `warn` through the logger capability when one is
+registered, and never changes the response; a `defer` after completion runs at once. The member is
+optional, so no implementor breaks: the kernel's context implements it, `createTestContext` does
+not. A request that never calls it stays on the synchronous path.
+
+**`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
+value this request holds under `key`, compared by object identity, and on the first call for that
+key stores and returns `create()`; a throwing `create` stores nothing, so a later call retries.
+Entries cannot be enumerated or deleted and live as long as the context, so a key the owner keeps
+private gives it storage no other code can read or replace through `slot`. `create` must not call
+`slot` with its own key. The kernel's context keeps the first entry without allocating; the member
+is optional, and `createTestContext` does not implement it. `forRequest` keeps each request's scope
+here.
 
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
@@ -13425,21 +13472,29 @@ Contract notes:
 
 Optional dependency injection container plugin. Registers an `IContainer` under
 `CAPABILITIES.DI_CONTAINER`. The service registry remains the primary resolution mechanism; this
-container is a convenience layer for constructor injection and lifecycle management. No other plugin
-depends on it. Implemented in **Milestone 8**; this section is the authoritative export list
-(AI_GUIDELINES §10.5). All exports carry full JSDoc.
+container is a convenience layer for constructor injection, lifetimes and disposal. No other plugin
+depends on it. Implemented in **Milestone 8**; compiled graph, boot validation and the request scope
+in **Milestone 125**. This section is the authoritative export list (AI_GUIDELINES §10.5). All
+exports carry full JSDoc.
 
 ### Values (di-plugin exports)
 
-| Export             | Kind     | Purpose                                                                   |
-| ------------------ | -------- | ------------------------------------------------------------------------- |
-| `DiPlugin`         | function | Plugin factory — registers `IContainer` under `CAPABILITIES.DI_CONTAINER` |
-| `ContainerBuilder` | class    | Fluent builder for configuring and creating a `DiContainer`               |
-| `createContainer`  | function | Convenience factory for a standalone `IContainer`                         |
-| `DiContainer`      | class    | The `IContainer` implementation (for direct construction or testing)      |
-| `CircularDetector` | class    | Circular dependency detector (exported for testing and advanced use)      |
-| `ProviderRegistry` | class    | Token-keyed provider store with hierarchical lookups                      |
-| `ScopeManager`     | class    | Singleton/scoped/transient instance cache manager                         |
+| Export                         | Kind     | Purpose                                                                                                      |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `DiPlugin`                     | function | Plugin factory — registers `IContainer` under `CAPABILITIES.DI_CONTAINER`, closes it at the end of bootstrap |
+| `ContainerBuilder`             | class    | Fluent builder for configuring and creating a `DiContainer`                                                  |
+| `createContainer`              | function | Convenience factory for a standalone `IContainer`                                                            |
+| `DiContainer`                  | class    | The `IContainer` implementation; adds `close()`, which ends registration and validates the graph             |
+| `CircularDetector`             | class    | Cycle detector used by the graph compiler's walk (exported for testing and advanced use)                     |
+| `ProviderRegistry`             | class    | Token-keyed provider store with hierarchical lookups                                                         |
+| `ContainerValidationError`     | class    | Thrown when a compile or `close()` finds missing, cyclic or captive dependencies; carries `findings`         |
+| `ScopeRequiredError`           | class    | Thrown when a `scoped` token, or a `transient` reaching one, is resolved on the root container               |
+| `ScopeDisposedError`           | class    | Thrown by `resolve` on a disposed scope                                                                      |
+| `ContainerClosedError`         | class    | Thrown by `register` on a closed root container                                                              |
+| `RequestScopeUnavailableError` | class    | Thrown by `forRequest` when the request context has no `defer` (for example one from `createTestContext`)    |
+
+`ScopeManager` was removed in 0.11.0: the compiled graph keeps singletons on their compiled entries
+and scoped instances in a per-scope slot array.
 
 ### Types
 
@@ -13456,25 +13511,47 @@ Contract notes:
 
 - **Optional**: no plugin depends on the DI container. When `DiPlugin` is not registered,
   `ctx.container` is `undefined` and services resolve directly from the `ServiceRegistry`.
-- **Three provider forms**: `ClassProvider` (constructor injection via `inject` tokens),
-  `FactoryProvider` (factory function), `ValueProvider` (pre-built value) — all defined in
-  `@setu-ts/common`.
-- **Three lifecycle scopes**: `singleton` (one instance, shared across child scopes), `scoped` (one
-  instance per `createScope()` scope), `transient` (new instance every resolve). Default is
-  `singleton`. The framework creates no scope per request, so a `scoped` service is not re-created
-  on every HTTP request.
-- **Circular dependency detection**: an instance-level resolution stack catches cycles that cross
-  public `resolve()` boundaries (including factory providers calling back into the container).
-  Throws `Error` with a readable `A → B → A` chain.
-- **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
-  the parent but has its own scoped-instance cache. A scope is created and disposed explicitly by
-  the application; the framework creates no scope per request.
-- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): resolving a token not in the
-  container falls back to the kernel's `ServiceRegistry`; `false` confines resolution to the
-  container's own registrations. The first successful fallback is cached as a singleton; explicit DI
-  registrations always take precedence. `ClassProvider.inject` dependencies also use this two-tier
-  resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as constructor
-  dependencies without pre-registration.
+- **Three provider forms**: `ClassProvider` (constructor injection via `inject`), `FactoryProvider`
+  (a factory called with its `inject` dependencies), `ValueProvider` (pre-built value) — all defined
+  in `@setu-ts/common`, with the token and `inject` rules in "DI container contract (M125)".
+- **Three lifetimes**: `singleton` (one instance, shared with every scope), `scoped` (one instance
+  per scope — a request's scope comes from `forRequest(ctx)`), `transient` (new instance every
+  resolve, tracked by the scope that built it). Default is `singleton`.
+- **Open, then closed**: a container accepts registrations and resolves while open; a resolve
+  compiles that token's subgraph on demand. `DiPlugin` closes the container after the last bootstrap
+  hook, the moment the service registry seals; a `register` on the closed root then throws
+  `ContainerClosedError`. A standalone container stays open until its owner calls `close()`.
+- **Boot validation**: closing compiles every provider into a direct factory and validates the whole
+  graph once — a missing dependency, a cycle (reported `A → B → A`), and a `singleton` reaching a
+  `scoped` provider directly or through `transient`s — throwing one `ContainerValidationError` that
+  lists every finding. Validation instantiates nothing. A factory without `inject` is opaque;
+  `DiPlugin` lists such tokens in one `debug` line.
+- **Compiled resolution**: no resolve runs the cycle detector or looks up a dependency by token; a
+  top-level `resolve(token)` reads one `Map`. Singletons are still created lazily, on first resolve.
+- **Scopes**: `createScope()` and `forRequest(ctx)` return child containers that share singletons
+  with their parent. A scope may register tokens its parent chain does not have, and they live as
+  long as the scope (a `singleton` lifetime there is stored as `scoped`); registering one it has
+  throws, because the parent's compiled graph cannot be rebound from below.
+- **Request scope**: `forRequest(ctx)` creates the scope on first call for that request, keeps it in
+  `ctx.slot` under a key private to the container (a context without `slot` falls back to a
+  per-container `WeakMap`), and registers its disposal with `ctx.defer`. A request that never calls
+  it pays one `undefined` check and stays on the kernel's synchronous path. A scope allocates its
+  own registry only when it registers a token, and instances of its own registrations are held by
+  the scope that resolves them, so request volume never grows anything the root holds.
+- **Disposal**: `ProviderOptions.dispose` runs from `dispose()` — for a request scope when the
+  request finishes, for the root in `DiPlugin`'s `onClose` hook. Each asynchronous dispose is
+  bounded at 5000 ms, on the runtime's timers when a runtime is registered
+  (`ContainerConfig.timing`); one that never settles is reported in the `AggregateError` and the
+  rest still run, so `app.stop()` is never held indefinitely. The bound is per disposal, not a
+  total: k disposals that never settle take about k × 5000 ms, which can exceed the 10 s shutdown
+  drain. A request scope reports each disposal failure itself, through `DiPlugin`'s logger at `warn`
+  (`ContainerConfig.reportDisposeError`), whenever it settles — also after the kernel's 5000 ms
+  cleanup bound has already reported its own timeout.
+- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): a token not in the container
+  falls back to the kernel's `ServiceRegistry`, checked with `has()` during validation and resolved
+  lazily once, then cached as a singleton; `false` confines resolution to the container's own
+  registrations. Explicit DI registrations always take precedence, and framework capability tokens
+  (`CAPABILITIES.LOGGER`, etc.) work as dependencies without pre-registration.
 - **No runtime-specific APIs**: the container uses no `Date.now()`, `crypto.*`, or `process.*` — it
   is pure TypeScript and runtime-independent.
 
@@ -13533,6 +13610,7 @@ carry full JSDoc.
 | `CommandHandler`/`QueryHandler`                              | function | Method decorators — register bound `ICommandHandler` / `IQueryHandler` objects during `onInit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `UseIngressBehaviors`/`UsePipelineBehaviors`                 | function | Method decorators — scope `IIngressBehavior` to one supported non-HTTP ingress handler, or `IPipelineBehavior` to one command/query handler; wrong decorator category is refused at startup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Params`                                                     | function | Method decorator binding handler arguments to sources, positionally; type-checked against the handler's signature                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `Service`                                                    | function | Parameter source for `@Params(...)` (M125): `Service<T>(token)` resolves `token` from the request's DI scope (`container.forRequest(ctx)`) on every call, so a singleton controller reaches `scoped` services per request. `token` is any `ContainerToken<T>`. Without a registered DI container it is reported at startup as unresolvable. A controller constructor that reaches a `scoped` service fails the boot, and its error names this source                                                                                                                                                                                                                                           |
 | `Injectable`                                                 | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `Inject`                                                     | function | Class decorator declaring constructor injection tokens, one per argument in argument order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `Optional`                                                   | function | Wraps a token inside `@Inject(...)`; that argument receives `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -13674,6 +13752,10 @@ Contract notes:
   a built-in custom parameter type and needs no resolver registration. It is recognised by a marker
   registered with `Symbol.for`, so it keeps working if two copies of the package share a process,
   and an application's own `Custom('context')` still reaches its own resolver.
+- **Controllers and the DI container**: controllers are built once, during `register()`, and are
+  registered in the container as `singleton` whatever its `defaultScope` (M125). A `scoped` service
+  reaches a handler through `@Params(Service(token))`; an `@Injectable` class is also registered
+  under the class itself, so `resolve(UserService)` returns the same instance as its string token.
 - **Startup diagnostics**: when a logger is registered, `DecoratorPlugin.register()` warns (never
   throws) about two silent misconfigurations. A class passed in `controllers` that carries no
   `@Controller` metadata registers no routes — the usual cause is two copies of the package, where
@@ -13755,13 +13837,10 @@ Contract notes:
   it would otherwise pass `undefined` for an argument nothing declares.
 
   Both construction paths honor it identically — the DI container when one is registered, the
-  kernel's service registry otherwise. One consequence is worth knowing on the container path: a
-  class carrying `@Optional` registers as a `useFactory` provider rather than a `useClass` one,
-  because `ClassProvider.inject` is a bare token list with nowhere to record optionality. The
-  class's own `scope` is still honored, but since `FactoryProvider.useFactory` takes no arguments,
-  that factory resolves its dependencies from the container the class was registered on rather than
-  from the resolving scope. Classes without `@Optional` are unaffected and still register as
-  `useClass`.
+  kernel's service registry otherwise. On the container path a class carrying `@Optional` registers
+  as a `useClass` provider whose `inject` entries mark the optional positions
+  (`{ token, optional: true }`, M125), so its dependencies resolve from the scope that resolves it —
+  a request scope included — and boot validation sees them.
 
 - **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
   file/time operations go through `IRuntimeServices`.
@@ -13890,7 +13969,7 @@ capability without declaring it fails startup with `Capability '<token>' is alre
 either, exclude the provider and supply the double ahead of its consumers —
 `without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
 
-`overrideProvider<T>(token: string, provider: Provider<T>, options?: ProviderOptions): IPlugin`
+`overrideProvider<T>(token: ContainerToken<T>, provider: Provider<T>, options?: ProviderOptions<T>): IPlugin`
 replaces a provider in the DI container, which `overrideCapability` cannot reach: with `DiPlugin`
 registered, `DecoratorPlugin` puts each `@Injectable` class into the container, and the container
 refuses a second registration of a token. The plugin depends on `CAPABILITIES.DI_CONTAINER` and
@@ -13900,7 +13979,9 @@ swallows the application's later registration of the same token and passes every
 so every class that injects the token is constructed with the double. `start()` fails from
 `register()` when the application has no container or the real provider was registered first, and
 from an `onInit` hook when nothing registered, resolved or checked for the token, which is how a
-mistyped token surfaces.
+mistyped token surfaces. The token may be a string, a `createToken` token or a class (M125); the
+double also applies inside request scopes (`forRequest`), and `dispose()` passes through to the real
+container.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the

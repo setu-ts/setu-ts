@@ -235,6 +235,59 @@ health bridge.
   controller or routes. A test that asserted the old `<Pascal> <id> was not found.` must assert the
   fixed detail instead, and should not assert that the id is echoed.
 
+### DI lifetimes are enforced, and every request has a scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`, breaking)
+
+Affects applications that register `DiPlugin`, and any code implementing `IContainer` itself. An
+application without `DiPlugin` is unaffected.
+
+- **A boot failure naming a `captive` dependency** means a `singleton` reaches a `scoped` service,
+  directly or through `transient`s. Before 0.11.0 the singleton kept the first scope's instance for
+  the life of the application. Make the dependent `scoped` too, or resolve the scoped service per
+  request: `container.forRequest(ctx).resolve(token)` in a handler, or `@Params(Service(token))` on
+  a decorated one. A decorated **controller** is always a singleton (it is built once, at
+  registration, whatever `defaultScope` says), so a controller constructor that takes a scoped
+  service needs the handler-parameter form:
+
+  ```typescript
+  // Before: constructor(private readonly reports: ReportService) {} — now a boot failure
+  @Get()
+  @Params(Service<ReportService>('report-service'))
+  today(reports: ReportService) {
+    return reports.summary();
+  }
+  ```
+
+- **A boot failure naming a `missing` dependency or a `cycle`** used to surface on the first request
+  that resolved it; it now fails `app.start()`, listing every finding at once.
+- **`ScopeRequiredError`** replaces the old behaviour of a `scoped` token resolved on the root
+  container quietly acting as a singleton. It is also thrown for a `transient` with a `dispose`
+  option resolved on the root, which the root would otherwise keep until the application closes.
+  Resolve it through `forRequest(ctx)` or a scope from `createScope()`.
+- **`ContainerClosedError`**: `DiPlugin` closes the container after the last bootstrap hook. Move a
+  `register` that runs after `app.start()` into a plugin's `register()`, `onInit` or `onBootstrap`.
+  A scope may still register tokens its parent does not have, but registering one the parent has now
+  throws; register the replacement on the root, or use `overrideProvider` in tests.
+- **Factories receive their dependencies.** `useFactory` is called with the resolved `inject`
+  entries in order. A zero-argument factory that resolves from a captured container keeps working,
+  but boot validation cannot see what it uses; prefer
+  `{ useFactory: (db: Db) => new Repo(db), inject: [DB] }`.
+- **Own `IContainer` implementations** add `forRequest(ctx)` and `dispose()`. Delegating to the
+  wrapped container, as `OverridingContainer` in `@setu-ts/testing` does, is enough for a wrapper.
+- **`ScopeManager` is gone** from `@setu-ts/di-plugin`; nothing replaces it as an export.
+- **Unit tests of a request-scoped handler** need the kernel's request context, which implements
+  `ctx.defer`: test them through `createTestApp` and `inject()`. A `createTestContext` context makes
+  `forRequest` throw `RequestScopeUnavailableError`.
+- **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
+  disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
+  `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
+  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
+  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
+  settle after the kernel's own 5 s bound.
+- **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
+  means once per scope; it is no longer created and kept on the root.
+- **Shutdown and streamed responses.** A streamed response whose request used a scope stays
+  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
+
 ## 0.10.0
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)

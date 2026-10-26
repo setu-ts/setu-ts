@@ -207,8 +207,10 @@ describe('rest-starter / integration', () => {
   });
 
   // I1: the explicit opt-out restores the pre-I1 behaviour — no registry
-  // fallback, so the injected capability is unresolvable (the X66-1 message).
-  it('throws the X66-1 message for the same service with autoRegister: false', async () => {
+  // fallback, so the injected capability is unresolvable. Since M125 the
+  // container validates its graph at boot, so the X66-1 case fails start()
+  // naming the missing edge, instead of the first resolve.
+  it('fails start() on the X66-1 missing dependency with autoRegister: false', async () => {
     @Injectable({ token: 'logger-holder-optout' })
     @Inject(CAPABILITIES.LOGGER)
     class OptOutHolder {
@@ -219,11 +221,8 @@ describe('rest-starter / integration', () => {
       di: { autoRegister: false },
       decorators: { services: [OptOutHolder] },
     });
-    await app.start();
-
-    const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
-    expect(() => container.resolve('logger-holder-optout')).toThrow(
-      "No provider registered for DI token 'logger'.",
+    await expect(app.start()).rejects.toThrow(
+      'missing: logger-holder-optout → logger (No provider registered)',
     );
   });
 

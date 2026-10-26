@@ -47,6 +47,7 @@ export {
   Body,
   Cookie,
   Ctx,
+  Service,
   CurrentUser,
   Custom,
   Header,

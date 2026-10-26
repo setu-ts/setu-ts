@@ -8,6 +8,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
+  `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The
+  container compiles its graph into direct factories and validates it once at boot.
+  `createToken<T>(name)` (`@setu-ts/common`) returns an `InjectionToken<T>`, a frozen object matched
+  by identity; with a class, it is accepted wherever a `ContainerToken<T>` is, and `resolve` infers
+  `T` from either. `InjectEntry` is one `inject` element, a token or `{ token, optional: true }`.
+  `IContainer.forRequest(ctx)` returns the request's scope, created on first call and disposed when
+  the request finishes; `IContainer.dispose()` and `ProviderOptions.dispose` release what the
+  container created, each asynchronous disposal bounded at 5000 ms (per disposal, not in total);
+  `ContainerConfig.timing` supplies the timers, and `ContainerConfig.reportDisposeError` — set by
+  `DiPlugin` to a logger `warn` — reports a request scope's disposal failures whenever they settle.
+  `IRequestContext.defer?(cleanup)` is the kernel's per-request cleanup primitive: cleanups run
+  before a buffered response is returned, or when a streamed body ends, each asynchronous one
+  bounded at 5000 ms, and a request that never calls it stays on the synchronous path.
+  `IRequestContext.slot?(key, create)` is owner-keyed per-request storage under a key only its owner
+  holds; `forRequest` keeps the scope there. `@Params(Service(token))` (`@setu-ts/decorator-plugin`)
+  resolves from the request scope on every call. `DiContainer.close()` ends registration; `DiPlugin`
+  calls it after the last bootstrap hook. New errors in `@setu-ts/di-plugin`:
+  `ContainerValidationError` (with `findings`), `ScopeRequiredError`, `ScopeDisposedError`,
+  `ContainerClosedError` and `RequestScopeUnavailableError`.
+
 - **Portable database errors (M119e, 0.11.0, `@setu-ts/common`, `@setu-ts/database-plugin`).**
   `UnknownPayloadFieldError` moves to common, preserving the database-plugin re-export's identity;
   `InvalidFieldValueError` provides the fixed 400 field-type refusal. `MissingKeyColumnError` and
@@ -111,6 +132,37 @@ All notable changes to this project are documented here. The format follows
   with the existing `not a recognized zod schema` unrepresentable diagnostic. Upgrade Zod to at
   least 4.6.6 and migrate any Zod 3 API usage before regenerating OpenAPI documents and clients.
 
+- **BREAKING — DI lifetimes are enforced (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`,
+  `@setu-ts/decorator-plugin`).** A `singleton` reaching a `scoped` provider, directly or through
+  `transient`s, fails the boot with `ContainerValidationError`, as do a missing dependency and a
+  cycle — previously the singleton silently kept the first scope's instance, and the others failed
+  on the first resolve that reached them. Resolving a `scoped` token on the root container, or a
+  `transient` there that reaches one, or a `transient` with a `dispose` option, throws
+  `ScopeRequiredError` instead of quietly behaving as a singleton. Reach scoped services through
+  `container.forRequest(ctx)` or `@Params(Service(token))`, or `createScope()` for a scope of your
+  own.
+- **BREAKING — DI registration closes at boot (M125, 0.11.0, `@setu-ts/di-plugin`).** `DiPlugin`
+  closes the container after the last bootstrap hook; `register` on it afterwards throws
+  `ContainerClosedError`. Register providers during `register()`, `onInit` or `onBootstrap`. A scope
+  may register a token its parent chain does not have — it lives as long as the scope, a `singleton`
+  lifetime there being stored as `scoped` — but no longer shadow one it has — register the
+  replacement on the root, or use `overrideProvider` in tests.
+- **BREAKING — factories receive their dependencies (M125, 0.11.0, `@setu-ts/common`).**
+  `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
+  `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
+  own dependencies still works, but boot validation cannot see them; declare `inject` instead.
+- **BREAKING — `IContainer` gains `forRequest` and `dispose` (M125, 0.11.0, `@setu-ts/common`).**
+  Required members, so an application's own `IContainer` implementation must add them;
+  `OverridingContainer` in `@setu-ts/testing` forwards both. `ProviderOptions` is now generic,
+  `ProviderOptions<T = unknown>`.
+- **BREAKING — `ScopeManager` removed (M125, 0.11.0, `@setu-ts/di-plugin`).** The compiled graph
+  replaced it, and nothing outside the package imported it. There is no replacement export.
+- **BREAKING — decorated controllers are DI singletons (M125, 0.11.0,
+  `@setu-ts/decorator-plugin`).** Controllers were always built once, at registration; they are now
+  registered as `singleton` whatever `DiPlugin`'s `defaultScope`. A controller constructor that
+  reaches a `scoped` service fails the boot; take the service as `@Params(Service(token))` on the
+  handler instead.
+
 - **A queue-less NATS subscription is shared (V10-13, M119a, 0.11.0, `@setu-ts/messaging-plugin`).**
   A `subscribe()` with no `queue` — `respond()` with no queue included — no longer gives every
   replica every message on a per-process consumer. It now uses ONE durable JetStream consumer per
@@ -203,6 +255,14 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **A singleton no longer captures a scoped service, and `@Optional` dependencies honour the
+  resolving scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/decorator-plugin`).** A scope
+  shared its parent's singleton cache, so a singleton first resolved inside one scope kept that
+  scope's instances for the life of the application, and an `@Optional` class resolved its
+  dependencies from the container it was registered on, never from the scope resolving it. The first
+  is now refused at boot (see the BREAKING entry above); the second registers as a class provider
+  with optional `inject` entries.
 
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request

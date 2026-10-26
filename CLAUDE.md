@@ -670,6 +670,10 @@ here.
   npm workspace: the load error names who loads the peer and that it belongs where that package is
   installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
   V10-58) — complete (PR #505).
+- **Milestone 125** (`di-plugin` + `common` + `kernel` + `decorator-plugin` + `testing` — a compiled
+  container and a request scope: typed tokens, boot-time graph validation, `forRequest` kept in
+  `ctx.slot` and disposed through `ctx.defer`, the singleton-captures-scoped fix) — complete (PR
+  #508).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M118 and
   M120–M123 are open in the ROADMAP; M120 depends on M118.
 

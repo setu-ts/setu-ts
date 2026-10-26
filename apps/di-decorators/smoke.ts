@@ -23,14 +23,17 @@ describe('di-decorators example', () => {
     assert.deepEqual(response.json(), { greeting: 'Hello, decorators!' });
   });
 
-  it('shares singletons across scopes and keeps scoped instances per scope', async () => {
-    const response = await app.inject({ method: 'GET', url: '/lifetimes/' });
-
-    assert.equal(response.statusCode, 200);
-    assert.deepEqual(response.json<LifetimesReport>(), {
-      singletonShared: true,
-      scopeRetainsInstance: true,
-      scopesAreDistinct: true,
-    });
+  it('shares singletons and creates a distinct scoped service for each request', async () => {
+    const first = await app.inject({ method: 'GET', url: '/lifetimes/' });
+    const second = await app.inject({ method: 'GET', url: '/lifetimes/' });
+    assert.equal(first.statusCode, 200);
+    assert.equal(second.statusCode, 200);
+    const a = first.json<LifetimesReport>();
+    const b = second.json<LifetimesReport>();
+    assert.equal(a.singletonShared, true);
+    assert.equal(b.singletonShared, true);
+    assert.equal(a.scopeRetainsInstance, true);
+    assert.equal(b.scopeRetainsInstance, true);
+    assert.notEqual(a.scopedId, b.scopedId);
   });
 });
