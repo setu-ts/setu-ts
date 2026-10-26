@@ -152,6 +152,8 @@ describe('unknown-option refusal', () => {
       [['workspace', 'bogus-sub', '--bogus'], 'setu workspace'],
       [['commands', '--bogus'], 'setu commands'],
       [['help', '--bogus'], 'setu help'],
+      [['check', '--json'], 'setu check'],
+      [['sync', '--json'], 'setu sync'],
     ];
     for (const [argv, label] of cases) {
       const h = harness(WORKSPACE_SEED);
@@ -360,6 +362,8 @@ describe('help text agrees with the inventory', () => {
     ['generate library', ['generate', 'library', '--help']],
     ['add', ['add', '--help']],
     ['agents', ['agents', '--help']],
+    ['check', ['check', '--help']],
+    ['sync', ['sync', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
   ];

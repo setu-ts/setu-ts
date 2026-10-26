@@ -308,6 +308,11 @@ one exemption from the refusal that protects an existing file. Two consequences:
   token and the kernel's route map overwrites on a duplicate, so the second artifact would otherwise
   be silently unreachable.
 
+A barrel is rewritten only when its family is generated, so a file copied or hand-written into a
+seam directory stays unregistered until then. [`setu check`](#wiring-check-setu-check-and-setu-sync)
+reports that, and `setu sync` rewrites every managed barrel from its directory without generating
+anything.
+
 ### Custom schematics
 
 A schematic is a pure `(names, options) => GeneratedFile[]`, which is what makes `--dry-run` exact
@@ -737,6 +742,105 @@ Run `npx @setu-ts/cli@<version> agents` to update AGENTS.md.
 
 The command named is the project's pinned CLI invocation for its runtime: on Bun it is
 `bunx @setu-ts/cli@<version>`, and on Deno it is `deno run -A npm:@setu-ts/cli@<version>`.
+
+## Wiring check (`setu check` and `setu sync`)
+
+Code in a seam directory that nothing registers compiles, lints and never runs. `tsc` cannot see it,
+and a test sees it only for the routes it requests. `setu check` is the read-only gate for that:
+
+```bash
+setu check                       # this project, or every member from a workspace root
+setu check --strict              # warnings fail too
+setu check --dir apps/orders
+setu sync                        # rewrite every CLI-managed barrel from its directory
+setu sync --dry-run              # print the barrels it would write
+```
+
+`setu check` reads the project's files and writes nothing. It does not load or start the
+application, so it needs no database or broker. Wiring the DI container validates at boot
+(`ContainerValidationError`) stays where it is, in `DiPlugin`.
+
+It exits `0` with no errors (warnings print but pass), `1` with any error, and `2` on a usage error.
+Each finding prints with its id, followed by how to fix it, and a summary line ends the run:
+
+```text
+error setu.E003: src/controllers/index.ts has barrel drift: unlisted src/controllers/admin.controller.ts; stale (none).
+  Run `setu sync` to rewrite src/controllers/index.ts from src/controllers.
+setu check: 1 error(s), 0 warning(s), 0 silenced in /work/shop.
+```
+
+From a workspace root it checks every `apps/<member>`, prefixing each line with the member's name,
+and exits with the worst result. A project with no seam directories (a `full-stack` project, or one
+that has never generated anything) prints `No CLI-owned seams in <dir>; nothing to check.` and exits
+`0`.
+
+| Id          | Severity | Finding                                                                                         |
+| ----------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `setu.E001` | error    | An artifact does not export what its barrel imports, so it is skipped                           |
+| `setu.E002` | error    | An artifact's file name is not a kebab-case identifier, so it is skipped                        |
+| `setu.E003` | error    | A barrel does not list an artifact in its directory, or lists one that is not there             |
+| `setu.E004` | error    | A barrel is not a regular file, is over 1 MiB, or cannot be classified                          |
+| `setu.E005` | error    | An artifact is registered both by its barrel and by hand in `setu.config.ts`                    |
+| `setu.E006` | error    | `setu.config.ts` does not reference a barrel on disk                                            |
+| `setu.E007` | error    | A feature module is missing its activation export or `@Module` declaration                      |
+| `setu.E008` | error    | A feature module's directory name is not a kebab-case identifier                                |
+| `setu.E009` | error    | A feature module is not activated in `src/modules/index.ts`                                     |
+| `setu.E010` | error    | `src/routes/` still holds files; it was merged into `src/controllers/`, so nothing imports them |
+| `setu.E011` | error    | `.setu-ts/check.json` is invalid                                                                |
+| `setu.W001` | warning  | `setu.config.ts` uses a construct the check cannot classify, so a barrel's wiring is unknown    |
+| `setu.W002` | warning  | There is no `setu.config.ts`, so nothing can be checked for wiring                              |
+| `setu.W003` | warning  | `setu.config.ts` calls `registerGeneratedRoutes(app.router)` without `app.services`             |
+| `setu.W004` | warning  | A `.setu-ts/check.json` entry matched no finding                                                |
+
+Barrels are compared as **sets of names**, read from their import and export declarations, so a
+barrel your formatter rewrote, reordered or re-quoted still passes. Ids are never reused: a retired
+check keeps its number.
+
+`setu sync` rewrites the managed barrels — each seam family's `index.ts`, `src/modules/index.ts`,
+and each functional module's `index.ts` — with the same renderer `setu generate` uses, so a synced
+barrel is byte-identical to the one the next `generate` would write. It writes a barrel only when it
+exists or its family has an artifact, and never touches `setu.config.ts`, a manifest or an artifact.
+It cannot fix a finding that is not a barrel (a skipped artifact, an unwired config, an inactive
+module), so afterwards it prints whatever remains and exits `1` if an error does.
+
+### Silencing a finding
+
+A finding you accept can be silenced in `.setu-ts/check.json`, beside `.setu-ts/schematics/`:
+
+```json
+{
+  "silence": [
+    "setu.W001",
+    { "id": "setu.E003", "path": "src/controllers/index.ts" }
+  ]
+}
+```
+
+A bare id silences every instance. The object form silences that id only for one project-relative
+path: the artifact for `E001`, `E002` and `E005`, the barrel for `E003`, `E004` and `E006`, and
+`src/modules/<name>` for `E009`. Silenced findings do not print or fail the run; the summary counts
+them. If the file is invalid — bad JSON, a key other than `silence`, an unknown id, a malformed path
+— the run reports `setu.E011` and silences nothing, so a typo cannot switch the gate off. `E011` and
+`W004` cannot be silenced. In a workspace, each member reads its own file.
+
+### Generated projects run it
+
+A scaffolded project carries the CLI as a pinned development dependency and runs `setu check` from
+its `check` script, after the type check:
+
+| Target               | `check`                                                                              |
+| -------------------- | ------------------------------------------------------------------------------------ |
+| Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                   |
+| Workers with a build | `npm run build && tsc --noEmit && setu check`                                        |
+| Deno                 | `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check` |
+
+The generated `dev`, `debug` and `start` scripts do not run it, so the edit loop is never blocked.
+The CLI generates no CI workflow; in your own, run `npm run check` (or `deno task check`). A project
+scaffolded before this change gets the script from
+[the upgrade guide](./upgrading.md#setu-check-in-the-generated-check-script-m118-0110-setu-tscli).
+
+`check` and `sync` are built-in verbs, so they take precedence over a plugin command of the same
+name.
 
 ## Plugin-contributed commands
 

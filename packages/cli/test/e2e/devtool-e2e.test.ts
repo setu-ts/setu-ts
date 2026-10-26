@@ -20,7 +20,7 @@ import * as nodeFs from 'node:fs/promises';
  * @module
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type {
   CacheDiagnosticsResponse,
@@ -34,11 +34,20 @@ import {
   workspaceEntrypoint,
 } from '../fixtures/generated-project.ts';
 import { VERSION } from '../../src/version.ts';
+import { startOverlay, type RegistryOverlay } from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 let root = '';
+let overlay: RegistryOverlay;
+
+beforeAll(async () => {
+  overlay = await startOverlay();
+}, 900_000);
+afterAll(async () => {
+  await overlay?.close();
+});
 
 beforeEach(async () => {
   root = await tempDir({ prefix: 'setu-devtool-e2e-' });
@@ -69,7 +78,7 @@ async function denoRun(
     runProcess(denoBinary(), {
       args: [...args],
       cwd,
-      env,
+      env: { NPM_CONFIG_REGISTRY: overlay.url, ...env },
       stdin: 'null',
       stdout: 'piped',
       stderr: 'piped',
@@ -401,7 +410,8 @@ const snapshot = await client.snapshot();`,
         pair.sessionKey,
       ]);
       expect(result.code, result.output).toBe(0);
-      expect(JSON.parse(result.output.trim().split('\n').pop()!).instanceId).not.toBeNull();
+      // The driver emits JSON on stdout; Deno dependency diagnostics use stderr.
+      expect(JSON.parse(result.stdout.trim().split('\n').pop()!).instanceId).not.toBeNull();
       expect(
         await fetch(`http://127.0.0.1:${oldPort}/v1/status`)
           .then(() => true)

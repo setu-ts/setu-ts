@@ -204,6 +204,17 @@ const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-
   noun: 'no arguments',
 });
 
+const CHECK: ICommandFlagSpec = spec('check', ['dir', 'strict'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+const SYNC: ICommandFlagSpec = spec('sync', ['dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+
 /** `setu adopt`: takes no positionals at all — `--name` and `--port` are flags. */
 const ADOPT: ICommandFlagSpec = spec('adopt', ['name', 'port', 'dir', 'dry-run'], [], {
   fixed: 1,
@@ -289,6 +300,10 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'check':
+      return CHECK;
+    case 'sync':
+      return SYNC;
     case 'agents':
       return AGENTS;
     case 'devtool':
@@ -321,6 +336,8 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [GENERATE_LIBRARY.label, GENERATE_LIBRARY.documented],
   [ADD.label, ADD.documented],
   [AGENTS.label, AGENTS.documented],
+  [CHECK.label, CHECK.documented],
+  [SYNC.label, SYNC.documented],
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],

@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`setu check` and `setu sync` (M118, 0.11.0, `@setu-ts/cli`).** `setu check [--dir] [--strict]`
+  is a read-only wiring gate: it exits `1` when a seam artifact is skipped, a barrel does not list
+  an artifact in its directory or lists one that is gone, `setu.config.ts` does not reference a
+  barrel on disk, an artifact is registered both by its barrel and by hand, a feature module is
+  skipped or not activated, or the old `src/routes/` layout is still in use. It never loads the
+  application. Barrels are compared as sets of names, so a reformatted barrel passes. Every finding
+  carries a stable id (`setu.E001`…`setu.E011`, `setu.W001`…`setu.W004`); warnings exit `0` unless
+  `--strict`. `.setu-ts/check.json` silences an id everywhere or for one path, and an invalid file
+  silences nothing (`setu.E011`). From a workspace root both commands run over every member.
+  `setu sync [--dir] [--dry-run]` rewrites every CLI-managed barrel from its directory with the
+  renderer `setu generate` uses, writes nothing else, and then reports what it could not fix.
+
 - **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
   `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The
   container compiles its graph into direct factories and validates it once at boot.
@@ -98,6 +110,16 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **Generated projects run `setu check` (M118, 0.11.0, `@setu-ts/cli`).** Node, Bun and Workers
+  scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their `check`
+  script is `tsc --noEmit && setu check` (`npm run build && tsc --noEmit && setu check` for a
+  Workers project with a build). Deno scaffolds gain a `check` task:
+  `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check`; the devtool
+  form adds `main.dev.ts`, and `setu devtool enable` replaces the scaffold's own `check` task with
+  it. `check` and `sync` are built-in verbs and now shadow a plugin command of the same name.
+  `setu generate` reads `setu.config.ts` with the scanner's 1 MiB regular-file limit; its output is
+  otherwise unchanged. See the upgrade guide for existing projects.
 
 - **Optional peers in a workspace (M119f, #505, 0.11.0, `@setu-ts/common`, `@setu-ts/cli` and every
   optional-peer loader).** `OptionalDependencyUnavailableError` accepts `requiredBy?: string`; all

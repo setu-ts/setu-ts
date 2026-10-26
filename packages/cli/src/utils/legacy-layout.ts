@@ -28,6 +28,7 @@
 import type { IFileSystem } from '@setu-ts/common';
 
 import { joinPath } from './file-writer.ts';
+import { readProjectWiring } from './artifact-scanner.ts';
 import { escapeName } from './names.ts';
 import { HTTP_SEAM_BARREL, HTTP_SEAM_DIR, REGISTER_ROUTES_EXPORT } from '../seams/http.ts';
 
@@ -88,12 +89,7 @@ export const CONFIG_MODULE = 'setu.config.ts';
  * @returns The source, or an empty string when the file is absent
  */
 export async function readConfigModule(fs: IFileSystem, dir: string): Promise<string> {
-  try {
-    return new TextDecoder().decode(await fs.readFile(joinPath(dir, CONFIG_MODULE)));
-  } catch {
-    // Absent: a bare directory, or a project that keeps its wiring elsewhere.
-    return '';
-  }
+  return (await readProjectWiring(fs, dir))?.source ?? '';
 }
 
 /**

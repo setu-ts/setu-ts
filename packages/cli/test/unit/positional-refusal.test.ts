@@ -332,3 +332,12 @@ describe('valid arities still succeed', () => {
     expect(received).toEqual(['prod', 'extra']);
   });
 });
+
+for (const command of ['check', 'sync']) {
+  it(`refuses extra arguments to ${command} before touching the project`, async () => {
+    const h = harness();
+    expect(await h.run([command, 'extra'])).toBe(2);
+    expect(h.err.text()).toContain(`setu ${command} takes no arguments; got 1.`);
+    expect(h.fs.writes).toEqual([]);
+  });
+}
