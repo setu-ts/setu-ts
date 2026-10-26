@@ -15807,12 +15807,14 @@ the few things that need a per-request instance, such as a unit of work.
    dependencies as arguments. That retires the `@Optional` closure (finding 2). A factory without
    `inject` stays legal but opaque: boot validation cannot see its dependencies, and the plugin
    lists such tokens in one `debug` line.
-4. **A lazy request scope, on by default, without DI in the kernel.** The kernel gains only a
-   generic per-request cleanup primitive, `ctx.defer(cleanup)`, whose list is allocated on first
-   call; completion — fast path, full path and error path — checks whether it exists and does
-   nothing more when it does not. The scope itself is `container.forRequest(ctx)` in di-plugin:
-   created on first call, cached per request, disposed through `ctx.defer`. This is NOT an
-   `onResponse` hook: any registered hook moves every request off the M87 synchronous path
+4. **A lazy request scope, on by default, without DI in the kernel.** The kernel gains two generic
+   per-request primitives: `ctx.defer(cleanup)`, whose list is allocated on first call — completion
+   (fast path, full path and error path) checks whether it exists and does nothing more when it does
+   not — and `ctx.slot(key, create)`, owner-keyed storage under a key only its owner holds (added
+   2026-10-26: caching the scope in a `WeakMap` cost a request scope 10% of hello-world throughput).
+   The scope itself is `container.forRequest(ctx)` in di-plugin: created on first call, kept in the
+   request's slot, disposed through `ctx.defer`. This is NOT an `onResponse` hook: any registered
+   hook moves every request off the M87 synchronous path
    (`kernel/src/application/application.ts:1221`). Cleanup finishes before a buffered response is
    handed back, and when the body stream ends, errors or is cancelled for a streaming one — work
    after the response is not reliable on Workers without `waitUntil`, which the kernel cannot reach.

@@ -14,8 +14,9 @@ what it creates, and gives every request a lazily created scope that is disposed
 is finished — without moving a request that never uses it off the kernel's synchronous path.
 
 - **In scope:** ROADMAP M125 findings 1–6 and decisions 1–7, as corrected in §2; the kernel's
-  generic per-request cleanup primitive (`ctx.defer`); the decorator parameter source that reaches
-  the request scope; `apps/di-decorators` moved onto it; docs, PUBLIC_API, CHANGELOG, upgrade guide.
+  generic per-request cleanup primitive (`ctx.defer`) and owner-keyed per-request storage
+  (`ctx.slot`, §3.19); the decorator parameter source that reaches the request scope;
+  `apps/di-decorators` moved onto it; docs, PUBLIC_API, CHANGELOG, upgrade guide.
 - **NOT this milestone:**
   - Static `@Module` graph validation in `setu check` — after M118 and this milestone both ship
     (ROADMAP M125 "Named, not taken").
@@ -59,18 +60,22 @@ is finished — without moving a request that never uses it off the kernel's syn
 | Capability-token grammar                      | `packages/common/src/tokens.ts:353`                                                      | No new capability token is added; `createToken` creates DI tokens, which are not capability tokens and are not validated by that grammar.                                                                                                                           |
 | Versioning Policy                             | `ROADMAP.md` "Versioning Policy From `0.9.0`"; `CHANGELOG.md:7`, `:107`                  | Breaks are batched into a minor; `Unreleased` is 0.11.0 and already carries a BREAKING entry.                                                                                                                                                                       |
 | Workers post-response work                    | `packages/cloudflare-plugin/src/options.ts:187-217`                                      | Work after the response needs `waitUntil`, which only the Cloudflare plugin holds; the kernel has no `waitUntil` contract. This decides §3.9's ordering.                                                                                                            |
+| Request-context reuse (§3.19)                 | `packages/kernel/src/context/request-context.ts`; `application.ts` (grep, 2026-10-26)    | A `RequestContext` is created per request and never pooled or reused, so a value held on one context cannot reach another request.                                                                                                                                  |
+| `ResponseBuilder` visibility (§3.21)          | `packages/kernel/src/index.ts`                                                           | Not exported; a getter added to it is kernel-internal surface.                                                                                                                                                                                                      |
+| Shared slot counter (§3.20)                   | `packages/di-plugin/src/container/compiler.ts:62`, `:222` (at `4ccf701c`)                | One `{ next }` counter is shared by the root compiler and every scope's; a scope-local `scoped` registration takes an index that is never released (probe: 100,000 request scopes each registering one value → the next scope's `slots.length` is 100,001).         |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                                                                                                    | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                                                 | Doc deliverable (same PR)                                                                   |
-| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| C1  | ROADMAP M125 decision 2 gives each `createToken` token a process-unique numeric `id` assigned at creation. AI_GUIDELINES §11.4 forbids global state, and a creation counter is module-level mutable state.                  | **AI_GUIDELINES wins: no id.** A token is a frozen object keyed by identity. The id existed to make a resolve an array read; with the graph compiled (§3.3) every dependency inside it is a direct reference with no lookup, so a lookup happens only at a top-level `resolve()` — one `Map` read on the token object, the same cost as a string token today. **Maintainer to confirm.** | ROADMAP M125 decision 2 rewritten to match.                                                 |
-| C2  | ROADMAP decision 4 makes the request scope kernel-owned (`ctx.scope()`). AI_GUIDELINES §2.4 and §3.1 keep the kernel to orchestration, with DI an optional plugin.                                                          | **The kernel gains only a generic cleanup primitive (`ctx.defer`, §3.8); the scope lives in di-plugin as `container.forRequest(ctx)` (§3.10).** Same cost profile — nothing allocated until first use, one `undefined` check at completion — with no DI concept in the kernel.                                                                                                           | ROADMAP decision 4 rewritten to match.                                                      |
-| C3  | ROADMAP decision 4 says disposal runs after the response is handed back. On Workers that work can be cut off without `waitUntil`, which the kernel cannot reach (§1, last row).                                             | **Cleanup finishes before a buffered response is handed back, and when the body stream ends, errors or is cancelled for a streaming one (§3.9).** A request with no cleanup is unaffected.                                                                                                                                                                                               | ROADMAP decision 4 rewritten to match.                                                      |
-| C4  | ROADMAP decision 7 has existing paths warn for one release and refuse in "the next minor". The next release, 0.11.0, is itself a minor that already carries a BREAKING entry.                                               | **Refuse in 0.11.0, with BREAKING CHANGELOG entries and upgrade-guide steps; no warning phase.** The Versioning Policy batches breaks into a minor, and 0.11.0 is that minor. If M125 misses the 0.11.0 cut, the entries move to the next minor unchanged. **Maintainer to confirm.**                                                                                                    | ROADMAP decision 7 rewritten to match.                                                      |
-| C5  | ROADMAP decision 6 suggests the parameter source be named `Scoped(...)`. `ScopedRoles`/`ScopedPermissions` already mean RBAC scopes in the same package.                                                                    | **Named `Service(token)`.**                                                                                                                                                                                                                                                                                                                                                              | ROADMAP decision 6 rewritten to match.                                                      |
-| C6  | `ServiceScope` JSDoc says the application "disposes" a scope; `IContainer` has no dispose member.                                                                                                                           | `IContainer.dispose()` is added (§3.7) and the JSDoc is rewritten to describe the request scope.                                                                                                                                                                                                                                                                                         | `packages/common/src/container.ts` JSDoc; PUBLIC_API common DI rows.                        |
-| C7  | `docs/decorators.md`, `docs/migration-nestjs.md`, the di-plugin README and both AGENT_CARDs state that the framework creates no scope per request and that `scoped` behaves as a singleton until `createScope()` is called. | The behaviour changes; the docs follow it.                                                                                                                                                                                                                                                                                                                                               | Those five files rewritten; their fences compile under `test/guide-fence-compiler.test.ts`. |
+| #   | Conflict                                                                                                                                                                                                                                                                  | Resolution (picked side)                                                                                                                                                                                                                                                                                                                                                                 | Doc deliverable (same PR)                                                                   |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| C1  | ROADMAP M125 decision 2 gives each `createToken` token a process-unique numeric `id` assigned at creation. AI_GUIDELINES §11.4 forbids global state, and a creation counter is module-level mutable state.                                                                | **AI_GUIDELINES wins: no id.** A token is a frozen object keyed by identity. The id existed to make a resolve an array read; with the graph compiled (§3.3) every dependency inside it is a direct reference with no lookup, so a lookup happens only at a top-level `resolve()` — one `Map` read on the token object, the same cost as a string token today. **Maintainer to confirm.** | ROADMAP M125 decision 2 rewritten to match.                                                 |
+| C2  | ROADMAP decision 4 makes the request scope kernel-owned (`ctx.scope()`). AI_GUIDELINES §2.4 and §3.1 keep the kernel to orchestration, with DI an optional plugin.                                                                                                        | **The kernel gains only a generic cleanup primitive (`ctx.defer`, §3.8); the scope lives in di-plugin as `container.forRequest(ctx)` (§3.10).** Same cost profile — nothing allocated until first use, one `undefined` check at completion — with no DI concept in the kernel.                                                                                                           | ROADMAP decision 4 rewritten to match.                                                      |
+| C3  | ROADMAP decision 4 says disposal runs after the response is handed back. On Workers that work can be cut off without `waitUntil`, which the kernel cannot reach (§1, last row).                                                                                           | **Cleanup finishes before a buffered response is handed back, and when the body stream ends, errors or is cancelled for a streaming one (§3.9).** A request with no cleanup is unaffected.                                                                                                                                                                                               | ROADMAP decision 4 rewritten to match.                                                      |
+| C4  | ROADMAP decision 7 has existing paths warn for one release and refuse in "the next minor". The next release, 0.11.0, is itself a minor that already carries a BREAKING entry.                                                                                             | **Refuse in 0.11.0, with BREAKING CHANGELOG entries and upgrade-guide steps; no warning phase.** The Versioning Policy batches breaks into a minor, and 0.11.0 is that minor. If M125 misses the 0.11.0 cut, the entries move to the next minor unchanged. **Maintainer to confirm.**                                                                                                    | ROADMAP decision 7 rewritten to match.                                                      |
+| C5  | ROADMAP decision 6 suggests the parameter source be named `Scoped(...)`. `ScopedRoles`/`ScopedPermissions` already mean RBAC scopes in the same package.                                                                                                                  | **Named `Service(token)`.**                                                                                                                                                                                                                                                                                                                                                              | ROADMAP decision 6 rewritten to match.                                                      |
+| C6  | `ServiceScope` JSDoc says the application "disposes" a scope; `IContainer` has no dispose member.                                                                                                                                                                         | `IContainer.dispose()` is added (§3.7) and the JSDoc is rewritten to describe the request scope.                                                                                                                                                                                                                                                                                         | `packages/common/src/container.ts` JSDoc; PUBLIC_API common DI rows.                        |
+| C8  | ROADMAP M125 decision 4 (as rewritten by C1–C3) says the kernel gains only `ctx.defer`, and §3.10 cached the scope in a per-container `WeakMap`. Measured on the committed code, that cache cost a request scope 10.4% of hello-world throughput and tripled p99 (§3.13). | **The kernel also gains a generic, owner-keyed per-request slot (`ctx.slot`, §3.19).** It stays DI-agnostic: any owner keeps a value for one request under a key only it holds.                                                                                                                                                                                                          | ROADMAP decision 4 amended to name `ctx.slot`.                                              |
+| C7  | `docs/decorators.md`, `docs/migration-nestjs.md`, the di-plugin README and both AGENT_CARDs state that the framework creates no scope per request and that `scoped` behaves as a singleton until `createScope()` is called.                                               | The behaviour changes; the docs follow it.                                                                                                                                                                                                                                                                                                                                               | Those five files rewritten; their fences compile under `test/guide-fence-compiler.test.ts`. |
 
 ## 3. Design decisions
 
@@ -225,11 +230,13 @@ is finished — without moving a request that never uses it off the kernel's syn
 ### 3.10 The request scope: `container.forRequest(ctx)`
 
 - **Decision:** `IContainer.forRequest(ctx: IRequestContext): IContainer` returns the scope for that
-  request, creating it on first call and caching it in a `WeakMap` held by the container instance
-  (no module-level state). On creation it calls `ctx.defer(() => scope.dispose())`; when `ctx.defer`
-  is absent it throws `RequestScopeUnavailableError` saying the context cannot dispose a scope and
-  naming `createTestApp` as the way to test one. A request that never calls `forRequest` pays only
-  §3.8's `undefined` check. `OverridingContainer` forwards `forRequest` and `dispose`, wrapping the
+  request, creating it on first call and keeping it in the context's slot under the container's
+  private key (§3.19; amended 2026-10-26 — the first implementation cached it in a per-container
+  `WeakMap`, which §3.13's measurement refused). On creation it calls
+  `ctx.defer(() => scope.dispose())`; when `ctx.defer` is absent it throws
+  `RequestScopeUnavailableError` saying the context cannot dispose a scope and naming
+  `createTestApp` as the way to test one. A request that never calls `forRequest` pays only §3.8's
+  `undefined` check. `OverridingContainer` forwards `forRequest` and `dispose`, wrapping the
   returned scope so a claimed override still applies inside it.
 - **Why:** The Awilix and `@fastify/awilix` shape (a child scope per request, disposed at the end),
   without the kernel knowing about DI (§2 C2).
@@ -274,8 +281,17 @@ is finished — without moving a request that never uses it off the kernel's syn
   with a request scope whose disposal is synchronous. **Measured, in the PR:** the benchmark harness
   in three configurations against `develop` — no DI, DI registered and unused, DI with a request
   scope resolving two scoped services — paired and alternating per the harness README, with the
-  server built from this branch's `dist/`. Acceptance: configuration 2 is within noise of the
-  baseline (paired p > 0.05); configuration 3 costs at most 3% of hello-world throughput.
+  server built from this branch's `dist/`. Acceptance (statistics named 2026-10-26): configuration 2
+  against the baseline — a two-sided sign test over the 21 paired passes gives p > 0.05;
+  configuration 3 against configuration 2 — the median of the 21 per-pass throughput deltas is at
+  most −3%, and its p99 is within 10% of configuration 2's.
+- **Measured so far (2026-10-26, against published 0.10.0 — `develop` for the final run):** on the
+  committed code (`4ccf701c`) configuration 1 +1.4% and configuration 2 −2.1% (p ≈ 0.19) pass, but
+  configuration 3 is −10.4% with p99 867 → 2,566 µs. A micro-benchmark put a `forRequest` cycle at
+  1,155 ns, of which the `WeakMap` cache was about 1,000 ns. Prototyped in the harness's installed
+  build: §3.19 alone gave −5.3% and p99 913 µs; with §3.20 and §3.21, −3.0% (p = 0.007), p99 913
+  against 884 µs, and a 100 ns `forRequest` cycle; configuration 2 re-run +3.3% (p ≈ 0.38). A heap
+  test (200,000 requests, after GC) showed no growth in any build.
 - **Why:** The fast path is the property most likely to regress silently, so it gets a test, not
   only a measurement.
 - **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (structural); PR body
@@ -368,10 +384,72 @@ is finished — without moving a request that never uses it off the kernel's syn
   would have given up is still reported; without a reporter the cleanup rethrows);
   `di-plugin/test/integration/di-plugin.test.ts` (`DiPlugin` wires the reporter to its logger).
 
+### 3.19 Owner-keyed per-request storage: `ctx.slot` (added by §3.13's measurement)
+
+- **Decision:** `IRequestContext` gains an **optional** `slot?<T>(key: object, create: () => T): T`,
+  `@since 0.11.0`. It returns the value this request holds under `key`, comparing keys by identity,
+  and on the first call for that key stores and returns `create()`. If `create` throws, nothing is
+  stored and the error propagates. The kernel's `RequestContext` keeps the first entry in two
+  private fields fixed at construction, so the object's shape never changes, and further entries in
+  a private list allocated on first use; it has no `delete` and no enumeration, and the store dies
+  with the context. A call after completion behaves the same. `DiContainer` holds one private key
+  object per container instance, and `forRequest` is
+  `ctx.slot(this.#requestKey, () => <create scope, defer its disposal>)`. A context with `defer` but
+  no `slot` (a third-party implementor) falls back to a per-container `WeakMap` allocated on first
+  use; one with neither throws `RequestScopeUnavailableError` as before. `createTestContext`
+  implements neither.
+- **Why:** §3.13 measured the `WeakMap` cache at about 1,000 ns of a 1,155 ns `forRequest` cycle,
+  and p99 tripled. The prototype's first slot was keyed by the container itself, which let any code
+  holding the container — every plugin can reach it — plant its own object as a request's scope
+  before DI ran; the committed private `WeakMap` could not be planted. A key only the container
+  holds restores that, and identity-keyed entries mean no other owner can claim or overwrite DI's.
+- **Test home:** `kernel/test/unit/request-context-slot.test.ts` (one `create` per key; distinct
+  keys independent; a throwing `create` stores nothing; works after completion; shape-stable first
+  entry and a second and third key); `di-plugin/test/unit/request-scope.test.ts` (the scope lives in
+  the slot; code that tries every key it can construct, the container included, neither reads nor
+  replaces it; the `WeakMap` fallback for a context without `slot`).
+
+### 3.20 A scope allocates only what it uses (added by §3.13's measurement)
+
+- **Decision:** A scope built by `createScope` or `forRequest` holds its parent, the root and its
+  slot array, and creates its own provider registry, compiler, provider map and cleanup list only
+  when first needed: the registry and compiler on its first `register`, the cleanup list on its
+  first tracked instance. Until then `resolve`, `has` and validation use the nearest ancestor's
+  compiler, which is what a scope without registrations already reached. Instances of providers a
+  scope registers are stored in the resolving scope's own `Map` keyed by provider entry, allocated
+  on first use, not in the shared slot array: slot indexes are assigned only to the root's
+  registrations, a fixed set once the root closes, so the shared counter no longer grows with
+  request volume and a nested scope can never share an index with its parent's later registrations.
+- **Why:** A scope cost 81 ns to create before any resolve. The shared counter (§1, last row) gave
+  every request that registers a local value a new index for the life of the process; a per-scope
+  counter would avoid the growth but collide when a parent scope registers after a child exists,
+  returning the wrong instance for a token. The heap test showed no leak in any build; the cost was
+  slower, hash-table lookups in every scope once the index was large.
+- **Test home:** `di-plugin/test/unit/request-scope.test.ts` (10,000 request scopes each registering
+  a local `scoped` value: a fresh scope's slot array is no longer than the root's registration
+  count); `di-plugin/test/unit/container.test.ts` (an untouched scope resolves, refuses and disposes
+  as before; a scope that registers after resolving still resolves inherited tokens; a parent scope
+  registering after its child exists gives each its own instance; a nested scope reaches a parent
+  scope's registration with its own scoped instance).
+
+### 3.21 A buffered response with synchronous cleanups settles without allocating (added by §3.13)
+
+- **Decision:** `#settleRequest` checks a kernel-internal `isStreaming` getter on `ResponseBuilder`;
+  for a buffered response it runs the cleanups with `runDeferred` directly and, when that returns
+  synchronously, releases the in-flight count and completes the request inline — no snapshot object,
+  no closures. An asynchronous result and every streaming response take the existing path unchanged.
+  §3.8, §3.9 and §3.14 are unchanged in behaviour.
+- **Why:** After §3.19 and §3.20 the remaining per-request cost included a response snapshot and two
+  closures allocated for every request with a cleanup.
+- **Test home:** `kernel/test/integration/deferred-cleanup.test.ts` (existing §3.9 cases unchanged;
+  a buffered request with synchronous cleanups returns synchronously, runs them before the response
+  is handed back and releases the in-flight count exactly once).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** `IContainer` gains required `forRequest` and `dispose` — ships in
-minor 0.11.0. `IRequestContext.defer` is optional and breaks no implementor.
+minor 0.11.0. `IRequestContext.defer` and `IRequestContext.slot` are optional and break no
+implementor.
 
 | Exported symbol                                         | Kind                     | Consumer / real code path that READS it                                            |
 | ------------------------------------------------------- | ------------------------ | ---------------------------------------------------------------------------------- |
@@ -384,6 +462,7 @@ minor 0.11.0. `IRequestContext.defer` is optional and breaks no implementor.
 | `ProviderOptions<T>.dispose` (common)                   | field                    | `DiContainer.dispose()`                                                            |
 | `IContainer.forRequest` / `.dispose` (common)           | method                   | decorator-plugin `Service` resolution; `DiPlugin` `onClose`; `OverridingContainer` |
 | `IRequestContext.defer` (common)                        | method                   | `DiContainer.forRequest`                                                           |
+| `IRequestContext.slot` (common)                         | method                   | `DiContainer.forRequest` (§3.19)                                                   |
 | `ContainerValidationError` (di-plugin)                  | class                    | Thrown by `close()` and on-demand compiles; applications catch it by `instanceof`  |
 | `ScopeRequiredError` (di-plugin)                        | class                    | Thrown by root `resolve` (§3.4)                                                    |
 | `ScopeDisposedError` (di-plugin)                        | class                    | Thrown by `resolve` on a disposed scope                                            |
@@ -407,51 +486,53 @@ minor 0.11.0. `IRequestContext.defer` is optional and breaks no implementor.
 
 ## 5. Implementation files
 
-| File                                                            | Purpose                                                                                   |
-| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `packages/common/src/container.ts`                              | Tokens, `InjectEntry`, provider and option changes, `IContainer` members, JSDoc rewrite   |
-| `packages/common/src/http.ts`                                   | `IRequestContext.defer?`                                                                  |
-| `packages/common/src/index.ts`                                  | Barrel: `createToken`, new types                                                          |
-| `packages/kernel/src/context/request-context.ts`                | `defer`, the private list and an internal `takeDeferred()` on the handle                  |
-| `packages/kernel/src/application/application.ts`                | Completion settles deferred cleanup (§3.8–§3.9), stream wrapping                          |
-| `packages/kernel/src/context/deferred.ts` (new, internal)       | Runs cleanups, wraps a stream, reports failures — not exported                            |
-| `packages/di-plugin/src/container/container.ts`                 | Open/closed lifecycle, token-keyed registry use, `forRequest`, `dispose`, `close`         |
-| `packages/di-plugin/src/container/compiler.ts` (new)            | Graph walk, validation findings, compiled resolvers, slot assignment                      |
-| `packages/di-plugin/src/container/errors.ts` (new)              | The five error classes                                                                    |
-| `packages/di-plugin/src/container/provider-registry.ts`         | Keys widened to `ContainerToken`; class aliases                                           |
-| `packages/di-plugin/src/container/scope-manager.ts`             | **Deleted**                                                                               |
-| `packages/di-plugin/src/container/container-builder.ts`         | Token widening; unchanged otherwise                                                       |
-| `packages/di-plugin/src/plugin/di-plugin.ts`                    | Bootstrap close, debug line for opaque factories, `onClose` dispose                       |
-| `packages/di-plugin/src/index.ts`                               | Barrel: errors in, `ScopeManager` out                                                     |
-| `packages/decorator-plugin/src/decorators/params.ts`            | `Service()`                                                                               |
-| `packages/decorator-plugin/src/resolvers/parameter-resolver.ts` | `service` classification and resolution                                                   |
-| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`      | Optional entries instead of the factory closure; controllers as singletons; class aliases |
-| `packages/decorator-plugin/src/index.ts`                        | Barrel: `Service`                                                                         |
-| `packages/testing/src/override-provider.ts`                     | Forward `forRequest`, `dispose`, typed tokens                                             |
-| `apps/di-decorators/src/modules/lifetimes/*`                    | Per-request lifetimes through `Service()` and `forRequest`                                |
+| File                                                            | Purpose                                                                                                                |
+| --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/src/container.ts`                              | Tokens, `InjectEntry`, provider and option changes, `IContainer` members, JSDoc rewrite                                |
+| `packages/common/src/http.ts`                                   | `IRequestContext.defer?`, `IRequestContext.slot?` (§3.19)                                                              |
+| `packages/common/src/index.ts`                                  | Barrel: `createToken`, new types                                                                                       |
+| `packages/kernel/src/context/request-context.ts`                | `defer`, the private list and an internal `takeDeferred()` on the handle; `slot` (§3.19)                               |
+| `packages/kernel/src/context/response.ts`                       | Internal `isStreaming` getter (§3.21)                                                                                  |
+| `packages/kernel/src/application/application.ts`                | Completion settles deferred cleanup (§3.8–§3.9, §3.21), stream wrapping                                                |
+| `packages/kernel/src/context/deferred.ts` (new, internal)       | Runs cleanups, wraps a stream, reports failures — not exported                                                         |
+| `packages/di-plugin/src/container/container.ts`                 | Open/closed lifecycle, token-keyed registry use, `forRequest`, `dispose`, `close`; lazy scope internals (§3.19–§3.20)  |
+| `packages/di-plugin/src/container/compiler.ts` (new)            | Graph walk, validation findings, compiled resolvers, slot assignment; scope-local instances in a per-scope map (§3.20) |
+| `packages/di-plugin/src/container/errors.ts` (new)              | The five error classes                                                                                                 |
+| `packages/di-plugin/src/container/provider-registry.ts`         | Keys widened to `ContainerToken`; class aliases                                                                        |
+| `packages/di-plugin/src/container/scope-manager.ts`             | **Deleted**                                                                                                            |
+| `packages/di-plugin/src/container/container-builder.ts`         | Token widening; unchanged otherwise                                                                                    |
+| `packages/di-plugin/src/plugin/di-plugin.ts`                    | Bootstrap close, debug line for opaque factories, `onClose` dispose                                                    |
+| `packages/di-plugin/src/index.ts`                               | Barrel: errors in, `ScopeManager` out                                                                                  |
+| `packages/decorator-plugin/src/decorators/params.ts`            | `Service()`                                                                                                            |
+| `packages/decorator-plugin/src/resolvers/parameter-resolver.ts` | `service` classification and resolution                                                                                |
+| `packages/decorator-plugin/src/plugin/decorator-plugin.ts`      | Optional entries instead of the factory closure; controllers as singletons; class aliases                              |
+| `packages/decorator-plugin/src/index.ts`                        | Barrel: `Service`                                                                                                      |
+| `packages/testing/src/override-provider.ts`                     | Forward `forRequest`, `dispose`, typed tokens                                                                          |
+| `apps/di-decorators/src/modules/lifetimes/*`                    | Per-request lifetimes through `Service()` and `forRequest`                                                             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                      | src covered                            | Key assertions (and the signature each call type-checks against)                                                                                                                                                       |
-| ---------------------------------------------------------------------------------------------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `packages/common/test/unit/container-token.test.ts`                                            | `common/src/container.ts`              | `createToken<T>(name)` returns a frozen object with that `name`; two calls with one name are distinct; no state between calls                                                                                          |
-| `packages/common/test/unit/barrel-exports.test.ts` (extend)                                    | `common/src/index.ts`                  | New exports present                                                                                                                                                                                                    |
-| `packages/kernel/test/unit/request-context-defer.test.ts`                                      | `request-context.ts`, `deferred.ts`    | List allocated only on first `defer`; LIFO; post-completion `defer` runs at once; failure reported once at `warn`                                                                                                      |
-| `packages/kernel/test/integration/deferred-cleanup.test.ts`                                    | `application.ts`, `deferred.ts`        | §3.9 cases through `app.inject` and a capturing adapter; §3.13 structural fast-path test                                                                                                                               |
-| `packages/di-plugin/test/unit/container-lifecycle.test.ts`                                     | `container.ts`                         | Open resolve compiles on demand; `close()` validates; `ContainerClosedError` on root and scope after close                                                                                                             |
-| `packages/di-plugin/test/unit/compiler.test.ts`                                                | `compiler.ts`                          | Table of graphs → findings (missing, cycle, captive direct and through transients, optional, external leaf, opaque factory); no instantiation during validation                                                        |
-| `packages/di-plugin/test/unit/container.test.ts` (rewritten)                                   | `container.ts`, `provider-registry.ts` | Lifetimes; `ScopeRequiredError` both shapes; typed and class tokens (`expectTypeOf`); factory arguments; optional `undefined`                                                                                          |
-| `packages/di-plugin/test/unit/dispose.test.ts`                                                 | `container.ts`                         | Reverse order; transient tracked by scope; aggregate after all run; idempotent; `ScopeDisposedError`                                                                                                                   |
-| `packages/di-plugin/test/unit/request-scope.test.ts`                                           | `container.ts`                         | One scope per context; `defer` called once; `RequestScopeUnavailableError` without `defer`                                                                                                                             |
-| `packages/di-plugin/test/unit/errors.test.ts`                                                  | `errors.ts`                            | `name`, message shape, `findings` on `ContainerValidationError`                                                                                                                                                        |
-| `packages/di-plugin/test/unit/{circular-detector,provider-registry,container-builder}.test.ts` | those files                            | Kept; token widening and class aliases added                                                                                                                                                                           |
-| `packages/di-plugin/test/unit/scope-manager.test.ts`                                           | —                                      | **Deleted** with its source                                                                                                                                                                                            |
-| `packages/di-plugin/test/integration/di-plugin.test.ts`                                        | `di-plugin.ts`                         | Close after the last bootstrap hook; registration from a bootstrap hook succeeds; after `start()` it throws; debug line lists opaque factories; root disposed on `stop()`                                              |
-| `packages/di-plugin/test/e2e/request-scope-e2e.test.ts`                                        | the request path end to end            | Two concurrent requests each get their own scoped instance and neither sees the other's; disposal after each, including one whose handler throws and one streaming; a captive graph fails `start()` naming both tokens |
-| `packages/decorator-plugin/test/unit/service-param.test.ts`                                    | `params.ts`, `parameter-resolver.ts`   | `Service()` descriptor; classified `service`; unresolvable without a container; `resolveParameters` and the plugin wrapper resolve identically                                                                         |
-| `packages/decorator-plugin/test/integration/di-optional-scope.test.ts`                         | `decorator-plugin.ts`                  | `@Optional` dependency comes from the request scope; controllers registered as singletons under a `defaultScope: 'scoped'` container; captive controller fails the boot naming `Service`                               |
-| `packages/testing/test/unit/override-provider.test.ts` (extend)                                | `override-provider.ts`                 | An override still applies inside `forRequest`; `dispose` forwarded                                                                                                                                                     |
-| `apps/di-decorators/smoke.ts` (extend)                                                         | the example                            | `GET /lifetimes` reports per-request distinct scoped instances over two requests                                                                                                                                       |
+| Test file                                                                                      | src covered                                    | Key assertions (and the signature each call type-checks against)                                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `packages/common/test/unit/container-token.test.ts`                                            | `common/src/container.ts`                      | `createToken<T>(name)` returns a frozen object with that `name`; two calls with one name are distinct; no state between calls                                                                                          |
+| `packages/common/test/unit/barrel-exports.test.ts` (extend)                                    | `common/src/index.ts`                          | New exports present                                                                                                                                                                                                    |
+| `packages/kernel/test/unit/request-context-defer.test.ts`                                      | `request-context.ts`, `deferred.ts`            | List allocated only on first `defer`; LIFO; post-completion `defer` runs at once; failure reported once at `warn`                                                                                                      |
+| `packages/kernel/test/unit/request-context-slot.test.ts`                                       | `request-context.ts`                           | §3.19: one `create` per key; keys independent; a throwing `create` stores nothing; after completion; first, second and third keys                                                                                      |
+| `packages/kernel/test/integration/deferred-cleanup.test.ts`                                    | `application.ts`, `deferred.ts`, `response.ts` | §3.9 cases through `app.inject` and a capturing adapter; §3.13 structural fast-path test                                                                                                                               |
+| `packages/di-plugin/test/unit/container-lifecycle.test.ts`                                     | `container.ts`                                 | Open resolve compiles on demand; `close()` validates; `ContainerClosedError` on root and scope after close                                                                                                             |
+| `packages/di-plugin/test/unit/compiler.test.ts`                                                | `compiler.ts`                                  | Table of graphs → findings (missing, cycle, captive direct and through transients, optional, external leaf, opaque factory); no instantiation during validation                                                        |
+| `packages/di-plugin/test/unit/container.test.ts` (rewritten)                                   | `container.ts`, `provider-registry.ts`         | Lifetimes; `ScopeRequiredError` both shapes; typed and class tokens (`expectTypeOf`); factory arguments; optional `undefined`                                                                                          |
+| `packages/di-plugin/test/unit/dispose.test.ts`                                                 | `container.ts`                                 | Reverse order; transient tracked by scope; aggregate after all run; idempotent; `ScopeDisposedError`                                                                                                                   |
+| `packages/di-plugin/test/unit/request-scope.test.ts`                                           | `container.ts`, `compiler.ts`                  | One scope per context; `defer` called once; `RequestScopeUnavailableError` without `defer`; §3.19 slot, planting refused and `WeakMap` fallback; §3.20 no slot growth over 10,000 registering scopes                   |
+| `packages/di-plugin/test/unit/errors.test.ts`                                                  | `errors.ts`                                    | `name`, message shape, `findings` on `ContainerValidationError`                                                                                                                                                        |
+| `packages/di-plugin/test/unit/{circular-detector,provider-registry,container-builder}.test.ts` | those files                                    | Kept; token widening and class aliases added                                                                                                                                                                           |
+| `packages/di-plugin/test/unit/scope-manager.test.ts`                                           | —                                              | **Deleted** with its source                                                                                                                                                                                            |
+| `packages/di-plugin/test/integration/di-plugin.test.ts`                                        | `di-plugin.ts`                                 | Close after the last bootstrap hook; registration from a bootstrap hook succeeds; after `start()` it throws; debug line lists opaque factories; root disposed on `stop()`                                              |
+| `packages/di-plugin/test/e2e/request-scope-e2e.test.ts`                                        | the request path end to end                    | Two concurrent requests each get their own scoped instance and neither sees the other's; disposal after each, including one whose handler throws and one streaming; a captive graph fails `start()` naming both tokens |
+| `packages/decorator-plugin/test/unit/service-param.test.ts`                                    | `params.ts`, `parameter-resolver.ts`           | `Service()` descriptor; classified `service`; unresolvable without a container; `resolveParameters` and the plugin wrapper resolve identically                                                                         |
+| `packages/decorator-plugin/test/integration/di-optional-scope.test.ts`                         | `decorator-plugin.ts`                          | `@Optional` dependency comes from the request scope; controllers registered as singletons under a `defaultScope: 'scoped'` container; captive controller fails the boot naming `Service`                               |
+| `packages/testing/test/unit/override-provider.test.ts` (extend)                                | `override-provider.ts`                         | An override still applies inside `forRequest`; `dispose` forwarded                                                                                                                                                     |
+| `apps/di-decorators/smoke.ts` (extend)                                                         | the example                                    | `GET /lifetimes` reports per-request distinct scoped instances over two requests                                                                                                                                       |
 
 ## 7. Verification gates
 
@@ -494,7 +575,10 @@ decorator-plugin and testing; each ≥ 90% on branch, function and line.
 requested once M125 was implemented and committed (`9e847ac3`), so unlike a review written before
 the code it can only bind the audit to the design; it is not evidence the design was reviewed before
 the code existed. Where it found the design incomplete it added decisions §3.14 and §3.15, which the
-committed code does not yet implement — the audit runs after they land.
+committed code does not yet implement — the audit runs after they land. §3.19–§3.21 were added on
+2026-10-26 after §3.13's benchmark refused the committed request scope; their threats are T14–T16
+below, reviewed against prototypes patched into the benchmark build, and obligations 11–13 bind the
+next audit to them.
 
 - **Reviewed flows:**
   1. An HTTP request whose handler calls `container.forRequest(ctx)` and resolves scoped, transient
@@ -525,7 +609,8 @@ committed code does not yet implement — the audit runs after they land.
   claims to refuse it.
 - **Budgets:**
   - A request that never calls `forRequest` allocates nothing new and stays synchronous (§3.13).
-  - A request that does allocates one child container and one slot array, both released with it.
+  - A request that does allocates one scope object, its slot array and its cleanup list, held in the
+    context's slot and released with it (§3.19–§3.20).
   - No per-request growth of root state (§3.15).
   - Each asynchronous cleanup is bounded at 5000 ms (§3.14), inside the unchanged 10 s drain.
 - **Audit obligations:**
@@ -561,28 +646,42 @@ committed code does not yet implement — the audit runs after they land.
      handler returns synchronously; with a synchronous request scope too.
   10. **Hostile tokens.** `'__proto__'`, `'constructor'` and `'prototype'` as string tokens register
       and resolve as ordinary keys without touching any prototype.
+  11. **The request scope cannot be planted or read (§3.19).** Middleware running before the handler
+      calls `ctx.slot` with every key it can construct — the container, its scope, the service
+      registry, `ctx` itself, fresh objects — and with a `create` returning a fake scope. The
+      handler's `forRequest` still returns the real scope and the fake is never consulted. Positive
+      control: the same middleware's own key returns its own value.
+  12. **No growth with request volume (§3.20).** 10,000 request scopes each register a local
+      `scoped` value; afterwards a fresh scope's slot array is no longer than the root's
+      registration count, and the root tracks nothing new. Positive control: each scope resolved and
+      disposed its own value.
+  13. **No index collision between scopes (§3.20).** A parent scope registers a token after a child
+      scope exists and the child registers another; each resolves its own instance for each token.
 
-| Threat                                                                                     | Resolution                                                                                                                       |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| T1 Request B observes request A's scoped instance                                          | §3.10: one scope per context in a per-container `WeakMap`; §3.3: scoped values live in that scope's slot array                   |
-| T2 A singleton captures a scoped instance through some indirect path                       | §3.2 captive validation over every edge kind; §3.6 visible factory and `@Optional` dependencies; §3.11 controllers as singletons |
-| T3 A scope used after disposal                                                             | §3.7: `ScopeDisposedError`; §3.8: a post-completion `defer` runs at once, so a late scope is born disposed                       |
-| T4 Cleanup skipped on some ending (pool exhaustion by abort or error)                      | §3.8 and §3.9 settle on every path; the throwing-responder path fixed during review with a test                                  |
-| T5 Dispose before the last use, or twice                                                   | §3.9: a stream settles once, after its last chunk or the cancel; §3.7: `dispose()` is idempotent                                 |
-| T6 A hanging cleanup holds the response, the in-flight slot and `stop()`                   | **§3.14 (new)**: 5000 ms bound per asynchronous cleanup                                                                          |
-| T7 Token, provider or dispose-error names disclosed in a 500                               | Kernel and `errorHandler` 500 bodies are opaque; cleanup failures go to the log only (§3.8)                                      |
-| T8 A dispose error forges log lines                                                        | §3.8 reports through `describeError`, which collapses control characters                                                         |
-| T9 Root cleanup list grows with request volume                                             | **§3.15 (new)**: disposable transients refused on the root                                                                       |
-| T10 One application's scope or instance reached from another in the same process           | Compiled entries, slots and the request `WeakMap` belong to one root container; tokens carry no state (§2 C1)                    |
-| T11 `Service`'s `Symbol.for` brand forged                                                  | Accepted: it selects a resolution path for application code, which is trusted; it is not an access decision                      |
-| T12 An opaque factory captures a scoped instance unseen                                    | Accepted: unvalidated by construction and listed in the `debug` line (§3.2); the docs prefer `inject`                            |
-| T13 A client stalls a scoped streaming response, holding its scope                         | Accepted: the connection is held anyway; the scope is released on cancel, and `stop()` is bounded by the drain                   |
-| F1 (audit `d5f0f8c5`, High) A hung `dispose` blocks later disposals in its scope           | FIXED after the audit: §3.16 per-disposal 5000 ms bound                                                                          |
-| F2 (audit `d5f0f8c5`, Medium) Scope-registered `singleton` leaves tracked on the root      | FIXED after the audit: §3.17 scope registrations live as long as the scope                                                       |
-| F3 (audit `d5f0f8c5`, Medium) A hung singleton `dispose` holds `app.stop()`                | FIXED after the audit: §3.16 covers root disposal                                                                                |
-| F4 (audit `d5f0f8c5`, Low) The startup warning says an unbacked `Service()` is `undefined` | FIXED after the audit: the warning says the request will fail                                                                    |
-| N1 (re-audit `db1e6bf6`, Low) A slow scope disposal's named errors never reach the log     | FIXED after the re-audit: §3.18 the scope reports its own outcome                                                                |
-| N2 (re-audit `db1e6bf6`, Low) k hung disposals hold `stop()` about k × 5000 ms             | ACCEPTED (maintainer, 2026-10-26): a total bound would abandon later disposals (F1); §3.16 and the docs say so                   |
+| Threat                                                                                     | Resolution                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T1 Request B observes request A's scoped instance                                          | §3.10: one scope per context in a per-container `WeakMap`; §3.3: scoped values live in that scope's slot array                                                   |
+| T2 A singleton captures a scoped instance through some indirect path                       | §3.2 captive validation over every edge kind; §3.6 visible factory and `@Optional` dependencies; §3.11 controllers as singletons                                 |
+| T3 A scope used after disposal                                                             | §3.7: `ScopeDisposedError`; §3.8: a post-completion `defer` runs at once, so a late scope is born disposed                                                       |
+| T4 Cleanup skipped on some ending (pool exhaustion by abort or error)                      | §3.8 and §3.9 settle on every path; the throwing-responder path fixed during review with a test                                                                  |
+| T5 Dispose before the last use, or twice                                                   | §3.9: a stream settles once, after its last chunk or the cancel; §3.7: `dispose()` is idempotent                                                                 |
+| T6 A hanging cleanup holds the response, the in-flight slot and `stop()`                   | **§3.14 (new)**: 5000 ms bound per asynchronous cleanup                                                                                                          |
+| T7 Token, provider or dispose-error names disclosed in a 500                               | Kernel and `errorHandler` 500 bodies are opaque; cleanup failures go to the log only (§3.8)                                                                      |
+| T8 A dispose error forges log lines                                                        | §3.8 reports through `describeError`, which collapses control characters                                                                                         |
+| T9 Root cleanup list grows with request volume                                             | **§3.15 (new)**: disposable transients refused on the root                                                                                                       |
+| T10 One application's scope or instance reached from another in the same process           | Compiled entries, slots and the request `WeakMap` belong to one root container; tokens carry no state (§2 C1)                                                    |
+| T11 `Service`'s `Symbol.for` brand forged                                                  | Accepted: it selects a resolution path for application code, which is trusted; it is not an access decision                                                      |
+| T12 An opaque factory captures a scoped instance unseen                                    | Accepted: unvalidated by construction and listed in the `debug` line (§3.2); the docs prefer `inject`                                                            |
+| T13 A client stalls a scoped streaming response, holding its scope                         | Accepted: the connection is held anyway; the scope is released on cancel, and `stop()` is bounded by the drain                                                   |
+| F1 (audit `d5f0f8c5`, High) A hung `dispose` blocks later disposals in its scope           | FIXED after the audit: §3.16 per-disposal 5000 ms bound                                                                                                          |
+| F2 (audit `d5f0f8c5`, Medium) Scope-registered `singleton` leaves tracked on the root      | FIXED after the audit: §3.17 scope registrations live as long as the scope                                                                                       |
+| F3 (audit `d5f0f8c5`, Medium) A hung singleton `dispose` holds `app.stop()`                | FIXED after the audit: §3.16 covers root disposal                                                                                                                |
+| F4 (audit `d5f0f8c5`, Low) The startup warning says an unbacked `Service()` is `undefined` | FIXED after the audit: the warning says the request will fail                                                                                                    |
+| N1 (re-audit `db1e6bf6`, Low) A slow scope disposal's named errors never reach the log     | FIXED after the re-audit: §3.18 the scope reports its own outcome                                                                                                |
+| N2 (re-audit `db1e6bf6`, Low) k hung disposals hold `stop()` about k × 5000 ms             | ACCEPTED (maintainer, 2026-10-26): a total bound would abandon later disposals (F1); §3.16 and the docs say so                                                   |
+| T14 Code holding the container plants or reads a request's scope through the slot          | §3.19: the key is a private object per container; entries are identity-keyed, with no delete and no enumeration (found in the prototype, keyed by the container) |
+| T15 The shared slot counter grows with every scope-local registration                      | §3.20: only root registrations get slot indexes; scope-local instances live in a per-scope map (found 2026-10-26 in `4ccf701c`)                                  |
+| T16 A per-scope counter collides with a parent scope's later registration                  | §3.20 avoids per-scope counters; obligation 13 tests the shape                                                                                                   |
 
 ## 9. Out of scope
 
