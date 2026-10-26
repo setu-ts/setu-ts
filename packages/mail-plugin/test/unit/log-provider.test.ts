@@ -12,6 +12,22 @@ const MESSAGE: OutgoingMail = {
 };
 
 describe('LogProvider', () => {
+  it('D5 retains the latest 1,000 messages in order while forwarding all 1,001 to the sink', async () => {
+    const sunk: OutgoingMail[] = [];
+    const provider = new LogProvider({ sink: (message) => sunk.push(message) });
+    await provider.connect();
+    try {
+      for (let i = 0; i < 1_001; i++) {
+        await provider.send({ ...MESSAGE, subject: `message-${i}` });
+      }
+      expect(sunk).toHaveLength(1_001);
+      expect(provider.messages).toHaveLength(1_000);
+      expect(provider.messages).toEqual(sunk.slice(1));
+    } finally {
+      await provider.disconnect();
+    }
+  });
+
   it('records, forwards to the sink, and logs via the injected logger', async () => {
     const sunk: OutgoingMail[] = [];
     const logged: Array<{ msg: string; meta?: Record<string, unknown> | undefined }> = [];

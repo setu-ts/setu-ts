@@ -26,6 +26,10 @@ No third-party dependency. The listener socket is owned by `@setu-ts/runtime` (`
 required dependency of every application and now provides
 `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`).
 
+Per-session rate buckets are swept on authenticated promotion using a doubling threshold starting at
+64 sessions. A bucket is discarded only after it has refilled to its full burst; a drained or
+partially refilled bucket keeps its budget.
+
 ## Pairing
 
 The trusted native launcher generates a fresh 32-byte session key and a 16-byte session ID per

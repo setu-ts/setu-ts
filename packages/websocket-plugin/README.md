@@ -298,7 +298,8 @@ ws.route('/ws', handlers, { protocols: ['chat', 'json'] });
   distinct name polled — with nothing to reclaim it until some other socket disconnects (the sweep
   runs on disconnection, so an idle application never reclaims). Use `peek` wherever the name comes
   from a request: it returns the room if one exists and `undefined` otherwise, and registers
-  nothing.
+  nothing. At the registry level, `RoomRegistry.get(name)` also creates a room on lookup; use
+  `RoomRegistry.peek(name)` when reading a client-supplied name.
 
   ```typescript
   app.router.get('/presence/:board', (ctx) => {

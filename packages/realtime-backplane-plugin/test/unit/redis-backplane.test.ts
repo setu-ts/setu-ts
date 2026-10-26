@@ -143,6 +143,30 @@ class FakeRedisClient implements IRedisBackplaneClient {
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
 
+it('D3 retains only the latest 100 of 1,000 Redis handler errors in delivery order', async () => {
+  const client = new FakeRedisClient();
+  const subscriber = new FakeRedisClient();
+  const backplane = new RedisBackplane(
+    { transport: 'redis', client, subscriber },
+    'node-a',
+    'realtime',
+  );
+  await backplane.connect();
+  const thrown = Array.from({ length: 1_000 }, (_, i) => new Error(`failure-${i}`));
+  let calls = 0;
+  await backplane.subscribe(() => {
+    throw thrown[calls++];
+  });
+  try {
+    for (let i = 0; i < 1_000; i++) subscriber.emit('realtime', JSON.stringify(FRAME));
+    expect(calls).toBe(1_000);
+    expect(backplane.handlerErrors).toHaveLength(100);
+    expect(backplane.handlerErrors).toEqual(thrown.slice(-100));
+  } finally {
+    await backplane.close();
+  }
+});
+
 describe('RedisBackplane construction', () => {
   it('rejects a client injected without a subscriber', () => {
     expect(

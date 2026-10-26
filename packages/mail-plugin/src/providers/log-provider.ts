@@ -39,7 +39,7 @@ export class LogProvider implements MailProvider {
     this.#sink = options?.sink;
   }
 
-  /** Every message recorded by this provider, in send order. */
+  /** The most recent 1,000 messages, in send order; the sink receives every message. */
   get messages(): readonly OutgoingMail[] {
     return this.#messages;
   }
@@ -84,6 +84,9 @@ export class LogProvider implements MailProvider {
       return Promise.reject(new Error('LogProvider is not connected'));
     }
     this.#messages.push(message);
+    if (this.#messages.length > 1_000) {
+      this.#messages.shift();
+    }
     this.#sink?.(message);
     this.#logger?.info('mail sent (log provider)', {
       from: message.from,

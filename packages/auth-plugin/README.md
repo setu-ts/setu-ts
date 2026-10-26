@@ -1158,7 +1158,9 @@ To make logout invalidate the paired access credential before its normal expiry,
 application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
 revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
 make `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family; the shipped
-`MemoryRefreshTokenStore` does both with lazy expiry.
+`MemoryRefreshTokenStore` does both with lazy expiry on `get()` and amortised expiry sweeps on
+`save()` and `rotate()`. Sweeps remove only expired records; unexpired revoked records remain
+available for rotation reuse detection. No background timer is required.
 
 ```typescript
 import {
@@ -1295,6 +1297,10 @@ rateLimitMiddleware({
 | `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |
 | `standardHeaders` | `boolean`                | `true`                                                | Emit `RateLimit-*` headers.                                              |
 | `exclude`         | `readonly PathPattern[]` | six operational paths                                 | Paths skipped entirely; strings match exactly and regexps test the path. |
+
+`MemoryRateLimitStore` reclaims expired windows on `increment()` with a doubling-threshold sweep
+starting at 1,024 entries. Each key retains its own window duration; live windows are never evicted
+for a hard cap, so active rate limits survive cleanup.
 
 ## Diagnostics
 

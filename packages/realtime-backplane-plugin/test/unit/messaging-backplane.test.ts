@@ -188,6 +188,25 @@ describe('MessagingBackplane', () => {
 });
 
 describe('MessagingBackplane handler isolation', () => {
+  it('D3 retains only the latest 100 of 1,000 handler errors in delivery order', async () => {
+    const broker = new FakeBroker();
+    const backplane = new MessagingBackplane(broker, 'node-a', 'realtime');
+    await backplane.connect();
+    const thrown = Array.from({ length: 1_000 }, (_, i) => new Error(`failure-${i}`));
+    let calls = 0;
+    await backplane.subscribe(() => {
+      throw thrown[calls++];
+    });
+    try {
+      for (let i = 0; i < 1_000; i++) broker.deliver(FRAME);
+      expect(calls).toBe(1_000);
+      expect(backplane.handlerErrors).toHaveLength(100);
+      expect(backplane.handlerErrors).toEqual(thrown.slice(-100));
+    } finally {
+      await backplane.close();
+    }
+  });
+
   it('continues delivering after a handler throws, and records the error', async () => {
     const broker = new FakeBroker();
     const backplane = new MessagingBackplane(broker, 'node-a', 'realtime');

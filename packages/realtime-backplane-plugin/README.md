@@ -48,6 +48,9 @@ await app.start({ port: 3000 });
 Nothing else changes. `ws.room('lobby').broadcast(data)` and `sse.channel('news').publish(msg)` now
 reach clients on every replica.
 
+The memory, messaging, and Redis transports expose `handlerErrors` as the most recent 100 subscriber
+errors, oldest first. Delivery continues to other subscribers when a handler throws.
+
 ## Transports
 
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                                         |

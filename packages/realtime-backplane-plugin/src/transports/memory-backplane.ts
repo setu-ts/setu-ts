@@ -8,6 +8,7 @@
 import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
+import { recordHandlerError } from './handler-errors.ts';
 
 /**
  * A process-wide bus. Named buses stay isolated from one another, so
@@ -41,7 +42,7 @@ export class MemoryBackplane implements IRealtimeBackplane {
   readonly #handlers = new Set<RealtimeFrameHandler>();
   #connected = false;
   /**
-   * Errors thrown by subscribers, oldest first.
+   * The most recent 100 errors thrown by subscribers, oldest first.
    *
    * The in-process transport has no logger and no driver callback to surface a
    * throw to, so it records rather than swallows: a test — or an operator
@@ -59,7 +60,7 @@ export class MemoryBackplane implements IRealtimeBackplane {
     this.#bus = bus;
   }
 
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;
   }
@@ -148,7 +149,7 @@ export class MemoryBackplane implements IRealtimeBackplane {
       return;
     }
     const delivered = dispatchFrame(this.#handlers, frame, (error) => {
-      this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+      recordHandlerError(this.#handlerErrors, error);
     });
     // M98l: counted only after the own-origin filter admitted the frame.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
