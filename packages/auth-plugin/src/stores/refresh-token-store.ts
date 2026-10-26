@@ -87,7 +87,7 @@ export interface RefreshTokenStore {
 /**
  * In-memory implementation of RefreshTokenStore.
  *
- * Entries expire lazily on get() and through amortised sweeps on save(),
+ * Entries expire lazily on get() and through amortised sweeps on save() and rotate(),
  * deleting records whose expiresAt <= runtime.now(). Unexpired revoked records
  * remain available for rotation reuse detection. No background job is needed;
  * memory follows unexpired records plus the doubling-threshold sweep slack.
@@ -102,10 +102,15 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
   }
 
   save(record: RefreshTokenRecord): Promise<void> {
+    this.#write(record);
+    return Promise.resolve();
+  }
+
+  /** Every write path sweeps first, so a store that only rotates stays bounded too. */
+  #write(record: RefreshTokenRecord): void {
     const now = this.#runtime.now();
     this.#sweepAt = sweepExpired(this.#map, this.#sweepAt, (entry) => entry.expiresAt <= now);
     this.#map.set(record.jti, record);
-    return Promise.resolve();
   }
 
   get(jti: string): Promise<RefreshTokenRecord | null> {
@@ -143,7 +148,7 @@ export class MemoryRefreshTokenStore implements RefreshTokenStore {
     }
 
     record.revoked = true;
-    this.#map.set(successor.jti, successor);
+    this.#write(successor);
     return Promise.resolve<IRefreshTokenRotation>({ record, rotated: true });
   }
 

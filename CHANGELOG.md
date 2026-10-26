@@ -258,9 +258,9 @@ All notable changes to this project are documented here. The format follows
 
 - **Expired in-memory auth state is reclaimed (0.11.0, `@setu-ts/auth-plugin`).**
   `MemoryRateLimitStore.increment()` sweeps expired per-key windows without evicting live limits;
-  `MemoryRefreshTokenStore.save()` sweeps expired records even when they are never read. Unexpired
-  revoked refresh records remain available for rotation reuse detection. Both use doubling
-  thresholds.
+  `MemoryRefreshTokenStore.save()` and `rotate()` sweep expired records even when they are never
+  read. Unexpired revoked refresh records remain available for rotation reuse detection. Both use
+  doubling thresholds.
 - **HTTP method metrics have bounded cardinality (0.11.0, `@setu-ts/metrics-plugin`).** Unknown
   method labels now use `_OTHER` on success and error paths. The nine known uppercase HTTP methods
   keep their names; comparison is case-sensitive. Consumers querying invented method labels should

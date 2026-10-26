@@ -1159,8 +1159,8 @@ application supplies a shared implementation. Access revocation requires `access
 revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
 make `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family; the shipped
 `MemoryRefreshTokenStore` does both with lazy expiry on `get()` and amortised expiry sweeps on
-`save()`. Sweeps remove only expired records; unexpired revoked records remain available for
-rotation reuse detection. No background timer is required.
+`save()` and `rotate()`. Sweeps remove only expired records; unexpired revoked records remain
+available for rotation reuse detection. No background timer is required.
 
 ```typescript
 import {
