@@ -264,6 +264,10 @@ export async function readArtifactNames(
     let source: string;
     try {
       const stat = await fs.stat(path);
+      // A directory named like an artifact is unrelated and never was one; only a
+      // file-like entry the scanner cannot read (a FIFO, a device link, an oversized
+      // file) leaves an artifact's wiring unknown.
+      if (stat.isDirectory) continue;
       if (!stat.isFile || stat.size > MAX_EXISTING_FILE_BYTES) {
         unreadable.push({
           path: joinPath(spec.dir, entry),

@@ -15078,7 +15078,7 @@ dependency on M117.
 
 **Deliverables**
 
-- [x] `plans/milestone-118-setu-check.md`, settling the open questions above
+- [x] `plans/archive/milestone-118-setu-check.md`, settling the open questions above
 - [x] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
 - [x] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
       codes above

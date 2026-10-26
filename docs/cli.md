@@ -813,13 +813,17 @@ that artifact's import.
 `check` executes nothing from the project and its parsers are linear in the size of what they read,
 so it is safe as a CI step on a pull request from anyone — with one condition. On a pull request you
 have not reviewed, the project's own `check` script, and the CLI version its lockfile resolves, are
-the author's to change. Run a CLI your CI pins, installed outside the checkout and before the
-checkout's dependencies are installed, and use `--strict` so a configuration the check cannot
-classify fails rather than warns:
+the author's to change, and so is its `.npmrc`, which npm reads from the project it runs in and
+which can point `@setu-ts` at a registry the author controls. Run a CLI your CI pins, from a working
+directory outside the checkout and before the checkout's dependencies are installed, pass the
+checkout with `--dir`, and use `--strict` so a configuration the check cannot classify fails rather
+than warns:
 
 ```bash
-npx --yes @setu-ts/cli@<version> check --strict --dir <checkout>
+cd "$RUNNER_TEMP" && npx --yes @setu-ts/cli@<version> check --strict --dir "$CHECKOUT"
 ```
+
+`RUNNER_TEMP` is any directory outside the checkout; `CHECKOUT` is the checkout's absolute path.
 
 `sync` and `generate` — including with `--dry-run` — format what they plan with the project's own
 Prettier configuration, and loading that configuration runs the project's `prettier.config.*` and

@@ -16,7 +16,8 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
 scripts, so add it yourself. In a Node, Bun or Workers project, add the CLI as a development
-dependency at your framework version and append the check to the `check` script:
+dependency at your framework version and append ` && setu check` to the end of your existing `check`
+script, keeping whatever runs before it:
 
 ```json
 {
@@ -24,6 +25,9 @@ dependency at your framework version and append the check to the `check` script:
   "devDependencies": { "@setu-ts/cli": "^0.11.0" }
 }
 ```
+
+A Workers project with a build keeps its build first: its script becomes
+`npm run build && tsc --noEmit && setu check`.
 
 In a Deno project, add a `check` task (`main.dev.ts` belongs in the `deno check` list only when you
 enabled the devtool):

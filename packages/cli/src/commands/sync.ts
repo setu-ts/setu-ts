@@ -36,6 +36,17 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
       try {
         const installed = await detectPlugins(deps.fs, dir);
         const diagnosis = await diagnoseProject(deps.fs, dir, installed);
+        // Hand registrations are read from `setu.config.ts`; without it the scan cannot
+        // tell which artifacts a barrel must leave out, and a rewrite could register one
+        // twice. So nothing is written, whatever a silence entry says about E012.
+        if (diagnosis.findings.some((finding) => finding.kind === 'config-unreadable')) {
+          const result = await readSilence(deps.fs, dir, diagnosis.findings);
+          renderCheckFindings(result.findings, deps.error);
+          deps.error(
+            'setu sync wrote nothing: setu.config.ts cannot be read, so hand registrations cannot be checked.',
+          );
+          return EXIT_ERROR;
+        }
         const files = new Map<string, GeneratedFile>();
         const plan = (path: string, contents: string): void => {
           files.set(path, { path: joinPath(dir, path), contents, managed: true });

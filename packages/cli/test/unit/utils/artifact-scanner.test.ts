@@ -110,10 +110,12 @@ describe('readArtifactNames', () => {
   // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
   // artifact is opened unless stat reports a regular file under the cap.
   it('never opens a barrel or artifact that is not a regular file under the cap', async () => {
-    const base = fsWith(['user.routes.ts', 'huge.routes.ts'], {
+    const base = fsWith(['user.routes.ts', 'huge.routes.ts', 'pipe.routes.ts'], {
       stats: {
         'index.ts': { isFile: false, isDirectory: false, size: 0 },
         'huge.routes.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+        // A FIFO or a link to a device: neither a file nor a directory.
+        'pipe.routes.ts': { isFile: false, isDirectory: false, size: 0 },
       },
     });
     const opened: string[] = [];
@@ -130,6 +132,7 @@ describe('readArtifactNames', () => {
     // Left out of the barrel, as before, but reported rather than silently dropped.
     expect(scan.unreadable).toEqual([
       { path: `${ROUTES.dir}/huge.routes.ts`, reason: 'too-large' },
+      { path: `${ROUTES.dir}/pipe.routes.ts`, reason: 'not-a-file' },
     ]);
   });
 
@@ -178,6 +181,8 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not a rejection: nothing is wrong with an unrelated directory.
     expect(scan.skipped).toEqual([]);
+    // Nor an unreadable artifact: `setu check` must not fail a project over it.
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('excludes a bare suffix, which would derive an empty symbol name', async () => {

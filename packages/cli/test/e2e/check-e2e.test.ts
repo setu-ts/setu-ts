@@ -203,6 +203,18 @@ it('fails on a setu.config.ts it cannot read, and only warns when there is none'
   expect(unreadable.code).toBe(1);
   expect(unreadable.err).toContain('error setu.E012: Cannot read setu.config.ts: not-a-file');
   expect(unreadable.err).not.toContain('setu.W002');
+  // An unlisted artifact sync would otherwise add — and might double-register, since
+  // the hand registrations it must leave out live in the config it cannot read.
+  await nodeFs.writeFile(
+    `${project}/src/controllers/extra.controller.ts`,
+    'export function registerExtraRoutes() {}',
+  );
+  const barrelPath = `${project}/src/controllers/index.ts`;
+  const barrel = await nodeFs.readFile(barrelPath, 'utf8');
+  const synced = await run(['sync', '--dir', project]);
+  expect(synced.code).toBe(1);
+  expect(synced.err).toContain('setu sync wrote nothing: setu.config.ts cannot be read');
+  expect(await nodeFs.readFile(barrelPath, 'utf8')).toBe(barrel);
 });
 
 it('reports an unreadable artifact, and sync keeps the barrel import it cannot verify', async () => {
