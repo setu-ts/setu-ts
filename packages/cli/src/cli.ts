@@ -18,6 +18,8 @@ import {
   TARGET_RUNTIMES,
   VERSION,
 } from './constants.ts';
+import { runCheckCommand } from './commands/check.ts';
+import { runSyncCommand } from './commands/sync.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
 import { runAgentsCommand } from './commands/agents.ts';
@@ -108,6 +110,8 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
+  log(`  check                          Check CLI-owned wiring (read-only)`);
+  log(`  sync                           Rewrite CLI-managed barrels`);
   log(`  agents                         Write or check this project's AGENTS.md brief`);
   log(`  adopt                          Convert this project into a workspace`);
   log(`  devtool enable [member]        Enable the local diagnostics connector`);
@@ -259,6 +263,12 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         });
+
+      case 'check':
+        return await runCheckCommand(rest, deps);
+
+      case 'sync':
+        return await runSyncCommand(rest, deps);
 
       case 'agents':
         return await runAgentsCommand(rest, deps);

@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
+  `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
+  skipped, a barrel does not list an artifact in its directory or lists one that is gone,
+  `setu.config.ts` does not reference a barrel on disk, an artifact is registered both by its barrel
+  and by hand, a feature module is skipped or not activated, or the old `src/routes/` layout is
+  still in use. It never loads the application. Barrels are compared as sets of names, so a
+  reformatted barrel passes. Every finding carries a stable id (`setu.E001`…`setu.E013`,
+  `setu.W001`…`setu.W004`); warnings exit `0` unless `--strict`. A `setu.config.ts` or seam artifact
+  that exists but cannot be read is an error, and `sync` leaves an artifact's barrel unchanged
+  rather than drop an import it cannot verify. `.setu-ts/check.json` silences an id everywhere or
+  for one path, and an invalid file silences nothing (`setu.E011`). From a workspace root both
+  commands run over every member, and refuse a member that is a symbolic link. `check` executes no
+  project code and parses in linear time, so it is safe on an untrusted pull request; `sync` and
+  `generate` load the project's Prettier configuration. `setu sync [--dir] [--dry-run]` rewrites
+  every CLI-managed barrel from its directory with the renderer `setu generate` uses, writes nothing
+  else, and then reports what it could not fix.
+
 - **A compiled DI container with a request scope (M125, 0.11.0, `@setu-ts/common`,
   `@setu-ts/di-plugin`, `@setu-ts/kernel`, `@setu-ts/decorator-plugin`, `@setu-ts/testing`).** The
   container compiles its graph into direct factories and validates it once at boot.
@@ -98,6 +115,16 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and
+  Workers scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their
+  `check` script is `tsc --noEmit && setu check` (`npm run build && tsc --noEmit && setu check` for
+  a Workers project with a build). Deno scaffolds gain a `check` task:
+  `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check`; the devtool
+  form adds `main.dev.ts`, and `setu devtool enable` replaces the scaffold's own `check` task with
+  it. `check` and `sync` are built-in verbs and now shadow a plugin command of the same name.
+  `setu generate` reads `setu.config.ts` with the scanner's 1 MiB regular-file limit; its output is
+  otherwise unchanged. See the upgrade guide for existing projects.
 
 - **Optional peers in a workspace (M119f, #505, 0.11.0, `@setu-ts/common`, `@setu-ts/cli` and every
   optional-peer loader).** `OptionalDependencyUnavailableError` accepts `requiredBy?: string`; all
@@ -256,23 +283,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Expired in-memory auth state is reclaimed (0.11.0, `@setu-ts/auth-plugin`).**
+- **Expired in-memory auth state is reclaimed (#509, 0.11.0, `@setu-ts/auth-plugin`).**
   `MemoryRateLimitStore.increment()` sweeps expired per-key windows without evicting live limits;
   `MemoryRefreshTokenStore.save()` and `rotate()` sweep expired records even when they are never
   read. Unexpired revoked refresh records remain available for rotation reuse detection. Both use
   doubling thresholds.
-- **HTTP method metrics have bounded cardinality (0.11.0, `@setu-ts/metrics-plugin`).** Unknown
-  method labels now use `_OTHER` on success and error paths. The nine known uppercase HTTP methods
-  keep their names; comparison is case-sensitive. Consumers querying invented method labels should
-  query `_OTHER` instead.
-- **Subscriber error histories are bounded (0.11.0, `@setu-ts/realtime-backplane-plugin`).** Memory,
-  messaging, and Redis transports retain the most recent 100 `handlerErrors`, oldest first.
-- **Logged mail has bounded retention (0.11.0, `@setu-ts/mail-plugin`).** `LogProvider.messages`
-  keeps the most recent 1,000 messages in send order; its optional `sink` still receives every send.
-- **Idle diagnostics session budgets are reclaimed (0.11.0, `@setu-ts/diagnostics-plugin`).**
+- **HTTP method metrics have bounded cardinality (#509, 0.11.0, `@setu-ts/metrics-plugin`).**
+  Unknown method labels now use `_OTHER` on success and error paths. The nine known uppercase HTTP
+  methods keep their names; comparison is case-sensitive. Consumers querying invented method labels
+  should query `_OTHER` instead.
+- **Subscriber error histories are bounded (#509, 0.11.0, `@setu-ts/realtime-backplane-plugin`).**
+  Memory, messaging, and Redis transports retain the most recent 100 `handlerErrors`, oldest first.
+- **Logged mail has bounded retention (#509, 0.11.0, `@setu-ts/mail-plugin`).**
+  `LogProvider.messages` keeps the most recent 1,000 messages in send order; its optional `sink`
+  still receives every send.
+- **Idle diagnostics session budgets are reclaimed (#509, 0.11.0, `@setu-ts/diagnostics-plugin`).**
   Authenticated promotion sweeps fully refilled token buckets at doubling thresholds starting at 64;
   drained and partially refilled buckets retain their limits.
-- **Room lookup allocation is explicit (0.11.0, `@setu-ts/websocket-plugin`).** Document that
+- **Room lookup allocation is explicit (#509, 0.11.0, `@setu-ts/websocket-plugin`).** Document that
   `RoomRegistry.get(name)` creates on lookup and never-joined rooms are reclaimed on disconnection;
   use `peek()` for client-supplied room-name reads.
 

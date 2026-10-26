@@ -939,7 +939,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: 'deno check main.ts setu.config.ts main.dev.ts',
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.

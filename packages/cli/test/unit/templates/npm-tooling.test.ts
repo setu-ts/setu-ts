@@ -34,7 +34,7 @@ describe('npm tooling files', () => {
   });
 
   it('ships the scripts the emitted package.json advertises', () => {
-    expect(NPM_TOOLING_SCRIPTS['check']).toBe('tsc --noEmit');
+    expect(NPM_TOOLING_SCRIPTS['check']).toBe('tsc --noEmit && setu check');
     expect(NPM_TOOLING_SCRIPTS['lint']).toBe('eslint .');
   });
 });

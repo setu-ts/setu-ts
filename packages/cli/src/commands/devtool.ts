@@ -77,7 +77,7 @@ import {
 import { assumePortAvailable, type PortProbe } from '../workspace/port-probe.ts';
 import { LEGACY_DENO_RUN_ALL, workspaceProfile } from '../workspace/runtime-profile.ts';
 
-import { cliInvocation } from '../templates/project-files.ts';
+import { cliInvocation, cliCheckCommand } from '../templates/project-files.ts';
 
 /** The import-map key the development entry resolves the plugin through. */
 const DEVTOOL_DEPENDENCY = '@setu-ts/diagnostics-plugin';
@@ -236,10 +236,15 @@ async function readWritableDenoManifest(
  * mode this command exists to avoid — or `undefined` when merged or already
  * byte-identical
  */
-function mergeTask(handle: DenoJsonHandle, key: string, expected: string): string | undefined {
+function mergeTask(
+  handle: DenoJsonHandle,
+  key: string,
+  expected: string,
+  predecessor?: string,
+): string | undefined {
   const current = handle.tasks[key];
   if (current === expected) return undefined;
-  if (current !== undefined) {
+  if (current !== undefined && current !== predecessor) {
     return (
       `Refusing to replace the existing "${key}" task in ${escapeName(handle.path)}:\n` +
       `  current: ${escapeName(current)}\n` +
@@ -527,7 +532,12 @@ async function enableInWorkspace(
   }
   const devRefusal = mergeTask(memberHandle, 'dev', devTask);
   if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
-  const checkRefusal = mergeTask(memberHandle, 'check', devtoolCheckTask());
+  const checkRefusal = mergeTask(
+    memberHandle,
+    'check',
+    devtoolCheckTask(),
+    `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
+  );
   if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
   // The entry imports the diagnostics plugin, so the MEMBER's import map must
   // pin it — the root map is untouched: the root has no development entry of
@@ -819,7 +829,12 @@ async function enableStandalone(
   const planned: PlannedWrite[] = [];
   const devRefusal = mergeTask(handle, 'dev', devTask);
   if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
-  const checkRefusal = mergeTask(handle, 'check', devtoolCheckTask());
+  const checkRefusal = mergeTask(
+    handle,
+    'check',
+    devtoolCheckTask(),
+    `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
+  );
   if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
   const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
   if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);

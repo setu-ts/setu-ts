@@ -1256,7 +1256,14 @@ function denoTasks(
       : undefined;
 
   if (manifest?.npmBuild === undefined) {
-    return { start, ...test, ...host.extraTasks };
+    return {
+      start,
+      ...test,
+      ...(runtime === 'deno'
+        ? { check: `deno check main.ts ${CONFIG_MODULE} && ${cliCheckCommand(runtime)}` }
+        : {}),
+      ...host.extraTasks,
+    };
   }
 
   return {
@@ -1278,8 +1285,18 @@ function denoTasks(
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
       ? { dev: `deno task install && deno run -A ${manifest.npmBuild.devEntry.path}` }
       : {}),
+    ...(runtime === 'deno'
+      ? { check: `deno check main.ts ${CONFIG_MODULE} && ${cliCheckCommand(runtime)}` }
+      : {}),
     ...host.extraTasks,
   };
+}
+
+/** The pinned CLI half of a generated project's check task. */
+export function cliCheckCommand(runtime: TargetRuntime): string {
+  return runtime === 'deno'
+    ? `deno run -A ${frameworkSpecifier('cli', 'deno')} check`
+    : 'setu check';
 }
 
 /** The development entry module the devtool opt-in emits. */
@@ -1296,9 +1313,8 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
  * the project makes (measured, M98c §3.7). The loopback guarantee is the
  * listener's, not a permission flag's.
  *
- * `check` is what puts `main.dev.ts` inside a check path the project already
- * runs: `denoTasks` emits no check task of its own, so without this the dev
- * entry sits outside every gate a generated project executes.
+ * `check` extends the scaffold gate to include `main.dev.ts`, and retains
+ * the pinned CLI wiring check.
  *
  * Rendered here — beside `denoTasks`, reading the same permission helper —
  * rather than in the devtool planner, so both this create-time path and
@@ -1311,7 +1327,7 @@ export function devtoolTasks(manifest?: TemplateManifest): Record<string, string
   const run = `deno run ${denoPermissions(manifest)} ${DEVTOOL_ENTRY_MODULE}`;
   return {
     dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
-    check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE}`,
+    check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE} && ${cliCheckCommand('deno')}`,
   };
 }
 
@@ -1765,7 +1781,9 @@ function standaloneNpmFiles(
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
     ...runtimeDevDependencies(runtime),
-    ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
+    ...(onWorkers
+      ? { ...NPM_TOOLING_DEV_DEPENDENCIES, '@setu-ts/cli': frameworkSpecifier('cli', 'npm') }
+      : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
@@ -1779,8 +1797,10 @@ function standaloneNpmFiles(
           // A template with a build has its Workers entry import the compiled
           // server module, which does not exist until that build runs. The
           // check therefore builds first, the same order `start` and `test`
-          // use. Every other target and template keeps the bare `tsc --noEmit`.
-          ...(manifest?.npmBuild === undefined ? {} : { check: 'npm run build && tsc --noEmit' }),
+          // use. Every form then runs the CLI wiring check after TypeScript.
+          ...(manifest?.npmBuild === undefined
+            ? {}
+            : { check: 'npm run build && tsc --noEmit && setu check' }),
           dev: 'wrangler dev',
           deploy: 'wrangler deploy',
         }
@@ -2141,6 +2161,7 @@ describe('application composition', () => {
             ...npmDevFrameworkDependencies(host, runtime),
             ...runtimeDevDependencies(runtime),
             ...NPM_TOOLING_DEV_DEPENDENCIES,
+            '@setu-ts/cli': frameworkSpecifier('cli', 'npm'),
             ...host.extraDevDependencies,
             ...manifest?.npmDevDependencies,
           },

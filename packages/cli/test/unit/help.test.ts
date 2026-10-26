@@ -31,6 +31,8 @@ describe('help output', () => {
     const text = await helpText(['--help']);
     expect(text).toContain('new, n');
     expect(text).toContain('generate, g');
+    expect(text).toContain('check                          Check CLI-owned wiring');
+    expect(text).toContain('sync                           Rewrite CLI-managed barrels');
   });
 
   it('documents every runtime target', async () => {

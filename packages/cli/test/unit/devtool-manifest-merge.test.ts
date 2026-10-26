@@ -59,6 +59,43 @@ function harness(rootDev: string) {
 }
 
 describe('the devtool manifest merge', () => {
+  for (const standalone of [false, true]) {
+    it(`replaces the exact scaffold check predecessor (${standalone ? 'standalone' : 'member'}) and refuses a foreign check`, async () => {
+      for (const foreign of [false, true]) {
+        const h = harness(LEGACY_DENO_RUN_ALL);
+        const path = standalone ? '/ws/deno.json' : '/ws/apps/orders/deno.json';
+        if (standalone) {
+          await h.fs.rm('/ws/setu.workspace.json');
+          await h.fs.writeFile('/ws/setu.config.ts', new TextEncoder().encode(CONFIG));
+        }
+        await h.fs.writeFile(
+          path,
+          new TextEncoder().encode(
+            JSON.stringify({
+              tasks: {
+                start: 'deno run --allow-net --allow-env main.ts',
+                check: foreign
+                  ? 'my-check'
+                  : `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+              },
+              imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
+            }),
+          ),
+        );
+        const writes = h.fs.writes.length;
+        expect(await h.run(standalone ? ['enable'] : ['enable', 'orders']), h.err.text()).toBe(
+          foreign ? 1 : 0,
+        );
+        if (foreign) {
+          expect(h.err.text()).toContain('Refusing to replace the existing "check" task');
+          expect(h.fs.writes).toHaveLength(writes);
+        } else
+          expect(JSON.parse(h.fs.read(path)).tasks.check).toBe(
+            `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          );
+      }
+    });
+  }
   it('preserves every unrelated key and task, including a developer-owned one', async () => {
     const h = harness(LEGACY_DENO_RUN_ALL);
     expect(await h.run(['enable', 'orders'])).toBe(0);
@@ -134,7 +171,7 @@ describe('the devtool manifest merge', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: 'deno check main.ts setu.config.ts main.dev.ts',
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
         },
         imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
       }) + '\n';

@@ -12,6 +12,45 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `setu check` in the generated check script (M118, 0.11.0, `@setu-ts/cli`)
+
+New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
+scripts, so add it yourself. In a Node, Bun or Workers project, add the CLI as a development
+dependency at your framework version and append ` && setu check` to the end of your existing `check`
+script, keeping whatever runs before it:
+
+```json
+{
+  "scripts": { "check": "tsc --noEmit && setu check" },
+  "devDependencies": { "@setu-ts/cli": "^0.11.0" }
+}
+```
+
+A Workers project with a build keeps its build first: its script becomes
+`npm run build && tsc --noEmit && setu check`.
+
+In a Deno project, add a `check` task (`main.dev.ts` belongs in the `deno check` list only when you
+enabled the devtool):
+
+```json
+{
+  "tasks": {
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.11.0 check"
+  }
+}
+```
+
+Run `setu check` once before you add it. A project that copied or hand-wrote files into a seam
+directory reports `setu.E003`; `setu sync` rewrites the barrels from their directories. A finding
+you accept can be silenced in `.setu-ts/check.json` — see
+[Silencing a finding](./cli.md#silencing-a-finding).
+
+`setu devtool enable` replaces a scaffold's own `check` task with the devtool form, which adds
+`main.dev.ts`. In a project that enabled the devtool before this release, re-running it refuses the
+older `check` task by name; change the task to the form above, with `main.dev.ts` in the list.
+
+A plugin command named `check` or `sync` is now shadowed by the built-in verb; rename it.
+
 ### Optional peers and `setu add` workspace root entries (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli`)
 
 In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
