@@ -153,12 +153,13 @@ A `@Controller` class whose constructor receives an `@Injectable` service throug
 `@Inject(GREETING_SERVICE)`, with `DiPlugin` providing the container; each feature is a `@Module`. A
 second controller shows the per-request scope: `GET /lifetimes` resolves a scoped service through
 `@Params(Service(...))` and `container.forRequest(ctx)`, and two requests receive different
-instances.
+instances: call it twice and compare `scopedId`, which differs on every request.
 
 ```bash
 pnpm --dir apps/di-decorators run start 3400
 curl localhost:3400/greetings   # {"greeting":"Hello, decorators!"}
-curl localhost:3400/lifetimes   # {"singletonShared":true,"scopeRetainsInstance":true,"scopesAreDistinct":true}
+curl localhost:3400/lifetimes   # {"singletonShared":true,"scopeRetainsInstance":true,"scopedId":"<uuid>"}
+curl localhost:3400/lifetimes   # same flags, a different scopedId
 ```
 
 Read: [`src/modules/greeting/`](../apps/di-decorators/src/modules/greeting),

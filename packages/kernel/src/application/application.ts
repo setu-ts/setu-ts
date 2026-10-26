@@ -1053,6 +1053,10 @@ class Application implements IKernelApplication {
     // draining the live stream, which would consume it. Say so explicitly
     // rather than reporting `body: null`, which reads as "empty response".
     if (snapshot.streaming) {
+      // Cancel the unread body first: a response with deferred cleanup settles
+      // only when its stream ends or is cancelled, so an abandoned body would
+      // never run that cleanup or release its in-flight count.
+      await snapshot.body.cancel().catch(() => undefined);
       throw new Error(
         'inject() cannot read a streaming response body. Call app.fetch() with a web Request ' +
           'and read the returned Response body stream instead.',

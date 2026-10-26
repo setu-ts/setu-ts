@@ -461,3 +461,60 @@ it('releases the request when the error responder itself throws, so stop() does 
   const timeout = new Promise((resolve) => setTimeout(() => resolve('stalled'), 2000));
   await expect(Promise.race([stopped, timeout])).resolves.toBe('stopped');
 });
+
+it('cancels an unread streaming body when inject() refuses it, so cleanup runs and stop() does not stall', async () => {
+  const cleaned: string[] = [];
+  let sourceCancelled = false;
+  const { app } = await appFor((app) => {
+    app.router.get('/stream', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned.push('cleanup');
+      });
+      return ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          pull(controller): void {
+            controller.enqueue(new TextEncoder().encode('chunk'));
+          },
+          cancel(): void {
+            sourceCancelled = true;
+          },
+        }),
+      );
+    });
+  });
+  await expect(app.inject({ method: 'GET', url: '/stream' })).rejects.toThrow(
+    /cannot read a streaming response body/,
+  );
+  expect(cleaned).toEqual(['cleanup']);
+  expect(sourceCancelled).toBe(true);
+  // A leaked in-flight count would hold stop() until its 10 s drain deadline.
+  const stopped = app.stop().then(() => 'stopped');
+  const timeout = new Promise((resolve) => setTimeout(() => resolve('stalled'), 2000));
+  await expect(Promise.race([stopped, timeout])).resolves.toBe('stopped');
+});
+
+it('still reports the streaming refusal from inject() when cancelling the body fails', async () => {
+  const cleaned: string[] = [];
+  const { app } = await appFor((app) => {
+    app.router.get('/stream', (ctx) => {
+      ctx.defer?.(() => {
+        cleaned.push('cleanup');
+      });
+      return ctx.response.stream(
+        new ReadableStream<Uint8Array>({
+          pull(controller): void {
+            controller.enqueue(new TextEncoder().encode('chunk'));
+          },
+          cancel(): void {
+            throw new Error('source refused cancel');
+          },
+        }),
+      );
+    });
+  });
+  await expect(app.inject({ method: 'GET', url: '/stream' })).rejects.toThrow(
+    /cannot read a streaming response body/,
+  );
+  expect(cleaned).toEqual(['cleanup']);
+  await app.stop();
+});
