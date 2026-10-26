@@ -256,6 +256,26 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Expired in-memory auth state is reclaimed (0.11.0, `@setu-ts/auth-plugin`).**
+  `MemoryRateLimitStore.increment()` sweeps expired per-key windows without evicting live limits;
+  `MemoryRefreshTokenStore.save()` sweeps expired records even when they are never read. Unexpired
+  revoked refresh records remain available for rotation reuse detection. Both use doubling
+  thresholds.
+- **HTTP method metrics have bounded cardinality (0.11.0, `@setu-ts/metrics-plugin`).** Unknown
+  method labels now use `_OTHER` on success and error paths. The nine known uppercase HTTP methods
+  keep their names; comparison is case-sensitive. Consumers querying invented method labels should
+  query `_OTHER` instead.
+- **Subscriber error histories are bounded (0.11.0, `@setu-ts/realtime-backplane-plugin`).** Memory,
+  messaging, and Redis transports retain the most recent 100 `handlerErrors`, oldest first.
+- **Logged mail has bounded retention (0.11.0, `@setu-ts/mail-plugin`).** `LogProvider.messages`
+  keeps the most recent 1,000 messages in send order; its optional `sink` still receives every send.
+- **Idle diagnostics session budgets are reclaimed (0.11.0, `@setu-ts/diagnostics-plugin`).**
+  Authenticated promotion sweeps fully refilled token buckets at doubling thresholds starting at 64;
+  drained and partially refilled buckets retain their limits.
+- **Room lookup allocation is explicit (0.11.0, `@setu-ts/websocket-plugin`).** Document that
+  `RoomRegistry.get(name)` creates on lookup and never-joined rooms are reclaimed on disconnection;
+  use `peek()` for client-supplied room-name reads.
+
 - **A singleton no longer captures a scoped service, and `@Optional` dependencies honour the
   resolving scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/decorator-plugin`).** A scope
   shared its parent's singleton cache, so a singleton first resolved inside one scope kept that

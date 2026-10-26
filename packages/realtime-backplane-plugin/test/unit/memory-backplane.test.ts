@@ -142,6 +142,28 @@ describe('MemoryBackplane', () => {
 });
 
 describe('MemoryBackplane handler isolation', () => {
+  it('D3 retains only the latest 100 of 1,000 handler errors in delivery order', async () => {
+    const sender = new MemoryBackplane('sender', 'bounded-errors');
+    const receiver = new MemoryBackplane('receiver', 'bounded-errors');
+    await sender.connect();
+    await receiver.connect();
+    const thrown = Array.from({ length: 1_000 }, (_, i) => new Error(`failure-${i}`));
+    let calls = 0;
+    await receiver.subscribe(() => {
+      const index = calls++;
+      throw index === 0 ? 'non-Error subscriber failure' : thrown[index];
+    });
+    try {
+      for (let i = 0; i < 1_000; i++) await sender.publish(frame('sender'));
+      expect(calls).toBe(1_000);
+      expect(receiver.handlerErrors).toHaveLength(100);
+      expect(receiver.handlerErrors).toEqual(thrown.slice(-100));
+    } finally {
+      await sender.close();
+      await receiver.close();
+    }
+  });
+
   it('continues delivering after a handler throws, and records the error', async () => {
     const a = new MemoryBackplane('node-a', 'iso-1');
     const b = new MemoryBackplane('node-b', 'iso-1');

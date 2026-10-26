@@ -96,14 +96,24 @@ class TokenBucket {
    * @returns `true` when a token was available and taken
    */
   tryTake(nowHr: number): boolean {
-    const elapsedMs = Math.max(0, nowHr - this.#lastHr);
+    this.#tokens = this.#availableTokens(nowHr);
     this.#lastHr = nowHr;
-    this.#tokens = Math.min(this.#burst, this.#tokens + (elapsedMs / 1000) * this.#ratePerSecond);
     if (this.#tokens >= 1) {
       this.#tokens -= 1;
       return true;
     }
     return false;
+  }
+
+  /** Whether this bucket has refilled to a fresh bucket's burst capacity. */
+  isFull(nowHr: number): boolean {
+    return this.#availableTokens(nowHr) === this.#burst;
+  }
+
+  /** Computes refill without changing the last debit's clock or fractional tokens. */
+  #availableTokens(nowHr: number): number {
+    const elapsedMs = Math.max(0, nowHr - this.#lastHr);
+    return Math.min(this.#burst, this.#tokens + (elapsedMs / 1000) * this.#ratePerSecond);
   }
 }
 
@@ -128,6 +138,7 @@ export class ConnectorLimits {
   readonly #clock: LimitsClock;
   readonly #anonymous: TokenBucket;
   readonly #sessionBuckets = new Map<string, TokenBucket>();
+  #sweepAt = 64;
   #total = 0;
   #unpaired = 0;
   #verifying = 0;
@@ -202,16 +213,25 @@ export class ConnectorLimits {
    * @returns `true` when the session budget allowed the request
    */
   promote(sessionId: string): boolean {
+    const nowHr = this.#clock.hrtime();
+    if (this.#sessionBuckets.size >= this.#sweepAt) {
+      for (const [id, candidate] of this.#sessionBuckets) {
+        if (candidate.isFull(nowHr)) {
+          this.#sessionBuckets.delete(id);
+        }
+      }
+      this.#sweepAt = Math.max(64, this.#sessionBuckets.size * 2);
+    }
     let bucket = this.#sessionBuckets.get(sessionId);
     if (bucket === undefined) {
       bucket = new TokenBucket(
         CONNECTOR_LIMITS.sessionBurst,
         CONNECTOR_LIMITS.sessionRatePerSecond,
-        this.#clock.hrtime(),
+        nowHr,
       );
       this.#sessionBuckets.set(sessionId, bucket);
     }
-    if (!bucket.tryTake(this.#clock.hrtime())) {
+    if (!bucket.tryTake(nowHr)) {
       return false;
     }
     // The verify-lane slot is consumed; the total slot is kept.

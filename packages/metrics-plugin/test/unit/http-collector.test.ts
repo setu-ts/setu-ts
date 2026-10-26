@@ -12,6 +12,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import type { HttpMethod } from '@setu-ts/common';
 import { HttpCollector, MIDDLEWARE_PRIORITY } from '../../src/collectors/http-collector.ts';
 import { MetricsService } from '../../src/services/metrics-service.ts';
 import type { Counter } from '../../src/metrics/counter.ts';
@@ -37,6 +38,50 @@ function setup() {
 }
 
 describe('HttpCollector', () => {
+  it('D2 bounds invented method labels on success, status errors, and thrown errors case-sensitively', async () => {
+    const { collector, requests, errors, duration, active } = setup();
+    const boom = new Error('unknown-method handler');
+    // Network methods can exceed HttpMethod: the kernel also casts the wire value.
+    const contextForMethod = (method: string, status = 200) =>
+      createFakeContext({ method: method as HttpMethod, status });
+    for (let i = 0; i < 1_000; i++) {
+      const method = `INVENTED-${i}`;
+      await collector.middleware(contextForMethod(method, 200), () => Promise.resolve());
+      await collector.middleware(contextForMethod(method, 503), () => Promise.resolve());
+      await expect(
+        collector.middleware(contextForMethod(method), () => {
+          throw boom;
+        }),
+      ).rejects.toBe(boom);
+    }
+    // Lowercase spellings remain unknown; all nine known uppercase methods retain their names.
+    await collector.middleware(contextForMethod('get'), () => Promise.resolve());
+    for (const method of [
+      'GET',
+      'HEAD',
+      'POST',
+      'PUT',
+      'DELETE',
+      'CONNECT',
+      'OPTIONS',
+      'TRACE',
+      'PATCH',
+    ]) {
+      await collector.middleware(contextForMethod(method), () => Promise.resolve());
+      expect(requests.getValue({ method, status: '200' })).toBe(1);
+    }
+    expect(active.getValue()).toBe(0);
+    expect(requests.values.size).toBe(12);
+    expect(errors.values.size).toBe(2);
+    expect(duration.getAllBucketCounts().size).toBe(12);
+    for (const status of ['200', '503', '500']) {
+      const count = status === '200' ? 1_001 : 1_000;
+      expect(requests.getValue({ method: '_OTHER', status })).toBe(count);
+      expect(duration.getCount({ method: '_OTHER', status })).toBe(count);
+      expect(errors.getValue({ method: '_OTHER', status })).toBe(status === '200' ? 0 : count);
+    }
+  });
+
   it('middleware priority is 20 (outermost, just inside the error handler)', () => {
     expect(MIDDLEWARE_PRIORITY.METRICS).toBe(20);
   });

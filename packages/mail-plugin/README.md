@@ -46,6 +46,9 @@ await mailer.sendTemplate('welcome', { to: 'ada@example.com', subject: 'Welcome'
 | `defaults`  | `{ from?: string }`                      | —       | Applied when a message omits the field.                                                                                                      |
 | `templates` | `Record<string, MailTemplate>`           | —       | Named bodies available to `sendTemplate`: `{{ variable }}` strings, or view components rendered through `CAPABILITIES.VIEW` (see Templates). |
 
+`LogProvider.messages` retains the most recent 1,000 outgoing messages in send order. The optional
+`sink` still receives every message, including those later dropped from that retained tail.
+
 ## Runtime support
 
 `SmtpProvider` needs raw sockets, so it runs on Node/Deno/Bun only. `LogProvider`, `SesProvider`,

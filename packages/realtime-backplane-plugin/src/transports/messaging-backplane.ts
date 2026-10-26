@@ -14,6 +14,7 @@ import type {
 } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
 import { dispatchFrame } from './dispatch.ts';
+import { recordHandlerError } from './handler-errors.ts';
 
 /**
  * Narrows an arriving broker payload to a {@linkcode RealtimeFrame}.
@@ -57,7 +58,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
   readonly #broker: IMessageBroker;
   readonly #topic: string;
   readonly #handlers = new Set<RealtimeFrameHandler>();
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
   #subscription: ISubscription | undefined;
 
@@ -98,7 +99,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
     }
   }
 
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;
   }
@@ -119,7 +120,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
       // and this loop runs inside the broker's delivery callback where
       // nothing above would catch a throw.
       const delivered = dispatchFrame(this.#handlers, message, (error) => {
-        this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
+        recordHandlerError(this.#handlerErrors, error);
       });
       // M98l: counted only after the shape and own-origin filters.
       realtimeObserverOf(this)?.observe('backplane-receive', delivered);
