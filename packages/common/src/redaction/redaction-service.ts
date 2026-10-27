@@ -9,7 +9,11 @@ import type { RedactionContext, Redactor } from './redactors.ts';
 export interface IRedactionService {
   /** Redacts a value when its field path is classified. */
   redactValue(path: string, value: unknown): unknown;
-  /** Returns a clone-on-write redacted view of a structured record. */
+  /**
+   * Returns a redacted snapshot of a structured record: every plain object and
+   * array it walks is read once and copied, so the result holds exactly the
+   * values that were checked. The caller's record is never mutated.
+   */
   redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
 }
 
@@ -78,7 +82,6 @@ function redactNode(
     ? entries.map(([, child]) => child)
     : snapshotCopy(direct, entries);
   active.set(direct, copy);
-  let changed = false;
   try {
     for (const [key, child] of entries) {
       const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
@@ -89,13 +92,15 @@ function redactNode(
         } else {
           copy[String(key)] = redacted;
         }
-        changed = true;
       }
     }
   } finally {
     active.delete(direct);
   }
-  return changed ? copy : direct;
+  // Always the snapshot, never the caller's object, even when nothing changed:
+  // returning `direct` let the serializer read a getter again after redaction
+  // and write a value redaction never checked (pino's redactor copies too).
+  return copy;
 }
 
 /**
