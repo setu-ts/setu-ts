@@ -145,7 +145,7 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
       return EXIT_ERROR;
     }
     if (project.kind === 'unreadable') {
-      deps.error(`Cannot read ${project.path}: ${project.reason}`);
+      deps.error(escapeTerminalControls(`Cannot read ${project.path}: ${project.reason}`));
       return EXIT_ERROR;
     }
     const runtime = await detectTargetRuntime(deps.fs, dir);

@@ -163,9 +163,16 @@ export async function runLibraryCommand(
   const profile = workspaceProfile(read.manifest.runtime);
   const files: GeneratedFile[] = [...libraryFiles(scope, names, profile)];
   if (profile.runtime === 'bun') {
-    const linker = planBunWorkspaceLinker(
-      await readExistingText(deps.fs, joinPath(deps.dir, BUNFIG_FILE)),
-    );
+    let bunfig: string | undefined;
+    try {
+      bunfig = await readExistingText(deps.fs, joinPath(deps.dir, BUNFIG_FILE));
+    } catch (cause) {
+      // A linked, oversized or non-regular bunfig.toml is refused like any other
+      // unreadable input — a named error, not an uncaught stack (M120 re-audit N1).
+      deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
+      return EXIT_ERROR;
+    }
+    const linker = planBunWorkspaceLinker(bunfig);
     if (linker.kind === 'refused') {
       deps.error(linker.message);
       return EXIT_ERROR;

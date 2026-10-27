@@ -84,6 +84,16 @@ describe('runLibraryCommand', () => {
       }
     }
   });
+  it('refuses an unreadable bunfig.toml with a named error instead of throwing (M120 re-audit N1)', async () => {
+    // A directory stands in for every unreadable shape (a link, >1 MiB, a special
+    // file): each makes the bounded read throw, which once escaped as a stack.
+    const h = harness(undefined, true, 'bun');
+    await h.fs.mkdir('/acme/bunfig.toml', { recursive: true });
+    const before = [...h.fs.writes];
+    expect(await h.run(['library', 'shared'])).toBe(1);
+    expect(h.err.text()).toContain('/acme/bunfig.toml: expected a regular file at most 1 MiB');
+    expect(h.fs.writes).toEqual(before);
+  });
   it('dry-run collision refuses without writing', async () => {
     const h = harness();
     await h.fs.writeFile('/acme/libs/widget/src/index.ts', new TextEncoder().encode('mine'));

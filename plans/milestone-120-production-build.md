@@ -492,11 +492,11 @@ committed tree to the decisions and obligations below.
   - **D-S4 Output is escaped.** Every message carrying a path, a package name or esbuild text passes
     `escapeTerminalControls`.
   - **D-S5 The image ships production only.** The Node final stage has `dist/`, `build/` and a
-    `--omit=dev` install; Bun installs `--production`; the Deno final stage carries no frontend
-    toolchain (it is built in the `frontend` stage). `.dockerignore` keeps `.env` / `.env.*` (except
-    `.env.example`), `.git`, host `node_modules`, `dist` and `build` out of every context. Source
-    maps ship in `dist/` (they map to code already in the image; accepted, used by
-    `--enable-source-maps`).
+    `--omit=dev` install; Bun installs `--production`; the Deno final stage carries no build output
+    beyond `build/`, but its full-map install keeps frontend tooling in `node_modules` (accepted,
+    §8b F4). `.dockerignore` keeps `.env` / `.env.*` (except `.env.example`), `.npmrc` (§8b F2),
+    `.git`, host `node_modules`, `dist` and `build` out of every context. Source maps ship in
+    `dist/` (they map to code already in the image; accepted, used by `--enable-source-maps`).
   - **D-S6 The image keeps M95a/V9-78's posture.** Numeric non-root `USER`, read-only root, no
     network at runtime; Deno keeps `--frozen` and its explicit permission set. The `"manual"`
     rewrite (§3.15) runs with read/write limited to the root manifest.
@@ -538,6 +538,10 @@ committed tree to the decisions and obligations below.
 
 ### 8b. Audit round 1 (commit `87038ce0`) — dispositions
 
+Round 2 (fresh agent, `e645a483`): **passed with accepted risks**, no new security finding. Its
+non-security items were fixed (N1 clean refusal for an unreadable `bunfig.toml`, N2 docs for a
+build-secret `.npmrc`, N3 this D-S5 wording, the doubled path in read errors) or recorded (N4).
+
 The fresh-agent audit failed only for want of dispositions: 1 Medium, 6 Low, no Critical/High; all
 eleven obligations ran with positive controls and nine reverted controls each failed their probe.
 Maintainer dispositions (2026-10-27), each checked against established tools:
@@ -551,6 +555,7 @@ Maintainer dispositions (2026-10-27), each checked against established tools:
 | F4  | The Deno full-stack final image carries Vite and TypeScript                                                                        | **Accepted risk:** the final stage's full-map install is what completes broker npm edges (M101f, measured); the tools are not network-reachable and the image is read-only. Revisit with a `deno install --entrypoint` probe against every broker.                                                                                            |
 | F6  | `setu build` inlines any host file the sources import                                                                              | **Accepted risk:** esbuild, Vite, webpack and `tsc` all follow imports anywhere on disk; reaching a host file needs pull-request code, which CI already executes through `npm test`. D-S3 bounds manifest reads only.                                                                                                                         |
 | F3  | A member's own `.git` reaches Bun/Deno workspace images                                                                            | **Not changed:** the generated root-only `.git` matches `docker init`; a member with its own repository is a submodule layout the generator does not create.                                                                                                                                                                                  |
+| N4  | Re-audit: where `O_NOFOLLOW` is undefined (Windows) the reader follows links                                                       | **Accepted limitation:** the same `?? 0` fallback the writer has always used; Setu's CI and generated images are Linux.                                                                                                                                                                                                                       |
 
 ## 9. Out of scope
 
