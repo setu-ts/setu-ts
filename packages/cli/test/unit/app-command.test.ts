@@ -281,9 +281,9 @@ describe('runAppCommand', () => {
   // testing the profile's renderer alone leaves this line free to drift back.
   it('names each toolchain own commands in the next step it prints', async () => {
     const expected = {
-      deno: 'deno install && cd apps/orders && deno task start',
-      node: 'npm install && cd apps/orders && npm run start',
-      bun: 'bun install && cd apps/orders && bun run start',
+      deno: 'deno install && cd apps/orders && deno task start:dev',
+      node: 'npm install && cd apps/orders && npm run start:dev',
+      bun: 'bun install && cd apps/orders && bun run start:dev',
     } as const;
 
     for (const [runtime, line] of Object.entries(expected)) {
@@ -647,7 +647,7 @@ describe('runAppCommand', () => {
       const h = harness([]);
       await h.run(['app', 'orders']);
       expect(h.out.text()).toContain('Added orders on port 3000');
-      expect(h.out.text()).toContain('cd apps/orders && deno task start');
+      expect(h.out.text()).toContain('cd apps/orders && deno task start:dev');
     });
 
     it('normalizes the member name', async () => {

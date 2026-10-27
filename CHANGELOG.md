@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Production builds (M120, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles one
+  Node service, including workspace libraries and migration runners. Runtime npm packages remain
+  external; runtime imports of devDependencies fail. Generated Node starts now require a build; use
+  start:dev for source development and start:debug for debugging. Node and Bun full-stack starts
+  stop rebuilding. Standalone and workspace images install production dependencies and build
+  frontend artifacts in the image. Bun workspaces select the hoisted linker so members resolve
+  shared libraries; library generation safely plans the setting for older workspaces. Deno images
+  build a full-stack frontend on a glibc stage, and a Deno workspace with a full-stack member and a
+  library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
+  `"manual"`). See [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+
 - **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
   `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
   skipped, a barrel does not list an artifact in its directory or lists one that is gone,

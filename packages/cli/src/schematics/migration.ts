@@ -182,6 +182,7 @@ import { createMigrationLedger } from '@setu-ts/database-plugin';
 //
 //   ${run}          # apply pending migrations
 //   ${run} --down   # reverse applied migrations, newest first
+${runtime === 'node' ? '//\n// After npm run build, use node dist/src/migrations/run.js (or add --down).\n// The commands above run the source in development.\n' : ''}\
 //
 // This boots the whole app without a listening port, so every plugin's start-up
 // effects (queue processors, scheduled jobs, broker subscriptions) run for the

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BUILD_MATRIX,
   buildGeneratedImage,
+  buildGeneratedNodeImage,
   type DriftReport,
   EXCLUDED_EXAMPLES,
   GENERATED_LAYOUTS,
@@ -22,6 +23,42 @@ import {
 } from '../scripts/check-deploy.ts';
 
 const read = (path: string): string => readFileSync(path, 'utf8');
+
+it('builds generated Node standalone and workspace Dockerfiles with lockfiles and registry arguments', async () => {
+  for (const workspace of [true, false]) {
+    const calls: (readonly string[])[] = [];
+    const execute = (command: readonly string[]) => {
+      calls.push(command);
+      return Promise.resolve({ success: true, stdout: '', stderr: '' });
+    };
+    expect(
+      (await buildGeneratedNodeImage('/project', 'image', 'http://registry', workspace, execute))
+        .success,
+    ).toBe(true);
+    expect(calls[0]).toEqual(['npm', 'install', '--no-audit', '--no-fund']);
+    expect(calls[1]).toContain(`/project/${workspace ? 'docker/' : ''}Dockerfile`);
+    expect(calls[1]).toContain('NPM_CONFIG_REGISTRY=http://registry');
+    expect(calls[1]!.some((part) => part.startsWith('MEMBER='))).toBe(workspace);
+  }
+  const bunCalls: (readonly string[])[] = [];
+  await buildGeneratedNodeImage(
+    '/project',
+    'image',
+    'http://registry',
+    true,
+    (command: readonly string[]) => {
+      bunCalls.push(command);
+      return Promise.resolve({ success: true, stdout: '', stderr: '' });
+    },
+    'bun',
+  );
+  expect(bunCalls[0]).toEqual(['bun', 'install']);
+  expect(bunCalls[1]).toContain('/project/docker/Dockerfile');
+  const failed = await buildGeneratedNodeImage('/project', 'image', 'http://registry', false, () =>
+    Promise.resolve({ success: false, stdout: '', stderr: 'install failed' }),
+  );
+  expect(failed.success).toBe(false);
+});
 
 /**
  * Strips comment lines so an assertion is about EFFECTIVE configuration.

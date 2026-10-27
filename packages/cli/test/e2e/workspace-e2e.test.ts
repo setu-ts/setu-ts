@@ -731,57 +731,59 @@ try {
       `${project}/setu.config.ts`,
     ]);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // A frontend member was refused outright until its one real blocker was
   // measured: its Vite build needs `node_modules`, and Deno accepts
   // `nodeModulesDir` only in the workspace ROOT. With the root declaring it, a
-  // real `react-router build` and an SSR 200 both work inside a member — verified
-  // by hand, because this suite has no network grant and so cannot run the npm
-  // install that build needs.
-  //
-  // What it CAN check is everything up to the build: the member exists, the root
-  // gained exactly one field, and the server-side modules type-check.
-  it('adds a full-stack member and enables node_modules at the root', async () => {
-    expect(
-      await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]),
-    ).toBe(0);
-    const ws = `${root}/shop`;
-    expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
+  // real `react-router build` works inside a member. denoCheck now builds the
+  // frontend before checking main.ts, whose production entry imports that build.
+  // The install and frontend build have the same budget as the full-stack
+  // scaffold check task; no server boot timeout is increased.
+  it(
+    'adds a full-stack member and enables node_modules at the root',
+    { timeout: 900_000 },
+    async () => {
+      expect(
+        await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--port', String(base)]),
+      ).toBe(0);
+      const ws = `${root}/shop`;
+      expect(await run(['g', 'app', 'web', '--template', 'full-stack', '--dir', ws])).toBe(0);
 
-    const rootManifest = JSON.parse(await nodeFs.readFile(`${ws}/deno.json`, 'utf8')) as {
-      nodeModulesDir?: string;
-      workspace?: string[];
-      tasks?: Record<string, string>;
-    };
-    expect(rootManifest.nodeModulesDir).toBe('auto');
-    // The merge keeps what the root already declared: a regenerated root would
-    // drop the globs that make it a workspace at all.
-    expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
-    expect(rootManifest.tasks?.['dev']).toBe(
-      'deno run --allow-read --allow-run --allow-net ' +
-        '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
-        'scripts/dev.ts',
-    );
+      const rootManifest = JSON.parse(await nodeFs.readFile(`${ws}/deno.json`, 'utf8')) as {
+        nodeModulesDir?: string;
+        workspace?: string[];
+        tasks?: Record<string, string>;
+      };
+      expect(rootManifest.nodeModulesDir).toBe('auto');
+      // The merge keeps what the root already declared: a regenerated root would
+      // drop the globs that make it a workspace at all.
+      expect(rootManifest.workspace).toEqual(['./apps/*', './libs/*']);
+      expect(rootManifest.tasks?.['dev']).toBe(
+        'deno run --allow-read --allow-run --allow-net ' +
+          '--allow-env=SETU_DEVTOOL_SESSION_ID,SETU_DEVTOOL_SESSION_KEY,SETU_DEVTOOL_MEMBER ' +
+          'scripts/dev.ts',
+      );
 
-    // The route whose absence made `/` a blank 200 in every scaffolded
-    // full-stack project. Asserted as a file because proving it functionally
-    // needs the real build.
-    const project = `${ws}/apps/web`;
-    expect((await nodeFs.stat(`${project}/app/routes/_app/_index.tsx`)).isFile()).toBe(true);
+      // The route whose absence made `/` a blank 200 in every scaffolded
+      // full-stack project. Asserted as a file because proving it functionally
+      // needs the real build.
+      const project = `${ws}/apps/web`;
+      expect((await nodeFs.stat(`${project}/app/routes/_app/_index.tsx`)).isFile()).toBe(true);
 
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, [
-      `${project}/main.ts`,
-      `${project}/setu.config.ts`,
-      `${project}/app/lib/load-context.ts`,
-    ]);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
-  });
+      await useWorkspacePackages(project);
+      const { code, stderr } = await denoCheck(project, [
+        `${project}/main.ts`,
+        `${project}/setu.config.ts`,
+        `${project}/app/lib/load-context.ts`,
+      ]);
+      expect(stderr).not.toContain('SyntaxError');
+      expect(code, stderr).toBe(0);
+    },
+  );
 
-  it('type-checks a full-stack member in a grpc workspace', async () => {
+  it('type-checks a full-stack member in a grpc workspace', { timeout: 900_000 }, async () => {
     expect(
       await run(['new', '--runtime', 'deno', 'shop', '--workspace', '--transport', 'grpc']),
     ).toBe(0);
@@ -801,7 +803,7 @@ try {
       `${project}/app/lib/load-context.ts`,
     ]);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // The whole claim of a library member is that it needs NO wiring: a Deno

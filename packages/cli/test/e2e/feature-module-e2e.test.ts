@@ -7,6 +7,7 @@ import { runCli } from '../../src/cli.ts';
 import {
   startOverlay,
   npmInstall,
+  npmRun,
   runIn,
   withNodeServer,
   type RegistryOverlay,
@@ -147,7 +148,13 @@ describe('feature module generated tasks', () => {
           expect(await summary.json()).toEqual({ items: [] });
         };
         if (target === 'deno') await withGeneratedServer(project, drive);
-        else await withNodeServer(project, drive);
+        else {
+          if (target === 'node') {
+            const built = await npmRun(project, 'build');
+            expect(built.code, built.output).toBe(0);
+          }
+          await withNodeServer(project, drive);
+        }
         await nodeFs.rm(`${project}/src/modules/invoices`, { recursive: true });
         // The source redirect adds all framework imports for source resolution;
         // generation must see the installed package set the scaffold declared.
@@ -167,7 +174,13 @@ describe('feature module generated tasks', () => {
           expect(await greeting.json()).toEqual({ message: 'Hello, Setu!' });
         };
         if (target === 'deno') await withGeneratedServer(project, afterDelete);
-        else await withNodeServer(project, afterDelete);
+        else {
+          if (target === 'node') {
+            const built = await npmRun(project, 'build');
+            expect(built.code, built.output).toBe(0);
+          }
+          await withNodeServer(project, afterDelete);
+        }
       } finally {
         await nodeFs.rm(root, { recursive: true, force: true });
       }

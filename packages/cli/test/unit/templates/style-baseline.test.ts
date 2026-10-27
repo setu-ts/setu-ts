@@ -6,13 +6,17 @@ import * as nodeFs from 'node:fs/promises';
  * `test/fixtures/capture-template-baseline.ts` BEFORE any template change in
  * M99e, refreshed for M101g's reviewed factory and smoke-test changes, and
  * M119c's reviewed Node test-runner flag and `swagger-ui-dist` pin, and
- * M119h's reviewed Workers test lane (V10-23), and M118's reviewed manifest
- * check tasks and CLI devDependency:
+ * M119h's reviewed Workers test lane (V10-23), M118's reviewed manifest
+ * check tasks and CLI devDependency, and M120's reviewed production scripts,
+ * README sections, `.gitignore` line and new `Dockerfile`/`.dockerignore`:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *
  * M118 updates only manifest hashes, verifying that reversing the new check
- * string and devDependency reproduces each previous hash. This test
+ * string and devDependency reproduces each previous hash. M120 likewise
+ * verified, once and uncommitted, that reversing its script, README and
+ * ignore changes (and dropping the two new files) reproduces every previous
+ * hash before re-capturing. This test
  * re-renders every (host, runtime) pair the script captured — through the
  * same `resolveHost` + `projectFiles` path the `new` command uses — and
  * asserts the file set and every hash match. A refactor of a renderer's

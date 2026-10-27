@@ -204,6 +204,12 @@ const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-
   noun: 'no arguments',
 });
 
+const BUILD: ICommandFlagSpec = spec('build', ['dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+
 const CHECK: ICommandFlagSpec = spec('check', ['dir', 'strict'], [], {
   fixed: 1,
   taken: 0,
@@ -300,6 +306,8 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'build':
+      return BUILD;
     case 'check':
       return CHECK;
     case 'sync':
@@ -337,6 +345,7 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [ADD.label, ADD.documented],
   [AGENTS.label, AGENTS.documented],
   [CHECK.label, CHECK.documented],
+  [BUILD.label, BUILD.documented],
   [SYNC.label, SYNC.documented],
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],

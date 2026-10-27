@@ -19,7 +19,7 @@ it('pins and invokes the CLI in every runtime and template check script', () => 
           tasks: Record<string, string>;
         };
         expect(manifest.tasks.check).toBe(
-          `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          `${host.manifest?.npmBuild === undefined ? '' : 'deno task build && '}deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
         );
       } else {
         const manifest = JSON.parse(
@@ -27,7 +27,7 @@ it('pins and invokes the CLI in every runtime and template check script', () => 
         ) as { scripts: Record<string, string>; devDependencies: Record<string, string> };
         expect(manifest.devDependencies['@setu-ts/cli']).toBe(`^${VERSION}`);
         expect(manifest.scripts.check).toBe(
-          `${runtime === 'cloudflare-workers' && host.manifest?.npmBuild !== undefined ? 'npm run build && ' : ''}tsc --noEmit && setu check`,
+          `${host.manifest?.npmBuild === undefined ? '' : runtime === 'cloudflare-workers' ? 'npm run build && ' : 'react-router build && '}tsc --noEmit && setu check`,
         );
         if (runtime === 'cloudflare-workers')
           expect(

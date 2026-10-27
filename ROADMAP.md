@@ -15439,18 +15439,13 @@ Node service gains little and worsens stack traces.
 
 **Decisions the plan takes:**
 
-1. **Workspace libraries.** A `generate library` package exports its `.ts` source, so a per-service
-   `tsc` build emits imports that plain `node` cannot load. Either (a) `tsc -b` with project
-   references and conditional exports on libraries, the framework's own layout, or (b) bundle each
-   service with esbuild (`--platform=node --packages=external` except workspace libraries,
-   `--sourcemap`), keeping optional peers external so M113d's guarded `await import()` still works.
-   The review recommends evaluating (b) first; `tsc --noEmit` stays the type-check gate.
-2. **Scripts.** `build`, which runs `setu check` (M118) before compiling, so code that compiles but
-   is never registered fails the build — only errors fail it, warnings print; production
-   `start: node --enable-source-maps dist/main.js`; `dev: tsx watch main.ts`;
-   `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether `start` keeps its
-   development meaning (least surprise) with a separate `start:prod`, or follows NestJS (`start`
-   compiled, `start:dev` watch) — an upgrade-guide entry either way.
+1. **Workspace libraries.** `setu build` bundles source libraries with esbuild and keeps npm
+   dependencies and optional peers external. Libraries keep source exports; tsc --noEmit remains the
+   type-check gate.
+2. **Scripts.** Node build runs tsc --noEmit then setu build (wiring errors refuse, warnings print).
+   Production start is node --enable-source-maps dist/main.js; start:dev watches source and
+   start:debug uses the inspector. Full-stack develops through dev.ts and builds its frontend before
+   the service. Tests build only the frontend when needed, without the wiring gate.
 3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
    `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
    `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
@@ -15459,25 +15454,27 @@ Node service gains little and worsens stack traces.
    today.
 4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
    out of the build, as M101f keeps it out of images).
-5. **Bun and Deno** run TypeScript natively; emit `bun build` / `deno compile` or document them.
-6. **Interim:** if this milestone is not soon, replace `sh -c "npx tsx main.ts"` with
-   `node --import tsx main.ts` — about 160 MB and 140 ms per container with no build.
+5. **Bun and Deno** retain native source execution. `bun build` and `deno compile` are documented
+   custom packaging choices, not generated steps.
+6. **Interim command superseded.** M120 ships compiled Node starts; Bun and Deno retain source.
 
 **Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
 generated projects; this milestone wires it into `build`.
 
-**Gate:** `scaffold-runs-e2e` builds, runs the COMPILED output, and runs the built image read-only
-with no network, for every template × runtime, including a workspace with a library (the M63 and
-M95a lesson: generated output is proven only by running it).
+**Gate:** Node scaffold e2e builds and serves compiled output, including full-stack SSR and a
+workspace library. The deploy gate runs the Node workspace/library, Node standalone, Bun
+workspace/library and Deno workspace (with a library under a root `nodeModulesDir: "auto"`) images
+read-only with no external network. Full-stack and standalone Deno Dockerfiles are unit-tested;
+full-stack images were built and run by hand in review.
 
 **Deliverables:**
 
-- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member; `build` runs
-      `setu check` first, and the e2e proves a broken seam fails the build
+- [ ] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
+      `build` runs `setu check` first, and the e2e proves a broken seam fails the build
 - [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
       it
 - [ ] `.gitignore` covers `dist/` and `build/`
-- [ ] The workspace-library build decided and implemented
+- [ ] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
 - [ ] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
 - [ ] **ROADMAP.md** — this section and the Progress Tracking row `120`
 

@@ -30,6 +30,17 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
+  it('ignores production outputs and selects the hoisted linker only on Bun', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const files = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime));
+      const ignored = files.find((file) => file.path === '.gitignore')!.contents;
+      expect(ignored).toContain('apps/*/build/');
+      expect(ignored.includes('apps/*/dist/')).toBe(runtime !== 'deno');
+      expect(files.find((file) => file.path === 'bunfig.toml')?.contents).toBe(
+        runtime === 'bun' ? '[install]\nlinker = "hoisted"\n' : undefined,
+      );
+    }
+  });
   it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
     for (const [runtime, invocation] of [
       ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],

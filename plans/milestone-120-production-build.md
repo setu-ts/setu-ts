@@ -179,11 +179,14 @@ projects).
 ### 3.5 Full-stack hands its server build to `createApp` as a module
 
 - **Decision:** the full-stack `main.ts` imports `./build/server/index.js` statically and calls
-  `createApp(undefined, undefined, { serverBuild })`, the Workers arm's existing shape. This applies
-  on Node, Bun and Deno, so `main.ts` stays byte-identical across the three, as `docs/cli.md`
-  promises. `setu.config.ts` is unchanged and keeps `serverBuildPath` for callers that pass no
-  module (the generated smoke test). Because `main.ts` now imports build output, each runtime's
-  full-stack `check` builds the frontend first:
+  `createApp(undefined, undefined, { serverBuild })`, the Workers arm's existing shape. On the
+  socket targets that arm also sets `assetsDir: './build/client/assets'` — the server serves the
+  client bundle the page loads; on Workers the platform's asset binding does, so its arm sets none.
+  (Review found the socket arm without it: HTML 200, every `/assets/*.js` 404.) This applies on
+  Node, Bun and Deno, so `main.ts` stays byte-identical across the three, as `docs/cli.md` promises.
+  `setu.config.ts` is unchanged and keeps `serverBuildPath` for callers that pass no module (the
+  generated smoke test). Because `main.ts` now imports build output, each runtime's full-stack
+  `check` builds the frontend first:
   - Node and Bun: `react-router build && tsc --noEmit && setu check`.
   - Deno:
     `deno task build && deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check`.
@@ -221,11 +224,14 @@ projects).
     and runs `CMD ["bun","run","main.ts"]`. It does not use `--filter`: a filtered install links no
     library (§1), so the image would resolve imports differently from development.
   - **Deno:** the existing workspace Dockerfile shape (`deno cache` at build, `--frozen` scoped
-    run), plus one step before `deno cache main.ts`: when the member's manifest declares a `build`
-    task (full-stack), run `deno task build`. Without it `deno cache main.ts` fails on the static
-    `build/server/index.js` import (§3.5), and `.dockerignore` keeps a host `build/` out of the
-    context, so the image must build it. Detect the task by parsing the manifest (the file's
-    existing pinned `@std/jsonc` parse), not by grepping text.
+    run), plus a `frontend` stage on `denoland/deno:debian-2.9.5` (the same Deno version, glibc).
+    When the member's manifest declares a `build` task (full-stack) that stage runs
+    `deno task build`; otherwise it creates an empty `build/`. The Alpine stage copies `buil[d]`
+    from it before `deno cache main.ts`, which needs the static `build/server/index.js` import
+    (§3.5); `.dockerignore` keeps a host `build/` out. Detect the task by parsing the manifest with
+    the file's pinned `@std/jsonc`, not by grepping text. Why glibc: probed 2026-10-27,
+    `deno task build` on the Alpine image fails — Vite's `rolldown` finds no musl native binding
+    (`rolldown-binding.linux-x64-musl.node`); the Debian stage builds it.
   - **The single parameterized workspace file and full-stack.** `WorkspaceMember` carries no
     template, so each Dockerfile decides per member at build time: Node always runs
     `npm run build --workspace apps/${MEMBER}` (every Node member has `build`) and copies `build/`
@@ -279,9 +285,11 @@ projects).
     `tsc --noEmit` reports before `setu build` runs.
   - **Deploy gate:** `check:deploy --generated` also builds a Node workspace member (with a library)
     and a standalone Node project with their Dockerfiles, and runs each `--read-only` with no
-    external network until `/health` serves. The existing Deno case stays. Bun is added if
-    `oven/bun:1-alpine` builds in the gate's time budget; otherwise its rendered Dockerfile is
-    covered by unit tests only, and the PR says so.
+    external network until `/health` serves. The existing Deno case stays and gains a library under
+    a root `nodeModulesDir: "auto"` (§3.15). A Bun workspace member with a library is added:
+    measured 2026-10-27, `oven/bun:1-alpine` builds in about 33 s. Every full-stack image built by
+    hand during review also requests one `/assets/*.js` the page references (the compiled e2e
+    asserts it too).
 - **Why:** the ROADMAP gate; the M63/M95a lesson that generated output is proven only by running it.
 
 ### 3.12 What the build checks for DI, and what it does not
@@ -332,6 +340,23 @@ projects).
   Dockerfile copies it); an e2e scaffolding a Bun workspace with a library, running `bun install`
   and importing the library from a member (guarded on `bun` being present, like the existing Bun e2e
   tests).
+
+### 3.15 A Deno workspace image starts read-only when the root enables `node_modules` (merged-code defect, folded in)
+
+- **Decision:** after its installs, the Deno image rewrites a root `nodeModulesDir: "auto"` to
+  `"manual"` (the root manifest is plain JSON by then; parsed, never text-matched). Workspaces and
+  standalone projects without the key are unchanged.
+- **Why:** probed 2026-10-27 with the `develop` CLI (so not caused by M120) against the public
+  registry: a Deno workspace with a full-stack member (which sets the root's
+  `nodeModulesDir: "auto"`, M36c) and a library builds, but EVERY member's container — REST included
+  — exits under `--read-only` with
+  `File exists (os error 17), symlink '../../libs/shared' -> '/srv/node_modules/@rv/shared'`: under
+  `"auto"` each `deno run` re-syncs `node_modules`. With `"manual"` (flag or config) the same image
+  serves `/health` read-only with no network.
+- **Test home:** `test/unit/workspace/compose.test.ts` (the rewrite step is present and runs after
+  the installs, before `chown`); the deploy gate's Deno case gains a library and sets the root's
+  `nodeModulesDir: "auto"` (its redis workspace refuses a full-stack member, which is what sets it
+  in practice), so its REST member image runs against that root (§3.11).
 
 ## 4. Exported surface — every symbol names its consumer
 
@@ -425,6 +450,91 @@ pnpm run release:verify 0.10.0
   `node_modules/@m120`. Raised to the maintainer as a merged-code defect; the maintainer folded the
   fix into M120 (§3.14).
 - **`npm start` habits.** → The next-step hint, README and upgrade guide all name `start:dev`.
+
+## 8a. Design security review
+
+**Written before the committed-tree audit, from the design (maintainer direction, 2026-10-27).**
+M120 crosses three trust boundaries: `setu build` runs in CI on a checkout an outsider controls
+(M118's flow, now with a bundler and filesystem writes); the generated images are what a deployment
+exposes to the network; and the generated scripts open a debugger port. The audit holds the
+committed tree to the decisions and obligations below.
+
+- **Reviewed flows:**
+  1. `setu build` (with and without `--dry-run`) in CI on an untrusted pull-request checkout,
+     standalone and as a workspace member, through the generated `npm run build`.
+  2. A generated image (Node, Bun, Deno; workspace member and standalone; full-stack and not)
+     serving network clients under `--read-only` with no external network.
+  3. A generated image's build: what enters the build context and what reaches the final stage.
+  4. `setu generate library` writing a Bun root `bunfig.toml` (§3.14).
+  5. The generated `start:debug` / `start:dev` scripts on a developer machine.
+- **Assets:** the filesystem outside the project (CI runner, developer machine); the CI runner's
+  availability; the integrity of the build's refusals (the `setu check` gate and the devDependency
+  gate must not be bypassable by a malformed input); the deployed server's files that are not public
+  (the server build, source, `.env`, manifests); the image's secrets and the terminal/CI log.
+- **Attackers:** (a) a pull-request author controlling every file in the checkout — sources,
+  `package.json` of the member and of every `libs/*`, directory and file names, symbolic links
+  (`dist`, `libs/<name>`, `bunfig.toml`, `src/migrations/run.ts`) — but not the CLI, esbuild or the
+  runner; (b) any network client of a deployed image; (c) another local user or process on the
+  developer's machine, or a web page in their browser. Out of scope: a maintainer who merges the
+  code (it then runs as the application), and the project's own `scripts` (CI running
+  `npm run build` already runs whatever the PR puts there; `setu build` is what the gate trusts).
+- **Decisions:**
+  - **D-S1 `setu build` executes no project code.** esbuild resolves and transforms; no esbuild
+    plugin, no `tsconfig` `paths` plugin, no loader that runs code. `setu check` runs first and is
+    read-only (M118 D-S4). Type checking stays in the script (`tsc --noEmit`), outside `setu build`.
+  - **D-S2 Writes stay inside the project.** `dist/` is removed only when it is a real directory
+    inside the project (`assertInsideProject`; a link is refused by name); every esbuild output path
+    is checked the same way before it is written; nothing is written on a refusal or a bundle error,
+    and `--dry-run` writes nothing.
+  - **D-S3 Bounded, link-checked reads.** Manifests are read through `readExistingText` (the CLI's
+    bounded regular-file read); every `libs/<name>` is checked with `assertInsideProject` before its
+    manifest is read; the wiring gate keeps M118's bounds (D-S1–D-S6 there).
+  - **D-S4 Output is escaped.** Every message carrying a path, a package name or esbuild text passes
+    `escapeTerminalControls`.
+  - **D-S5 The image ships production only.** The Node final stage has `dist/`, `build/` and a
+    `--omit=dev` install; Bun installs `--production`; the Deno final stage carries no frontend
+    toolchain (it is built in the `frontend` stage). `.dockerignore` keeps `.env` / `.env.*` (except
+    `.env.example`), `.git`, host `node_modules`, `dist` and `build` out of every context. Source
+    maps ship in `dist/` (they map to code already in the image; accepted, used by
+    `--enable-source-maps`).
+  - **D-S6 The image keeps M95a/V9-78's posture.** Numeric non-root `USER`, read-only root, no
+    network at runtime; Deno keeps `--frozen` and its explicit permission set. The `"manual"`
+    rewrite (§3.15) runs with read/write limited to the root manifest.
+  - **D-S7 Assets serve only the client build.** The socket full-stack server serves
+    `build/client/assets` (and the client-build root, `publicFiles`) through the plugin's existing
+    static handler and its traversal check; `build/server/` and anything above the client build are
+    never reachable by URL.
+  - **D-S8 The debugger listens on loopback only.** `start:debug` uses each runtime's default
+    inspector address; it ships only in the development scripts, never in an image `CMD`.
+  - **D-S9 `bunfig.toml` writes are managed writes.** Created only when absent, through the CLI's
+    write path (link refusal, overwrite check); an existing file is never rewritten.
+- **Audit obligations:**
+  1. `dist` as a symlink to a directory outside the project, and as a regular file: `setu build`
+     exits `1`, the target is untouched (sentinel), nothing is written. Positive control: a real
+     `dist/` is replaced.
+  2. A `libs/<name>` symlinked outside the workspace and a `package.json` over the read bound:
+     refused, exit non-zero, nothing written.
+  3. A `src/migrations/run.ts` symlinked outside the project: no output written outside `dist/`.
+  4. An entry whose import is a devDependency — through a library, a re-export and a dynamic
+     `import()` with a literal: each refused (or, if esbuild leaves the dynamic form unresolved, the
+     behaviour recorded). Positive control: a `dependencies` import builds.
+  5. esbuild error text and a package name carrying terminal control sequences: escaped in output.
+  6. No esbuild plugin and no project code execution during `setu build` (a `postinstall`-free
+     fixture whose sources would write a sentinel if executed: sentinel absent).
+  7. Each built image: `/assets/../server/index.js`, its percent-encoded forms (`%2e%2e%2f`,
+     `%2e%2e/`, double-encoded) and `/../build/server/index.js` return 404, never the server bundle;
+     `/.env` and `/package.json` return 404. Positive control: a referenced `/assets/*.js`
+     returns 200.
+  8. Each final image (Node, Bun, Deno; workspace and standalone): no `.env` file, no `.git`, no
+     devDependency package (Node: none of the member's `devDependencies` under `node_modules`),
+     process user is uid 1000, root filesystem read-only. Positive control: a `.env.example` is
+     present when the project has one.
+  9. `start:debug` on Node, Bun and Deno: the inspector's listening address is loopback (measured
+     with `ss`/`lsof`, not assumed); no image `CMD` contains `--inspect`.
+  10. `bunfig.toml` as a symlink to a file outside the workspace: `setu generate library` refuses
+      and writes nothing through it.
+  11. Re-confirm M118's passed areas on the `setu build` path: bounded reads, linear parsers,
+      symlinked members refused.
 
 ## 9. Out of scope
 

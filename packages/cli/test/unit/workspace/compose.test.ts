@@ -362,13 +362,15 @@ describe('workspaceContainerFiles', () => {
       // The whole workspace installs, not one member: a member resolves its
       // dependencies through the ROOT manifest and lockfile.
       expect(contents).toContain('COPY package.json package-lock.json* ./');
-      expect(contents).toContain(`${GUARD}npm install`);
+      expect(contents).toContain(`${GUARD}npm ci`);
+      expect(contents).toContain('npm ci --omit=dev --workspace apps/${MEMBER} --workspace libs');
+      expect(contents).toContain('COPY --from=build /srv/apps/${MEMBER}/buil[d] ./build/');
       expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       // Numeric user, same reason as the Deno arm.
       expect(contents).toContain('USER 1000:1000');
       expect(contents).not.toMatch(/^USER deno/m);
       // The start command runs the member's entry via tsx.
-      expect(contents).toContain('CMD ["sh", "-c", "npx tsx main.ts"]');
+      expect(contents).toContain('CMD ["node", "--enable-source-maps", "dist/main.js"]');
     });
 
     it('builds a Bun member into the pinned Bun image', () => {
@@ -381,7 +383,10 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain(`${GUARD}bun install`);
       expect(contents).toContain('ARG NPM_CONFIG_REGISTRY=');
       expect(contents).toContain('USER 1000:1000');
-      expect(contents).toContain('CMD ["sh", "-c", "bun run main.ts"]');
+      expect(contents).toContain('CMD ["bun", "run", "main.ts"]');
+      expect(contents).toContain('--production');
+      expect(contents).not.toContain('--filter');
+      expect(contents).toContain('COPY bunfig.tom[l] ./');
     });
 
     // R7 (plan §1): this arm resolves through node_modules and writes no

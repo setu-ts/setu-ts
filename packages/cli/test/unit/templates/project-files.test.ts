@@ -91,9 +91,9 @@ describe('functional module hosts and generated test tasks', () => {
             ? ''
             : target === 'deno'
               ? 'deno task build && '
-              : target === 'bun'
-                ? 'bun run build && '
-                : 'npm run build && ';
+              : target === 'cloudflare-workers'
+                ? 'npm run build && '
+                : 'react-router build && ';
         expect(tasks['test']).toBe(prefix + unit);
         expect(tasks['test:e2e']).toBe(prefix + e2e);
         const test = contentsOf(files, 'test/e2e/app.e2e.test.ts');
@@ -471,9 +471,9 @@ describe('a template with a frontend build, on a Deno target', () => {
           scripts: Record<string, string>;
         }
       ).scripts;
-      expect(scripts['dev']).toBe(dev);
+      expect(scripts['start:dev']).toBe(dev);
       expect(contentsOf(files, 'README.md')).toContain(
-        runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
+        runtime === 'bun' ? '```bash\nbun run start:dev\n```' : '```bash\nnpm run start:dev\n```',
       );
       // `ssr` is read on these targets, not underscore-prefixed.
       expect(contentsOf(files, 'setu.config.ts')).toContain(

@@ -37,6 +37,36 @@ export interface ToolchainProseRules {
 export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
   allowlist: [
     {
+      path: 'packages/cli/test/unit/project-files-check.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts frontend-first check tasks for supported Deno applications.',
+    },
+    {
+      path: 'packages/cli/test/unit/dockerfile.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts the generated Deno image build-task gate before cache.',
+    },
+    {
+      path: 'packages/cli/src/workspace/compose.ts',
+      category: 'deno-target',
+      reason: 'Generated Deno application build and task instructions.',
+    },
+    {
+      path: 'packages/cli/test/unit/project-files-scripts.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts supported Deno application development and build tasks.',
+    },
+    {
+      path: 'packages/cli/src/commands/build.ts',
+      category: 'deno-target',
+      reason: 'Build refusal names the supported Deno application start task.',
+    },
+    {
+      path: 'packages/cli/test/unit/build-command.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts Deno application guidance from the Node-only build command.',
+    },
+    {
       path: 'packages/cli/test/unit/agents/render-brief.test.ts',
       category: 'deno-target',
       reason: 'Asserts commands rendered for supported Deno application projects.',
