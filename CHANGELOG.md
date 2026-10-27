@@ -133,10 +133,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`redactRecord()` returns a snapshot (0.11.0, `@setu-ts/common`).** Every plain object and array
-  it walks is now copied, unclassified subtrees included, instead of being returned by identity, so
-  a logger serializes exactly the values redaction checked (the same choice pino's own redactor
-  makes). Code that compared a result's subtree with the original by `===` should compare by value.
+- **`redactRecord()` returns a snapshot (#513, 0.11.0, `@setu-ts/common`).** Every plain object and
+  array it walks is now copied, unclassified subtrees included, instead of being returned by
+  identity, so a logger serializes exactly the values redaction checked (the same choice pino's own
+  redactor makes). Code that compared a result's subtree with the original by `===` should compare
+  by value.
 
 - **One request completion at info (#512, 0.11.0, `@setu-ts/logger-plugin`).** Request logging emits
   `request completed` at `info` with `method`, `path`, `status`, `duration` and the child's
@@ -315,17 +316,18 @@ All notable changes to this project are documented here. The format follows
   provider should apply the same override until Azure ships an identity release accepting the fix;
   workspace overrides do not propagate to consumers.
 
-- **Redaction cache, single-read redaction and log-call containment (0.11.0, `@setu-ts/common`,
-  `@setu-ts/logger-plugin`, `@setu-ts/metrics-plugin`).** From the security audit of #512. The
-  redaction matcher's path cache now skips paths longer than 256 characters, so field names taken
-  from request bodies can no longer pin memory (600 requests with 900 KB names held ~1 GiB).
-  Redaction now reads each property once and returns that snapshot: a getter returning a different
-  object on a later read (during traversal, or when the logger serializes the result) could put a
-  secret redaction never checked into the output. Log calls and `child()` no longer throw on any
-  transport: metadata that throws while being read is replaced by `[unserializable metadata]`, such
-  bindings are dropped, and a custom sink that throws loses that record instead of failing the
-  request, and its first failure is reported once on stderr. `ConsoleLogger`'s constructor is back
-  to `(runtime, options?)`, and metric label values are read once per observation.
+- **Redaction cache, single-read redaction and log-call containment (#513, 0.11.0,
+  `@setu-ts/common`, `@setu-ts/logger-plugin`, `@setu-ts/metrics-plugin`).** From the security audit
+  of #512. The redaction matcher's path cache now skips paths longer than 256 characters, so field
+  names taken from request bodies can no longer pin memory (600 requests with 900 KB names held ~1
+  GiB). Redaction now reads each property once and returns that snapshot: a getter returning a
+  different object on a later read (during traversal, or when the logger serializes the result)
+  could put a secret redaction never checked into the output. Log calls and `child()` no longer
+  throw on any transport: metadata that throws while being read is replaced by
+  `[unserializable metadata]`, such bindings are dropped, and a custom sink that throws loses that
+  record instead of failing the request, and its first failure is reported once on stderr.
+  `ConsoleLogger`'s constructor is back to `(runtime, options?)`, and metric label values are read
+  once per observation.
 
 ### Fixed
 
