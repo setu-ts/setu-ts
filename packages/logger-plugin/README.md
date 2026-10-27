@@ -92,7 +92,8 @@ function adapt(sink: IWinstonSink): ILogger {
   };
 }
 
-// existingSink is your application's logger instance.
+// Your application's existing logger instance.
+declare const existingSink: IWinstonSink;
 LoggerPlugin({ transport: 'custom', logger: adapt(existingSink), requestLogging: true });
 ```
 
