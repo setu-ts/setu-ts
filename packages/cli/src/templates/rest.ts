@@ -45,7 +45,7 @@ export const REST_PLUGINS: readonly Wiring[] = [
     // (six spaces) so the emitted call is exactly what `deno fmt` produces: the
     // one-line form is 103 characters against the generated `lineWidth: 100`,
     // so a fresh scaffold failed its own `deno fmt --check` (M113h §3.9).
-    args: "{\n        requestLogging: true,\n        excludePaths: ['/live', '/ready', '/health', '/metrics'],\n      }",
+    args: "{\n        transport: 'pino',\n        requestLogging: true,\n        excludePaths: ['/live', '/ready', '/health', '/metrics'],\n      }",
   },
   // `errorFormat: 'rfc9457'` makes a validation failure answer in the same
   // Problem Details shape the `errorHandler` below emits for thrown errors

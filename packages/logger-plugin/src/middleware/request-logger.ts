@@ -1,6 +1,6 @@
 /**
- * Request/response logging middleware — logs every incoming request and its
- * outgoing response, with slow-request detection and thrown-error status prediction.
+ * Request logging middleware — self-contained completion at info, arrival at
+ * debug, with slow-request detection and thrown-error status prediction.
  *
  * @module
  */
@@ -37,7 +37,7 @@ export interface RequestLoggerOptions {
 const DEFAULT_SLOW_THRESHOLD = 5000;
 
 /**
- * Creates middleware that logs each request and its response.
+ * Creates middleware that logs completion at info and arrival at debug.
  *
  * The middleware resolves the {@linkcode ILogger} from the service registry
  * on every request, so it picks up any request-scoped child logger that a
@@ -68,10 +68,12 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
     const runtime = resolveRuntime(ctx);
     const requestLogger = logger.child({ requestId: ctx.id });
 
-    requestLogger.info('request received', {
-      method: ctx.request.method,
-      path,
-    });
+    if (shouldLogReceived(requestLogger)) {
+      requestLogger.debug('request received', {
+        method: ctx.request.method,
+        path,
+      });
+    }
 
     const start = ctx.startTime;
     let errored = false;
@@ -89,6 +91,8 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
       // Its pure rule predicts that response while the snapshot is still 200.
       const status = errorStatus ?? readStatus(ctx);
       requestLogger.info('request completed', {
+        method: ctx.request.method,
+        path,
         status,
         duration,
       });
@@ -102,6 +106,18 @@ export function createRequestLoggerMiddleware(options?: RequestLoggerOptions): M
       }
     }
   };
+}
+
+/** Avoids building disabled arrival metadata; unknown levels defer to the logger. */
+function shouldLogReceived(logger: ILogger): boolean {
+  try {
+    const level = logger.level;
+    return level !== 'fatal' && level !== 'error' && level !== 'warn' && level !== 'info';
+  } catch {
+    // A legacy or application logger may expose no readable level. Its debug
+    // method remains responsible for filtering rather than losing the entry.
+    return true;
+  }
 }
 
 /**

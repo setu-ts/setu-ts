@@ -40,9 +40,9 @@ describe('composeHost', () => {
     for (const style of ['functional', 'class-based'] as const) {
       const host = composeHost(recipe, style);
       expect(Object.hasOwn(host, 'runtimeSwaps')).toBe(false);
-      expect(resolveHost(host, 'cloudflare-workers').plugins).toEqual(
-        resolveHost(host, 'node').plugins,
-      );
+      const withoutLogger = (runtime: 'node' | 'cloudflare-workers') =>
+        resolveHost(host, runtime).plugins.filter((plugin) => plugin.pkg !== 'logger-plugin');
+      expect(withoutLogger('cloudflare-workers')).toEqual(withoutLogger('node'));
     }
   });
   describe('the class-based arm of rest', () => {

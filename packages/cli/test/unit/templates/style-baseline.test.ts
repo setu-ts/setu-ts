@@ -7,7 +7,8 @@ import * as nodeFs from 'node:fs/promises';
  * M99e, refreshed for M101g's reviewed factory and smoke-test changes, and
  * M119c's reviewed Node test-runner flag and `swagger-ui-dist` pin, and
  * M119h's reviewed Workers test lane (V10-23), and M118's reviewed manifest
- * check tasks and CLI devDependency:
+ * check tasks and CLI devDependency, and the REST performance fix's Pino logger
+ * choice (config and runtime dependencies only):
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *
