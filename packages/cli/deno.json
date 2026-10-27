@@ -32,6 +32,7 @@
     }
   },
   "imports": {
+    "esbuild": "npm:esbuild@~0.28.0",
     "prettier": "npm:prettier@^3.9.10",
     "tsx/esm/api": "npm:tsx@^4.23.0/esm/api",
     "vitest": "npm:vitest@5.0.3"

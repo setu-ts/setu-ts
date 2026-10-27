@@ -196,6 +196,31 @@ export interface CheckResult {
  * @returns The process result
  */
 export async function denoCheck(root: string, files: readonly string[]): Promise<CheckResult> {
+  const manifest = JSON.parse(await nodeFs.readFile(`${root}/deno.json`, 'utf8')) as {
+    tasks?: Record<string, string>;
+  };
+  if (
+    manifest.tasks?.['build'] !== undefined &&
+    files.some((file) => /(?:^|\/)main\.ts$/.test(file))
+  ) {
+    const ready = await nodeFs.stat(`${root}/build/server/index.js`).then(
+      () => true,
+      () => false,
+    );
+    if (!ready) {
+      const built = await runProcess(denoBinary(), {
+        args: ['task', 'build'],
+        cwd: root,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      if (built.code !== 0)
+        return {
+          code: built.code,
+          stderr: new TextDecoder().decode(built.stdout) + new TextDecoder().decode(built.stderr),
+        };
+    }
+  }
   const command = () =>
     runProcess(denoBinary(), {
       // `--node-modules-dir=none` because a template that also emits a

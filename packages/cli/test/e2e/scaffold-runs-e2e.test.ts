@@ -42,7 +42,13 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
-import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
+import {
+  npmInstall,
+  npmRun,
+  runIn,
+  startOverlay,
+  withNodeServer,
+} from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
@@ -60,6 +66,10 @@ for (const template of ['rest', 'class-based'] as const) {
       try {
         const installed = await npmInstall(project, overlay);
         expect(installed.code, installed.output).toBe(0);
+        // M120: `npm start` runs the compiled bundle, so build first — which also
+        // proves the pino logger works from the bundle (pino stays external).
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
         const result = await withNodeServer(project, async (origin, output) => {
           const response = await fetch(`${origin}/greetings/log-probe`);
           await response.body?.cancel();
@@ -538,6 +548,8 @@ for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
     try {
       const installed = await npmInstall(project, overlay);
       expect(installed.code, installed.output).toBe(0);
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => (await fetch(origin)).status);
       expect(booted.result, booted.output).toBe(200);
     } finally {
@@ -622,6 +634,8 @@ try {
       expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
         'billing',
       );
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => {
         const statuses: number[] = [];
         // `/health` is requested too, so the log assertions below can prove the

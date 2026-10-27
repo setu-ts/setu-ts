@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {
   FULL_STACK_NPM_DEPENDENCIES,
@@ -25,6 +26,21 @@ import {
 } from '../../src/templates/full-stack-build-files.ts';
 import { FULL_STACK_APP_FRAMEWORK_PACKAGES } from '../../src/templates/full-stack.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
+
+it('passes the same static server-build module from every socket entry', () => {
+  const entries = ['node', 'bun', 'deno'].map((runtime) => {
+    const target = runtime as TargetRuntime;
+    const files = projectFiles('probe', target, resolveHost(FULL_STACK_TEMPLATE, target));
+    const config = JSON.parse(files.find((file) => file.path === 'tsconfig.json')!.contents) as {
+      compilerOptions: { allowJs?: boolean };
+    };
+    expect(config.compilerOptions.allowJs).toBe(true);
+    return files.find((file) => file.path === 'main.ts')!.contents;
+  });
+  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toContain("import * as serverBuild from './build/server/index.js'");
+  expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
+});
 
 /** Every path the template emits. */
 const paths = (FULL_STACK_TEMPLATE.files ?? []).map((file) => file.path);
@@ -247,6 +263,18 @@ describe('full-stack template | the runtime-dependent argument', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
       expect(argsFor(runtime)).toContain("assetsDir: './build/client/assets'");
     }
+  });
+
+  it('serves assets from the production serverBuild arm on Deno, Node and Bun (M120)', () => {
+    // M120 review: the production entry passes `{ serverBuild }`, and that arm
+    // once set no assetsDir — the page rendered, every /assets/*.js was a 404.
+    // The substring check above passed throughout, because the path arm has it.
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      expect(argsFor(runtime)).toContain(
+        "...('serverBuild' in (ssr ?? {}) ? { assetsDir: './build/client/assets' } : {}),",
+      );
+    }
+    expect(argsFor('cloudflare-workers')).not.toContain("'serverBuild' in (ssr ?? {})");
   });
 
   it('opts into request logging with the probe and scrape paths excluded (M113h §3.9)', () => {

@@ -12,6 +12,61 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
+
+Update existing Node scripts explicitly; the CLI does not rewrite scripts:
+
+```json
+{
+  "build": "tsc --noEmit && setu build",
+  "start": "node --enable-source-maps dist/main.js",
+  "start:dev": "tsx watch main.ts",
+  "start:debug": "node --inspect --import tsx main.ts"
+}
+```
+
+Keep TypeScript, tsx and the matching CLI version as development dependencies. Full-stack Node
+prefixes build and check with `react-router build && `; development/debug use dev.ts instead of
+main.ts (development is `tsx dev.ts`, without watch). Prefix full-stack tests with
+`react-router build && `, replacing `npm run build && `, so tests do not depend on wiring checks. In
+full-stack socket main.ts import `* as serverBuild` from `./build/server/index.js` and call
+`createApp(undefined, undefined, { serverBuild })`; in `setu.config.ts` that arm must also set
+`assetsDir: './build/client/assets'` on Node, Bun and Deno (not Workers), or the page renders and
+every `/assets/*.js` answers 404. Keep the config's path fallback for tests and set `allowJs: true`
+in tsconfig.json so the static server-build import can be checked.
+
+Bun keeps `start: bun run main.ts`; add `start:dev: bun --watch main.ts` and
+`start:debug: bun --inspect main.ts`. Full-stack uses `bun run dev.ts` and `bun --inspect dev.ts`;
+run its frontend build before starting, removing the build prefix from start. Deno keeps its
+production start; add watch/inspect to its existing run command with the same grants. Full-stack
+Deno instead uses `deno task install && deno run -A --watch dev.ts` and the inspect equivalent; its
+check prefixes `deno task build && `.
+
+Ignore dist/ in standalone Node projects. Workspace roots add `apps/*/build/` everywhere and
+`apps/*/dist/` on Node/Bun. Use the generated Dockerfile from a fresh scaffold as the migration
+template: Node builds in one stage, installs production dependencies in a separate stage and copies
+dist/ and frontend build/. Bun installs with --production. Deno builds a declared frontend in a
+Debian `frontend` stage, caches source, and switches a root `nodeModulesDir: "auto"` to `"manual"`
+after installing (under `"auto"` a read-only container cannot start). Copy the generated
+.dockerignore too: exclude node_modules, dist, build, coverage, git and dotenv files, keeping
+.env.example. Workspace images use the root context and MEMBER build argument. See
+[deployment](./deployment.md).
+
+Bun workspace roots need bunfig.toml containing:
+
+```toml
+[install]
+linker = "hoisted"
+```
+
+Rerun bun install. This exposes sibling libraries to members. Library generation creates a missing
+file, preserves hoisted settings and refuses other or missing linker settings in existing TOML, with
+the line to add. The CLI never rewrites user-owned TOML. The Bun image copies this file too.
+
+For built Node migrations use `node dist/src/migrations/run.js`; in development use
+`npx tsx src/migrations/run.ts`. Bun and Deno keep their source runners. Native `bun build` and
+`deno compile` are available for custom packaging; generated services do not emit those steps.
+
 ### `setu check` in the generated check script (M118, 0.11.0, `@setu-ts/cli`)
 
 New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
@@ -1269,8 +1324,8 @@ copy the fix from a fresh scaffold:
   fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
-- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
-  without it the first `start` fails with "Failed to load React Router server build".
+- **Full-stack on Node or Bun:** run the build before production start. Use start:dev for
+  development; see the M120 production scripts above.
 - **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
   answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
   is unchanged.

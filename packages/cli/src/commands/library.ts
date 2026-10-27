@@ -35,9 +35,16 @@ import {
   firstDuplicatePath,
   type GeneratedFile,
   joinPath,
+  readExistingText,
   writeFiles,
 } from '../utils/file-writer.ts';
-import { libraryFiles, librarySpecifier, LIBS_DIR } from '../workspace/library.ts';
+import {
+  libraryFiles,
+  librarySpecifier,
+  LIBS_DIR,
+  BUNFIG_FILE,
+  planBunWorkspaceLinker,
+} from '../workspace/library.ts';
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
 import { planRootWorkspaceGlob } from '../workspace/root-manifest.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
@@ -155,6 +162,23 @@ export async function runLibraryCommand(
   // workspace is invisible to every member that would import it.
   const profile = workspaceProfile(read.manifest.runtime);
   const files: GeneratedFile[] = [...libraryFiles(scope, names, profile)];
+  if (profile.runtime === 'bun') {
+    let bunfig: string | undefined;
+    try {
+      bunfig = await readExistingText(deps.fs, joinPath(deps.dir, BUNFIG_FILE));
+    } catch (cause) {
+      // A linked, oversized or non-regular bunfig.toml is refused like any other
+      // unreadable input — a named error, not an uncaught stack (M120 re-audit N1).
+      deps.error(escapeName(cause instanceof Error ? cause.message : String(cause)));
+      return EXIT_ERROR;
+    }
+    const linker = planBunWorkspaceLinker(bunfig);
+    if (linker.kind === 'refused') {
+      deps.error(linker.message);
+      return EXIT_ERROR;
+    }
+    if (linker.kind === 'update') files.push(linker.file);
+  }
 
   // Only ever an edit for a workspace created before libraries existed: a root
   // this CLI wrote already declares the glob, so this is `unchanged` there.

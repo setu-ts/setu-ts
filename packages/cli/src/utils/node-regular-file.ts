@@ -15,9 +15,25 @@ export function regularFileFlags(flags: {
   return flags.O_RDONLY | (flags.O_NONBLOCK ?? 0) | (flags.O_NOCTTY ?? 0);
 }
 
-/** Reads only the regular file actually opened, never allocating beyond the byte bound. */
+/**
+ * Reads only the regular file actually opened, never allocating beyond the byte bound.
+ *
+ * Opened with `O_NOFOLLOW`, like the writer below: a link as the file itself is
+ * refused rather than followed (M120 audit F1 — a pull request linking a
+ * manifest to a host file made the CLI read it and echo part of it in a parse
+ * error). Linked DIRECTORIES above it are the callers' `assertInsideProject`.
+ */
 export async function readRegularFile(path: string, maxBytes: number): Promise<Uint8Array> {
-  const handle = await open(path, regularFileFlags(constants));
+  const handle = await open(path, regularFileFlags(constants) | (constants.O_NOFOLLOW ?? 0)).catch(
+    (cause: unknown) => {
+      if (cause instanceof Error && 'code' in cause && cause.code === 'ELOOP') {
+        throw new Error(`${path}: is a symbolic link; Setu does not read through links`, {
+          cause,
+        });
+      }
+      throw cause;
+    },
+  );
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error(`${path}: expected a regular file at most 1 MiB`);

@@ -71,7 +71,9 @@ describe('bounded text consumers', () => {
       );
       expect(await readJsonManifest(fs, path)).toMatchObject({
         kind: 'unreadable',
-        reason: `${path}: expected a regular file at most 1 MiB`,
+        // The path is the caller's to print (`Cannot read <path>: <reason>`), so the
+        // reader's own leading `<path>: ` is not repeated (M120 re-audit, cosmetic).
+        reason: 'expected a regular file at most 1 MiB',
       });
     }
     const vanished = {

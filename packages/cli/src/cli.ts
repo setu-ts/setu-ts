@@ -18,6 +18,7 @@ import {
   TARGET_RUNTIMES,
   VERSION,
 } from './constants.ts';
+import { runBuildCommand } from './commands/build.ts';
 import { runCheckCommand } from './commands/check.ts';
 import { runSyncCommand } from './commands/sync.ts';
 import { runGenerateCommand } from './commands/generate.ts';
@@ -110,6 +111,7 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
+  log(`  build                          Bundle a Node service for production`);
   log(`  check                          Check CLI-owned wiring (read-only)`);
   log(`  sync                           Rewrite CLI-managed barrels`);
   log(`  agents                         Write or check this project's AGENTS.md brief`);
@@ -263,6 +265,9 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         });
+
+      case 'build':
+        return await runBuildCommand(rest, deps);
 
       case 'check':
         return await runCheckCommand(rest, deps);

@@ -8,6 +8,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
+  one Node service, including workspace libraries and migration runners. Runtime npm packages remain
+  external; runtime imports of devDependencies fail. Generated Node starts now require a build; use
+  start:dev for source development and start:debug for debugging. Node and Bun full-stack starts
+  stop rebuilding. Standalone and workspace images install production dependencies and build
+  frontend artifacts in the image. Bun workspaces select the hoisted linker so members resolve
+  shared libraries; library generation safely plans the setting for older workspaces. Deno images
+  build a full-stack frontend on a glibc stage, and a Deno workspace with a full-stack member and a
+  library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
+  `"manual"`). Generated `.dockerignore` files exclude `.npmrc`. Every CLI command now refuses a
+  manifest that is itself a symbolic link (naming the link) instead of reading through it. See
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
 - **Custom logger transport (#512, 0.11.0, `@setu-ts/logger-plugin`).**
   `LoggerPlugin({ transport: 'custom', logger })` wraps an application `ILogger` with level
   filtering, metadata redaction, request logging and trace correlation. Logger/transport mismatches

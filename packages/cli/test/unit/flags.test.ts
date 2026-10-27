@@ -19,6 +19,12 @@ function parseHelpFlags(text: string): Set<string> {
   return names;
 }
 
+it('inventories build as a zero-positional command with dir and dry-run flags', () => {
+  const spec = commandFlagsFor('build', undefined);
+  expect(spec?.documented).toEqual(['dir', 'dry-run']);
+  expect(spec?.positionals).toEqual({ fixed: 1, taken: 0, noun: 'no arguments' });
+});
+
 interface IHarness {
   readonly fs: FakeFs;
   readonly out: Recorder;

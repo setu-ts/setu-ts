@@ -17,8 +17,8 @@ describe('workspaceDevRunner', () => {
     const node = workspaceDevRunner(workspaceProfile('node'));
     const bun = workspaceDevRunner(workspaceProfile('bun'));
     expect(node.path).toBe('scripts/dev.mjs');
-    expect(node.contents).toContain("spawn('npm', ['run', 'start']");
-    expect(bun.contents).toContain("spawn('bun', ['run', 'start']");
+    expect(node.contents).toContain("spawn('npm', ['run', 'start:dev']");
+    expect(bun.contents).toContain("spawn('bun', ['run', 'start:dev']");
     expect(node.contents).toContain('/ready');
     expect(bun.contents).toContain('Dependency cycle includes');
   });

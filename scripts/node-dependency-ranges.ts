@@ -24,6 +24,7 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  esbuild: '~0.28.0',
   prettier: '^3.9.10',
   tsx: '^4.23.0',
   vitest: '5.0.3',
