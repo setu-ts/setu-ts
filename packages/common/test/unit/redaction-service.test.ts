@@ -272,3 +272,35 @@ describe('createRedactionService', () => {
     });
   });
 });
+
+describe('redactRecord reads each property once', () => {
+  it('should redact the nested value it copied when a getter changes between reads', () => {
+    // Re-audit of #512: the copy was taken from one read and the redaction
+    // decided on a second, so a getter returning a secret first and a clean
+    // object second left the secret in the output.
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    let reads = 0;
+    const record = Object.defineProperty({ password: 'top' }, 'meta', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? { password: 'canary-nested' } : { clean: true }),
+    });
+    const output = JSON.stringify(service.redactRecord(record));
+    expect(reads).toBe(1);
+    expect(output).not.toContain('canary-nested');
+    expect(output).not.toContain('top');
+    expect(service.redactRecord({ meta: { password: 'plain', safe: 'ok' } })).toEqual({
+      meta: { password: '[Redacted]', safe: 'ok' },
+    });
+  });
+
+  it('should keep enumerable symbol-keyed values on a redacted copy', () => {
+    const service = createRedactionService({ fields: { password: 'secret' } });
+    const tag = Symbol('tag');
+    const output = service.redactRecord({ password: 'hidden', [tag]: 'kept' }) as Record<
+      PropertyKey,
+      unknown
+    >;
+    expect(output['password']).toBe('[Redacted]');
+    expect(output[tag]).toBe('kept');
+  });
+});

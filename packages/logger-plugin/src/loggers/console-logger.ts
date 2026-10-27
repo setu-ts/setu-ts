@@ -51,9 +51,11 @@ export interface ConsoleLoggerOptions {
 }
 
 /**
- * Carries a root's compiled `redact` paths to its children. Module-private, so
- * no caller outside this file can create or read it: the public constructor
- * stays `(runtime, options?)`, and `redact` cannot be replaced from outside.
+ * Carries a root's compiled `redact` paths to its children, keeping the public
+ * constructor `(runtime, options?)`. Not exported, so ordinary callers cannot
+ * name it. A caller passing a Proxy as `options` can observe it and forge child
+ * options, but only for a logger it builds itself, which could equally pass
+ * `redact: []`: it never weakens another logger's redaction.
  */
 const INHERITED_REDACTION: unique symbol = Symbol('inherited legacy redaction');
 
@@ -145,10 +147,19 @@ export class ConsoleLogger implements ILogger {
    * @returns A new child logger
    */
   child(bindings: LogMetadata): ILogger {
+    // Read once, here, like the pino and custom transports: bindings that
+    // throw while being read are dropped, so neither this call nor every later
+    // record from the child fails on them.
+    let added: LogMetadata;
+    try {
+      added = normalizeMetadata(bindings);
+    } catch {
+      added = {};
+    }
     const childOptions: ChildLoggerOptions = {
       level: this.level,
       pretty: this.#pretty,
-      bindings: { ...this.#bindings, ...bindings },
+      bindings: { ...this.#bindings, ...added },
       [INHERITED_REDACTION]: this.#legacyRedaction,
     };
     return new ConsoleLogger(

@@ -68,11 +68,16 @@ function redactNode(
   const activeCopy = active.get(direct);
   if (activeCopy !== undefined) return activeCopy;
 
-  const copy: unknown[] | Record<string, unknown> = Array.isArray(direct)
-    ? [...direct]
-    : { ...direct };
+  // One read per property: the copy and the redaction decisions both come from
+  // this snapshot. Reading twice let a getter hand the copy a secret-bearing
+  // object and the traversal a clean one, so the secret was never redacted.
+  const entries: [PropertyKey, unknown][] = Array.isArray(direct)
+    ? [...direct.entries()]
+    : Object.entries(direct);
+  const copy = Array.isArray(direct)
+    ? entries.map(([, child]) => child)
+    : snapshotCopy(direct, entries);
   active.set(direct, copy);
-  const entries = Array.isArray(direct) ? direct.entries() : Object.entries(direct);
   let changed = false;
   try {
     for (const [key, child] of entries) {
@@ -91,6 +96,24 @@ function redactNode(
     active.delete(direct);
   }
   return changed ? copy : direct;
+}
+
+/**
+ * Rebuilds `{ ...value }` from already-read string entries, adding the
+ * enumerable symbol-keyed values a spread would also copy (read once each,
+ * never traversed).
+ */
+function snapshotCopy(
+  value: Record<string, unknown>,
+  entries: readonly [PropertyKey, unknown][],
+): Record<string, unknown> {
+  const copy: Record<PropertyKey, unknown> = Object.fromEntries(entries);
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, symbol)) {
+      copy[symbol] = Reflect.get(value, symbol);
+    }
+  }
+  return copy;
 }
 
 /** Limits structural traversal to arrays and dictionary-like objects. */

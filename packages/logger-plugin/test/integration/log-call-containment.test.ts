@@ -1,11 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
 import { CAPABILITIES, createRedactionService } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
+import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { PinoLogger } from '../../src/loggers/pino-logger.ts';
 import type { PinoFactory } from '../../src/loggers/pino-logger.ts';
 import { LoggerPlugin } from '../../src/plugin/logger-plugin.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 // Security audit F2 (PR #512): a log call sits on request paths, so metadata the
 // caller cannot read, or a sink that throws, must never become the request's
@@ -146,6 +148,27 @@ describe('log calls never throw to their caller', () => {
         { level: 'info', message: 'hostile', metadata: { metadata: MARKER } },
         { level: 'info', message: 'ordinary', metadata: { password: '[Redacted]', safe: 'ok' } },
       ]);
+    });
+  }
+
+  for (const [shape, metadata] of Object.entries(hostile())) {
+    it(`should drop console child bindings holding ${shape} and keep logging`, () => {
+      const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        const logger = new ConsoleLogger(createFakeRuntime().runtime, { redact: ['**.password'] });
+        const parent = logger.child({ requestId: 'r1' });
+        let child: ILogger | undefined;
+        expect(() => (child = parent.child(metadata()))).not.toThrow();
+        child!.info('after', { password: 'hidden', safe: 'ok' });
+        expect(JSON.parse(String(output.mock.calls[0]![0]))).toMatchObject({
+          msg: 'after',
+          requestId: 'r1',
+          password: '[Redacted]',
+          safe: 'ok',
+        });
+      } finally {
+        output.mockRestore();
+      }
     });
   }
 

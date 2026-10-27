@@ -12,10 +12,13 @@ export interface PathCache<V> {
  * Creates a FIFO cache of at most `maxEntries` paths, each at most `maxKeyLength`
  * UTF-16 units long.
  *
- * The key bound is what bounds memory: field names reaching a logger can come
- * from request bodies, so an entry count alone would let a few hundred
- * megabyte-sized names stay pinned until restart. Longer paths are simply not
- * cached; the caller recomputes them.
+ * The key bound limits what request data can pin: field names reaching a
+ * logger can come from request bodies, so an entry count alone let a few
+ * hundred megabyte-sized names stay pinned until restart. Longer paths are not
+ * cached; the caller recomputes them. It bounds the key's length, not what the
+ * key string retains: a short substring that in-process code slices from a
+ * huge string can keep its parent alive. Paths built from parsed object keys
+ * or template literals are fresh strings and are not affected.
  *
  * @param maxEntries - Entries retained before the oldest is dropped
  * @param maxKeyLength - Longest path that is cached
