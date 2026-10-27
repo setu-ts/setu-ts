@@ -1,0 +1,385 @@
+# Milestone 120 — A production build for generated services (`@setu-ts/cli`)
+
+> **Status:** Planning. Branch: `feat/m120-production-build`. `main` and `develop` are protected —
+> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+
+## 0. Objective & scope
+
+Generated Node services stop running TypeScript through `tsx` in production. The `build` script
+type-checks with `tsc --noEmit`, then a new `setu build` runs `setu check` (M118) and bundles the
+service with esbuild into `dist/`, inlining workspace libraries and keeping every npm package
+external. `npm start` runs the compiled output, and `start:dev` / `start:debug` run the source.
+Every project gets a multi-stage image that ships production dependencies only and serves with a
+read-only root and no network. Bun and Deno keep running their source natively, with production-only
+images and the same `start:dev` / `start:debug` scripts. Closes **V10-54**, **V10-53** and
+**V10-55**.
+
+Decisions taken with the maintainer on 2026-10-27, after comparing current starters:
+
+| Project (read 2026-10-27) | `start`                             | dev / debug                | build                                               |
+| ------------------------- | ----------------------------------- | -------------------------- | --------------------------------------------------- |
+| Hono Node starter         | `node dist/index.js`                | `dev: tsx watch`           | `tsc`                                               |
+| AdonisJS web starter kit  | `node bin/server.js` (build output) | `dev: ace serve --hmr`     | `ace build` (framework CLI)                         |
+| NestJS TypeScript starter | `nest start`, `start:prod: node …`  | `start:dev`, `start:debug` | `nest build` (framework CLI)                        |
+| Nx `@nx/esbuild` executor | —                                   | —                          | bundles local code; third-party external by default |
+
+Taken: the build is framework-owned (`setu build`, like `nest build` / `ace build`, Nx's bundling
+rule); `start` is the compiled command (Hono, AdonisJS); the watch and debug scripts are `start:dev`
+and `start:debug` (NestJS's names — `dev` is already a generated script on full-stack and devtool
+projects).
+
+- **In scope:** `packages/cli` — the `setu build` command; generated scripts and tasks for every
+  Node, Bun and Deno template and workspace member; the workspace dev runner; the workspace and new
+  standalone Dockerfiles and `.dockerignore`; `.gitignore` for `dist/` and `build/`; the migration
+  runner's production command; next-step hints and READMEs; `scripts/check-deploy.ts`'s generated
+  image gate; docs (`docs/deployment.md`, `docs/cli.md`, `docs/upgrading.md`, CLI README,
+  `PUBLIC_API.md` commands, CHANGELOG); ROADMAP and CLAUDE.md status.
+- **NOT this milestone:**
+  - Building or deploying a whole workspace from its root — **M122** (`setu build` at a workspace
+    root refuses and names the member form).
+  - CSS builds — **M123** joins `build` and the image.
+  - Workers — wrangler already bundles at deploy; unchanged.
+  - `bun build` and `deno compile` — documented, not emitted (maintainer decision).
+
+## 1. Contracts verified from SOURCE (not names)
+
+| Reference                                              | Source (file:line)                                                                                       | Verified surface / fact                                                                                                                                                                                                                                            |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| npm scripts                                            | `packages/cli/src/templates/project-files.ts:1615-1639`                                                  | `start: tsx main.ts` (Bun `bun run main.ts`); with an npm build `build: <manifest.npmBuild.script>`, `start: npm run build && tsx main.ts`, `dev` from `npmBuild.devEntry` (`tsx dev.ts`).                                                                         |
+| Test scripts                                           | `project-files.ts:1585-1601`                                                                             | `test`/`test:e2e` under `tsx --test` (Bun `bun test`); with an npm build they run the build first. Unchanged by this milestone.                                                                                                                                    |
+| `NODE_RUNNER`                                          | `project-files.ts:1658`                                                                                  | `'tsx'`; its JSDoc records why strip-types cannot run decorators or parameter properties.                                                                                                                                                                          |
+| Standalone `.gitignore`                                | `project-files.ts:1986-2008`                                                                             | `node_modules/` (non-Deno), `coverage/`, `.wrangler/` (Workers), each `generatedOutputDirs` entry (`build/`, `.react-router/` on full-stack), the env file. No `dist/`.                                                                                            |
+| Workspace root `.gitignore`                            | `packages/cli/src/workspace/root-files.ts:207-217`                                                       | npm/Bun: `node_modules/ apps/*/node_modules/ libs/*/node_modules/ coverage/ .react-router/ .env …`. No `build/` or `dist/` (V10-55).                                                                                                                               |
+| Workspace npm/Bun Dockerfile                           | `packages/cli/src/workspace/compose.ts:262-321`                                                          | One stage on `node:24-alpine` / `oven/bun:1-alpine` (`:80`, `:86`); copies root manifest + lockfile, member manifest, `lib[s]`, installs everything, copies the member, `USER uid:uid`, `CMD ["sh","-c","npx tsx main.ts"]` (Bun `bun run main.ts`).               |
+| Workspace Deno Dockerfile                              | `compose.ts:101-194`                                                                                     | Pinned Deno image, `deno cache`, `CMD ["run","--frozen",…,"main.ts"]` with scoped permissions.                                                                                                                                                                     |
+| Kubernetes `/tmp`                                      | `packages/cli/src/workspace/k8s.ts:199-218`                                                              | `readOnlyRootFilesystem: true` plus an `emptyDir` at `/tmp` (for `tsx`'s cache).                                                                                                                                                                                   |
+| Workspace dev runner                                   | `packages/cli/src/workspace/dev-runner.ts:243`                                                           | npm/Bun runner spawns `<pm> run start` per member; Deno runner `:125-128` runs `start` (or `dev` for the devtool member).                                                                                                                                          |
+| Workspace library                                      | `packages/cli/src/workspace/library.ts:91`, `:114-115`                                                   | `exports: { '.': './src/index.ts' }` (and `main`): libraries ship source, which plain `node` will not load from `node_modules`.                                                                                                                                    |
+| Migration runner                                       | `packages/cli/src/schematics/migration.ts:149-157`                                                       | Run as `npx tsx src/migrations/run.ts` (Node), `bun run …`, `deno run …`; its guard compares `import.meta.url` with `process.argv[1]`, so it works as its own bundle entry.                                                                                        |
+| Full-stack server build path                           | `packages/cli/src/templates/full-stack.ts:109-123`                                                       | Non-Workers arm passes `serverBuildPath: new URL('./build/server/index.js', import.meta.url).href`; the Workers arm passes `serverBuild` (a module) when `createApp`'s third argument carries one. `createApp(env?, devtool?, ssr?)`.                              |
+| `ReactRouterPlugin` build loading                      | `packages/react-router-plugin/src/handler/server-build.ts:141-170`                                       | `serverBuild` (module) skips the path import entirely; otherwise `await import(serverBuildPath)`.                                                                                                                                                                  |
+| Next-step hint / README                                | `packages/cli/src/commands/new.ts:851-852`; `project-files.ts:1964-1965`                                 | Print `npm install && npm start` / `bun run start`.                                                                                                                                                                                                                |
+| Deploy gate                                            | `scripts/check-deploy.ts:652-913`; `.github/workflows/ci.yml` (`check:deploy` step)                      | `--generated` scaffolds a **Deno** workspace, builds `docker/Dockerfile` with `MEMBER`, runs it `--read-only` with no external network until `/health` serves. Runs in CI.                                                                                         |
+| `setu check`                                           | `packages/cli/src/commands/check.ts`, `diagnostics/*` (M118)                                             | `forEachProject`, `diagnoseProject`, `readSilence`, `renderCheckFindings`; ids, `setu.E0xx` errors exit 1.                                                                                                                                                         |
+| CLI dependencies                                       | `packages/cli/package.json`                                                                              | `@setu-ts/common`, `@setu-ts/runtime`, `prettier`, `tsx` (which itself depends on `esbuild ~0.28.0`).                                                                                                                                                              |
+| External: esbuild on a class-based scaffold            | probe 2026-10-27, esbuild 0.28.2, published `0.10.0`                                                     | `esbuild main.ts --bundle --platform=node --format=esm --packages=external --sourcemap` built in 2 ms; `node --enable-source-maps dist/main.js` served `/health` and `/greetings/ada` (TC39 decorators included).                                                  |
+| External: full-stack server build as a module          | probe 2026-10-27                                                                                         | An entry that `import * as serverBuild from './build/server/index.js'` and calls `createApp(undefined, undefined, { serverBuild })`, bundled the same way, served SSR HTML (`<!DOCTYPE html>…app-shell`) and `/health` 200; react-router stays external.           |
+| Members do not declare libraries                       | `packages/cli/src/workspace/library.ts:125-138`                                                          | A library is imported by name and "no member needs an entry for it"; a library declares its own dependencies in `libs/<name>/package.json`, which "do not extend" from the member.                                                                                 |
+| External: npm installs a library's dependencies        | probe, npm 11.19.1                                                                                       | `npm ci --omit=dev --workspace apps/a --workspace libs` installed `a`, its dependency, the library and the library's production dependency — not the library's devDependency, not another member's dependency. With no `libs/` directory the same command exits 0. |
+| External: Bun filtered install does not link libraries | probe, Bun 1.4.2                                                                                         | `bun install --production --frozen-lockfile --filter './apps/a' --filter './libs/*'` installed each package's own dependencies but linked no workspace package where the member could import it (`node_modules/` holds only `.bun/`).                              |
+| DI boot validation (M125)                              | `packages/di-plugin/src/plugin/di-plugin.ts:107-116`; `packages/di-plugin/src/container/errors.ts:39-58` | `DiPlugin` calls `DiContainer.close()` from a bootstrap hook; it throws `ContainerValidationError` listing each `missing`, `cycle` and `captive` path. It needs a running bootstrap.                                                                               |
+| The generated smoke test boots the app                 | `packages/testing/src/test-app.ts:156-190`; `packages/cli/src/templates/project-files.ts:2070-2085`      | `createTestApp` calls `app.start()`; the generated `test/app.test.ts` calls `createTestApp({ app: await createApp() })`, so `npm test` runs bootstrap and therefore DI validation.                                                                                 |
+| External: npm per-member production install            | probe, npm 11.19.1                                                                                       | `npm ci --omit=dev --workspace apps/a` installed only `a` and its production dependency — not its devDependency, not another member's dependency.                                                                                                                  |
+| External: Bun per-member production install            | probe, Bun 1.4.2                                                                                         | `bun install --production --frozen-lockfile --filter a` installed only `a`'s production dependency, into `apps/a/node_modules`.                                                                                                                                    |
+
+## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
+
+| #   | Conflict                                                                                                               | Resolution (picked side)                                                                                                                                                                                                                                                                                                          | Doc deliverable (same PR)                            |
+| --- | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| C1  | ROADMAP decision 2 offers `start` with `start:prod`, or NestJS's `start`/`start:dev`, and names `dev`/`debug` scripts. | `start` = compiled; `start:dev` (watch) and `start:debug` (maintainer decision, §0). There is no `dev` or `debug` script on a non-full-stack project; on full-stack, the Vite `dev` entry is renamed `start:dev`.                                                                                                                 | ROADMAP M120 section corrected; upgrade-guide entry. |
+| C2  | ROADMAP decision 1 leaves the workspace-library build open (tsc project references or an esbuild bundle).              | `setu build` bundles with esbuild and inlines libraries; libraries keep exporting source.                                                                                                                                                                                                                                         | ROADMAP M120 deliverable reworded.                   |
+| C3  | ROADMAP decision 6 (interim `node --import tsx`) applies only "if this milestone is not soon".                         | Superseded: the milestone ships the compiled command. Bun and Deno already run source natively.                                                                                                                                                                                                                                   | ROADMAP M120 section notes it.                       |
+| C4  | ROADMAP gate: images run read-only with no network "for every template × runtime".                                     | The deploy gate runs a Node workspace member (with a library), a Node standalone project and the existing Deno workspace. Bun images and the Deno standalone image are checked as rendered Dockerfiles in unit tests, and Bun is added to the gate if `oven/bun:1-alpine` builds within its time budget. The PR states which ran. | ROADMAP M120 gate line amended.                      |
+
+## 3. Design decisions
+
+### 3.1 `setu build`
+
+- **Decision:** `commands/build.ts`, built-in verb `build`, flags `--dir`, `--dry-run`
+  (`spec('build', ['dir', 'dry-run'], [], { fixed: 1, taken: 0, noun: 'no arguments' })`).
+  1. Scope: a standalone project or a workspace member. At a workspace root it refuses with exit
+     `2`, naming `--dir apps/<member>` (M122 owns root builds). Not a project: the
+     `generate`/`check` message, exit `1`.
+  2. Runtime: Node only (detected with `detectTargetRuntime`). Bun, Deno and Workers refuse with
+     exit `2`, naming what runs instead (`bun run main.ts`, `deno task start`, `wrangler deploy`).
+  3. Gate: runs the same diagnosis `setu check` runs (`diagnoseProject` + `readSilence`, rendered by
+     `renderCheckFindings`). An error finding prints, nothing is built, exit `1`. Warnings print and
+     the build continues.
+  4. Entries: `main.ts`, plus `src/migrations/run.ts` when it exists. `main.dev.ts` is never an
+     entry (M101f).
+  5. Bundle (esbuild JS API): `bundle: true`, `platform: 'node'`, `format: 'esm'`,
+     `target: 'node22'` (the CLI's own engine floor), `sourcemap: true`, `outdir: 'dist'`,
+     `outbase: '.'` (so `dist/main.js` and `dist/src/migrations/run.js`), `logLevel: 'silent'`
+     (errors are rendered by the command).
+  6. External: every dependency name in the project manifest (`dependencies`, `devDependencies`,
+     `peerDependencies`, `optionalDependencies`) and, for a workspace member, in every library
+     manifest under the workspace's `libs/`, minus the libraries' own package names. Members never
+     declare libraries (§1), so a library is bundled because it is not on the list, and its own
+     third-party and framework dependencies stay external rather than being inlined twice. Node
+     builtins are external under `platform: 'node'`. Optional peers stay external, so M113d's
+     guarded `await import()` calls inside framework packages still run.
+  7. Output: `dist/` is removed first only when it is a real directory inside the project
+     (`assertInsideProject`); a symlinked `dist` is refused by name. Prints `built dist/main.js`
+     (and the runner) and exits `0`. A bundle error prints esbuild's messages (file, line, text) and
+     exits `1`.
+  8. `--dry-run` runs the gate and prints the entries, the output paths and the externals, without
+     bundling or writing.
+  9. A runtime import of a development dependency fails the build. From esbuild's metafile, any
+     external import whose package is declared only in `devDependencies` (of the project, or of the
+     library that imports it) is an error naming the package and the importing file, with exit `1`.
+     The production image installs no development dependencies, so this import would otherwise fail
+     only when the container starts.
+- **Why:** framework-owned builds (NestJS, AdonisJS). The externals list must follow the manifest as
+  dependencies change, which a static script line cannot do (§0). A bundle removes the
+  second-tsconfig problem (`nodenext`, `rewriteRelativeImportExtensions`).
+- **Test home:** `test/unit/build-command.test.ts` (scope and runtime refusals, gate on and off,
+  externals computation including libraries and their dependencies, a runtime devDependency import,
+  `--dry-run` writes nothing, symlinked `dist`, esbuild error rendering through an injected
+  bundler); `test/e2e/build-e2e.test.ts` (real esbuild over real scaffolds).
+
+### 3.2 esbuild is a direct `@setu-ts/cli` dependency
+
+- **Decision:** `esbuild` is added to `packages/cli` `dependencies` at the range `tsx` already
+  resolves (`~0.28.0`), imported statically by `commands/build.ts`. It is not lazily loaded: `tsx`
+  already requires it, so every install of the CLI already has it.
+- **Why:** dependency approval is in this plan (maintainer choice, 2026-10-27). A transitive
+  dependency is not a contract.
+- **Test home:** `build-e2e.test.ts` uses the real package; `release:publish --dry-run` checks the
+  packed manifest.
+
+### 3.3 Generated scripts — Node
+
+- **Decision:** for every Node template and workspace member:
+  - `build: tsc --noEmit && setu build`; full-stack:
+    `react-router build && tsc --noEmit && setu build`. esbuild strips types without checking them,
+    so the type check runs first, in the script, where it is visible (maintainer decision,
+    2026-10-27). `setu build` itself never runs `tsc`.
+  - `start: node --enable-source-maps dist/main.js`. It no longer builds first, so full-stack does
+    not rebuild on every start (V10-53's second half).
+  - `start:dev: tsx watch main.ts`; full-stack: `tsx dev.ts` (the existing Vite dev entry, renamed
+    from `dev`).
+  - `start:debug: node --inspect --import tsx main.ts`; full-stack:
+    `node --inspect --import tsx dev.ts`.
+  - `lint`, `format`, `format:check` are unchanged; `check` is unchanged except on full-stack
+    (§3.5). `test` and `test:e2e` are unchanged except on full-stack, where their build prefix
+    becomes `react-router build` instead of `npm run build`: a test run needs the server build, not
+    the bundle, and must not depend on `setu check`.
+- **Why:** §0.
+- **Test home:** `test/unit/project-files-scripts.test.ts` (each template × Node: exact scripts);
+  node-scaffold e2e (§3.11).
+
+### 3.4 Generated scripts — Bun and Deno
+
+- **Decision:** production keeps running source.
+  - Bun: `start: bun run main.ts` (unchanged), `start:dev: bun --watch main.ts`,
+    `start:debug: bun --inspect main.ts`. Full-stack keeps `build: react-router build`, `start`
+    stops building first, and `dev` is renamed `start:dev`.
+  - Deno: `start` unchanged; new tasks `start:dev` (`deno run --watch <same permissions> main.ts`)
+    and `start:debug` (`deno run --inspect <same permissions> main.ts`). The devtool's `dev` task
+    and Deno full-stack's `dev` task are unchanged (Deno tasks are a separate namespace).
+- **Why:** maintainer decision (§0).
+- **Test home:** `project-files-scripts.test.ts`; `deno-tasks.test.ts`.
+
+### 3.5 Full-stack hands its server build to `createApp` as a module
+
+- **Decision:** the full-stack `main.ts` imports `./build/server/index.js` statically and calls
+  `createApp(undefined, undefined, { serverBuild })`, the Workers arm's existing shape. This applies
+  on Node, Bun and Deno, so `main.ts` stays byte-identical across the three, as `docs/cli.md`
+  promises. `setu.config.ts` is unchanged and keeps `serverBuildPath` for callers that pass no
+  module (the generated smoke test). Because `main.ts` now imports build output, each runtime's
+  full-stack `check` builds the frontend first:
+  - Node and Bun: `react-router build && tsc --noEmit && setu check`.
+  - Deno:
+    `deno task build && deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check`.
+
+  This is the Workers precedent from M118.
+
+- **Why:** a bundle moves `import.meta.url` to `dist/main.js`, so the path form would resolve
+  `dist/build/server/index.js`. The probe in §1 shows the module form serves SSR from the bundle.
+- **Test home:** `full-stack-template.test.ts` (one `main.ts` across Node, Bun and Deno);
+  node-scaffold e2e full-stack host builds, starts the compiled output and asserts rendered HTML
+  (the M37c rule: visible content, not a status); the Deno full-stack `check` e2e (M118) still
+  passes.
+
+### 3.6 The workspace dev runner runs `start:dev`
+
+- **Decision:** the npm/Bun runner spawns `<pm> run start:dev`. The Deno runner keeps `start` (Deno
+  `start` still runs source).
+- **Why:** `start` now needs a build, and the root `dev` command is for development.
+- **Test home:** `test/unit/workspace/dev-runner.test.ts`; `dev-runner-e2e.test.ts`.
+
+### 3.7 Images
+
+- **Decision:**
+  - **Node (workspace member and standalone):**
+    - Stage `build`: the pinned Node image; copies manifests and lockfile, the member, and `lib[s]`;
+      `npm ci`; `npm run build` (in a workspace, `--workspace apps/${MEMBER}`). The type check and
+      `setu check` therefore both gate the image.
+    - Stage `runtime`: the same base; copies the root manifest and lockfile, the member manifest and
+      `lib[s]`; `npm ci --omit=dev` (in a workspace, `--workspace apps/${MEMBER} --workspace libs`,
+      so the libraries' own production dependencies are installed — §1); copies `dist/` (and
+      full-stack `build/`) from the build stage; `USER` uid:uid;
+      `CMD ["node","--enable-source-maps","dist/main.js"]`.
+  - **Bun:** stage `build` only for full-stack (`react-router build`). Runtime keeps today's file
+    set and install command with `--production` added, copies the source (and full-stack `build/`),
+    and runs `CMD ["bun","run","main.ts"]`. It does not use `--filter`: a filtered install links no
+    library (§1), so the image would resolve imports differently from development.
+  - **Deno:** the existing workspace Dockerfile shape (`deno cache` at build, `--frozen` scoped
+    run).
+  - **Standalone projects** (Node, Bun, Deno) get a root `Dockerfile` and `.dockerignore` in the
+    same shapes, with the context at the project root and no `MEMBER` argument. Workers gets none.
+  - `.dockerignore` (standalone and workspace root) excludes `node_modules/`, `dist/`, `build/`,
+    `coverage/`, `.git/`, `.env` and `.env.*` (keeping `.env.example`), so neither a local install
+    nor a secret file reaches the image.
+  - The `NPM_CONFIG_REGISTRY` build argument and the M95a / V9-78 properties are kept: numeric user,
+    read-only root, no network at runtime. The Kubernetes `/tmp` `emptyDir` stays: harmless, and Bun
+    and Deno may still use `/tmp`.
+- **Why:** ROADMAP decision 3; the per-member install probes in §1.
+- **Test home:** `test/unit/workspace/compose.test.ts` / `test/unit/dockerfile.test.ts` (rendered
+  shapes for each runtime, workspace and standalone); the deploy gate (§3.11).
+
+### 3.8 `.gitignore`
+
+- **Decision:** a standalone Node project ignores `dist/`; the workspace root template adds
+  `apps/*/dist/` and `apps/*/build/` (npm/Bun) and `apps/*/build/` (Deno). Existing projects get the
+  lines from the upgrade guide; nothing rewrites an existing `.gitignore`.
+- **Why:** V10-55; the M118 rule that nothing rewrites a developer's file.
+- **Test home:** `project-files-scripts.test.ts`; `test/unit/workspace/root-files.test.ts`.
+
+### 3.9 Migration runner
+
+- **Decision:** the Node runner prints and documents `node dist/src/migrations/run.js` for a built
+  project and `npx tsx src/migrations/run.ts` in development. Bun and Deno are unchanged. Its guard
+  already works as a bundle entry (§1).
+- **Why:** ROADMAP decision 4.
+- **Test home:** `schematics/migration.test.ts`; `build-e2e.test.ts` builds a project with a
+  migration and runs the compiled runner's `--help` path (or its no-op path), exit 0.
+
+### 3.10 Hints and READMEs
+
+- **Decision:** the next-step hint becomes `npm install && npm run start:dev` (Bun:
+  `bun install && bun run start:dev`; Deno: `deno task start:dev`). The README lists `start:dev`,
+  `build` then `start`, and the image commands.
+- **Test home:** `new-command.test.ts`; `project-files.test.ts`.
+
+### 3.11 Gates
+
+- **Decision:**
+  - **Node scaffold e2e:** every Node host runs `npm run build`, then `npm start` (compiled), and
+    requests its advertised endpoints. A workspace with a library: the member imports a runtime
+    value from the library, builds, and serves it. A broken seam (an unlisted artifact) makes
+    `npm run build` exit non-zero, name the file, and write no `dist/`; so does a type error, which
+    `tsc --noEmit` reports before `setu build` runs.
+  - **Deploy gate:** `check:deploy --generated` also builds a Node workspace member (with a library)
+    and a standalone Node project with their Dockerfiles, and runs each `--read-only` with no
+    external network until `/health` serves. The existing Deno case stays. Bun is added if
+    `oven/bun:1-alpine` builds in the gate's time budget; otherwise its rendered Dockerfile is
+    covered by unit tests only, and the PR says so.
+- **Why:** the ROADMAP gate; the M63/M95a lesson that generated output is proven only by running it.
+
+### 3.12 What the build checks for DI, and what it does not
+
+- **Decision:** the build checks M125's typed tokens and nothing more. `tsc --noEmit` (§3.3) fails
+  on an `InjectionToken<T>` / `ContainerToken<T>` misuse or a mistyped `resolve`. The container's
+  graph validation (missing provider, cycle, captive dependency) runs only at boot (§1), and
+  `setu build` never boots the app (the M118/M125 boundary). The generated smoke test does boot it,
+  so `npm test` is where a graph error is caught before an image is built. The docs say so in those
+  words: `docs/deployment.md` (before building an image) and `docs/cli.md` (the `setu build`
+  section): "`build` type-checks DI tokens; graph validation happens at boot, so run `npm test`
+  before building an image."
+- **Why:** the maintainer asked whether the build covers M125's checks (2026-10-27). The answer must
+  be in the docs and proven, not assumed.
+- **Test home:** node-scaffold e2e, `class-based` host: after the existing passing `npm test`, add a
+  service `@Injectable()` with `@Inject('m120-missing-token')` to `src/services/`. `npm run build`
+  still succeeds (the type checker cannot see the graph), and `npm test` then exits non-zero with
+  output containing `ContainerValidationError` and `missing:` naming the token. The fresh run is the
+  positive control.
+
+### 3.13 Upgrade path
+
+- **Decision:** `docs/upgrading.md` gives the script, Dockerfile and `.gitignore` changes for
+  existing Node, Bun and Deno projects and workspaces. Nothing rewrites existing scripts.
+- **Test home:** docs gates.
+
+## 4. Exported surface — every symbol names its consumer
+
+**Breaking for implementors:** none in `src/index.ts`. Generated output changes: `npm start` now
+needs a build. Ships in minor 0.11.0, with an upgrade-guide entry.
+
+| Exported symbol                            | Kind      | Consumer / real code path that READS it               |
+| ------------------------------------------ | --------- | ----------------------------------------------------- |
+| (no change to `packages/cli/src/index.ts`) | —         | —                                                     |
+| `setu build` (command)                     | CLI verb  | generated `build` scripts; the images' build stage    |
+| `runBuildCommand` (internal)               | function  | `cli.ts` `case 'build'`                               |
+| `bundleExternals` (internal)               | function  | `runBuildCommand`; unit-tested directly               |
+| `renderDockerfile` variants (internal)     | functions | `workspace/compose.ts`, standalone `project-files.ts` |
+
+### 4.1 Options — every option names its consumer
+
+| Option            | Consumer                         | Behavior (per implementation)            |
+| ----------------- | -------------------------------- | ---------------------------------------- |
+| `build --dir`     | `runBuildCommand` → `resolveDir` | Project to build; default CWD.           |
+| `build --dry-run` | `runBuildCommand`                | Gate and plan only; no bundle, no write. |
+| `build --help`    | `runBuildCommand`                | Usage, exit `0`.                         |
+
+## 5. Implementation files
+
+| File                                          | Purpose                                                                                                                       |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `packages/cli/src/index.ts`                   | Unchanged barrel.                                                                                                             |
+| `packages/cli/src/commands/build.ts`          | `runBuildCommand`, `bundleExternals` (§3.1).                                                                                  |
+| `packages/cli/src/cli.ts`, `src/flags.ts`     | `case 'build'`, `BUILD` spec, help.                                                                                           |
+| `packages/cli/package.json`                   | `esbuild` dependency (§3.2).                                                                                                  |
+| `packages/cli/src/templates/project-files.ts` | Node/Bun scripts, Deno tasks, standalone `.gitignore`, standalone Dockerfile and `.dockerignore`, README, full-stack `check`. |
+| `packages/cli/src/templates/full-stack.ts`    | Full-stack `main.ts` passes `serverBuild` (§3.5); `dev` → `start:dev`.                                                        |
+| `packages/cli/src/workspace/compose.ts`       | Multi-stage npm, Bun and Deno Dockerfiles (§3.7).                                                                             |
+| `packages/cli/src/workspace/root-files.ts`    | Root `.gitignore` (§3.8), README commands.                                                                                    |
+| `packages/cli/src/workspace/dev-runner.ts`    | `start:dev` (§3.6).                                                                                                           |
+| `packages/cli/src/schematics/migration.ts`    | Production runner command (§3.9).                                                                                             |
+| `packages/cli/src/commands/new.ts`            | Next-step hint (§3.10).                                                                                                       |
+| `scripts/check-deploy.ts`                     | Node workspace and standalone image cases (§3.11).                                                                            |
+
+## 6. Test plan (every `src/` file mapped; per-file 90% bar)
+
+| Test file                                                                      | src covered                                             | Key assertions                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/build-command.test.ts` (new)                                        | `commands/build.ts`                                     | §3.1 items 1–8 through an injected bundler and fake fs; externals exclude libraries and include optional peers.                                                                                                                                                                                     |
+| `test/e2e/build-e2e.test.ts` (new)                                             | `commands/build.ts` with real esbuild                   | rest, class-based and full-stack scaffolds build; the compiled output serves; a workspace member inlines a library that has its own third-party dependency, and that dependency stays external; an unlisted artifact fails the build with `setu.E003` and no `dist/`; migration runner entry built. |
+| `test/unit/project-files-scripts.test.ts` (new)                                | `templates/project-files.ts`, `templates/full-stack.ts` | Exact scripts and tasks per template × runtime; `.gitignore` lines; standalone Dockerfile and `.dockerignore` presence and shape.                                                                                                                                                                   |
+| `test/unit/dockerfile.test.ts`, `test/unit/workspace/compose.test.ts` (extend) | `workspace/compose.ts`                                  | Node multi-stage (two `FROM`, `npm ci --omit=dev --workspace`, `CMD node --enable-source-maps dist/main.js`, numeric `USER`); Bun `--production --filter`; Deno unchanged.                                                                                                                          |
+| `test/unit/workspace/root-files.test.ts` (extend)                              | `workspace/root-files.ts`                               | Root `.gitignore` gains `apps/*/dist/`, `apps/*/build/`.                                                                                                                                                                                                                                            |
+| `test/unit/workspace/dev-runner.test.ts` (extend)                              | `workspace/dev-runner.ts`                               | npm/Bun spawn `run start:dev`; Deno unchanged.                                                                                                                                                                                                                                                      |
+| `test/unit/schematics/migration.test.ts` (extend)                              | `schematics/migration.ts`                               | Node prints both commands.                                                                                                                                                                                                                                                                          |
+| `flags.test.ts`, `help.test.ts`, `positional-refusal.test.ts` (extend)         | `flags.ts`, `cli.ts`                                    | `build` inventory, help, `setu build extra` refused.                                                                                                                                                                                                                                                |
+| Existing pins of scripts, Dockerfiles and the template baseline (extend)       | templates                                               | Reviewed edits, never regenerated snapshots.                                                                                                                                                                                                                                                        |
+| `test/e2e/node-scaffold-e2e.test.ts` (extend)                                  | generated output                                        | §3.11 first bullet; §3.12 (a broken DI graph builds, then fails `npm test` naming the token).                                                                                                                                                                                                       |
+| `test/deploy-gate.test.ts` (extend, root tooling)                              | `scripts/check-deploy.ts`                               | New generated cases' command construction; the run itself is CI's `check:deploy`.                                                                                                                                                                                                                   |
+
+## 7. Verification gates
+
+```bash
+git branch --show-current   # MUST be feat/m120-production-build
+pnpm run check:plan
+pnpm run fmt:check
+pnpm run lint
+pnpm run check
+pnpm run check:docs
+pnpm run ci:local          # on the final commit, alone (check for other suites first)
+pnpm run check:deploy      # generated images, read-only, no network
+pnpm run release:publish --dry-run
+pnpm run release:verify 0.10.0
+```
+
+## 8. Risks & mitigations
+
+- **A dependency the code imports is not in the manifest.** esbuild would inline it, or fail to
+  resolve it. → esbuild's resolution error names the specifier, and the image proves the runtime
+  install has it.
+- **CommonJS-only packages imported from ESM output.** They stay external, so Node's own ESM/CJS
+  interop applies, exactly as under `tsx`. → The e2e runs every template compiled.
+- **A user's own `import.meta.url` relative path moves with bundling.** → Documented in
+  `docs/deployment.md` (resolve from `process.cwd()` or pass modules in, as §3.5 does). The
+  generated templates have none left (§1).
+- **A Bun member's library imports.** Bun's default install links a workspace package only into
+  packages that declare it, and members do not declare libraries (§1). Whether a Bun member resolves
+  a library in development today is unverified. → The implementation probes it first. If it does not
+  resolve, that is a defect in merged code outside M120, raised to the maintainer; the Bun image
+  keeps development's resolution in both cases (§3.7).
+- **`npm start` habits.** → The next-step hint, README and upgrade guide all name `start:dev`.
+
+## 9. Out of scope
+
+- Root-level workspace build, test and deploy — M122.
+- CSS and asset builds — M123.
+- `bun build`, `deno compile`, single-executable images — documented only.
+- Minification or comment removal — not wanted (the build-step review, §4).
