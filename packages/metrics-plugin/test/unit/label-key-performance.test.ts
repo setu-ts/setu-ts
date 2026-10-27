@@ -74,4 +74,15 @@ describe('metric label key cache', () => {
       entries.mockRestore();
     }
   });
+
+  it('treats null labels as unlabeled, as before the cache', () => {
+    // `labelKey` once guarded with `!labels`; a JavaScript caller passing null
+    // must still land on the unlabeled series instead of throwing.
+    const metric = new Counter('nullable', { help: 'test', type: 'counter' });
+    const none = null as unknown as Readonly<Record<string, string>>;
+    metric.inc(2, none);
+    metric.inc(1);
+    expect([...metric.values.entries()]).toEqual([['', 3]]);
+    expect(metric.getValue(none)).toBe(3);
+  });
 });

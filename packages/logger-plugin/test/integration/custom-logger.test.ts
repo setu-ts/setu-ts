@@ -155,6 +155,14 @@ describe('custom logger transport', () => {
     );
   });
 
+  it('refuses custom with a null logger at construction, as without one', () => {
+    // A JavaScript caller can pass null; it must not slip past the check and
+    // fail later, on the first log call.
+    expect(() => LoggerPlugin(customOptions({ transport: 'custom', logger: null }))).toThrowError(
+      expect.objectContaining({ name: 'LoggerConfigurationError' }),
+    );
+  });
+
   for (const transport of [undefined, 'console', 'pino', 'noop']) {
     it(`refuses a logger with ${transport ?? 'the default'} transport at construction`, () => {
       expect(() =>

@@ -106,7 +106,8 @@ export abstract class MetricBase implements IMetric {
     labels: Readonly<Record<string, string>> | undefined,
     observed: boolean = false,
   ): string {
-    if (labels === undefined) return '';
+    // `!labels`, not `=== undefined`: a JavaScript caller may pass null.
+    if (!labels) return '';
     const names = Object.keys(labels);
     if (names.length === 0) {
       return '';

@@ -116,7 +116,9 @@ const PLUGIN_NAME = 'logger-plugin';
 export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
   const level = options?.level ?? DEFAULT_LEVEL;
   const transport = options?.transport ?? 'console';
-  if ((transport === 'custom') !== (options?.logger !== undefined)) {
+  // A null logger (from a JavaScript caller) counts as absent, as undefined does.
+  const hasLogger = options?.logger !== undefined && options.logger !== null;
+  if ((transport === 'custom') !== hasLogger) {
     const error = new Error(
       transport === 'custom'
         ? "transport: 'custom' requires logger: ILogger."
