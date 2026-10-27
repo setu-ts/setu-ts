@@ -12401,10 +12401,13 @@ number) and map classifications to a `Redactor`. Matching is case-insensitive by
 `createRedactionService(policy, { caseSensitive: true })` enables case-sensitive matching. When
 patterns overlap, the most specific match wins; equally specific patterns retain declaration order.
 `eraseRedactor` replaces values with `'[Redacted]'`, while `createMaskRedactor({ keep: 4 })`
-preserves a trailing suffix of strings. `redactRecord()` is clone-on-write: it never mutates caller
-metadata, preserves unclassified subtrees by identity, and descends only into plain objects and
-arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
-through their `redaction` option; this is an option-passed pure utility, not a capability token.
+preserves a trailing suffix of strings. `redactRecord()` never mutates caller metadata and descends
+only into plain objects and arrays. Since 0.11.0 it returns a snapshot: each plain object and array
+it walks is read once and copied, unclassified subtrees included, so what a logger serializes is
+exactly what redaction checked (a getter cannot change it afterwards). Earlier versions returned
+unclassified subtrees by identity. The logger, telemetry, and audit plugins accept either a policy
+or an `IRedactionService` through their `redaction` option; this is an option-passed pure utility,
+not a capability token.
 
 `RedactionPolicy` has three members:
 

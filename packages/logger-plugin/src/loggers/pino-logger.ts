@@ -10,7 +10,7 @@
  */
 import type { ILogger, IRedactionService, LogLevel, LogMetadata } from '@setu-ts/common';
 
-import { normalizeMetadata } from './normalize-metadata.ts';
+import { normalizeMetadata, UNSERIALIZABLE_METADATA } from './normalize-metadata.ts';
 
 /**
  * Minimal structural shape of a Pino logger that this wrapper depends on.
@@ -303,8 +303,14 @@ function normalize(
   redaction: IRedactionService | undefined,
 ): unknown {
   if (metadata === undefined) return undefined;
-  const normalized = normalizeMetadata(metadata);
-  return redaction?.redactRecord(normalized) ?? normalized;
+  // Reading the caller's metadata can run its code (a getter, a Proxy). A
+  // throw there must not escape the log call, matching the console transport.
+  try {
+    const normalized = normalizeMetadata(metadata);
+    return redaction?.redactRecord(normalized) ?? normalized;
+  } catch {
+    return { metadata: UNSERIALIZABLE_METADATA };
+  }
 }
 
 /** Normalizes and redacts bindings before Pino retains them outside log calls. */
@@ -312,6 +318,11 @@ function normalizeBindings(
   bindings: LogMetadata,
   redaction: IRedactionService | undefined,
 ): Record<string, unknown> {
-  const normalized = normalizeMetadata(bindings);
-  return redaction?.redactRecord(normalized) ?? normalized;
+  // Bindings that throw while being read are dropped, so `child()` never throws.
+  try {
+    const normalized = normalizeMetadata(bindings);
+    return redaction?.redactRecord(normalized) ?? normalized;
+  } catch {
+    return {};
+  }
 }

@@ -9,7 +9,11 @@ import type { RedactionContext, Redactor } from './redactors.ts';
 export interface IRedactionService {
   /** Redacts a value when its field path is classified. */
   redactValue(path: string, value: unknown): unknown;
-  /** Returns a clone-on-write redacted view of a structured record. */
+  /**
+   * Returns a redacted snapshot of a structured record: every plain object and
+   * array it walks is read once and copied, so the result holds exactly the
+   * values that were checked. The caller's record is never mutated.
+   */
   redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>>;
 }
 
@@ -68,12 +72,16 @@ function redactNode(
   const activeCopy = active.get(direct);
   if (activeCopy !== undefined) return activeCopy;
 
-  const copy: unknown[] | Record<string, unknown> = Array.isArray(direct)
-    ? [...direct]
-    : { ...direct };
+  // One read per property: the copy and the redaction decisions both come from
+  // this snapshot. Reading twice let a getter hand the copy a secret-bearing
+  // object and the traversal a clean one, so the secret was never redacted.
+  const entries: [PropertyKey, unknown][] = Array.isArray(direct)
+    ? [...direct.entries()]
+    : Object.entries(direct);
+  const copy = Array.isArray(direct)
+    ? entries.map(([, child]) => child)
+    : snapshotCopy(direct, entries);
   active.set(direct, copy);
-  const entries = Array.isArray(direct) ? direct.entries() : Object.entries(direct);
-  let changed = false;
   try {
     for (const [key, child] of entries) {
       const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
@@ -84,13 +92,33 @@ function redactNode(
         } else {
           copy[String(key)] = redacted;
         }
-        changed = true;
       }
     }
   } finally {
     active.delete(direct);
   }
-  return changed ? copy : direct;
+  // Always the snapshot, never the caller's object, even when nothing changed:
+  // returning `direct` let the serializer read a getter again after redaction
+  // and write a value redaction never checked (pino's redactor copies too).
+  return copy;
+}
+
+/**
+ * Rebuilds `{ ...value }` from already-read string entries, adding the
+ * enumerable symbol-keyed values a spread would also copy (read once each,
+ * never traversed).
+ */
+function snapshotCopy(
+  value: Record<string, unknown>,
+  entries: readonly [PropertyKey, unknown][],
+): Record<string, unknown> {
+  const copy: Record<PropertyKey, unknown> = Object.fromEntries(entries);
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    if (Object.prototype.propertyIsEnumerable.call(value, symbol)) {
+      copy[symbol] = Reflect.get(value, symbol);
+    }
+  }
+  return copy;
 }
 
 /** Limits structural traversal to arrays and dictionary-like objects. */
