@@ -13,9 +13,10 @@ that mount into the generated files, so a project with a private registry or a s
 `NPMRC="$(cat .npmrc)" docker compose build`) and no Dockerfile edit, while a project without one
 builds exactly as before.
 
-- **In scope:** the secret mount on every package install step of the generated Node, Bun and Deno
-  Dockerfiles (workspace and standalone); the generated workspace `docker/compose.yaml` passing the
-  secret from an environment variable; docs; tests; the deploy gate proving the no-secret build.
+- **In scope:** the one-member Compose fix (§3.6); the secret mount on every package install step of
+  the generated Node, Bun and Deno Dockerfiles (workspace and standalone); the generated workspace
+  `docker/compose.yaml` passing the secret from an environment variable; docs; tests; the deploy
+  gate proving the no-secret build.
 - **NOT this milestone:** Kaniko and Podman verification beyond their documentation (no local
   builder; recorded in §8); a `syntax=` directive (not needed — measured, §1); root workspace builds
   (M122).
@@ -97,6 +98,20 @@ builds exactly as before.
   hand or regenerate); CHANGELOG Unreleased entry.
 - **Why:** C1.
 - **Test home:** `pnpm run check:docs`.
+
+### 3.6 A one-member workspace's Compose file is valid (merged-code defect, folded in)
+
+- **Decision:** a member with no environment variables to render (a one-member workspace on a
+  transport that adds none) gets no `environment:` key in `docker/compose.yaml`; members that have
+  variables are unchanged.
+- **Why:** found while validating §3.2, and reproduced with the M120 CLI (so it predates this
+  milestone): a one-member `http` workspace renders `environment:` with nothing under it, which
+  Compose reads as `null` and refuses — `docker compose config` fails with
+  `services.<member>.environment must be a mapping`, so `docker compose up` cannot run at all. The
+  maintainer asked for the fix here (2026-10-27).
+- **Test home:** `test/unit/workspace/compose.test.ts` (a one-member `http` workspace renders no
+  `environment:` key; a two-member one still renders each sibling's host); by hand,
+  `docker compose config` on a generated one-member workspace succeeds.
 
 ## 4. Exported surface — every symbol names its consumer
 

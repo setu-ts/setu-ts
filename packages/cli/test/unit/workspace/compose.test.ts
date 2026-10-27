@@ -335,6 +335,27 @@ describe('workspaceContainerFiles', () => {
       expect(compose).toContain('/ServiceBus_Emulator/ConfigFiles/Config.json:ro');
     });
 
+    it('renders no environment key for a member with nothing to set (M120b §3.6)', () => {
+      // A bare `environment:` is YAML null, which Compose refuses for the whole file.
+      const one = contentsOf(
+        workspaceContainerFiles(manifestOf([{ name: 'api', port: 3000 }]), transportSpec('http')),
+        COMPOSE_FILE,
+      );
+      // A member's block (the top-level secrets block's `environment: NPMRC` is not one).
+      expect(one).not.toMatch(/^ {4}environment:\n/m);
+      const two = contentsOf(
+        workspaceContainerFiles(
+          manifestOf([
+            { name: 'api', port: 3000 },
+            { name: 'web', port: 3001 },
+          ]),
+          transportSpec('http'),
+        ),
+        COMPOSE_FILE,
+      );
+      expect(two.match(/^ {4}environment:\n {6}\w/gm)).toHaveLength(2);
+    });
+
     it('is empty of members before the first one is added', () => {
       const compose = contentsOf(
         workspaceContainerFiles(manifestOf([]), transportSpec('http')),

@@ -13,8 +13,9 @@ All notable changes to this project are documented here. The format follows
   `/root/.npmrc`, and the generated Compose file passes it from `NPMRC`, so a private registry token
   or npm settings reach the install without entering an image layer. Without the secret, builds are
   unchanged. Generated Dockerfiles now need BuildKit; the deprecated legacy builder refuses
-  `RUN --mount`. See [deployment](docs/deployment.md) and
-  [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+  `RUN --mount`. A one-member workspace's generated `docker/compose.yaml` no longer renders an empty
+  `environment:` key, which Compose refused for the whole file. See [deployment](docs/deployment.md)
+  and [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
 
 - **Production builds (M120, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles one
   Node service, including workspace libraries and migration runners. Runtime npm packages remain

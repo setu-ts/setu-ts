@@ -429,6 +429,12 @@ function memberService(
     .map(([key, value]) => `      ${key}: '${value}'`)
     .join('\n');
 
+  // Only when there is something to set (M120b §3.6): an `environment:` key with
+  // nothing under it is YAML null, and Compose refuses the whole file —
+  // `services.<member>.environment must be a mapping` — which is what a
+  // one-member workspace on a transport adding no variables used to render.
+  const environmentBlock = envLines === '' ? '' : `\n    environment:\n${envLines}`;
+
   const dependsOn = backing?.dependsOn ?? [];
   const dependsBlock =
     dependsOn.length === 0
@@ -450,9 +456,7 @@ ${dependsOn
       secrets:
         - npmrc
     ports:
-      - '${port}:${port}'
-    environment:
-${envLines}${dependsBlock}
+      - '${port}:${port}'${environmentBlock}${dependsBlock}
     # The messaging plugin connects to its broker during plugin registration and
     # does not retry, so a member that loses the race to a backing service whose
     # image cannot be health-probed exits. Compose brings it back until the broker
