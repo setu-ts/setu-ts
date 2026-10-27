@@ -139,8 +139,10 @@ export class CustomLogger implements ILogger {
  */
 function errorName(error: unknown): string {
   try {
-    const name = error instanceof Error ? error.name : typeof error;
-    return /^[A-Za-z_$][\w$]{0,63}$/.test(name) ? name : 'Error';
+    const raw: unknown = error instanceof Error ? error.name : typeof error;
+    // Only a primitive string, never coerced: a `toString` could answer the
+    // check with one value and the template literal with another.
+    return typeof raw === 'string' && /^[A-Za-z_$][\w$]{0,63}$/.test(raw) ? raw : 'Error';
   } catch {
     return 'an unreadable value';
   }

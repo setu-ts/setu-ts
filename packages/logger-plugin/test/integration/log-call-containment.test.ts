@@ -271,6 +271,48 @@ describe('log calls never throw to their caller', () => {
       'an unreadable value',
     ],
     ['a thrown string', 'canary-string', 'string'],
+    // Re-audit N7: a non-string name was converted twice, once for the check
+    // and once for the line, so it could pass as `Ok` and print anything.
+    ...(
+      [
+        [
+          'a toString name that changes',
+          () => {
+            let calls = 0;
+            return {
+              toString: () => (calls++ === 0 ? 'Ok' : '\n{"level":"fatal","msg":"canary-forged"}'),
+            };
+          },
+        ],
+        [
+          'a toPrimitive name that changes',
+          () => {
+            let calls = 0;
+            return { [Symbol.toPrimitive]: () => (calls++ === 0 ? 'Ok' : 'canary-secret\nline') };
+          },
+        ],
+        ['an array name', () => ['canary_array']],
+        [
+          'a toString name that throws on the second call',
+          () => {
+            let calls = 0;
+            return {
+              toString: () => {
+                if (calls++ === 0) return 'Ok';
+                throw new Error('canary-second');
+              },
+            };
+          },
+        ],
+      ] as const
+    ).map(
+      ([name, make]) =>
+        [
+          `${name}`,
+          Object.assign(new Error('x'), { name: make() as unknown as string }),
+          'Error',
+        ] as const,
+    ),
   ] as const) {
     it(`should name only the error class on stderr when the sink throws ${label}`, async () => {
       const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
