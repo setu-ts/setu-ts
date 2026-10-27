@@ -72,14 +72,16 @@ export interface RouteRegistrationEvent {
   readonly middlewareCount: number;
 }
 
-// Hono imports — use LinearRouter (not the default SmartRouter) because the
+// Hono imports — use TrieRouter (not the default SmartRouter) because the
 // kernel's tie-break (§3.6) needs Hono to return EVERY overlapping candidate
 // for a path so it can re-rank them by static-segment count + registration
-// order. LinearRouter matches routes linearly and yields all candidates;
-// it also never raises RegExpRouter's UnsupportedPathError on overlapping
-// param patterns. Extracted params are strings either way.
+// order. TrieRouter yields all candidates and never raises RegExpRouter's
+// UnsupportedPathError on overlapping param patterns, like the LinearRouter
+// M22 chose; unlike it, TrieRouter compiles routes into a tree at registration
+// instead of re-parsing every pattern on every request (13-20% of request CPU
+// on Bun, 2026-10-28). Extracted params are strings either way.
 import { Hono } from 'hono';
-import { LinearRouter } from 'hono/router/linear-router';
+import { TrieRouter } from 'hono/router/trie-router';
 import type { Context as HonoContext, Next as HonoNext } from 'hono';
 
 /**
@@ -145,7 +147,7 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
 export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
-  readonly #hono = new Hono({ strict: false, router: new LinearRouter() });
+  readonly #hono = new Hono({ strict: false, router: new TrieRouter() });
   /** Maps `${method} ${path}` → the kernel's RouteEntry. */
   readonly #entryMap = new Map<string, RouteEntry>();
   readonly #owner: () => string | undefined;
@@ -305,7 +307,14 @@ export class Router implements IRouterApi {
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
     // Each candidate: [[handler, routeInfo], params] where routeInfo = {basePath, path, method}.
-    const honoMatch = this.#hono.router.match(method, path);
+    // `strict: false` is applied by Hono's `fetch` path (getPathNoStrict), which
+    // this direct router call bypasses; LinearRouter happened to accept one
+    // trailing slash, TrieRouter does not. Apply Hono's own rule here: drop one
+    // trailing slash from any path longer than the root.
+    const honoMatch = this.#hono.router.match(
+      method,
+      path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : path,
+    );
 
     // Extract candidates from honoMatch[0].
     type HonoCandidate = [
