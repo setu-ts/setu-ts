@@ -8,7 +8,8 @@ import * as nodeFs from 'node:fs/promises';
  * M119c's reviewed Node test-runner flag and `swagger-ui-dist` pin, and
  * M119h's reviewed Workers test lane (V10-23), M118's reviewed manifest
  * check tasks and CLI devDependency, and M120's reviewed production scripts,
- * README sections, `.gitignore` line and new `Dockerfile`/`.dockerignore`:
+ * README sections, `.gitignore` line and new `Dockerfile`/`.dockerignore`, and M120b's
+ * reviewed build-secret mount on every Dockerfile install step:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

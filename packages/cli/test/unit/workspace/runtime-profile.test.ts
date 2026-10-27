@@ -223,8 +223,9 @@ describe('what an npm workspace renders', () => {
     // dependencies through the root manifest and lockfile.
     expect(dockerfile).toContain('npm ci');
     expect(dockerfile).toContain('COPY package.json');
-    // No registry mapping is copied: the framework installs from npm.
-    expect(dockerfile).not.toContain('.npmrc');
+    // No registry mapping is copied: the framework installs from npm. (A private
+    // registry's .npmrc reaches the install only as the M120b build secret.)
+    expect(dockerfile).not.toMatch(/^COPY[^\n]*\.npmrc/m);
     // Shared libraries BEFORE the install, not after: a member that depends on one
     // is linked by the install itself, so a library arriving later is a dependency
     // the install could not resolve.

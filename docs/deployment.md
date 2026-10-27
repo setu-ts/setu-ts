@@ -510,10 +510,14 @@ packaging choices, not generated commands. Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
 dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
-private registry's token, or a setting such as `legacy-peer-deps` — mount it as a build secret for
-that install only, as npm's own Docker guide does: change the install line to
-`RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci` and build with
-`docker build --secret id=npmrc,src=.npmrc …`. The file then never reaches a layer. A Bun
+private registry's token, or a setting such as `legacy-peer-deps` — pass it as a build secret. Every
+generated install step (Node and Bun `npm ci` / `bun install`, Deno's frontend build and install)
+already mounts the optional secret `npmrc` at `/root/.npmrc`, as npm's own Docker guide does:
+`docker build --secret id=npmrc,src=.npmrc …`, or through the generated Compose file,
+`NPMRC="$(cat .npmrc)" docker compose -f docker/compose.yaml up --build`. The secret exists only for
+that step, so it never reaches a layer, the history or the cache; without one the install runs as
+before. The mount needs BuildKit, Docker's default builder; the deprecated legacy builder
+(`DOCKER_BUILDKIT=0`) refuses it, and Podman/Buildah document the same `--secret` form. A Bun
 `bunfig.toml` is copied into the image, so it must name tokens through environment variables. Images
 run as numeric UID 1000. The generated-deploy gate exercises the Deno workspace (with a library
 under a root `nodeModulesDir: "auto"`), the Node workspace/library and standalone images, and a Bun

@@ -52,6 +52,14 @@ after installing (under `"auto"` a read-only container cannot start). Copy the g
 .env.example. Workspace images use the root context and MEMBER build argument. See
 [deployment](./deployment.md).
 
+Generated install steps mount an optional build secret `npmrc` at `/root/.npmrc` (M120b), so
+`docker build --secret id=npmrc,src=.npmrc …` or `NPMRC="$(cat .npmrc)" docker compose … up --build`
+supplies a private registry token or npm settings without copying `.npmrc` into the image. An
+existing project gets this by regenerating its Dockerfile and Compose file, or by adding
+`--mount=type=secret,id=npmrc,target=/root/.npmrc` after `RUN` on each install line and a
+`secrets: [npmrc]` build entry with a top-level `secrets: { npmrc: { environment: NPMRC } }`. The
+mount needs BuildKit.
+
 Bun workspace roots need bunfig.toml containing:
 
 ```toml

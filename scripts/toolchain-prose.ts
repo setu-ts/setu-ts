@@ -52,6 +52,11 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Generated Deno application build and task instructions.',
     },
     {
+      path: 'packages/cli/test/unit/workspace/compose.test.ts',
+      category: 'deno-target',
+      reason: 'Generated Deno application build and task instructions.',
+    },
+    {
       path: 'packages/cli/test/unit/project-files-scripts.test.ts',
       category: 'deno-target',
       reason: 'Asserts supported Deno application development and build tasks.',
