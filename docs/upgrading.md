@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### Production builds and Bun library resolution (M120)
+### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
 
 Update existing Node scripts explicitly; the CLI does not rewrite scripts:
 

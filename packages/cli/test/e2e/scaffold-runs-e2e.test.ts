@@ -66,6 +66,10 @@ for (const template of ['rest', 'class-based'] as const) {
       try {
         const installed = await npmInstall(project, overlay);
         expect(installed.code, installed.output).toBe(0);
+        // M120: `npm start` runs the compiled bundle, so build first — which also
+        // proves the pino logger works from the bundle (pino stays external).
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
         const result = await withNodeServer(project, async (origin, output) => {
           const response = await fetch(`${origin}/greetings/log-probe`);
           await response.body?.cancel();

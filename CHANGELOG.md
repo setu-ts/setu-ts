@@ -19,7 +19,7 @@ All notable changes to this project are documented here. The format follows
   library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
   `"manual"`). Generated `.dockerignore` files exclude `.npmrc`. Every CLI command now refuses a
   manifest that is itself a symbolic link (naming the link) instead of reading through it. See
-  [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
 - **Custom logger transport (#512, 0.11.0, `@setu-ts/logger-plugin`).**
   `LoggerPlugin({ transport: 'custom', logger })` wraps an application `ILogger` with level
   filtering, metadata redaction, request logging and trace correlation. Logger/transport mismatches
