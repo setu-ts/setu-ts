@@ -120,7 +120,10 @@ via plugins.
 
 As of Milestone 22, Hono is used as the **internal routing engine** inside the kernel `Router`
 class. Route matching is delegated to a `new Hono({ strict: false })` instance constructed with
-Hono's `LinearRouter`; the kernel's custom `(ctx, next)` middleware pipeline runs **inside** the
+Hono's `TrieRouter` (M22 chose `LinearRouter`; `TrieRouter` replaced it in 0.11.0 because it returns
+the same full candidate set without re-parsing every pattern per request). The kernel calls the
+router directly, so it applies Hono's `strict: false` rule itself, dropping one trailing slash from
+any path longer than `/`. The kernel's custom `(ctx, next)` middleware pipeline runs **inside** the
 Hono dispatch, and the application's `#handleRequest` method calls `router.match()` which maps
 Hono's matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map
 so `getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own
@@ -2874,7 +2877,7 @@ The framework minimizes object allocations:
 
 - Request context is reused where possible (pooled in high-throughput scenarios).
 - Middleware chain is pre-compiled, not rebuilt per request.
-- Route matching uses Hono's LinearRouter with candidate ranking.
+- Route matching uses Hono's TrieRouter, compiled once at registration, with candidate ranking.
 - Service instances are cached (singleton scope by default).
 
 ### Lazy Loading

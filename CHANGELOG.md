@@ -331,6 +331,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Route matching with Hono's `TrieRouter` (0.11.0, `@setu-ts/kernel`).** The kernel now matches
+  routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route pattern on
+  every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full candidate set and
+  never throws on overlapping parameter patterns, so the kernel's static-over-parameter and
+  registration-order tie-break is unchanged. `strict: false` trailing-slash matching is unchanged
+  too: the kernel now applies Hono's rule (drop one trailing slash) itself. Measured on Bun: the
+  bare kernel matched faster in five of six alternating passes.
+
 - **Logging and metrics hot paths (#512, 0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
   `@setu-ts/metrics-plugin`).** Compile literal and suffix field matchers and specificity once,
   bound matcher path results to 1,024 entries per instance, and memoize recursive wildcard states
