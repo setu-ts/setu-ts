@@ -15,7 +15,8 @@ All notable changes to this project are documented here. The format follows
   unchanged. Generated Dockerfiles now need BuildKit; the deprecated legacy builder refuses
   `RUN --mount`. A one-member workspace's generated `docker/compose.yaml` no longer renders an empty
   `environment:` key, which Compose refused for the whole file. See [deployment](docs/deployment.md)
-  and [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
+  and
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
 
 - **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
   one Node service, including workspace libraries and migration runners. Runtime npm packages remain
