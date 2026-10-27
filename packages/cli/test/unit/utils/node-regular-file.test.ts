@@ -81,7 +81,7 @@ describe('Node bounded reader', () => {
       const read = vi.spyOn(prototype, 'read');
       try {
         await expect(readRegularFile(path, MAX_EXISTING_FILE_BYTES)).rejects.toThrow(
-          'expected a regular file at most 1 MiB',
+          'is a symbolic link; Setu does not read through links',
         );
         expect(read).not.toHaveBeenCalled();
       } finally {

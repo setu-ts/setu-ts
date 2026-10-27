@@ -86,6 +86,7 @@ for (const host of [
         '**/.env',
         '**/.env.*',
         '!**/.env.example',
+        '**/.npmrc',
       ])
         expect(ignored).toContain(pattern);
     });

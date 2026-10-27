@@ -198,6 +198,8 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('\n**/.env\n');
       expect(contents).toContain('**/.env.*');
       expect(contents).toContain('!**/.env.example');
+      // M120 audit F2: registry credentials never reach the context.
+      expect(contents).toContain('\n**/.npmrc\n');
       // The limit is stated, not implied: the rules cover .env and .env.* only,
       // and a custom --env-file name must be added by hand (F2).
       expect(contents).toContain('Dotenv files whose names are .env or .env.*');

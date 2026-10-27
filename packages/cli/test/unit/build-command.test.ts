@@ -181,7 +181,11 @@ it('reports esbuild locations, plain failures and filesystem failures', async ()
 
 it('rejects a runtime import of a devDependency before writing any output', async () => {
   const h = harness(
-    { '/app/package.json': '{"devDependencies":{"dev-only":"*"}}' },
+    {
+      '/app/package.json': '{"devDependencies":{"dev-only":"*"}}',
+      // The previous good build (M120 audit F5): a refusal must leave it in place.
+      '/app/dist/main.js': 'previous build',
+    },
     {
       inputs: {
         'main.ts': {
@@ -192,13 +196,23 @@ it('rejects a runtime import of a devDependency before writing any output', asyn
       outputs: {},
     },
   );
+  const remove = vi.spyOn(h.fs, 'rm');
   expect(await h.run()).toBe(1);
   expect(h.error.text()).toContain('main.ts: runtime import of devDependency "dev-only"');
   expect(h.fs.writes).toEqual([]);
+  expect(remove).not.toHaveBeenCalled();
 });
 
 it('uses the importing library manifest for development imports and production exceptions', async () => {
-  for (const production of [false, true]) {
+  // M120 audit F7: only what `npm ci --omit=dev` installs counts as production. A
+  // package in devDependencies AND peerDependencies is omitted there, so it is
+  // refused like a plain devDependency; dependencies/optionalDependencies clear it.
+  for (const [also, production] of [
+    [undefined, false],
+    ['peerDependencies', false],
+    ['dependencies', true],
+    ['optionalDependencies', true],
+  ] as const) {
     const h = harness(
       {
         '/ws/setu.workspace.json': '{}',
@@ -207,7 +221,7 @@ it('uses the importing library manifest for development imports and production e
         '/ws/libs/shared/package.json': JSON.stringify({
           name: '@ws/shared',
           devDependencies: { '@third/peer': '*' },
-          ...(production ? { peerDependencies: { '@third/peer': '*' } } : {}),
+          ...(also === undefined ? {} : { [also]: { '@third/peer': '*' } }),
         }),
         '/ws/libs/readme': 'ignored',
         '/ws/libs/empty/file': '',

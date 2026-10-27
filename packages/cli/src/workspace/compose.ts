@@ -291,6 +291,14 @@ export function renderDockerignore(): string {
     '**/.env',
     '**/.env.*',
     '!**/.env.example',
+    // Registry credentials never reach an image either (M120 audit F2): Bun and
+    // Deno images copy source, so a member's .npmrc would ship. A private
+    // registry's token belongs in a build secret
+    // (`RUN --mount=type=secret,id=npmrc,target=/root/.npmrc`), as Docker
+    // recommends. bunfig.toml is copied (its linker setting is needed), so it
+    // must name tokens through environment variables, never literally.
+    '# Registry credentials: pass a private registry token as a build secret.',
+    '**/.npmrc',
     // The Dockerfile itself is passed with -f and read from the client, so
     // ignoring the directory costs nothing and keeps k8s/ and docker/ out of the
     // image.

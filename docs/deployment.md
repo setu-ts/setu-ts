@@ -509,11 +509,13 @@ own client bundle from `build/client/assets`. Native bun build and deno compile 
 packaging choices, not generated commands. Workers continues using Wrangler.
 
 Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
-dotenv files, preserving .env.example. Images run as numeric UID 1000. The generated-deploy gate
-exercises the Deno workspace (with a library under a root `nodeModulesDir: "auto"`), the Node
-workspace/library and standalone images, and a Bun workspace member importing a library, read-only
-with no external network. Full-stack images and the standalone Deno image have rendered shapes
-unit-tested; the gate does not build them.
+dotenv files, preserving .env.example, and every `.npmrc`. A private registry's token belongs in a
+build secret (`RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci`), never in the context;
+a Bun `bunfig.toml` is copied into the image, so it must name tokens through environment variables.
+Images run as numeric UID 1000. The generated-deploy gate exercises the Deno workspace (with a
+library under a root `nodeModulesDir: "auto"`), the Node workspace/library and standalone images,
+and a Bun workspace member importing a library, read-only with no external network. Full-stack
+images and the standalone Deno image have rendered shapes unit-tested; the gate does not build them.
 
 The generated workspace Dockerfile uses node:24-alpine, selects a member with ARG MEMBER and starts
 with node --enable-source-maps dist/main.js from /srv/apps/${MEMBER}. Build with the workspace root

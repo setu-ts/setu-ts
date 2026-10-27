@@ -103,8 +103,11 @@ function developmentImports(
     const owner =
       libraries.find((library) => absolute.startsWith(`${library.dir}/`))?.manifest ?? project;
     const dev = record(owner['devDependencies']);
+    // Only what `npm ci --omit=dev` installs counts as production: a package in
+    // both devDependencies and peerDependencies is omitted (measured, npm 11.19.1;
+    // M120 audit F7), so a peer listing does not clear a dev one.
     const production = new Set(
-      ['dependencies', 'peerDependencies', 'optionalDependencies'].flatMap((field) =>
+      ['dependencies', 'optionalDependencies'].flatMap((field) =>
         Object.keys(record(owner[field])),
       ),
     );
@@ -174,11 +177,11 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
     }
     const dist = joinPath(dir, 'dist');
     await assertInsideProject(deps.fs, dir, dist);
-    if (await exists(deps.fs, dist)) {
-      if (!(await deps.fs.stat(dist)).isDirectory)
-        throw new Error(`${dist} is not a real directory.`);
-      await deps.fs.rm(dist, { recursive: true });
-    }
+    if ((await exists(deps.fs, dist)) && !(await deps.fs.stat(dist)).isDirectory)
+      throw new Error(`${dist} is not a real directory.`);
+    // Bundled in memory (`write: false`) and gated BEFORE the previous dist/ is
+    // touched, so a refused or failed build leaves the last good output in place
+    // — Vite's emptyOutDir empties on write the same way (M120 audit F5).
     const result = await (deps.bundle ?? build)({
       absWorkingDir: dir,
       entryPoints: entries,
@@ -199,6 +202,7 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
       for (const error of errors) deps.error(escapeTerminalControls(error));
       return EXIT_ERROR;
     }
+    if (await exists(deps.fs, dist)) await deps.fs.rm(dist, { recursive: true });
     for (const file of result.outputFiles!) {
       await assertInsideProject(deps.fs, dir, file.path);
       await deps.fs.mkdir(resolveDir(file.path, '..'), { recursive: true });

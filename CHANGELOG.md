@@ -17,7 +17,9 @@ All notable changes to this project are documented here. The format follows
   shared libraries; library generation safely plans the setting for older workspaces. Deno images
   build a full-stack frontend on a glibc stage, and a Deno workspace with a full-stack member and a
   library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
-  `"manual"`). See [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+  `"manual"`). Generated `.dockerignore` files exclude `.npmrc`. Every CLI command now refuses a
+  manifest that is itself a symbolic link (naming the link) instead of reading through it. See
+  [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
 
 - **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
   `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
