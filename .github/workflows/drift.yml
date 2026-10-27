@@ -207,6 +207,12 @@ jobs:
           # does. The fetch happens during checkout, while the credential is
           # still held, so dropping it above costs nothing here.
           fetch-depth: 0
+          # Every run, scheduled or manual, tests `develop`: drift is a question
+          # about what is being built next. Without this ref a scheduled run
+          # would check out the default branch, `main`, which holds only the last
+          # release; that is how issue #507 reported a test race develop had
+          # already fixed (6c299f67).
+          ref: develop
 
       # Deno is a subject here, as in ci.yml: the SDK fixtures' `deno fmt`, the
       # CLI e2e suites' Deno-target scaffolds, and the Deno runtime lane.
