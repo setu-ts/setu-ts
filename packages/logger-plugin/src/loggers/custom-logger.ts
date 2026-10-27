@@ -1,6 +1,5 @@
 /** Internal adapter applying framework logging policy before a custom sink. */
 import type { ILogger, IRedactionService, LogLevel, LogMetadata } from '@setu-ts/common';
-import { describeError } from '@setu-ts/common';
 import { normalizeMetadata, UNSERIALIZABLE_METADATA } from './normalize-metadata.ts';
 
 const LEVEL_RANK: Readonly<Record<LogLevel, number>> = Object.freeze({
@@ -114,9 +113,10 @@ export class CustomLogger implements ILogger {
 
   /**
    * Writes ONE line to stderr the first time the sink throws, for this root and
-   * all its children: the sink is the application's only log output, so a
-   * silent drop would hide a broken logger from every monitor. Later failures
-   * stay silent, so a sink that is down cannot flood stderr once per record.
+   * all its children, naming only the error's class. The sink is the
+   * application's only log output, so a silent drop would hide a broken logger
+   * from every monitor; later failures stay silent, so a sink that is down
+   * cannot flood stderr once per record.
    */
   #reportSinkFailure(error: unknown): void {
     if (this.#sinkFailure.reported) return;
@@ -124,10 +124,24 @@ export class CustomLogger implements ILogger {
     try {
       // eslint-disable-next-line no-console -- the application's logger is the thing that failed
       console.error(
-        `[@setu-ts/logger-plugin] custom logger sink threw; records it rejects are dropped (reported once): ${describeError(error)}`,
+        `[@setu-ts/logger-plugin] custom logger sink threw ${errorName(error)}; records it rejects are dropped (reported once)`,
       );
     } catch {
       // stderr itself is unavailable; nothing further can report it.
     }
+  }
+}
+
+/**
+ * The thrown value's class name, and nothing else: stderr bypasses redaction,
+ * and a sink's error message or cause chain is application data (a connection
+ * string, the rejected record). Read guarded, and only an identifier is kept.
+ */
+function errorName(error: unknown): string {
+  try {
+    const name = error instanceof Error ? error.name : typeof error;
+    return /^[A-Za-z_$][\w$]{0,63}$/.test(name) ? name : 'Error';
+  } catch {
+    return 'an unreadable value';
   }
 }

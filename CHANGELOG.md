@@ -325,9 +325,9 @@ All notable changes to this project are documented here. The format follows
   could put a secret redaction never checked into the output. Log calls and `child()` no longer
   throw on any transport: metadata that throws while being read is replaced by
   `[unserializable metadata]`, such bindings are dropped, and a custom sink that throws loses that
-  record instead of failing the request, and its first failure is reported once on stderr.
-  `ConsoleLogger`'s constructor is back to `(runtime, options?)`, and metric label values are read
-  once per observation.
+  record instead of failing the request, and its first failure is reported once on stderr, by error
+  class only. `ConsoleLogger`'s constructor is back to `(runtime, options?)`, and metric label
+  values are read once per observation, for both the series key and the stored labels.
 
 ### Fixed
 

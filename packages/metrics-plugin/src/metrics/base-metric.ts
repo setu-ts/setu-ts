@@ -96,6 +96,21 @@ export abstract class MetricBase implements IMetric {
   }
 
   /**
+   * Copies the caller's labels once per observation. Validation, the series key
+   * and the stored labels all read this copy, so an accessor returning a
+   * different value on each read cannot file a series under one label set and
+   * export it under another.
+   *
+   * @param labels - The caller's labels
+   * @returns A private copy, or `undefined` when unlabeled (null included)
+   */
+  protected snapshotLabels(
+    labels: Readonly<Record<string, string>> | undefined,
+  ): Readonly<Record<string, string>> | undefined {
+    return labels ? { ...labels } : undefined;
+  }
+
+  /**
    * Creates a deterministic key from labels for storage/retrieval.
    *
    * @param labels - The labels to key by

@@ -232,8 +232,12 @@ describe('log calls never throw to their caller', () => {
         expect.stringContaining('custom logger sink threw') as unknown as string,
         expect.stringContaining('custom logger sink threw') as unknown as string,
       ]);
-      expect(String(stderr.mock.calls[0]![0])).toContain('sink down');
-      expect(String(stderr.mock.calls[1]![0])).toContain('sink child down');
+      // Only the class is named; the sink's own messages stay out of stderr.
+      for (const call of stderr.mock.calls) {
+        expect(String(call[0])).toContain('custom logger sink threw Error;');
+        expect(String(call[0])).not.toContain('sink down');
+        expect(String(call[0])).not.toContain('sink child down');
+      }
       expect(healthy.calls).toHaveLength(5);
       expect(failingChild.calls).toHaveLength(5);
     } finally {
@@ -243,6 +247,55 @@ describe('log calls never throw to their caller', () => {
       await third.stop();
     }
   });
+
+  for (const [label, thrown, expected] of [
+    [
+      'a secret message and cause',
+      Object.assign(new TypeError('postgres://user:canary-pw@db'), {
+        cause: new Error('canary-cause'),
+      }),
+      'TypeError',
+    ],
+    [
+      'a forged multi-line name',
+      Object.assign(new Error('x'), { name: 'Error\n[fake] line' }),
+      'Error',
+    ],
+    [
+      'a name getter that throws',
+      Object.defineProperty(new Error('x'), 'name', {
+        get() {
+          throw new Error('canary-getter');
+        },
+      }),
+      'an unreadable value',
+    ],
+    ['a thrown string', 'canary-string', 'string'],
+  ] as const) {
+    it(`should name only the error class on stderr when the sink throws ${label}`, async () => {
+      const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const sink = recordingSink();
+      const throwing: ILogger = {
+        ...sink.logger,
+        info: () => {
+          throw thrown;
+        },
+      };
+      const { logger, stop } = await customLogger(throwing);
+      try {
+        logger.info('dropped', { safe: 'ok' });
+        expect(stderr).toHaveBeenCalledTimes(1);
+        const line = String(stderr.mock.calls[0]![0]);
+        expect(line).toBe(
+          `[@setu-ts/logger-plugin] custom logger sink threw ${expected}; records it rejects are dropped (reported once)`,
+        );
+        expect(line).not.toContain('canary');
+      } finally {
+        stderr.mockRestore();
+        await stop();
+      }
+    });
+  }
 
   it('should not throw when stderr itself fails while reporting the sink', async () => {
     const stderr = vi.spyOn(console, 'error').mockImplementation(() => {

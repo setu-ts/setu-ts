@@ -108,4 +108,41 @@ describe('metric label key cache', () => {
       expect(metric.values.get(keyOf(other))).toBe(before.get(keyOf(other)));
     }
   });
+
+  it('should store the same label values it keyed the series by', () => {
+    // CodeRabbit on #513 (the audit's N3): the stored labels were a second
+    // read, so a flipping getter exported a series whose labels named another.
+    const flipping = () => {
+      let reads = 0;
+      return Object.defineProperty({}, 'route', {
+        enumerable: true,
+        get: () => (reads++ % 2 === 0 ? '/a' : '/b'),
+      }) as Readonly<Record<string, string>>;
+    };
+    const counter = new Counter('c', { help: 'test', type: 'counter', labels: ['route'] });
+    const gauge = new Gauge('g', { help: 'test', type: 'gauge', labels: ['route'] });
+    for (let index = 0; index < 3; index++) {
+      counter.inc(1, flipping());
+      gauge.set(1, flipping());
+      gauge.inc(1, flipping());
+      gauge.dec(1, flipping());
+    }
+    const histogram = new Histogram('h', { help: 'test', type: 'histogram', labels: ['route'] });
+    const summary = new Summary('s', { help: 'test', type: 'summary', labels: ['route'] });
+    for (let index = 0; index < 3; index++) {
+      histogram.observe(1, flipping());
+      summary.observe(1, flipping());
+    }
+    for (const entries of [
+      counter.valueEntries,
+      gauge.valueEntries,
+      histogram.getAllBucketCounts(),
+      summary.getAllQuantiles(),
+    ]) {
+      expect(entries.size).toBeGreaterThan(0);
+      for (const [key, entry] of entries) {
+        expect(JSON.stringify(Object.entries(entry.labels!).sort())).toBe(key);
+      }
+    }
+  });
 });
