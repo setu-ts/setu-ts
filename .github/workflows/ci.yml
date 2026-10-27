@@ -645,6 +645,12 @@ jobs:
         with:
           deno-version: 2.9.6
 
+      # M120: the generated gate also installs a Bun workspace's lockfile on the
+      # host before building its image.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       # Docker is preinstalled on ubuntu-latest; kind, kubectl and helm are not.
       - uses: helm/kind-action@v1
         with:
