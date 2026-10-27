@@ -15878,109 +15878,184 @@ request scope in use, decorators lowered by whatever M120 bundles with.
 
 ## Milestone 126: A Local Diagnostics Listener on Node
 
-**Package(s):** `packages/runtime` (the listener), `packages/cli` (the devtool opt-in and the
-generated development entry on a Node target); docs. `packages/common` does not change: the
-`ILocalDiagnosticsListenerFactory` contract is already runtime-neutral, and it already says that a
-runtime without a supported transport refuses before binding.
+**Package(s):** `packages/runtime` (the listener), `packages/cli` (the devtool opt-in, the
+development entry and the workspace runner on a Node target), `scripts/` (test lanes and the
+consumer exercise); docs. `packages/common` and `packages/diagnostics-plugin` source do not change:
+the `ILocalDiagnosticsListenerFactory` contract is runtime-neutral, and it already says that a
+runtime with no supported transport refuses before it binds. The connector, its `Host` check and the
+native client contain no Deno API (checked: no `Deno` reference in `diagnostics-plugin/src`).
 
 **Source:** the maintainer's direction (2026-10-28), from refreshing the devtool roadmap against
-`v0.10.0`. Since M111d, Node has been the default target, so a stock `setu new` project is a Node
-project. The local diagnostics listener (M98b) binds only on Deno, and the devtool opt-in (M98c)
-refuses every other runtime. As a result, the separately maintained devtool cannot inspect a project
-generated with the defaults. This is the only framework prerequisite for widening the devtool's
-support matrix beyond Deno.
+`v0.10.0`. Since M111d, Node has been the default target. The default `setu new` template is the
+plugin-list minimal host, which the devtool opt-in accepts, so a default project is a Node project
+the opt-in would otherwise accept. The local diagnostics listener (M98b) binds only on Deno, and
+M98c refuses every other runtime. The separately maintained devtool therefore cannot inspect a
+project generated with the defaults. This milestone is the only framework prerequisite for widening
+the devtool's support matrix beyond Deno.
 
 **Where things stand (checked against source, 2026-10-28):**
 
-1. **The listener refuses on Node before binding.** `createLocalDiagnosticsListenerFactory` returns
+1. **The listener refuses on Node before it binds.** `createLocalDiagnosticsListenerFactory` returns
    the refusing factory for every platform except `deno`
    (`runtime/src/diagnostics/local-diagnostics-listener.ts:305`). Its fixed error names Deno as the
-   only supported runtime (`:45`). The RuntimePlugin builds the factory once and registers its
+   only supported runtime (`:45`). The RuntimePlugin builds the factory once and registers
    `closeActive()` on the close hook (`runtime/src/plugin/runtime-plugin.ts:248-256`). A Node
-   factory plugs into that same seam unchanged.
-2. **The framing policy can be enforced more strictly on Node than on Deno.** On Deno, duplicate
-   singleton header lines can be detected only by looking for a comma in the coalesced `Headers`
-   value (`SINGLETON_HEADER_NAMES`, `nativeFramingRefusal` at `:127`), because Deno does not expose
-   the raw header lines. Node exposes them as `IncomingMessage.rawHeaders`, and `@hono/node-server`
-   passes `incoming` through to the fetch callback
-   (`runtime/src/adapters/node/node-http-adapter.ts`, `NodeServeHost`).
-3. **The CLI refuses non-Deno targets at all three entry points.** `devtoolRuntimeRefusal`
-   (`cli/src/devtool/planner.ts:255`) refuses `setu new --devtool`, `setu generate app --devtool`
-   and `setu devtool enable` on any target other than Deno. `devtool enable` writes only into a
-   `deno.json` (`readWritableDenoManifest`), and it imports the plugin through the Deno specifier
-   (`cli/src/commands/devtool.ts:91`).
-4. **A Node project runs TypeScript under `tsx`** (`cli/src/templates/project-files.ts:1662`). tsx's
-   CLI (4.23.15) runs the script in a child `process.execPath`. The application is therefore one
-   process below whatever the launcher spawns. This matters for the devtool's process ownership and
-   teardown, and the plan states it in the protocol documentation that the devtool consumes.
+   factory plugs into that seam unchanged.
+2. **`@hono/node-server`'s `serve()` cannot host this listener as it stands** (2.1.5, read from
+   `dist/index.mjs`):
+   - It answers a missing `Host`, an invalid `Host` or an invalid URL with its own
+     `new Response(null, { status: 400 })`, before the fetch callback runs. That is not the
+     protocol's fixed refusal.
+   - When a response fails, it writes `Error: ${err.message}` to the client.
+   - `serve()` returns the server synchronously and listens without an `'error'` listener. A port
+     conflict is therefore an uncaught `'error'` event, not a rejected `listen()`. The adapter's
+     `await host.serve(...)` (`node-http-adapter.ts:549`) awaits nothing.
+   - `getRequestListener` does accept an `errorHandler`, but `serve()` never passes one through.
+3. **Node exposes what Deno hides.** On Deno, duplicate singleton header lines can be detected only
+   by looking for a comma in the coalesced value (`SINGLETON_HEADER_NAMES`, `nativeFramingRefusal`
+   at `:127`). Node gives the real line multiplicity in `IncomingMessage.rawHeaders`. Node also
+   applies its own HTTP parser limits (`maxHeaderSize`, `headersTimeout`, `requestTimeout`,
+   keep-alive), and its `clientError` path answers a parse error before any application code runs.
+4. **The proof runs only on Deno.** `scripts/test-lanes.ts` excludes 19 diagnostics-plugin suites
+   from Node and runs them only in the Deno lane, together with the listener's unit suite and the
+   M98b consumer exercise (`test/inspect-local-diagnostics.test.ts`). These cover every end-to-end
+   observation family plus the `core-conformance`, `lifecycle` and `security` integration suites. On
+   Node, nothing in the suite has ever reached a real connector.
+5. **The CLI's devtool output is Deno-shaped from end to end:**
+   - `devtoolRuntimeRefusal` (`cli/src/devtool/planner.ts:255`) refuses `new --devtool`,
+     `generate app --devtool` and `devtool enable` on any other target.
+   - `devtool enable` writes only into a `deno.json` and imports the plugin through the Deno
+     specifier (`cli/src/commands/devtool.ts:91`).
+   - The development entry reads its credentials with `Deno.env.get` and stops with `Deno.exit`
+     (`cli/src/devtool/dev-entry.ts:100-115`).
+   - `devtoolTasks` emits `deno run …` and a `deno check` that includes `main.dev.ts`
+     (`project-files.ts:1330`).
+   - A standalone Node project has no `dev` script today: only the starter-composed full-stack
+     template has one, and that template is refused anyway.
+6. **The Node workspace runner has no devtool path, and it leaves the devtool's process group.**
+   `nodeRunner` (`cli/src/workspace/dev-runner.ts:185`) always runs `npm run start` and never reads
+   `SETU_DEVTOOL_MEMBER`. Its `spawn` passes no `env`, so every member would inherit the launcher's
+   session pair; the Deno runner blanks it for every member except the selected one (`:109-121`). It
+   also starts each member with `detached: true`, in a process group of its own, so that a
+   non-forwarding shell cannot strand a server. The devtool's supervisor is a process-group leader
+   and tears down with `process.kill(0, …)` (`setu-ts-devtool/src/launch/supervisor.ts:19,39`). A
+   detached member escapes that teardown.
+7. **One more process level.** A Node project runs TypeScript under `tsx` (`project-files.ts:1662`),
+   and tsx's CLI (4.23.15) runs the script in a child `process.execPath`. Under `npm run`, the
+   application is three processes below the launcher: npm, a shell, tsx, then node. These all stay
+   in the launcher's group unless something detaches them (item 6).
+8. **The production image installs development dependencies.** The npm workspace Dockerfile runs
+   `npm install` (`runtime-profile.ts:216`, `compose.ts:305`). `.dockerignore` already excludes
+   `apps/*/main.dev.ts` (`compose.ts:222`), but `diagnostics-plugin` would still be installed in the
+   image wherever it is declared. The Deno image strips the import instead (`compose.ts:169`, the
+   V8-21 fix).
 
 **Decisions:**
 
-1. **The wire contract is the same on both runtimes.** For every request, the Node listener answers
-   with the same status, the same fixed headers, the same body bytes and the same refusal codes as
-   the Deno listener. A single conformance table of request fixtures (well-formed, zero-body
-   violations, duplicate singleton headers, oversized, wrong `Host`, unknown operation) runs against
-   both listeners and asserts identical responses. The devtool's client and the protocol fixtures do
-   not change.
-2. **Duplicate-header refusal on Node uses `rawHeaders`**, which is the real line multiplicity, not
-   the comma heuristic. The comma check stays as well, so both runtimes refuse every case the Deno
-   listener refuses today. Tests write to a raw socket (`node:net`), never through `fetch`, which
-   rewrites or drops some headers before they reach the wire.
-3. **Malformed HTTP gets fixed bytes too.** Node's `http.Server` answers a parse error from its own
-   `clientError` path, before the fetch callback runs. The plan either directs that path to the
-   protocol's fixed `invalid-request` refusal or proves that the default reply carries no reflected
-   input. It also pins the server options that affect this boundary: `insecureHTTPParser` is off,
-   and header size, header timeout, request timeout and keep-alive limits are set to explicit
-   values. Each one is recorded in the delta to the security review.
-4. **The CLI emits the devtool for a Node target from the same planner** that `new`, `generate app`
-   and `enable` already share. That covers a `package.json` dependency set that is bumped together
-   (the V8-19 rule), a development entry run under `tsx`, the workspace runner's per-member
-   environment, and the production image excluding both the entry and the plugin (the V8-21 rule).
-   The scaffold end-to-end test boots a Node devtool scaffold and pairs with it.
-5. **Only Deno and Node are supported.** On Bun and Workers, `listen` still refuses before binding,
-   and the fixed error lists the runtimes that are supported.
+1. **The listener is `node:http`, not `serve()`.** It uses `createServer` with node-server's
+   `getRequestListener` and an `errorHandler` that answers the protocol's fixed refusal (or a
+   request mapping of its own; the plan chooses). It sits behind an injectable host seam, as the
+   Deno factory does. `listen()` resolves on `'listening'` and rejects on `'error'`, so a port
+   conflict fails closed and the application never crashes. The server is created with explicit
+   values for `maxHeaderSize`, `headersTimeout`, `requestTimeout`, `keepAliveTimeout` and
+   `maxRequestsPerSocket`, with `insecureHTTPParser: false` and a `clientError` handler that writes
+   fixed bytes and destroys the socket.
+2. **The protocol is identical on both runtimes; the transport is not.** For every request, status,
+   body bytes, refusal code and the protocol's own headers (`content-type`, `cache-control`,
+   `x-content-type-options`, the `x-setu-*` set) match the Deno listener. Headers the HTTP stack
+   adds (`date`, `connection`, `keep-alive`, `content-length` versus chunked) are documented, not
+   asserted equal. The native client checks only the protocol headers.
+3. **Duplicate-header refusal on Node uses `rawHeaders`**, the real line multiplicity, and keeps the
+   comma check, so Node refuses a superset of what Deno refuses. Tests write to a raw `node:net`
+   socket, never through `fetch`.
+4. **Every existing real-connector suite runs on both lanes.** The 19 diagnostics-plugin suites, the
+   listener suite and the consumer exercise leave `NODE_EXCLUDED_TESTS`. Only the Deno listener's
+   own host-specific cases stay Deno-only. This is the conformance proof; a new two-runtime table
+   covers only the framing and parser cases the existing suites do not reach.
+5. **`close()` is bounded, as on Deno.** `server.close()` stops accepting connections; idle
+   keep-alive sockets are closed immediately, and an in-flight poll is given the same bound the Deno
+   listener gives it before `closeAllConnections()`. The close hook can never hang shutdown.
+6. **`onListen` keeps its meaning.** It receives `{ hostname, port }` mapped from
+   `server.address()`. Without it, the Node listener prints the same default banner Deno prints, so
+   the bind is never silent (the reason `diagnostics-plugin.ts:417-427` omits the key).
+7. **The CLI emits the devtool for a Node target from the planner that `new`, `generate app` and
+   `enable` already share:**
+   - The development entry reads its credentials through `runtime.env` and stops with the
+     runtime-neutral shutdown block, so one rendering serves every runtime that has a listener.
+   - `diagnostics-plugin` goes in `devDependencies`, bumped together with
+     `kernel`/`common`/`runtime` (the V8-19 rule).
+   - The script is `tsx main.dev.ts`, never `tsx watch`: a watch restart is a new instance, and a
+     new instance ends the session.
+   - The project's `tsc --noEmit` check covers `main.dev.ts`.
+   - The refusal narrows to Bun and Workers.
+8. **The Node workspace runner gains the devtool path:**
+   - It reads the three variables and runs `dev` only for the selected member.
+   - It passes every child an explicit environment that blanks the pair for every other member.
+   - When the launcher selects a member, it does not detach, so the devtool's group teardown reaches
+     every process it started. It still forwards `SIGINT`/`SIGTERM` itself.
+   - A workspace whose `scripts/dev.ts` is the pre-M126 Node runner is refused by name, as M98c
+     refuses a stale Deno runner.
 
-**Open questions the plan resolves rather than inherits:** whether the listener goes through
-`@hono/node-server` (already a dependency, and it shares the adapter's host seam) or uses
-`node:http` directly (which gives `rawHeaders`, `clientError` and the server timeouts without a
-wrapper). Either way, it needs an injectable host for tests. Also: what the generated Node
-development entry and `dev` script look like, measured against what M120 emits; and whether
-`setu check` (M118) recognises the Node development entry.
+**Open questions the plan resolves rather than inherits:**
 
-**Security.** This milestone opens an authenticated loopback listener on a second runtime, so it
-crosses a trust boundary. The plan carries a design security review written as a delta against
-`docs/diagnostics-security-review.md`, and the committed tree gets an independent security audit
-before merge. That audit covers DNS rebinding and `Host`, the framing refusals, the raw-socket cases
-above, and the fact that a Node project's dependency install can never bind the listener without the
-explicit opt-in.
+- **The script name is a contract with the devtool's launcher**: `dev`, as on Deno, or a name that
+  cannot collide with the `dev` (watch) script M120 adds. Agree it with M120 and the devtool's D06
+  before implementation.
+- **Keeping `diagnostics-plugin` out of the production image** needs `--omit=dev` (M120's production
+  build) or a strip step like the Deno image's. Until M120 lands, decide which applies.
+- **Whether an in-flight poll is bounded at all today on Deno.** The plan measures it, and decision
+  5 matches whatever bound it finds.
 
-**Coordination, not dependency.** M120 adds `dev` and `debug` scripts to Node members. Whichever of
-M120 and this milestone lands second reconciles the development entry with those scripts and reruns
-the scaffold end-to-end test with both in place. The devtool's own Node support (discovery of npm
-projects, launching under `tsx`, and process-tree teardown) is a milestone in the devtool repository
-that consumes this one.
+**Security.** This milestone opens an authenticated loopback listener on a second runtime and
+changes which processes receive session credentials, so it crosses a trust boundary. The plan
+carries a design security review written as a delta against `docs/diagnostics-security-review.md`
+(T13 and the "Non-Deno runtimes refuse" line at `:189` change). The committed tree gets an
+independent security audit before merge. The audit covers:
+
+- DNS rebinding and `Host`, including node-server's missing-`Host` default (it falls back to the
+  configured hostname);
+- every framing and parser refusal, over raw sockets;
+- no reflected error text on any path, including a response that fails mid-write;
+- sibling members never holding a working credential;
+- a Node project's dependency install never binding the listener without the explicit opt-in.
+
+**Coordination, not dependency.** M120 adds `dev` and `debug` scripts, and a production image, for
+Node members. Whichever of M120 and this milestone lands second reconciles the script name and the
+image exclusion, and reruns the scaffold end-to-end test with both in place. The devtool's own Node
+support is milestone D06 in the devtool repository, which consumes this one: npm project discovery,
+the Node recipe catalog, launch, and teardown across the npm/shell/tsx/node chain.
 
 **Named, not taken:**
 
-- **Bun.** `Bun.serve` resembles `Deno.serve` closely enough that it could be a small follow-up
-  letter. Take it only when the devtool asks for Bun.
+- **Bun.** `Bun.serve` resembles `Deno.serve`, and Bun also runs `node:http`. Take it as a small
+  follow-up letter only when the devtool asks for Bun.
 - **Workers.** A Worker has no loopback socket of its own; inspecting one needs a different
   transport design.
 
 **Deliverables:**
 
-- [ ] A Node `ILocalDiagnosticsListenerFactory`: `127.0.0.1` only, the same port bounds, one active
-      listener, an idempotent `close()`, released by the RuntimePlugin close hook on every shutdown
-      and failed-startup path
-- [ ] The two-runtime conformance table (decision 1), and raw-socket tests for duplicate headers and
-      malformed requests (decisions 2 and 3)
-- [ ] The CLI Node arm at all three entry points (decision 4), with the refusal narrowed to Bun and
-      Workers, and a scaffold end-to-end test that boots a Node devtool project and pairs with it
-- [ ] The M98b consumer exercise rerun on Node: pair, read a snapshot, observe a request, renew,
-      revoke, and refuse reuse
+- [ ] A Node `ILocalDiagnosticsListenerFactory` per decisions 1, 5 and 6: `127.0.0.1` only, the same
+      port bounds, one active listener, a port conflict that rejects `listen()`, and a bounded,
+      idempotent `close()` released by the RuntimePlugin close hook on every shutdown and
+      failed-startup path
+- [ ] The diagnostics-plugin real-connector suites, the listener suite and the consumer exercise
+      running on BOTH lanes (decision 4), plus a raw-socket table for duplicate headers, malformed
+      requests, a missing or invalid `Host`, oversized headers and slow headers (decisions 2 and 3)
+- [ ] The CLI Node arm at all three entry points (decision 7), with the refusal narrowed to Bun and
+      Workers
+- [ ] The Node workspace runner's devtool path, with no detach under the devtool, sibling blanks,
+      and a refusal of a pre-M126 runner (decision 8)
+- [ ] A scaffold end-to-end test that boots a standalone Node devtool project AND a Node workspace
+      member under the generated runner, pairs with each, renews, and proves that no other member's
+      environment holds the pair
 - [ ] The design security review delta, and the committed-tree audit record in the PR
-- [ ] The runtime and diagnostics-plugin READMEs, `docs/diagnostics-protocol.md` (the process tree
-      under `tsx`), the CHANGELOG, and the CLI docs for `--devtool` on Node
+- [ ] Docs that say Deno-only today, corrected: - `docs/runtime-deployment.md:336` -
+      `docs/diagnostics-protocol.md:17` - `docs/diagnostics-security-review.md:189` -
+      `packages/cli/README.md:274,307` - `packages/diagnostics-plugin/AGENT_CARD.md:36` - the
+      runtime and diagnostics-plugin READMEs - `PUBLIC_API.md` (`--devtool` row) - the CHANGELOG
+
+      Plus the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher.
+
 - [ ] **ROADMAP.md**: this section and the Progress Tracking row `126`
 
 ---
