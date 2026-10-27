@@ -563,3 +563,6 @@ Maintainer dispositions (2026-10-27), each checked against established tools:
 - CSS and asset builds — M123.
 - `bun build`, `deno compile`, single-executable images — documented only.
 - Minification or comment removal — not wanted (the build-step review, §4).
+- A `--mount=type=secret,id=npmrc` line in the generated Node/Bun install steps (§8b F2/N2) — a
+  follow-up, maintainer decision 2026-10-27: it needs BuildKit, Compose `build.secrets` and probes
+  of the optional-secret, Bun and builder behaviour first. M120 documents the pattern instead.
