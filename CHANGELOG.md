@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Production builds (M120, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles one
-  Node service, including workspace libraries and migration runners. Runtime npm packages remain
+- **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
+  one Node service, including workspace libraries and migration runners. Runtime npm packages remain
   external; runtime imports of devDependencies fail. Generated Node starts now require a build; use
   start:dev for source development and start:debug for debugging. Node and Bun full-stack starts
   stop rebuilding. Standalone and workspace images install production dependencies and build

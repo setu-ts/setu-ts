@@ -680,7 +680,7 @@ here.
 - **Milestone 120** (`packages/cli` — `setu build` (esbuild after the `setu check` gate), compiled
   Node starts with `start:dev`/`start:debug`, multi-stage production images for Node, Bun and Deno,
   Bun's hoisted linker for workspace libraries, Deno read-only start under `nodeModulesDir: "auto"`)
-  — complete (PR pending).
+  — complete (PR #515).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M121–M123
   are open in the ROADMAP.
 
