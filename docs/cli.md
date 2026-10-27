@@ -888,10 +888,16 @@ an image.
 
 Workspace libraries are inlined; npm packages, including optional peers and libraries' own
 dependencies, remain external. Runtime imports declared only in the importing project's or library's
-devDependencies fail with the package and importing file named: move them to dependencies.
-`--dry-run` checks wiring and prints entries, output paths and externals without bundling or
-writing. A symlinked dist directory is refused. Build failures exit 1; unsupported scope/runtime
-exits 2. See [deployment](./deployment.md) and [upgrading](./upgrading.md) for images and scripts.
+devDependencies (a package also listed under peerDependencies included, since `npm ci --omit=dev`
+omits it) fail with the package and importing file named: move them to dependencies. `--dry-run`
+checks wiring and prints entries, output paths and externals without bundling or writing. The bundle
+is checked before `dist/` is replaced, so a refused build, or one whose bundle fails, keeps the
+previous output; a failure while writing the new files (a full disk, for example) can leave `dist/`
+incomplete, and rebuilding restores it. A symlinked dist directory is refused, and every CLI command
+refuses a manifest that is itself a symbolic link instead of reading through it; that refusal relies
+on `O_NOFOLLOW`, so on Windows (which has none) a linked manifest is followed, as the CLI's writer
+has always been. Build failures exit 1; unsupported scope/runtime exits 2. See
+[deployment](./deployment.md) and [upgrading](./upgrading.md) for images and scripts.
 
 ## Plugin-contributed commands
 

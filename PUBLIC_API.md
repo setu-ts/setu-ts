@@ -561,7 +561,7 @@ import { LoggerPlugin } from '@setu-ts/logger-plugin';
 app.register(
   LoggerPlugin({
     level: 'info', // minimum level to emit (default 'info')
-    transport: 'console', // 'console' | 'pino' | 'noop' (default 'console')
+    transport: 'console', // 'console' | 'pino' | 'noop' | 'custom' (default 'console')
     pretty: false, // pretty-print console output
     redact: ['password', 'token', 'authorization'], // dot-paths to redact
     requestLogging: true, // register request/response middleware
@@ -573,11 +573,21 @@ app.register(
 
 ### Transports
 
-| Transport   | Description                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------ |
-| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                    |
-| `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async. |
-| `'noop'`    | Discards all output. For tests or disabling logging.                                       |
+| Transport   | Description                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------- |
+| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                                 |
+| `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async.              |
+| `'noop'`    | Discards all output. For tests or disabling logging.                                                    |
+| `'custom'`  | Wraps `LoggerPluginOptions.logger: ILogger` with framework level filtering and redaction. Since 0.11.0. |
+
+`LoggerPluginOptions.logger?: ILogger` (since 0.11.0) is required with `transport: 'custom'` and
+refused with every other transport, including the default. Invalid combinations throw an `Error`
+named `LoggerConfigurationError` when constructing the plugin. The wrapper applies `level` (default
+`info`), error normalization, and the same `redaction` policy and `redact` paths as built-in
+transports before delegating metadata. Default secret patterns apply when `redact` is omitted; an
+explicit list replaces them. Children delegate to the supplied logger's `child()` with redacted
+bindings and retain the wrapper. Request logging and trace correlation also apply. The supplied
+logger controls its own sink and may impose additional filtering.
 
 ### Usage in Routes
 
@@ -695,10 +705,12 @@ app.middleware.add(
 The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child logger bound to
 `requestId`, and logs:
 
-- Incoming request (method, path)
-- Outgoing response (status, duration in ms), including a request that threw: the status is the one
-  `errorHandler`'s responder predicts through `statusFor` (`500` without it), so a custom `respond`
-  hook that chooses another status is not reflected
+- `request received` at `debug` (method, path). Set `level: 'debug'` to emit this arrival entry; its
+  metadata is not built when the child's exposed level excludes debug. With no readable level, the
+  middleware calls `debug()` and lets the logger filter.
+- One `request completed` at `info` (method, path, status, duration in ms), including a request that
+  threw: the status is the one `errorHandler`'s responder predicts through `statusFor` (`500`
+  without it), so a custom `respond` hook that chooses another status is not reflected
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
 It does not log the error itself; `errorHandler` logs it once (V9-80).
@@ -10048,6 +10060,15 @@ earlier) is refused the same way, pointing at the upgrade guide.
 
 ### `@setu-ts/cli/main` — the process boundary
 
+`setu new --logger console|pino` and `setu generate app --logger console|pino` (since 0.11.0) select
+the logger for `rest`, `microservice`, `class-based`, and `full-stack`, including styled templates.
+The default is Pino on Node, Deno and Bun, and console on Cloudflare Workers. Pino adds `pino: 10.x`
+to runtime dependencies (the same range in Deno's import map). Explicit console adds no Pino
+dependency. `--logger pino` on Workers is refused by name before writing. A minimal host or
+workspace root also refuses the flag because it registers no logger. Interactive `new` asks
+`Logger?` only for a host with logging; `--yes` takes the runtime default. `--dry-run` reports the
+selected logger and writes nothing.
+
 | Export          | Kind      | Description                                                                                                                                   |
 | --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
@@ -10096,6 +10117,7 @@ setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template class-based          # byte-identical alias of --template rest --style class-based
 setu new my-app --template rest --env-file config/.env.local
+setu new my-app --template rest --logger console  # console | pino; since 0.11.0
 
 # Scaffold a monorepo (creates ./acme, no member yet)
 setu new acme --workspace
@@ -10103,6 +10125,7 @@ setu new acme --workspace --port 4100          # base port for its members
 setu new acme --workspace --transport redis    # http | grpc | memory | redis | rabbitmq | nats | kafka
 setu generate app orders --template microservice
 setu generate app billing --template microservice
+setu generate app reports --template rest --logger console
 setu generate app shipping --template microservice --depends-on orders --depends-on billing
 setu generate app orders --devtool                   # + main.dev.ts, dev/check tasks, a devtool port
 setu devtool enable orders                           # same composition, on a member that exists
@@ -12386,10 +12409,13 @@ number) and map classifications to a `Redactor`. Matching is case-insensitive by
 `createRedactionService(policy, { caseSensitive: true })` enables case-sensitive matching. When
 patterns overlap, the most specific match wins; equally specific patterns retain declaration order.
 `eraseRedactor` replaces values with `'[Redacted]'`, while `createMaskRedactor({ keep: 4 })`
-preserves a trailing suffix of strings. `redactRecord()` is clone-on-write: it never mutates caller
-metadata, preserves unclassified subtrees by identity, and descends only into plain objects and
-arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
-through their `redaction` option; this is an option-passed pure utility, not a capability token.
+preserves a trailing suffix of strings. `redactRecord()` never mutates caller metadata and descends
+only into plain objects and arrays. Since 0.11.0 it returns a snapshot: each plain object and array
+it walks is read once and copied, unclassified subtrees included, so what a logger serializes is
+exactly what redaction checked (a getter cannot change it afterwards). Earlier versions returned
+unclassified subtrees by identity. The logger, telemetry, and audit plugins accept either a policy
+or an `IRedactionService` through their `redaction` option; this is an option-passed pure utility,
+not a capability token.
 
 `RedactionPolicy` has three members:
 

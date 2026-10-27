@@ -81,14 +81,23 @@ describe('feature module generated tasks', () => {
           expect(installed.code, installed.output).toBe(0);
         }
         for (const task of ['test:e2e', 'test']) {
+          // Bun's console reporter may omit passing test names when the logger
+          // writes directly to stdout (Pino). Use its machine report to prove
+          // which files ran, independently of the chosen logging transport.
+          const reportFile = `bun-${task === 'test' ? 'unit' : 'e2e'}-results.xml`;
           const result = await runIn(project, target === 'node' ? 'npm' : target, [
             target === 'deno' ? 'task' : 'run',
             task,
+            ...(target === 'bun' ? ['--reporter=junit', '--reporter-outfile', reportFile] : []),
           ]);
           expect(result.code, `${target} ${task}\n${result.output}`).toBe(0);
+          const scopeReport =
+            target === 'bun'
+              ? await nodeFs.readFile(`${project}/${reportFile}`, 'utf8')
+              : result.output;
           if (task === 'test')
-            expect(result.output).not.toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
-          else expect(result.output).toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
+            expect(scopeReport).not.toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
+          else expect(scopeReport).toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
         }
         const drive = async (origin: string): Promise<void> => {
           const response = await fetch(`${origin}/openapi.json`);

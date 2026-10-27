@@ -184,13 +184,14 @@ async function waitForServer(origin: string, attempts = 600): Promise<boolean> {
  * origin to a caller that drives it, then kills the process group.
  *
  * @param project - The installed project directory
- * @param drive - Called once the project is serving
+ * @param drive - Called once the project is serving, with a reader for what the
+ *   process has written so far (to wait for output before the kill)
  * @returns What `drive` returned, and everything the process wrote
  * @throws {Error} If the project never serves, or `drive` rejects
  */
 export async function withNodeServer<T>(
   project: string,
-  drive: (origin: string) => Promise<T>,
+  drive: (origin: string, output: () => string) => Promise<T>,
 ): Promise<{ readonly result: T; readonly output: string }> {
   const port = await unusedPort();
   const server = startServer(project, port);
@@ -199,7 +200,7 @@ export async function withNodeServer<T>(
   let result: T | undefined;
   let failure: unknown;
   try {
-    if (served) result = await drive(origin);
+    if (served) result = await drive(origin, () => server.output());
   } catch (error) {
     failure = error;
   } finally {

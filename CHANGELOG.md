@@ -15,10 +15,10 @@ All notable changes to this project are documented here. The format follows
   unchanged. Generated Dockerfiles now need BuildKit; the deprecated legacy builder refuses
   `RUN --mount`. A one-member workspace's generated `docker/compose.yaml` no longer renders an empty
   `environment:` key, which Compose refused for the whole file. See [deployment](docs/deployment.md)
-  and [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+  and [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
 
-- **Production builds (M120, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles one
-  Node service, including workspace libraries and migration runners. Runtime npm packages remain
+- **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
+  one Node service, including workspace libraries and migration runners. Runtime npm packages remain
   external; runtime imports of devDependencies fail. Generated Node starts now require a build; use
   start:dev for source development and start:debug for debugging. Node and Bun full-stack starts
   stop rebuilding. Standalone and workspace images install production dependencies and build
@@ -28,7 +28,14 @@ All notable changes to this project are documented here. The format follows
   library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
   `"manual"`). Generated `.dockerignore` files exclude `.npmrc`. Every CLI command now refuses a
   manifest that is itself a symbolic link (naming the link) instead of reading through it. See
-  [upgrading](docs/upgrading.md#production-builds-and-bun-library-resolution-m120).
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
+- **Custom logger transport (#512, 0.11.0, `@setu-ts/logger-plugin`).**
+  `LoggerPlugin({ transport: 'custom', logger })` wraps an application `ILogger` with level
+  filtering, metadata redaction, request logging and trace correlation. Logger/transport mismatches
+  throw a named `LoggerConfigurationError` at construction; child adapters keep the controls.
+- **Scaffold logger choice (#512, 0.11.0, `@setu-ts/cli`).** `setu new --logger console|pino` and
+  `setu generate app --logger console|pino` configure templates with logging. The prompt, help and
+  dry-run report the choice; Pino on Cloudflare Workers is refused by name.
 
 - **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
   `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
@@ -146,6 +153,24 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **`redactRecord()` returns a snapshot (#513, 0.11.0, `@setu-ts/common`).** Every plain object and
+  array it walks is now copied, unclassified subtrees included, instead of being returned by
+  identity, so a logger serializes exactly the values redaction checked (the same choice pino's own
+  redactor makes). Code that compared a result's subtree with the original by `===` should compare
+  by value.
+
+- **One request completion at info (#512, 0.11.0, `@setu-ts/logger-plugin`).** Request logging emits
+  `request completed` at `info` with `method`, `path`, `status`, `duration` and the child's
+  `requestId`. `request received` moves to `debug`; set
+  `LoggerPlugin({ requestLogging: true, level: 'debug' })` to restore the arrival/completion pair.
+  When the exposed child level excludes debug, arrival metadata is not built. Slow warnings,
+  error-status prediction and path exclusions are unchanged.
+
+- **Pino scaffold default (#512, 0.11.0, `@setu-ts/cli`).** REST, microservice, class-based and
+  full-stack projects use Pino on Node, Deno and Bun, adding its `10.x` runtime dependency through
+  the existing client dependency renderer. Workers defaults to console; `--logger console` keeps
+  console output without installing Pino.
 
 - **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and
   Workers scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their
@@ -312,7 +337,26 @@ All notable changes to this project are documented here. The format follows
   provider should apply the same override until Azure ships an identity release accepting the fix;
   workspace overrides do not propagate to consumers.
 
+- **Redaction cache, single-read redaction and log-call containment (#513, 0.11.0,
+  `@setu-ts/common`, `@setu-ts/logger-plugin`, `@setu-ts/metrics-plugin`).** From the security audit
+  of #512. The redaction matcher's path cache now skips paths longer than 256 characters, so field
+  names taken from request bodies can no longer pin memory (600 requests with 900 KB names held ~1
+  GiB). Redaction now reads each property once and returns that snapshot: a getter returning a
+  different object on a later read (during traversal, or when the logger serializes the result)
+  could put a secret redaction never checked into the output. Log calls and `child()` no longer
+  throw on any transport: metadata that throws while being read is replaced by
+  `[unserializable metadata]`, such bindings are dropped, and a custom sink that throws loses that
+  record instead of failing the request, and its first failure is reported once on stderr, by error
+  class only. `ConsoleLogger`'s constructor is back to `(runtime, options?)`, and metric label
+  values are read once per observation, for both the series key and the stored labels.
+
 ### Fixed
+
+- **Logging and metrics hot paths (#512, 0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
+  `@setu-ts/metrics-plugin`).** Compile literal and suffix field matchers and specificity once,
+  bound matcher path results to 1,024 entries per instance, and memoize recursive wildcard states
+  only for multiple globstars. Console children reuse root redaction compilation. Metrics cache
+  byte-identical label keys by configured label values, retaining only observed combinations.
 
 - **Realtime subscriber failures (#511, 0.11.0, `@setu-ts/realtime-backplane-plugin`,
   `@setu-ts/cloudflare-plugin`).** Async subscriber rejections are captured and reported without an

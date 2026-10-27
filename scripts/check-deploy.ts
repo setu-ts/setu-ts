@@ -1104,8 +1104,14 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!(await checkGeneratedNode(workspace, overlay.url, workspaceCase))) return 'failed';
     }
     // M120 §3.11/§3.14: a Bun member importing a library, so the image proves the
-    // root bunfig.toml's hoisted linker reaches the production install.
-    if (!(await checkGeneratedNode(workspace, overlay.url, true, 'bun'))) return 'failed';
+    // root bunfig.toml's hoisted linker reaches the production install. The host
+    // install needs Bun; without it the case is skipped by name, like a missing
+    // docker, never silently (CI installs it).
+    if (!(await onPath('bun'))) {
+      console.log('  SKIP — bun-workspace: missing tool(s): bun');
+    } else if (!(await checkGeneratedNode(workspace, overlay.url, true, 'bun'))) {
+      return 'failed';
+    }
     return 'passed';
   } finally {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });

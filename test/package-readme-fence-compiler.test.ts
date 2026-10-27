@@ -139,7 +139,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/idempotency-plugin/README.md': 3,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
-  'packages/logger-plugin/README.md': 3,
+  'packages/logger-plugin/README.md': 4,
   // M102: +1 for the component-template example rendered through the view engine.
   'packages/mail-plugin/README.md': 3,
   'packages/metrics-plugin/README.md': 2,

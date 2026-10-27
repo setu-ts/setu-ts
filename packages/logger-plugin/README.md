@@ -47,7 +47,8 @@ without a logger. Registering a logger selects it exclusively, including a no-op
 | Option                 | Type                                   | Default               | Description                                                                                             |
 | ---------------------- | -------------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------------- |
 | `level`                | `LogLevel`                             | `'info'`              | Minimum level to emit.                                                                                  |
-| `transport`            | `LoggerTransport`                      | `'console'`           | Implementation: `'console'`, `'pino'`, or `'noop'`.                                                     |
+| `transport`            | `LoggerTransport`                      | `'console'`           | Implementation: `'console'`, `'pino'`, `'noop'`, or `'custom'`.                                         |
+| `logger`               | `ILogger`                              | —                     | Required only with `'custom'`; refused with other transports. Since 0.11.0.                             |
 | `pretty`               | `boolean`                              | `false`               | Pretty-print entries (console transport only).                                                          |
 | `redact`               | `readonly string[]`                    | Secret-field patterns | Dot-paths to redact from metadata; pass `[]` to opt out of the secure defaults.                         |
 | `redaction`            | `RedactionPolicy \| IRedactionService` | —                     | Shared policy or service applied before log egress.                                                     |
@@ -62,10 +63,60 @@ without a logger. Registering a logger selects it exclusively, including a no-op
 a console-logging application never pulls it in. You may also inject a pre-built factory via
 `PinoLoggerOptions` to skip the import entirely.
 
+## Custom logger
+
+Since 0.11.0, `transport: 'custom'` accepts an `ILogger` adapter. Level filtering, default secret
+redaction, explicit `redact` paths, a `redaction` policy/service, request logging and trace
+correlation apply before metadata reaches your sink. Children delegate to the adapter's `child()`
+with redacted bindings and keep these controls. Invalid logger/transport combinations throw an
+`Error` named `LoggerConfigurationError` at plugin construction. Your sink may filter further. As on
+every transport, a log call never throws: metadata that throws while being read is replaced by
+`[unserializable metadata]`, and if your sink throws on a log call, that record is dropped rather
+than failing the request that logged it. If your sink's `child()` throws, the child keeps the parent
+sink and its records carry none of the new bindings (such as `requestId`). The first sink failure is
+reported once on stderr, naming only the error's class, so a broken sink does not go unnoticed.
+
+For example, adapt an existing Winston-shaped sink without adding a framework dependency:
+
+```typescript
+import type { ILogger, LogLevel, LogMetadata } from '@setu-ts/common';
+
+interface IWinstonSink {
+  log(level: string, message: string, metadata?: LogMetadata): void;
+  child(bindings: LogMetadata): IWinstonSink;
+}
+
+function adapt(sink: IWinstonSink): ILogger {
+  const emit = (level: LogLevel) => (message: string, metadata?: LogMetadata): void =>
+    sink.log(level === 'fatal' ? 'error' : level === 'trace' ? 'debug' : level, message, metadata);
+  return {
+    level: 'trace',
+    fatal: emit('fatal'), error: emit('error'), warn: emit('warn'),
+    info: emit('info'), debug: emit('debug'), trace: emit('trace'),
+    child: (bindings) => adapt(sink.child(bindings)),
+  };
+}
+
+// Your application's existing logger instance.
+declare const existingSink: IWinstonSink;
+LoggerPlugin({ transport: 'custom', logger: adapt(existingSink), requestLogging: true });
+```
+
 ## Request logging
 
-`createRequestLoggerMiddleware(options)` logs each request and its outcome. Durations are computed
-from the monotonic clock (`runtime.hrtime()`), never from a wall-clock epoch.
+Since 0.11.0, `createRequestLoggerMiddleware(options)` emits one `info` entry per request:
+`request completed`, carrying `method`, `path`, `status`, `duration` and the child logger's
+`requestId`. For example, console output is a self-contained JSON line:
+
+```text
+{"level":"info","time":1730000000000,"msg":"request completed","requestId":"req-1","method":"GET","path":"/users","status":200,"duration":12}
+```
+
+`request received` now logs at `debug`. Set `LoggerPlugin({ requestLogging: true, level: 'debug' })`
+to emit both arrival and completion again. When the child's exposed level excludes debug, the
+middleware skips building arrival metadata; if no level is readable, it delegates filtering to
+`debug()`. Slow requests still add a `warn` entry and thrown errors retain their predicted
+completion status. Durations use the monotonic clock (`runtime.hrtime()`), never a wall-clock epoch.
 
 The scaffolded templates opt in with `requestLogging: true` and exclude `/live`, `/ready`, `/health`
 and `/metrics`, so probe traffic writes no line. The plugin's own default stays `false`.

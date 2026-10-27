@@ -53,6 +53,64 @@ import {
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+// `class-based` runs the same request logger behind DI and decorator dispatch,
+// so it gets the same one-line proof rather than relying on `rest`'s.
+for (const template of ['rest', 'class-based'] as const) {
+  it(
+    `boots a pino-default ${template} scaffold and emits one numeric-level JSON request log`,
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', 'pino-app', '--template', template, '--runtime', 'node'])).toBe(0);
+      const project = `${root}/pino-app`;
+      const overlay = await startOverlay();
+      try {
+        const installed = await npmInstall(project, overlay);
+        expect(installed.code, installed.output).toBe(0);
+        // M120: `npm start` runs the compiled bundle, so build first — which also
+        // proves the pino logger works from the bundle (pino stays external).
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
+        const result = await withNodeServer(project, async (origin, output) => {
+          const response = await fetch(`${origin}/greetings/log-probe`);
+          await response.body?.cancel();
+          // Pino's default stdout destination writes asynchronously, and the
+          // server is SIGKILLed when this returns: wait (bounded) for the line.
+          for (let waited = 0; waited < 10_000; waited += 50) {
+            if (output().includes('"path":"/greetings/log-probe"')) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return response.status;
+        });
+        expect(result.result, result.output).toBe(200);
+        const lines = result.output
+          .split('\n')
+          .filter((line) => line.startsWith('{'))
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(
+          lines.filter((line) => line['path'] === '/greetings/log-probe'),
+          result.output,
+        ).toEqual([
+          expect.objectContaining({
+            level: 30,
+            msg: 'request completed',
+            requestId: expect.any(String),
+            method: 'GET',
+            path: '/greetings/log-probe',
+            status: 200,
+            duration: expect.any(Number),
+          }),
+        ]);
+        expect(
+          lines.filter((line) => line['msg'] === 'request received'),
+          result.output,
+        ).toEqual([]);
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
 for (const target of ['deno', 'bun'] as const) {
   it(
     `runs the ${target} scaffold check task and catches a removed barrel import`,

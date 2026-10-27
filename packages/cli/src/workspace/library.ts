@@ -58,7 +58,11 @@ export function planBunWorkspaceLinker(
     };
   let install = false;
   const values: string[] = [];
-  for (const line of source.split(/\r?\n/)) {
+  // A line scan cannot tell a TOML multiline string from configuration: an
+  // `[install]` / `linker = "hoisted"` pair inside one would read as the real
+  // setting. Such input is refused as ambiguous rather than guessed at.
+  const ambiguous = /"""|'''/.test(source);
+  for (const line of ambiguous ? [] : source.split(/\r?\n/)) {
     if (/^\s*\[/.test(line)) install = /^\s*\[install\]\s*(?:#.*)?$/.test(line);
     if (!install) continue;
     const setting = /^\s*linker\s*=\s*(["'])([^"']*)\1\s*(?:#.*)?$/.exec(line);
@@ -69,9 +73,11 @@ export function planBunWorkspaceLinker(
     kind: 'refused',
     message:
       'bunfig.toml must set [install] linker = "hoisted" so members can import workspace libraries. ' +
-      (values.length > 0
-        ? `Found linker = "${values.join(', ')}". `
-        : 'No unambiguous install.linker setting found. ') +
+      (ambiguous
+        ? 'It contains a TOML multiline string, so the setting cannot be read without a TOML parser. '
+        : values.length > 0
+          ? `Found linker = "${values.join(', ')}". `
+          : 'No unambiguous install.linker setting found. ') +
       'Setu will not rewrite TOML; add or change that setting, then run generate library again.',
   };
 }

@@ -47,4 +47,13 @@ it('plans the four older-workspace cases without rewriting TOML', () => {
       message: expect.stringContaining('linker = "hoisted"'),
     });
   }
+  // PR #515 review: a multiline string holding an `[install]` / hoisted pair is not
+  // configuration, and a line scan cannot tell — refused as ambiguous, both quote styles.
+  for (const quote of ['"""', "'''"]) {
+    const source = `note = ${quote}\n[install]\nlinker = "hoisted"\n${quote}\n[install]\ncache = true\n`;
+    expect(planBunWorkspaceLinker(source)).toMatchObject({
+      kind: 'refused',
+      message: expect.stringContaining('TOML multiline string'),
+    });
+  }
 });

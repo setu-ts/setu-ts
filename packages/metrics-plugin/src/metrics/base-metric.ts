@@ -5,6 +5,11 @@
  */
 import type { IMetric, MetricConfig, MetricType } from '@setu-ts/common';
 
+interface ILabelKeyNode {
+  readonly children: Map<string, ILabelKeyNode>;
+  key?: string;
+}
+
 /**
  * Abstract base class for all metric types.
  *
@@ -15,6 +20,7 @@ export abstract class MetricBase implements IMetric {
   readonly #type: MetricType;
   readonly #help: string;
   readonly #labelNames: readonly string[] | undefined;
+  readonly #labelKeys: ILabelKeyNode = { children: new Map() };
 
   /**
    * Creates a new metric.
@@ -27,7 +33,7 @@ export abstract class MetricBase implements IMetric {
     this.#name = name;
     this.#type = config.type;
     this.#help = help ?? config.help ?? name;
-    this.#labelNames = config.labels;
+    this.#labelNames = config.labels === undefined ? undefined : [...config.labels];
   }
 
   /**
@@ -90,14 +96,60 @@ export abstract class MetricBase implements IMetric {
   }
 
   /**
+   * Copies the caller's labels once per observation. Validation, the series key
+   * and the stored labels all read this copy, so an accessor returning a
+   * different value on each read cannot file a series under one label set and
+   * export it under another.
+   *
+   * @param labels - The caller's labels
+   * @returns A private copy, or `undefined` when unlabeled (null included)
+   */
+  protected snapshotLabels(
+    labels: Readonly<Record<string, string>> | undefined,
+  ): Readonly<Record<string, string>> | undefined {
+    return labels ? { ...labels } : undefined;
+  }
+
+  /**
    * Creates a deterministic key from labels for storage/retrieval.
    *
    * @param labels - The labels to key by
+   * @param observed - Only observations retain combinations; getters cannot grow the cache
    * @returns A deterministic string key
    */
-  protected labelKey(labels: Readonly<Record<string, string>> | undefined): string {
-    if (!labels || Object.keys(labels).length === 0) {
+  protected labelKey(
+    labels: Readonly<Record<string, string>> | undefined,
+    observed: boolean = false,
+  ): string {
+    // `!labels`, not `=== undefined`: a JavaScript caller may pass null.
+    if (!labels) return '';
+    const names = Object.keys(labels);
+    if (names.length === 0) {
       return '';
+    }
+    const configured = this.#labelNames;
+    if (
+      configured !== undefined &&
+      names.length === configured.length &&
+      configured.every((name) => Object.hasOwn(labels, name))
+    ) {
+      // Each value is read exactly once: a getter returning different values
+      // on each read must not cache a key for a series it did not observe.
+      const values = configured.map((name) => labels[name]!);
+      let node = this.#labelKeys;
+      for (const value of values) {
+        let child = node.children.get(value);
+        if (child === undefined) {
+          if (!observed) return snapshotKey(configured, values);
+          child = { children: new Map() };
+          node.children.set(value, child);
+        }
+        node = child;
+      }
+      if (node.key !== undefined) return node.key;
+      const key = snapshotKey(configured, values);
+      node.key = key;
+      return key;
     }
     // JSON.stringify of sorted entries ensures injectivity:
     // - Distinct label-sets → distinct keys (no collision from |, =, or \ in values)
@@ -110,4 +162,15 @@ export abstract class MetricBase implements IMetric {
    * Records an observation (implemented by subclasses).
    */
   abstract observe(value?: number, labels?: Readonly<Record<string, string>>): void;
+}
+
+/**
+ * Builds the label key from values already read, byte-identical to
+ * `JSON.stringify(Object.entries(labels).sort())` for the same label set. The
+ * default sort compares each pair as the string `name,value`, so the input
+ * order matters only when two pairs stringify equally, which needs a comma in a
+ * label name; then the configured order decides, the same on every call.
+ */
+function snapshotKey(names: readonly string[], values: readonly string[]): string {
+  return JSON.stringify(names.map((name, index) => [name, values[index]!]).sort());
 }

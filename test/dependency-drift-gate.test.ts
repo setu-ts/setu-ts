@@ -24,6 +24,20 @@ function stepOf(text: string, name: string): string {
  * because a regression is a one-word edit that CI reports as passing.
  */
 describe('dependency drift gate configuration', () => {
+  it('checks out develop, not the default branch', async () => {
+    // Issue #507: a scheduled run checks out `main`, the last release, so the
+    // gates reported a test race develop had already fixed. The one checkout
+    // in this workflow must name develop explicitly.
+    const text = await readWorkflow();
+    const checkouts = text.match(/uses:\s*actions\/checkout@/g) ?? [];
+    expect(checkouts).toHaveLength(1);
+    const step = text.slice(
+      text.indexOf('uses: actions/checkout@'),
+      text.indexOf('\n\n', text.indexOf('uses: actions/checkout@')),
+    );
+    expect(step).toMatch(/^\s+ref: develop$/m);
+  });
+
   it('uses only tools the runner image actually provides', async () => {
     // ripgrep is NOT installed on ubuntu-24.04. `rg --files` exited 127 before
     // any resolution ran, and the report step attributed that to drift.

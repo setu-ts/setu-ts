@@ -32,6 +32,7 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   ioredis: '5.x',
   kafkajs: '2.x',
   nats: '2.x',
+  pino: '10.x',
   // The Node WebSocket server is an optional peer of `@setu-ts/runtime`; a
   // package manager never installs it for the consumer (M113h §3.8).
   ws: '^8.18.0',

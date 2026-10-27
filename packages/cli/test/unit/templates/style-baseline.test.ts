@@ -7,8 +7,9 @@ import * as nodeFs from 'node:fs/promises';
  * M99e, refreshed for M101g's reviewed factory and smoke-test changes, and
  * M119c's reviewed Node test-runner flag and `swagger-ui-dist` pin, and
  * M119h's reviewed Workers test lane (V10-23), M118's reviewed manifest
- * check tasks and CLI devDependency, and M120's reviewed production scripts,
- * README sections, `.gitignore` line and new `Dockerfile`/`.dockerignore`, and M120b's
+ * check tasks and CLI devDependency, the REST performance fix's Pino logger
+ * choice (config and runtime dependencies only), and M120's reviewed production
+ * scripts, README sections, `.gitignore` line and new `Dockerfile`/`.dockerignore`, and M120b's
  * reviewed build-secret mount on every Dockerfile install step:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts

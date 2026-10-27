@@ -1,4 +1,4 @@
-/** Tests for the common clone-on-write redaction service. */
+/** Tests for the common snapshot redaction service. */
 import { describe, expect, it } from 'vitest';
 import { createMaskRedactor, createRedactionService } from '../../src/index.ts';
 import type { RedactionContext, Redactor } from '../../src/index.ts';
@@ -36,7 +36,7 @@ describe('createRedactionService', () => {
     expect(context).toEqual({ path: 'APIKEY', classification: 'secret' });
   });
 
-  it('masks strings, erases non-strings, and preserves unmatched identity', () => {
+  it('masks strings, erases non-strings, and returns unmatched subtrees as snapshots', () => {
     const nested = { retained: true };
     const service = createRedactionService({
       fields: { card: 'pci', count: 'pci' },
@@ -45,7 +45,8 @@ describe('createRedactionService', () => {
     const result = service.redactRecord({ card: '12345678', count: 4, nested });
 
     expect(result).toEqual({ card: '****5678', count: '[Redacted]', nested });
-    expect(result.nested).toBe(nested);
+    // A snapshot, not the caller's object: what is serialized is what was checked.
+    expect(result.nested).not.toBe(nested);
     expect(service.redactValue('other', 'unchanged')).toBe('unchanged');
   });
 
@@ -270,5 +271,52 @@ describe('createRedactionService', () => {
       expect(service.redactValue('email', 'jane@example.com')).toBe('[Redacted]');
       expect(service.redactValue('phone', '555-0100')).toBe('[Redacted]');
     });
+  });
+});
+
+describe('redactRecord reads each property once', () => {
+  it('should redact the nested value it copied when a getter changes between reads', () => {
+    // Re-audit of #512: the copy was taken from one read and the redaction
+    // decided on a second, so a getter returning a secret first and a clean
+    // object second left the secret in the output.
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    let reads = 0;
+    const record = Object.defineProperty({ password: 'top' }, 'meta', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? { password: 'canary-nested' } : { clean: true }),
+    });
+    const output = JSON.stringify(service.redactRecord(record));
+    expect(reads).toBe(1);
+    expect(output).not.toContain('canary-nested');
+    expect(output).not.toContain('top');
+    expect(service.redactRecord({ meta: { password: 'plain', safe: 'ok' } })).toEqual({
+      meta: { password: '[Redacted]', safe: 'ok' },
+    });
+  });
+
+  it('should serialize the value it checked when a getter turns secret after redaction', () => {
+    // Re-audit N5: an unchanged subtree used to come back by identity, so the
+    // serializer read the getter again and wrote a secret redaction never saw.
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    let reads = 0;
+    const record = Object.defineProperty({ safe: 1 }, 'meta', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? { clean: true } : { password: 'canary-late' }),
+    });
+    const output = JSON.stringify(service.redactRecord(record));
+    expect(output).not.toContain('canary-late');
+    expect(JSON.parse(output)).toEqual({ safe: 1, meta: { clean: true } });
+    expect(reads).toBe(1);
+  });
+
+  it('should keep enumerable symbol-keyed values on a redacted copy', () => {
+    const service = createRedactionService({ fields: { password: 'secret' } });
+    const tag = Symbol('tag');
+    const output = service.redactRecord({ password: 'hidden', [tag]: 'kept' }) as Record<
+      PropertyKey,
+      unknown
+    >;
+    expect(output['password']).toBe('[Redacted]');
+    expect(output[tag]).toBe('kept');
   });
 });

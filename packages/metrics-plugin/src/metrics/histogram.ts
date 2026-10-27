@@ -63,8 +63,9 @@ export class Histogram extends MetricBase {
    * @param labels - Label values keyed by label name
    */
   observe(value: number, labels?: Readonly<Record<string, string>>): void {
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    this.validateLabels(snapshot);
+    const key = this.labelKey(snapshot, true);
 
     // Initialize per-label-set storage
     if (!this.#bucketCounts.has(key)) {
@@ -75,8 +76,8 @@ export class Histogram extends MetricBase {
       }
       bucketCounts.set(Number.POSITIVE_INFINITY, 0);
       const data: HistogramData = { bucketCounts, sum: 0, count: 0 };
-      if (labels) {
-        data.labels = { ...labels }; // Defensive shallow copy
+      if (snapshot) {
+        data.labels = snapshot;
       }
       this.#bucketCounts.set(key, data);
     }

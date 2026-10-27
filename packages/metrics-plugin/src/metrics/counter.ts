@@ -39,12 +39,13 @@ export class Counter extends MetricBase {
     if (value < 0) {
       throw new Error(`Counter "${this.name}" cannot be decremented`);
     }
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    this.validateLabels(snapshot);
+    const key = this.labelKey(snapshot, true);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: CounterValue = { value: current + value };
-    if (labels) {
-      entry.labels = { ...labels }; // Defensive shallow copy
+    if (snapshot) {
+      entry.labels = snapshot;
     }
     this.#values.set(key, entry);
   }

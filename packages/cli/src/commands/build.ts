@@ -180,7 +180,8 @@ export async function runBuildCommand(args: ParsedArgs, deps: IBuildDependencies
     if ((await exists(deps.fs, dist)) && !(await deps.fs.stat(dist)).isDirectory)
       throw new Error(`${dist} is not a real directory.`);
     // Bundled in memory (`write: false`) and gated BEFORE the previous dist/ is
-    // touched, so a refused or failed build leaves the last good output in place
+    // touched, so a refused build or a failed bundle leaves the last good output in
+    // place (a write that fails after the removal can leave dist/ incomplete)
     // — Vite's emptyOutDir empties on write the same way (M120 audit F5).
     const result = await (deps.bundle ?? build)({
       absWorkingDir: dir,

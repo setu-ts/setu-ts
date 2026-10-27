@@ -34,6 +34,7 @@ import {
   FULL_STACK_TSCONFIG_OPTIONS,
 } from './full-stack-build-files.ts';
 import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
+import { defaultLogger } from './logger.ts';
 
 /**
  * Framework packages the emitted `app/` tree imports.
@@ -158,7 +159,11 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         // Opted in by the scaffold, with the probe and scrape paths excluded so a
         // kubelet does not write a log line per poll. The plugin's own default
         // (off) is unchanged.
-        logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },${discovery}
+        logger: {
+          transport: '${context.logger ?? defaultLogger(runtime)}',
+          requestLogging: true,
+          excludePaths: ['/live', '/ready', '/health', '/metrics'],
+        },${discovery}
         // Preserve Origin on native form posts; send no cross-origin referrer.
         httpSecurity: {
           headers: { referrerPolicy: 'same-origin' },
@@ -221,7 +226,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     args: fullStackArgs,
     // The REST starter underneath registers these unconditionally; listed here
     // because the factory hides them from the plugin list the README reads.
-    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
+    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin', 'logger-plugin'],
     parameter: {
       name: 'ssr',
       type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",

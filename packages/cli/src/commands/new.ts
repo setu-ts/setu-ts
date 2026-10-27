@@ -43,6 +43,7 @@ import {
 } from '../constants.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import {
   cliInvocation,
@@ -207,6 +208,14 @@ function planWorkspace(
     return {
       ok: false,
       message: '--env-file applies to a generated application, not a workspace root.',
+    };
+  }
+
+  if (args.flags['logger'] !== undefined) {
+    return {
+      ok: false,
+      message:
+        '--logger applies to an application, not a workspace root. Use setu generate app <name> --template rest --logger <name>.',
     };
   }
 
@@ -470,7 +479,12 @@ async function planProject(
   args: ParsedArgs,
   probe?: PortProbe,
 ): Promise<
-  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: true;
+      readonly files: readonly GeneratedFile[];
+      readonly notice?: string;
+      readonly logger?: string;
+    }
   | {
       readonly ok: false;
       readonly message: string;
@@ -529,7 +543,11 @@ async function planProject(
   //
   // The HOST, not the template: `--style class-based` resolves to the
   // template's precomputed variant, and the alias resolves to itself.
-  const host = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const loggerChoice = resolveLoggerChoice(args, runtime, resolved);
+  if (!loggerChoice.ok) return loggerChoice;
+  const host =
+    loggerChoice.logger === undefined ? resolved : withLogger(resolved, loggerChoice.logger);
   const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
   if (configured === undefined) {
     return {
@@ -586,6 +604,7 @@ async function planProject(
     return {
       ok: true,
       files: projectFiles(name, runtime, overlaid),
+      ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
       ...(notice === undefined ? {} : { notice }),
     };
   }
@@ -602,6 +621,7 @@ async function planProject(
   return {
     ok: true,
     files: projectFiles(name, runtime, devHost),
+    ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
     ...(notice === undefined ? {} : { notice }),
   };
 }
@@ -660,6 +680,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
       `  --queue <name>      Job queue backend for a standalone project: ` +
         `${listQueues().join(' | ')} (default memory)`,
     );
+    deps.log('  --logger <name>     console | pino (default pino; console on Cloudflare Workers)');
     deps.log(
       '  --devtool           Emit the development entry for the local diagnostics connector ' +
         '(Deno only)',
@@ -742,6 +763,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   // an error: the alias is byte-identical and stays. Only the standalone plan
   // carries one: a workspace root refuses --template, so it can never be an alias.
   let planNotice: string | undefined;
+  let planLogger: string | undefined;
   let plan:
     | { readonly ok: true; readonly files: readonly GeneratedFile[] }
     | {
@@ -752,7 +774,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
     const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
-    if (projectPlan.ok) planNotice = projectPlan.notice;
+    if (projectPlan.ok) {
+      planNotice = projectPlan.notice;
+      planLogger = projectPlan.logger;
+    }
     plan = projectPlan;
   }
   if (!plan.ok) {
@@ -795,6 +820,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }));
 
   if (args.flags['dry-run'] === true) {
+    if (planLogger !== undefined) deps.log(`Logger: ${planLogger}`);
     const code = await reportDryRunPlan(deps, files);
     return code;
   }
