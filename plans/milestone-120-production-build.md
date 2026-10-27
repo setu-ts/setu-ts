@@ -167,6 +167,12 @@ projects).
   - Deno: `start` unchanged; new tasks `start:dev` (`deno run --watch <same permissions> main.ts`)
     and `start:debug` (`deno run --inspect <same permissions> main.ts`). The devtool's `dev` task
     and Deno full-stack's `dev` task are unchanged (Deno tasks are a separate namespace).
+  - Deno full-stack is the exception, mirroring Node's full-stack rule (§3.3): its `main.ts` imports
+    `build/server/index.js` (§3.5), which a fresh project does not have, so `start:dev` is
+    `deno task install && deno run -A --watch dev.ts` and `start:debug` is
+    `deno task install && deno run -A --inspect dev.ts` — the existing Vite development entry, which
+    serves route modules itself and needs no production build. `-A` because the existing `dev` task
+    already runs that entry with `-A` (`project-files.ts`, the `devEntry` arm).
 - **Why:** maintainer decision (§0).
 - **Test home:** `project-files-scripts.test.ts`; `deno-tasks.test.ts`.
 
@@ -215,7 +221,18 @@ projects).
     and runs `CMD ["bun","run","main.ts"]`. It does not use `--filter`: a filtered install links no
     library (§1), so the image would resolve imports differently from development.
   - **Deno:** the existing workspace Dockerfile shape (`deno cache` at build, `--frozen` scoped
-    run).
+    run), plus one step before `deno cache main.ts`: when the member's manifest declares a `build`
+    task (full-stack), run `deno task build`. Without it `deno cache main.ts` fails on the static
+    `build/server/index.js` import (§3.5), and `.dockerignore` keeps a host `build/` out of the
+    context, so the image must build it. Detect the task by parsing the manifest (the file's
+    existing pinned `@std/jsonc` parse), not by grepping text.
+  - **The single parameterized workspace file and full-stack.** `WorkspaceMember` carries no
+    template, so each Dockerfile decides per member at build time: Node always runs
+    `npm run build --workspace apps/${MEMBER}` (every Node member has `build`) and copies `build/`
+    with the `buil[d]` bracket glob, the same absent-tolerant trick as `lib[s]`; Bun runs its build
+    only when the member's `package.json` declares a `build` script, detected the same way. The
+    implementation probes that a bracket glob in `COPY --from=build` tolerates an absent directory
+    before relying on it; if it does not, the build stage creates an empty `build/` first.
   - **Standalone projects** (Node, Bun, Deno) get a root `Dockerfile` and `.dockerignore` in the
     same shapes, with the context at the project root and no `MEMBER` argument. Workers gets none.
   - `.dockerignore` (standalone and workspace root) excludes `node_modules/`, `dist/`, `build/`,
@@ -291,6 +308,31 @@ projects).
   existing Node, Bun and Deno projects and workspaces. Nothing rewrites existing scripts.
 - **Test home:** docs gates.
 
+### 3.14 A Bun workspace member resolves its libraries (merged-code defect, folded in)
+
+- **Decision:** a Bun workspace root carries `bunfig.toml` with `[install]` `linker = "hoisted"`.
+  - `setu new --workspace --runtime bun` writes it (`workspace/root-files.ts`).
+  - `setu generate library` in a Bun workspace without it plans it (`workspace/library.ts`, written
+    like the existing root edits: `managed`, reported): absent file → create it; a file already
+    setting `linker = "hoisted"` → unchanged; a file setting any other `linker` → refused with a
+    message naming the setting and why the library needs `hoisted`; a file without a `linker` key →
+    refused rather than rewritten (TOML is not parsed here, so a merge could discard content), with
+    the line to add.
+  - The Bun workspace Dockerfile copies `bunfig.toml` (bracket glob, absent-tolerant) before its
+    install, so the image links libraries exactly as development does (§3.7).
+  - The `generate library` next-step text stays "run `bun install`", now true.
+- **Why:** probed 2026-10-27 on Bun 1.4.2 (§8): a new workspace lockfile (`configVersion: 1`)
+  installs with Bun's isolated linker, which links a workspace package only into packages that
+  declare it, and members never declare libraries (`library.ts:125-138`). From clean installs:
+  default → `Cannot find module '@m120/shared'`, exit 1; with the `bunfig.toml` above →
+  `bun install` and `bun install --production` both resolve it, exit 0. `hoisted` is npm's layout,
+  which the npm arm already relies on.
+- **Test home:** `test/unit/workspace/root-files.test.ts` (Bun root has the file; npm and Deno do
+  not); `test/unit/workspace/library.test.ts` (the four `bunfig.toml` cases); the compose test (Bun
+  Dockerfile copies it); an e2e scaffolding a Bun workspace with a library, running `bun install`
+  and importing the library from a member (guarded on `bun` being present, like the existing Bun e2e
+  tests).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none in `src/index.ts`. Generated output changes: `npm start` now
@@ -321,13 +363,15 @@ needs a build. Ships in minor 0.11.0, with an upgrade-guide entry.
 | `packages/cli/src/cli.ts`, `src/flags.ts`     | `case 'build'`, `BUILD` spec, help.                                                                                           |
 | `packages/cli/package.json`                   | `esbuild` dependency (§3.2).                                                                                                  |
 | `packages/cli/src/templates/project-files.ts` | Node/Bun scripts, Deno tasks, standalone `.gitignore`, standalone Dockerfile and `.dockerignore`, README, full-stack `check`. |
-| `packages/cli/src/templates/full-stack.ts`    | Full-stack `main.ts` passes `serverBuild` (§3.5); `dev` → `start:dev`.                                                        |
+| `packages/cli/src/templates/full-stack.ts`    | Full-stack comments and `dev` → `start:dev`; the `main.ts` itself is emitted by `project-files.ts` (§3.5).                    |
 | `packages/cli/src/workspace/compose.ts`       | Multi-stage npm, Bun and Deno Dockerfiles (§3.7).                                                                             |
 | `packages/cli/src/workspace/root-files.ts`    | Root `.gitignore` (§3.8), README commands.                                                                                    |
 | `packages/cli/src/workspace/dev-runner.ts`    | `start:dev` (§3.6).                                                                                                           |
 | `packages/cli/src/schematics/migration.ts`    | Production runner command (§3.9).                                                                                             |
 | `packages/cli/src/commands/new.ts`            | Next-step hint (§3.10).                                                                                                       |
 | `scripts/check-deploy.ts`                     | Node workspace and standalone image cases (§3.11).                                                                            |
+| `packages/cli/src/workspace/library.ts`       | Bun `bunfig.toml` root edit for older workspaces (§3.14).                                                                     |
+| `scripts/toolchain-prose.ts`                  | Allowlist entries for the legitimate Deno-target `deno task start` guidance in `commands/build.ts` and its unit test.         |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -336,8 +380,9 @@ needs a build. Ships in minor 0.11.0, with an upgrade-guide entry.
 | `test/unit/build-command.test.ts` (new)                                        | `commands/build.ts`                                     | §3.1 items 1–8 through an injected bundler and fake fs; externals exclude libraries and include optional peers.                                                                                                                                                                                     |
 | `test/e2e/build-e2e.test.ts` (new)                                             | `commands/build.ts` with real esbuild                   | rest, class-based and full-stack scaffolds build; the compiled output serves; a workspace member inlines a library that has its own third-party dependency, and that dependency stays external; an unlisted artifact fails the build with `setu.E003` and no `dist/`; migration runner entry built. |
 | `test/unit/project-files-scripts.test.ts` (new)                                | `templates/project-files.ts`, `templates/full-stack.ts` | Exact scripts and tasks per template × runtime; `.gitignore` lines; standalone Dockerfile and `.dockerignore` presence and shape.                                                                                                                                                                   |
-| `test/unit/dockerfile.test.ts`, `test/unit/workspace/compose.test.ts` (extend) | `workspace/compose.ts`                                  | Node multi-stage (two `FROM`, `npm ci --omit=dev --workspace`, `CMD node --enable-source-maps dist/main.js`, numeric `USER`); Bun `--production --filter`; Deno unchanged.                                                                                                                          |
+| `test/unit/dockerfile.test.ts`, `test/unit/workspace/compose.test.ts` (extend) | `workspace/compose.ts`                                  | Node multi-stage (two `FROM`, `npm ci --omit=dev --workspace`, `CMD node --enable-source-maps dist/main.js`, numeric `USER`); Bun `--production` and no `--filter` (§3.7); Deno runs `deno task build` before `deno cache` only for a member declaring `build`; Node copies `buil[d]`.              |
 | `test/unit/workspace/root-files.test.ts` (extend)                              | `workspace/root-files.ts`                               | Root `.gitignore` gains `apps/*/dist/`, `apps/*/build/`.                                                                                                                                                                                                                                            |
+| `test/unit/workspace/library.test.ts` (extend)                                 | `workspace/library.ts`                                  | The four Bun `bunfig.toml` cases (§3.14); npm and Deno libraries write no `bunfig.toml`.                                                                                                                                                                                                            |
 | `test/unit/workspace/dev-runner.test.ts` (extend)                              | `workspace/dev-runner.ts`                               | npm/Bun spawn `run start:dev`; Deno unchanged.                                                                                                                                                                                                                                                      |
 | `test/unit/schematics/migration.test.ts` (extend)                              | `schematics/migration.ts`                               | Node prints both commands.                                                                                                                                                                                                                                                                          |
 | `flags.test.ts`, `help.test.ts`, `positional-refusal.test.ts` (extend)         | `flags.ts`, `cli.ts`                                    | `build` inventory, help, `setu build extra` refused.                                                                                                                                                                                                                                                |
@@ -374,7 +419,11 @@ pnpm run release:verify 0.10.0
   packages that declare it, and members do not declare libraries (§1). Whether a Bun member resolves
   a library in development today is unverified. → The implementation probes it first. If it does not
   resolve, that is a defect in merged code outside M120, raised to the maintainer; the Bun image
-  keeps development's resolution in both cases (§3.7).
+  keeps development's resolution in both cases (§3.7). **Probed 2026-10-27 (Bun 1.4.2): it does not
+  resolve.** A Bun workspace with `libs/*` in its root `workspaces`, after `bun install`, fails
+  `import '@m120/shared'` from `apps/api` with `Cannot find module`; nothing is linked under
+  `node_modules/@m120`. Raised to the maintainer as a merged-code defect; the maintainer folded the
+  fix into M120 (§3.14).
 - **`npm start` habits.** → The next-step hint, README and upgrade guide all name `start:dev`.
 
 ## 9. Out of scope
