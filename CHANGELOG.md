@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Custom logger transport (0.11.0, `@setu-ts/logger-plugin`).**
+  `LoggerPlugin({ transport: 'custom', logger })` wraps an application `ILogger` with level
+  filtering, metadata redaction, request logging and trace correlation. Logger/transport mismatches
+  throw a named `LoggerConfigurationError` at construction; child adapters keep the controls.
+- **Scaffold logger choice (0.11.0, `@setu-ts/cli`).** `setu new --logger console|pino` and
+  `setu generate app --logger console|pino` configure templates with logging. The prompt, help and
+  dry-run report the choice; Pino on Cloudflare Workers is refused by name.
+
 - **`setu check` and `setu sync` (M118, #510, 0.11.0, `@setu-ts/cli`).**
   `setu check [--dir] [--strict]` is a read-only wiring gate: it exits `1` when a seam artifact is
   skipped, a barrel does not list an artifact in its directory or lists one that is gone,
@@ -124,6 +132,18 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **One request completion at info (0.11.0, `@setu-ts/logger-plugin`).** Request logging emits
+  `request completed` at `info` with `method`, `path`, `status`, `duration` and the child's
+  `requestId`. `request received` moves to `debug`; set
+  `LoggerPlugin({ requestLogging: true, level: 'debug' })` to restore the arrival/completion pair.
+  When the exposed child level excludes debug, arrival metadata is not built. Slow warnings,
+  error-status prediction and path exclusions are unchanged.
+
+- **Pino scaffold default (0.11.0, `@setu-ts/cli`).** REST, microservice, class-based and full-stack
+  projects use Pino on Node, Deno and Bun, adding its `10.x` runtime dependency through the existing
+  client dependency renderer. Workers defaults to console; `--logger console` keeps console output
+  without installing Pino.
 
 - **Generated projects run `setu check` (M118, #510, 0.11.0, `@setu-ts/cli`).** Node, Bun and
   Workers scaffolds carry `@setu-ts/cli` at the framework range in `devDependencies`, and their
@@ -291,6 +311,12 @@ All notable changes to this project are documented here. The format follows
   workspace overrides do not propagate to consumers.
 
 ### Fixed
+
+- **Logging and metrics hot paths (0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
+  `@setu-ts/metrics-plugin`).** Compile literal and suffix field matchers and specificity once,
+  bound matcher path results to 1,024 entries per instance, and memoize recursive wildcard states
+  only for multiple globstars. Console children reuse root redaction compilation. Metrics cache
+  byte-identical label keys by configured label values, retaining only observed combinations.
 
 - **Realtime subscriber failures (#511, 0.11.0, `@setu-ts/realtime-backplane-plugin`,
   `@setu-ts/cloudflare-plugin`).** Async subscriber rejections are captured and reported without an

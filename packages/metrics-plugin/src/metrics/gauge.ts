@@ -37,7 +37,7 @@ export class Gauge extends MetricBase {
    */
   set(value: number, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const key = this.labelKey(labels, true);
     const entry: GaugeValue = { value };
     if (labels) {
       entry.labels = { ...labels }; // Defensive shallow copy
@@ -53,7 +53,7 @@ export class Gauge extends MetricBase {
    */
   inc(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const key = this.labelKey(labels, true);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current + value };
     if (labels) {
@@ -70,7 +70,7 @@ export class Gauge extends MetricBase {
    */
   dec(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const key = this.labelKey(labels, true);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current - value };
     if (labels) {

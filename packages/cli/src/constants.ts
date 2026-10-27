@@ -80,6 +80,7 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'transport-url',
   'broker',
   'queue',
+  'logger',
   'env-file',
   'depends-on',
   'scope',

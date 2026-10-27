@@ -47,6 +47,50 @@ import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/nod
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
+it(
+  'boots a pino-default REST scaffold and emits a numeric-level JSON request log',
+  { timeout: 900_000 },
+  async () => {
+    expect(await run(['new', 'pino-app', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+    const project = `${root}/pino-app`;
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const result = await withNodeServer(project, async (origin) => {
+        const response = await fetch(`${origin}/greetings/log-probe`);
+        await response.body?.cancel();
+        return response.status;
+      });
+      expect(result.result, result.output).toBe(200);
+      const lines = result.output
+        .split('\n')
+        .filter((line) => line.startsWith('{'))
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      expect(
+        lines.filter((line) => line['path'] === '/greetings/log-probe'),
+        result.output,
+      ).toEqual([
+        expect.objectContaining({
+          level: 30,
+          msg: 'request completed',
+          requestId: expect.any(String),
+          method: 'GET',
+          path: '/greetings/log-probe',
+          status: 200,
+          duration: expect.any(Number),
+        }),
+      ]);
+      expect(
+        lines.filter((line) => line['msg'] === 'request received'),
+        result.output,
+      ).toEqual([]);
+    } finally {
+      await overlay.close();
+    }
+  },
+);
+
 for (const target of ['deno', 'bun'] as const) {
   it(
     `runs the ${target} scaffold check task and catches a removed barrel import`,

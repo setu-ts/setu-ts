@@ -132,6 +132,7 @@ const NEW: ICommandFlagSpec = spec(
     'transport-url',
     'broker',
     'queue',
+    'logger',
     'yes',
     'y',
     'dir',
@@ -166,6 +167,7 @@ const GENERATE_APP: ICommandFlagSpec = spec(
   [
     'template',
     'style',
+    'logger',
     'port',
     'devtool',
     'devtool-port',

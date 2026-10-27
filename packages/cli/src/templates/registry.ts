@@ -171,6 +171,8 @@ export interface EnvVariable {
 
 /** Inputs a template factory needs while its call is rendered. */
 export interface AppFactoryRenderContext {
+  /** Logger selected for the starter's logger configuration. @since 0.11.0 */
+  readonly logger?: 'console' | 'pino';
   /** Asset mode supplied by a runtime swap to a starter composition. */
   readonly swaggerAssets?: 'cdn';
   /** The runtime target selected for the generated project. */
