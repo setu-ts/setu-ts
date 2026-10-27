@@ -211,4 +211,51 @@ describe('log calls never throw to their caller', () => {
       }
     });
   }
+
+  it('should report a throwing custom sink once on stderr across the root and its children', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failing = recordingSink({ log: true });
+    const failingChild = recordingSink({ child: true });
+    const healthy = recordingSink();
+    const first = await customLogger(failing.logger);
+    const second = await customLogger(failingChild.logger);
+    const third = await customLogger(healthy.logger);
+    try {
+      for (let index = 0; index < 5; index++) {
+        first.logger.info('dropped', { index });
+        first.logger.child({ requestId: `r${index}` }).warn('dropped too');
+        second.logger.child({ requestId: `r${index}` }).info('kept');
+        third.logger.child({ requestId: `r${index}` }).info('kept');
+      }
+      // One line per broken root, naming the failure; the healthy root is silent.
+      expect(stderr.mock.calls.map((call) => String(call[0]))).toEqual([
+        expect.stringContaining('custom logger sink threw') as unknown as string,
+        expect.stringContaining('custom logger sink threw') as unknown as string,
+      ]);
+      expect(String(stderr.mock.calls[0]![0])).toContain('sink down');
+      expect(String(stderr.mock.calls[1]![0])).toContain('sink child down');
+      expect(healthy.calls).toHaveLength(5);
+      expect(failingChild.calls).toHaveLength(5);
+    } finally {
+      stderr.mockRestore();
+      await first.stop();
+      await second.stop();
+      await third.stop();
+    }
+  });
+
+  it('should not throw when stderr itself fails while reporting the sink', async () => {
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {
+      throw new Error('stderr closed');
+    });
+    const failing = recordingSink({ log: true });
+    const { logger, stop } = await customLogger(failing.logger);
+    try {
+      expect(() => logger.info('dropped')).not.toThrow();
+      expect(stderr).toHaveBeenCalledTimes(1);
+    } finally {
+      stderr.mockRestore();
+      await stop();
+    }
+  });
 });

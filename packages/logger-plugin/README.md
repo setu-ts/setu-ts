@@ -72,7 +72,8 @@ with redacted bindings and keep these controls. Invalid logger/transport combina
 `Error` named `LoggerConfigurationError` at plugin construction. Your sink may filter further. As on
 every transport, a log call never throws: metadata that throws while being read is replaced by
 `[unserializable metadata]`, and if your sink throws, that record is dropped rather than failing the
-request that logged it.
+request that logged it. The first such failure is reported once on stderr, so a broken sink does not
+go unnoticed.
 
 For example, adapt an existing Winston-shaped sink without adding a framework dependency:
 
