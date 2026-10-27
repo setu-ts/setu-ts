@@ -1,6 +1,6 @@
 /** Internal adapter applying framework logging policy before a custom sink. */
 import type { ILogger, IRedactionService, LogLevel, LogMetadata } from '@setu-ts/common';
-import { normalizeMetadata } from './normalize-metadata.ts';
+import { normalizeMetadata, UNSERIALIZABLE_METADATA } from './normalize-metadata.ts';
 
 const LEVEL_RANK: Readonly<Record<LogLevel, number>> = Object.freeze({
   fatal: 60,
@@ -45,21 +45,48 @@ export class CustomLogger implements ILogger {
     this.#log('trace', message, metadata);
   }
 
+  /**
+   * Never throws. Bindings that throw while being read are dropped; a sink whose
+   * `child()` throws is kept as is, without the new bindings, so redaction and
+   * level filtering still wrap every record.
+   */
   child(bindings: LogMetadata): ILogger {
-    return new CustomLogger(
-      this.#inner.child(this.#redaction.redactRecord(normalizeMetadata(bindings))),
-      this.level,
-      this.#redaction,
-    );
+    let redacted: Readonly<Record<string, unknown>>;
+    try {
+      redacted = this.#redaction.redactRecord(normalizeMetadata(bindings));
+    } catch {
+      redacted = {};
+    }
+    let inner: ILogger;
+    try {
+      inner = this.#inner.child(redacted);
+    } catch {
+      inner = this.#inner;
+    }
+    return new CustomLogger(inner, this.level, this.#redaction);
   }
 
+  /**
+   * Never throws, matching the console transport: a log call sits on request
+   * paths, so a fault here must not become the request's fault. Metadata that
+   * throws while being read is replaced by {@linkcode UNSERIALIZABLE_METADATA};
+   * a sink that throws loses the record, since there is nowhere left to report it.
+   */
   #log(level: LogLevel, message: string, metadata?: LogMetadata): void {
     if (LEVEL_RANK[level] < LEVEL_RANK[this.level]) return;
-    this.#inner[level](
-      message,
-      metadata === undefined
-        ? undefined
-        : this.#redaction.redactRecord(normalizeMetadata(metadata)),
-    );
+    let payload: Readonly<Record<string, unknown>> | undefined;
+    try {
+      payload =
+        metadata === undefined
+          ? undefined
+          : this.#redaction.redactRecord(normalizeMetadata(metadata));
+    } catch {
+      payload = { metadata: UNSERIALIZABLE_METADATA };
+    }
+    try {
+      this.#inner[level](message, payload);
+    } catch {
+      // The application's sink failed; the caller must not.
+    }
   }
 }

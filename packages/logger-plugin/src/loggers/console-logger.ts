@@ -16,19 +16,13 @@ import type {
   LogMetadata,
 } from '@setu-ts/common';
 
-import { normalizeMetadata } from './normalize-metadata.ts';
+import { normalizeMetadata, UNSERIALIZABLE_METADATA } from './normalize-metadata.ts';
 import { safeStringify } from './safe-stringify.ts';
 
 /**
  * Numeric severity ranking. Lower numbers are more severe (so a configured
  * level allows any entry whose rank is `<=` the configured rank).
  */
-/**
- * Stands in for metadata that threw while being read. Emitted in place of the
- * metadata so the entry still reaches the operator and says why it is thin.
- */
-const UNSERIALIZABLE_METADATA = '[unserializable metadata]';
-
 const LEVEL_RANK: Readonly<Record<LogLevel, number>> = Object.freeze({
   fatal: 60,
   error: 50,
@@ -57,6 +51,18 @@ export interface ConsoleLoggerOptions {
 }
 
 /**
+ * Carries a root's compiled `redact` paths to its children. Module-private, so
+ * no caller outside this file can create or read it: the public constructor
+ * stays `(runtime, options?)`, and `redact` cannot be replaced from outside.
+ */
+const INHERITED_REDACTION: unique symbol = Symbol('inherited legacy redaction');
+
+/** Options a child is built with; the extra key is invisible to the public type. */
+interface ChildLoggerOptions extends ConsoleLoggerOptions {
+  readonly [INHERITED_REDACTION]: IRedactionService;
+}
+
+/**
  * Structured logger that writes JSON lines (or pretty text) to `console`.
  *
  * Runtime-independent: timestamps come from {@linkcode IRuntimeServices.now},
@@ -82,18 +88,14 @@ export class ConsoleLogger implements ILogger {
   /**
    * @param runtime - Runtime services (for timestamps)
    * @param options - Configuration
-   * @param legacyRedaction - Internal child construction: reuse the root's compiled paths
    */
-  constructor(
-    runtime: IRuntimeServices,
-    options?: ConsoleLoggerOptions,
-    legacyRedaction?: IRedactionService,
-  ) {
+  constructor(runtime: IRuntimeServices, options?: ConsoleLoggerOptions) {
     this.#runtime = runtime;
     this.level = options?.level ?? 'info';
     this.#pretty = options?.pretty ?? false;
+    // A child reuses its root's compiled paths instead of compiling per request.
     this.#legacyRedaction =
-      legacyRedaction ??
+      (options as Partial<ChildLoggerOptions> | undefined)?.[INHERITED_REDACTION] ??
       createRedactionService(
         {
           fields: Object.fromEntries((options?.redact ?? []).map((path) => [path, 'secret'])),
@@ -143,17 +145,17 @@ export class ConsoleLogger implements ILogger {
    * @returns A new child logger
    */
   child(bindings: LogMetadata): ILogger {
-    const childOptions = {
+    const childOptions: ChildLoggerOptions = {
       level: this.level,
       pretty: this.#pretty,
       bindings: { ...this.#bindings, ...bindings },
+      [INHERITED_REDACTION]: this.#legacyRedaction,
     };
     return new ConsoleLogger(
       this.#runtime,
       this.#redaction === undefined
         ? childOptions
         : { ...childOptions, redaction: this.#redaction },
-      this.#legacyRedaction,
     );
   }
 

@@ -118,19 +118,21 @@ export abstract class MetricBase implements IMetric {
       names.length === configured.length &&
       configured.every((name) => Object.hasOwn(labels, name))
     ) {
+      // Each value is read exactly once: a getter returning different values
+      // on each read must not cache a key for a series it did not observe.
+      const values = configured.map((name) => labels[name]!);
       let node = this.#labelKeys;
-      for (const name of configured) {
-        const value = labels[name]!;
+      for (const value of values) {
         let child = node.children.get(value);
         if (child === undefined) {
-          if (!observed) return JSON.stringify(Object.entries(labels).sort());
+          if (!observed) return snapshotKey(configured, values);
           child = { children: new Map() };
           node.children.set(value, child);
         }
         node = child;
       }
       if (node.key !== undefined) return node.key;
-      const key = JSON.stringify(Object.entries(labels).sort());
+      const key = snapshotKey(configured, values);
       node.key = key;
       return key;
     }
@@ -145,4 +147,15 @@ export abstract class MetricBase implements IMetric {
    * Records an observation (implemented by subclasses).
    */
   abstract observe(value?: number, labels?: Readonly<Record<string, string>>): void;
+}
+
+/**
+ * Builds the label key from values already read, byte-identical to
+ * `JSON.stringify(Object.entries(labels).sort())` for the same label set. The
+ * default sort compares each pair as the string `name,value`, so the input
+ * order matters only when two pairs stringify equally, which needs a comma in a
+ * label name; then the configured order decides, the same on every call.
+ */
+function snapshotKey(names: readonly string[], values: readonly string[]): string {
+  return JSON.stringify(names.map((name, index) => [name, values[index]!]).sort());
 }

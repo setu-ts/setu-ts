@@ -2,6 +2,7 @@
 
 import type { DataClassification } from './classification.ts';
 import type { FieldRedaction } from './policy.ts';
+import { createPathCache } from './path-cache.ts';
 import { eraseRedactor, type Redactor } from './redactors.ts';
 
 /** The classification and optional pattern-specific redactor a match carries. */
@@ -20,6 +21,9 @@ interface Pattern extends CompiledFieldPattern {
 }
 
 const PATH_CACHE_LIMIT = 1_024;
+// Bounds retained memory, not just entries: field names can come from request
+// bodies, and 1,024 megabyte-sized names would otherwise stay pinned.
+const PATH_CACHE_MAX_KEY_LENGTH = 256;
 
 /** Compiles dot-path patterns that support `*` and `**`. */
 export function createFieldMatcher(
@@ -60,7 +64,7 @@ export function createFieldMatcher(
       ? { ...compiled, classification, redactor: value.redactor }
       : { ...compiled, classification };
   });
-  const cache = new Map<string, Pattern | undefined>();
+  const cache = createPathCache<Pattern | undefined>(PATH_CACHE_LIMIT, PATH_CACHE_MAX_KEY_LENGTH);
   return (path: string): CompiledFieldPattern | undefined => {
     if (cache.has(path)) return cache.get(path);
     const segments = path
@@ -75,7 +79,6 @@ export function createFieldMatcher(
         selected = pattern;
       }
     }
-    if (cache.size === PATH_CACHE_LIMIT) cache.delete(cache.keys().next().value!);
     cache.set(path, selected);
     return selected;
   };

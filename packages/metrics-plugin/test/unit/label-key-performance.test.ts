@@ -61,17 +61,18 @@ describe('metric label key cache', () => {
 
   it('does not cache unobserved combinations requested by getters', () => {
     const metric = new Counter('cache', { help: 'test', type: 'counter', labels: ['label'] });
-    const entries = vi.spyOn(Object, 'entries');
+    // Building a key sorts its pairs once; a cached key is returned unsorted.
+    const sort = vi.spyOn(Array.prototype, 'sort');
     try {
       metric.getValue({ label: 'missing' });
-      entries.mockClear();
+      sort.mockClear();
       metric.inc(1, { label: 'missing' });
-      expect(entries).toHaveBeenCalledTimes(1);
-      entries.mockClear();
+      expect(sort).toHaveBeenCalledTimes(1);
+      sort.mockClear();
       metric.inc(1, { label: 'missing' });
-      expect(entries).not.toHaveBeenCalled();
+      expect(sort).not.toHaveBeenCalled();
     } finally {
-      entries.mockRestore();
+      sort.mockRestore();
     }
   });
 
@@ -84,5 +85,27 @@ describe('metric label key cache', () => {
     metric.inc(1);
     expect([...metric.values.entries()]).toEqual([['', 3]]);
     expect(metric.getValue(none)).toBe(3);
+  });
+
+  it('should key each observation by the label values it read once', () => {
+    // Security audit F4: values were read twice, so an accessor returning
+    // different values cached one series' key under another series' path.
+    const metric = new Counter('flip', { help: 'test', type: 'counter', labels: ['route'] });
+    let reads = 0;
+    const flipping = Object.defineProperty({}, 'route', {
+      enumerable: true,
+      get: () => (reads++ % 2 === 0 ? '/a' : '/b'),
+    }) as Readonly<Record<string, string>>;
+    const keyOf = (route: string) => JSON.stringify([['route', route]]);
+    for (let index = 0; index < 4; index++) metric.inc(1, flipping);
+    // A plain observation must land in its own series; with a wrongly cached
+    // key it lands in the other one, for good.
+    for (const route of ['/a', '/b']) {
+      const before = new Map(metric.values);
+      metric.inc(1, { route });
+      expect(metric.values.get(keyOf(route))).toBe((before.get(keyOf(route)) ?? 0) + 1);
+      const other = route === '/a' ? '/b' : '/a';
+      expect(metric.values.get(keyOf(other))).toBe(before.get(keyOf(other)));
+    }
   });
 });

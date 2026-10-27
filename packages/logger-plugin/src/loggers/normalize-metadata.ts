@@ -21,6 +21,13 @@ import type { LogMetadata } from '@setu-ts/common';
 import { serializeError } from '@setu-ts/common';
 
 /**
+ * Stands in for metadata that threw while being read. Emitted in place of the
+ * metadata so the entry still reaches the operator and says why it is thin.
+ * One value for every transport, so a log query finds them all.
+ */
+export const UNSERIALIZABLE_METADATA = '[unserializable metadata]';
+
+/**
  * Returns a copy of `metadata` in which every `Error` value is replaced by its
  * plain, serializable {@linkcode serializeError} representation. Non-`Error`
  * values — including nested objects and arrays — are left untouched; only a

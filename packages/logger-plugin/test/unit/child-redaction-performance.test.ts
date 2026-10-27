@@ -28,4 +28,26 @@ describe('ConsoleLogger', () => {
       output.mockRestore();
     }
   });
+
+  it('should keep redact paths when an untyped caller passes a third constructor argument', () => {
+    // Security audit F3: the constructor once took the children's compiled
+    // redaction as a public third parameter, which silently replaced `redact`.
+    const output = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const Untyped = ConsoleLogger as unknown as new (...args: unknown[]) => ConsoleLogger;
+      const replacement = common.createRedactionService({ fields: {} });
+      const logger = new Untyped(
+        createFakeRuntime().runtime,
+        { redact: ['**.apiKey'] },
+        replacement,
+      );
+      logger.child({ requestId: 'r1' }).child({}).info('call', { apiKey: 'hidden', safe: 'ok' });
+      logger.info('root', { apiKey: 'hidden' });
+      const lines = output.mock.calls.map((call) => JSON.parse(String(call[0])) as object);
+      expect(lines[0]).toMatchObject({ apiKey: '[Redacted]', safe: 'ok', requestId: 'r1' });
+      expect(lines[1]).toMatchObject({ apiKey: '[Redacted]' });
+    } finally {
+      output.mockRestore();
+    }
+  });
 });

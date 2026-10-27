@@ -30,7 +30,9 @@ describe('compiled field matcher', () => {
       '*.password',
       'a..b',
     ];
-    const atoms = ['', 'a', 'b', 'A', 'password', '__proto__', 'constructor'];
+    // The 300-character atom makes paths too long to cache, so the uncached
+    // branch is compared with the old matcher too.
+    const atoms = ['', 'a', 'b', 'A', 'password', '__proto__', 'constructor', 'x'.repeat(300)];
     let paths = [''];
     let level = [''];
     for (let depth = 0; depth < 4; depth++) {
@@ -107,6 +109,29 @@ describe('compiled field matcher', () => {
       expect(
         createFieldMatcher({ '**.password': 'pii' }, false)('first.password')?.classification,
       ).toBe('pii');
+    } finally {
+      split.mockRestore();
+    }
+  });
+
+  it('does not cache a path longer than 256 characters, and still matches it exactly', () => {
+    // An attacker-chosen field name must not stay pinned in a long-lived matcher
+    // (security audit F1: 600 × 900 KB names retained ~1 GiB). Long paths are
+    // matched exactly as before, only without the cache.
+    const matcher = createFieldMatcher({ '**.password': 'secret' }, false);
+    const longSecret = `${'k'.repeat(10_000)}.password`;
+    const longPlain = `${'k'.repeat(10_000)}.name`;
+    const boundary = `${'k'.repeat(256 - '.password'.length)}.password`;
+    expect(boundary).toHaveLength(256);
+    for (const path of [longSecret, longPlain, boundary]) matcher(path);
+    const split = vi.spyOn(String.prototype, 'split');
+    try {
+      expect(matcher(longSecret)?.classification).toBe('secret');
+      expect(matcher(longPlain)).toBeUndefined();
+      expect(split).toHaveBeenCalledTimes(2);
+      split.mockClear();
+      expect(matcher(boundary)?.classification).toBe('secret');
+      expect(split).not.toHaveBeenCalled();
     } finally {
       split.mockRestore();
     }

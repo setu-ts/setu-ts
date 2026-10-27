@@ -310,6 +310,15 @@ All notable changes to this project are documented here. The format follows
   provider should apply the same override until Azure ships an identity release accepting the fix;
   workspace overrides do not propagate to consumers.
 
+- **Redaction cache and log-call containment (0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
+  `@setu-ts/metrics-plugin`).** From the security audit of #512. The redaction matcher's path cache
+  now skips paths longer than 256 characters, so field names taken from request bodies can no longer
+  pin memory (600 requests with 900 KB names held ~1 GiB). A log call on the `pino` and `custom`
+  transports no longer throws, matching `console`: metadata or bindings that throw while being read
+  are replaced by `[unserializable metadata]` or dropped, and a custom sink that throws loses that
+  record instead of failing the request. `ConsoleLogger`'s constructor is back to
+  `(runtime, options?)`, and metric label values are read once per observation.
+
 ### Fixed
 
 - **Logging and metrics hot paths (#512, 0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,

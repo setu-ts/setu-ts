@@ -69,7 +69,10 @@ Since 0.11.0, `transport: 'custom'` accepts an `ILogger` adapter. Level filterin
 redaction, explicit `redact` paths, a `redaction` policy/service, request logging and trace
 correlation apply before metadata reaches your sink. Children delegate to the adapter's `child()`
 with redacted bindings and keep these controls. Invalid logger/transport combinations throw an
-`Error` named `LoggerConfigurationError` at plugin construction. Your sink may filter further.
+`Error` named `LoggerConfigurationError` at plugin construction. Your sink may filter further. As on
+every transport, a log call never throws: metadata that throws while being read is replaced by
+`[unserializable metadata]`, and if your sink throws, that record is dropped rather than failing the
+request that logged it.
 
 For example, adapt an existing Winston-shaped sink without adding a framework dependency:
 
