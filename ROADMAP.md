@@ -15876,6 +15876,115 @@ request scope in use, decorators lowered by whatever M120 bundles with.
 
 ---
 
+## Milestone 126: A Local Diagnostics Listener on Node
+
+**Package(s):** `packages/runtime` (the listener), `packages/cli` (the devtool opt-in and the
+generated development entry on a Node target); docs. `packages/common` does not change: the
+`ILocalDiagnosticsListenerFactory` contract is already runtime-neutral, and it already says that a
+runtime without a supported transport refuses before binding.
+
+**Source:** the maintainer's direction (2026-10-28), from refreshing the devtool roadmap against
+`v0.10.0`. Since M111d, Node has been the default target, so a stock `setu new` project is a Node
+project. The local diagnostics listener (M98b) binds only on Deno, and the devtool opt-in (M98c)
+refuses every other runtime. As a result, the separately maintained devtool cannot inspect a project
+generated with the defaults. This is the only framework prerequisite for widening the devtool's
+support matrix beyond Deno.
+
+**Where things stand (checked against source, 2026-10-28):**
+
+1. **The listener refuses on Node before binding.** `createLocalDiagnosticsListenerFactory` returns
+   the refusing factory for every platform except `deno`
+   (`runtime/src/diagnostics/local-diagnostics-listener.ts:305`). Its fixed error names Deno as the
+   only supported runtime (`:45`). The RuntimePlugin builds the factory once and registers its
+   `closeActive()` on the close hook (`runtime/src/plugin/runtime-plugin.ts:248-256`). A Node
+   factory plugs into that same seam unchanged.
+2. **The framing policy can be enforced more strictly on Node than on Deno.** On Deno, duplicate
+   singleton header lines can be detected only by looking for a comma in the coalesced `Headers`
+   value (`SINGLETON_HEADER_NAMES`, `nativeFramingRefusal` at `:127`), because Deno does not expose
+   the raw header lines. Node exposes them as `IncomingMessage.rawHeaders`, and `@hono/node-server`
+   passes `incoming` through to the fetch callback
+   (`runtime/src/adapters/node/node-http-adapter.ts`, `NodeServeHost`).
+3. **The CLI refuses non-Deno targets at all three entry points.** `devtoolRuntimeRefusal`
+   (`cli/src/devtool/planner.ts:255`) refuses `setu new --devtool`, `setu generate app --devtool`
+   and `setu devtool enable` on any target other than Deno. `devtool enable` writes only into a
+   `deno.json` (`readWritableDenoManifest`), and it imports the plugin through the Deno specifier
+   (`cli/src/commands/devtool.ts:91`).
+4. **A Node project runs TypeScript under `tsx`** (`cli/src/templates/project-files.ts:1662`). tsx's
+   CLI (4.23.15) runs the script in a child `process.execPath`. The application is therefore one
+   process below whatever the launcher spawns. This matters for the devtool's process ownership and
+   teardown, and the plan states it in the protocol documentation that the devtool consumes.
+
+**Decisions:**
+
+1. **The wire contract is the same on both runtimes.** For every request, the Node listener answers
+   with the same status, the same fixed headers, the same body bytes and the same refusal codes as
+   the Deno listener. A single conformance table of request fixtures (well-formed, zero-body
+   violations, duplicate singleton headers, oversized, wrong `Host`, unknown operation) runs against
+   both listeners and asserts identical responses. The devtool's client and the protocol fixtures do
+   not change.
+2. **Duplicate-header refusal on Node uses `rawHeaders`**, which is the real line multiplicity, not
+   the comma heuristic. The comma check stays as well, so both runtimes refuse every case the Deno
+   listener refuses today. Tests write to a raw socket (`node:net`), never through `fetch`, which
+   rewrites or drops some headers before they reach the wire.
+3. **Malformed HTTP gets fixed bytes too.** Node's `http.Server` answers a parse error from its own
+   `clientError` path, before the fetch callback runs. The plan either directs that path to the
+   protocol's fixed `invalid-request` refusal or proves that the default reply carries no reflected
+   input. It also pins the server options that affect this boundary: `insecureHTTPParser` is off,
+   and header size, header timeout, request timeout and keep-alive limits are set to explicit
+   values. Each one is recorded in the delta to the security review.
+4. **The CLI emits the devtool for a Node target from the same planner** that `new`, `generate app`
+   and `enable` already share. That covers a `package.json` dependency set that is bumped together
+   (the V8-19 rule), a development entry run under `tsx`, the workspace runner's per-member
+   environment, and the production image excluding both the entry and the plugin (the V8-21 rule).
+   The scaffold end-to-end test boots a Node devtool scaffold and pairs with it.
+5. **Only Deno and Node are supported.** On Bun and Workers, `listen` still refuses before binding,
+   and the fixed error lists the runtimes that are supported.
+
+**Open questions the plan resolves rather than inherits:** whether the listener goes through
+`@hono/node-server` (already a dependency, and it shares the adapter's host seam) or uses
+`node:http` directly (which gives `rawHeaders`, `clientError` and the server timeouts without a
+wrapper). Either way, it needs an injectable host for tests. Also: what the generated Node
+development entry and `dev` script look like, measured against what M120 emits; and whether
+`setu check` (M118) recognises the Node development entry.
+
+**Security.** This milestone opens an authenticated loopback listener on a second runtime, so it
+crosses a trust boundary. The plan carries a design security review written as a delta against
+`docs/diagnostics-security-review.md`, and the committed tree gets an independent security audit
+before merge. That audit covers DNS rebinding and `Host`, the framing refusals, the raw-socket cases
+above, and the fact that a Node project's dependency install can never bind the listener without the
+explicit opt-in.
+
+**Coordination, not dependency.** M120 adds `dev` and `debug` scripts to Node members. Whichever of
+M120 and this milestone lands second reconciles the development entry with those scripts and reruns
+the scaffold end-to-end test with both in place. The devtool's own Node support (discovery of npm
+projects, launching under `tsx`, and process-tree teardown) is a milestone in the devtool repository
+that consumes this one.
+
+**Named, not taken:**
+
+- **Bun.** `Bun.serve` resembles `Deno.serve` closely enough that it could be a small follow-up
+  letter. Take it only when the devtool asks for Bun.
+- **Workers.** A Worker has no loopback socket of its own; inspecting one needs a different
+  transport design.
+
+**Deliverables:**
+
+- [ ] A Node `ILocalDiagnosticsListenerFactory`: `127.0.0.1` only, the same port bounds, one active
+      listener, an idempotent `close()`, released by the RuntimePlugin close hook on every shutdown
+      and failed-startup path
+- [ ] The two-runtime conformance table (decision 1), and raw-socket tests for duplicate headers and
+      malformed requests (decisions 2 and 3)
+- [ ] The CLI Node arm at all three entry points (decision 4), with the refusal narrowed to Bun and
+      Workers, and a scaffold end-to-end test that boots a Node devtool project and pairs with it
+- [ ] The M98b consumer exercise rerun on Node: pair, read a snapshot, observe a request, renew,
+      revoke, and refuse reuse
+- [ ] The design security review delta, and the committed-tree audit record in the PR
+- [ ] The runtime and diagnostics-plugin READMEs, `docs/diagnostics-protocol.md` (the process tree
+      under `tsx`), the CHANGELOG, and the CLI docs for `--devtool` on Node
+- [ ] **ROADMAP.md**: this section and the Progress Tracking row `126`
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -16164,3 +16273,4 @@ patch by construction and gains nothing new here.
 | 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
+| 126       | ⬜     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
