@@ -43,6 +43,7 @@ import {
   withEnvFile,
 } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
@@ -131,6 +132,7 @@ function printUsage(log: (message: string) => void): void {
     }
   }
   log('  --style <name>      Code style for a styleable template: functional | class-based');
+  log('  --logger <name>     console | pino (default pino)');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
   log('  --devtool           Enable the local diagnostics connector for this member (Deno only)');
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
@@ -223,7 +225,12 @@ function planMember(
   rootGitignore: string,
   devtoolPort?: number,
 ):
-  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: true;
+      readonly files: readonly GeneratedFile[];
+      readonly notice?: string;
+      readonly logger?: string;
+    }
   | {
       readonly ok: false;
       readonly message: string;
@@ -289,7 +296,11 @@ function planMember(
   // The HOST, not the template: `--style class-based` resolves to the
   // template's precomputed variant, and the member inherits it exactly as a
   // standalone project does.
-  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
+  const initial = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
+  const loggerChoice = resolveLoggerChoice(args, profile.runtime, initial);
+  if (!loggerChoice.ok) return loggerChoice;
+  const resolved =
+    loggerChoice.logger === undefined ? initial : withLogger(initial, loggerChoice.logger);
   const envHost = envFile.path === undefined ? resolved : withEnvFile(resolved, envFile.path);
   if (envHost === undefined) {
     return {
@@ -357,7 +368,12 @@ function planMember(
 
   for (const file of extra) files.push(file);
 
-  return { ok: true, files, ...(choice.notice === undefined ? {} : { notice: choice.notice }) };
+  return {
+    ok: true,
+    files,
+    ...(choice.notice === undefined ? {} : { notice: choice.notice }),
+    ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
+  };
 }
 
 /**
@@ -742,6 +758,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
+    if (plan.logger !== undefined) deps.log(`Logger: ${plan.logger}`);
     return reportDryRunPlan(deps, files);
   }
 

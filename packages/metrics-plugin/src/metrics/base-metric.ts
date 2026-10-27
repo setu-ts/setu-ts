@@ -5,6 +5,11 @@
  */
 import type { IMetric, MetricConfig, MetricType } from '@setu-ts/common';
 
+interface ILabelKeyNode {
+  readonly children: Map<string, ILabelKeyNode>;
+  key?: string;
+}
+
 /**
  * Abstract base class for all metric types.
  *
@@ -15,6 +20,7 @@ export abstract class MetricBase implements IMetric {
   readonly #type: MetricType;
   readonly #help: string;
   readonly #labelNames: readonly string[] | undefined;
+  readonly #labelKeys: ILabelKeyNode = { children: new Map() };
 
   /**
    * Creates a new metric.
@@ -27,7 +33,7 @@ export abstract class MetricBase implements IMetric {
     this.#name = name;
     this.#type = config.type;
     this.#help = help ?? config.help ?? name;
-    this.#labelNames = config.labels;
+    this.#labelNames = config.labels === undefined ? undefined : [...config.labels];
   }
 
   /**
@@ -93,11 +99,40 @@ export abstract class MetricBase implements IMetric {
    * Creates a deterministic key from labels for storage/retrieval.
    *
    * @param labels - The labels to key by
+   * @param observed - Only observations retain combinations; getters cannot grow the cache
    * @returns A deterministic string key
    */
-  protected labelKey(labels: Readonly<Record<string, string>> | undefined): string {
-    if (!labels || Object.keys(labels).length === 0) {
+  protected labelKey(
+    labels: Readonly<Record<string, string>> | undefined,
+    observed: boolean = false,
+  ): string {
+    // `!labels`, not `=== undefined`: a JavaScript caller may pass null.
+    if (!labels) return '';
+    const names = Object.keys(labels);
+    if (names.length === 0) {
       return '';
+    }
+    const configured = this.#labelNames;
+    if (
+      configured !== undefined &&
+      names.length === configured.length &&
+      configured.every((name) => Object.hasOwn(labels, name))
+    ) {
+      let node = this.#labelKeys;
+      for (const name of configured) {
+        const value = labels[name]!;
+        let child = node.children.get(value);
+        if (child === undefined) {
+          if (!observed) return JSON.stringify(Object.entries(labels).sort());
+          child = { children: new Map() };
+          node.children.set(value, child);
+        }
+        node = child;
+      }
+      if (node.key !== undefined) return node.key;
+      const key = JSON.stringify(Object.entries(labels).sort());
+      node.key = key;
+      return key;
     }
     // JSON.stringify of sorted entries ensures injectivity:
     // - Distinct label-sets → distinct keys (no collision from |, =, or \ in values)

@@ -23,6 +23,7 @@ import {
 import type { RedactionPolicy } from '@setu-ts/common';
 
 import { ConsoleLogger } from '../loggers/console-logger.ts';
+import { CustomLogger } from '../loggers/custom-logger.ts';
 import { NoopLogger } from '../loggers/noop-logger.ts';
 import { PinoLogger } from '../loggers/pino-logger.ts';
 import type { PinoFactory, PinoLoggerOptions } from '../loggers/pino-logger.ts';
@@ -37,10 +38,11 @@ import { VERSION } from '../version.ts';
  * - `'console'` — runtime-independent `console` output (default)
  * - `'pino'` — Pino-backed, lazy-loaded
  * - `'noop'` — discards all output
+ * - `'custom'` — wraps the supplied `ILogger` (since 0.11.0)
  *
  * @since 0.1.0
  */
-export type LoggerTransport = 'console' | 'pino' | 'noop';
+export type LoggerTransport = 'console' | 'pino' | 'noop' | 'custom';
 
 /**
  * Options for {@linkcode LoggerPlugin}.
@@ -52,6 +54,12 @@ export interface LoggerPluginOptions {
   readonly level?: LogLevel;
   /** Underlying logger implementation. Defaults to `'console'`. */
   readonly transport?: LoggerTransport;
+  /**
+   * Application logger, required with `transport: 'custom'` and refused otherwise.
+   * Framework level filtering, metadata redaction and request logging wrap this logger.
+   * @since 0.11.0
+   */
+  readonly logger?: ILogger;
   /** When `true` (and `transport: 'console'`), pretty-print entries. */
   readonly pretty?: boolean;
   /** Dot-paths to redact from metadata (e.g. `['password', 'token']`). */
@@ -102,11 +110,23 @@ const PLUGIN_NAME = 'logger-plugin';
  * ```
  * @param options - Plugin configuration
  * @returns The plugin instance
+ * @throws {Error} `LoggerConfigurationError` when logger and transport do not agree
  * @since 0.1.0
  */
 export function LoggerPlugin(options?: LoggerPluginOptions): IPlugin {
   const level = options?.level ?? DEFAULT_LEVEL;
   const transport = options?.transport ?? 'console';
+  // A null logger (from a JavaScript caller) counts as absent, as undefined does.
+  const hasLogger = options?.logger !== undefined && options.logger !== null;
+  if ((transport === 'custom') !== hasLogger) {
+    const error = new Error(
+      transport === 'custom'
+        ? "transport: 'custom' requires logger: ILogger."
+        : "logger is only supported with transport: 'custom'.",
+    );
+    error.name = 'LoggerConfigurationError';
+    throw error;
+  }
   const requestLogging = options?.requestLogging ?? false;
   const redaction = resolveRedaction(options?.redaction);
   const loggerRedaction = composeLoggerRedaction(
@@ -177,6 +197,9 @@ async function createLogger(
   loggerRedaction?: IRedactionService,
 ): Promise<ILogger> {
   switch (transport) {
+    case 'custom':
+      // Construction validates both values before the plugin can register.
+      return new CustomLogger(options!.logger!, level, loggerRedaction!);
     case 'noop':
       return new NoopLogger({ level });
     case 'pino':

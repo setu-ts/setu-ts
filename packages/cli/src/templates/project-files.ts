@@ -33,6 +33,7 @@ import type {
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
+import { defaultLogger, withLogger } from './logger.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 import {
@@ -223,49 +224,52 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       ? withoutWorkersFilesystemNeeds(host.manifest)
       : host.manifest;
 
-  return {
-    plugins: withPluginOptionSeams(swapped, seams),
-    workerExports: swap?.workerExports ?? [],
-    entryReExports: swap?.entryReExports ?? [],
-    wranglerToml: swap?.wranglerToml ?? '',
-    middleware: host.middleware,
-    localImports: [
-      ...(host.localImports ?? []),
-      ...seamLocalImports(seams),
-      ...(functional
-        ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
-        : []),
-    ],
-    packageImports: host.packageImports ?? [],
-    files: [
-      ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
-      ...seamFiles(seams, host.seamArtifacts ?? {}),
-      ...(swap?.files ?? []),
-      ...(functional
-        ? [
-            {
-              path: 'src/modules/index.ts',
-              contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
-            },
-          ]
-        : []),
-    ],
-    pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
-    setupCalls,
-    extraTasks: { ...host.extraTasks },
-    extraImports: {},
-    extraDependencies: {},
-    extraScripts: {},
-    extraDevDependencies: {},
-    appFactory: host.appFactory,
-    routes: host.routes ?? [],
-    appFactoryContext: {
-      ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
-      ...host.appFactoryContext,
-      ...swap?.appFactoryContext,
+  return withLogger(
+    {
+      plugins: withPluginOptionSeams(swapped, seams),
+      workerExports: swap?.workerExports ?? [],
+      entryReExports: swap?.entryReExports ?? [],
+      wranglerToml: swap?.wranglerToml ?? '',
+      middleware: host.middleware,
+      localImports: [
+        ...(host.localImports ?? []),
+        ...seamLocalImports(seams),
+        ...(functional
+          ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
+          : []),
+      ],
+      packageImports: host.packageImports ?? [],
+      files: [
+        ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
+        ...seamFiles(seams, host.seamArtifacts ?? {}),
+        ...(swap?.files ?? []),
+        ...(functional
+          ? [
+              {
+                path: 'src/modules/index.ts',
+                contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
+              },
+            ]
+          : []),
+      ],
+      pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
+      setupCalls,
+      extraTasks: { ...host.extraTasks },
+      extraImports: {},
+      extraDependencies: {},
+      extraScripts: {},
+      extraDevDependencies: {},
+      appFactory: host.appFactory,
+      routes: host.routes ?? [],
+      appFactoryContext: {
+        ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
+        ...host.appFactoryContext,
+        ...swap?.appFactoryContext,
+      },
+      manifest,
     },
-    manifest,
-  };
+    defaultLogger(runtime),
+  );
 }
 
 /**

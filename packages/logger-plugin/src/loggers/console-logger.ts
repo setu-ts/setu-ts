@@ -75,7 +75,6 @@ export class ConsoleLogger implements ILogger {
   readonly level: LogLevel;
   readonly #runtime: IRuntimeServices;
   readonly #pretty: boolean;
-  readonly #redact: readonly string[];
   readonly #legacyRedaction: IRedactionService;
   readonly #redaction: IRedactionService | undefined;
   readonly #bindings: LogMetadata;
@@ -83,19 +82,25 @@ export class ConsoleLogger implements ILogger {
   /**
    * @param runtime - Runtime services (for timestamps)
    * @param options - Configuration
+   * @param legacyRedaction - Internal child construction: reuse the root's compiled paths
    */
-  constructor(runtime: IRuntimeServices, options?: ConsoleLoggerOptions) {
+  constructor(
+    runtime: IRuntimeServices,
+    options?: ConsoleLoggerOptions,
+    legacyRedaction?: IRedactionService,
+  ) {
     this.#runtime = runtime;
     this.level = options?.level ?? 'info';
     this.#pretty = options?.pretty ?? false;
-    this.#redact = options?.redact ?? [];
-    this.#legacyRedaction = createRedactionService(
-      {
-        fields: Object.fromEntries(this.#redact.map((path) => [path, 'secret'])),
-        redactors: { secret: eraseRedactor },
-      },
-      { caseSensitive: true },
-    );
+    this.#legacyRedaction =
+      legacyRedaction ??
+      createRedactionService(
+        {
+          fields: Object.fromEntries((options?.redact ?? []).map((path) => [path, 'secret'])),
+          redactors: { secret: eraseRedactor },
+        },
+        { caseSensitive: true },
+      );
     this.#redaction = options?.redaction;
     this.#bindings = options?.bindings ?? {};
   }
@@ -141,7 +146,6 @@ export class ConsoleLogger implements ILogger {
     const childOptions = {
       level: this.level,
       pretty: this.#pretty,
-      redact: this.#redact,
       bindings: { ...this.#bindings, ...bindings },
     };
     return new ConsoleLogger(
@@ -149,6 +153,7 @@ export class ConsoleLogger implements ILogger {
       this.#redaction === undefined
         ? childOptions
         : { ...childOptions, redaction: this.#redaction },
+      this.#legacyRedaction,
     );
   }
 

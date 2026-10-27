@@ -44,8 +44,8 @@ describe('the generated config module factory signature', () => {
 
   it('opts a starter-composed project into request logging, probe paths excluded (M113h §3.9)', () => {
     const source = config('deno', FULL_STACK_TEMPLATE);
-    expect(source).toContain(
-      "logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },",
+    expect(source.replace(/\s+/g, ' ')).toContain(
+      "logger: { transport: 'pino', requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'], },",
     );
   });
 

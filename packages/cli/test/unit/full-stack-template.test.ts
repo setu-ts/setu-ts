@@ -281,8 +281,8 @@ describe('full-stack template | the runtime-dependent argument', () => {
     // The scaffold opts in; `LoggerPlugin`'s own default stays off. The excluded
     // paths are the ones a kubelet probes and Prometheus scrapes.
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-      expect(argsFor(runtime)).toContain(
-        "logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },",
+      expect(argsFor(runtime).replace(/\s+/g, ' ')).toContain(
+        `logger: { transport: '${runtime === 'cloudflare-workers' ? 'console' : 'pino'}', requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'], },`,
       );
     }
   });

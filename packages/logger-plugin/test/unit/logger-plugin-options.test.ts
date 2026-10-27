@@ -28,7 +28,13 @@ it('passes RegExp excludePaths through the plugin to the request matcher', async
     expect((await app.inject({ method: 'GET', url: '/probes/live' })).statusCode).toBe(200);
     expect(logger.calls).toEqual([]);
     await app.inject({ method: 'GET', url: '/visible' });
-    expect(logger.calls.map((c) => c.message)).toEqual(['request received', 'request completed']);
+    expect(logger.calls).toEqual([
+      {
+        level: 'info',
+        message: 'request completed',
+        meta: { method: 'GET', path: '/visible', status: 200, duration: expect.any(Number) },
+      },
+    ]);
   } finally {
     await app.stop();
   }

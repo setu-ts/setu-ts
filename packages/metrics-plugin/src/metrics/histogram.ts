@@ -64,7 +64,7 @@ export class Histogram extends MetricBase {
    */
   observe(value: number, labels?: Readonly<Record<string, string>>): void {
     this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const key = this.labelKey(labels, true);
 
     // Initialize per-label-set storage
     if (!this.#bucketCounts.has(key)) {

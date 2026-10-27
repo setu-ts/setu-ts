@@ -40,7 +40,7 @@ export class Counter extends MetricBase {
       throw new Error(`Counter "${this.name}" cannot be decremented`);
     }
     this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const key = this.labelKey(labels, true);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: CounterValue = { value: current + value };
     if (labels) {
