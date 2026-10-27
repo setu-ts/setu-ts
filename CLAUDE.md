@@ -677,8 +677,12 @@ here.
 - **Milestone 118** (`packages/cli` — `setu check`, a read-only wiring gate run by every generated
   `check` script, plus `setu sync`, stable finding ids and `.setu-ts/check.json` silencing) —
   complete (PR #510).
-- **Next milestone** — M119i (documentation that does not match the code, or is missing). M120–M123
-  are open in the ROADMAP; M120's dependency on M118 is met.
+- **Milestone 120** (`packages/cli` — `setu build` (esbuild after the `setu check` gate), compiled
+  Node starts with `start:dev`/`start:debug`, multi-stage production images for Node, Bun and Deno,
+  Bun's hoisted linker for workspace libraries, Deno read-only start under `nodeModulesDir: "auto"`)
+  — complete (PR pending).
+- **Next milestone** — M119i (documentation that does not match the code, or is missing). M121–M123
+  are open in the ROADMAP.
 
 ## Verification (run before declaring any work done)
 

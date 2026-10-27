@@ -15469,14 +15469,14 @@ full-stack images were built and run by hand in review.
 
 **Deliverables:**
 
-- [ ] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
+- [x] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
       `build` runs `setu check` first, and the e2e proves a broken seam fails the build
-- [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
+- [x] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
       it
-- [ ] `.gitignore` covers `dist/` and `build/`
-- [ ] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
-- [ ] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `120`
+- [x] `.gitignore` covers `dist/` and `build/`
+- [x] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
+- [x] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `120`
 
 ---
 
@@ -16156,7 +16156,7 @@ patch by construction and gains nothing new here.
 | 119g      | ✅     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
 | 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
 | 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
-| 120       | ⬜     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
+| 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
