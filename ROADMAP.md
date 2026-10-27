@@ -15999,8 +15999,9 @@ the devtool's support matrix beyond Deno.
 **Open questions the plan resolves rather than inherits:**
 
 - **The script name is a contract with the devtool's launcher**: `dev`, as on Deno, or a name that
-  cannot collide with the `dev` (watch) script M120 adds. Agree it with M120 and the devtool's D06
-  before implementation.
+  cannot collide with the `dev` (watch) script M120 adds. Decided after M120 merges, against the
+  scripts M120 actually ships (maintainer decision, 2026-10-28); the devtool's D06 follows. The M126
+  plan cannot be finalized before then.
 - **Keeping `diagnostics-plugin` out of the production image** needs `--omit=dev` (M120's production
   build) or a strip step like the Deno image's. Until M120 lands, decide which applies.
 - **Whether an in-flight poll is bounded at all today on Deno.** The plan measures it, and decision
