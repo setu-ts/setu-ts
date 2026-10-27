@@ -4,7 +4,7 @@ import { ConsoleLogger } from '../../src/loggers/console-logger.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('ConsoleLogger', () => {
-  it('10,000 console children reuse the root compiled redaction service', () => {
+  it('should redact nested child logs while compiling redaction once across 10,000 children', () => {
     const create = vi.spyOn(common, 'createRedactionService');
     const output = vi.spyOn(console, 'log').mockImplementation(() => {});
     try {

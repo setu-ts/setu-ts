@@ -60,9 +60,15 @@ for (const template of ['rest', 'class-based'] as const) {
       try {
         const installed = await npmInstall(project, overlay);
         expect(installed.code, installed.output).toBe(0);
-        const result = await withNodeServer(project, async (origin) => {
+        const result = await withNodeServer(project, async (origin, output) => {
           const response = await fetch(`${origin}/greetings/log-probe`);
           await response.body?.cancel();
+          // Pino's default stdout destination writes asynchronously, and the
+          // server is SIGKILLed when this returns: wait (bounded) for the line.
+          for (let waited = 0; waited < 10_000; waited += 50) {
+            if (output().includes('"path":"/greetings/log-probe"')) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
           return response.status;
         });
         expect(result.result, result.output).toBe(200);
