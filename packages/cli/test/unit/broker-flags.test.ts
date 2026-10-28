@@ -376,6 +376,20 @@ describe('missingComposeServices (PR #519 review)', () => {
     expect(missingComposeServices(lookalike, redis)).toBeDefined();
     expect(missingComposeServices('volumes:\n  redis:\n', redis)).toBeDefined();
   });
+  it('accepts comments, CRLF line endings and any service indentation', () => {
+    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    for (const file of [
+      'services: # local backing services\n  redis: # the broker\n    image: redis:7\n',
+      'services:\r\n  redis:\r\n    image: redis:7\r\n',
+      'services:\n    redis:\n        image: redis:7\n',
+      'services:\n# a comment at column 0\n  other:\n    image: x\n  redis:\n    image: redis:7\n',
+    ]) {
+      expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
+    }
+    // A nested key with the service's name is not a service.
+    const nested = 'services:\n  other:\n    redis:\n      image: x\n';
+    expect(missingComposeServices(nested, redis)).toBeDefined();
+  });
   it('has nothing to report for an arm with no backing service', () => {
     const none = listTransports().find((arm) => arm.compose === undefined)!;
     expect(missingComposeServices('services:\n', none)).toBeUndefined();
