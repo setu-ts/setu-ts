@@ -613,4 +613,29 @@ describe('Histogram', () => {
       ]),
     );
   });
+
+  it('refuses a NaN bucket boundary', () => {
+    expect(
+      () =>
+        new Histogram('nan_histogram', {
+          type: 'histogram',
+          help: 'NaN',
+          buckets: [5, Number.NaN, 1],
+        }),
+    ).toThrow('Histogram "nan_histogram" cannot have a NaN bucket boundary');
+  });
+
+  it('counts a configured Infinity boundary once, as the +Inf bucket', () => {
+    const histogram = new Histogram('inf_histogram', {
+      type: 'histogram',
+      help: 'Infinity',
+      buckets: [1, Number.POSITIVE_INFINITY],
+    });
+    histogram.observe(0.5);
+    histogram.observe(7);
+    expect([...histogram.getBucketCounts().entries()]).toEqual([
+      [1, 1],
+      [Number.POSITIVE_INFINITY, 2],
+    ]);
+  });
 });

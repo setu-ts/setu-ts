@@ -172,3 +172,37 @@ describe('C1 regression — same path, different methods', () => {
     expect(postResult!.params).toEqual({});
   });
 });
+
+// Security audit F2: TrieRouter's cost for a `:name{…}` constraint that can
+// match '/' grows quadratically with the path, so the syntax is refused.
+describe('regular-expression route parameters', () => {
+  it.each(['/files/:path{.+}/download', '/users/:id{[0-9]+}', '/:slug{[a-z-]+}/edit'])(
+    'refuses %s at registration',
+    (pattern) => {
+      const router = new Router();
+      expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).toThrow(
+        `Route 'GET ${pattern}' uses a regular-expression parameter (':name{…}')`,
+      );
+      expect(router.getAll()).toEqual([]);
+    },
+  );
+
+  it('refuses one registered through a group prefix', () => {
+    const router = new Router();
+    expect(() =>
+      router.group('/api', (api) => {
+        api.post('/items/:id{\\d+}', () => ({ __handlerResult: true }) as never);
+      }),
+    ).toThrow("Route 'POST /api/items/:id{");
+  });
+
+  it('still accepts plain parameters, wildcards and braces outside a parameter', () => {
+    const router = new Router();
+    expect(() => {
+      router.get('/users/:id', () => ({ __handlerResult: true }) as never);
+      router.get('/files/*', () => ({ __handlerResult: true }) as never);
+      router.get('/literal{brace}', () => ({ __handlerResult: true }) as never);
+    }).not.toThrow();
+    expect(router.match('GET', '/users/7')?.params).toEqual({ id: '7' });
+  });
+});

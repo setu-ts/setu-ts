@@ -158,6 +158,16 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
  * @param path - The request path
  * @returns The path minus one trailing slash, or `undefined`
  */
+/**
+ * A `:name{…}` parameter — Hono's regular-expression constraint syntax. Refused
+ * at registration: it is not part of the kernel's route grammar, the kernel's
+ * static-over-parameter ranking does not model it, and under TrieRouter a
+ * constraint that can match `/` (`/files/:path{.+}/download`) costs time
+ * quadratic in the path's segment count — an 8 KB path blocked the event loop
+ * for ~313 ms (security audit F2).
+ */
+const REGEX_PARAMETER = /\/:[^/]*\{/;
+
 function withoutTrailingSlash(path: string): string | undefined {
   return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : undefined;
 }
@@ -188,6 +198,13 @@ export class Router implements IRouterApi {
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
     const key = `${method} ${path}`;
+    if (REGEX_PARAMETER.test(path)) {
+      throw new Error(
+        `Route '${key}' uses a regular-expression parameter (':name{…}'), which the router does ` +
+          `not support. Use ':name' or '*' and validate the value in the handler or with ` +
+          `@setu-ts/validation-plugin.`,
+      );
+    }
     const existing = this.#entryMap.get(key);
     if (existing !== undefined) {
       // Name the FIRST claimant. The message used to give the pattern and the

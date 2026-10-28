@@ -30,7 +30,11 @@ interface HistogramData {
 
 export class Histogram extends MetricBase {
   readonly #buckets: readonly number[];
-  /** The distinct boundaries — a repeated one is one `le` bucket, counted once. */
+  /**
+   * The distinct finite boundaries — a repeated one is one `le` bucket, counted
+   * once, and a configured `Infinity` is the `+Inf` bucket every histogram
+   * already has, so it is not counted a second time.
+   */
   readonly #bounds: readonly number[];
   readonly #bucketCounts = new Map<string, HistogramData>();
 
@@ -44,6 +48,11 @@ export class Histogram extends MetricBase {
   constructor(name: string, config: MetricConfig, buckets?: readonly number[]) {
     super(name, config);
     const rawBuckets = buckets ?? config.buckets ?? DEFAULT_BUCKETS;
+    // A NaN boundary sorts unpredictably and compares false with every value,
+    // which corrupted the cumulative counts of the buckets around it.
+    if (rawBuckets.some((bound) => Number.isNaN(bound))) {
+      throw new Error(`Histogram "${this.name}" cannot have a NaN bucket boundary`);
+    }
     // Ensure buckets are sorted
     if (rawBuckets.length > 0) {
       const sorted = [...rawBuckets].sort((a, b) => a - b);
@@ -54,7 +63,9 @@ export class Histogram extends MetricBase {
     } else {
       this.#buckets = rawBuckets;
     }
-    this.#bounds = [...new Set(this.#buckets)];
+    this.#bounds = [...new Set(this.#buckets)].filter(
+      (bound) => bound !== Number.POSITIVE_INFINITY,
+    );
   }
 
   /**

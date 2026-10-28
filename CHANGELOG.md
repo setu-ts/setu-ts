@@ -213,6 +213,12 @@ All notable changes to this project are documented here. The format follows
   `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
   `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
   own dependencies still works, but boot validation cannot see them; declare `inject` instead.
+- **BREAKING — regular-expression route parameters are refused (0.11.0, `@setu-ts/kernel`).** A
+  route pattern with Hono's `:name{…}` constraint syntax now throws at registration. It was never
+  part of the documented route grammar and the kernel's ranking did not model it; under
+  `TrieRouter`, a constraint that can match `/` (`/files/:path{.+}/download`) took time quadratic in
+  the path length — an 8 KB path blocked the event loop for about 300 ms. Use `:name` or `*` and
+  validate the value in the handler or with `@setu-ts/validation-plugin`.
 - **BREAKING — `IResponse` gains `setHeaders` (0.11.0, `@setu-ts/common`).** A required member that
   sets several headers at once, as `header()` per entry. An application class or a test fake typed
   as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this
@@ -367,10 +373,12 @@ All notable changes to this project are documented here. The format follows
   pass, and a histogram counts in a typed array; the default security headers are copied into each
   response in one step. Behaviour is unchanged apart from the two entries under Changed.
 
-- **A repeated histogram boundary is one bucket (0.11.0, `@setu-ts/metrics-plugin`).** A `Histogram`
-  configured with the same boundary twice counted each observation once per repeat in that bucket.
-  It is now one `le` bucket, counted once, as Prometheus expects; `buckets` still returns the
-  configured list.
+- **Histogram boundaries: repeats, `Infinity` and `NaN` (0.11.0, `@setu-ts/metrics-plugin`).** A
+  `Histogram` configured with the same boundary twice counted each observation once per repeat in
+  that bucket; it is now one `le` bucket, counted once, as Prometheus expects. A configured
+  `Infinity` was counted a second time beside the `+Inf` bucket every histogram has; it is now that
+  bucket. A `NaN` boundary, which corrupted the cumulative counts around it, is refused at
+  construction. `buckets` still returns the configured list.
 
 - **Logging and metrics hot paths (#512, 0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
   `@setu-ts/metrics-plugin`).** Compile literal and suffix field matchers and specificity once,
