@@ -142,8 +142,7 @@ async function observed(): Promise<string | undefined> {
 }
 
 /**
- * The npm profile's members: a `package.json` whose `start` script serves, as
- * the npm runner (`node scripts/dev.mjs`) starts each member with `npm start`.
+ * The npm profile's members expose start:dev, which the root development runner uses.
  */
 async function writeNodeWorkspace(
   members: readonly Member[],
@@ -162,7 +161,11 @@ async function writeNodeWorkspace(
     await nodeFs.mkdir(`${root}/apps/${member.name}`, { recursive: true });
     await nodeFs.writeFile(
       `${root}/apps/${member.name}/package.json`,
-      JSON.stringify({ name: member.name, private: true, scripts: { start: 'node server.mjs' } }),
+      JSON.stringify({
+        name: member.name,
+        private: true,
+        scripts: { 'start:dev': 'node server.mjs' },
+      }),
     );
   }
   await nodeFs.writeFile(

@@ -13,7 +13,14 @@ describe('the generated Deno task set', () => {
     ) as { tasks: Record<string, string> };
     // The scaffold checks wiring even without the devtool opt-in.
     // REST's existing start permissions remain unchanged.
-    expect(Object.keys(manifest.tasks)).toEqual(['start', 'test', 'test:e2e', 'check']);
+    expect(Object.keys(manifest.tasks)).toEqual([
+      'start',
+      'start:dev',
+      'start:debug',
+      'test',
+      'test:e2e',
+      'check',
+    ]);
     expect(manifest.tasks['start']).toMatch(/^deno run --allow-net --allow-env .* main\.ts$/);
     expect(manifest.tasks['check']).toBe(
       `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,

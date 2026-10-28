@@ -1,5 +1,26 @@
 # @setu-ts/cli
 
+## Production builds
+
+Run `npm run build` then `npm start` in a generated Node service.
+`setu build [--dir <member>] [--dry-run]` checks wiring and bundles main.ts and an optional
+migration runner into dist/ with source maps. Libraries are inlined; npm packages remain external. A
+runtime devDependency import fails with the package and importing file named. Workspace roots
+refuse: select apps/<member>. Dry-run prints the plan without writing. Use the build script to
+type-check before bundling.
+
+Use start:dev for source development and start:debug for debugging. Full-stack uses dev.ts during
+development and builds its frontend before production. DI graph validation runs at boot: run npm
+test before building an image. Bun and Deno keep running source; Workers uses Wrangler. Native bun
+build and deno compile are optional custom packaging choices.
+
+Standalone projects include Dockerfile and .dockerignore. Workspace images use the root context and
+--build-arg MEMBER=orders. Node installs production dependencies in a separate runtime stage; Bun
+uses --production and a hoisted-linker bunfig.toml so members resolve shared libraries. Deno runs a
+declared build task before caching source. See the
+[upgrade guide](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for existing
+scripts, ignore files and images.
+
 Projects using Swagger declare `swagger-ui-dist` through their template's npm dependencies,
 including the Deno import map. Node, Bun and Deno self-host the three `/docs` assets (Deno start
 tasks grant read access); Workers templates select pinned CDN assets. Full-stack projects pass that
@@ -591,3 +612,18 @@ names that parameter `_waitUntil` while nothing reads it, so the command also te
 it. A project scaffolded before 0.10.0 has no such parameter, and its entry does not pass one; the
 command points at
 [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for both edits.
+
+### Styled server-rendered views
+
+`setu add view` adds `hono`, hono JSX compiler options, Tailwind 4's CLI and neutral shadcn tokens,
+view files for `/ui`, CSS build/watch scripts, and `StaticPlugin` serving `build/assets/app.css`. A
+`build` or `start:dev` script it creates or prefixes runs CSS first (one that already called `css`
+is left as it was); run `npm run css:watch`, `bun run css:watch` or `deno task css:watch` separately
+while editing. Existing files, pins and settings are preserved and reported; an unfamiliar config
+receives manual registration instructions. `--dry-run` lists all planned changes and writes nothing.
+Workers gets dependencies, JSX and example view files only; CSS there belongs to Wrangler static
+assets. See
+[the MVC guide](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#styling-server-rendered-views).
+
+The full-stack template includes Tailwind through Vite, copied shadcn Button/Card, a fixed app shell
+and a light/dark/system toggle. Run `npx shadcn add <component>` to add more components.

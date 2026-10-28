@@ -143,10 +143,14 @@ interface StartedServer {
  * builds first — in a process group of its own, since `npm` and `tsx` each run
  * the entry in a child.
  */
-function startServer(project: string, port: number): StartedServer {
+function startServer(
+  project: string,
+  port: number,
+  env: Readonly<Record<string, string>>,
+): StartedServer {
   const child = spawn('npm', ['start', '--silent'], {
     cwd: project,
-    env: { ...projectEnv(project), PORT: String(port) },
+    env: { ...projectEnv(project), ...env, PORT: String(port) },
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,
   });
@@ -186,15 +190,17 @@ async function waitForServer(origin: string, attempts = 600): Promise<boolean> {
  * @param project - The installed project directory
  * @param drive - Called once the project is serving, with a reader for what the
  *   process has written so far (to wait for output before the kill)
+ * @param env - Optional child environment overrides (browser tests use short socket paths)
  * @returns What `drive` returned, and everything the process wrote
  * @throws {Error} If the project never serves, or `drive` rejects
  */
 export async function withNodeServer<T>(
   project: string,
   drive: (origin: string, output: () => string) => Promise<T>,
+  env: Readonly<Record<string, string>> = {},
 ): Promise<{ readonly result: T; readonly output: string }> {
   const port = await unusedPort();
-  const server = startServer(project, port);
+  const server = startServer(project, port, env);
   const origin = `http://127.0.0.1:${port}`;
   const served = await Promise.race([waitForServer(origin), server.status.then(() => false)]);
   let result: T | undefined;

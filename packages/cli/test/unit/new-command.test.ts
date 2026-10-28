@@ -180,21 +180,18 @@ describe('the Workers target is deployable as documented', () => {
 });
 
 describe('a template with a frontend build, on an npm target', () => {
-  // The next-step hint and the README both tell a new user to run `start`.
-  // Without a build first it crashed on a fresh project with "Failed to load
-  // React Router server build", because the server bundle did not exist yet.
-  for (const [runtime, build, entry] of [
-    ['node', 'npm run build', 'tsx main.ts'],
-    ['bun', 'bun run build', 'bun run main.ts'],
+  for (const [runtime, entry] of [
+    ['node', 'node --enable-source-maps dist/main.js'],
+    ['bun', 'bun run main.ts'],
   ] as const) {
-    it(`builds before start on ${runtime}, as it already does before test`, async () => {
+    it(`starts without rebuilding on ${runtime}; tests build the frontend only`, async () => {
       const h = harness();
       expect(await h.run(['app', '--runtime', runtime, '--template', 'full-stack'])).toBe(0);
       const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
         scripts: Record<string, string>;
       };
-      expect(manifest.scripts['start']).toBe(`${build} && ${entry}`);
-      expect(manifest.scripts['test']?.startsWith(`${build} && `)).toBe(true);
+      expect(manifest.scripts['start']).toBe(entry);
+      expect(manifest.scripts['test']?.startsWith('react-router build && ')).toBe(true);
       // The start script is the runtime marker other commands read, so the
       // build prefix must not change which runtime the project reads as.
       expect(await detectTargetRuntime(h.fs, '/work/app')).toBe(runtime);
@@ -207,7 +204,7 @@ describe('a template with a frontend build, on an npm target', () => {
     const manifest = JSON.parse(h.fs.read('/work/app/package.json')) as {
       scripts: Record<string, string>;
     };
-    expect(manifest.scripts['start']).toBe('tsx main.ts');
+    expect(manifest.scripts['start']).toBe('node --enable-source-maps dist/main.js');
   });
 });
 
@@ -225,7 +222,7 @@ describe('the Node target can run decorated source', () => {
 
   it('runs Node through a transpiler, not through type stripping', async () => {
     const manifest = await manifestOf('node');
-    expect(manifest.scripts['start']).toBe('tsx main.ts');
+    expect(manifest.scripts['start:dev']).toBe('tsx watch main.ts');
     expect(manifest.scripts['start']).not.toContain('experimental-strip-types');
     expect(manifest.scripts['start']).not.toContain('experimental-transform-types');
   });
@@ -237,7 +234,7 @@ describe('the Node target can run decorated source', () => {
     // cannot run. CI never boots a Node-target project, so this invariant is
     // the standing guard for that.
     const manifest = await manifestOf('node');
-    const binary = manifest.scripts['start']?.split(' ')[0];
+    const binary = manifest.scripts['start:dev']?.split(' ')[0];
     expect(binary).toBeDefined();
     expect(binary).not.toBe('node');
     expect(Object.keys(manifest.devDependencies ?? {})).toContain(binary);
@@ -887,7 +884,9 @@ describe('runNewCommand', () => {
             ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
             : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
         );
-        expect(pkg.scripts.build).toBeUndefined();
+        expect(pkg.scripts.build).toBe(
+          runtime === 'node' ? 'tsc --noEmit && setu build' : undefined,
+        );
         expect(pkg.scripts.start).toBeDefined();
       });
 
@@ -897,7 +896,11 @@ describe('runNewCommand', () => {
         await h.run(['app', '--runtime', runtime, '--template', 'full-stack']);
 
         const pkg = JSON.parse(h.fs.read('/work/app/package.json'));
-        expect(pkg.scripts.build).toBe('react-router build');
+        expect(pkg.scripts.build).toBe(
+          runtime === 'node'
+            ? 'react-router build && tsc --noEmit && setu build'
+            : 'react-router build',
+        );
       });
     });
 
@@ -1200,13 +1203,13 @@ describe('runNewCommand', () => {
     const h = harness();
     await h.run(['my-app']);
     expect(h.out.text()).toContain('cd my-app');
-    expect(h.out.text()).toContain('npm install && npm start');
+    expect(h.out.text()).toContain('npm install && npm run start:dev');
   });
 
   const nextSteps: readonly (readonly [string, string])[] = [
     ['deno', 'deno task start'],
-    ['node', 'npm install && npm start'],
-    ['bun', 'bun install && bun run start'],
+    ['node', 'npm install && npm run start:dev'],
+    ['bun', 'bun install && bun run start:dev'],
     ['cloudflare-workers', 'npm install && npx wrangler dev'],
   ];
 

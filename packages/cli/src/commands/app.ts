@@ -820,7 +820,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // after being told to run `bun install`.
   deps.log(
     `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
-      `${profile.runScript('start')}`,
+      `${profile.runScript('start:dev')}`,
   );
   return EXIT_OK;
 }

@@ -31,8 +31,15 @@ describe('help output', () => {
     const text = await helpText(['--help']);
     expect(text).toContain('new, n');
     expect(text).toContain('generate, g');
+    expect(text).toContain('build                          Bundle a Node service for production');
     expect(text).toContain('check                          Check CLI-owned wiring');
     expect(text).toContain('sync                           Rewrite CLI-managed barrels');
+  });
+
+  it('documents the production build flags', async () => {
+    const text = await helpText(['build', '--help']);
+    expect(text).toContain('--dir');
+    expect(text).toContain('--dry-run');
   });
 
   it('documents every runtime target', async () => {

@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {
   FULL_STACK_NPM_DEPENDENCIES,
@@ -25,6 +26,21 @@ import {
 } from '../../src/templates/full-stack-build-files.ts';
 import { FULL_STACK_APP_FRAMEWORK_PACKAGES } from '../../src/templates/full-stack.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
+
+it('passes the same static server-build module from every socket entry', () => {
+  const entries = ['node', 'bun', 'deno'].map((runtime) => {
+    const target = runtime as TargetRuntime;
+    const files = projectFiles('probe', target, resolveHost(FULL_STACK_TEMPLATE, target));
+    const config = JSON.parse(files.find((file) => file.path === 'tsconfig.json')!.contents) as {
+      compilerOptions: { allowJs?: boolean };
+    };
+    expect(config.compilerOptions.allowJs).toBe(true);
+    return files.find((file) => file.path === 'main.ts')!.contents;
+  });
+  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toContain("import * as serverBuild from './build/server/index.js'");
+  expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
+});
 
 /** Every path the template emits. */
 const paths = (FULL_STACK_TEMPLATE.files ?? []).map((file) => file.path);
@@ -135,7 +151,7 @@ describe('full-stack template | the React Router middleware example', () => {
   it('explains both layers in the README section it contributes', () => {
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
     const section = typeof render === 'string' ? render : render('npx @setu-ts/cli@0.9.0');
-    expect(section.startsWith('## Middleware\n')).toBe(true);
+    expect(section).toContain('## Middleware\n');
     expect(section).toContain('`npx @setu-ts/cli@0.9.0 generate middleware <name>`');
     expect(section).toContain('`export const middleware = [...]`');
     expect(section).toContain('`app/middleware/require-user.server.ts`');
@@ -204,7 +220,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     // Single-quoted: the generated project's own `fmt` config sets
     // `singleQuote`, so double-quoted JSX would make it fail `deno fmt --check`
     // on a file the CLI just wrote.
-    expect(login).toContain(`<Form method='post'>`);
+    expect(login).toContain(`<Form method='post' className='grid gap-4'>`);
     // The action writes to the session, which is what the plugin commits onto
     // the response — otherwise the login would not stick.
     expect(login).toContain('getSession(context)');
@@ -247,6 +263,18 @@ describe('full-stack template | the runtime-dependent argument', () => {
     for (const runtime of ['deno', 'node', 'bun'] as const) {
       expect(argsFor(runtime)).toContain("assetsDir: './build/client/assets'");
     }
+  });
+
+  it('serves assets from the production serverBuild arm on Deno, Node and Bun (M120)', () => {
+    // M120 review: the production entry passes `{ serverBuild }`, and that arm
+    // once set no assetsDir — the page rendered, every /assets/*.js was a 404.
+    // The substring check above passed throughout, because the path arm has it.
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      expect(argsFor(runtime)).toContain(
+        "...('serverBuild' in (ssr ?? {}) ? { assetsDir: './build/client/assets' } : {}),",
+      );
+    }
+    expect(argsFor('cloudflare-workers')).not.toContain("'serverBuild' in (ssr ?? {})");
   });
 
   it('opts into request logging with the probe and scrape paths excluded (M113h §3.9)', () => {
@@ -435,10 +463,17 @@ describe('full-stack vite.config.ts | executed', () => {
       await nodeFs.mkdir(app, { recursive: true });
       await nodeFs.writeFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
       await nodeFs.writeFile(`${app}/vite.ts`, 'export const defineConfig = (c: unknown) => c;\n');
+      await nodeFs.writeFile(`${app}/tw.ts`, 'export default () => ({});\n');
       await nodeFs.writeFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
       await nodeFs.writeFile(
         `${app}/deno.json`,
-        JSON.stringify({ imports: { vite: './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
+        JSON.stringify({
+          imports: {
+            vite: './vite.ts',
+            '@react-router/dev/vite': './rr.ts',
+            '@tailwindcss/vite': './tw.ts',
+          },
+        }),
       );
       const library = async (name: string, file: string, text: string) => {
         await nodeFs.mkdir(`${root}/libs/${name}`, { recursive: true });
@@ -537,5 +572,73 @@ describe('full-stack gRPC csrf exclusion', () => {
         FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }),
       ).toThrow('must be a single plain path segment');
     }
+  });
+});
+
+describe('full-stack styling foundation (M123)', () => {
+  it('emits a shadcn-ready project with copied MIT components', () => {
+    const config = JSON.parse(contentsOf('components.json'));
+    expect(config).toMatchObject({
+      style: 'new-york',
+      rsc: false,
+      tsx: true,
+      iconLibrary: 'lucide',
+      tailwind: { config: '', css: 'app/app.css', baseColor: 'neutral', cssVariables: true },
+      aliases: {
+        components: '~/components',
+        utils: '~/lib/utils',
+        ui: '~/components/ui',
+        lib: '~/lib',
+        hooks: '~/hooks',
+      },
+    });
+    for (const name of ['button', 'card']) {
+      const source = contentsOf(`app/components/ui/${name}.tsx`);
+      expect(source).toContain(`https://ui.shadcn.com/r/styles/new-york-v4/${name}.json`);
+      expect(source).toContain('shadcn/ui, MIT licence');
+      // Registry imports unchanged: the only edit to a copied source is its header.
+      expect(source).toContain("import { cn } from 'cn';");
+      expect(source).not.toContain('~/lib/utils');
+    }
+    expect(contentsOf('app/components/layouts/AppLayout.tsx')).toContain(
+      "import { cn } from 'cn';",
+    );
+    expect(paths).not.toContain('app/lib/utils.ts');
+    expect(contentsOf('vite.config.ts')).toContain('plugins: [tailwindcss(), reactRouter()]');
+    expect(FULL_STACK_NPM_DEPENDENCIES).not.toHaveProperty('clsx');
+    expect(FULL_STACK_NPM_DEPENDENCIES).not.toHaveProperty('tailwind-merge');
+    const pins = {
+      cn: '^0.5.0',
+      'class-variance-authority': '^0.7.1',
+      'radix-ui': '^1.8.1',
+    };
+    const deno = projectFiles('shop', 'deno', resolveHost(FULL_STACK_TEMPLATE, 'deno'));
+    const imports = JSON.parse(deno.find((file) => file.path === 'deno.json')!.contents).imports;
+    for (const [name, range] of Object.entries(pins)) {
+      expect(FULL_STACK_NPM_DEPENDENCIES[name]).toBe(range);
+      expect(imports[name]).toBe(`npm:${name}@${range}`);
+    }
+  });
+  it('emits the fixed shell, reset effect and early theme script', () => {
+    const root = contentsOf('app/root.tsx');
+    expect(root).toContain("<html lang='en' suppressHydrationWarning>");
+    expect(root).toMatch(/<head>\s*<script dangerouslySetInnerHTML=\{\{ __html: THEME_SCRIPT \}\}/);
+    const layout = contentsOf('app/components/layouts/AppLayout.tsx');
+    for (const hook of ['frame', 'header', 'sidebar', 'content'])
+      expect(layout).toContain(`data-shell='${hook}'`);
+    expect(layout).toContain('flex h-dvh flex-col overflow-hidden');
+    expect(layout).toContain('content.current.scrollTop = 0');
+    expect(layout).toContain('}, [pathname])');
+    expect(layout).toContain('overflow-x-auto');
+    expect(layout).toContain('bg-accent text-accent-foreground');
+    expect(contentsOf('app/components/layouts/LoginLayout.tsx')).toContain('<Card>');
+    for (const route of ['_index', 'products._index'])
+      expect(contentsOf(`app/routes/_app/${route}.tsx`)).toContain('<Card>');
+    expect(contentsOf('app/routes/_auth/login.tsx')).toContain("<Button type='submit'>");
+    expect(contentsOf('app/components/theme-toggle.tsx')).toContain("variant='ghost'");
+    expect(contentsOf('app/components/theme-toggle.tsx')).toContain(
+      "media.removeEventListener('change', apply)",
+    );
+    expect(contentsOf('app/app.css')).toContain('--primary:');
   });
 });

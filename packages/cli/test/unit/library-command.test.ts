@@ -61,6 +61,39 @@ function harness(root?: string, workspace = true, runtime: TargetRuntime = 'deno
 }
 
 describe('runLibraryCommand', () => {
+  it('plans missing Bun linker configuration, preserves hoisted settings and refuses other TOML', async () => {
+    for (const setting of [
+      undefined,
+      '[install]\nlinker = "hoisted"\n',
+      '[install]\nlinker = "isolated"\n',
+      '[install]\ncache = true\n',
+    ]) {
+      const h = harness(undefined, true, 'bun');
+      if (setting !== undefined)
+        await h.fs.writeFile('/acme/bunfig.toml', new TextEncoder().encode(setting));
+      const before = [...h.fs.writes];
+      const refused = setting !== undefined && !setting.includes('hoisted');
+      expect(await h.run(['library', 'shared', '--dry-run'])).toBe(refused ? 1 : 0);
+      expect(h.fs.writes).toEqual(before);
+      expect(await h.run(['library', 'shared'])).toBe(refused ? 1 : 0);
+      if (refused) {
+        expect(h.err.text()).toContain('linker = "hoisted"');
+        expect(h.fs.writes).toEqual(before);
+      } else {
+        expect(h.fs.read('/acme/bunfig.toml')).toBe('[install]\nlinker = "hoisted"\n');
+      }
+    }
+  });
+  it('refuses an unreadable bunfig.toml with a named error instead of throwing (M120 re-audit N1)', async () => {
+    // A directory stands in for every unreadable shape (a link, >1 MiB, a special
+    // file): each makes the bounded read throw, which once escaped as a stack.
+    const h = harness(undefined, true, 'bun');
+    await h.fs.mkdir('/acme/bunfig.toml', { recursive: true });
+    const before = [...h.fs.writes];
+    expect(await h.run(['library', 'shared'])).toBe(1);
+    expect(h.err.text()).toContain('/acme/bunfig.toml: expected a regular file at most 1 MiB');
+    expect(h.fs.writes).toEqual(before);
+  });
   it('dry-run collision refuses without writing', async () => {
     const h = harness();
     await h.fs.writeFile('/acme/libs/widget/src/index.ts', new TextEncoder().encode('mine'));

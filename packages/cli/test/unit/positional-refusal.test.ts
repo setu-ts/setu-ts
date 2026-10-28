@@ -119,6 +119,13 @@ describe('extra-positional refusal', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it('refuses positionals on build before bundling or writing', async () => {
+    const h = harness();
+    expect(await h.run(['build', 'extra'])).toBe(2);
+    expect(h.err.text()).toContain('setu build takes no arguments; got 1.');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('refuses any positional on adopt, which takes none', async () => {
     const h = harness({
       seed: {

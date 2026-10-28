@@ -10095,6 +10095,14 @@ exactly what `setu new` accepts.
 
 ### Commands
 
+`setu build [--dir <path>] [--dry-run]` checks CLI wiring and bundles one Node project or workspace
+member into dist/main.js and a source map, plus dist/src/migrations/run.js when present. It never
+boots the app. Libraries are inlined and npm packages remain external; runtime devDependency imports
+fail with the importing file named. Dry-run checks and reports without bundling or writing.
+Workspace roots and non-Node targets refuse with exit 2; build failures exit 1. Generated Node build
+scripts type-check before invoking this command; production start runs the bundle. Use start:dev and
+start:debug for development. See [CLI build](docs/cli.md#production-build-setu-build).
+
 Every socket-target scaffold includes `test/app.test.ts`: it starts the application's own
 `createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
 the platform environment and emits no smoke test; its `test` task permits an empty suite.
@@ -10410,15 +10418,15 @@ rather than a registration: `setu.config.ts` does not import it, and you import 
 function is needed. In a class-based project the same path holds the `APP_SERVICES` array of
 `@Injectable` classes, which the scaffolded config does pass to `DecoratorPlugin`.
 
-> **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
+> **Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
 > decorator — V8 has not shipped them, so even a TC39 **standard** decorator is a bare
 > `SyntaxError: Invalid or unexpected token` there — or the constructor parameter property
 > `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project
-> therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, which transforms
-> both; its `tsconfig.json` sets no decorator option, because standard decorators need none. Bun
-> compiles TypeScript outright and Deno and Workers never invoke it, so no other target carries the
-> dependency.
+> therefore declares `tsx` in `devDependencies` and develops with `tsx watch main.ts`, which
+> transforms both; its `tsconfig.json` sets no decorator option, because standard decorators need
+> none. Bun compiles TypeScript outright and Deno and Workers never invoke it, so no other target
+> carries the dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 > `src/index.ts` with esbuild, which does not read a Deno import map, so a scaffolded Workers

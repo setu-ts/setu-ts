@@ -15439,18 +15439,13 @@ Node service gains little and worsens stack traces.
 
 **Decisions the plan takes:**
 
-1. **Workspace libraries.** A `generate library` package exports its `.ts` source, so a per-service
-   `tsc` build emits imports that plain `node` cannot load. Either (a) `tsc -b` with project
-   references and conditional exports on libraries, the framework's own layout, or (b) bundle each
-   service with esbuild (`--platform=node --packages=external` except workspace libraries,
-   `--sourcemap`), keeping optional peers external so M113d's guarded `await import()` still works.
-   The review recommends evaluating (b) first; `tsc --noEmit` stays the type-check gate.
-2. **Scripts.** `build`, which runs `setu check` (M118) before compiling, so code that compiles but
-   is never registered fails the build — only errors fail it, warnings print; production
-   `start: node --enable-source-maps dist/main.js`; `dev: tsx watch main.ts`;
-   `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether `start` keeps its
-   development meaning (least surprise) with a separate `start:prod`, or follows NestJS (`start`
-   compiled, `start:dev` watch) — an upgrade-guide entry either way.
+1. **Workspace libraries.** `setu build` bundles source libraries with esbuild and keeps npm
+   dependencies and optional peers external. Libraries keep source exports; tsc --noEmit remains the
+   type-check gate.
+2. **Scripts.** Node build runs tsc --noEmit then setu build (wiring errors refuse, warnings print).
+   Production start is node --enable-source-maps dist/main.js; start:dev watches source and
+   start:debug uses the inspector. Full-stack develops through dev.ts and builds its frontend before
+   the service. Tests build only the frontend when needed, without the wiring gate.
 3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
    `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
    `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
@@ -15459,27 +15454,29 @@ Node service gains little and worsens stack traces.
    today.
 4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
    out of the build, as M101f keeps it out of images).
-5. **Bun and Deno** run TypeScript natively; emit `bun build` / `deno compile` or document them.
-6. **Interim:** if this milestone is not soon, replace `sh -c "npx tsx main.ts"` with
-   `node --import tsx main.ts` — about 160 MB and 140 ms per container with no build.
+5. **Bun and Deno** retain native source execution. `bun build` and `deno compile` are documented
+   custom packaging choices, not generated steps.
+6. **Interim command superseded.** M120 ships compiled Node starts; Bun and Deno retain source.
 
 **Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
 generated projects; this milestone wires it into `build`.
 
-**Gate:** `scaffold-runs-e2e` builds, runs the COMPILED output, and runs the built image read-only
-with no network, for every template × runtime, including a workspace with a library (the M63 and
-M95a lesson: generated output is proven only by running it).
+**Gate:** Node scaffold e2e builds and serves compiled output, including full-stack SSR and a
+workspace library. The deploy gate runs the Node workspace/library, Node standalone, Bun
+workspace/library and Deno workspace (with a library under a root `nodeModulesDir: "auto"`) images
+read-only with no external network. Full-stack and standalone Deno Dockerfiles are unit-tested;
+full-stack images were built and run by hand in review.
 
 **Deliverables:**
 
-- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member; `build` runs
-      `setu check` first, and the e2e proves a broken seam fails the build
-- [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
+- [x] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
+      `build` runs `setu check` first, and the e2e proves a broken seam fails the build
+- [x] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
       it
-- [ ] `.gitignore` covers `dist/` and `build/`
-- [ ] The workspace-library build decided and implemented
-- [ ] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `120`
+- [x] `.gitignore` covers `dist/` and `build/`
+- [x] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
+- [x] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `120`
 
 ---
 
@@ -15632,17 +15629,19 @@ must reach the M120 image.
 
 **Deliverables:**
 
-- [ ] The chosen styling foundation in the full-stack template, with a theme switch
-- [ ] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
+- [x] The chosen styling foundation in the full-stack template, with a theme switch
+- [x] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
       only the content region scrolls; the e2e scrolls the content and asserts the header and
       sidebar have not moved
-- [ ] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
+- [x] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
       runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
       styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
       cannot do in server-rendered views
-- [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
-- [ ] Template README and `docs/` entry; CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
+- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash — the full-stack template on
+      every runtime it supports, `setu add view` on Node, Bun and Deno (Workers views carry no
+      Tailwind setup)
+- [x] Template README and `docs/` entry; CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `123`
 
 ---
 
@@ -16159,9 +16158,9 @@ patch by construction and gains nothing new here.
 | 119g      | ✅     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
 | 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
 | 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
-| 120       | ⬜     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
+| 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
-| 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
+| 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |

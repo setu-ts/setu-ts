@@ -240,7 +240,7 @@ async function start(member) {
     await waitForReady(dependency);
   }
   visiting.delete(member.name);
-  const child = spawn('${executable}', ['run', 'start'], {
+  const child = spawn('${executable}', ['run', 'start:dev'], {
     cwd: \`apps/\${member.name}\`,
     stdio: 'inherit',
     detached: grouped,

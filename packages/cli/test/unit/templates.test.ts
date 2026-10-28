@@ -87,9 +87,7 @@ describe('the scaffolded application smoke test', () => {
           // twice by a later add.
           expect(parsed.devDependencies['@setu-ts/testing']).toBe(`^${VERSION}`);
           expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
-          expect(
-            parsed.scripts.test.startsWith(`${runtime === 'bun' ? 'bun' : 'npm'} run build && `),
-          ).toBe(buildsFirst);
+          expect(parsed.scripts.test.startsWith('react-router build && ')).toBe(buildsFirst);
         }
       });
     }

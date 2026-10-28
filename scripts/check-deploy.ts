@@ -530,6 +530,8 @@ const GENERATED_MEMBER = 'orders';
 const GENERATED_PORT = 3000;
 const GENERATED_IMAGE_PREFIX = 'setu/generated-gate:m95a';
 const GENERATED_CONTAINER_PREFIX = 'setu-generated-gate';
+/** Extra generated image case proving the CSS build is copied into production. */
+export const GENERATED_VIEW_CASE = 'node-rest-view';
 const GENERATED_PROBE_ATTEMPTS = 120;
 const GENERATED_PROBE_INTERVAL_MS = 1_000;
 
@@ -688,6 +690,221 @@ export async function buildGeneratedImage(
   );
 }
 
+/** Installs a generated Node or Bun project's lockfile, then builds its own Dockerfile. */
+export async function buildGeneratedNodeImage(
+  root: string,
+  image: string,
+  registry: string,
+  workspace: boolean,
+  execute: typeof run = run,
+  runtime: 'node' | 'bun' = 'node',
+): ReturnType<typeof run> {
+  const install =
+    runtime === 'bun' ? ['bun', 'install'] : ['npm', 'install', '--no-audit', '--no-fund'];
+  const installed = await execute(install, {
+    quiet: true,
+    cwd: root,
+    env: { NPM_CONFIG_REGISTRY: registry },
+  });
+  if (!installed.success) return installed;
+  return execute(
+    [
+      'docker',
+      'build',
+      '--quiet',
+      '--network',
+      'host',
+      '-f',
+      `${root}/${workspace ? 'docker/' : ''}Dockerfile`,
+      ...(workspace ? ['--build-arg', `MEMBER=${GENERATED_MEMBER}`] : []),
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${registry}`,
+      '-t',
+      image,
+      root,
+    ],
+    { quiet: true },
+  );
+}
+
+/** Generated Node images must serve with no writable root and no external network. */
+async function checkGeneratedNode(
+  directory: string,
+  registry: string,
+  workspace: boolean,
+  runtime: 'node' | 'bun' = 'node',
+  view = false,
+): Promise<boolean> {
+  const name = view ? GENERATED_VIEW_CASE : `${runtime}-${workspace ? 'workspace' : 'standalone'}`;
+  const root = `${directory}/${name}`;
+  const resources = generatedResources();
+  const cli = (args: readonly string[]) =>
+    run([...CLI_COMMAND, ...args], { quiet: true, cwd: directory });
+  try {
+    const created = await cli([
+      'new',
+      name,
+      '--runtime',
+      runtime,
+      ...(workspace ? ['--workspace'] : ['--template', 'rest']),
+    ]);
+    if (!created.success) throw new Error(created.stderr);
+    if (workspace) {
+      const member = await cli([
+        'generate',
+        'app',
+        GENERATED_MEMBER,
+        '--template',
+        'rest',
+        '--dir',
+        root,
+      ]);
+      const library = await cli([
+        'generate',
+        'library',
+        'shared',
+        '--scope',
+        'm120',
+        '--dir',
+        root,
+      ]);
+      if (!member.success || !library.success) throw new Error(member.stderr + library.stderr);
+      const mainPath = `${root}/apps/${GENERATED_MEMBER}/main.ts`;
+      const source = await readFile(mainPath, 'utf8');
+      await writeFile(
+        mainPath,
+        "import { shared } from '@m120/shared';\n" +
+          source.replace(
+            'await app.start(',
+            "app.router.get('/library', (ctx) => ctx.response.json({ value: shared('image') }));\nawait app.start(",
+          ),
+      );
+    }
+    if (view) {
+      const added = await cli(['add', 'view', '--dir', root]);
+      if (!added.success) throw new Error(added.stderr);
+    }
+    const built = await buildGeneratedNodeImage(
+      root,
+      resources.image,
+      registry,
+      workspace,
+      run,
+      runtime,
+    );
+    if (!built.success) throw new Error(built.stdout + built.stderr);
+    const started = await run(
+      [
+        'docker',
+        'run',
+        '-d',
+        '--name',
+        resources.container,
+        '--read-only',
+        '--network',
+        'none',
+        resources.image,
+      ],
+      { quiet: true },
+    );
+    if (!started.success) throw new Error(started.stderr);
+    for (let attempt = 0; attempt < GENERATED_PROBE_ATTEMPTS; attempt++) {
+      const probe = await run(
+        [
+          'docker',
+          'exec',
+          resources.container,
+          'wget',
+          '-q',
+          '-O',
+          '-',
+          'http://127.0.0.1:3000/health',
+        ],
+        { quiet: true },
+      );
+      if (probe.success) {
+        if (workspace) {
+          const library = await run(
+            [
+              'docker',
+              'exec',
+              resources.container,
+              'wget',
+              '-q',
+              '-O',
+              '-',
+              'http://127.0.0.1:3000/library',
+            ],
+            { quiet: true },
+          );
+          if (!library.success || !library.stdout.includes('shared: image'))
+            throw new Error(`Library value missing: ${library.stdout}${library.stderr}`);
+        }
+        if (view) {
+          const page = await run(
+            [
+              'docker',
+              'exec',
+              resources.container,
+              'wget',
+              '-q',
+              '-O',
+              '-',
+              'http://127.0.0.1:3000/ui',
+            ],
+            { quiet: true },
+          );
+          const css = await run(
+            [
+              'docker',
+              'exec',
+              resources.container,
+              'wget',
+              '-S',
+              '-O',
+              '-',
+              'http://127.0.0.1:3000/assets/app.css',
+            ],
+            { quiet: true },
+          );
+          if (
+            !page.success ||
+            !page.stdout.includes('data-shell="frame"') ||
+            !css.success ||
+            !css.stdout.includes('.h-dvh') ||
+            !/content-type: text\/css/i.test(css.stderr)
+          ) {
+            throw new Error(
+              `View or CSS missing from read-only image: ${page.stderr}${css.stderr}`,
+            );
+          }
+          console.log('  ✓ /ui 200 and /assets/app.css 200 text/css with .h-dvh');
+        }
+        console.log(
+          `  ✓ ${name} served /health${workspace ? ' and bundled library value' : ''} read-only, network none`,
+        );
+        return true;
+      }
+      const state = await run(
+        ['docker', 'inspect', '-f', '{{.State.Running}}', resources.container],
+        { quiet: true },
+      );
+      if (state.stdout.trim() !== 'true') break;
+      await new Promise((resolve) => setTimeout(resolve, GENERATED_PROBE_INTERVAL_MS));
+    }
+    throw new Error(`The generated ${runtime} image did not serve /health`);
+  } catch (cause) {
+    const logs = await run(['docker', 'logs', resources.container], { quiet: true });
+    console.error(
+      `  ✗ ${name}: ${cause instanceof Error ? cause.message : String(cause)}\n${logs.stdout}${logs.stderr}`,
+    );
+    return false;
+  } finally {
+    await run(['docker', 'rm', '-f', resources.container], { quiet: true });
+    await run(['docker', 'image', 'rm', '-f', resources.image], { quiet: true });
+  }
+}
+
 /**
  * Proves the deployment a user actually gets, which until M95a nothing did.
  *
@@ -761,6 +978,25 @@ async function checkGenerated(): Promise<CheckOutcome> {
       if (!member.success) console.error(member.stderr);
       return 'failed';
     }
+    // M120 §3.15: a library adds a workspace symlink under node_modules, and a root
+    // `nodeModulesDir: "auto"` — which a full-stack member sets (M36c), though a redis
+    // workspace cannot take one — is the pair under which every member's image once
+    // died read-only re-creating that symlink. The key is set as that member would.
+    const library = await cli(['generate', 'library', 'shared', '--scope', 'm120', '--dir', root]);
+    if (!library.success) {
+      console.error('  ✗ adding the library failed');
+      console.error(library.stderr);
+      return 'failed';
+    }
+    const rootManifestPath = `${root}/deno.json`;
+    const rootManifest = JSON.parse(await readFile(rootManifestPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(
+      rootManifestPath,
+      `${JSON.stringify({ ...rootManifest, nodeModulesDir: 'auto' }, null, 2)}\n`,
+    );
 
     // Build the user Dockerfile against all supported manifest layouts. The last
     // layout also proves a member can inherit imports from the workspace root.
@@ -911,6 +1147,19 @@ async function checkGenerated(): Promise<CheckOutcome> {
       return 'failed';
     }
     console.log('  ✓ served /health under --read-only with no external network');
+    for (const workspaceCase of [true, false]) {
+      if (!(await checkGeneratedNode(workspace, overlay.url, workspaceCase))) return 'failed';
+    }
+    if (!(await checkGeneratedNode(workspace, overlay.url, false, 'node', true))) return 'failed';
+    // M120 §3.11/§3.14: a Bun member importing a library, so the image proves the
+    // root bunfig.toml's hoisted linker reaches the production install. The host
+    // install needs Bun; without it the case is skipped by name, like a missing
+    // docker, never silently (CI installs it).
+    if (!(await onPath('bun'))) {
+      console.log('  SKIP — bun-workspace: missing tool(s): bun');
+    } else if (!(await checkGeneratedNode(workspace, overlay.url, true, 'bun'))) {
+      return 'failed';
+    }
     return 'passed';
   } finally {
     await run(['docker', 'rm', '-f', resources.container], { quiet: true });

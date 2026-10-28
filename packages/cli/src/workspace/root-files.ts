@@ -17,7 +17,7 @@ import {
   WORKSPACE_VERSION,
 } from './manifest.ts';
 import { rootManifestSettings } from '../templates/root-settings.ts';
-import { LIBS_GLOB } from './library.ts';
+import { LIBS_GLOB, BUNFIG_FILE, BUN_WORKSPACE_CONFIG } from './library.ts';
 import { workspaceProfile, type WorkspaceRuntimeProfile } from './runtime-profile.ts';
 import { workspaceDevRunner } from './dev-runner.ts';
 import type { TransportSpec } from './transport.ts';
@@ -183,6 +183,17 @@ That builds every member and starts the ${transport.name} service they share.`
 
 The transport is a property of the whole workspace, recorded in \`${WORKSPACE_MANIFEST}\`, because
 members can only meet on a bus they share. Every service added later inherits it.
+
+## Build and start a member
+
+Run development with the root dev command above. For production, enter the member directory:
+
+\`\`\`bash
+cd apps/orders
+${profile.runtime === 'node' ? 'npm run build\nnpm start' : profile.runtime === 'bun' ? 'bun run start' : 'deno task start'}
+\`\`\`
+
+${wrapProse('Full-stack Bun members also run `bun run build` before starting. Node builds inline shared libraries and keep npm dependencies external. The root does not build all members.')}
 `;
 
   return [
@@ -203,18 +214,19 @@ members can only meet on a bus they share. Every service added later inherits it
       }),
     },
     { path: 'README.md', contents: readme },
+    ...(profile.runtime === 'bun' ? [{ path: BUNFIG_FILE, contents: BUN_WORKSPACE_CONFIG }] : []),
     {
       path: '.gitignore',
       contents:
         profile.manifestKind === 'deno'
-          ? 'node_modules/\ncoverage/\n.react-router/\n.env\n.env.*\n!.env.example\n'
+          ? 'node_modules/\ncoverage/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n'
           : // Both locations: Bun installs into each MEMBER's node_modules as well as
             // the root, measured — an ignore listing only the root would commit them.
             // `.react-router/` is unanchored, so it covers a full-stack member's
             // typegen directory as well as the root's. The dotenv rules are
             // unanchored too, so they cover each member's own `.env`.
             'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n' +
-            '.react-router/\n.env\n.env.*\n!.env.example\n',
+            'apps/*/dist/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n',
     },
   ];
 }

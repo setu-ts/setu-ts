@@ -51,7 +51,9 @@ describe.skipIf(process.platform === 'win32')(
             expect(result.stdout).toContain(`would create ${dir}/AGENTS.md`);
           } else {
             expect(result.code).toBe(1);
-            expect(result.stderr).toContain('expected a regular file at most 1 MiB');
+            // Since M120 (audit F1) the link itself is refused before the special
+            // file behind it is ever opened.
+            expect(result.stderr).toContain('is a symbolic link; Setu does not read through links');
           }
         }, 4000);
       }

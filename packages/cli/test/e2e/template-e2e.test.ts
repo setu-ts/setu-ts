@@ -207,7 +207,7 @@ describe('template scaffolding — end to end', () => {
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // The `microservice` template had no e2e coverage at all until service
@@ -228,7 +228,7 @@ describe('template scaffolding — end to end', () => {
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // The full-stack template is the only one that composes through a starter
@@ -237,32 +237,36 @@ describe('template scaffolding — end to end', () => {
   // anywhere else: a factory call disagreeing with the starter's real
   // signature, or an alias the manifest never declares, type-checks nowhere
   // else in the suite.
-  it('type-checks the scaffolded full-stack project, config and app tree', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
-    const project = `${root}/shop`;
+  it(
+    'type-checks the scaffolded full-stack project, config and app tree',
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
 
-    // The .tsx files are deliberately excluded: they need React and the npm
-    // toolchain the project installs, which CI does not run. Everything with
-    // framework coupling is plain TypeScript and IS checked.
-    const sources = [
-      `${project}/main.ts`,
-      `${project}/setu.config.ts`,
-      `${project}/app/lib/context-keys.server.ts`,
-      `${project}/app/lib/load-context.ts`,
-      `${project}/app/config/services.server.ts`,
-      `${project}/app/models/product.ts`,
-      `${project}/app/services/products.server.ts`,
-      `${project}/app/features/products/products.server.ts`,
-    ];
-    for (const source of sources) {
-      expect((await nodeFs.stat(source)).isFile()).toBe(true);
-    }
+      // The entry imports the frontend build, so denoCheck builds it first.
+      // These explicit roots also check the server modules independently of
+      // their reachability from the frontend routes.
+      const sources = [
+        `${project}/main.ts`,
+        `${project}/setu.config.ts`,
+        `${project}/app/lib/context-keys.server.ts`,
+        `${project}/app/lib/load-context.ts`,
+        `${project}/app/config/services.server.ts`,
+        `${project}/app/models/product.ts`,
+        `${project}/app/services/products.server.ts`,
+        `${project}/app/features/products/products.server.ts`,
+      ];
+      for (const source of sources) {
+        expect((await nodeFs.stat(source)).isFile()).toBe(true);
+      }
 
-    await useWorkspacePackages(project);
-    const { code, stderr } = await denoCheck(project, sources);
-    expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
-  });
+      await useWorkspacePackages(project);
+      const { code, stderr } = await denoCheck(project, sources);
+      expect(stderr).not.toContain('SyntaxError');
+      expect(code, stderr).toBe(0);
+    },
+  );
 
   it('refuses the retired independent DI switch', async () => {
     expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'rest', '--di'])).toBe(2);
@@ -319,7 +323,7 @@ describe('template scaffolding — end to end', () => {
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // Every other runtime keeps the socket-bound brokers, so the swap must be
@@ -682,7 +686,7 @@ describe('setu generate module, end to end', () => {
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   // The class-based template includes the DI pair, so its emitted `@Inject` has
@@ -712,7 +716,7 @@ describe('setu generate module, end to end', () => {
     await useWorkspacePackages(project);
     const { code, stderr } = await denoCheck(project, sources);
     expect(stderr).not.toContain('SyntaxError');
-    expect(code).toBe(0);
+    expect(code, stderr).toBe(0);
   });
 
   it('regenerates the barrel without refusing, and lists each module once', async () => {

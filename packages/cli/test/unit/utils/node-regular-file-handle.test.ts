@@ -23,10 +23,22 @@ describe('opened-handle bounded read', () => {
     await expect(readRegularFile('/swapped-path', 10)).rejects.toThrow('regular file');
     expect(open).toHaveBeenCalledWith(
       '/swapped-path',
-      constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY,
+      constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOCTTY | constants.O_NOFOLLOW,
     );
     expect(handle.read).not.toHaveBeenCalled();
     expect(handle.close).toHaveBeenCalledOnce();
+  });
+
+  it('refuses a link as the file itself, naming it, and passes other open errors through', async () => {
+    // M120 audit F1: O_NOFOLLOW makes the kernel answer ELOOP for a final-component link.
+    open.mockRejectedValueOnce(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }));
+    await expect(readRegularFile('/linked', 10)).rejects.toThrow(
+      '/linked: is a symbolic link; Setu does not read through links',
+    );
+    const missing = Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    open.mockRejectedValueOnce(missing);
+    await expect(readRegularFile('/missing', 10)).rejects.toBe(missing);
+    expect(handle.read).not.toHaveBeenCalled();
   });
 
   it('bounds a growing file despite small fstat size and closes after overflow', async () => {

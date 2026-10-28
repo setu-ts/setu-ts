@@ -478,12 +478,57 @@ manifest's own read-only root filesystem cannot crash it.
 
 ### The default Node workspace image
 
-A workspace defaults to Node. Its generated `docker/Dockerfile` uses `node:24-alpine`, selects a
-member with `ARG MEMBER`, and installs from the workspace root: it copies the root manifest and
-`package-lock.json`, the member manifest, and shared libraries before `npm install`, then copies the
-member source. It runs as numeric UID 1000 from `/srv/apps/${MEMBER}`, starting with
-`npx tsx main.ts`. Build with the workspace root as context; the member directory alone omits the
-workspace manifest and shared libraries.
+`build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
+an image.
+
+Generated Node services use a build stage with `npm ci` and `npm run build`; the latter type-checks
+and runs the wiring gate before bundling. The runtime stage installs only production dependencies
+and copies dist/ and the full-stack frontend build/. A standalone project has a root Dockerfile:
+
+```sh
+npm run build
+npm start
+docker build -t my-service .
+```
+
+Workspace builds use `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders .`.
+Shared libraries are bundled, their production dependencies stay external and are installed with the
+member. A runtime import of a devDependency fails the build. `start:dev` and `start:debug` run
+source; production start never rebuilds. Full-stack main.ts passes its compiled server module to
+createApp so its location survives bundling. User import.meta.url paths move with the bundle:
+resolve application data from process.cwd() or pass modules in explicitly.
+
+Bun runs source with production dependencies, builds a declared frontend script first, and copies
+the workspace's hoisted-linker bunfig.toml. Deno builds a declared frontend in a `frontend` stage on
+`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
+the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
+the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
+full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
+start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
+own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
+packaging choices, not generated commands. Workers continues using Wrangler.
+
+Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
+dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
+private registry's token, or a setting such as `legacy-peer-deps` — pass it as a build secret. Every
+generated install step (Node and Bun `npm ci` / `bun install`, Deno's frontend build and install)
+already mounts the optional secret `npmrc` at `/root/.npmrc`, as npm's own Docker guide does:
+`docker build --secret id=npmrc,src=.npmrc …`, or through the generated Compose file,
+`NPMRC="$(cat .npmrc)" docker compose -f docker/compose.yaml up --build`. In CI, set `NPMRC` from
+the CI's secret store rather than expanding it on a traced command line (`set -x` would print it).
+The secret exists only for that step, so it never reaches a layer, the history or the cache; without
+one the install runs as before. The mount needs BuildKit, Docker's default builder; the deprecated
+legacy builder (`DOCKER_BUILDKIT=0`) refuses it, and Podman/Buildah document the same `--secret`
+form. A Bun `bunfig.toml` is copied into the image, so it must name tokens through environment
+variables. Images run as numeric UID 1000. The generated-deploy gate exercises the Deno workspace
+(with a library under a root `nodeModulesDir: "auto"`), the Node workspace/library and standalone
+images, and a Bun workspace member importing a library, read-only with no external network.
+Full-stack images and the standalone Deno image have rendered shapes unit-tested; the gate does not
+build them.
+
+The generated workspace Dockerfile uses node:24-alpine, selects a member with ARG MEMBER and starts
+with node --enable-source-maps dist/main.js from /srv/apps/${MEMBER}. Build with the workspace root
+as context; the member directory alone omits shared libraries and root metadata.
 
 ### The Deno image is the member's only dependency source at runtime
 

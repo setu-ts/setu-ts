@@ -8,6 +8,38 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
+  Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
+  fixed header/sidebar with scrolling content. `components.json` supports adding more components;
+  class names combine with shadcn's `cn` package, and `app/lib/utils.ts` (`classNames`) is no longer
+  generated. `setu add view` adds `hono`, JSX options, Tailwind CLI build/watch scripts, stylesheet,
+  layout, `/ui` example and static serving, preserving and reporting existing choices. Workers
+  receives the dependency/JSX/example pieces only. See
+  [upgrading](docs/upgrading.md#setu-add-view-and-the-styled-app-shell-m123-0110-setu-tscli) and
+  [server-rendered view styling](docs/mvc.md#styling-server-rendered-views).
+
+- **npm configuration as a build secret (M120b, #516, 0.11.0, `@setu-ts/cli`).** Every generated
+  install step (Node, Bun and Deno; workspace and standalone) mounts an optional BuildKit secret
+  `npmrc` at `/root/.npmrc`, and the generated Compose file passes it from `NPMRC`, so a private
+  registry token or npm settings reach the install without entering an image layer. Without the
+  secret, builds are unchanged. Generated Dockerfiles now need BuildKit; the deprecated legacy
+  builder refuses `RUN --mount`. A one-member workspace's generated `docker/compose.yaml` no longer
+  renders an empty `environment:` key, which Compose refused for the whole file. See
+  [deployment](docs/deployment.md) and
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
+
+- **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
+  one Node service, including workspace libraries and migration runners. Runtime npm packages remain
+  external; runtime imports of devDependencies fail. Generated Node starts now require a build; use
+  start:dev for source development and start:debug for debugging. Node and Bun full-stack starts
+  stop rebuilding. Standalone and workspace images install production dependencies and build
+  frontend artifacts in the image. Bun workspaces select the hoisted linker so members resolve
+  shared libraries; library generation safely plans the setting for older workspaces. Deno images
+  build a full-stack frontend on a glibc stage, and a Deno workspace with a full-stack member and a
+  library no longer fails to start read-only (the image switches the root's `nodeModulesDir` to
+  `"manual"`). Generated `.dockerignore` files exclude `.npmrc`. Every CLI command now refuses a
+  manifest that is itself a symbolic link (naming the link) instead of reading through it. See
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
 - **Custom logger transport (#512, 0.11.0, `@setu-ts/logger-plugin`).**
   `LoggerPlugin({ transport: 'custom', logger })` wraps an application `ILogger` with level
   filtering, metadata redaction, request logging and trace correlation. Logger/transport mismatches

@@ -677,8 +677,17 @@ here.
 - **Milestone 118** (`packages/cli` — `setu check`, a read-only wiring gate run by every generated
   `check` script, plus `setu sync`, stable finding ids and `.setu-ts/check.json` silencing) —
   complete (PR #510).
-- **Next milestone** — M119i (documentation that does not match the code, or is missing). M120–M123
-  are open in the ROADMAP; M120's dependency on M118 is met.
+- **Milestone 120** (`packages/cli` — `setu build` (esbuild after the `setu check` gate), compiled
+  Node starts with `start:dev`/`start:debug`, multi-stage production images for Node, Bun and Deno,
+  Bun's hoisted linker for workspace libraries, Deno read-only start under `nodeModulesDir: "auto"`)
+  — complete (PR #515).
+- **Milestone 120b** (`packages/cli` — `.npmrc` as an optional BuildKit secret on every generated
+  install step and in Compose, plus the one-member Compose `environment:` fix; no ROADMAP entry, by
+  the maintainer's direction) — complete (PR #516).
+- **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
+  package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
+  `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
+- **Next milestone** — M121 (full-stack members with a broker), then M122. M119i is also open.
 
 ## Verification (run before declaring any work done)
 

@@ -870,12 +870,12 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   deps.log(`  cd ${projectName}`);
   deps.log(
     runtime === 'deno'
-      ? '  deno task start'
+      ? '  deno task start:dev'
       : runtime === 'cloudflare-workers'
         ? '  npm install && npx wrangler dev'
         : runtime === 'bun'
-          ? '  bun install && bun run start'
-          : '  npm install && npm start',
+          ? '  bun install && bun run start:dev'
+          : '  npm install && npm run start:dev',
   );
   return EXIT_OK;
 }

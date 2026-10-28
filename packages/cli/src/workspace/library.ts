@@ -39,6 +39,49 @@ export const LIBS_DIR = 'libs';
 /** The member glob that makes Deno treat a library as part of the workspace. */
 export const LIBS_GLOB: string = `./${LIBS_DIR}/*`;
 
+/** Bun must expose libraries to members that do not declare them individually. */
+export const BUNFIG_FILE = 'bunfig.toml';
+/** Shared layout with npm; isolated Bun installs cannot resolve undeclared sibling libraries. */
+export const BUN_WORKSPACE_CONFIG = '[install]\nlinker = "hoisted"\n';
+
+/** Plans a conservative root edit without rewriting user-owned TOML. */
+export function planBunWorkspaceLinker(
+  source: string | undefined,
+):
+  | { readonly kind: 'unchanged' }
+  | { readonly kind: 'update'; readonly file: GeneratedFile }
+  | { readonly kind: 'refused'; readonly message: string } {
+  if (source === undefined)
+    return {
+      kind: 'update',
+      file: { path: BUNFIG_FILE, contents: BUN_WORKSPACE_CONFIG, managed: true },
+    };
+  let install = false;
+  const values: string[] = [];
+  // A line scan cannot tell a TOML multiline string from configuration: an
+  // `[install]` / `linker = "hoisted"` pair inside one would read as the real
+  // setting. Such input is refused as ambiguous rather than guessed at.
+  const ambiguous = /"""|'''/.test(source);
+  for (const line of ambiguous ? [] : source.split(/\r?\n/)) {
+    if (/^\s*\[/.test(line)) install = /^\s*\[install\]\s*(?:#.*)?$/.test(line);
+    if (!install) continue;
+    const setting = /^\s*linker\s*=\s*(["'])([^"']*)\1\s*(?:#.*)?$/.exec(line);
+    if (setting !== null) values.push(setting[2]!);
+  }
+  if (values.length === 1 && values[0] === 'hoisted') return { kind: 'unchanged' };
+  return {
+    kind: 'refused',
+    message:
+      'bunfig.toml must set [install] linker = "hoisted" so members can import workspace libraries. ' +
+      (ambiguous
+        ? 'It contains a TOML multiline string, so the setting cannot be read without a TOML parser. '
+        : values.length > 0
+          ? `Found linker = "${values.join(', ')}". `
+          : 'No unambiguous install.linker setting found. ') +
+      'Setu will not rewrite TOML; add or change that setting, then run generate library again.',
+  };
+}
+
 /**
  * The library's import specifier: `@<scope>/<name>`.
  *

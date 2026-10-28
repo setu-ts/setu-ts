@@ -96,12 +96,12 @@ provider on the container when one is present and never touches the kernel regis
 
 ### Runtime targets
 
-| `--runtime`          | Entry                         | Manifests                                                        | Start command       |
-| -------------------- | ----------------------------- | ---------------------------------------------------------------- | ------------------- |
-| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `npm start` (`tsx`) |
-| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                      | `deno task start`   |
-| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `bun run start`     |
-| `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `tsconfig.json` + `wrangler.toml` | `npm run dev`       |
+| `--runtime`          | Entry                         | Manifests                                                        | Start command          |
+| -------------------- | ----------------------------- | ---------------------------------------------------------------- | ---------------------- |
+| `node` (default)     | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `npm start` (compiled) |
+| `deno`               | `main.ts` → `app.start()`     | `deno.json`                                                      | `deno task start`      |
+| `bun`                | `main.ts` → `app.start()`     | `package.json` + `tsconfig.json` + ESLint + Prettier             | `bun run start`        |
+| `cloudflare-workers` | `src/index.ts` `fetch` export | `deno.json` + `package.json` + `tsconfig.json` + `wrangler.toml` | `npm run dev`          |
 
 Every target takes the framework from npm: `package.json` names `@setu-ts/*` at `^<version>`, and
 `deno.json` maps each to `npm:@setu-ts/<name>@^<version>`. A Deno project sets
@@ -118,9 +118,9 @@ manifest change:
 
 - **Node → Bun:** keep `package.json`, set its scripts to `bun run main.ts` and `bun test`, and
   replace the `tsx` and `@types/node` dev dependencies with `@types/bun`. A `full-stack` project
-  keeps its `build` script and builds first: `start` becomes `bun run build && bun run main.ts`,
-  `test` becomes `bun run build && bun test`, and `dev` becomes `bun run dev.ts`. (Bun also runs an
-  unmodified Node project's `main.ts` directly.)
+  builds the frontend before production, keeps `start: bun run main.ts`, prefixes tests with
+  `react-router build && ` and uses `start:dev: bun run dev.ts`. Bun workspaces need the hoisted
+  linker setting described in the upgrade guide.
 - **Node or Bun → Deno:** _replace_ `package.json`, `tsconfig.json`, the ESLint and Prettier files
   and the npm lockfile with the `deno.json` that `setu new --runtime deno` emits. A `deno.json`
   added beside a kept `package.json` still serves, but `setu generate` checks `package.json` first,
@@ -140,14 +140,14 @@ hand. `cloudflare-workers` is the exception: its entry is a `fetch` export rathe
 and its `setu.config.ts` passes the Worker's bindings to `RuntimePlugin({ env })`. Moving to or from
 Workers rewrites those two files. Your routes, middleware and plugins under `src/` stay the same.
 
-**The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
+**Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 support (`--experimental-strip-types`) erases types without transforming code, so it cannot run a
 decorator — V8 has not shipped them, so even a TC39 standard decorator is a bare `SyntaxError` — or
 the constructor parameter property `setu generate module` emits
 (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project therefore declares `tsx` in
-`devDependencies` and starts with `tsx main.ts`, which transforms both. Its `tsconfig.json` needs no
-decorator option. Bun compiles TypeScript outright and Deno and Workers never invoke a runner, so no
-other target carries the dependency.
+`devDependencies` and develops with `tsx watch main.ts`, which transforms both. Its `tsconfig.json`
+needs no decorator option. Bun compiles TypeScript outright and Deno and Workers never invoke a
+runner, so no other target carries the dependency.
 
 **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 `src/index.ts` with esbuild, which reads no Deno import map, so the project emits `package.json`
@@ -170,7 +170,7 @@ from the same transport registry the workspace `--transport` flag reads, so the 
 setu new svc --template microservice --broker redis --queue redis
 cd svc
 docker compose -f docker/compose.yaml up -d   # start the broker the flags named
-npm install && npm start
+npm install && npm run start:dev
 ```
 
 `--broker` accepts every arm with messaging wiring plus `memory`: `memory`, `redis`, `rabbitmq`,
@@ -857,16 +857,47 @@ its `check` script, after the type check:
 | Target               | `check`                                                                              |
 | -------------------- | ------------------------------------------------------------------------------------ |
 | Node, Bun, Workers   | `tsc --noEmit && setu check` (`@setu-ts/cli` in `devDependencies`)                   |
+| Node/Bun full-stack  | `react-router build && tsc --noEmit && setu check`                                   |
 | Workers with a build | `npm run build && tsc --noEmit && setu check`                                        |
 | Deno                 | `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^<version> check` |
 
-The generated `dev`, `debug` and `start` scripts do not run it, so the edit loop is never blocked.
-The CLI generates no CI workflow; in your own, run `npm run check` (or `deno task check`). A project
+Deno full-stack prefixes its check task with `deno task build && `. The generated `start:dev`,
+`start:debug` and `start` scripts do not run the wiring gate, so the edit loop is never blocked. The
+CLI generates no CI workflow; in your own, run `npm run check` (or `deno task check`). A project
 scaffolded before this change gets the script from
 [the upgrade guide](./upgrading.md#setu-check-in-the-generated-check-script-m118-0110-setu-tscli).
 
 `check` and `sync` are built-in verbs, so they take precedence over a plugin command of the same
 name.
+
+## Production build (`setu build`)
+
+`setu build [--dir <path>] [--dry-run]` checks CLI wiring, then bundles a Node service into
+`dist/main.js` with source maps. It also emits `dist/src/migrations/run.js` when the source runner
+exists. A workspace root refuses with exit 2: use `setu build --dir apps/orders`. Bun and Deno run
+source natively; Workers uses Wrangler. The command never boots the application.
+
+Generated Node `build` runs `tsc --noEmit && setu build`; full-stack prefixes `react-router build`.
+`npm start` runs `node --enable-source-maps dist/main.js` after building. `start:dev` runs
+`tsx watch main.ts`, or `tsx dev.ts` for full-stack. `start:debug` runs
+`node --inspect --import tsx main.ts` (full-stack uses `dev.ts`). The CLI command itself does not
+run TypeScript: use the project's build script for type-checking.
+
+`build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
+an image.
+
+Workspace libraries are inlined; npm packages, including optional peers and libraries' own
+dependencies, remain external. Runtime imports declared only in the importing project's or library's
+devDependencies (a package also listed under peerDependencies included, since `npm ci --omit=dev`
+omits it) fail with the package and importing file named: move them to dependencies. `--dry-run`
+checks wiring and prints entries, output paths and externals without bundling or writing. The bundle
+is checked before `dist/` is replaced, so a refused build, or one whose bundle fails, keeps the
+previous output; a failure while writing the new files (a full disk, for example) can leave `dist/`
+incomplete, and rebuilding restores it. A symlinked dist directory is refused, and every CLI command
+refuses a manifest that is itself a symbolic link instead of reading through it; that refusal relies
+on `O_NOFOLLOW`, so on Windows (which has none) a linked manifest is followed, as the CLI's writer
+has always been. Build failures exit 1; unsupported scope/runtime exits 2. See
+[deployment](./deployment.md) and [upgrading](./upgrading.md) for images and scripts.
 
 ## Plugin-contributed commands
 

@@ -162,6 +162,28 @@ async function scaffoldAndInstall(args: readonly string[]): Promise<string> {
 
 describe('a scaffolded npm project runs its own scripts', () => {
   it(
+    'builds a broken DI graph, then rejects it when npm test boots the application',
+    { timeout: INSTALL_TIMEOUT_MS },
+    async () => {
+      const project = await scaffoldAndInstall(['--template', 'class-based']);
+      const fresh = await npmRun(project, 'test');
+      expect(fresh.code, fresh.output).toBe(0);
+      await nodeFs.mkdir(`${project}/src/services`, { recursive: true });
+      await nodeFs.writeFile(
+        `${project}/src/services/broken.service.ts`,
+        "import { Injectable, Inject } from '@setu-ts/decorator-plugin';\n@Injectable()\n@Inject('m120-missing-token')\nexport class BrokenService { constructor(readonly dependency: unknown) {} }\n",
+      );
+      expect(await run(['sync', '--dir', project])).toBe(0);
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
+      const tested = await npmRun(project, 'test');
+      expect(tested.code, tested.output).not.toBe(0);
+      expect(tested.output).toContain('ContainerValidationError');
+      expect(tested.output).toContain('missing:');
+      expect(tested.output).toContain('m120-missing-token');
+    },
+  );
+  it(
     'fails its own check script for a copied, unregistered controller',
     { timeout: INSTALL_TIMEOUT_MS },
     async () => {
@@ -210,6 +232,8 @@ describe('a scaffolded npm project runs its own scripts', () => {
           expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
         }
         if (!boots) return;
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
 
         const advertised = await advertisedPaths(project);
         // Vacuity guard: every host lists at least `/`.
@@ -261,6 +285,8 @@ describe('a scaffolded npm project runs its own scripts', () => {
           const result = await npmRun(project, script);
           expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
         }
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
         const { result, output } = await withNodeServer(
           project,
           async (origin) => await fetchServed(origin, '/widget'),

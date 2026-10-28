@@ -769,6 +769,9 @@ importers:
       '@setu-ts/runtime':
         specifier: workspace:^
         version: link:../runtime
+      esbuild:
+        specifier: ~0.28.0
+        version: 0.28.2
       prettier:
         specifier: ^3.9.10
         version: 3.9.10

@@ -17,6 +17,9 @@ the application did not concatenate by hand.
 
 ## Installation
 
+`setu add view` writes the dependency and JSX setup below. For styling and the Workers limit, see
+[styling server-rendered views](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#styling-server-rendered-views).
+
 ```bash
 npm install @setu-ts/view-plugin hono
 # Deno: deno add npm:@setu-ts/view-plugin npm:hono
