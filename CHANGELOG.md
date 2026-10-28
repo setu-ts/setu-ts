@@ -213,6 +213,20 @@ All notable changes to this project are documented here. The format follows
   `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
   `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
   own dependencies still works, but boot validation cannot see them; declare `inject` instead.
+- **BREAKING — `IResponse` gains `setHeaders` (0.11.0, `@setu-ts/common`).** A required member that
+  sets several headers at once, as `header()` per entry. An application class or a test fake typed
+  as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this
+  repository's own tests needed exactly that. `createTestContext` from `@setu-ts/testing` already
+  implements it. Passing the same frozen object on every request lets the kernel validate it once
+  and copy it into each response in one step; `HttpSecurityPlugin`'s security headers now do.
+- **Request identity fields are inherited on framework-created requests (0.11.0, `@setu-ts/common`,
+  `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/testing`).** The one-write guard on `user`,
+  `tenant` and `locale` is now installed once on the request class's prototype
+  (`installRequestIdentityGuard`) for served, `inject()` and `createTestContext` requests, instead
+  of on every request object. On those requests `Object.keys(ctx.request)` and
+  `JSON.stringify(ctx.request)` no longer list the three fields; reading and writing them, the
+  one-write rule and the `replace*` helpers are unchanged. A request object an application builds
+  itself keeps the per-instance guard and its enumerable fields.
 - **BREAKING — `IContainer` gains `forRequest` and `dispose` (M125, 0.11.0, `@setu-ts/common`).**
   Required members, so an application's own `IContainer` implementation must add them;
   `OverridingContainer` in `@setu-ts/testing` forwards both. `ProviderOptions` is now generic,
@@ -339,6 +353,22 @@ All notable changes to this project are documented here. The format follows
   too: the kernel now applies Hono's rule (drop one trailing slash) itself, to both the registered
   pattern and the request path, so a route registered as `/api/docs/` still answers. Measured on
   Bun: the bare kernel matched faster in five of six alternating passes.
+
+- **Per-request work on the request path (0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
+  `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU
+  profile of the REST scaffold, each change measured alone first: the middleware chain runs without
+  an `async` wrapper per stage when diagnostics are off (koa-compose's shape); the request identity
+  guard is installed once per request class rather than per request; log redaction fills its copy
+  without per-call scaffolding and walks only into nested values; a request path without `%` skips
+  `decodeURIComponent`; a request-scoped service registry allocates storage only when something
+  registers into it; a metric with distinct label names validates and keys an observation in one
+  pass, and a histogram counts in a typed array; the default security headers are copied into each
+  response in one step. Behaviour is unchanged apart from the two entries under Changed.
+
+- **A repeated histogram boundary is one bucket (0.11.0, `@setu-ts/metrics-plugin`).** A `Histogram`
+  configured with the same boundary twice counted each observation once per repeat in that bucket.
+  It is now one `le` bucket, counted once, as Prometheus expects; `buckets` still returns the
+  configured list.
 
 - **Logging and metrics hot paths (#512, 0.11.0, `@setu-ts/common`, `@setu-ts/logger-plugin`,
   `@setu-ts/metrics-plugin`).** Compile literal and suffix field matchers and specificity once,
