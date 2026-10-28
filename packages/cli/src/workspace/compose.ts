@@ -69,6 +69,19 @@ export const DOCKERIGNORE = '.dockerignore';
 const DENO_IMAGE = 'denoland/deno:alpine-2.9.5';
 
 /**
+ * The optional build secret every generated install step mounts (M120b).
+ *
+ * `.npmrc` never reaches a build context (`.dockerignore`), so a private
+ * registry's token or a setting such as `legacy-peer-deps` reaches the install
+ * only this way: `docker build --secret id=npmrc,src=.npmrc …`, or `NPMRC` in the
+ * generated Compose file. Mounted for that one `RUN`, so it is never in a layer,
+ * the history or the cache. Optional: without `--secret` the mount is absent and
+ * the install runs exactly as before (measured, BuildKit). npm, Bun and Deno all
+ * read `/root/.npmrc` in these root build steps (measured). Needs BuildKit.
+ */
+const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
+
+/**
  * The glibc Deno image a full-stack member's frontend is built in (M120 §3.7).
  *
  * Same Deno version as {@linkcode DENO_IMAGE}. Vite's bundler ships its native
@@ -137,7 +150,7 @@ COPY lib[s] ./${LIBS_DIR}/
 COPY ${MEMBERS_DIR}/\${MEMBER} ./${MEMBERS_DIR}/\${MEMBER}
 WORKDIR /srv/${MEMBERS_DIR}/\${MEMBER}
 ARG NPM_CONFIG_REGISTRY=
-RUN printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.tasks && "build" in manifest.tasks) Deno.writeTextFileSync(".setu-build-task", ""); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi
+RUN ${NPMRC_MOUNT} printf '%s' 'import { parse } from "jsr:@std/jsonc@1.0.3"; for (const name of ["deno.json", "deno.jsonc"]) { let source; try { source = Deno.readTextFileSync(name); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = parse(source); if (manifest.tasks && "build" in manifest.tasks) Deno.writeTextFileSync(".setu-build-task", ""); break; }' | DENO_DIR=/tmp/.setu-build-cache deno run --no-config --no-lock --no-prompt --allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task - && if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi
 
 FROM ${DENO_IMAGE}
 
@@ -212,7 +225,7 @@ ARG NPM_CONFIG_REGISTRY=
 # 17), symlink '../../libs/shared'\`), so EVERY member failed to start. "manual"
 # uses the node_modules this build installed. The root manifest is plain JSON
 # by now, rewritten by the step above.
-RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
+RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && deno cache main.ts && deno install && deno install --frozen && deno install --entrypoint main.ts && deno install --entrypoint main.ts --frozen && printf '%s' 'for (const name of ["deno.json", "deno.jsonc"]) { const path = "/srv/" + name; let source; try { source = Deno.readTextFileSync(path); } catch (error) { if (error instanceof Deno.errors.NotFound) continue; throw error; } const manifest = JSON.parse(source); if (manifest.nodeModulesDir === "auto") { manifest.nodeModulesDir = "manual"; Deno.writeTextFileSync(path, JSON.stringify(manifest)); } break; }' | deno run --no-config --no-prompt --allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc - && chown -R ${DENO_UID}:${DENO_UID} /srv /deno-dir
 
 # NUMERIC, not \`USER deno\`: Kubernetes' runAsNonRoot refuses an image whose user
 # is a name — "cannot verify user is non-root" — while Docker resolves it happily,
@@ -347,7 +360,7 @@ FROM ${image} AS build
 ${workspace ? 'ARG MEMBER\n' : ''}WORKDIR /srv
 ${manifests}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${guard} && ${install}
+RUN ${NPMRC_MOUNT} ${guard} && ${install}
 COPY ${member} ${workspace ? `./${member}` : '.'}
 ${bun ? `WORKDIR /srv${workspace ? '/apps/${MEMBER}' : ''}\n` : ''}RUN ${build}
 
@@ -355,7 +368,7 @@ FROM ${image} AS runtime
 ${workspace ? 'ARG MEMBER\n' : ''}WORKDIR /srv
 ${manifests}
 ARG NPM_CONFIG_REGISTRY=
-RUN ${guard} && ${install}${bun ? ' --production' : ` --omit=dev${workspace ? ' --workspace apps/${MEMBER} --workspace libs' : ''}`}
+RUN ${NPMRC_MOUNT} ${guard} && ${install}${bun ? ' --production' : ` --omit=dev${workspace ? ' --workspace apps/${MEMBER} --workspace libs' : ''}`}
 ${bun ? `COPY ${member} ${workspace ? `./${member}` : '.'}\n` : ''}WORKDIR /srv${workspace ? '/apps/${MEMBER}' : ''}
 ${bun ? '' : `COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/dist ./dist\n`}COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/buil[d] ./build/
 # NUMERIC, not a name: Kubernetes can verify this user is non-root.
@@ -416,6 +429,12 @@ function memberService(
     .map(([key, value]) => `      ${key}: '${value}'`)
     .join('\n');
 
+  // Only when there is something to set (M120b §3.6): an `environment:` key with
+  // nothing under it is YAML null, and Compose refuses the whole file —
+  // `services.<member>.environment must be a mapping` — which is what a
+  // one-member workspace on a transport adding no variables used to render.
+  const environmentBlock = envLines === '' ? '' : `\n    environment:\n${envLines}`;
+
   const dependsOn = backing?.dependsOn ?? [];
   const dependsBlock =
     dependsOn.length === 0
@@ -432,10 +451,12 @@ ${dependsOn
       dockerfile: ${DOCKERFILE}
       args:
         MEMBER: ${name}
+      # The optional npm configuration (registry token, settings) for the
+      # image's install steps; see the secrets block at the end of this file.
+      secrets:
+        - npmrc
     ports:
-      - '${port}:${port}'
-    environment:
-${envLines}${dependsBlock}
+      - '${port}:${port}'${environmentBlock}${dependsBlock}
     # The messaging plugin connects to its broker during plugin registration and
     # does not retry, so a member that loses the race to a backing service whose
     # image cannot be health-probed exits. Compose brings it back until the broker
@@ -499,7 +520,16 @@ export function workspaceContainerFiles(
 name: ${'${COMPOSE_PROJECT_NAME:-setu-workspace}'}
 
 services:
-${services}${backing === undefined ? '' : `\n${backing.services}`}`;
+${services}${backing === undefined ? '' : `\n${backing.services}`}
+# Passes the build secret every install step mounts. From an environment
+# variable, not a file: unset, it is empty and the build is unchanged; a file
+# source would fail every build where the file is absent (measured).
+#
+#   NPMRC="$(cat .npmrc)" docker compose -f ${COMPOSE_FILE} up --build
+secrets:
+  npmrc:
+    environment: NPMRC
+`;
 
   return [
     { path: DOCKERFILE, contents: renderDockerfile(profile), managed: true },

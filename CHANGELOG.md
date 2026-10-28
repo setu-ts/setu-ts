@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **npm configuration as a build secret (M120b, #516, 0.11.0, `@setu-ts/cli`).** Every generated
+  install step (Node, Bun and Deno; workspace and standalone) mounts an optional BuildKit secret
+  `npmrc` at `/root/.npmrc`, and the generated Compose file passes it from `NPMRC`, so a private
+  registry token or npm settings reach the install without entering an image layer. Without the
+  secret, builds are unchanged. Generated Dockerfiles now need BuildKit; the deprecated legacy
+  builder refuses `RUN --mount`. A one-member workspace's generated `docker/compose.yaml` no longer
+  renders an empty `environment:` key, which Compose refused for the whole file. See
+  [deployment](docs/deployment.md) and
+  [upgrading](docs/upgrading.md#setu-build-production-images-and-bun-library-resolution-m120-0110-setu-tscli).
+
 - **Production builds (M120, #515, 0.11.0, `@setu-ts/cli`).** `setu build` checks wiring and bundles
   one Node service, including workspace libraries and migration runners. Runtime npm packages remain
   external; runtime imports of devDependencies fail. Generated Node starts now require a build; use

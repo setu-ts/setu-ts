@@ -3,6 +3,7 @@ import {
   COMPOSE_FILE,
   DOCKERFILE,
   DOCKERIGNORE,
+  renderDockerfile,
   workspaceContainerFiles,
 } from '../../../src/workspace/compose.ts';
 import {
@@ -40,8 +41,11 @@ function contentsOf(files: readonly { path: string; contents: string }[], path: 
   return file?.contents ?? '';
 }
 
-/** The guard every generated install line opens with (M111d). */
-const GUARD = 'RUN if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && ';
+/** The optional npm-configuration build secret every install line mounts (M120b). */
+const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
+
+/** The guard every generated install line opens with (M111d), after the M120b mount. */
+const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
   it('emits a Dockerfile, an ignore file and a Compose file, all managed', () => {
@@ -331,6 +335,27 @@ describe('workspaceContainerFiles', () => {
       expect(compose).toContain('/ServiceBus_Emulator/ConfigFiles/Config.json:ro');
     });
 
+    it('renders no environment key for a member with nothing to set (M120b §3.6)', () => {
+      // A bare `environment:` is YAML null, which Compose refuses for the whole file.
+      const one = contentsOf(
+        workspaceContainerFiles(manifestOf([{ name: 'api', port: 3000 }]), transportSpec('http')),
+        COMPOSE_FILE,
+      );
+      // A member's block (the top-level secrets block's `environment: NPMRC` is not one).
+      expect(one).not.toMatch(/^ {4}environment:\n/m);
+      const two = contentsOf(
+        workspaceContainerFiles(
+          manifestOf([
+            { name: 'api', port: 3000 },
+            { name: 'web', port: 3001 },
+          ]),
+          transportSpec('http'),
+        ),
+        COMPOSE_FILE,
+      );
+      expect(two.match(/^ {4}environment:\n {6}\w/gm)).toHaveLength(2);
+    });
+
     it('is empty of members before the first one is added', () => {
       const compose = contentsOf(
         workspaceContainerFiles(manifestOf([]), transportSpec('http')),
@@ -402,5 +427,43 @@ describe('workspaceContainerFiles', () => {
         expect(contents).not.toContain('--cached-only');
       }
     });
+  });
+});
+
+describe('the npmrc build secret (M120b)', () => {
+  // Every RUN that installs packages mounts the optional secret; every other RUN
+  // does not. The table is the claim: install steps per runtime, by what they run.
+  const INSTALLS = ['npm ci', 'bun install', 'deno task build', 'deno cache main.ts'];
+  const runs = (dockerfile: string): string[] =>
+    dockerfile.split('\n').filter((line) => line.startsWith('RUN '));
+  for (const runtime of ['node', 'bun', 'deno'] as const) {
+    for (const workspace of [true, false]) {
+      it(`mounts it on exactly the install steps: ${runtime}, ${workspace ? 'workspace' : 'standalone'}`, () => {
+        const lines = runs(renderDockerfile(workspaceProfile(runtime), workspace));
+        const installs = lines.filter((line) => INSTALLS.some((step) => line.includes(step)));
+        expect(installs).toHaveLength(2);
+        for (const line of installs) expect(line.startsWith(`RUN ${NPMRC_MOUNT} `)).toBe(true);
+        for (const line of lines.filter((line) => !installs.includes(line)))
+          expect(line).not.toContain('type=secret');
+        // Never a required secret: an absent one is the no-op build.
+        expect(lines.join('\n')).not.toContain('required=');
+      });
+    }
+  }
+
+  it('passes it from Compose through an environment variable, never a file', () => {
+    const compose = contentsOf(
+      workspaceContainerFiles(
+        manifestOf([
+          { name: 'api', port: 3000 },
+          { name: 'web', port: 3001 },
+        ]),
+        transportSpec('http'),
+      ),
+      COMPOSE_FILE,
+    );
+    expect(compose.match(/\n {6}secrets:\n {8}- npmrc\n/g)).toHaveLength(2);
+    expect(compose).toContain('\nsecrets:\n  npmrc:\n    environment: NPMRC\n');
+    expect(compose).not.toMatch(/^\s+file:/m);
   });
 });

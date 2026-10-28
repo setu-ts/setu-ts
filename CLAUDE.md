@@ -681,6 +681,9 @@ here.
   Node starts with `start:dev`/`start:debug`, multi-stage production images for Node, Bun and Deno,
   Bun's hoisted linker for workspace libraries, Deno read-only start under `nodeModulesDir: "auto"`)
   — complete (PR #515).
+- **Milestone 120b** (`packages/cli` — `.npmrc` as an optional BuildKit secret on every generated
+  install step and in Compose, plus the one-member Compose `environment:` fix; no ROADMAP entry, by
+  the maintainer's direction) — complete (PR #516).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M121–M123
   are open in the ROADMAP.
 
