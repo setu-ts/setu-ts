@@ -154,6 +154,66 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
  */
 const REGEX_PARAMETER = /(?:^|\/):[^/]*\{/;
 
+/** A route parameter name: the identifier LinearRouter's `:\w+` read before 0.11.0. */
+const PARAMETER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Names the first part of a pattern outside the route grammar — static
+ * segments, `:name` parameters, a final optional `:name?`, `*` segments and a
+ * final `prefix*` — or returns `undefined` for a pattern inside it. These
+ * shapes were never documented, and each routes differently under TrieRouter
+ * than it did under LinearRouter (security re-audit N4), so they are refused
+ * at registration rather than left to route somewhere unexpected.
+ *
+ * @param path - The pattern with a leading slash
+ * @returns Why the pattern is refused, or `undefined`
+ */
+function unsupportedPatternReason(path: string): string | undefined {
+  if (path === '/') return undefined;
+  const segments = path.slice(1).split('/');
+  const last = segments.length - 1;
+  for (let index = 0; index <= last; index++) {
+    const segment = segments[index]!;
+    // A trailing slash leaves one final empty segment, which is fine.
+    if (segment === '') {
+      if (index === last) continue;
+      return 'an empty segment (`//`)';
+    }
+    if (segment.charCodeAt(0) === 58) {
+      const optional = segment.endsWith('?');
+      const name = segment.slice(1, optional ? -1 : undefined);
+      if (!PARAMETER_NAME.test(name)) {
+        return `the parameter name '${name}' (use letters, digits and '_', not starting with a digit)`;
+      }
+      if (optional && index !== last) {
+        return 'an optional parameter that is not the final segment';
+      }
+      continue;
+    }
+    if (segment.includes('?')) return `'?' outside a final optional parameter`;
+    if (segment.includes('*') && segment !== '*') {
+      const finalPrefix = index === last && segment.indexOf('*') === segment.length - 1;
+      if (!finalPrefix)
+        return `the wildcard segment '${segment}' ('*' must be a whole segment or end the final one)`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Joins a group prefix and a path with exactly one `/` between them. The path
+ * `/` (or an empty path) is the prefix itself, as it always was.
+ *
+ * @param prefix - The group prefix
+ * @param path - The path registered inside the group
+ * @returns The joined pattern
+ */
+function joinGroupPath(prefix: string, path: string): string {
+  if (path === '/' || path === '') return prefix;
+  const head = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  return path.charCodeAt(0) === 47 ? head + path : `${head}/${path}`;
+}
+
 /**
  * The pattern as Hono registers it: Hono prefixes a pattern written without a
  * leading slash (`admin` → `/admin`), so the kernel's duplicate check keys on
@@ -236,6 +296,13 @@ export class Router implements IRouterApi {
         `Route '${key}' uses a regular-expression parameter (':name{…}'), which the router does ` +
           `not support. Use ':name' or '*' and validate the value in the handler or with ` +
           `@setu-ts/validation-plugin.`,
+      );
+    }
+    const unsupported = unsupportedPatternReason(withLeadingSlash(path));
+    if (unsupported !== undefined) {
+      throw new Error(
+        `Route '${key}' uses ${unsupported}, which the router does not support. Route patterns ` +
+          `are static segments, ':name' parameters, a final optional ':name?', and '*'.`,
       );
     }
     const existing = this.#entryMap.get(key);
@@ -422,6 +489,7 @@ export class Router implements IRouterApi {
       entry: RouteEntry;
     }> = [];
 
+    const seen = new Set<RouteEntry>();
     for (const [handlerRouteTuple, rawParams] of candidatesRaw) {
       // The entry rides on the stub, as on the single-candidate path: one
       // source for both, and no reconstructed `${method} ${path}` key that
@@ -435,10 +503,12 @@ export class Router implements IRouterApi {
       // match. A malformed escape means this candidate does not match,
       // mirroring the old matcher's `null` return.
       // One route can arrive twice — through the path and through the path
-      // without its trailing slash; the first arrival stands for it.
-      if (candidates.some((candidate) => candidate.entry === entry)) {
+      // without its trailing slash; the first arrival stands for it. A set,
+      // so the check stays linear in how many routes match one path.
+      if (seen.has(entry)) {
         continue;
       }
+      seen.add(entry);
       const params = decodeParams(rawParams as Record<string, string>);
       if (params === null) {
         continue;
@@ -525,9 +595,7 @@ class GroupRouter implements IRouterApi {
   }
 
   #resolvePath(path: string): string {
-    // Normalize: ensure single slash between prefix and path
-    const p = path === '/' ? '' : path;
-    return this.#prefix + p;
+    return joinGroupPath(this.#prefix, path);
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -559,7 +627,7 @@ class GroupRouter implements IRouterApi {
   }
 
   group(prefix: string, configure: (router: IRouterApi) => void): void {
-    this.#parent.group(this.#prefix + prefix, configure);
+    this.#parent.group(joinGroupPath(this.#prefix, prefix), configure);
   }
 
   listRoutes(): readonly RouteInfo[] {

@@ -259,3 +259,78 @@ describe('patterns written without a leading slash', () => {
     );
   });
 });
+
+// Security re-audit N4: shapes outside the route grammar routed differently
+// under TrieRouter than under LinearRouter, so they are refused at
+// registration. The table is the grammar's edge, as data.
+describe('patterns outside the route grammar', () => {
+  it.each([
+    ['/api//:id', 'an empty segment (`//`)'],
+    ['/trailing//', 'an empty segment (`//`)'],
+    ['/v*/admin', "the wildcard segment 'v*'"],
+    ['/a*b', "the wildcard segment 'a*b'"],
+    ['/users/:user-id', "the parameter name 'user-id'"],
+    ['/users/:1st', "the parameter name '1st'"],
+    ['/u/:id?/', 'an optional parameter that is not the final segment'],
+    ['/p/:id?/edit', 'an optional parameter that is not the final segment'],
+    ['/search?q', "'?' outside a final optional parameter"],
+  ])('refuses %s', (pattern, reason) => {
+    const router = new Router();
+    expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).toThrow(
+      `Route 'GET ${pattern}' uses ${reason}`,
+    );
+    expect(router.getAll()).toEqual([]);
+  });
+
+  it.each([
+    '/',
+    '/users',
+    '/users/',
+    '/users/:id',
+    '/users/:id/',
+    '/u/:id?',
+    '/files/*',
+    '/*',
+    '/files*',
+    '/:a/*',
+    '/_x/:snake_case',
+  ])('accepts %s', (pattern) => {
+    const router = new Router();
+    expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).not.toThrow();
+  });
+
+  it('optional final parameter answers with and without it', () => {
+    const router = new Router();
+    router.get('/u/:id?', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/u/7')?.params).toEqual({ id: '7' });
+    expect(router.match('GET', '/u')).not.toBe(null);
+  });
+});
+
+describe('group prefixes join with exactly one slash', () => {
+  it.each([
+    ['/api/', '/:id', '/api/:id'],
+    ['/api', '/:id', '/api/:id'],
+    ['/api', ':id', '/api/:id'],
+    ['/', '/x', '/x'],
+    ['/api', '/', '/api'],
+    ['/api/', '/', '/api/'],
+  ])('group(%s) + %s registers %s', (prefix, path, expected) => {
+    const router = new Router();
+    router.group(prefix, (group) => {
+      group.get(path, () => ({ __handlerResult: true }) as never);
+    });
+    expect(router.getAll()[0]!.pattern).toBe(expected);
+  });
+
+  it('joins nested group prefixes the same way', () => {
+    const router = new Router();
+    router.group('/api/', (api) => {
+      api.group('/v1/', (v1) => {
+        v1.get('/items', () => ({ __handlerResult: true }) as never);
+      });
+    });
+    expect(router.getAll()[0]!.pattern).toBe('/api/v1/items');
+    expect(router.match('GET', '/api/v1/items')).not.toBe(null);
+  });
+});

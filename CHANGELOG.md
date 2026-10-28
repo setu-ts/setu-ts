@@ -213,12 +213,18 @@ All notable changes to this project are documented here. The format follows
   `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
   `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
   own dependencies still works, but boot validation cannot see them; declare `inject` instead.
-- **BREAKING — regular-expression route parameters are refused (0.11.0, `@setu-ts/kernel`).** A
-  route pattern with Hono's `:name{…}` constraint syntax now throws at registration. It was never
-  part of the documented route grammar and the kernel's ranking did not model it; under
-  `TrieRouter`, a constraint that can match `/` (`/files/:path{.+}/download`) took time quadratic in
-  the path length — an 8 KB path blocked the event loop for about 300 ms. Use `:name` or `*` and
-  validate the value in the handler or with `@setu-ts/validation-plugin`.
+- **BREAKING — route patterns outside the route grammar are refused (0.11.0, `@setu-ts/kernel`).**
+  Route patterns are static segments, `:name` parameters, a final optional `:name?`, `*` segments
+  and a final `prefix*`. Patterns outside that grammar now throw at registration, naming the part
+  that is not supported: a Hono regular-expression parameter (`:name{…}`); an empty segment
+  (`/api//:id`); a `*` inside a segment that is not the final one (`/v*/admin`); a parameter name
+  outside `[A-Za-z_][A-Za-z0-9_]*` (`:user-id`); an optional parameter that is not last
+  (`/p/:id?/edit`); and `?` outside a final optional parameter. None was documented, and each routed
+  differently under `TrieRouter` than under `LinearRouter` — a `:name{…}` constraint that can match
+  `/` (`/files/:path{.+}/download`) also took time quadratic in the path length, about 300 ms for an
+  8 KB path. Use `:name` or `*` and validate the value in the handler or with
+  `@setu-ts/validation-plugin`. `router.group()` now joins its prefix and a path with exactly one
+  `/`, as its documentation said, so `group('/api/', r => r.get('/:id'))` registers `/api/:id`.
 - **BREAKING — `IResponse` gains `setHeaders` (0.11.0, `@setu-ts/common`).** A required member that
   sets several headers at once, as `header()` per entry. An application class or a test fake typed
   as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this
