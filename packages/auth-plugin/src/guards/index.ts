@@ -110,9 +110,17 @@ function isNavigation(method: string, headers: Headers): boolean {
  *
  * @param signInPage - The configured page
  * @returns The page parsed against a placeholder origin
- * @throws {AuthPluginConfigurationError} When it is not a same-origin absolute path
+ * @throws {AuthPluginConfigurationError} When it is not a same-origin absolute path,
+ *   or when the URL parser would normalize it to a different one
  */
 function compileSignInPage(signInPage: unknown): URL {
+  const refuse = (): never => {
+    throw new AuthPluginConfigurationError(
+      `auth-plugin: requireAuth signInPage must be a same-origin absolute path, got '${String(
+        signInPage,
+      )}'`,
+    );
+  };
   // The empty fallback cannot equal a non-empty page, so only a value
   // safeReturnTo keeps unchanged passes; '' is refused on its own, since it
   // would equal that fallback.
@@ -121,13 +129,17 @@ function compileSignInPage(signInPage: unknown): URL {
     signInPage === '' ||
     safeReturnTo(signInPage, '') !== signInPage
   ) {
-    throw new AuthPluginConfigurationError(
-      `auth-plugin: requireAuth signInPage must be a same-origin absolute path, got '${String(
-        signInPage,
-      )}'`,
-    );
+    return refuse();
   }
-  return new URL(signInPage, URL_BASE);
+  // The redirect is built from the PARSED page, so the parser must give back
+  // exactly the string that was checked: dot segments ('/x/..//evil.test',
+  // '/%2e%2e//evil.test') pass safeReturnTo but normalize to a
+  // protocol-relative `//evil.test` (M124 audit F2).
+  const page = new URL(signInPage, URL_BASE);
+  if (page.origin !== URL_BASE || page.pathname + page.search + page.hash !== signInPage) {
+    return refuse();
+  }
+  return page;
 }
 
 /**

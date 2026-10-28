@@ -385,6 +385,9 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
           sessionService,
           now: () => runtime.now(),
           ...(sessionStamp === null ? {} : { sessionStamp }),
+          ...(compiledSignIn.refreshPrincipal === null
+            ? {}
+            : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
           ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in'
             ? {}
             : {

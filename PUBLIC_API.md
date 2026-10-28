@@ -3005,9 +3005,12 @@ what changed is that the refusal is legible.
 > promotion. On every request the `auth-session` strategy resolves the principal (snapshot or
 > `refreshPrincipal`), calls `sessionStamp` with it, and compares digests in constant time; a
 > mismatch, a throw or a malformed value makes the request anonymous. A record without `stamp` reads
-> as `null`, which matches only a user whose stamp is `null`. A non-function `sessionStamp` throws
-> `AuthPluginConfigurationError` from `AuthPlugin(...)`. No API bumps the stamp: the application
-> changes it on its own user record. `requireAuth(options?: RequireAuthOptions)`,
+> as `null`, which matches only a user whose stamp is `null`. The plugin's passkey registration
+> routes admit through the same re-checks (`refreshPrincipal`, then the stamp), so a session either
+> has ended cannot enrol a credential; `IAuthSessionService.current(ctx)` remains the synchronous,
+> un-re-checked snapshot. A non-function `sessionStamp` throws `AuthPluginConfigurationError` from
+> `AuthPlugin(...)`. No API bumps the stamp: the application changes it on its own user record.
+> `requireAuth(options?: RequireAuthOptions)`,
 > `RequireAuthOptions = { readonly signInPage?: string }`: without options, unchanged. With
 > `signInPage` (a same-origin absolute path that `safeReturnTo` keeps unchanged, else
 > `AuthPluginConfigurationError` when the guard is built), an unauthenticated `GET`/`HEAD` that is

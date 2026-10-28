@@ -189,6 +189,14 @@ describe('requireAuth signInPage validation', () => {
       '/\\evil.test',
       '/a\nb',
       '/café',
+      // Pass safeReturnTo, but the URL parser normalizes them to `//evil.test`
+      // (M124 audit F2), or to a different page.
+      '/x/..//evil.test',
+      '/.//evil.test',
+      '/%2e%2e//evil.test',
+      '/login/..//evil.test/',
+      '/a/../login',
+      '/a b',
       `/${'a'.repeat(MAX_RETURN_TO_BYTES)}`,
       42,
       null,

@@ -16,8 +16,11 @@ All notable changes to this project are documented here. The format follows
   `Accept`, `Sec-Fetch-Mode` and `X-Requested-With` to `Vary` (V10-66). `signIn.sessionStamp`
   (`SessionStamp`) reads a stamp from the application's user record: its SHA-256 digest is recorded
   at sign-in and compared on every request in constant time, so changing the stamp ends every
-  session of that user on both session strategies. `safeReturnTo` is exported for an application's
-  own login handler. See
+  session of that user on both session strategies; passkey registration admits a session only
+  through the same re-checks, so an ended session cannot enrol a credential and mint a new one (its
+  `mayRegister` policy now receives that re-checked principal, carrying `claims.amr`).
+  `IAuthSessionService.current()` stays the un-re-checked snapshot — authorize from
+  `ctx.request.user`. `safeReturnTo` is exported for an application's own login handler. See
   [ending every session of a user](packages/auth-plugin/README.md#ending-every-session-of-a-user)
   and [upgrading](docs/upgrading.md#session-and-account-lifecycle-m124-0110-setu-tsauth-plugin).
 

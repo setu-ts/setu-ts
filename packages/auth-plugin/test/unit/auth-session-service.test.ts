@@ -19,6 +19,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 import {
   asPendingPromotion,
+  asVerifiedSessionRead,
   AUTH_SESSION_KEY,
   AuthSessionService,
   DEFAULT_PENDING_TTL_MS,
@@ -559,6 +560,50 @@ describe('AuthSessionService — session stamp (M124 §3.3)', () => {
     expect(plain.get<Record<string, unknown>>(PENDING_MFA_SESSION_KEY)).not.toHaveProperty('stamp');
     expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
     expect(plain.get<Record<string, unknown>>(AUTH_SESSION_KEY)).not.toHaveProperty('stamp');
+  });
+
+  it('verifiedCurrent applies refreshPrincipal and the stamp, as the strategy does (audit F1)', async () => {
+    let stamp: string | null = 'v1';
+    let active = true;
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      sessionStamp: { read: () => stamp, subtle: crypto.subtle },
+      refreshPrincipal: (stored) => (active ? { ...stored, roles: ['fresh'] } : null),
+    });
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(await impl.verifiedCurrent(CTX)).toEqual({
+      id: 'u1',
+      roles: ['fresh'],
+      claims: { amr: ['pwd'] },
+    });
+    stamp = 'v2';
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    // `current` is the snapshot, by contract: it still answers.
+    expect(impl.current(CTX)).toEqual(PRINCIPAL);
+    stamp = 'v1';
+    active = false;
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    // A service built with neither re-check reads the snapshot with amr.
+    const plain = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+    });
+    expect((await plain.verifiedCurrent(CTX))?.claims).toEqual({ amr: ['pwd'] });
+  });
+
+  it('narrows only the plugin service to the verified read', () => {
+    const { impl } = build(() => null);
+    expect(asVerifiedSessionRead(impl)).toBe(impl);
+    const opaque: IAuthSessionService = {
+      signIn: () => Promise.resolve({ status: 'signed-in' }),
+      current: () => null,
+      pending: () => null,
+      signOut: () => undefined,
+    };
+    expect(asVerifiedSessionRead(opaque)).toBeNull();
   });
 
   it('parses a record stamp: absent or null is null, a string is kept, anything else is malformed', () => {

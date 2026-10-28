@@ -126,6 +126,12 @@ export interface IAuthSessionService {
    * Reads the signed-in principal of the request's session, without running the
    * authentication strategy chain.
    *
+   * This is the snapshot recorded at sign-in: an implementation's per-request
+   * re-checks (`@setu-ts/auth-plugin`'s `refreshPrincipal` and `sessionStamp`)
+   * do not run here, so a session they have ended can still be returned.
+   * Decide who may act from `ctx.request.user`, which the strategy chain
+   * re-checked.
+   *
    * @param ctx - The request context whose session is read
    * @returns The principal, or `null` when the session holds no identity
    * @throws {Error} If the session middleware did not run for this request

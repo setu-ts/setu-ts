@@ -24,7 +24,8 @@ import type {
   SignInOutcome,
 } from '@setu-ts/common';
 import { readGrant } from '../scoped/model.ts';
-import { digestSessionStamp } from './session-stamp.ts';
+import type { RefreshPrincipal } from '../interfaces/index.ts';
+import { digestSessionStamp, sessionStampMatches } from './session-stamp.ts';
 import type { SessionStampCheck } from './session-stamp.ts';
 
 /** The reserved session key holding the signed-in record. */
@@ -171,6 +172,76 @@ export function parseAuthSessionRecord(raw: unknown): AuthSessionRecord | null {
   return { principal: principal as IPrincipal, methods, at: candidate.at, stamp };
 }
 
+/** The per-read re-checks `signIn` configures (`refreshPrincipal`, `sessionStamp`). */
+export interface AuthSessionChecks {
+  /** Re-reads the stored principal; `null` or a throw makes the read anonymous. */
+  readonly refreshPrincipal?: RefreshPrincipal;
+  /** Compares the user's current stamp with the recorded digest. */
+  readonly sessionStamp?: SessionStampCheck;
+}
+
+/**
+ * A principal carrying `amr` from the session record.
+ *
+ * The record's `methods` is the ONLY source: any `amr` the stored principal
+ * itself carried is overwritten, so a provider that put `amr` in an ID token
+ * cannot claim a stronger authentication than the plugin recorded.
+ */
+function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
+  // `amr` is placed AFTER the spread so it replaces any value the stored
+  // principal carried, and the result is frozen so nothing downstream can
+  // quietly upgrade the authentication method of an authenticated request.
+  return Object.freeze({
+    ...principal,
+    claims: Object.freeze({
+      ...(principal.claims ?? {}),
+      amr: Object.freeze([...record.methods]),
+    }),
+  });
+}
+
+/**
+ * Turns a signed-in record into the principal it still authenticates, or `null`.
+ *
+ * The ONE implementation of the re-checks: the `auth-session` strategy runs it
+ * for every request and {@linkcode AuthSessionService.verifiedCurrent} for the
+ * package's own identity reads (passkey registration), so a session the stamp
+ * or `refreshPrincipal` has ended cannot act anywhere. Fails closed: a
+ * re-read that throws, or a stamp that does not match, answers `null` — never
+ * the stale snapshot.
+ *
+ * @param record - A parsed signed-in record
+ * @param checks - The configured re-checks
+ * @returns The frozen principal with `claims.amr` from the record, or `null`
+ */
+export async function verifyAuthSessionRecord(
+  record: AuthSessionRecord,
+  checks: AuthSessionChecks,
+): Promise<IPrincipal | null> {
+  let principal: IPrincipal | null = record.principal;
+  if (checks.refreshPrincipal !== undefined) {
+    // A failing identity store must not turn every signed-in request into a
+    // 500, and it must not fall back to the stale snapshot either.
+    try {
+      principal = await checks.refreshPrincipal(record.principal);
+    } catch {
+      return null;
+    }
+    if (principal === null) {
+      return null;
+    }
+  }
+  // The stamp is compared against the principal this read resolved, so a
+  // `refreshPrincipal` that loaded the user can carry the stamp in a claim.
+  if (
+    checks.sessionStamp !== undefined &&
+    !(await sessionStampMatches(checks.sessionStamp, principal, record.stamp ?? null))
+  ) {
+    return null;
+  }
+  return withAmr(principal, record);
+}
+
 /**
  * Validates a pending MFA record read from under {@linkcode PENDING_MFA_SESSION_KEY}.
  *
@@ -246,6 +317,11 @@ export interface AuthSessionServiceDeps {
    * digest; a rejection rejects `signIn` and records nothing.
    */
   readonly sessionStamp?: SessionStampCheck;
+  /**
+   * The per-request re-read (`signIn.refreshPrincipal`), applied by
+   * {@linkcode AuthSessionService.verifiedCurrent}.
+   */
+  readonly refreshPrincipal?: RefreshPrincipal;
 }
 
 /**
@@ -264,6 +340,7 @@ export class AuthSessionService implements IAuthSessionService {
   readonly #pendingTtlMs: number;
   readonly #scopedGrants: AuthSessionServiceDeps['scopedGrants'];
   readonly #sessionStamp: SessionStampCheck | undefined;
+  readonly #checks: AuthSessionChecks;
 
   /**
    * Builds the plugin's sign-in owner.
@@ -278,6 +355,10 @@ export class AuthSessionService implements IAuthSessionService {
     this.#pendingTtlMs = deps.mfa?.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
     this.#scopedGrants = deps.scopedGrants;
     this.#sessionStamp = deps.sessionStamp;
+    this.#checks = {
+      ...(deps.refreshPrincipal === undefined ? {} : { refreshPrincipal: deps.refreshPrincipal }),
+      ...(deps.sessionStamp === undefined ? {} : { sessionStamp: deps.sessionStamp }),
+    };
   }
 
   /**
@@ -366,6 +447,12 @@ export class AuthSessionService implements IAuthSessionService {
   /**
    * Reads the session's signed-in principal without running the strategy chain.
    *
+   * The stored snapshot, NOT re-checked: `refreshPrincipal` and `sessionStamp`
+   * do not run, so a session they have ended still reads as signed in here.
+   * Decide who may act from `ctx.request.user`, which the `auth-session`
+   * strategy re-checked; the package's own identity reads use
+   * {@linkcode AuthSessionService.verifiedCurrent}.
+   *
    * @param ctx - The request context whose session is read
    * @returns The principal, or `null` when the session holds no usable identity
    * @throws {Error} If the session middleware did not run for this request
@@ -373,6 +460,22 @@ export class AuthSessionService implements IAuthSessionService {
   current(ctx: IRequestContext): IPrincipal | null {
     const record = parseAuthSessionRecord(this.#sessionService.from(ctx).get(AUTH_SESSION_KEY));
     return record?.principal ?? null;
+  }
+
+  /**
+   * Reads the session's signed-in principal through the same re-checks the
+   * `auth-session` strategy applies ({@linkcode verifyAuthSessionRecord}).
+   *
+   * Internal seam (see {@linkcode VerifiedSessionRead}); not part of
+   * `IAuthSessionService`, whose `current` is synchronous.
+   *
+   * @param ctx - The request context whose session is read
+   * @returns The re-checked principal with `claims.amr`, or `null`
+   * @throws {Error} If the session middleware did not run for this request
+   */
+  verifiedCurrent(ctx: IRequestContext): Promise<IPrincipal | null> {
+    const record = parseAuthSessionRecord(this.#sessionService.from(ctx).get(AUTH_SESSION_KEY));
+    return record === null ? Promise.resolve(null) : verifyAuthSessionRecord(record, this.#checks);
   }
 
   /**
@@ -564,6 +667,30 @@ export interface PendingPromotion {
    * say.
    */
   currentMethods(ctx: IRequestContext): readonly AuthMethod[] | null;
+}
+
+/**
+ * The internal re-checked identity read {@linkcode asVerifiedSessionRead}
+ * narrows to. Deliberately NOT part of `IAuthSessionService`: `current` there
+ * is synchronous and committed.
+ */
+export interface VerifiedSessionRead {
+  /** The signed-in principal after `refreshPrincipal` and the session stamp. */
+  verifiedCurrent(ctx: IRequestContext): Promise<IPrincipal | null>;
+}
+
+/**
+ * Narrows an `IAuthSessionService` to the re-checked read, or `null` for an
+ * implementation that is not the plugin's own.
+ *
+ * @param service - The auth-session service
+ * @returns The seam, or `null`
+ */
+export function asVerifiedSessionRead(service: IAuthSessionService): VerifiedSessionRead | null {
+  const candidate: unknown = service;
+  return typeof (candidate as VerifiedSessionRead).verifiedCurrent === 'function'
+    ? (candidate as VerifiedSessionRead)
+    : null;
 }
 
 /**

@@ -707,6 +707,10 @@ app.router.get('/account', (ctx) =>
   principal, or `null` to make the request anonymous. It runs per request, so it is opt-in; a
   throwing re-read is treated as anonymous, never as the stale snapshot.
 - **Ending every session of one user** is `signIn.sessionStamp` — see below.
+- **`IAuthSessionService.current(ctx)` is the stored snapshot**: neither re-read runs, so it still
+  returns a user whose session `refreshPrincipal` or the stamp has ended. Decide who may act from
+  `ctx.request.user`, which the `auth-session` strategy re-checked. The plugin's own passkey
+  registration routes re-check the same way.
 
 ### Ending every session of a user
 
@@ -714,14 +718,20 @@ Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of 
 Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessionService.signIn`
 records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
 it, in constant time. Change the stamp and every session of that user answers anonymous on its next
-request, on the cookie strategy as well as the store strategy.
+request — `ctx.request.user` is unset, and passkey registration refuses it — on the cookie strategy
+as well as the store strategy.
 
 ```typescript
+import type { IPrincipal } from '@setu-ts/common';
 import { AuthPlugin } from '@setu-ts/auth-plugin';
 
 declare const users: {
   find(id: string): Promise<{ active: boolean; roles: string[]; sessionVersion: number } | null>;
 };
+
+// Principals this request's refreshPrincipal just loaded. A snapshot read back
+// from the session is a new object and never in here.
+const loaded = new WeakSet<IPrincipal>();
 
 AuthPlugin({
   signIn: {
@@ -729,20 +739,31 @@ AuthPlugin({
     // One user load per request: the re-read carries the stamp in a claim…
     refreshPrincipal: async (stored) => {
       const user = await users.find(stored.id);
-      return user?.active === true
-        ? { id: stored.id, roles: user.roles, claims: { sessionVersion: String(user.sessionVersion) } }
-        : null;
+      if (user?.active !== true) return null;
+      const principal: IPrincipal = {
+        id: stored.id,
+        roles: user.roles,
+        claims: { sessionVersion: String(user.sessionVersion) },
+      };
+      loaded.add(principal);
+      return principal;
     },
-    // …and the stamp reader takes it from the principal the request resolved.
+    // …and the stamp reader takes it only from a principal refreshPrincipal
+    // loaded; at sign-in (or for anything else) it reads the user record.
     sessionStamp: async (principal) => {
       const claim = principal.claims?.sessionVersion;
-      if (typeof claim === 'string') return claim;
+      if (loaded.has(principal) && typeof claim === 'string') return claim;
       const user = await users.find(principal.id);
       return user === null ? null : String(user.sessionVersion);
     },
   },
 });
 ```
+
+The claim shortcut is safe only for a principal `refreshPrincipal` loaded **on this request**. A
+reader that trusts the claim on any principal also trusts the stored snapshot — which is what it
+receives at sign-in, and on every request when `refreshPrincipal` is not configured — and then a
+bump never ends anything. Without `refreshPrincipal`, read the stamp from the user record.
 
 - **The reader runs at sign-in and on every request.** At sign-in it receives the principal you pass
   to `signIn`; on a request, the principal `refreshPrincipal` returned (or the stored snapshot
