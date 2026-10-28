@@ -15960,19 +15960,24 @@ the devtool's support matrix beyond Deno.
 
 **Decisions:**
 
-1. **The listener is `node:http`, not `serve()`.** It uses `createServer` with node-server's
-   `getRequestListener` and an `errorHandler` that answers the protocol's fixed refusal (or a
-   request mapping of its own; the plan chooses). It sits behind an injectable host seam, as the
-   Deno factory does. `listen()` resolves on `'listening'` and rejects on `'error'`, so a port
-   conflict fails closed and the application never crashes. The server is created with explicit
-   values for `maxHeaderSize`, `headersTimeout`, `requestTimeout`, `keepAliveTimeout` and
-   `maxRequestsPerSocket`, with `insecureHTTPParser: false` and a `clientError` handler that writes
-   fixed bytes and destroys the socket.
-2. **The protocol is identical on both runtimes; the transport is not.** For every request, status,
-   body bytes, refusal code and the protocol's own headers (`content-type`, `cache-control`,
-   `x-content-type-options`, the `x-setu-*` set) match the Deno listener. Headers the HTTP stack
-   adds (`date`, `connection`, `keep-alive`, `content-length` versus chunked) are documented, not
-   asserted equal. The native client checks only the protocol headers.
+1. **The listener is `node:http`, not `serve()`.** It uses `createServer` with node-server's own
+   request mapping and no node-server code: node-server normalizes the request-target
+   (`/v1/./status` arrives as `/v1/status`, measured), which would make the connector serve an alias
+   it must refuse. It sits behind an injectable host seam, as the Deno factory does. `listen()`
+   resolves on `'listening'` and rejects on `'error'`, so a port conflict fails closed and the
+   application never crashes. The server is created with explicit values for `maxHeaderSize`,
+   `headersTimeout`, `requestTimeout`, `keepAliveTimeout` and `maxRequestsPerSocket`, with
+   `insecureHTTPParser: false` and a `clientError` handler that writes fixed bytes and destroys the
+   socket.
+2. **The protocol is identical on both runtimes; the transport is not.** For every request that
+   reaches the protocol, status, body bytes, refusal code and the protocol's own headers
+   (`content-type`, `cache-control`, `x-content-type-options`, the `x-setu-*` set) match the Deno
+   listener. Each HTTP parser refuses some malformed requests before the protocol sees them, with a
+   bare `400` and no body. The two parsers draw that line in different places (measured: Node
+   refuses a duplicate `Content-Length`, Deno a duplicate `Host`), and the conformance table records
+   each row's outcome per runtime. Headers the HTTP stack adds (`date`, `connection`, `keep-alive`,
+   `content-length` versus chunked) are documented, not asserted equal. The native client checks
+   only the protocol headers.
 3. **Duplicate-header refusal on Node uses `rawHeaders`**, the real line multiplicity, and keeps the
    comma check, so Node refuses a superset of what Deno refuses. Tests write to a raw `node:net`
    socket, never through `fetch`.
@@ -15990,8 +15995,8 @@ the devtool's support matrix beyond Deno.
    `enable` already share:**
    - The development entry reads its credentials through `runtime.env` and stops with the
      runtime-neutral shutdown block, so one rendering serves every runtime that has a listener.
-   - `diagnostics-plugin` goes in `devDependencies`, bumped together with
-     `kernel`/`common`/`runtime` (the V8-19 rule).
+   - `diagnostics-plugin` goes in `devDependencies`. Framework pins that disagree with the CLI are
+     refused with the upgrade guide named, never bumped (the shipped V8-19 rule).
    - The script is named `dev` and runs `tsx main.dev.ts` (the maintainer deferred the name until
      M120 merged; it is chosen against what M120 shipped). M120 took `start:dev` and `start:debug`,
      so `dev` collides with nothing. It is the name the Deno devtool task already has, so the
