@@ -216,7 +216,7 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
  * `setu add --broker/--queue` never rewrites a developer's `docker/compose.yaml`; when the
  * file exists without the selected arm's services, the caller prints this block instead of
  * staying silent (PR #519 review). Services are matched by their top-level key
- * (`  rabbitmq:`), so an arm with several services is reported if any one is missing.
+ * (`  rabbitmq:`), and only the services the file lacks are returned.
  *
  * @param existing - The current Compose file
  * @param spec - The selected transport
@@ -225,22 +225,28 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
 export function missingComposeServices(existing: string, spec: TransportSpec): string | undefined {
   const block = spec.compose?.services;
   if (block === undefined) return undefined;
-  const names = [...block.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((match) => match[1]!);
-  // Only the `services:` section counts: a same-named `volumes:` entry is not a service
-  // (PR #519 review). The section runs to the next top-level key; a column-0 comment does
-  // not end it. CRLF files and trailing comments on keys are accepted.
+  // One entry per service the block declares (a two-space key), so only the absent ones
+  // are printed: adding one already present would duplicate its key (PR #519 review).
+  const entries = block
+    .replace(/\n$/, '')
+    .split(/^(?= {2}[\w-]+:)/m)
+    .map((entry) => ({ name: /^ {2}([\w-]+):/.exec(entry)?.[1], text: entry.replace(/\n$/, '') }));
+  // Only the `services:` section counts: a same-named `volumes:` entry is not a service.
+  // The section runs to the next top-level key; a column-0 comment does not end it. CRLF
+  // files, trailing comments, anchors (`redis: &redis`) and inline values are accepted.
   const text = existing.replace(/\r\n?/g, '\n');
   const section = /^services:[ \t]*(?:#.*)?$/m.exec(text);
   const tail = section === null ? '' : text.slice(section.index + section[0].length);
   const services = tail.slice(0, /^[^\s#]/m.exec(tail)?.index ?? tail.length);
   // A service is a key at the section's shallowest key indentation, whatever it is.
-  const keys = [...services.matchAll(/^( +)([\w.-]+):[ \t]*(?:#.*)?$/gm)].map((match) => ({
+  const keys = [...services.matchAll(/^( +)([\w.-]+):(?=[ \t]|$)/gm)].map((match) => ({
     depth: match[1]!.length,
     name: match[2]!,
   }));
   const depth = Math.min(...keys.map((key) => key.depth));
   const declared = new Set(keys.filter((key) => key.depth === depth).map((key) => key.name));
-  return names.every((name) => declared.has(name)) ? undefined : block.replace(/\n$/, '');
+  const missing = entries.filter((entry) => entry.name !== undefined && !declared.has(entry.name));
+  return missing.length === 0 ? undefined : missing.map((entry) => entry.text).join('\n');
 }
 
 /**

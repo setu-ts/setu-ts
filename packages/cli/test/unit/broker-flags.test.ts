@@ -367,7 +367,10 @@ describe('missingComposeServices (PR #519 review)', () => {
     expect(multi.map(({ arm }) => arm.name)).toContain('service-bus');
     for (const { arm, names } of multi) {
       const partial = `services:\n  ${names[0]}:\n    image: x\n`;
-      expect(missingComposeServices(partial, arm), arm.name).toBeDefined();
+      const printed = missingComposeServices(partial, arm) ?? '';
+      // Only the absent services: printing the present one would duplicate its key.
+      const keys = [...printed.matchAll(/^ {2}([\w-]+):/gm)].map((m) => m[1]);
+      expect(keys, arm.name).toEqual(names.slice(1));
     }
   });
   it('does not count a same-named entry outside services:', () => {
@@ -386,6 +389,16 @@ describe('missingComposeServices (PR #519 review)', () => {
     ]) {
       expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
     }
+    // Anchors and inline values after the key still declare the service.
+    for (const file of [
+      'services:\n  redis: &redis\n    image: redis:7\n',
+      'services:\n  web: &web\n    image: x\n  redis: { image: redis:7 }\n',
+    ]) {
+      expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
+    }
+    // An anchored service sets the depth, so a nested `redis:` under it is not a service.
+    const anchored = 'services:\n  web: &web\n    redis:\n      image: x\n';
+    expect(missingComposeServices(anchored, redis)).toBeDefined();
     // A nested key with the service's name is not a service.
     const nested = 'services:\n  other:\n    redis:\n      image: x\n';
     expect(missingComposeServices(nested, redis)).toBeDefined();
