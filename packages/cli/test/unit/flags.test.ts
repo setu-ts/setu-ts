@@ -25,6 +25,17 @@ it('inventories build as a zero-positional command with dir and dry-run flags', 
   expect(spec?.positionals).toEqual({ fixed: 1, taken: 0, noun: 'no arguments' });
 });
 
+it('dispatches standalone add broker and queue selections through the real CLI', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'api', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+  expect(await h.run(['add', 'messaging', '--broker', 'redis', '--dir', '/work/api'])).toBe(0);
+  expect(await h.run(['add', 'queue', '--queue', 'redis', '--dir', '/work/api'])).toBe(0);
+  const config = h.fs.read('/work/api/setu.config.ts');
+  expect(config).toContain("broker: 'redis-streams'");
+  expect(config).toContain("adapter: 'redis'");
+  expect(h.fs.read('/work/api/package.json')).toContain('ioredis');
+});
+
 interface IHarness {
   readonly fs: FakeFs;
   readonly out: Recorder;

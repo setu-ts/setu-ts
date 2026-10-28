@@ -61,6 +61,43 @@ describe('the derived broker and queue lists', () => {
 });
 
 describe('a --broker scaffold', () => {
+  for (const spec of listTransports()) {
+    for (const flag of ['broker', 'queue'] as const) {
+      const builder = flag === 'broker' ? spec.messagingArgs : spec.queueArgs;
+      if (builder === undefined) continue;
+      for (const runtime of ['node', 'deno'] as const) {
+        it(`renders full-stack ${flag} ${spec.name} with clients, dotenv and Compose on ${runtime}`, async () => {
+          const h = harness();
+          expect(
+            await h.run([
+              'portal',
+              '--template',
+              'full-stack',
+              '--runtime',
+              runtime,
+              `--${flag}`,
+              spec.name,
+            ]),
+          ).toBe(0);
+          const config = h.fs.read('/work/portal/setu.config.ts');
+          expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
+          expect(config).toContain(`'${spec.connection!.variable}'`);
+          expect(config).toContain('config.get<string>(');
+          for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
+            []) {
+            expect(
+              h.fs.read(`/work/portal/${runtime === 'deno' ? 'deno.json' : 'package.json'}`),
+            ).toContain(client);
+          }
+          expect(h.fs.read('/work/portal/.env')).toContain(
+            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+          );
+          expect(h.fs.read('/work/portal/.env.example')).toContain(`${spec.connection!.variable}=`);
+          expect(h.fs.read('/work/portal/docker/compose.yaml')).toContain('services:');
+        });
+      }
+    }
+  }
   it('renders the redis-streams wiring with the environment read', async () => {
     const h = harness();
     expect(await h.run(['svc', '--template', 'microservice', '--broker', 'redis'])).toBe(0);
@@ -248,13 +285,6 @@ describe('broker and queue refusals', () => {
       ]),
     ).toBe(2);
     expect(h.errText()).toContain('Cloudflare Workers');
-    expect(h.fs.writes).toEqual([]);
-  });
-
-  it('refuses a starter-composed template, naming --template microservice', async () => {
-    const h = harness();
-    expect(await h.run(['svc', '--template', 'full-stack', '--broker', 'redis'])).toBe(2);
-    expect(h.errText()).toContain('--template microservice');
     expect(h.fs.writes).toEqual([]);
   });
 

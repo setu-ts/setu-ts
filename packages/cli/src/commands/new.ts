@@ -15,6 +15,7 @@ import { stringFlag } from '../args.ts';
 import type { Prompter } from '../prompt.ts';
 import { resolveNewChoices } from './new-interactive.ts';
 import {
+  readArmFlag,
   brokerComposeFiles,
   brokerEnvVariables,
   standaloneOverlayRefusal,
@@ -360,56 +361,6 @@ function dependsOnRefusal(): string {
     `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
     `existing workspace member this service waits for, and only a workspace has members.`
   );
-}
-
-/**
- * Reads and validates one standalone transport-backend flag.
- *
- * The accepted set is DERIVED from the registry (`listBrokers`/`listQueues`), so
- * help text, refusal text and validation cannot drift from the arms that exist.
- * `memory` is always accepted: it states the default the plugin already takes
- * and rewrites nothing.
- *
- * @param args - The parsed arguments
- * @param flag - Which flag is being read
- * @returns The selected spec (undefined when the flag is absent), or the refusal
- */
-function readArmFlag(
-  args: ParsedArgs,
-  flag: 'broker' | 'queue',
-):
-  | { readonly ok: true; readonly spec?: TransportSpec }
-  | {
-      readonly ok: false;
-      readonly message: string;
-    } {
-  const raw = args.flags[flag];
-  if (raw === undefined) return { ok: true };
-
-  const accepted = flag === 'broker' ? listBrokers() : listQueues();
-  if (typeof raw !== 'string') {
-    return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
-  }
-
-  const spec = getTransport(raw);
-  const hasArm =
-    spec !== undefined &&
-    (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
-  if (spec === undefined || (raw !== 'memory' && !hasArm)) {
-    // The two failures are told apart, because "no such transport" and "this
-    // transport has no arm for this flag" are different mistakes.
-    const prefix =
-      spec === undefined
-        ? `Unknown ${flag} "${escapeName(raw)}".`
-        : flag === 'broker'
-          ? `"${raw}" declares no message-broker wiring.`
-          : `"${raw}" declares no queue wiring.`;
-    return {
-      ok: false,
-      message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
-    };
-  }
-  return { ok: true, spec };
 }
 
 /**

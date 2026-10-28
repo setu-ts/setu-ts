@@ -27,6 +27,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   esbuild: '~0.28.0',
   prettier: '^3.9.10',
   tsx: '^4.23.0',
+  typescript: '6.0.3',
   vitest: '5.0.3',
   'zod-v4': 'npm:zod@^4.6.6',
   'xml-crypto': '^6',

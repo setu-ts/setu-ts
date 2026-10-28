@@ -21,6 +21,26 @@ import type { ResolvedHost } from './project-files.ts';
 const ARGS_BUDGET = 60;
 
 /**
+ * Shifts continuation lines of a CLI-authored literal to its new nesting depth.
+ * @param literal - Rendered option literal
+ * @param fromDepth - Existing indentation in spaces
+ * @param toDepth - Destination indentation in spaces
+ * @returns The literal at the destination depth; single lines pass through
+ */
+export function reindentLiteral(literal: string, fromDepth: number, toDepth: number): string {
+  return literal
+    .split('\n')
+    .map((line, index) => {
+      if (index === 0 || line.trim() === '') return index === 0 ? line : '';
+      // A shift of the leading spaces only: text is never cut, and a line shallower
+      // than `fromDepth` keeps its offset relative to the rest.
+      const leading = /^ */.exec(line)![0].length;
+      return ' '.repeat(Math.max(0, leading - fromDepth + toDepth)) + line.slice(leading);
+    })
+    .join('\n');
+}
+
+/**
  * Joins CLI-authored object arguments; expressions and nested object literals are refused.
  * Braces inside a quoted string, including a template literal's `${…}`, are not inspected;
  * the CLI never renders a template literal into these arguments (`stringLiteral` emits only
