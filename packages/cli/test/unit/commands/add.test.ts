@@ -30,6 +30,33 @@ import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { listTransports } from '../../../src/workspace/transport.ts';
 
 describe('M121 transport additions', () => {
+  // PR #519 review: an existing Compose file is never rewritten, and a selected service it
+  // lacks is printed rather than silently skipped.
+  it('prints the service an existing Compose file lacks, and nothing when it has it', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+    const compose = h.read('/app/shop/docker/compose.yaml');
+    expect(compose).toContain('  redis:');
+
+    h.out.length = 0;
+    expect(await h.run(['queue', '--queue', 'rabbitmq', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/docker/compose.yaml')).toBe(compose);
+    const out = h.out.join('\n');
+    expect(out).toContain('docker/compose.yaml exists and has no rabbitmq service');
+    expect(out).toContain('  rabbitmq:');
+
+    h.out.length = 0;
+    expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/shop'])).toBe(0);
+    expect(h.out.join('\n')).not.toContain('has no redis service');
+  });
   // PR #519 review: guidance must not ask for the option this run just wrote, and must
   // still name the value when an existing one was preserved.
   for (const template of ['rest', 'full-stack'] as const) {

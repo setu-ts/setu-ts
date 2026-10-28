@@ -602,7 +602,8 @@ transport and refuse per-member flags. The selected client is installed in runti
 Deno imports. An absent generated full-stack option is inserted; existing values and unfamiliar
 configs receive the exact property to configure manually. With no transport the starter uses memory.
 `add` preserves dotenv files and existing Compose files, prints the connection variable and local
-default, and creates broker Compose files only when the project has none.
+default, and creates broker Compose files only when the project has none. When `docker/compose.yaml`
+exists without the selected broker's service, it prints the service block to add.
 
 `setu add react-router` refuses projects without a full-stack factory or existing ReactRouterPlugin.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a

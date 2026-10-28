@@ -4,7 +4,11 @@ import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { listBrokers, listQueues, listTransports } from '../../src/workspace/transport.ts';
 import type { TransportSpec } from '../../src/workspace/transport.ts';
-import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
+import {
+  missingComposeServices,
+  withBrokerArgs,
+  withQueueArgs,
+} from '../../src/templates/broker.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
@@ -340,5 +344,34 @@ describe('the transport note carried by both overlay arms', () => {
 
     expect(afterBroker.plugins.some((wiring) => wiring.pkg === 'messaging-plugin')).toBe(true);
     expect(afterQueue.plugins.some((wiring) => wiring.pkg === 'queue-plugin')).toBe(true);
+  });
+});
+
+describe('missingComposeServices (PR #519 review)', () => {
+  for (const spec of listTransports().filter((arm) => arm.compose !== undefined)) {
+    it(`reports ${spec.name} as missing from a file without it, and nothing once present`, () => {
+      const block = spec.compose!.services.replace(/\n$/, '');
+      expect(missingComposeServices('services:\n  other:\n    image: x\n', spec)).toBe(block);
+      expect(missingComposeServices(`services:\n${block}\n`, spec)).toBeUndefined();
+    });
+  }
+  it('reports an arm when only some of its services are present', () => {
+    const multi = listTransports()
+      .map((arm) => ({
+        arm,
+        names: [...(arm.compose?.services ?? '').matchAll(/^ {2}([\w-]+):\s*$/gm)].map(
+          (m) => m[1]!,
+        ),
+      }))
+      .filter(({ names }) => names.length > 1);
+    expect(multi.map(({ arm }) => arm.name)).toContain('service-bus');
+    for (const { arm, names } of multi) {
+      const partial = `services:\n  ${names[0]}:\n    image: x\n`;
+      expect(missingComposeServices(partial, arm), arm.name).toBeDefined();
+    }
+  });
+  it('has nothing to report for an arm with no backing service', () => {
+    const none = listTransports().find((arm) => arm.compose === undefined)!;
+    expect(missingComposeServices('services:\n', none)).toBeUndefined();
   });
 });

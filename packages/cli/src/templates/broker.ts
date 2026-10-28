@@ -211,6 +211,27 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
 }
 
 /**
+ * The Compose service block an existing file lacks for a transport, if any.
+ *
+ * `setu add --broker/--queue` never rewrites a developer's `docker/compose.yaml`; when the
+ * file exists without the selected arm's services, the caller prints this block instead of
+ * staying silent (PR #519 review). Services are matched by their top-level key
+ * (`  rabbitmq:`), so an arm with several services is reported if any one is missing.
+ *
+ * @param existing - The current Compose file
+ * @param spec - The selected transport
+ * @returns The block to add under `services:`, or undefined when nothing is missing
+ */
+export function missingComposeServices(existing: string, spec: TransportSpec): string | undefined {
+  const block = spec.compose?.services;
+  if (block === undefined) return undefined;
+  const names = [...block.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((match) => match[1]!);
+  // Names match `[\w-]+`, so they need no escaping inside the pattern.
+  const present = (name: string): boolean => new RegExp(`^ {2}${name}:\\s*$`, 'm').test(existing);
+  return names.every(present) ? undefined : block.replace(/\n$/, '');
+}
+
+/**
  * Emits the per-project Compose file starting the selected transports' backing
  * services.
  *

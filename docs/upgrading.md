@@ -20,8 +20,10 @@ the workspace transport through their starter options. Existing standalone proje
 transport automatically. Install again after adding so the selected client is available. Existing
 calls and option values are preserved; review the exact property printed when manual configuration
 is needed. Standalone `add` creates missing broker Compose files and prints the connection variable
-and default, while leaving dotenv files unchanged. Generated full-stack options use `config.get`, so
-both dotenv values and deployment environment variables apply, with environment taking precedence.
+and default, while leaving dotenv files unchanged; an existing `docker/compose.yaml` is never
+rewritten, and a selected service it lacks is printed for you to add. Generated full-stack options
+use `config.get`, so both dotenv values and deployment environment variables apply, with environment
+taking precedence.
 
 `setu add react-router` now refuses an app without a full-stack factory or an existing
 ReactRouterPlugin. Create a full-stack project with `setu new <name> --template full-stack`, or a

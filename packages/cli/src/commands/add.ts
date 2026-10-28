@@ -41,6 +41,7 @@ import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/pr
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import {
   brokerComposeFiles,
+  missingComposeServices,
   readArmFlag,
   standaloneOverlayRefusal,
   starterOptionLiteral,
@@ -1444,16 +1445,23 @@ export async function runAddCommand(
     deps.log(
       `  ${selected.connection.variable}=${selected.connection.localDefault} (local default; .env files are unchanged).`,
     );
-    if (
-      (await findExisting(deps.fs, [{ path: joinPath(dir, BROKER_COMPOSE_FILE), contents: '' }]))
-        .length === 0
-    ) {
-      for (const file of brokerComposeFiles([selected])) {
-        const path = joinPath(dir, file.path);
-        if ((await findExisting(deps.fs, [{ ...file, path }])).length > 0) continue;
-        createOnlyPaths.add(path);
-        edits.push({ path, contents: file.contents });
-      }
+    const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
+    const existingCompose = await readExistingText(deps.fs, composePath);
+    // Every file is create-only: an existing Compose file is never rewritten, so a
+    // service it lacks is printed for the developer to add (PR #519 review).
+    for (const file of brokerComposeFiles([selected])) {
+      const path = joinPath(dir, file.path);
+      if ((await findExisting(deps.fs, [{ ...file, path }])).length > 0) continue;
+      createOnlyPaths.add(path);
+      edits.push({ path, contents: file.contents });
+    }
+    const missing =
+      existingCompose === undefined ? undefined : missingComposeServices(existingCompose, selected);
+    if (missing !== undefined) {
+      deps.log(
+        `  ${BROKER_COMPOSE_FILE} exists and has no ${selected.name} service; add this under services: and keep the rest:`,
+      );
+      for (const line of missing.split('\n')) deps.log(`  ${line}`);
     }
   }
 
