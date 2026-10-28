@@ -1347,7 +1347,18 @@ export async function runAddCommand(
     ]) {
       const fullPath = joinPath(dir, path);
       const pending = edits.find((edit) => edit.path === fullPath);
-      const text = pending?.contents ?? (await readExistingText(deps.fs, fullPath));
+      let text: string | undefined;
+      try {
+        text = pending?.contents ?? (await readExistingText(deps.fs, fullPath));
+      } catch (cause) {
+        // A linked or unreadable view file refuses the whole add, before any write.
+        deps.error(
+          `Failed to read the project for the view setup: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
+        );
+        return EXIT_ERROR;
+      }
       if (text !== undefined) existing.set(path, text);
     }
     const plan = planViewSetup({

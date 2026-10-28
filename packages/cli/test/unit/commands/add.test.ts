@@ -2110,6 +2110,32 @@ describe('setu add view styling (M123)', () => {
     expect(rewired.match(/ViewPlugin\(\)/g)).toHaveLength(1);
     expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
   });
+  it('refuses an unreadable view file by name, before writing anything', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    const before = h.read('/app/shop/package.json');
+    await h.fs.writeFile('/app/shop/src/views/home.tsx', new TextEncoder().encode('linked'));
+    const readFile = h.fs.readFile.bind(h.fs);
+    // What the Node filesystem reports for a symbolic link (O_NOFOLLOW).
+    h.fs.readFile = (path: string) =>
+      path === '/app/shop/src/views/home.tsx'
+        ? Promise.reject(new Error(`${path}: is a symbolic link; Setu does not read through links`))
+        : readFile(path);
+    h.err.length = 0;
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(1);
+    expect(h.err).toEqual([
+      'Failed to read the project for the view setup: /app/shop/src/views/home.tsx: is a symbolic link; Setu does not read through links',
+    ]);
+    expect(h.read('/app/shop/package.json')).toBe(before);
+    expect(h.fs.has('/app/shop/src/views/layout.tsx')).toBe(false);
+  });
   it('lists every planned file in a dry-run and writes nothing', async () => {
     const h = harness();
     expect(
