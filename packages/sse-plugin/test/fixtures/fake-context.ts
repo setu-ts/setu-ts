@@ -50,6 +50,10 @@ export function createFakeContext(opts?: {
 
   // Build response builder.
   const resp: IResponse = {
+    setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+      for (const name of Object.keys(headers)) resp.header(name, headers[name]!);
+      return resp;
+    },
     header(name: string, value: string) {
       state.headers.set(name, value);
       return this;

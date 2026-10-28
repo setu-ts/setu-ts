@@ -165,6 +165,19 @@ class ProtocolResponse implements IResponse {
     return this;
   }
 
+  /**
+   * Sets several headers, one {@linkcode ProtocolResponse.header} call per entry.
+   *
+   * @param headers - Header names and values
+   * @returns This response, for chaining
+   */
+  setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+    for (const name of Object.keys(headers)) {
+      this.header(name, headers[name]!);
+    }
+    return this;
+  }
+
   json<T>(body: T): HandlerResult {
     this.#body = ENCODER.encode(JSON.stringify(body));
     return HANDLER_RESULT;

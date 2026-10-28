@@ -110,6 +110,7 @@ export type {
 
 // Request identity and cross-package state keys
 export {
+  installRequestIdentityGuard,
   replaceLocale,
   replacePrincipal,
   replaceTenant,

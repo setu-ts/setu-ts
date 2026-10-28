@@ -37,6 +37,7 @@ export interface FakeRequestOptions {
 function createFakeResponse(): IResponse {
   const r: IResponse = {
     status: () => r,
+    setHeaders: () => r,
     header: () => r,
     appendHeader: () => r,
     json: () => ({ __handlerResult: true }) as unknown as HandlerResult,

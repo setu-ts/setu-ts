@@ -123,6 +123,10 @@ function createFakeResponse(ctx: { response: IResponse }): IResponse {
       status = code;
       return ctx.response;
     },
+    setHeaders: (headers: Readonly<Record<string, string>>) => {
+      for (const name of Object.keys(headers)) ctx.response.header(name, headers[name]!);
+      return ctx.response;
+    },
     header: (name: string, value: string) => {
       headers.set(name, value);
       return ctx.response;

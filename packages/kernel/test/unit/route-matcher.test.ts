@@ -26,6 +26,11 @@ describe('isPathDecodable', () => {
   it('returns false for a bare percent sign', () => {
     expect(isPathDecodable('/users/123%')).toBe(false);
   });
+
+  it('returns false for escapes that are not valid UTF-8', () => {
+    expect(isPathDecodable('/%E0%A4%A')).toBe(false);
+    expect(isPathDecodable('/%C3%28')).toBe(false);
+  });
 });
 
 describe('parsePattern segment kinds', () => {

@@ -561,4 +561,81 @@ describe('Histogram', () => {
     expect(endpointData!.buckets.get(1)).toEqual(1); // 0.3 <= 1
     expect(endpointData!.buckets.get(Number.POSITIVE_INFINITY)).toEqual(1);
   });
+  it('counts a repeated boundary once, as one le bucket', () => {
+    const histogram = new Histogram('dup_histogram', {
+      type: 'histogram',
+      help: 'Duplicate boundaries',
+      buckets: [5, 1, 5],
+    });
+    histogram.observe(3);
+    expect([...histogram.getBucketCounts().entries()]).toEqual([
+      [1, 0],
+      [5, 1],
+      [Number.POSITIVE_INFINITY, 1],
+    ]);
+    expect(histogram.buckets).toEqual([1, 5, 5]);
+  });
+
+  it('counts NaN and values above every boundary in +Inf only', () => {
+    const histogram = new Histogram('edge_histogram', {
+      type: 'histogram',
+      help: 'Edges',
+      buckets: [1, 2],
+    });
+    histogram.observe(Number.NaN);
+    histogram.observe(9);
+    histogram.observe(1);
+    expect([...histogram.getBucketCounts().entries()]).toEqual([
+      [1, 1],
+      [2, 1],
+      [Number.POSITIVE_INFINITY, 3],
+    ]);
+    expect(histogram.getCount()).toBe(3);
+  });
+
+  it('returns a fresh map per read, in boundary order with +Inf last', () => {
+    const histogram = new Histogram('read_histogram', {
+      type: 'histogram',
+      help: 'Reads',
+      labels: ['route'],
+      buckets: [0.1, 1],
+    });
+    histogram.observe(0.5, { route: 'a' });
+    const first = histogram.getBucketCounts({ route: 'a' });
+    histogram.observe(0.05, { route: 'a' });
+    expect([...first.values()]).toEqual([0, 1, 1]);
+    const all = histogram.getAllBucketCounts();
+    expect([...all.values()][0]?.buckets).toEqual(
+      new Map([
+        [0.1, 1],
+        [1, 2],
+        [Number.POSITIVE_INFINITY, 2],
+      ]),
+    );
+  });
+
+  it('refuses a NaN bucket boundary', () => {
+    expect(
+      () =>
+        new Histogram('nan_histogram', {
+          type: 'histogram',
+          help: 'NaN',
+          buckets: [5, Number.NaN, 1],
+        }),
+    ).toThrow('Histogram "nan_histogram" cannot have a NaN bucket boundary');
+  });
+
+  it('counts a configured Infinity boundary once, as the +Inf bucket', () => {
+    const histogram = new Histogram('inf_histogram', {
+      type: 'histogram',
+      help: 'Infinity',
+      buckets: [1, Number.POSITIVE_INFINITY],
+    });
+    histogram.observe(0.5);
+    histogram.observe(7);
+    expect([...histogram.getBucketCounts().entries()]).toEqual([
+      [1, 1],
+      [Number.POSITIVE_INFINITY, 2],
+    ]);
+  });
 });

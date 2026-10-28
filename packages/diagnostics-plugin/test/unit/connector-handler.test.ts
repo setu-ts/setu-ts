@@ -1415,6 +1415,10 @@ describe('Connector handler — response builder contract', () => {
   it('supports text, send, appendHeader, and snapshot on its internal builder', () => {
     const response = refusalResponse('invalid-request');
     expect(response.header('x-probe', '1').appendHeader('x-probe', '2')).toBeDefined();
+    const viaSetHeaders = refusalResponse('invalid-request');
+    viaSetHeaders.setHeaders({ 'x-one': '1', 'x-two': '2' });
+    expect(viaSetHeaders.snapshot().headers.get('x-one')).toBe('1');
+    expect(viaSetHeaders.snapshot().headers.get('x-two')).toBe('2');
     const viaText = refusalResponse('unauthorized');
     viaText.status(401).text('plain');
     expect(viaText.snapshot().body).toEqual(new TextEncoder().encode('plain'));

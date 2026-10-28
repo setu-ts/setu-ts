@@ -86,6 +86,10 @@ export function createFakeResponse(): FakeResponseResult {
       status = code;
       return response;
     },
+    setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+      for (const name of Object.keys(headers)) response.header(name, headers[name]!);
+      return response;
+    },
     header(name: string, value: string): IResponse {
       headers.set(name, value);
       return response;

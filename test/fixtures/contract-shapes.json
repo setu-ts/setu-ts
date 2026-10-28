@@ -284,6 +284,13 @@
       },
       {
         "kind": "method",
+        "name": "setHeaders",
+        "readonly": false,
+        "optional": false,
+        "signature": "setHeaders(headers:Readonly<Record<string,string>>):IResponse"
+      },
+      {
+        "kind": "method",
         "name": "snapshot",
         "readonly": false,
         "optional": false,

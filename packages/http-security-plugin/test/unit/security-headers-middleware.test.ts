@@ -21,6 +21,23 @@ describe('securityHeadersMiddleware', () => {
       );
     });
 
+    it('hands the response one frozen record, the same object on every request', async () => {
+      const mw = securityHeadersMiddleware();
+      const seen: Readonly<Record<string, string>>[] = [];
+      for (let request = 0; request < 2; request++) {
+        const { ctx } = createFakeContext();
+        const setHeaders = ctx.response.setHeaders.bind(ctx.response);
+        ctx.response.setHeaders = (headers) => {
+          seen.push(headers);
+          return setHeaders(headers);
+        };
+        await mw(ctx, async () => {});
+      }
+      expect(seen).toHaveLength(2);
+      expect(seen[0]).toBe(seen[1]);
+      expect(Object.isFrozen(seen[0])).toBe(true);
+    });
+
     it('CSP and Permissions-Policy are ABSENT by default', async () => {
       const { ctx, response } = createFakeContext();
       const mw = securityHeadersMiddleware();

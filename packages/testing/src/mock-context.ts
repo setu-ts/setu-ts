@@ -12,7 +12,12 @@ import type {
 import type { HttpMethod } from '@setu-ts/common';
 import type { IPrincipal } from '@setu-ts/common';
 import type { ITenant } from '@setu-ts/common';
-import { parseFormBody, parseJsonBody, sealRequestIdentity } from '@setu-ts/common';
+import {
+  installRequestIdentityGuard,
+  parseFormBody,
+  parseJsonBody,
+  sealRequestIdentity,
+} from '@setu-ts/common';
 
 import { MockServiceRegistry } from './mock-registry.ts';
 
@@ -143,9 +148,11 @@ class MockRequest implements IRequest {
   readonly path: string;
   readonly headers: Headers;
   readonly ip?: string;
-  user?: IPrincipal;
-  tenant?: ITenant;
-  locale?: string;
+  // `declare`, not class fields: an initialized field would be an own
+  // property shadowing the identity guard installed on this prototype.
+  declare user?: IPrincipal;
+  declare tenant?: ITenant;
+  declare locale?: string;
   readonly signal?: AbortSignal;
   /**
    * The body reduced ONCE to its wire form, so `json()`, `text()` and
@@ -175,6 +182,11 @@ class MockRequest implements IRequest {
     tenant?: ITenant;
     locale?: string;
   }) {
+    // Guarded on the prototype like the runtime's served request, so a test
+    // context's request behaves as a served one: one write per identity field,
+    // inherited accessors rather than own properties. First, before the seeded
+    // values below are written through the guard.
+    installRequestIdentityGuard(MockRequest.prototype);
     this.method = options.method as HttpMethod;
     this.url = options.url;
     this.path = options.path ?? new URL(options.url).pathname;
@@ -295,6 +307,19 @@ export class MockResponse implements IResponse {
 
   appendHeader(name: string, value: string): IResponse {
     this.#headers.append(name, value);
+    return this;
+  }
+
+  /**
+   * Sets several headers, one {@linkcode MockResponse.header} call per entry.
+   *
+   * @param headers - Header names and values
+   * @returns This response, for chaining
+   */
+  setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+    for (const name of Object.keys(headers)) {
+      this.header(name, headers[name]!);
+    }
     return this;
   }
 

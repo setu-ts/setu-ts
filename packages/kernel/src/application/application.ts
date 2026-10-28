@@ -10,8 +10,6 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
-  parseFormBody,
-  parseJsonBody,
   respondWithError,
   serializeError,
   setUpgradeIntent,
@@ -20,8 +18,8 @@ import type {
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
-  FormBody,
   HealthIndicatorFn,
+  HttpMethod,
   HealthIndicatorOptions,
   IApplication,
   IConfig,
@@ -59,7 +57,7 @@ import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
-import { coerceInjectBody } from './inject-body.ts';
+import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
 import { compileLabelAllowlists } from '../diagnostics/projection.ts';
@@ -997,54 +995,14 @@ class Application implements IKernelApplication {
       raw = undefined;
     }
 
-    // The form read is memoized like `json()`'s: the in-flight promise is
-    // cached (a rejection with it), so two middleware reading the same
-    // injected body trigger one parse, and a body that is not a form keeps
-    // rejecting identically on a retry.
-    let form: Promise<FormBody> | undefined;
-
-    const syntheticRequest: IRequest = {
-      ...(request.ip !== undefined ? { ip: request.ip } : {}),
-      method: request.method as IRequest['method'],
-      url: fullUrl,
-      get path() {
-        return new URL(fullUrl).pathname;
-      },
+    const syntheticRequest = new InjectedRequest(
+      request.method as HttpMethod,
+      fullUrl,
       headers,
-      ...(raw !== undefined ? { raw } : {}),
-      json<T>(): Promise<T> {
-        // The shared parse (X37-1): a malformed body rejects with the
-        // `400`-branded MalformedRequestBodyError, so `inject()` observes the
-        // same failure the served path produces. The empty-body arm keeps its
-        // `{}` default — an in-process inject that sent no body is not a
-        // malformed body.
-        return Promise.resolve().then(
-          () =>
-            parseJsonBody(
-              bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes),
-            ) as T,
-        );
-      },
-      text(): Promise<string> {
-        return Promise.resolve(bodyBytes === undefined ? '' : new TextDecoder().decode(bodyBytes));
-      },
-      bytes(): Promise<Uint8Array> {
-        return Promise.resolve(bodyBytes ?? new Uint8Array(0));
-      },
-      formData(): Promise<FormBody> {
-        // The shared parse (M94b): a non-form content-type rejects with the
-        // `415`-branded UnsupportedFormEncodingError, so an injected request
-        // observes what a served request observes. A `Uint8Array` or an
-        // `ArrayBuffer` sets NO default content type (M95c §3.9), so an
-        // injected multipart in those shapes must supply its own — exactly
-        // what a served request requires. A `Blob` supplies it from `.type`
-        // (M99c), as the platform does.
-        form ??= Promise.resolve().then(() =>
-          parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type')),
-        );
-        return form;
-      },
-    };
+      bodyBytes,
+      request.ip,
+      raw,
+    );
 
     const response = await this.#handleRequest(syntheticRequest);
     const snapshot = response.snapshot();

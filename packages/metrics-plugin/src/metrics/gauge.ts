@@ -37,8 +37,7 @@ export class Gauge extends MetricBase {
    */
   set(value: number, labels?: Readonly<Record<string, string>>): void {
     const snapshot = this.snapshotLabels(labels);
-    this.validateLabels(snapshot);
-    const key = this.labelKey(snapshot, true);
+    const key = this.seriesKey(snapshot);
     const entry: GaugeValue = { value };
     if (snapshot) {
       entry.labels = snapshot;
@@ -54,8 +53,7 @@ export class Gauge extends MetricBase {
    */
   inc(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     const snapshot = this.snapshotLabels(labels);
-    this.validateLabels(snapshot);
-    const key = this.labelKey(snapshot, true);
+    const key = this.seriesKey(snapshot);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current + value };
     if (snapshot) {
@@ -72,8 +70,7 @@ export class Gauge extends MetricBase {
    */
   dec(value: number = 1, labels?: Readonly<Record<string, string>>): void {
     const snapshot = this.snapshotLabels(labels);
-    this.validateLabels(snapshot);
-    const key = this.labelKey(snapshot, true);
+    const key = this.seriesKey(snapshot);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current - value };
     if (snapshot) {
