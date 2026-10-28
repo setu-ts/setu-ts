@@ -17,7 +17,12 @@ const DEFAULT_BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10
  * `observe()` records a sample value into the appropriate bucket.
  */
 interface HistogramData {
-  bucketCounts: Map<number, number>;
+  /**
+   * Cumulative count per distinct boundary, in ascending order, then `+Inf`
+   * last. A typed array, not a `Map`: an observation increments a run of
+   * slots instead of one `Map` read and write per bucket.
+   */
+  counts: Float64Array;
   sum: number;
   count: number;
   labels?: Readonly<Record<string, string>>;
@@ -25,6 +30,8 @@ interface HistogramData {
 
 export class Histogram extends MetricBase {
   readonly #buckets: readonly number[];
+  /** The distinct boundaries — a repeated one is one `le` bucket, counted once. */
+  readonly #bounds: readonly number[];
   readonly #bucketCounts = new Map<string, HistogramData>();
 
   /**
@@ -47,6 +54,7 @@ export class Histogram extends MetricBase {
     } else {
       this.#buckets = rawBuckets;
     }
+    this.#bounds = [...new Set(this.#buckets)];
   }
 
   /**
@@ -64,46 +72,30 @@ export class Histogram extends MetricBase {
    */
   observe(value: number, labels?: Readonly<Record<string, string>>): void {
     const snapshot = this.snapshotLabels(labels);
-    this.validateLabels(snapshot);
-    const key = this.labelKey(snapshot, true);
+    const key = this.seriesKey(snapshot);
 
-    // Initialize per-label-set storage
-    if (!this.#bucketCounts.has(key)) {
-      const bucketCounts = new Map<number, number>();
-      // Initialize all buckets to 0
-      for (const bound of this.#buckets) {
-        bucketCounts.set(bound, 0);
-      }
-      bucketCounts.set(Number.POSITIVE_INFINITY, 0);
-      const data: HistogramData = { bucketCounts, sum: 0, count: 0 };
+    let data = this.#bucketCounts.get(key);
+    if (data === undefined) {
+      data = { counts: new Float64Array(this.#bounds.length + 1), sum: 0, count: 0 };
       if (snapshot) {
         data.labels = snapshot;
       }
       this.#bucketCounts.set(key, data);
     }
 
-    const data = this.#bucketCounts.get(key)!;
-    let sum = data.sum;
-    let count = data.count;
+    data.sum += value;
+    data.count++;
 
-    const bucketCounts = data.bucketCounts;
-
-    // Update sum and count
-    sum += value;
-    count++;
-
-    // Find all buckets where value <= bound (cumulative counts)
-    for (const bound of this.#buckets) {
-      if (value <= bound) {
-        bucketCounts.set(bound, bucketCounts.get(bound)! + 1);
-      }
-    }
-
-    // Update +Inf bucket (always incremented for values > all buckets)
-    bucketCounts.set(Number.POSITIVE_INFINITY, bucketCounts.get(Number.POSITIVE_INFINITY)! + 1);
-
-    data.sum = sum;
-    data.count = count;
+    // Cumulative: every bucket whose boundary is >= value, i.e. the run from
+    // the first such boundary to the end. `!(value <= bound)` rather than
+    // `value > bound`, so a NaN reaches no finite bucket, as before.
+    const bounds = this.#bounds;
+    const counts = data.counts;
+    let index = 0;
+    while (index < bounds.length && !(value <= bounds[index]!)) index++;
+    for (; index < bounds.length; index++) counts[index]!++;
+    // +Inf always counts the observation.
+    counts[bounds.length]!++;
   }
 
   /**
@@ -118,7 +110,7 @@ export class Histogram extends MetricBase {
     if (!data) {
       return new Map();
     }
-    return new Map(data.bucketCounts);
+    return this.#bucketMap(data.counts);
   }
 
   /**
@@ -151,7 +143,7 @@ export class Histogram extends MetricBase {
         count: number;
         labels?: Readonly<Record<string, string>>;
       } = {
-        buckets: new Map(data.bucketCounts),
+        buckets: this.#bucketMap(data.counts),
         sum: data.sum,
         count: data.count,
       };
@@ -185,5 +177,19 @@ export class Histogram extends MetricBase {
     const key = this.labelKey(labels);
     const data = this.#bucketCounts.get(key);
     return data?.count ?? 0;
+  }
+
+  /**
+   * The read shape callers have always received: boundary → cumulative count
+   * in ascending order, `+Inf` last, as a fresh `Map` they may keep.
+   */
+  #bucketMap(counts: Float64Array): Map<number, number> {
+    const bounds = this.#bounds;
+    const map = new Map<number, number>();
+    for (let index = 0; index < bounds.length; index++) {
+      map.set(bounds[index]!, counts[index]!);
+    }
+    map.set(Number.POSITIVE_INFINITY, counts[bounds.length]!);
+    return map;
   }
 }

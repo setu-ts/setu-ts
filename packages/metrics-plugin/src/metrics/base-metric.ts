@@ -20,6 +20,11 @@ export abstract class MetricBase implements IMetric {
   readonly #type: MetricType;
   readonly #help: string;
   readonly #labelNames: readonly string[] | undefined;
+  /**
+   * Whether the configured label names are non-empty and pairwise distinct —
+   * the condition under which a label set's shape alone proves it valid.
+   */
+  readonly #shapeProvesValidity: boolean;
   readonly #labelKeys: ILabelKeyNode = { children: new Map() };
 
   /**
@@ -34,6 +39,10 @@ export abstract class MetricBase implements IMetric {
     this.#type = config.type;
     this.#help = help ?? config.help ?? name;
     this.#labelNames = config.labels === undefined ? undefined : [...config.labels];
+    this.#shapeProvesValidity =
+      this.#labelNames !== undefined &&
+      this.#labelNames.length > 0 &&
+      new Set(this.#labelNames).size === this.#labelNames.length;
   }
 
   /**
@@ -111,16 +120,15 @@ export abstract class MetricBase implements IMetric {
   }
 
   /**
-   * Creates a deterministic key from labels for storage/retrieval.
+   * Creates a deterministic key from labels for storage/retrieval. A pure
+   * lookup: it reads the key cache but never adds to it, so a getter cannot
+   * grow the cache — only {@linkcode MetricBase.seriesKey}, for an observed
+   * series, does.
    *
    * @param labels - The labels to key by
-   * @param observed - Only observations retain combinations; getters cannot grow the cache
    * @returns A deterministic string key
    */
-  protected labelKey(
-    labels: Readonly<Record<string, string>> | undefined,
-    observed: boolean = false,
-  ): string {
+  protected labelKey(labels: Readonly<Record<string, string>> | undefined): string {
     // `!labels`, not `=== undefined`: a JavaScript caller may pass null.
     if (!labels) return '';
     const names = Object.keys(labels);
@@ -138,24 +146,63 @@ export abstract class MetricBase implements IMetric {
       const values = configured.map((name) => labels[name]!);
       let node = this.#labelKeys;
       for (const value of values) {
-        let child = node.children.get(value);
-        if (child === undefined) {
-          if (!observed) return snapshotKey(configured, values);
-          child = { children: new Map() };
-          node.children.set(value, child);
-        }
+        const child = node.children.get(value);
+        if (child === undefined) return snapshotKey(configured, values);
         node = child;
       }
-      if (node.key !== undefined) return node.key;
-      const key = snapshotKey(configured, values);
-      node.key = key;
-      return key;
+      // A node at full depth is a leaf, and seriesKey keys every leaf it creates.
+      return node.key!;
     }
     // JSON.stringify of sorted entries ensures injectivity:
     // - Distinct label-sets → distinct keys (no collision from |, =, or \ in values)
     // - Same label-set → same key (stable)
     // - Order-independent (entries sorted before stringify)
     return JSON.stringify(Object.entries(labels).sort());
+  }
+
+  /**
+   * Validates an observation's label snapshot and returns its series key, in
+   * one pass when it can. A snapshot (from {@linkcode snapshotLabels}) holds
+   * only own, enumerable data properties; when it has exactly as many as the
+   * configured names, and every configured name is among them, it carries
+   * exactly the configured labels — which is what `validateLabels` checks —
+   * provided the configured names are distinct (with `['a', 'a']`, the set
+   * `{ a, b }` would pass the count and presence test). Anything else takes
+   * `validateLabels`, so an invalid set throws the same error as before.
+   *
+   * @param snapshot - The observation's own copy of its labels
+   * @returns The series key
+   * @throws {Error} If the labels do not match the configured names
+   */
+  protected seriesKey(snapshot: Readonly<Record<string, string>> | undefined): string {
+    const configured = this.#labelNames;
+    if (
+      snapshot !== undefined &&
+      this.#shapeProvesValidity &&
+      Object.keys(snapshot).length === configured!.length &&
+      configured!.every((name) => Object.hasOwn(snapshot, name))
+    ) {
+      // Shape proven before any node is created: an invalid set must not
+      // leave cache entries behind on its way to validateLabels' error.
+      let node = this.#labelKeys;
+      for (const name of configured!) {
+        const value = snapshot[name]!;
+        let child = node.children.get(value);
+        if (child === undefined) {
+          child = { children: new Map() };
+          node.children.set(value, child);
+        }
+        node = child;
+      }
+      // The snapshot is the observation's own data copy, so reading its
+      // values again for a first-seen series cannot change them.
+      return (node.key ??= snapshotKey(
+        configured!,
+        configured!.map((name) => snapshot[name]!),
+      ));
+    }
+    this.validateLabels(snapshot);
+    return this.labelKey(snapshot);
   }
 
   /**

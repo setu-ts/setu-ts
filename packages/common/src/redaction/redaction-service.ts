@@ -51,9 +51,21 @@ export function createRedactionService(
   return {
     redactValue,
     redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-      return redactNode(record, '', 0, redactValue, new Map()) as Readonly<Record<string, unknown>>;
+      return redactNode(record, '', 0, redactValue, { active: undefined }) as Readonly<
+        Record<string, unknown>
+      >;
     },
   };
+}
+
+/**
+ * The copies under construction on the current traversal path, keyed by the
+ * caller's object, so a cycle resolves to its copy. Created when the walk
+ * first enters a traversable child: a flat record (every request-log entry)
+ * never needs one.
+ */
+interface Traversal {
+  active: Map<object, unknown[] | Record<string, unknown>> | undefined;
 }
 
 /** Redacts a traversable node without mutating its caller-owned graph. */
@@ -62,14 +74,14 @@ function redactNode(
   path: string,
   depth: number,
   redactValue: (path: string, value: unknown) => unknown,
-  active: Map<object, unknown[] | Record<string, unknown>>,
+  traversal: Traversal,
 ): unknown {
   const direct = path === '' ? value : redactValue(path, value);
   if (direct !== value || !isTraversable(direct)) return direct;
   if (depth >= MAX_REDACTION_DEPTH) {
     return eraseRedactor(direct, { path, classification: '' });
   }
-  const activeCopy = active.get(direct);
+  const activeCopy = traversal.active?.get(direct);
   if (activeCopy !== undefined) return activeCopy;
 
   // One read per property: the copy and the redaction decisions both come from
@@ -81,11 +93,22 @@ function redactNode(
   const copy = Array.isArray(direct)
     ? entries.map(([, child]) => child)
     : snapshotCopy(direct, entries);
-  active.set(direct, copy);
+  let entered = false;
   try {
     for (const [key, child] of entries) {
       const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
-      const redacted = redactNode(child, childPath, depth + 1, redactValue, active);
+      let redacted: unknown;
+      if (isTraversable(child)) {
+        if (!entered) {
+          (traversal.active ??= new Map()).set(direct, copy);
+          entered = true;
+        }
+        redacted = redactNode(child, childPath, depth + 1, redactValue, traversal);
+      } else {
+        // A leaf is decided by its own path alone — exactly what recursing
+        // into it would do, without the call.
+        redacted = redactValue(childPath, child);
+      }
       if (redacted !== child) {
         if (Array.isArray(copy)) {
           copy[Number(key)] = redacted;
@@ -95,7 +118,7 @@ function redactNode(
       }
     }
   } finally {
-    active.delete(direct);
+    if (entered) traversal.active!.delete(direct);
   }
   // Always the snapshot, never the caller's object, even when nothing changed:
   // returning `direct` let the serializer read a getter again after redaction
@@ -106,13 +129,27 @@ function redactNode(
 /**
  * Rebuilds `{ ...value }` from already-read string entries, adding the
  * enumerable symbol-keyed values a spread would also copy (read once each,
- * never traversed).
+ * never traversed). Filled in one loop rather than `Object.fromEntries`; an
+ * own `__proto__` key is defined, as `fromEntries` defines it, never assigned
+ * (an assignment would replace the copy's prototype).
  */
 function snapshotCopy(
   value: Record<string, unknown>,
   entries: readonly [PropertyKey, unknown][],
 ): Record<string, unknown> {
-  const copy: Record<PropertyKey, unknown> = Object.fromEntries(entries);
+  const copy: Record<PropertyKey, unknown> = {};
+  for (const [key, child] of entries) {
+    if (key === '__proto__') {
+      Object.defineProperty(copy, key, {
+        value: child,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    } else {
+      copy[key] = child;
+    }
+  }
   for (const symbol of Object.getOwnPropertySymbols(value)) {
     if (Object.prototype.propertyIsEnumerable.call(value, symbol)) {
       copy[symbol] = Reflect.get(value, symbol);

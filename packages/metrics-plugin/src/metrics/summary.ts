@@ -74,8 +74,7 @@ export class Summary extends MetricBase {
    */
   observe(value: number, labels?: Readonly<Record<string, string>>): void {
     const snapshot = this.snapshotLabels(labels);
-    this.validateLabels(snapshot);
-    const key = this.labelKey(snapshot, true);
+    const key = this.seriesKey(snapshot);
 
     // Initialize per-label-set storage
     if (!this.#data.has(key)) {

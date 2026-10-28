@@ -118,12 +118,14 @@ export class MiddlewarePipeline implements IMiddlewareApi {
    * chain executor; absent performs no additional work
    * @throws {Error} If next() is called multiple times in a single middleware
    */
-  async execute(
+  execute(
     ctx: IRequestContext,
     terminal: () => Promise<void>,
     observer?: ChainObserver,
   ): Promise<void> {
+    // Returns the chain's own promise: an `async` wrapper here would add a
+    // promise and a tick to every request for nothing.
     const chain = this.#compiled ?? this.compile();
-    await executeChain(chain, ctx, terminal, this.compiledNames(), observer);
+    return executeChain(chain, ctx, terminal, this.compiledNames(), observer);
   }
 }

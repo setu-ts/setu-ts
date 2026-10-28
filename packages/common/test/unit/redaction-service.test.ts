@@ -319,4 +319,37 @@ describe('redactRecord reads each property once', () => {
     expect(output['password']).toBe('[Redacted]');
     expect(output[tag]).toBe('kept');
   });
+  it("copies an own __proto__ key as data, never as the copy's prototype", () => {
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    const record = JSON.parse(
+      '{"__proto__":{"password":"hidden","polluted":true},"safe":1}',
+    ) as Record<string, unknown>;
+    const output = service.redactRecord(record);
+    expect(Object.getPrototypeOf(output)).toBe(Object.prototype);
+    expect(Object.hasOwn(output, '__proto__')).toBe(true);
+    expect((output as { polluted?: unknown }).polluted).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(output, '__proto__')?.value).toEqual({
+      password: '[Redacted]',
+      polluted: true,
+    });
+  });
+
+  it('skips a property a getter deletes before it is read, as Object.entries does', () => {
+    const service = createRedactionService({ fields: { '**.token': 'secret' } });
+    const record: Record<string, unknown> = {
+      get first() {
+        delete record['token'];
+        return 1;
+      },
+      token: 'never-read',
+    };
+    expect(service.redactRecord(record)).toEqual({ first: 1 });
+  });
+
+  it('redacts every leaf of a flat record without a nested walk', () => {
+    const service = createRedactionService({ fields: { '**.authorization': 'secret' } });
+    expect(
+      service.redactRecord({ method: 'GET', path: '/', status: 200, authorization: 'Bearer x' }),
+    ).toEqual({ method: 'GET', path: '/', status: 200, authorization: '[Redacted]' });
+  });
 });

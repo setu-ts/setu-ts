@@ -44,6 +44,7 @@ function createFakeResponse(): {
       statusCode = code;
       return response;
     },
+    setHeaders: () => response,
     header: () => response,
     appendHeader: () => response,
     json: <T>(b: T): HandlerResult => {
@@ -92,6 +93,7 @@ function createContext(opts: { user?: IPrincipal; authz?: IAuthorizationService 
       statusCode = code;
       return resp;
     },
+    setHeaders: () => resp,
     header: () => resp,
     appendHeader: () => resp,
     json: <T>(b: T): HandlerResult => {

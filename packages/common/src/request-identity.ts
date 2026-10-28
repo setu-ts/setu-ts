@@ -113,10 +113,78 @@ const IDENTITY_DESCRIPTORS: PropertyDescriptorMap = {
   },
 };
 
-/** Reports whether this module installed the accessor for an identity field. */
+/**
+ * Brands a prototype {@linkcode installRequestIdentityGuard} has guarded.
+ * Module-private and non-writable, so only the installer sets it.
+ */
+const GUARDED_PROTOTYPE = Symbol('setu.request.guardedPrototype');
+
+/**
+ * Reports whether a request inherits the guard from its IMMEDIATE prototype
+ * and shadows none of the three fields with an own property. A subclass
+ * instance, or one carrying an own `user`, is not covered and takes the
+ * per-instance seal instead.
+ */
+function isGuardedByPrototype(request: IRequest): boolean {
+  const prototype: unknown = Object.getPrototypeOf(request);
+  return (
+    typeof prototype === 'object' &&
+    prototype !== null &&
+    Object.hasOwn(prototype, GUARDED_PROTOTYPE) &&
+    !Object.hasOwn(request, 'user') &&
+    !Object.hasOwn(request, 'tenant') &&
+    !Object.hasOwn(request, 'locale')
+  );
+}
+
+/** Reports whether this module's accessor guards an identity field of this request. */
 function isSealed(request: IRequest, field: GuardedField): boolean {
+  if (isGuardedByPrototype(request)) return true;
   const descriptor = Object.getOwnPropertyDescriptor(request, field);
   return descriptor?.get === IDENTITY_DESCRIPTORS[field]?.get;
+}
+
+/**
+ * Installs the single-write guard once on a request class's prototype, so
+ * every instance is guarded from construction and
+ * {@linkcode sealRequestIdentity} has nothing to do per request.
+ *
+ * For the framework's own request classes — the runtime's served request,
+ * the kernel's `inject()` request and `@setu-ts/testing`'s mock — each calls
+ * it first in its constructor; after the first construction the call is one
+ * `Object.hasOwn` check. (Not a `static {}` block: that would run at import,
+ * an effect a tree-shakeable package must not have.) Sealing every request
+ * instance separately cost
+ * 3% of request CPU on Bun. The accessors are inherited and non-enumerable,
+ * like any class getter: `Object.keys(request)` and `JSON.stringify(request)`
+ * do not list `user`, `tenant` or `locale` on such a request.
+ *
+ * An instance whose class extends the guarded one, or that holds its own
+ * `user`, `tenant` or `locale` property, is not covered by the prototype and
+ * is sealed per instance as before. A class must therefore declare those
+ * fields with `declare`, never as initialized class fields, which would create
+ * own properties.
+ *
+ * @param prototype - The prototype of a class whose instances are requests
+ * @throws {Error} If the prototype already defines `user`, `tenant` or `locale`
+ * @since 0.11.0
+ */
+export function installRequestIdentityGuard(prototype: object): void {
+  if (Object.hasOwn(prototype, GUARDED_PROTOTYPE)) return;
+  for (const field of ['user', 'tenant', 'locale'] as const) {
+    if (Object.hasOwn(prototype, field)) {
+      throw new Error(
+        `Cannot guard request identity on a prototype that already defines '${field}'.`,
+      );
+    }
+  }
+  const descriptors: PropertyDescriptorMap = {
+    [GUARDED_PROTOTYPE]: { value: true, writable: false, enumerable: false, configurable: false },
+  };
+  for (const field of ['user', 'tenant', 'locale'] as const) {
+    descriptors[field] = { ...IDENTITY_DESCRIPTORS[field], enumerable: false, configurable: false };
+  }
+  Object.defineProperties(prototype, descriptors);
 }
 
 /**
@@ -133,7 +201,9 @@ function isSealed(request: IRequest, field: GuardedField): boolean {
  * so a seeded request refuses a further implicit assignment exactly as an
  * authenticated one does. Calling this twice on the same request is a no-op:
  * the second call sees the accessors already installed and leaves the
- * written-flags alone.
+ * written-flags alone. A request whose class was guarded with
+ * {@linkcode installRequestIdentityGuard} is already sealed, and this returns
+ * at once.
  *
  * @param request - The request to guard; mutated in place
  * @example
@@ -147,8 +217,9 @@ function isSealed(request: IRequest, field: GuardedField): boolean {
 export function sealRequestIdentity(request: IRequest): void {
   const slots = request as unknown as IdentitySlots;
   if (isSealed(request, 'user')) {
-    // Already sealed — re-installing would reset nothing but would re-run the
-    // seeding below against slots that are already authoritative.
+    // Already sealed, on the instance or through its prototype — re-installing
+    // would reset nothing but would re-run the seeding below against slots
+    // that are already authoritative.
     return;
   }
   const seededUser = request.user;

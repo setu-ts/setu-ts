@@ -225,6 +225,7 @@ package fits the plugin architecture.
 | `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `installRequestIdentityGuard`         | function  |
 | `isConnectionFault`                   | function  |
 | `isConnectionFaultCode`               | function  |
 | `isErr`                               | function  |

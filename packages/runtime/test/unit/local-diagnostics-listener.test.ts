@@ -126,6 +126,7 @@ describe('Local diagnostics listener — Deno factory', () => {
           status: () => undefined as never,
           header: () => undefined as never,
           appendHeader: () => undefined as never,
+          setHeaders: () => undefined as never,
           json: () => undefined as never,
           text: () => undefined as never,
           html: () => undefined as never,

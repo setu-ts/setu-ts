@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  installRequestIdentityGuard,
   replaceLocale,
   replacePrincipal,
   replaceTenant,
@@ -139,5 +140,141 @@ describe('request locale (M103)', () => {
         .map(String)
         .filter((s) => s.includes('locale')),
     ).toHaveLength(2);
+  });
+});
+
+/** A request class guarded on its prototype, as the framework's own request classes are. */
+class GuardedRequest {
+  static {
+    installRequestIdentityGuard(this.prototype);
+  }
+
+  readonly method = 'GET' as const;
+  readonly url = 'http://localhost/';
+  readonly path = '/';
+  readonly headers = new Headers();
+  declare user?: IPrincipal;
+  declare tenant?: ITenant;
+  declare locale?: string;
+
+  json<T>(): Promise<T> {
+    return Promise.resolve({} as T);
+  }
+
+  text(): Promise<string> {
+    return Promise.resolve('');
+  }
+
+  bytes(): Promise<Uint8Array> {
+    return Promise.resolve(new Uint8Array());
+  }
+}
+
+/** One row per guarded field: a first value, a second value, and its deliberate replacer. */
+const FIELDS = [
+  {
+    field: 'user',
+    first: { id: 'first', roles: [] } as IPrincipal,
+    second: { id: 'second', roles: [] } as IPrincipal,
+    replace: (req: IRequest, value: unknown) => replacePrincipal(req, value as IPrincipal),
+  },
+  {
+    field: 'tenant',
+    first: { id: 'first', name: 'First' } as ITenant,
+    second: { id: 'second', name: 'Second' } as ITenant,
+    replace: (req: IRequest, value: unknown) => replaceTenant(req, value as ITenant),
+  },
+  {
+    field: 'locale',
+    first: 'fr',
+    second: 'de',
+    replace: (req: IRequest, value: unknown) => replaceLocale(req, value as string),
+  },
+] as const;
+
+describe('installRequestIdentityGuard', () => {
+  describe.each(FIELDS)('$field on a guarded prototype', ({ field, first, second, replace }) => {
+    it('allows one write and refuses the second without any per-instance seal', () => {
+      const req = new GuardedRequest() as unknown as Record<string, unknown>;
+      req[field] = first;
+      expect(req[field]).toBe(first);
+      expect(() => {
+        req[field] = second;
+      }).toThrow(`ctx.request.${field} has already been set`);
+      expect(Object.hasOwn(req, field)).toBe(false);
+    });
+
+    it('is already sealed: sealRequestIdentity adds no own property', () => {
+      const req = new GuardedRequest() as unknown as IRequest;
+      sealRequestIdentity(req);
+      expect(Object.getOwnPropertyNames(req)).not.toContain(field);
+    });
+
+    it('replaces deliberately through the replacer, then still refuses an implicit write', () => {
+      const req = new GuardedRequest() as unknown as Record<string, unknown>;
+      req[field] = first;
+      replace(req as unknown as IRequest, second);
+      expect(req[field]).toBe(second);
+      expect(() => {
+        req[field] = first;
+      }).toThrow(`ctx.request.${field} has already been set`);
+    });
+
+    it('falls back to the per-instance seal when an own property shadows the guard', () => {
+      const req = new GuardedRequest() as unknown as Record<string, unknown>;
+      Object.defineProperty(req, field, {
+        value: first,
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+      sealRequestIdentity(req as unknown as IRequest);
+      expect(req[field]).toBe(first);
+      expect(() => {
+        req[field] = second;
+      }).toThrow(`ctx.request.${field} has already been set`);
+    });
+
+    it('falls back to the per-instance seal for a subclass instance', () => {
+      class Derived extends GuardedRequest {}
+      const req = new Derived() as unknown as Record<string, unknown>;
+      sealRequestIdentity(req as unknown as IRequest);
+      expect(Object.getOwnPropertyNames(req)).toContain(field);
+      req[field] = first;
+      expect(() => {
+        req[field] = second;
+      }).toThrow(`ctx.request.${field} has already been set`);
+    });
+  });
+
+  it('keeps the identity fields off Object.keys and JSON.stringify', () => {
+    const req = new GuardedRequest();
+    req.user = { id: 'u', roles: [] };
+    req.locale = 'fr';
+    expect(Object.keys(req)).not.toContain('user');
+    expect(Object.keys(req)).not.toContain('locale');
+    expect(JSON.stringify(req)).not.toContain('"user"');
+    expect(JSON.stringify(req)).not.toContain('setu.request');
+  });
+
+  it('is idempotent on an already guarded prototype', () => {
+    expect(() => installRequestIdentityGuard(GuardedRequest.prototype)).not.toThrow();
+  });
+
+  it.each(['user', 'tenant', 'locale'])('refuses a prototype that already defines %s', (field) => {
+    const prototype = {};
+    Object.defineProperty(prototype, field, { get: () => undefined });
+    expect(() => installRequestIdentityGuard(prototype)).toThrow(
+      `Cannot guard request identity on a prototype that already defines '${field}'.`,
+    );
+  });
+
+  it('does not treat a null-prototype object as guarded', () => {
+    const req = Object.assign(Object.create(null) as object, request()) as IRequest;
+    sealRequestIdentity(req);
+    req.user = { id: 'first', roles: [] };
+    expect(() => {
+      req.user = { id: 'second', roles: [] };
+    }).toThrow('ctx.request.user has already been set');
   });
 });

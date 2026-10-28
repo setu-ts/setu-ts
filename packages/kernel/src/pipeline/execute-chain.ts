@@ -73,42 +73,122 @@ export interface ChainObserver {
  * a throw is recorded and re-thrown with its identity intact, and the
  * `downstream-skipped` outcome records a stage that called `next()` after the
  * response had already ended.
+ * @returns A promise settling when the chain completes; a stage or terminal
+ * that throws synchronously rejects it rather than throwing to the caller
  * @throws {Error} If `next()` is called multiple times within a single middleware
  * @since 0.1.0
  */
-export async function executeChain(
+export function executeChain(
   chain: readonly MiddlewareFunction[],
   ctx: IRequestContext,
   terminal: () => Promise<void>,
   names?: readonly string[],
   observer?: ChainObserver,
 ): Promise<void> {
+  return observer === undefined
+    ? executeUnobserved(chain, ctx, terminal, names)
+    : executeObserved(chain, ctx, terminal, names, observer);
+}
+
+const SETTLED: Promise<void> = Promise.resolve();
+
+/**
+ * Defense in depth: stop once a prior stage has ended the response. The
+ * check is guarded so callers passing a minimal context (e.g. the pipeline
+ * unit tests with an empty object) don't crash on a missing `response` —
+ * only a real ResponseBuilder exposes `ended`.
+ */
+function responseEnded(ctx: IRequestContext): boolean {
+  const response = ctx.response as Partial<ResponseBuilder> | undefined;
+  return typeof response?.ended === 'boolean' ? response.ended : false;
+}
+
+/** The error a stage gets when it calls `next()` a second time. */
+function doubleNextError(
+  names: readonly string[] | undefined,
+  position: number,
+  fn: MiddlewareFunction,
+): Error {
+  // Prefer the name registered via `MiddlewareOptions.name`, then the
+  // function's own name. `fn.name` is ALWAYS a string — `''` for an
+  // anonymous function — so `??` never fell back and the message read
+  // "…in middleware " with a blank name. `||` is the correct operator.
+  const label = names?.[position] || fn.name || '<anonymous>';
+  return new Error(`next() called multiple times in middleware ${label}`);
+}
+
+/**
+ * The dispatch path when no diagnostics observer is attached — every request
+ * unless diagnostics are enabled. It is koa-compose's shape: each stage's own
+ * promise is handed back as `next()`'s result, with no `async` wrapper per
+ * stage (half the chain's cost on Bun and Node). A synchronous throw from a
+ * stage or the terminal becomes a rejection, as it was under the `async` form.
+ */
+function executeUnobserved(
+  chain: readonly MiddlewareFunction[],
+  ctx: IRequestContext,
+  terminal: () => Promise<void>,
+  names: readonly string[] | undefined,
+): Promise<void> {
+  let index = 0;
+  const dispatch = (): Promise<void> => {
+    // Defense in depth: a prior stage ended the response — run neither the
+    // next stage nor the terminal.
+    if (responseEnded(ctx)) return SETTLED;
+    if (index >= chain.length) {
+      try {
+        return Promise.resolve(terminal());
+      } catch (error) {
+        return Promise.reject(error);
+      }
+    }
+    const fn = chain[index]!;
+    const position = index;
+    index++;
+    let nextCalled = false;
+    const next = (): Promise<void> => {
+      if (nextCalled) throw doubleNextError(names, position, fn);
+      nextCalled = true;
+      return dispatch();
+    };
+    try {
+      // A stage may return its HandlerResult (`return ctx.response.json(…)`).
+      // That value is never read — `next()` and the chain resolve for
+      // sequencing only — so it is passed through rather than discarded with
+      // an extra `.then()` per stage.
+      return Promise.resolve(fn(ctx, next)) as Promise<void>;
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  };
+  return dispatch();
+}
+
+/** The dispatch path with a diagnostics observer: every stage's completion is recorded. */
+async function executeObserved(
+  chain: readonly MiddlewareFunction[],
+  ctx: IRequestContext,
+  terminal: () => Promise<void>,
+  names: readonly string[] | undefined,
+  observer: ChainObserver,
+): Promise<void> {
   let index = 0;
 
-  // Defense in depth: stop once a prior stage has ended the response. The
-  // check is guarded so callers passing a minimal context (e.g. the
-  // pipeline unit tests with an empty object) don't crash on a missing
-  // `response` — only a real ResponseBuilder exposes `ended`.
-  const responseEnded = (): boolean => {
-    const response = ctx.response as Partial<ResponseBuilder> | undefined;
-    return typeof response?.ended === 'boolean' ? response.ended : false;
-  };
-
   const elapsed = (startedAtMs: number | null): number | null =>
-    observer === undefined ? null : monotonicElapsed(observer.clock, startedAtMs);
+    monotonicElapsed(observer.clock, startedAtMs);
 
   const run = async (): Promise<void> => {
     if (index >= chain.length) {
       // Defense in depth: do not run the terminal if a prior stage
       // already ended the response.
-      if (responseEnded()) {
+      if (responseEnded(ctx)) {
         return;
       }
       await terminal();
       return;
     }
     // Defense in depth: a prior stage ended the response — stop.
-    if (responseEnded()) {
+    if (responseEnded(ctx)) {
       return;
     }
     const fn = chain[index]!;
@@ -117,16 +197,9 @@ export async function executeChain(
     let nextCalled = false;
     let downstreamSkipped = false;
     const next: () => Promise<void> = () => {
-      if (nextCalled) {
-        // Prefer the name registered via `MiddlewareOptions.name`, then the
-        // function's own name. `fn.name` is ALWAYS a string — `''` for an
-        // anonymous function — so `??` never fell back and the message read
-        // "…in middleware " with a blank name. `||` is the correct operator.
-        const label = names?.[position] || fn.name || '<anonymous>';
-        throw new Error(`next() called multiple times in middleware ${label}`);
-      }
+      if (nextCalled) throw doubleNextError(names, position, fn);
       nextCalled = true;
-      if (observer !== undefined && responseEnded()) {
+      if (responseEnded(ctx)) {
         // The stage called next() after ending the response; run()'s own
         // ended check below will skip the downstream. Recorded for the
         // caller's completion record — the outcome, not a new behavior.
@@ -134,28 +207,24 @@ export async function executeChain(
       }
       return run();
     };
-    const startedAtMs = observer === undefined ? null : observer.clock();
+    const startedAtMs = observer.clock();
     try {
       await fn(ctx, next);
     } catch (error) {
-      if (observer !== undefined) {
-        observer.onStage({
-          position,
-          outcome: 'error',
-          startedAtMs,
-          durationMs: elapsed(startedAtMs),
-        });
-      }
-      throw error;
-    }
-    if (observer !== undefined) {
       observer.onStage({
         position,
-        outcome: !nextCalled ? 'short-circuit' : downstreamSkipped ? 'downstream-skipped' : 'ok',
+        outcome: 'error',
         startedAtMs,
         durationMs: elapsed(startedAtMs),
       });
+      throw error;
     }
+    observer.onStage({
+      position,
+      outcome: !nextCalled ? 'short-circuit' : downstreamSkipped ? 'downstream-skipped' : 'ok',
+      startedAtMs,
+      durationMs: elapsed(startedAtMs),
+    });
   };
 
   await run();

@@ -598,3 +598,18 @@ describe('fetch-mapping | formData reads the PUBLIC headers (M94b review)', () =
     await expect(request.formData!()).rejects.toThrow(UnsupportedFormEncodingError);
   });
 });
+
+describe('mapWebRequestToFrameworkRequest identity guard', () => {
+  it('guards user, tenant and locale through the request prototype', () => {
+    const request = mapWebRequestToFrameworkRequest(new Request('http://localhost/'));
+    expect(['user', 'tenant', 'locale'].filter((field) => Object.hasOwn(request, field))).toEqual(
+      [],
+    );
+    request.user = { id: 'first', roles: [] };
+    expect(() => {
+      request.user = { id: 'second', roles: [] };
+    }).toThrow('ctx.request.user has already been set');
+    expect(request.user.id).toBe('first');
+    expect(Object.keys(request)).not.toContain('user');
+  });
+});
