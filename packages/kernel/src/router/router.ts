@@ -145,20 +145,6 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
 }
 
 /**
- * Returns the request path without one trailing slash, or `undefined` when it
- * has none to drop (the root `/` keeps its slash).
- *
- * The kernel calls `router.match()` directly, bypassing Hono's `strict: false`
- * handling, so it applies the rule the kernel has always had: a request may
- * carry ONE extra trailing slash — `/users/` reaches a route registered as
- * `/users` — but a route registered WITH a trailing slash answers only that
- * spelling, so `/reports` does not reach `/reports/`. LinearRouter behaved
- * this way; TrieRouter matches exactly, so the kernel retries once.
- *
- * @param path - The request path
- * @returns The path minus one trailing slash, or `undefined`
- */
-/**
  * A `:name{…}` parameter — Hono's regular-expression constraint syntax. Refused
  * at registration: it is not part of the kernel's route grammar, the kernel's
  * static-over-parameter ranking does not model it, and under TrieRouter a
@@ -166,8 +152,55 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
  * quadratic in the path's segment count — an 8 KB path blocked the event loop
  * for ~313 ms (security audit F2).
  */
-const REGEX_PARAMETER = /\/:[^/]*\{/;
+const REGEX_PARAMETER = /(?:^|\/):[^/]*\{/;
 
+/**
+ * The pattern as Hono registers it: Hono prefixes a pattern written without a
+ * leading slash (`admin` → `/admin`), so the kernel's duplicate check keys on
+ * that spelling too — `admin` and `/admin` are one route (security re-audit N2).
+ *
+ * @param path - The pattern as the caller wrote it
+ * @returns The pattern with a leading slash
+ */
+function withLeadingSlash(path: string): string {
+  return path.charCodeAt(0) === 47 ? path : `/${path}`;
+}
+
+/**
+ * The pattern handed to TrieRouter. LinearRouter, which the kernel matched with
+ * before 0.11.0, ignored a trailing slash written after a parameter pattern —
+ * `/users/:id/` answered `/users/42` exactly as `/users/:id` did — so such a
+ * pattern is registered without it, and the request-side rule in
+ * {@linkcode Router.match} supplies the slash-terminated spelling. A static
+ * pattern keeps its slash: `/reports/` never answered `/reports` (re-audit N3).
+ *
+ * @param path - The pattern with a leading slash
+ * @returns The pattern TrieRouter should match
+ */
+function honoPattern(path: string): string {
+  return path.length > 1 &&
+    path.charCodeAt(path.length - 1) === 47 &&
+    path.includes(':') &&
+    !path.includes('*')
+    ? path.slice(0, -1)
+    : path;
+}
+
+/**
+ * Returns the request path without one trailing slash, or `undefined` when it
+ * has none to drop (the root `/` keeps its slash).
+ *
+ * The kernel calls `router.match()` directly, bypassing Hono's `strict: false`
+ * handling, so it applies the rule LinearRouter gave it before 0.11.0: a
+ * request may carry ONE extra trailing slash — `/users/` reaches a route
+ * registered as `/users` — while a static route registered WITH a trailing
+ * slash answers only that spelling (`/reports` does not reach `/reports/`).
+ * TrieRouter matches exactly, so {@linkcode Router.match} also matches this
+ * trimmed path and ranks both candidate sets together.
+ *
+ * @param path - The request path
+ * @returns The path minus one trailing slash, or `undefined`
+ */
 function withoutTrailingSlash(path: string): string | undefined {
   return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : undefined;
 }
@@ -197,7 +230,7 @@ export class Router implements IRouterApi {
   }
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
-    const key = `${method} ${path}`;
+    const key = `${method} ${withLeadingSlash(path)}`;
     if (REGEX_PARAMETER.test(path)) {
       throw new Error(
         `Route '${key}' uses a regular-expression parameter (':name{…}'), which the router does ` +
@@ -264,7 +297,11 @@ export class Router implements IRouterApi {
     interface HonoOn {
       on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
     }
-    (this.#hono as unknown as HonoOn).on(method.toUpperCase(), path, stubHandler as HonoOnHandler);
+    (this.#hono as unknown as HonoOn).on(
+      method.toUpperCase(),
+      honoPattern(withLeadingSlash(path)),
+      stubHandler as HonoOnHandler,
+    );
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -347,11 +384,15 @@ export class Router implements IRouterApi {
       params: Record<string, string>,
     ];
     let candidatesRaw = this.#hono.router.match(method, path)[0] as unknown as HonoCandidate[];
-    if (candidatesRaw.length === 0) {
-      // One extra trailing slash on the request is tolerated: retry without it.
-      const trimmed = withoutTrailingSlash(path);
-      if (trimmed !== undefined) {
-        candidatesRaw = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
+    // A request may carry one extra trailing slash, as under LinearRouter: the
+    // routes matching the path without it join the SAME candidate set and are
+    // ranked together. Retrying only when nothing matched let a wildcard that
+    // happens to match `/admin/` win over the specific `/admin` (re-audit N1).
+    const trimmed = withoutTrailingSlash(path);
+    if (trimmed !== undefined) {
+      const lenient = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
+      if (lenient.length > 0) {
+        candidatesRaw = candidatesRaw.length === 0 ? lenient : [...candidatesRaw, ...lenient];
       }
     }
 
@@ -393,6 +434,11 @@ export class Router implements IRouterApi {
       // whether `params` was mutable depended on how many routes happened to
       // match. A malformed escape means this candidate does not match,
       // mirroring the old matcher's `null` return.
+      // One route can arrive twice — through the path and through the path
+      // without its trailing slash; the first arrival stands for it.
+      if (candidates.some((candidate) => candidate.entry === entry)) {
+        continue;
+      }
       const params = decodeParams(rawParams as Record<string, string>);
       if (params === null) {
         continue;

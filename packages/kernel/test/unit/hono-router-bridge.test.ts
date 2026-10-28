@@ -132,7 +132,34 @@ describe('Hono router bridge — trailing slash parity', () => {
     router.get('/users/me/', me);
     expect(router.match('GET', '/users/me/')?.definition).toBe(me);
     expect(router.match('GET', '/users/42/')?.params).toEqual({ id: '42' });
-    expect(router.match('GET', '/users/me')).toBe(null);
+    // A parameter pattern's trailing slash is not significant (LinearRouter's
+    // rule before 0.11.0), so the slashless path reaches the parameter route.
+    expect(router.match('GET', '/users/me')?.definition).toBe(byId);
+  });
+
+  it('lets a parameter route registered with a trailing slash answer the slashless path', () => {
+    const router = new Router();
+    router.get('/users/:id/', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/users/42')?.params).toEqual({ id: '42' });
+    expect(router.match('GET', '/users/42/')?.params).toEqual({ id: '42' });
+  });
+
+  // Re-audit N1: the trailing-slash spelling ranks every candidate together,
+  // so a wildcard cannot win over the specific route that carries a guard.
+  it.each([
+    ['/admin', '/admin/*', '/admin/'],
+    ['/api/v1/items', '/*', '/api/v1/items/'],
+    ['/openapi.json', '/*', '/openapi.json/'],
+  ])('prefers %s over %s for %s', (specific, wildcard, request) => {
+    const router = new Router();
+    const guarded = {
+      middleware: [(_ctx: never, _next: never) => Promise.resolve()],
+      handler: () => ({ __handlerResult: true }) as never,
+    };
+    const catchAll = { handler: () => ({ __handlerResult: true }) as never };
+    router.get(wildcard, catchAll);
+    router.get(specific, guarded as never);
+    expect(router.match('GET', request)?.definition).toBe(guarded);
   });
 
   it('keeps /a and /a/ as two reachable routes', () => {
@@ -187,6 +214,13 @@ describe('regular-expression route parameters', () => {
     },
   );
 
+  it('refuses one written without a leading slash', () => {
+    const router = new Router();
+    expect(() =>
+      router.get(':path{.+}/download', () => ({ __handlerResult: true }) as never),
+    ).toThrow("uses a regular-expression parameter (':name{…}')");
+  });
+
   it('refuses one registered through a group prefix', () => {
     const router = new Router();
     expect(() =>
@@ -204,5 +238,24 @@ describe('regular-expression route parameters', () => {
       router.get('/literal{brace}', () => ({ __handlerResult: true }) as never);
     }).not.toThrow();
     expect(router.match('GET', '/users/7')?.params).toEqual({ id: '7' });
+  });
+});
+
+// Re-audit N2: Hono gives a pattern written without a leading slash one, so
+// `admin` and `/admin` are the same route and the second is a duplicate.
+describe('patterns written without a leading slash', () => {
+  it('match as their slash-prefixed spelling', () => {
+    const router = new Router();
+    const def = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('admin', def);
+    expect(router.match('GET', '/admin')?.definition).toBe(def);
+  });
+
+  it('collide with the slash-prefixed spelling of the same route', () => {
+    const router = new Router();
+    router.get('admin', () => ({ __handlerResult: true }) as never);
+    expect(() => router.get('/admin', () => ({ __handlerResult: true }) as never)).toThrow(
+      "Route 'GET /admin' is already registered",
+    );
   });
 });

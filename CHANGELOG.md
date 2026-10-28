@@ -355,12 +355,14 @@ All notable changes to this project are documented here. The format follows
   routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route pattern on
   every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full candidate set and
   never throws on overlapping parameter patterns, so the kernel's static-over-parameter and
-  registration-order tie-break is unchanged. Trailing slashes behave as before: a request may carry
-  one extra trailing slash (`/users/` reaches a route registered as `/users`), while a route
-  registered with a trailing slash answers only that spelling (`/reports` does not reach
-  `/reports/`). The kernel applies that rule itself, matching the path as given and retrying once
-  without the slash, because TrieRouter matches exactly. Measured on Bun: the bare kernel matched
-  faster in five of six alternating passes.
+  registration-order tie-break is unchanged. Trailing slashes behave as they did under
+  `LinearRouter`: a request may carry one extra trailing slash (`/users/` reaches `/users`), a
+  static route registered with a trailing slash answers only that spelling (`/reports` does not
+  reach `/reports/`), and a parameter route's trailing slash is not significant (`/users/:id/`
+  answers `/users/42`). For a slash-terminated request the kernel ranks the routes matching both
+  spellings together, so a wildcard never wins over the specific route. A pattern written without a
+  leading slash (`admin`) is the same route as `/admin`, and registering both is refused as a
+  duplicate. Measured on Bun: the bare kernel matched faster in five of six alternating passes.
 
 - **Per-request work on the request path (0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU
