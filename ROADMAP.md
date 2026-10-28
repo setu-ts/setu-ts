@@ -15629,17 +15629,17 @@ must reach the M120 image.
 
 **Deliverables:**
 
-- [ ] The chosen styling foundation in the full-stack template, with a theme switch
-- [ ] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
+- [x] The chosen styling foundation in the full-stack template, with a theme switch
+- [x] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
       only the content region scrolls; the e2e scrolls the content and asserts the header and
       sidebar have not moved
-- [ ] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
+- [x] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
       runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
       styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
       cannot do in server-rendered views
-- [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
-- [ ] Template README and `docs/` entry; CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
+- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
+- [x] Template README and `docs/` entry; CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `123`
 
 ---
 
@@ -16159,6 +16159,6 @@ patch by construction and gains nothing new here.
 | 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
-| 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
+| 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
