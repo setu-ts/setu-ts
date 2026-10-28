@@ -65,10 +65,12 @@ Read on `origin/develop` `bc9aacb9`; probes with the CLI built from that tree (`
   `config.get<string>('<variable>', { default: '<override ?? localDefault>' })`, string literals
   single-quoted, no regex literal or backslash (the CLI's config reader stays able to classify the
   file, `full-stack.ts` comment, audit C-R5). It takes the column it will be printed at and emits
-  the call on one line when it fits in 100 columns, otherwise in the wrapped form `deno fmt` and
-  Prettier both print (`config.get<string>(` / `'<variable>',` / `{ default: '…' },` / `)`) — the
-  Service Bus emulator default alone exceeds the line. Full-stack options use it; inline plugin args
-  keep `renderConnection` unchanged.
+  the call on one line when it fits in 100 columns, otherwise exactly the text `deno fmt` prints for
+  it — measured (Codex, 2026-10-28): when the `{ default: '…' }` argument itself overflows,
+  `deno fmt` breaks the object too, with `default:` on its own line and the string on the next.
+  `deno fmt` is the reference because Deno files are written as rendered; npm targets are
+  reformatted by Prettier anyway. The Service Bus emulator default is the case that overflows.
+  Full-stack options use it; inline plugin args keep `renderConnection` unchanged.
 - **Why:** maintainer decision 2026-10-28 — the template's own idiom (`TRUSTED_PROXIES`), and the
   value then also comes from the project's `.env` through ConfigPlugin; Compose and Kubernetes
   environment variables still take precedence.
@@ -149,13 +151,21 @@ Read on `origin/develop` `bc9aacb9`; probes with the CLI built from that tree (`
     left byte-identical and the note prints the args to set.
   - **Generated full-stack factory:** a new internal `withStarterOption(source, key, literal)` in
     `packages/cli/src/commands/starter-options.ts` inserts `<key>: <literal>,` as the first property
-    of the object returned by the single `(config): FullStackStarterOptions =>` callback inside the
-    factory scope (`factoryScope`, `maskComments`, `referencesIdentifier`, as `withPluginWiring`).
-    Refused (→ printed line) when that callback is absent or repeated, the returned object already
-    has the key, or the source is not classifiable.
-  - **Hand-written `createRestApp`/`createMicroserviceApp` or any other starter config:** printed
-    line with the exact `messaging: …` / `queue: …` property, replacing today's "configure its
-    messaging arm".
+    of the object returned by the single `(config): FullStackStarterOptions =>` callback. It anchors
+    on that callback itself, NOT on `factoryScope`: the generated full-stack factory is
+    `export async function createApp(…): Promise<IKernelApplication>`, which `factoryScope`
+    (`devtool/sources.ts`) does not recognise, and `factoryScope` stays unchanged because
+    `withPluginWiring` and `setu devtool enable` also depend on it (maintainer decision 2026-10-28).
+    It reuses `maskComments`/`referencesIdentifier` so a mention in a comment or string is not a
+    match. Refused (→ printed line) when that callback is absent or repeated, the returned object
+    already has the key, or the source is not classifiable.
+  - **Hand-written `createMicroserviceApp` config:** printed line with the exact `messaging: …` /
+    `queue: …` property, replacing today's "configure its messaging arm".
+  - **Hand-written `createRestApp` config:** `RestStarterOptions` has no `messaging`/`queue` arm
+    (`packages/starters/rest-starter/src/options.ts`; only the microservice starter adds them), so
+    the printed line is `app.register(MessagingPlugin(<args>))` /
+    `app.register(QueuePlugin(<args>))` after the factory returns — today's after-factory guidance,
+    now carrying the transport's args (maintainer decision 2026-10-28).
   - With no transport and no flag, the printed line for a full-stack project says messaging is
     already registered in memory by the starter and shows the `--broker` form.
 - **Why:** the M123 "never overwrite" policy; the generated factory is the one shape the CLI owns.
