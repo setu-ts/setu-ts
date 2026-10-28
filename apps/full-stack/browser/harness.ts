@@ -2,10 +2,23 @@
 /** Dedicated browser prerequisite gate. Ordinary tests never launch Chromium. */
 import { mkdir, stat } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { relative, resolve } from 'node:path';
 import { run } from '../../../scripts/lib/run.ts';
 
 /** Pin shared with CI's browser installation step. */
 export const PLAYWRIGHT_VERSION = '1.63.0';
+/** Workspace-relative scratch directory shared by browser processes. */
+export const BROWSER_TEMP_DIRECTORY = '.tmp/browser';
+
+/**
+ * Keeps Unix socket names short without moving scratch outside the workspace.
+ * @param project - The child process working directory
+ * @param root - The workspace root
+ * @returns A relative path to the workspace's browser scratch directory
+ */
+export function browserTempDir(project: string, root: string): string {
+  return relative(project, resolve(root, BROWSER_TEMP_DIRECTORY)) || '.';
+}
 /** Install only Chromium using the pinned app dependency. */
 export const BROWSER_INSTALL_COMMAND =
   'pnpm --filter setu-ts-example-full-stack exec playwright install chromium';
@@ -13,6 +26,15 @@ export const BROWSER_INSTALL_COMMAND =
 /** Missing browsers may skip locally, but are failures in CI regardless of ALLOW_SKIP. */
 export function browserAvailabilityCode(present: boolean, ci: boolean): 0 | 1 | 77 {
   return present ? 0 : ci ? 1 : 77;
+}
+
+/** Missing named runtimes skip locally, and fail under CI, just like Chromium. */
+export function runtimeGateCode(runtime: 'bun' | 'deno', present: boolean, ci: boolean): 0 | 77 {
+  const code = browserAvailabilityCode(present, ci);
+  if (code === 1)
+    throw new Error(`${runtime} is unavailable in the browser gate (CI requires it).`);
+  if (code === 77) console.error(`SKIP — ${runtime} view scaffold: missing tool ${runtime}`);
+  return code;
 }
 
 /** Resolves the exact Playwright executable using an injectable filesystem check. */

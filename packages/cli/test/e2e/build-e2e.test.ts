@@ -61,7 +61,7 @@ for (const template of ['rest', 'class-based', 'full-stack']) {
       expect(response.status).toBe(200);
       const page = await response.text();
       if (template === 'full-stack') {
-        expect(page).toContain('app-shell');
+        expect(page).toContain('data-shell="frame"');
         // The browser loads the client bundle the page names; the compiled
         // server must serve it (M120 review: the serverBuild arm once set no
         // assetsDir, and every /assets/*.js was a 404).

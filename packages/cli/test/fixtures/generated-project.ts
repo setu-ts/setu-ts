@@ -448,8 +448,11 @@ export interface ProbeOutcome {
  * releases answering 500 on `/health` because its task never requested
  * `--allow-sys`, and an `-A` boot passes that every time.
  *
- * `--config` and `--node-modules-dir` are added on top, since neither grants a
- * permission — the flags under test are exactly the ones the template declared.
+ * Source-only fixtures resolve repointed packages from the npm cache (`none`),
+ * as they did before the styling foundation. Projects with a build task prepare
+ * installed modules first and keep their configured nodeModulesDir: forcing
+ * `none` there breaks Radix's transitive CommonJS subpaths. Neither changes the
+ * permission flags the generated task declares.
  *
  * @param project - The project directory, already repointed at the workspace
  * @param drive - Called once the project is serving, with its origin
@@ -482,8 +485,9 @@ export async function withGeneratedServer<T>(
   const port = workspacePort ?? (await unusedPort());
   const entry = `${project}/main.ts`;
 
+  const moduleFlags = manifest.tasks?.['build'] === undefined ? ['--node-modules-dir=none'] : [];
   const child = spawnProcess(denoBinary(), {
-    args: ['run', ...flags, '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
+    args: ['run', ...flags, ...moduleFlags, '--config', `${project}/deno.json`, entry],
     cwd: project,
     env: { PORT: String(port) },
     stdout: 'piped',

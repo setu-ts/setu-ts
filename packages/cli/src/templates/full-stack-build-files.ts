@@ -12,6 +12,7 @@
  */
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { TAILWIND_RANGE } from './ui-tokens.ts';
 import { NPM_TOOLING_DEV_DEPENDENCIES } from './npm-tooling.ts';
 
 /**
@@ -56,6 +57,7 @@ function renderViteConfig(frameworkPackages: readonly string[]): string {
 
   return `import { readdirSync, readFileSync } from 'node:fs';
 import { reactRouter } from '@react-router/dev/vite';
+import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
 
 /**
@@ -180,7 +182,7 @@ const isDeclared = (names: readonly string[], id: string): boolean =>
   names.some((name) => id === name || id.startsWith(name + '/'));
 
 export default defineConfig({
-  plugins: [reactRouter()],
+  plugins: [tailwindcss(), reactRouter()],
   resolve: { tsconfigPaths: true },
   // Declared per environment: React Router builds through Vite's Environment
   // API, and neither a top-level \`ssr.external\` nor
@@ -241,6 +243,8 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
   // router/dev@8` accepts TypeScript 6 (`^5.1.0 || ^6.0.0 || ^7.0.0`).
   typescript: NPM_TOOLING_DEV_DEPENDENCIES.typescript,
   vite: '^8.0.0',
+  tailwindcss: TAILWIND_RANGE,
+  '@tailwindcss/vite': TAILWIND_RANGE,
 };
 
 /**
@@ -250,6 +254,10 @@ export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> =
  * a runtime dependency and not only a build-time one.
  */
 export const FULL_STACK_NPM_DEPENDENCIES: Readonly<Record<string, string>> = {
+  // shadcn's own class merger: current registry sources import `cn` from it.
+  cn: '^0.5.0',
+  'class-variance-authority': '^0.7.1',
+  'radix-ui': '^1.8.1',
   'react-router': REACT_ROUTER_RANGE,
   react: '^19.2.0',
   'react-dom': '^19.2.0',

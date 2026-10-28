@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
+  Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
+  fixed header/sidebar with scrolling content. `components.json` supports adding more components;
+  class names combine with shadcn's `cn` package, and `app/lib/utils.ts` (`classNames`) is no longer
+  generated. `setu add view` adds `hono`, JSX options, Tailwind CLI build/watch scripts, stylesheet,
+  layout, `/ui` example and static serving, preserving and reporting existing choices. Workers
+  receives the dependency/JSX/example pieces only. See
+  [upgrading](docs/upgrading.md#setu-add-view-and-the-styled-app-shell-m123-0110-setu-tscli) and
+  [server-rendered view styling](docs/mvc.md#styling-server-rendered-views).
+
 - **npm configuration as a build secret (M120b, #516, 0.11.0, `@setu-ts/cli`).** Every generated
   install step (Node, Bun and Deno; workspace and standalone) mounts an optional BuildKit secret
   `npmrc` at `/root/.npmrc`, and the generated Compose file passes it from `NPMRC`, so a private

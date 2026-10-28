@@ -530,6 +530,8 @@ const GENERATED_MEMBER = 'orders';
 const GENERATED_PORT = 3000;
 const GENERATED_IMAGE_PREFIX = 'setu/generated-gate:m95a';
 const GENERATED_CONTAINER_PREFIX = 'setu-generated-gate';
+/** Extra generated image case proving the CSS build is copied into production. */
+export const GENERATED_VIEW_CASE = 'node-rest-view';
 const GENERATED_PROBE_ATTEMPTS = 120;
 const GENERATED_PROBE_INTERVAL_MS = 1_000;
 
@@ -731,8 +733,9 @@ async function checkGeneratedNode(
   registry: string,
   workspace: boolean,
   runtime: 'node' | 'bun' = 'node',
+  view = false,
 ): Promise<boolean> {
-  const name = `${runtime}-${workspace ? 'workspace' : 'standalone'}`;
+  const name = view ? GENERATED_VIEW_CASE : `${runtime}-${workspace ? 'workspace' : 'standalone'}`;
   const root = `${directory}/${name}`;
   const resources = generatedResources();
   const cli = (args: readonly string[]) =>
@@ -776,6 +779,10 @@ async function checkGeneratedNode(
             "app.router.get('/library', (ctx) => ctx.response.json({ value: shared('image') }));\nawait app.start(",
           ),
       );
+    }
+    if (view) {
+      const added = await cli(['add', 'view', '--dir', root]);
+      if (!added.success) throw new Error(added.stderr);
     }
     const built = await buildGeneratedNodeImage(
       root,
@@ -832,6 +839,46 @@ async function checkGeneratedNode(
           );
           if (!library.success || !library.stdout.includes('shared: image'))
             throw new Error(`Library value missing: ${library.stdout}${library.stderr}`);
+        }
+        if (view) {
+          const page = await run(
+            [
+              'docker',
+              'exec',
+              resources.container,
+              'wget',
+              '-q',
+              '-O',
+              '-',
+              'http://127.0.0.1:3000/ui',
+            ],
+            { quiet: true },
+          );
+          const css = await run(
+            [
+              'docker',
+              'exec',
+              resources.container,
+              'wget',
+              '-S',
+              '-O',
+              '-',
+              'http://127.0.0.1:3000/assets/app.css',
+            ],
+            { quiet: true },
+          );
+          if (
+            !page.success ||
+            !page.stdout.includes('data-shell="frame"') ||
+            !css.success ||
+            !css.stdout.includes('.h-dvh') ||
+            !/content-type: text\/css/i.test(css.stderr)
+          ) {
+            throw new Error(
+              `View or CSS missing from read-only image: ${page.stderr}${css.stderr}`,
+            );
+          }
+          console.log('  ✓ /ui 200 and /assets/app.css 200 text/css with .h-dvh');
         }
         console.log(
           `  ✓ ${name} served /health${workspace ? ' and bundled library value' : ''} read-only, network none`,
@@ -1103,6 +1150,7 @@ async function checkGenerated(): Promise<CheckOutcome> {
     for (const workspaceCase of [true, false]) {
       if (!(await checkGeneratedNode(workspace, overlay.url, workspaceCase))) return 'failed';
     }
+    if (!(await checkGeneratedNode(workspace, overlay.url, false, 'node', true))) return 'failed';
     // M120 §3.11/§3.14: a Bun member importing a library, so the image proves the
     // root bunfig.toml's hoisted linker reaches the production install. The host
     // install needs Bun; without it the case is skipped by name, like a missing

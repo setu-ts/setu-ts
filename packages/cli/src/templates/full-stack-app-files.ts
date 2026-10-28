@@ -18,6 +18,7 @@
  * @module
  */
 
+import { renderTokenCss } from './ui-tokens.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 
 const routesModule = `import { layout, type RouteConfig } from '@react-router/dev/routes';
@@ -51,6 +52,7 @@ const rootModule = `import {
   useRouteError,
 } from 'react-router';
 
+import { THEME_SCRIPT } from '~/lib/theme.ts';
 import './app.css';
 
 /**
@@ -58,8 +60,9 @@ import './app.css';
  */
 export function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang='en'>
+    <html lang='en' suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
         <meta charSet='utf-8' />
         <meta name='viewport' content='width=device-width, initial-scale=1' />
         <Meta />
@@ -90,16 +93,16 @@ export function ErrorBoundary() {
 
   if (isRouteErrorResponse(error)) {
     return (
-      <main className='error'>
-        <h1>{error.status}</h1>
+      <main className='p-8'>
+        <h1 className='text-2xl font-semibold'>{error.status}</h1>
         <p>{error.statusText}</p>
       </main>
     );
   }
 
   return (
-    <main className='error'>
-      <h1>Something went wrong</h1>
+    <main className='p-8'>
+      <h1 className='text-2xl font-semibold'>Something went wrong</h1>
     </main>
   );
 }
@@ -164,20 +167,9 @@ startTransition(() => {
 });
 `;
 
-const appCss = `:root {
-  color-scheme: light dark;
-  font-family: system-ui, sans-serif;
-}
+const appCss = `@import "tailwindcss";
 
-body {
-  margin: 0;
-  padding: 0;
-}
-
-.error {
-  padding: 2rem;
-}
-`;
+${renderTokenCss()}`;
 
 const loadContextModule = `import type { RouterContextKey } from '@setu-ts/react-router-plugin';
 
@@ -336,18 +328,6 @@ export function getCurrentUser(context: AppLoadContext): CurrentUser {
     );
   }
   return user;
-}
-`;
-
-const utilsModule = `/**
- * App-specific glue. Deliberately small: anything cross-cutting belongs to a
- * plugin, not to this directory.
- */
-
-/** Joins conditional class names. */
-export function classNames(...values: readonly (string | false | null | undefined)[]): string {
-  return values.filter((value): value is string => typeof value === 'string' && value !== '')
-    .join(' ');
 }
 `;
 
@@ -512,50 +492,82 @@ export async function buildProductsView(context: AppLoadContext): Promise<Produc
 }
 `;
 
-const appLayout = `import { NavLink, Outlet, useLocation } from 'react-router';
+const appLayout = `import { useEffect, useRef } from 'react';
+import { NavLink, Outlet, useLocation } from 'react-router';
 
+import { ThemeToggle } from '~/components/theme-toggle.tsx';
 import { APP_NAV, isActive } from '~/lib/nav-utils.ts';
-import { classNames } from '~/lib/utils.ts';
+import { cn } from 'cn';
 
-/** Chrome for the signed-in application. */
+/** Chrome for the signed-in application, with one scrolling content region. */
 export default function AppLayout() {
   const { pathname } = useLocation();
+  const content = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (content.current) content.current.scrollTop = 0;
+  }, [pathname]);
+
+  const navigation = APP_NAV.map((item) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      className={cn(
+        'block shrink-0 rounded-md px-3 py-2 text-sm',
+        isActive(item, pathname) && 'bg-accent text-accent-foreground',
+      )}
+    >
+      {item.label}
+    </NavLink>
+  ));
 
   return (
-    <div className='app-shell'>
-      <nav>
-        {APP_NAV.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            className={classNames('nav-link', isActive(item, pathname) && 'is-active')}
-          >
-            {item.label}
-          </NavLink>
-        ))}
+    <div data-shell='frame' className='flex h-dvh flex-col overflow-hidden'>
+      <header
+        data-shell='header'
+        className='flex h-14 shrink-0 items-center justify-between border-b px-6'
+      >
+        <span className='font-semibold'>Setu-TS</span>
+        <ThemeToggle />
+      </header>
+      <nav
+        aria-label='Mobile navigation'
+        className='flex shrink-0 overflow-x-auto border-b p-2 md:hidden'
+      >
+        {navigation}
       </nav>
-      <main>
-        <Outlet />
-      </main>
+      <div className='flex min-h-0 flex-1'>
+        <aside
+          data-shell='sidebar'
+          className='hidden w-56 shrink-0 overflow-y-auto border-r p-3 md:block'
+        >
+          <nav aria-label='Application navigation'>{navigation}</nav>
+        </aside>
+        <main ref={content} data-shell='content' className='min-w-0 flex-1 overflow-y-auto p-6'>
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
 `;
-
 const loginLayout = `import { Outlet } from 'react-router';
+import { Card, CardContent } from '~/components/ui/card.tsx';
 
 /** Chrome for unauthenticated pages. */
 export default function LoginLayout() {
   return (
-    <div className='auth-shell'>
-      <main>
-        <Outlet />
+    <div className='grid min-h-dvh place-items-center p-6'>
+      <main className='w-full max-w-sm'>
+        <Card>
+          <CardContent>
+            <Outlet />
+          </CardContent>
+        </Card>
       </main>
     </div>
   );
 }
 `;
-
 /**
  * The landing page — the route whose ABSENCE made every scaffolded full-stack
  * project serve a blank home page.
@@ -576,6 +588,7 @@ export default function LoginLayout() {
  */
 const indexRoute = `import { Link, useLoaderData } from 'react-router';
 
+import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getSession } from '~/config/services.server.ts';
 
@@ -589,37 +602,43 @@ export default function IndexRoute() {
   const { signedInAs } = useLoaderData<typeof loader>();
 
   return (
-    <section>
-      <h1>Welcome</h1>
-      <p>
-        A React Router application server-rendered by the kernel through{' '}
-        <code>react-router-plugin</code>.
-      </p>
-      <p>
-        {signedInAs === null ? <>You are not signed in.</> : (
-          <>
-            Signed in as <strong>{signedInAs}</strong>{' '}
-            — the session is server-authoritative and the cookie is HttpOnly.
-          </>
-        )}
-      </p>
-      <ul>
-        <li>
-          <Link to='/products'>Products</Link>{' '}
-          — rows read by a loader, behind a route middleware that sends you to sign in first.
-        </li>
-        <li>
-          <Link to='/login'>Sign in</Link>{' '}
-          — a form guarded by the session's synchronizer CSRF token.
-        </li>
-      </ul>
-    </section>
+    <Card>
+      <CardContent className='grid gap-4'>
+        <h1 className='text-2xl font-semibold'>Welcome</h1>
+        <p>
+          A React Router application server-rendered by the kernel through{' '}
+          <code className='rounded bg-muted px-1 font-mono text-sm'>react-router-plugin</code>.
+        </p>
+        <p>
+          {signedInAs === null ? <>You are not signed in.</> : (
+            <>
+              Signed in as <strong>{signedInAs}</strong>{' '}
+              — the session is server-authoritative and the cookie is HttpOnly.
+            </>
+          )}
+        </p>
+        <ul className='list-disc space-y-2 pl-5'>
+          <li>
+            <Link to='/products' className='font-medium underline underline-offset-4'>
+              Products
+            </Link>{' '}
+            — rows read by a loader, behind a route middleware that sends you to sign in first.
+          </li>
+          <li>
+            <Link to='/login' className='font-medium underline underline-offset-4'>
+              Sign in
+            </Link>{' '}
+            — a form guarded by the session's synchronizer CSRF token.
+          </li>
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 `;
-
 const productsRoute = `import { useLoaderData } from 'react-router';
 
+import { Card, CardContent } from '~/components/ui/card.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getCurrentUser } from '~/config/services.server.ts';
 import { buildProductsView } from '~/features/products/products.server.ts';
@@ -652,23 +671,25 @@ export default function ProductsRoute() {
   const { products, total, signedInAs } = useLoaderData<typeof loader>();
 
   return (
-    <section>
-      <h1>Products ({total})</h1>
-      <p>Signed in as {signedInAs}</p>
-      <ul>
-        {products.map((product) => (
-          <li key={product.id}>
-            {product.name} — {formatPrice(product)}
-          </li>
-        ))}
-      </ul>
-    </section>
+    <Card>
+      <CardContent className='grid gap-4'>
+        <h1 className='text-2xl font-semibold'>Products ({total})</h1>
+        <p className='text-muted-foreground'>Signed in as {signedInAs}</p>
+        <ul className='list-disc space-y-1 pl-5'>
+          {products.map((product) => (
+            <li key={product.id}>
+              {product.name} — {formatPrice(product)}
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 `;
-
 const loginRoute = `import { Form, redirect, useActionData, useLoaderData } from 'react-router';
 
+import { Button } from '~/components/ui/button.tsx';
 import type { AppLoadContext } from '~/lib/load-context.ts';
 import { getCsrfToken, getSession } from '~/config/services.server.ts';
 
@@ -719,16 +740,30 @@ export default function LoginRoute() {
   const actionData = useActionData<typeof action>();
 
   return (
-    <Form method='post'>
-      {actionData?.error ? <p role='alert'>{actionData.error}</p> : null}
+    <Form method='post' className='grid gap-4'>
+      {actionData?.error
+        ? <p role='alert' className='text-sm text-destructive'>{actionData.error}</p>
+        : null}
       <input type='hidden' name='_csrf' value={csrfToken} />
-      <label>
-        Email <input type='email' name='email' required />
+      <label className='grid gap-2 text-sm font-medium'>
+        Email
+        <input
+          type='email'
+          name='email'
+          required
+          className='h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs'
+        />
       </label>
-      <label>
-        Password <input type='password' name='password' required />
+      <label className='grid gap-2 text-sm font-medium'>
+        Password
+        <input
+          type='password'
+          name='password'
+          required
+          className='h-9 w-full rounded-md border border-input bg-transparent px-3 shadow-xs'
+        />
       </label>
-      <button type='submit'>Sign in</button>
+      <Button type='submit'>Sign in</Button>
     </Form>
   );
 }
@@ -749,7 +784,6 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
   { path: 'app/app.css', contents: appCss },
   { path: 'app/lib/load-context.ts', contents: loadContextModule },
   { path: 'app/lib/context-keys.server.ts', contents: contextKeysModule },
-  { path: 'app/lib/utils.ts', contents: utilsModule },
   { path: 'app/lib/nav-utils.ts', contents: navUtilsModule },
   { path: 'app/config/services.server.ts', contents: servicesAccessModule },
   { path: 'app/models/product.ts', contents: productModel },
@@ -774,7 +808,20 @@ export const FULL_STACK_APP_FILES: readonly GeneratedFile[] = [
 export const FULL_STACK_README_SECTION = (invocation: string): string => {
   const command = `\`${invocation} generate middleware <name>\` (\`src/middleware/\`)`;
   const width = command.length;
-  return `## Middleware
+  return `## Styling and theme
+
+Tailwind 4 runs through Vite. The neutral shadcn theme lives in \`app/app.css\`; \`app/components/ui/\`
+contains the copied MIT Button and Card components. Add more with \`npx shadcn add <component>\` —
+\`components.json\` already points at the app aliases. Combine Tailwind classes with \`cn\` from
+shadcn's \`cn\` package, which the components import too.
+
+The app shell has a fixed header and sidebar and one scrolling content region; navigation resets
+that region. Below the medium breakpoint the sidebar becomes a horizontal navigation row. The header
+toggle cycles system, light and dark and stores the preference locally. A static script is the first
+child of the document head so the theme is applied before paint. If adding a CSP, allow the inline
+theme script by hash or nonce. With JavaScript disabled the page renders light.
+
+## Middleware
 
 This project has two middleware layers. Pick by what the code needs to see.
 

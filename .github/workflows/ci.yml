@@ -43,6 +43,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 12.11.2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
       - name: Install Chromium for the pinned browser suite
         run: npx --yes playwright@1.63.0 install --with-deps chromium
       - name: Browser gate (example and fresh scaffold)
