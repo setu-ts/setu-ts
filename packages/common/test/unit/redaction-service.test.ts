@@ -375,4 +375,20 @@ describe('redactRecord reads each property once', () => {
       expect(service.redactRecord(value as never)).toBe(value);
     }
   });
+
+  it.each([
+    ['sibling aliases', (shared: object) => ({ a: shared, b: shared })],
+    ['an alias nested deeper', (shared: object) => ({ a: shared, b: { c: shared } })],
+  ])('keeps a Proxy reached through %s redacted at every reference', (_label, build) => {
+    const service = createRedactionService({ fields: { '**.token': 'secret' } });
+    let prototypeReads = 0;
+    // Plain on its first prototype read, not plain on every later one.
+    const shared = new Proxy(
+      { token: 'leaked-if-unredacted' },
+      { getPrototypeOf: () => (prototypeReads++ === 0 ? Object.prototype : Map.prototype) },
+    );
+    const output = JSON.stringify(service.redactRecord(build(shared) as never));
+    expect(output).not.toContain('leaked-if-unredacted');
+    expect(prototypeReads).toBe(1);
+  });
 });

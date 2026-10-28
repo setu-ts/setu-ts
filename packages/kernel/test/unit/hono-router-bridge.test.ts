@@ -251,6 +251,16 @@ describe('patterns written without a leading slash', () => {
     expect(router.match('GET', '/admin')?.definition).toBe(def);
   });
 
+  it('rank as parameters, so a literal route still wins its own path', () => {
+    const router = new Router();
+    const param = { handler: () => ({ __handlerResult: true }) as never };
+    const literal = { handler: () => ({ __handlerResult: true }) as never };
+    router.get(':id', param);
+    router.get('/foo', literal);
+    expect(router.match('GET', '/foo')?.definition).toBe(literal);
+    expect(router.match('GET', '/bar')?.definition).toBe(param);
+  });
+
   it('collide with the slash-prefixed spelling of the same route', () => {
     const router = new Router();
     router.get('admin', () => ({ __handlerResult: true }) as never);

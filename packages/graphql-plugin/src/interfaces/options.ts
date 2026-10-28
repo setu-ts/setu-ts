@@ -196,7 +196,7 @@ export interface GraphqlSubscriptionsOptions {
  * @since 0.3.0
  */
 export interface GraphqlWsTransportOptions {
-  /** The WebSocket endpoint path; defaults to `` `${path}/ws` ``. */
+  /** The WebSocket endpoint path; defaults to `path` without a trailing `/`, then `/ws` (`/graphql/` → `/graphql/ws`). */
   path?: string;
   /**
    * Milliseconds to wait for `connection_init` before closing with code 4408.
@@ -222,7 +222,7 @@ export interface GraphqlWsTransportOptions {
  * @since 0.3.0
  */
 export interface GraphqlSseTransportOptions {
-  /** The SSE endpoint path; defaults to `` `${path}/stream` ``. */
+  /** The SSE endpoint path; defaults to `path` without a trailing `/`, then `/stream` (`/graphql/` → `/graphql/stream`). */
   path?: string;
   /**
    * Milliseconds between `:keep-alive` comment frames. `0` disables.

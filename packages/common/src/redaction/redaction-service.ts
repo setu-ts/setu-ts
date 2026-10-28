@@ -53,9 +53,10 @@ export function createRedactionService(
     redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
       // The record itself is walked like any nested object: one traversability
       // check, so a non-object from a JavaScript caller is returned unchanged.
-      return descend(record, '', 0, redactValue, { active: undefined }) as Readonly<
-        Record<string, unknown>
-      >;
+      return descend(record, '', 0, redactValue, {
+        active: undefined,
+        traversable: undefined,
+      }) as Readonly<Record<string, unknown>>;
     },
   };
 }
@@ -68,6 +69,14 @@ export function createRedactionService(
  */
 interface Traversal {
   active: Map<object, unknown[] | Record<string, unknown>> | undefined;
+  /**
+   * Each object's FIRST traversability answer for this redaction, created
+   * with `active`. A Proxy reached twice — a sibling alias or a cycle — could
+   * answer "plain" once and "not plain" the next time, and the second
+   * reference was returned unredacted (PR #518 review). A flat record is never
+   * re-entered, so it needs no cache.
+   */
+  traversable: Map<object, boolean> | undefined;
 }
 
 /**
@@ -85,7 +94,12 @@ function descend(
   redactValue: (path: string, value: unknown) => unknown,
   traversal: Traversal,
 ): unknown {
-  if (!isTraversable(direct)) return direct;
+  let traversable = traversal.traversable?.get(direct);
+  if (traversable === undefined) {
+    traversable = isTraversable(direct);
+    traversal.traversable?.set(direct, traversable);
+  }
+  if (!traversable) return direct;
   if (depth >= MAX_REDACTION_DEPTH) {
     return eraseRedactor(direct, { path, classification: '' });
   }
@@ -100,7 +114,8 @@ function descend(
     : Object.entries(direct);
   const copy = Array.isArray(direct)
     ? entries.map(([, child]) => child)
-    : snapshotCopy(direct, entries);
+    : // Traversable and not an array: a plain object, by the answer cached above.
+      snapshotCopy(direct as Record<string, unknown>, entries);
   let entered = false;
   try {
     for (const [key, child] of entries) {
@@ -115,6 +130,7 @@ function descend(
       } else {
         if (!entered) {
           (traversal.active ??= new Map()).set(direct, copy);
+          (traversal.traversable ??= new Map()).set(direct, true);
           entered = true;
         }
         redacted = descend(child, childPath, depth + 1, redactValue, traversal);

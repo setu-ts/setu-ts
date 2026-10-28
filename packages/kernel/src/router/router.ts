@@ -371,7 +371,9 @@ export class Router implements IRouterApi {
     }
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
     const owner = this.#owner();
-    const segments = parsePattern(path);
+    // Ranked on the slash-normalized spelling, as Hono registers it: parsed raw,
+    // `:id` lost its colon and counted as a static segment (PR #518 review).
+    const segments = parsePattern(withLeadingSlash(path));
     const internal = internalParameters(withLeadingSlash(path));
     // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
     // the pattern once here and keep only the static count the tie-break reads.
