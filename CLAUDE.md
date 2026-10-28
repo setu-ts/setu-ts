@@ -686,7 +686,7 @@ here.
   the maintainer's direction) — complete (PR #516).
 - **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
   package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
-  `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR pending).
+  `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
 - **Next milestone** — M121 (full-stack members with a broker), then M122. M119i is also open.
 
 ## Verification (run before declaring any work done)

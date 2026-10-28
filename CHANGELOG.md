@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Styled app shells and views (M123, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
+- **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
   Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
   fixed header/sidebar with scrolling content. `components.json` supports adding more components;
   class names combine with shadcn's `cn` package, and `app/lib/utils.ts` (`classNames`) is no longer
