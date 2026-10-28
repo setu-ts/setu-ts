@@ -30,6 +30,46 @@ import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { listTransports } from '../../../src/workspace/transport.ts';
 
 describe('M121 transport additions', () => {
+  // PR #519 review: guidance reads the starter's actual option and the provider's actual call.
+  it('reports a full-stack option the factory already sets instead of the memory default', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['messaging', '--dir', '/app/shop'])).toBe(0);
+    expect(h.out.join('\n')).toContain('already registers messaging in memory by default');
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+    for (const flags of [[], ['--broker', 'memory']]) {
+      h.out.length = 0;
+      expect(await h.run(['messaging', ...flags, '--dir', '/app/shop'])).toBe(0);
+      const out = h.out.join('\n');
+      expect(out).toContain('setu.config.ts already sets its own messaging option');
+      expect(out).not.toContain('in memory by default');
+    }
+  });
+  it('does not take an unrelated object with the same literal for the configured call', async () => {
+    const source = `import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379' };
+export function createApp(): IKernelApplication {
+  return createApplication({ plugins: [MessagingPlugin(), ...(devtool?.plugins ?? [])] });
+}
+`;
+    const h = harness({
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/messaging-plugin': `^${VERSION}` },
+      }),
+      '/app/setu.config.ts': source,
+    });
+    expect(await h.run(['messaging', '--broker', 'redis'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('Set MessagingPlugin(');
+    expect(out).not.toContain('already passes these options');
+  });
   // PR #519 review: an existing Compose file is never rewritten, and a selected service it
   // lacks is printed rather than silently skipped.
   it('prints the service an existing Compose file lacks, and nothing when it has it', async () => {
@@ -87,7 +127,9 @@ describe('M121 transport additions', () => {
       h.out.length = 0;
       expect(await h.run(['messaging', '--broker', 'nats', '--dir', '/app/shop'])).toBe(0);
       expect(h.out.join('\n')).toMatch(
-        template === 'rest' ? /Set MessagingPlugin\(\{/ : /In setu\.config\.ts: messaging: \{/,
+        template === 'rest'
+          ? /Set MessagingPlugin\(\{/
+          : /existing messaging option was preserved; to use this transport, set:\n {2}messaging: \{/,
       );
       expect(h.read('/app/shop/setu.config.ts')).not.toContain("broker: 'nats'");
     });

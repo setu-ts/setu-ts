@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withStarterOption } from '../../../src/commands/starter-options.ts';
+import { starterOptionValue, withStarterOption } from '../../../src/commands/starter-options.ts';
 import { FULL_STACK_TEMPLATE } from '../../../src/templates/full-stack.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
 
@@ -105,4 +105,29 @@ describe('withStarterOption', () => {
     it(`refuses ${name}`, () =>
       expect(withStarterOption(source!, 'messaging', '{}')).toBeUndefined());
   }
+});
+
+describe('starterOptionValue', () => {
+  it('reads nothing when the option is absent, and the value once inserted', () => {
+    expect(starterOptionValue(config, 'messaging')).toBeUndefined();
+    const literal = "{\n          broker: 'nats',\n        }";
+    const inserted = withStarterOption(config, 'messaging', literal)!;
+    expect(starterOptionValue(inserted, 'messaging')).toBe(literal.trim());
+    expect(starterOptionValue(inserted, 'queue')).toBeUndefined();
+  });
+  it('reads a quoted key and ignores a nested property of the same name', () => {
+    const quoted = config.replace(
+      'return {\n        reactRouter',
+      "return {\n        'queue': { adapter: 'redis' },\n        reactRouter",
+    );
+    expect(starterOptionValue(quoted, 'queue')).toBe("{ adapter: 'redis' }");
+    const nested = config.replace(
+      'return {\n        reactRouter',
+      "return {\n        session2: { queue: { adapter: 'x' } },\n        reactRouter",
+    );
+    expect(starterOptionValue(nested, 'queue')).toBeUndefined();
+  });
+  it('reads nothing from an unclassified shape', () => {
+    expect(starterOptionValue('export const createApp = () => ({});', 'queue')).toBeUndefined();
+  });
 });

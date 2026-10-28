@@ -370,6 +370,12 @@ describe('missingComposeServices (PR #519 review)', () => {
       expect(missingComposeServices(partial, arm), arm.name).toBeDefined();
     }
   });
+  it('does not count a same-named entry outside services:', () => {
+    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    const lookalike = 'services:\n  other:\n    image: x\nvolumes:\n  redis:\n';
+    expect(missingComposeServices(lookalike, redis)).toBeDefined();
+    expect(missingComposeServices('volumes:\n  redis:\n', redis)).toBeDefined();
+  });
   it('has nothing to report for an arm with no backing service', () => {
     const none = listTransports().find((arm) => arm.compose === undefined)!;
     expect(missingComposeServices('services:\n', none)).toBeUndefined();

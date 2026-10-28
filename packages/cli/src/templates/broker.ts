@@ -226,8 +226,13 @@ export function missingComposeServices(existing: string, spec: TransportSpec): s
   const block = spec.compose?.services;
   if (block === undefined) return undefined;
   const names = [...block.matchAll(/^ {2}([\w-]+):\s*$/gm)].map((match) => match[1]!);
+  // Only the `services:` section counts: a same-named `volumes:` entry is not a service
+  // (PR #519 review). The section runs to the next top-level key.
+  const section = /^services:[ \t]*$/m.exec(existing);
+  const tail = section === null ? '' : existing.slice(section.index + section[0].length);
+  const services = tail.slice(0, /^\S/m.exec(tail)?.index ?? tail.length);
   // Names match `[\w-]+`, so they need no escaping inside the pattern.
-  const present = (name: string): boolean => new RegExp(`^ {2}${name}:\\s*$`, 'm').test(existing);
+  const present = (name: string): boolean => new RegExp(`^ {2}${name}:\\s*$`, 'm').test(services);
   return names.every(present) ? undefined : block.replace(/\n$/, '');
 }
 

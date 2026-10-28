@@ -46,7 +46,7 @@ import {
   standaloneOverlayRefusal,
   starterOptionLiteral,
 } from '../templates/broker.ts';
-import { withStarterOption } from './starter-options.ts';
+import { starterOptionValue, withStarterOption } from './starter-options.ts';
 import { stringFlag } from '../args.ts';
 import { BRIEF_BEGIN } from '../agents/brief-file.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
@@ -334,25 +334,54 @@ function registrationLine(bare: string): string | undefined {
 }
 
 /**
- * Whether the config already carries exactly these transport options.
+ * Whether an existing option or call argument already carries exactly these options.
  *
  * Compared with whitespace and trailing commas removed, because Prettier rewraps the
- * literal an npm-target project was written with. Comments are masked first so a
- * commented-out copy does not count; an unclassifiable config never matches, which
- * keeps the guidance (fail open).
+ * literal an npm-target project was written with, and on the literal's properties rather
+ * than its braces, because a generated call may carry a seam property first
+ * (`processors: [...QUEUE_PROCESSORS]`). Callers pass the one option or call they read, never
+ * the whole file, so an unrelated object cannot match (PR #519 review).
+ *
+ * @param existing - The existing option value or call arguments
+ * @param literal - The options this command would write
+ * @returns `true` when the same options are present
+ */
+function sameOptions(existing: string, literal: string): boolean {
+  const normalize = (text: string): string => text.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
+  const body = normalize(literal).replace(/^\{|\}$/g, '');
+  return body !== '' && normalize(existing).includes(body);
+}
+
+/**
+ * The source text of each call's arguments to a provider inside the app factory.
+ *
+ * Calls are found on masked code, so a mention in a comment or string is not a call, and
+ * read back from the source at the same offsets, so string values can be compared.
  *
  * @param source - The config source
- * @param literal - The options this command would write
- * @returns `true` when the same options are already present
+ * @param bare - Bare package name of the provider
+ * @param symbol - The provider's factory export
+ * @returns Each call's argument text; empty when the factory is not classified
  */
-function configuresAlready(source: string, literal: string): boolean {
-  const visible = maskComments(source);
-  if (visible === undefined) return false;
-  const normalize = (text: string): string => text.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
-  // The literal's properties, not its braces: a generated call may carry a seam
-  // property first (`processors: [...QUEUE_PROCESSORS]`) in the same object.
-  const body = normalize(literal).replace(/^\{|\}$/g, '');
-  return body !== '' && normalize(visible).includes(body);
+function providerCallArguments(source: string, bare: string, symbol: string): readonly string[] {
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return [];
+  const found: string[] = [];
+  const call = new RegExp(`(?<![\\w$.])${binding}\\s*\\(`, 'g');
+  for (const match of scope.code.slice(scope.start, scope.end).matchAll(call)) {
+    const open = scope.start + match.index + match[0].length - 1;
+    let depth = 0;
+    for (let at = open; at < scope.end; at++) {
+      const c = scope.code[at];
+      if (c === '(' || c === '{' || c === '[') depth++;
+      else if ((c === ')' || c === '}' || c === ']') && --depth === 0) {
+        found.push(source.slice(open + 1, at));
+        break;
+      }
+    }
+  }
+  return found;
 }
 
 /** Explains the registration site without rewriting starter-owned composition. */
@@ -370,13 +399,23 @@ function printWiringNote(
       if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
         const key = bare === 'messaging-plugin' ? 'messaging' : 'queue';
         const flag = key === 'messaging' ? 'broker' : 'queue';
-        log(
-          transportArgs === undefined
-            ? `  ${starter.symbol} already registers ${key} in memory by default; select a backend with setu add ${key} --${flag} <name> (standalone), or configure its ${key} property.`
-            : source !== undefined && configuresAlready(source, transportArgs)
-              ? `  setu.config.ts already sets these ${key} options.`
-              : `  In setu.config.ts: ${key}: ${transportArgs},`,
-        );
+        // The factory's own option, read with the same analysis withStarterOption edits
+        // through; undefined for a hand-written starter config the CLI does not classify.
+        const existing = source === undefined ? undefined : starterOptionValue(source, key);
+        if (transportArgs === undefined) {
+          log(
+            existing === undefined
+              ? `  ${starter.symbol} already registers ${key} in memory by default; select a backend with setu add ${key} --${flag} <name> (standalone), or configure its ${key} property.`
+              : `  setu.config.ts already sets its own ${key} option; it was left as it is.`,
+          );
+        } else if (existing !== undefined && sameOptions(existing, transportArgs)) {
+          log(`  setu.config.ts already sets these ${key} options.`);
+        } else if (existing !== undefined) {
+          log(`  The existing ${key} option was preserved; to use this transport, set:`);
+          log(`  ${key}: ${transportArgs},`);
+        } else {
+          log(`  In setu.config.ts: ${key}: ${transportArgs},`);
+        }
         return;
       }
       log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
@@ -411,7 +450,9 @@ function printWiringNote(
   ) {
     if (transportArgs !== undefined)
       log(
-        configuresAlready(source, transportArgs)
+        providerCallArguments(source, bare, factory).some((args) =>
+          sameOptions(args, transportArgs),
+        )
           ? `  setu.config.ts already passes these options to ${factory}.`
           : `  Set ${factory}(${transportArgs}) in setu.config.ts; the existing call was preserved.`,
       );
