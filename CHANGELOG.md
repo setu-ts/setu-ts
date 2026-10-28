@@ -245,30 +245,30 @@ All notable changes to this project are documented here. The format follows
   `FactoryProvider.useFactory` is `(...deps: never[]) => T`, called with the resolved
   `FactoryProvider.inject` entries in order. A factory that closed over the container to resolve its
   own dependencies still works, but boot validation cannot see them; declare `inject` instead.
-- **BREAKING — route patterns outside the route grammar are refused (0.11.0, `@setu-ts/kernel`,
-  `@setu-ts/graphql-plugin`).** Route patterns are static segments, `:name` parameters, a final
-  optional `:name?`, `*` segments and a final `prefix*`. Patterns outside that grammar now throw at
-  registration, naming the part that is not supported: a Hono regular-expression parameter
-  (`:name{…}`); an empty segment (`/api//:id`); a `*` inside a segment that is not the final one
-  (`/v*/admin`); a parameter name that is not a word (`\w+`, as `LinearRouter` read it: `:user-id`)
-  or is `__proto__`, which would hit the prototype setter of `ctx.params` rather than become a
-  parameter; an optional parameter that is not last (`/p/:id?/edit`); and `?` outside a final
-  optional parameter. None was documented, and each routed differently under `TrieRouter` than under
-  `LinearRouter` — a `:name{…}` constraint that can match `/` (`/files/:path{.+}/download`) also
-  took time quadratic in the path length, about 300 ms for an 8 KB path. Use `:name` or `*` and
-  validate the value in the handler or with `@setu-ts/validation-plugin`. `router.group()` now joins
-  its prefix and a path with exactly one `/`, as its documentation said, so
-  `group('/api/', r => r.get('/:id'))` registers `/api/:id`; `@setu-ts/graphql-plugin` joins a
-  `path` ending in `/` to its SSE `stream` path the same way.
-- **BREAKING — `IResponse` gains `setHeaders` (0.11.0, `@setu-ts/common`).** A required member that
-  sets several headers at once, as `header()` per entry. An application class or a test fake typed
-  as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this
+- **BREAKING — route patterns outside the route grammar are refused (#518, 0.11.0,
+  `@setu-ts/kernel`, `@setu-ts/graphql-plugin`).** Route patterns are static segments, `:name`
+  parameters, a final optional `:name?`, `*` segments and a final `prefix*`. Patterns outside that
+  grammar now throw at registration, naming the part that is not supported: a Hono
+  regular-expression parameter (`:name{…}`); an empty segment (`/api//:id`); a `*` inside a segment
+  that is not the final one (`/v*/admin`); a parameter name that is not a word (`\w+`, as
+  `LinearRouter` read it: `:user-id`) or is `__proto__`, which would hit the prototype setter of
+  `ctx.params` rather than become a parameter; an optional parameter that is not last
+  (`/p/:id?/edit`); and `?` outside a final optional parameter. None was documented, and each routed
+  differently under `TrieRouter` than under `LinearRouter` — a `:name{…}` constraint that can match
+  `/` (`/files/:path{.+}/download`) also took time quadratic in the path length, about 300 ms for an
+  8 KB path. Use `:name` or `*` and validate the value in the handler or with
+  `@setu-ts/validation-plugin`. `router.group()` now joins its prefix and a path with exactly one
+  `/`, as its documentation said, so `group('/api/', r => r.get('/:id'))` registers `/api/:id`;
+  `@setu-ts/graphql-plugin` joins a `path` ending in `/` to its SSE `stream` path the same way.
+- **BREAKING — `IResponse` gains `setHeaders` (#518, 0.11.0, `@setu-ts/common`).** A required member
+  that sets several headers at once, as `header()` per entry. An application class or a test fake
+  typed as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this
   repository's own tests needed exactly that. `createTestContext` from `@setu-ts/testing` already
   implements it. Passing the same frozen object on every request lets the kernel validate it once
   and copy it into each response in one step; `HttpSecurityPlugin`'s security headers now do.
-- **Request identity fields are inherited on framework-created requests (0.11.0, `@setu-ts/common`,
-  `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/testing`).** The one-write guard on `user`,
-  `tenant` and `locale` is now installed once on the request class's prototype
+- **Request identity fields are inherited on framework-created requests (#518, 0.11.0,
+  `@setu-ts/common`, `@setu-ts/kernel`, `@setu-ts/runtime`, `@setu-ts/testing`).** The one-write
+  guard on `user`, `tenant` and `locale` is now installed once on the request class's prototype
   (`installRequestIdentityGuard`) for served, `inject()` and `createTestContext` requests, instead
   of on every request object. On those requests `Object.keys(ctx.request)` and
   `JSON.stringify(ctx.request)` no longer list the three fields; reading and writing them, the
@@ -392,23 +392,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Route matching with Hono's `TrieRouter` (0.11.0, `@setu-ts/kernel`).** The kernel now matches
-  routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route pattern on
-  every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full candidate set and
-  never throws on overlapping parameter patterns, so the kernel's static-over-parameter and
-  registration-order tie-break is unchanged. Trailing slashes behave as they did under
-  `LinearRouter`: a request may carry one extra trailing slash (`/users/` reaches `/users`), a
-  static route registered with a trailing slash answers only that spelling (`/reports` does not
-  reach `/reports/`), and a parameter route's trailing slash is not significant (`/users/:id/`
-  answers `/users/42`). For a slash-terminated request the kernel ranks the routes matching both
-  spellings together, so a wildcard never wins over the specific route. Route parameters reach Hono
-  under the kernel's own names and are mapped back, so a parameter named after an `Object.prototype`
-  member (`:constructor`, `:toString`) routes like any other, including after a `*` segment. A
-  pattern written without a leading slash (`admin`) is the same route as `/admin`, and registering
-  both is refused as a duplicate. Measured on Bun: the bare kernel matched faster in five of six
-  alternating passes.
+- **Route matching with Hono's `TrieRouter` (#518, 0.11.0, `@setu-ts/kernel`).** The kernel now
+  matches routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route
+  pattern on every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full
+  candidate set and never throws on overlapping parameter patterns, so the kernel's
+  static-over-parameter and registration-order tie-break is unchanged. Trailing slashes behave as
+  they did under `LinearRouter`: a request may carry one extra trailing slash (`/users/` reaches
+  `/users`), a static route registered with a trailing slash answers only that spelling (`/reports`
+  does not reach `/reports/`), and a parameter route's trailing slash is not significant
+  (`/users/:id/` answers `/users/42`). For a slash-terminated request the kernel ranks the routes
+  matching both spellings together, so a wildcard never wins over the specific route. Route
+  parameters reach Hono under the kernel's own names and are mapped back, so a parameter named after
+  an `Object.prototype` member (`:constructor`, `:toString`) routes like any other, including after
+  a `*` segment. A pattern written without a leading slash (`admin`) is the same route as `/admin`,
+  and registering both is refused as a duplicate. Measured on Bun: the bare kernel matched faster in
+  five of six alternating passes.
 
-- **Per-request work on the request path (0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
+- **Per-request work on the request path (#518, 0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU
   profile of the REST scaffold, each change measured alone first: the middleware chain runs without
   an `async` wrapper per stage when diagnostics are off (koa-compose's shape); the request identity
@@ -419,8 +419,8 @@ All notable changes to this project are documented here. The format follows
   pass, and a histogram counts in a typed array; the default security headers are copied into each
   response in one step. Behaviour is unchanged apart from the two entries under Changed.
 
-- **Histogram boundaries: repeats, `Infinity` and `NaN` (0.11.0, `@setu-ts/metrics-plugin`).** A
-  `Histogram` configured with the same boundary twice counted each observation once per repeat in
+- **Histogram boundaries: repeats, `Infinity` and `NaN` (#518, 0.11.0, `@setu-ts/metrics-plugin`).**
+  A `Histogram` configured with the same boundary twice counted each observation once per repeat in
   that bucket; it is now one `le` bucket, counted once, as Prometheus expects. A configured
   `Infinity` was counted a second time beside the `+Inf` bucket every histogram has; it is now that
   bucket. A `NaN` boundary, which corrupted the cumulative counts around it, is refused at
