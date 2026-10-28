@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Full-stack broker configuration (M121, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
+- **Full-stack broker configuration (M121, #519, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
   workspace members render messaging and queue transport options with config-backed connection reads
   and the selected clients. `setu add messaging` / `queue` reads workspace transports and accepts
   standalone `--broker` / `--queue`, preserving existing values and printing exact manual guidance.

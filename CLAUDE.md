@@ -690,7 +690,7 @@ here.
 - **Milestone 121** (`packages/cli` — full-stack projects and workspace members on a broker through
   the starter's `messaging`/`queue` options, `setu add messaging`/`queue` reading the workspace
   transport and taking `--broker`/`--queue`, `setu add react-router` refused outside full-stack;
-  V10-51, V10-52) — complete (PR pending).
+  V10-51, V10-52) — complete (PR #519).
 - **Next milestone** — M122 (workspace operations from the root). M119i is also open.
 
 ## Verification (run before declaring any work done)
