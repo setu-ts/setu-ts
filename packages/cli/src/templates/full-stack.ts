@@ -21,6 +21,7 @@ import {
   seamsFor,
 } from './seam.ts';
 import { renderConfigOptions } from './env-file.ts';
+import { FULL_STACK_UI_FILES } from './full-stack-ui-files.ts';
 import { FULL_STACK_APP_FILES, FULL_STACK_README_SECTION } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -254,6 +255,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   files: [
     ...FULL_STACK_APP_FILES,
+    ...FULL_STACK_UI_FILES,
     ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES),
     ...seamFiles(FULL_STACK_SEAMS),
   ],

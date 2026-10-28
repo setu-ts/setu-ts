@@ -1019,7 +1019,14 @@ describe('M111b workflow lanes', () => {
     const source = await readFile('.github/workflows/ci.yml', 'utf8');
     const jobs = [...source.matchAll(/^ {2}([a-z][\w-]*):\n/gm)].map((match) => match[1]!);
     const withDeno = jobs.filter((job) => jobOf(source, job)?.includes('denoland/setup-deno'));
-    expect(withDeno).toEqual(['node', 'deno-lane', 'deploy', 'deno-view-plugin-resolution']);
+    // `browser` (M123): the view scaffold is built, booted and driven in Chromium on Deno.
+    expect(withDeno).toEqual([
+      'browser',
+      'node',
+      'deno-lane',
+      'deploy',
+      'deno-view-plugin-resolution',
+    ]);
     // No job reaches the repository tooling through Deno any more.
     expect(source).not.toMatch(/\bdeno (task|ci|run)\b/);
   });

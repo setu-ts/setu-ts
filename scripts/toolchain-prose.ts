@@ -37,6 +37,21 @@ export interface ToolchainProseRules {
 export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
   allowlist: [
     {
+      path: 'packages/cli/src/commands/add-view.ts',
+      category: 'deno-target',
+      reason: 'Emits CSS build and watch tasks for supported Deno view projects.',
+    },
+    {
+      path: 'packages/cli/test/unit/add-view.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts generated Deno view CSS tasks and preserves existing tasks.',
+    },
+    {
+      path: 'docs/mvc.md',
+      category: 'deno-target',
+      reason: 'Documents generated Deno view build, start and CSS watcher tasks.',
+    },
+    {
       path: 'packages/cli/test/unit/project-files-check.test.ts',
       category: 'deno-target',
       reason: 'Asserts frontend-first check tasks for supported Deno applications.',
@@ -412,7 +427,17 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       allowJsrUrl: true,
     },
   ],
-  generatedDenoTasks: ['build', 'check', 'dev', 'install', 'proto:gen', 'start', 'test'],
+  generatedDenoTasks: [
+    'build',
+    'check',
+    'css',
+    'css:watch',
+    'dev',
+    'install',
+    'proto:gen',
+    'start',
+    'test',
+  ],
   rootScripts: [],
   appScripts: {},
 };

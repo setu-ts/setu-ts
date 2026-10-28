@@ -15,6 +15,7 @@
  * @module
  */
 
+import { planViewSetup } from './add-view.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { escapeName } from '../utils/names.ts';
@@ -29,6 +30,7 @@ import {
 } from '../constants.ts';
 import {
   type GeneratedFile,
+  findExisting,
   joinPath,
   readExistingText,
   resolveDir,
@@ -174,7 +176,13 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
       peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
     },
   ],
-  ['view', { pkg: 'view-plugin' }],
+  [
+    'view',
+    {
+      pkg: 'view-plugin',
+      peers: { runtimes: ['node', 'bun', 'deno', 'cloudflare-workers'], packages: ['hono'] },
+    },
+  ],
   ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
@@ -346,21 +354,16 @@ function printWiringNote(
   }
   const registration = registrationLine(bare);
   const factory = registration?.slice(0, registration.indexOf('('));
-  const binding =
-    source === undefined || factory === undefined
-      ? undefined
-      : providerBinding(source, bare, factory);
   // Guidance is suppressed only by a real call in code. Inserting refuses on any
   // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
   // in a string would leave the plugin unregistered with nothing said (audit 4).
   // Only a call inside the createApp body counts: a same-named method or
   // signature elsewhere registers nothing (audit round 6, G-R6). A plugin built at
   // module scope therefore still gets the line — guidance fails open.
-  const scope = source === undefined ? undefined : factoryScope(source);
   if (
-    binding !== undefined &&
-    scope !== undefined &&
-    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
+    source !== undefined &&
+    factory !== undefined &&
+    factoryCallsProvider(source, bare, factory)
   ) {
     for (const line of seamGapLines(source, bare, seam)) log(line);
     return;
@@ -824,11 +827,19 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  * @param bare - Bare package name being added
  * @param seam - The generated-artifact seam the provider consumes, if any: the
  * call then carries its options and the barrel imports are added
+ * @param args - Explicit options for a classified insertion (including StaticPlugin); takes precedence over seam args
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
-export function withPluginWiring(source: string, bare: string, seam?: AddSeam): string | undefined {
-  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+export function withPluginWiring(
+  source: string,
+  bare: string,
+  seam?: AddSeam,
+  args?: string,
+): string | undefined {
+  const provider =
+    ZERO_CONFIG_WIRINGS.get(bare) ??
+    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
   if (provider === undefined) return undefined;
 
   const anchor = '...(devtool?.plugins ?? [])';
@@ -893,7 +904,28 @@ export function withPluginWiring(source: string, bare: string, seam?: AddSeam): 
   // On its own line the new call takes a line of its own at the same indentation;
   // inline it joins the array where it stands.
   const separator = before.trim() === '' ? `\n${before}` : ' ';
-  return `${withImport.slice(0, insertion)}${factory}(${seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
+  return `${withImport.slice(0, insertion)}${factory}(${args ?? seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
+}
+
+/**
+ * Whether the app factory body calls a provider through its recognized import.
+ *
+ * The same test {@linkcode printWiringNote} uses to stay quiet: a real call in
+ * classified code, never a mention in a string or comment.
+ *
+ * @param source - The config source
+ * @param bare - Bare package name of the provider
+ * @param symbol - The provider's factory export
+ * @returns `true` when the factory calls it
+ */
+function factoryCallsProvider(source: string, bare: string, symbol: string): boolean {
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  return (
+    binding !== undefined &&
+    scope !== undefined &&
+    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
+  );
 }
 
 /** Reads transport options only for a listed workspace member. */
@@ -1051,6 +1083,7 @@ export async function runAddCommand(
   ];
 
   const edits: { readonly path: string; readonly contents: string }[] = [];
+  const createOnlyPaths = new Set<string>();
   let found = false;
   let alreadyPresent = false;
   const searchDirs = await installSearchDirs(deps.fs, dir);
@@ -1226,13 +1259,13 @@ export async function runAddCommand(
 
   const configPath = joinPath(dir, 'setu.config.ts');
   let configSource: string | undefined;
+  let configRetargeted = false;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
-    const wired = (await frameworkImportsRetargeted(deps.fs, dir))
-      ? undefined
-      : withPluginWiring(config, bare, seam);
+    configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
+    const wired = configRetargeted ? undefined : withPluginWiring(config, bare, seam);
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {
@@ -1298,6 +1331,49 @@ export async function runAddCommand(
     }
   }
 
+  if (bare === 'view-plugin') {
+    const existing = new Map<string, string>();
+    for (const path of [
+      'package.json',
+      'deno.json',
+      'deno.jsonc',
+      'tsconfig.json',
+      'setu.config.ts',
+      '.gitignore',
+      'src/views/styles.css',
+      'src/views/layout.tsx',
+      'src/views/home.tsx',
+      'src/views/routes.ts',
+    ]) {
+      const fullPath = joinPath(dir, path);
+      const pending = edits.find((edit) => edit.path === fullPath);
+      const text = pending?.contents ?? (await readExistingText(deps.fs, fullPath));
+      if (text !== undefined) existing.set(path, text);
+    }
+    const plan = planViewSetup({
+      runtime,
+      existing,
+      // An earlier `setu add view` (0.10.0 wired only the plugin) or a hand
+      // registration counts too, so re-running the command wires the example route.
+      viewPluginRegistered:
+        configWired ||
+        (!configRetargeted &&
+          configSource !== undefined &&
+          factoryCallsProvider(configSource, 'view-plugin', 'ViewPlugin')),
+      wireStatic: (source, args) =>
+        configRetargeted ? undefined : withPluginWiring(source, 'static-plugin', undefined, args),
+    });
+    for (const file of plan.files) createOnlyPaths.add(joinPath(dir, file.path));
+    for (const file of [...plan.files, ...plan.manifestEdits, ...plan.configEdits]) {
+      const path = joinPath(dir, file.path);
+      const previous = edits.findIndex((edit) => edit.path === path);
+      if (previous >= 0) edits.splice(previous, 1);
+      edits.push({ path, contents: file.contents });
+      if (file.path === 'setu.config.ts') configSource = file.contents;
+    }
+    for (const line of plan.notes) deps.log(escapeName(line));
+  }
+
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
@@ -1312,14 +1388,19 @@ export async function runAddCommand(
 
   let outcomes: Awaited<ReturnType<typeof writeFiles>>;
   try {
+    const planned = await formatForTarget(
+      edits.map((edit) => ({ ...edit, managed: !createOnlyPaths.has(edit.path) })),
+      runtime,
+      dir,
+      deps.error,
+    );
+    // New view files remain developer-owned, even if one appeared while formatting.
+    const appeared = new Set(await findExisting(deps.fs, planned));
+    for (const path of appeared)
+      deps.log(`left ${escapeName(path)} unchanged: appeared after planning.`);
     outcomes = await writeFiles(
       deps.fs,
-      await formatForTarget(
-        edits.map((edit) => ({ ...edit, managed: true })),
-        runtime,
-        dir,
-        deps.error,
-      ),
+      planned.filter((file) => !appeared.has(file.path)),
       deps.interrupt === undefined
         ? { root: writeRoot }
         : { root: writeRoot, signal: deps.interrupt },

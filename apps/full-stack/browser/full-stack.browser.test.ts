@@ -2,6 +2,14 @@
 import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import { mkdir, mkdtemp, rm, rename } from 'node:fs/promises';
 import { run } from '../../../scripts/lib/run.ts';
+import { browserTempDir } from './harness.ts';
+import {
+  assertEarlyTheme,
+  assertFixedShell,
+  assertPrimaryButton,
+  assertThemeCycle,
+  recordEarlyTheme,
+} from './shell.ts';
 import { type Browser, chromium, type Page } from 'playwright';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../../packages/cli/src/cli.ts';
@@ -46,16 +54,13 @@ beforeAll(async () => {
   expect(installed.code, installed.output).toBe(0);
   await command(scaffold, ['run', 'build']);
   await command(`${REPO_ROOT}/apps/full-stack`, ['run', 'build']);
-  // Chromium creates its singleton socket under TMPDIR and refuses to start when the directory
-  // is missing. The path is relative to this process's cwd (the app directory under
-  // `pnpm --filter … exec`), which a fresh checkout does not have.
-  await mkdir('.tmp/browser', { recursive: true });
+  // The workspace scratch directory above also holds Chromium's singleton socket.
   // Use the bundled Chromium executable checked by harness.ts, not a system browser.
   browser = await chromium.launch({
     channel: 'chromium',
     // Linux socket paths are bounded to 108 bytes. A relative temp path keeps
     // Chromium's singleton socket inside this workspace even in deep worktrees.
-    env: { ...process.env, TMPDIR: '.tmp/browser' },
+    env: { ...process.env, TMPDIR: browserTempDir(process.cwd(), REPO_ROOT) },
   });
 }, 900_000);
 
@@ -71,16 +76,20 @@ async function drive(
   check: (page: Page, origin: string) => Promise<void>,
   javaScriptEnabled = true,
 ): Promise<void> {
-  await withNodeServer(project, async (origin) => {
-    const context = await browser.newContext({ javaScriptEnabled });
-    try {
-      const page = await context.newPage();
-      page.setDefaultTimeout(10_000);
-      await check(page, origin);
-    } finally {
-      await context.close();
-    }
-  });
+  await withNodeServer(
+    project,
+    async (origin) => {
+      const context = await browser.newContext({ javaScriptEnabled });
+      try {
+        const page = await context.newPage();
+        page.setDefaultTimeout(10_000);
+        await check(page, origin);
+      } finally {
+        await context.close();
+      }
+    },
+    { TMPDIR: browserTempDir(project, REPO_ROOT) },
+  );
 }
 
 /** Sign in through the real browser form before probing authenticated SSR. */
@@ -271,3 +280,87 @@ for (const target of ['example', 'scaffold'] as const) {
     });
   });
 }
+
+describe('full-stack scaffold shell and theme (M123)', () => {
+  it('keeps the shell fixed on desktop and mobile, and resets content on client navigation', async () => {
+    await drive(scaffold, async (page, origin) => {
+      await page.goto(origin, { waitUntil: 'networkidle' });
+      await assertFixedShell(page);
+      await page.addStyleTag({ content: '[data-slot=card] { min-height: 6000px; }' });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.locator('[data-shell=content]').evaluate((element) => {
+        element.scrollTop = 3000;
+      });
+      await clientTransition(
+        page,
+        () =>
+          page
+            .getByRole('navigation', { name: 'Application navigation' })
+            .getByRole('link', { name: 'Products', exact: true })
+            .click(),
+        '/login',
+      );
+      await page.locator('form').waitFor();
+      // Sign in, then navigate from the long landing page inside the SAME AppLayout.
+      await page.locator('[name=email]').fill(email);
+      await page.locator('[name=password]').fill('example');
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await page.waitForURL('**/products');
+      await page.goto(origin, { waitUntil: 'networkidle' });
+      await assertFixedShell(page);
+      await page.addStyleTag({ content: '[data-slot=card] { min-height: 6000px; }' });
+      await page.setViewportSize({ width: 1280, height: 800 });
+      await page.locator('[data-shell=content]').evaluate((element) => {
+        element.scrollTop = 3000;
+      });
+      await clientTransition(
+        page,
+        () =>
+          page
+            .getByRole('navigation', { name: 'Application navigation' })
+            .getByRole('link', { name: 'Products', exact: true })
+            .click(),
+        '/products',
+      );
+      await page.getByRole('heading', { name: /Products/ }).waitFor();
+      expect(
+        await page.locator('[data-shell=content]').evaluate((element) => element.scrollTop),
+      ).toBe(0);
+    });
+  });
+  it('applies stored dark at DOMContentLoaded and resolves the primary button token', async () => {
+    await drive(scaffold, async (page, origin) => {
+      await page.emulateMedia({ colorScheme: 'light' });
+      await recordEarlyTheme(page, 'dark');
+      await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' });
+      await assertEarlyTheme(page, 'dark');
+      await assertPrimaryButton(page);
+    });
+  });
+  it('cycles and persists the theme, and follows a live system preference', async () => {
+    await drive(scaffold, async (page, origin) => {
+      await assertThemeCycle(page, origin);
+    });
+  });
+  it('uses dark system mode before paint with no stored preference', async () => {
+    await drive(scaffold, async (page, origin) => {
+      await page.emulateMedia({ colorScheme: 'dark' });
+      await recordEarlyTheme(page, null);
+      await page.goto(origin, { waitUntil: 'domcontentloaded' });
+      await assertEarlyTheme(page, 'dark');
+    });
+  });
+  it('renders light with JavaScript disabled', async () => {
+    await drive(
+      scaffold,
+      async (page, origin) => {
+        await page.emulateMedia({ colorScheme: 'dark' });
+        await page.goto(origin);
+        expect(
+          await page.locator('html').evaluate((element) => element.classList.contains('dark')),
+        ).toBe(false);
+      },
+      false,
+    );
+  });
+});

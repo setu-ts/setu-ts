@@ -2051,3 +2051,180 @@ describe('setu add — the Node ws peer (M113h §3.8a)', () => {
     expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBeUndefined();
   });
 });
+
+describe('setu add view styling (M123)', () => {
+  for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers']) {
+    it(`writes the view plan and hono peer on ${runtime}, then is idempotent`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', runtime]), {
+          fs: h.fs,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      const path = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const manifest = JSON.parse(h.read(`/app/shop/${path}`));
+      expect(manifest[runtime === 'deno' ? 'imports' : 'dependencies'].hono).toBe(
+        runtime === 'deno' ? 'npm:hono@^4.12.30' : '^4.12.30',
+      );
+      expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
+      expect(h.read('/app/shop/src/views/home.tsx')).toContain('bg-primary');
+      const before = h.read(`/app/shop/${path}`);
+      h.out.length = 0;
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(`/app/shop/${path}`)).toBe(before);
+      expect(h.out.some((line) => /^(created|updated) /.test(line))).toBe(false);
+    });
+  }
+  it('wires the example route when ViewPlugin was registered by an earlier add', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+    // The 0.10.0 shape: ViewPlugin() registered, no example route and no views.
+    const config = h
+      .read('/app/shop/setu.config.ts')
+      .replace("import { registerViewRoutes } from './src/views/routes.ts';\n", '')
+      .replace(/\n\s*registerViewRoutes\(app\.router\);/, '');
+    expect(config).toContain('ViewPlugin()');
+    expect(config).not.toContain('registerViewRoutes');
+    await h.fs.writeFile('/app/shop/setu.config.ts', new TextEncoder().encode(config));
+    for (const file of ['layout.tsx', 'home.tsx', 'routes.ts', 'styles.css'])
+      await h.fs.rm(`/app/shop/src/views/${file}`);
+
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+    const rewired = h.read('/app/shop/setu.config.ts');
+    expect(rewired).toContain("import { registerViewRoutes } from './src/views/routes.ts';");
+    expect(rewired).toMatch(
+      /registerGeneratedRoutes\(app\.router, app\.services\);\n\s*registerViewRoutes\(app\.router\);/,
+    );
+    expect(rewired.match(/ViewPlugin\(\)/g)).toHaveLength(1);
+    expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
+  });
+  it('lists every planned file in a dry-run and writes nothing', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    const before = h.read('/app/shop/package.json');
+    expect(await h.run(['view', '--dir', '/app/shop', '--dry-run'])).toBe(0);
+    for (const path of [
+      'src/views/layout.tsx',
+      'src/views/home.tsx',
+      'src/views/routes.ts',
+      'src/views/styles.css',
+      'tsconfig.json',
+      'setu.config.ts',
+      'package.json',
+    ]) {
+      expect(h.out).toContain(`would update /app/shop/${path}`);
+    }
+    expect(h.read('/app/shop/package.json')).toBe(before);
+    expect(h.fs.has('/app/shop/src/views/home.tsx')).toBe(false);
+  });
+  it('uses the existing peer override path for hono in a workspace', async () => {
+    const h = harness();
+    const cli = (args: string[]) =>
+      runCli(args, {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: () => {},
+        error: (line) => h.err.push(line),
+      });
+    expect(await cli(['new', 'ws', '--workspace', '--runtime', 'node'])).toBe(0);
+    expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+    const path = '/app/ws/package.json';
+    const root = JSON.parse(h.read(path));
+    root.overrides = { hono: '4.12.30' };
+    await h.fs.writeFile(path, new TextEncoder().encode(JSON.stringify(root)));
+    expect(await h.run(['view', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(JSON.parse(h.read(path)).dependencies.hono).toBe('4.12.30');
+  });
+  it('uses explicit StaticPlugin args while keeping add static manifest-only', () => {
+    const config = `export function createApp(): IKernelApplication {\n  const app = createApplication({ plugins: [...(devtool?.plugins ?? [])] });\n  return app;\n}`;
+    expect(withPluginWiring(config, 'static-plugin')).toBeUndefined();
+    expect(
+      withPluginWiring(
+        config,
+        'static-plugin',
+        undefined,
+        "{ root: './build/assets', urlPrefix: '/assets' }",
+      ),
+    ).toContain("StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })");
+    const seam = { args: '{ old: true }', imports: [], files: [] };
+    expect(withPluginWiring(config, 'view-plugin', seam, '{ explicit: true }')).toContain(
+      'ViewPlugin({ explicit: true })',
+    );
+  });
+  it('pins hono to the framework dependency table', async () => {
+    const { EXTERNAL_RANGES } = await import('../../../../../scripts/node-dependency-ranges.ts');
+    expect(CLIENT_RANGES['hono']).toBe(EXTERNAL_RANGES['hono']);
+  });
+});
+
+it('does not wire either view provider through a retargeted framework import map', async () => {
+  const h = harness();
+  expect(
+    await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+      fs: h.fs,
+      cwd: '/app',
+      log: () => {},
+      error: () => {},
+    }),
+  ).toBe(0);
+  const config = h.read('/app/shop/setu.config.ts');
+  await h.fs.writeFile(
+    '/app/shop/deno.json',
+    new TextEncoder().encode(
+      JSON.stringify({ imports: { '@setu-ts/view-plugin': './custom-view.ts' } }),
+    ),
+  );
+  expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+  expect(h.read('/app/shop/setu.config.ts')).toBe(config);
+});
+
+it('preserves a view file created between planning and the writer preflight', async () => {
+  const h = harness({ '/app/package.json': '{}' });
+  const path = '/app/src/views/home.tsx';
+  let raced = false;
+  const fs = {
+    ...h.fs,
+    async stat(file: string) {
+      if (file === path && !raced) {
+        raced = true;
+        try {
+          return await h.fs.stat(file);
+        } catch (error) {
+          await h.fs.writeFile(path, new TextEncoder().encode('created by the developer'));
+          throw error;
+        }
+      }
+      return h.fs.stat(file);
+    },
+  };
+  expect(
+    await runAddCommand(parseArgs(['view']), {
+      fs,
+      cwd: '/app',
+      log: (line) => h.out.push(line),
+      error: (line) => h.err.push(line),
+    }),
+  ).toBe(0);
+  expect(raced).toBe(true);
+  expect(h.read(path)).toBe('created by the developer');
+});

@@ -4,14 +4,33 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import {
   BROWSER_INSTALL_COMMAND,
+  BROWSER_TEMP_DIRECTORY,
+  browserTempDir,
   browserAvailabilityCode,
   browserCacheDir,
   browserGateCode,
   CACHE_LOCATION_VARIABLES,
   PLAYWRIGHT_VERSION,
+  runtimeGateCode,
 } from '../apps/full-stack/browser/harness.ts';
 
 describe('dedicated browser gate', () => {
+  it('keeps temporary Unix socket names short and under the workspace root', () => {
+    expect(BROWSER_TEMP_DIRECTORY).toBe('.tmp/browser');
+    expect(browserTempDir('/workspace/apps/full-stack', '/workspace')).toBe('../../.tmp/browser');
+    expect(browserTempDir('/workspace/.tmp/browser/run/shop', '/workspace')).toBe('../..');
+    expect(browserTempDir('/workspace/.tmp/browser', '/workspace')).toBe('.');
+  });
+
+  it('names missing runtimes locally and refuses them under CI', () => {
+    for (const runtime of ['bun', 'deno'] as const) {
+      expect(runtimeGateCode(runtime, true, false)).toBe(0);
+      expect(runtimeGateCode(runtime, true, true)).toBe(0);
+      expect(runtimeGateCode(runtime, false, false)).toBe(77);
+      expect(() => runtimeGateCode(runtime, false, true)).toThrow(runtime + ' is unavailable');
+    }
+  });
+
   it('resolves present and absent executables with no browser import', async () => {
     expect(
       await browserGateCode('/browser', false, (path) => Promise.resolve(path === '/browser')),
@@ -73,5 +92,10 @@ describe('dedicated browser gate', () => {
       'pnpm --filter setu-ts-example-full-stack exec playwright install chromium',
     );
     expect(ci).not.toMatch(/ALLOW_SKIP:.*browser/);
+    const browserJob = ci.split('  browser:')[1]!.split('  fork-contribution-policy:')[0]!;
+    expect(browserJob).toContain('oven-sh/setup-bun@v2');
+    expect(browserJob).toContain('bun-version: 1.4.0');
+    expect(browserJob).toContain('denoland/setup-deno@v2');
+    expect(browserJob).toContain('deno-version: 2.9.5');
   });
 });

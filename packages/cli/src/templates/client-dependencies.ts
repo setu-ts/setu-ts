@@ -29,6 +29,7 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@opentelemetry/resources': '^2.9.0',
   '@opentelemetry/context-async-hooks': '^2.0.0',
   amqplib: '0.10.x',
+  hono: '^4.12.30',
   ioredis: '5.x',
   kafkajs: '2.x',
   nats: '2.x',

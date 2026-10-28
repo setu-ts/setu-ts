@@ -612,3 +612,17 @@ names that parameter `_waitUntil` while nothing reads it, so the command also te
 it. A project scaffolded before 0.10.0 has no such parameter, and its entry does not pass one; the
 command points at
 [docs/upgrading.md](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md) for both edits.
+
+### Styled server-rendered views
+
+`setu add view` adds `hono`, hono JSX compiler options, Tailwind 4's CLI and neutral shadcn tokens,
+view files for `/ui`, CSS build/watch scripts, and `StaticPlugin` serving `build/assets/app.css`.
+Build and source-development scripts run CSS first; run `npm run css:watch`, `bun run css:watch` or
+`deno task css:watch` separately while editing. Existing files, pins and settings are preserved and
+reported; an unfamiliar config receives manual registration instructions. `--dry-run` lists all
+planned changes and writes nothing. Workers gets dependencies, JSX and example view files only; CSS
+there belongs to Wrangler static assets. See
+[the MVC guide](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#styling-server-rendered-views).
+
+The full-stack template includes Tailwind through Vite, copied shadcn Button/Card, a fixed app shell
+and a light/dark/system toggle. Run `npx shadcn add <component>` to add more components.
