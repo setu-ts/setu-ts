@@ -51,7 +51,9 @@ export function createRedactionService(
   return {
     redactValue,
     redactRecord(record: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
-      return redactNode(record, '', 0, redactValue, { active: undefined }) as Readonly<
+      // The record itself is walked like any nested object: one traversability
+      // check, so a non-object from a JavaScript caller is returned unchanged.
+      return descend(record, '', 0, redactValue, { active: undefined }) as Readonly<
         Record<string, unknown>
       >;
     },
@@ -68,16 +70,22 @@ interface Traversal {
   active: Map<object, unknown[] | Record<string, unknown>> | undefined;
 }
 
-/** Redacts a traversable node without mutating its caller-owned graph. */
-function redactNode(
-  value: unknown,
+/**
+ * Copies and walks an object the path did not redact — the record itself, or
+ * a child whose own path matched no pattern. Its traversability is
+ * checked HERE and nowhere else: a Proxy can answer two prototype reads
+ * differently, and a caller-side check that said "plain" followed by this one
+ * saying "not plain" returned the original object — its nested secrets
+ * unredacted (PR #518 review).
+ */
+function descend(
+  direct: object,
   path: string,
   depth: number,
   redactValue: (path: string, value: unknown) => unknown,
   traversal: Traversal,
 ): unknown {
-  const direct = path === '' ? value : redactValue(path, value);
-  if (direct !== value || !isTraversable(direct)) return direct;
+  if (!isTraversable(direct)) return direct;
   if (depth >= MAX_REDACTION_DEPTH) {
     return eraseRedactor(direct, { path, classification: '' });
   }
@@ -97,17 +105,19 @@ function redactNode(
   try {
     for (const [key, child] of entries) {
       const childPath = path === '' ? String(key) : `${path}.${String(key)}`;
+      // The child's own path decides first, once. A match or a primitive is
+      // final; any other object is handed to `descend`, which alone decides
+      // whether it can be walked.
+      const decided = redactValue(childPath, child);
       let redacted: unknown;
-      if (isTraversable(child)) {
+      if (decided !== child || typeof child !== 'object' || child === null) {
+        redacted = decided;
+      } else {
         if (!entered) {
           (traversal.active ??= new Map()).set(direct, copy);
           entered = true;
         }
-        redacted = redactNode(child, childPath, depth + 1, redactValue, traversal);
-      } else {
-        // A leaf is decided by its own path alone — exactly what recursing
-        // into it would do, without the call.
-        redacted = redactValue(childPath, child);
+        redacted = descend(child, childPath, depth + 1, redactValue, traversal);
       }
       if (redacted !== child) {
         if (Array.isArray(copy)) {
@@ -162,5 +172,7 @@ function snapshotCopy(
 function isTraversable(value: unknown): value is Record<string, unknown> | unknown[] {
   if (typeof value !== 'object' || value === null) return false;
   if (Array.isArray(value)) return true;
-  return Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null;
+  // One prototype read: a Proxy may answer each read differently.
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

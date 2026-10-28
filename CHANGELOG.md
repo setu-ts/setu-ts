@@ -259,7 +259,8 @@ All notable changes to this project are documented here. The format follows
   8 KB path. Use `:name` or `*` and validate the value in the handler or with
   `@setu-ts/validation-plugin`. `router.group()` now joins its prefix and a path with exactly one
   `/`, as its documentation said, so `group('/api/', r => r.get('/:id'))` registers `/api/:id`;
-  `@setu-ts/graphql-plugin` joins a `path` ending in `/` to its SSE `stream` path the same way.
+  `@setu-ts/graphql-plugin` joins a `path` ending in `/` to its SSE `stream` and WebSocket `ws`
+  paths the same way.
 - **BREAKING — `IResponse` gains `setHeaders` (#518, 0.11.0, `@setu-ts/common`).** A required member
   that sets several headers at once, as `header()` per entry. An application class or a test fake
   typed as `IResponse` must add it — a loop over its own `header()` is enough; 23 fakes in this

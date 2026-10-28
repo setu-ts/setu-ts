@@ -167,7 +167,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
             if (wsService?.available) {
               wsAvailable = true;
               const { createWsHandlers } = await import('../transports/ws/graphql-ws-handler.ts');
-              const wsPath = wsOpt?.path ?? `${path}/ws`;
+              const wsPath = wsOpt?.path ?? transportPath(path, 'ws');
               // C6: thread apqResolver into WS handlers so hash-only subscribe
               // returns PERSISTED_QUERY_NOT_FOUND instead of a parse error.
               const wsHandlers = createWsHandlers(
@@ -193,9 +193,7 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         if (subscriptions.sse !== false) {
           const sseOpt = subscriptions.sse;
           const { createSseHandler } = await import('../transports/sse/graphql-sse-handler.ts');
-          // One '/' before `stream`: a `path` with a trailing slash would
-          // otherwise yield `/graphql//stream`, an empty segment the router refuses.
-          const ssePath = sseOpt?.path ?? `${path.endsWith('/') ? path.slice(0, -1) : path}/stream`;
+          const ssePath = sseOpt?.path ?? transportPath(path, 'stream');
           const sseHeartbeat = sseOpt?.heartbeatMs ?? 0;
           const sseHandler = createSseHandler(
             graphqlService,
@@ -236,4 +234,18 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
       logger?.info(`GraphQL plugin registered at ${path}`);
     },
   };
+}
+
+/**
+ * A subscription transport's default path: the GraphQL endpoint and the
+ * transport's segment joined by exactly one `/`. A `path` ending in `/` would
+ * otherwise yield `/graphql//ws` — a WebSocket table entry no client path
+ * reaches, and an empty segment the kernel router refuses for `/stream`.
+ *
+ * @param path - The GraphQL endpoint path
+ * @param segment - The transport's segment (`ws` or `stream`)
+ * @returns The joined path
+ */
+function transportPath(path: string, segment: string): string {
+  return `${path.endsWith('/') ? path.slice(0, -1) : path}/${segment}`;
 }

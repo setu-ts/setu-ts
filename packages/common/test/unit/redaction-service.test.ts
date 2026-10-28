@@ -352,4 +352,27 @@ describe('redactRecord reads each property once', () => {
       service.redactRecord({ method: 'GET', path: '/', status: 200, authorization: 'Bearer x' }),
     ).toEqual({ method: 'GET', path: '/', status: 200, authorization: '[Redacted]' });
   });
+
+  it('decides traversal from one prototype read, so a nested Proxy cannot hide a secret', () => {
+    const service = createRedactionService({ fields: { 'nested.token': 'secret' } });
+    let prototypeReads = 0;
+    // Answers "plain object" on its first prototype read, "not plain" after.
+    const nested = new Proxy(
+      { token: 'leaked-if-unredacted', safe: 1 },
+      {
+        getPrototypeOf: () => (prototypeReads++ === 0 ? Object.prototype : Map.prototype),
+      },
+    );
+    const output = service.redactRecord({ nested });
+    expect(JSON.stringify(output)).not.toContain('leaked-if-unredacted');
+    expect(output['nested']).toEqual({ token: '[Redacted]', safe: 1 });
+    expect(prototypeReads).toBe(1);
+  });
+
+  it('returns a non-object record from a JavaScript caller unchanged', () => {
+    const service = createRedactionService({ fields: { password: 'secret' } });
+    for (const value of [null, 'text', 7]) {
+      expect(service.redactRecord(value as never)).toBe(value);
+    }
+  });
 });
