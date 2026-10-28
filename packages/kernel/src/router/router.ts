@@ -154,8 +154,12 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
  */
 const REGEX_PARAMETER = /(?:^|\/):[^/]*\{/;
 
-/** A route parameter name: the identifier LinearRouter's `:\w+` read before 0.11.0. */
-const PARAMETER_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/**
+ * A route parameter name: LinearRouter's `:\w+` before 0.11.0, so `:1st` is a
+ * name as it was. `__proto__` is excluded: Hono stores parameters on a plain
+ * object, where that name hits the inherited setter and the value is lost.
+ */
+const PARAMETER_NAME = /^\w+$/;
 
 /**
  * Names the first part of a pattern outside the route grammar — static
@@ -182,8 +186,8 @@ function unsupportedPatternReason(path: string): string | undefined {
     if (segment.charCodeAt(0) === 58) {
       const optional = segment.endsWith('?');
       const name = segment.slice(1, optional ? -1 : undefined);
-      if (!PARAMETER_NAME.test(name)) {
-        return `the parameter name '${name}' (use letters, digits and '_', not starting with a digit)`;
+      if (!PARAMETER_NAME.test(name) || name === '__proto__') {
+        return `the parameter name '${name}' (use letters, digits and '_'; not '__proto__')`;
       }
       if (optional && index !== last) {
         return 'an optional parameter that is not the final segment';
@@ -302,7 +306,8 @@ export class Router implements IRouterApi {
     if (unsupported !== undefined) {
       throw new Error(
         `Route '${key}' uses ${unsupported}, which the router does not support. Route patterns ` +
-          `are static segments, ':name' parameters, a final optional ':name?', and '*'.`,
+          `are static segments, ':name' parameters, a final optional ':name?', '*' segments and ` +
+          `a final 'prefix*'.`,
       );
     }
     const existing = this.#entryMap.get(key);

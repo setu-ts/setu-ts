@@ -270,7 +270,7 @@ describe('patterns outside the route grammar', () => {
     ['/v*/admin', "the wildcard segment 'v*'"],
     ['/a*b', "the wildcard segment 'a*b'"],
     ['/users/:user-id', "the parameter name 'user-id'"],
-    ['/users/:1st', "the parameter name '1st'"],
+    ['/x/:__proto__', "the parameter name '__proto__'"],
     ['/u/:id?/', 'an optional parameter that is not the final segment'],
     ['/p/:id?/edit', 'an optional parameter that is not the final segment'],
     ['/search?q', "'?' outside a final optional parameter"],
@@ -294,6 +294,8 @@ describe('patterns outside the route grammar', () => {
     '/files*',
     '/:a/*',
     '/_x/:snake_case',
+    '/users/:1st',
+    '/x/:constructor',
   ])('accepts %s', (pattern) => {
     const router = new Router();
     expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).not.toThrow();
@@ -332,5 +334,19 @@ describe('group prefixes join with exactly one slash', () => {
     });
     expect(router.getAll()[0]!.pattern).toBe('/api/v1/items');
     expect(router.match('GET', '/api/v1/items')).not.toBe(null);
+  });
+});
+
+describe('parameter decoding', () => {
+  it('routes a parameter named after an Object.prototype member as develop did', () => {
+    const router = new Router();
+    router.get('/x/:constructor', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/x/abc')?.params).toEqual({ constructor: 'abc' });
+  });
+
+  it('accepts a parameter name starting with a digit, as LinearRouter did', () => {
+    const router = new Router();
+    router.get('/users/:1st', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/users/a')?.params).toEqual({ '1st': 'a' });
   });
 });

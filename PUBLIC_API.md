@@ -13107,7 +13107,7 @@ validates environment variables, and dispatches requests. Implemented in **Miles
 matching was delegated to Hono in **Milestone 22** (behind the unchanged `IRouterApi` contract).
 This section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
 
-Route patterns are static segments, `:name` parameters (names matching `[A-Za-z_][A-Za-z0-9_]*`), a
+Route patterns are static segments, `:name` parameters (a word, `\w+`, other than `__proto__`), a
 final optional `:name?`, `*` segments and a final `prefix*`. Since 0.11.0 anything else is refused
 at registration with an error naming the unsupported part — a Hono regular-expression parameter
 (`:name{…}`, whose `/`-spanning form `TrieRouter` matches in time quadratic in the path length), an

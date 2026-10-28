@@ -193,7 +193,9 @@ export function GraphqlPlugin(options: GraphqlPluginOptions): IPlugin {
         if (subscriptions.sse !== false) {
           const sseOpt = subscriptions.sse;
           const { createSseHandler } = await import('../transports/sse/graphql-sse-handler.ts');
-          const ssePath = sseOpt?.path ?? `${path}/stream`;
+          // One '/' before `stream`: a `path` with a trailing slash would
+          // otherwise yield `/graphql//stream`, an empty segment the router refuses.
+          const ssePath = sseOpt?.path ?? `${path.endsWith('/') ? path.slice(0, -1) : path}/stream`;
           const sseHeartbeat = sseOpt?.heartbeatMs ?? 0;
           const sseHandler = createSseHandler(
             graphqlService,
