@@ -26,10 +26,11 @@ the shell resets its content scroll position on pathname changes.
 Rerun `setu add view` to fill missing view setup in an existing project; a project whose
 `setu.config.ts` already registers `ViewPlugin()` also gets the example `/ui` route. It preserves
 existing files, pins, compiler choices and CSS tasks and prints what needs manual work; review every
-note. Builds and source-development starts run CSS once; run the separate CSS watcher while editing.
-Workers receives only the dependency/JSX/example-view pieces; use Wrangler static assets for CSS.
-See [styling server-rendered views](./mvc.md#styling-server-rendered-views). If adding a CSP, allow
-the static inline theme scripts by hash or nonce.
+note. A `build` or `start:dev` script the command creates or prefixes runs CSS once first; one that
+already called `css` is left as it was, so check its order. Run the separate CSS watcher while
+editing. Workers receives only the dependency/JSX/example-view pieces; use Wrangler static assets
+for CSS. See [styling server-rendered views](./mvc.md#styling-server-rendered-views). If adding a
+CSP, allow the static inline theme scripts by hash or nonce.
 
 ### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
 

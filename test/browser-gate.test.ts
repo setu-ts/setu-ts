@@ -96,6 +96,6 @@ describe('dedicated browser gate', () => {
     expect(browserJob).toContain('oven-sh/setup-bun@v2');
     expect(browserJob).toContain('bun-version: 1.4.0');
     expect(browserJob).toContain('denoland/setup-deno@v2');
-    expect(browserJob).toContain('deno-version: 2.9.5');
+    expect(browserJob).toContain('deno-version: 2.9.6');
   });
 });

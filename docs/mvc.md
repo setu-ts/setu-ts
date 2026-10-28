@@ -452,8 +452,9 @@ it prints the plugin and route registrations to add manually. Review those notes
 
 On Node, run `npm install`, then `npm run build` and `npm start`. Bun uses `bun install`,
 `bun run build` and `bun start`; Deno uses `deno install`, `deno task build` and `deno task start`.
-The build runs `css` first, emitting `build/assets/app.css`; `StaticPlugin` serves it at
-`/assets/app.css`. The source-development start also builds CSS once. In another terminal, run
+A `build` or `start:dev` script the command creates or prefixes runs `css` first, emitting
+`build/assets/app.css`; `StaticPlugin` serves it at `/assets/app.css`. A script that already called
+`css` is left as it was, so check that it runs `css` before the build. In another terminal, run
 `npm run css:watch`, `bun run css:watch`, or `deno task css:watch` while editing views. There is no
 combined watcher command. The generated production image already copies `build/`.
 

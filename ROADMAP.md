@@ -15637,7 +15637,9 @@ must reach the M120 image.
       runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
       styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
       cannot do in server-rendered views
-- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
+- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash — the full-stack template on
+      every runtime it supports, `setu add view` on Node, Bun and Deno (Workers views carry no
+      Tailwind setup)
 - [x] Template README and `docs/` entry; CHANGELOG
 - [x] **ROADMAP.md** — this section and the Progress Tracking row `123`
 

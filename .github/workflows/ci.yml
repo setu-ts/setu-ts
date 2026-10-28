@@ -48,7 +48,7 @@ jobs:
           bun-version: 1.4.0
       - uses: denoland/setup-deno@v2
         with:
-          deno-version: 2.9.5
+          deno-version: 2.9.6
       - name: Install Chromium for the pinned browser suite
         run: npx --yes playwright@1.63.0 install --with-deps chromium
       - name: Browser gate (example and fresh scaffold)
