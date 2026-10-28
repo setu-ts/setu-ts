@@ -350,3 +350,48 @@ describe('parameter decoding', () => {
     expect(router.match('GET', '/users/a')?.params).toEqual({ '1st': 'a' });
   });
 });
+
+// Security re-audit N6: TrieRouter keeps the parameters after a `*` segment on
+// a plain object, so a developer's name was read back as an inherited member.
+// Parameters reach Hono under the kernel's own names; every Object.prototype
+// member name (but `__proto__`, refused at registration) routes in every shape.
+describe('parameter names that are Object.prototype members', () => {
+  const NAMES = Object.getOwnPropertyNames(Object.prototype).filter((name) => name !== '__proto__');
+  const SHAPES: readonly (readonly [
+    string,
+    (name: string) => string,
+    string,
+    Record<string, string>,
+  ])[] = [
+    ['after * (last)', (n) => `/files/*/:${n}`, '/files/a/b', { v: 'b' }],
+    ['after a leading *', (n) => `/*/:${n}`, '/a/b', { v: 'b' }],
+    ['after * then static', (n) => `/*/:${n}/s`, '/a/b/s', { v: 'b' }],
+    ['second after *', (n) => `/*/:a/:${n}`, '/x/y/z', { a: 'y', v: 'z' }],
+    ['plain', (n) => `/x/:${n}`, '/x/b', { v: 'b' }],
+  ];
+
+  it.each(
+    SHAPES.flatMap(([shape, pattern, path, expected]) =>
+      NAMES.map((name) => [name, shape, pattern(name), path, expected] as const),
+    ),
+  )('routes :%s %s', (name, _shape, pattern, path, expected) => {
+    const router = new Router();
+    router.get(pattern, () => ({ __handlerResult: true }) as never);
+    const want = Object.fromEntries(
+      Object.entries(expected).map(([key, value]) => [key === 'v' ? name : key, value]),
+    );
+    expect(router.match('GET', path)?.params).toEqual(want);
+  });
+
+  it('keeps the first value when two parameters share a name', () => {
+    const router = new Router();
+    router.get('/x/:id/:id', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/x/1/2')?.params).toEqual({ id: '1' });
+  });
+
+  it('leaves an omitted optional parameter out of params', () => {
+    const router = new Router();
+    router.get('/u/:id?', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/u')?.params).toEqual({});
+  });
+});

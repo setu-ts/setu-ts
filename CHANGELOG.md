@@ -219,8 +219,8 @@ All notable changes to this project are documented here. The format follows
   registration, naming the part that is not supported: a Hono regular-expression parameter
   (`:name{…}`); an empty segment (`/api//:id`); a `*` inside a segment that is not the final one
   (`/v*/admin`); a parameter name that is not a word (`\w+`, as `LinearRouter` read it: `:user-id`)
-  or is `__proto__`, which Hono's parameter object cannot carry and which answered every request
-  with a 500; an optional parameter that is not last (`/p/:id?/edit`); and `?` outside a final
+  or is `__proto__`, which would hit the prototype setter of `ctx.params` rather than become a
+  parameter; an optional parameter that is not last (`/p/:id?/edit`); and `?` outside a final
   optional parameter. None was documented, and each routed differently under `TrieRouter` than under
   `LinearRouter` — a `:name{…}` constraint that can match `/` (`/files/:path{.+}/download`) also
   took time quadratic in the path length, about 300 ms for an 8 KB path. Use `:name` or `*` and
@@ -369,9 +369,12 @@ All notable changes to this project are documented here. The format follows
   static route registered with a trailing slash answers only that spelling (`/reports` does not
   reach `/reports/`), and a parameter route's trailing slash is not significant (`/users/:id/`
   answers `/users/42`). For a slash-terminated request the kernel ranks the routes matching both
-  spellings together, so a wildcard never wins over the specific route. A pattern written without a
-  leading slash (`admin`) is the same route as `/admin`, and registering both is refused as a
-  duplicate. Measured on Bun: the bare kernel matched faster in five of six alternating passes.
+  spellings together, so a wildcard never wins over the specific route. Route parameters reach Hono
+  under the kernel's own names and are mapped back, so a parameter named after an `Object.prototype`
+  member (`:constructor`, `:toString`) routes like any other, including after a `*` segment. A
+  pattern written without a leading slash (`admin`) is the same route as `/admin`, and registering
+  both is refused as a duplicate. Measured on Bun: the bare kernel matched faster in five of six
+  alternating passes.
 
 - **Per-request work on the request path (0.11.0, `@setu-ts/kernel`, `@setu-ts/common`,
   `@setu-ts/runtime`, `@setu-ts/metrics-plugin`, `@setu-ts/http-security-plugin`).** From a Bun CPU

@@ -44,6 +44,13 @@ export interface RouteEntry {
    * route registered after it.
    */
   wildcards: number;
+  /**
+   * The developer's parameter names, in pattern order. Hono sees the pattern
+   * with each parameter renamed to the kernel's own `p0`, `p1`, …, and
+   * {@linkcode decodeParams} maps the captured values back to these names, so
+   * no developer-chosen name is ever a key on Hono's parameter object.
+   */
+  paramNames: readonly string[];
   /** Plugin that registered this route, if it was registered by a plugin. */
   owner?: string;
 }
@@ -117,18 +124,22 @@ const EMPTY_PARAMS: Record<string, string> = Object.freeze({});
  * @param raw - Hono's raw param record
  * @returns The decoded params, or `null` when a value carries a malformed escape
  */
-function decodeParams(raw: Record<string, string>): Record<string, string> | null {
+function decodeParams(
+  raw: Record<string, string>,
+  names: readonly string[],
+): Record<string, string> | null {
   let params: Record<string, string> | undefined;
-  // `Object.keys`, not `for...in`: own enumerable properties only. Hono
-  // currently builds its params with a null prototype, so `for...in` happens
-  // to be equivalent — verified, not assumed — but that is an undocumented
-  // internal of a dependency, and if it ever became a `{}` literal a polluted
-  // `Object.prototype` would start injecting route params on every match. The
-  // `Object.entries` form this replaced was immune by construction; keeping
-  // that property costs nothing, since `keys` allocates one array where
-  // `entries` allocated one array plus a pair per key.
-  for (const key of Object.keys(raw)) {
-    const value = raw[key]!;
+  // Only the kernel's own keys are read, by index, so the shape of Hono's
+  // object — null-prototype or a plain `{}`, which TrieRouter uses after a
+  // `*` segment — cannot matter: an inherited `constructor` or `toString`
+  // there answered every request with a 500 (security re-audit N6).
+  for (let index = 0; index < names.length; index++) {
+    const value = raw[internalParameterKey(index)];
+    // An optional parameter the request omitted has no value.
+    if (value === undefined) continue;
+    const name = names[index]!;
+    // Two parameters sharing a name keep the first value, as before.
+    if (params !== undefined && Object.hasOwn(params, name)) continue;
     let decoded: string;
     if (value.includes('%')) {
       try {
@@ -139,9 +150,47 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
     } else {
       decoded = value;
     }
-    (params ??= {})[key] = decoded;
+    (params ??= {})[name] = decoded;
   }
   return params ?? EMPTY_PARAMS;
+}
+
+/** The kernel's own parameter keys, built once per index rather than per request. */
+const INTERNAL_PARAMETER_KEYS: string[] = [];
+
+/**
+ * The key a route's `index`-th parameter has on Hono's parameter object.
+ *
+ * @param index - The parameter's position in its pattern
+ * @returns `p` followed by the index
+ */
+function internalParameterKey(index: number): string {
+  return (INTERNAL_PARAMETER_KEYS[index] ??= `p${index}`);
+}
+
+/**
+ * Renames every `:name` parameter in a pattern to the kernel's own key, keeping
+ * a final `?`, and returns the developer's names in pattern order.
+ *
+ * @param pattern - The pattern with a leading slash, already inside the grammar
+ * @returns The renamed pattern and the original names
+ */
+function internalParameters(pattern: string): {
+  readonly pattern: string;
+  readonly names: readonly string[];
+} {
+  const names: string[] = [];
+  const renamed = pattern
+    .split('/')
+    .map((segment) => {
+      if (segment.charCodeAt(0) !== 58) return segment;
+      const optional = segment.endsWith('?');
+      const key = internalParameterKey(names.length);
+      names.push(segment.slice(1, optional ? -1 : undefined));
+      return optional ? `:${key}?` : `:${key}`;
+    })
+    .join('/');
+  return { pattern: renamed, names };
 }
 
 /**
@@ -156,8 +205,9 @@ const REGEX_PARAMETER = /(?:^|\/):[^/]*\{/;
 
 /**
  * A route parameter name: LinearRouter's `:\w+` before 0.11.0, so `:1st` is a
- * name as it was. `__proto__` is excluded: Hono stores parameters on a plain
- * object, where that name hits the inherited setter and the value is lost.
+ * name as it was. `__proto__` is excluded: the kernel builds `ctx.params` as a
+ * plain object, where that name would hit the inherited setter rather than
+ * become a parameter.
  */
 const PARAMETER_NAME = /^\w+$/;
 
@@ -322,6 +372,7 @@ export class Router implements IRouterApi {
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
     const owner = this.#owner();
     const segments = parsePattern(path);
+    const internal = internalParameters(withLeadingSlash(path));
     // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
     // the pattern once here and keep only the static count the tie-break reads.
     const entry: RouteEntry = {
@@ -331,6 +382,7 @@ export class Router implements IRouterApi {
       index: this.#index++,
       statics: staticSegmentCount(segments),
       wildcards: wildcardSegmentCount(segments),
+      paramNames: internal.names,
       ...(owner === undefined ? {} : { owner }),
     };
     this.#routes.push(entry);
@@ -371,7 +423,7 @@ export class Router implements IRouterApi {
     }
     (this.#hono as unknown as HonoOn).on(
       method.toUpperCase(),
-      honoPattern(withLeadingSlash(path)),
+      honoPattern(internal.pattern),
       stubHandler as HonoOnHandler,
     );
   }
@@ -482,7 +534,7 @@ export class Router implements IRouterApi {
     if (candidatesRaw.length === 1) {
       const [handlerRouteTuple, rawParams] = candidatesRaw[0]!;
       const entry = (handlerRouteTuple[0] as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY];
-      const params = decodeParams(rawParams);
+      const params = decodeParams(rawParams, entry.paramNames);
       // A malformed escape means this route does not match, mirroring the
       // multi-candidate path's `continue` when every candidate is dropped.
       return params === null ? null : { definition: entry.definition, params, entry };
@@ -514,7 +566,7 @@ export class Router implements IRouterApi {
         continue;
       }
       seen.add(entry);
-      const params = decodeParams(rawParams as Record<string, string>);
+      const params = decodeParams(rawParams as Record<string, string>, entry.paramNames);
       if (params === null) {
         continue;
       }
