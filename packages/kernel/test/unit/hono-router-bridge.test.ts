@@ -114,6 +114,15 @@ describe('Hono router bridge — trailing slash parity', () => {
     expect(result).not.toBe(null);
     expect(result!.params).toEqual({ id: '123' });
   });
+
+  it('a route registered with a trailing slash matches with and without it', () => {
+    const router = new Router();
+    const def = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/api/docs/', def);
+    expect(router.match('GET', '/api/docs/')?.definition).toBe(def);
+    expect(router.match('GET', '/api/docs')?.definition).toBe(def);
+    expect(router.getAll()[0]!.pattern).toBe('/api/docs/');
+  });
 });
 
 // C1 regression — same-path-different-method must return correct definition identity

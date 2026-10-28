@@ -144,6 +144,19 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
   return params ?? EMPTY_PARAMS;
 }
 
+/**
+ * Hono's `strict: false` rule: drop one trailing slash from any path longer
+ * than the root. Applied to both the registered pattern and the request path,
+ * because the kernel calls `router.match()` directly and so bypasses Hono's
+ * own `getPathNoStrict`; LinearRouter tolerated the slash, TrieRouter does not.
+ *
+ * @param path - a route pattern or request path
+ * @returns the path without one trailing slash, or unchanged
+ */
+function dropTrailingSlash(path: string): string {
+  return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : path;
+}
+
 export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
@@ -229,7 +242,11 @@ export class Router implements IRouterApi {
     interface HonoOn {
       on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
     }
-    (this.#hono as unknown as HonoOn).on(method.toUpperCase(), path, stubHandler as HonoOnHandler);
+    (this.#hono as unknown as HonoOn).on(
+      method.toUpperCase(),
+      dropTrailingSlash(path),
+      stubHandler as HonoOnHandler,
+    );
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -307,14 +324,7 @@ export class Router implements IRouterApi {
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
     // Each candidate: [[handler, routeInfo], params] where routeInfo = {basePath, path, method}.
-    // `strict: false` is applied by Hono's `fetch` path (getPathNoStrict), which
-    // this direct router call bypasses; LinearRouter happened to accept one
-    // trailing slash, TrieRouter does not. Apply Hono's own rule here: drop one
-    // trailing slash from any path longer than the root.
-    const honoMatch = this.#hono.router.match(
-      method,
-      path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : path,
-    );
+    const honoMatch = this.#hono.router.match(method, dropTrailingSlash(path));
 
     // Extract candidates from honoMatch[0].
     type HonoCandidate = [
