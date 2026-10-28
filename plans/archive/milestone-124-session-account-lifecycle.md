@@ -1,6 +1,6 @@
 # Milestone 124 — Session and Account Lifecycle (`@setu-ts/auth-plugin`)
 
-> **Status:** Planning. Branch: `feat/m124-session-account-lifecycle`. `main` is protected — all
+> **Status:** Complete. Branch: `feat/m124-session-account-lifecycle`. `main` is protected — all
 > work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope
@@ -164,7 +164,7 @@ way to end every session of one user. The boundary is `auth-plugin`'s session ar
 - **Decision:** `packages/auth-plugin/test/e2e/session-lifecycle-e2e.test.ts` boots
   `createApplication` with `RuntimePlugin`, `SessionPlugin` (store strategy, memory store) and
   `AuthPlugin({ signIn: { providers: [], refreshPrincipal, sessionStamp } })` over an in-memory user
-  table, and drives it with `app.inject()`: (a) sign in; deactivate the user; the next request is
+  table, and drives it with `app.fetch()`: (a) sign in; deactivate the user; the next request is
   anonymous; (b) an unauthenticated navigation to a `requireAuth({ signInPage: '/login' })` route
   gets `302 /login?returnTo=…` while the same path as an API call gets 401 Problem Details; (c) two
   sessions of one user both answer authenticated, one bump of the user's `sessionVersion` makes both
@@ -204,17 +204,18 @@ an optional member; the `signIn` refusal is relaxed, not tightened. Ships in min
 
 ## 5. Implementation files
 
-| File                                                                                                                                      | Purpose                                                                   |
-| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| `packages/auth-plugin/src/index.ts`                                                                                                       | export `RequireAuthOptions`, `SessionStamp`, `safeReturnTo`               |
-| `packages/auth-plugin/src/interfaces/index.ts`                                                                                            | `SessionStamp`, `SignInConfig.sessionStamp`, `RequireAuthOptions`         |
-| `packages/auth-plugin/src/sign-in/config.ts`                                                                                              | relax the refusal; validate and compile `sessionStamp`                    |
-| `packages/auth-plugin/src/sign-in/auth-session-service.ts`                                                                                | record `stamp` at sign-in and promotion; parse it                         |
-| `packages/auth-plugin/src/strategies/auth-session-strategy.ts`                                                                            | per-request stamp compare                                                 |
-| `packages/auth-plugin/src/plugin/auth-plugin.ts`                                                                                          | pass `sessionStamp` to the service and the strategy                       |
-| `packages/auth-plugin/src/guards/index.ts`                                                                                                | `requireAuth(options)`, navigation detection, redirect, `Vary`            |
-| `packages/auth-plugin/README.md`, `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `packages/session-plugin/README.md` | docs (§2, §3.6)                                                           |
-| `CLAUDE.md` "Current status", ROADMAP row `124`, `plans/archive/milestone-124-session-account-lifecycle.md`                               | status flip with the PR number and the plan archived, in the milestone PR |
+| File                                                                                                                                      | Purpose                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `packages/auth-plugin/src/index.ts`                                                                                                       | export `RequireAuthOptions`, `SessionStamp`, `safeReturnTo`                                                  |
+| `packages/auth-plugin/src/interfaces/index.ts`                                                                                            | `SessionStamp`, `SignInConfig.sessionStamp`, `RequireAuthOptions`                                            |
+| `packages/auth-plugin/src/sign-in/config.ts`                                                                                              | relax the refusal; validate and compile `sessionStamp`                                                       |
+| `packages/auth-plugin/src/sign-in/auth-session-service.ts`                                                                                | record `stamp` at sign-in and promotion; parse it                                                            |
+| `packages/auth-plugin/src/strategies/auth-session-strategy.ts`                                                                            | per-request stamp compare                                                                                    |
+| `packages/auth-plugin/src/sign-in/session-stamp.ts`                                                                                       | internal: the stamp digest and the fail-closed constant-time compare, shared by the service and the strategy |
+| `packages/auth-plugin/src/plugin/auth-plugin.ts`                                                                                          | pass `sessionStamp` to the service and the strategy                                                          |
+| `packages/auth-plugin/src/guards/index.ts`                                                                                                | `requireAuth(options)`, navigation detection, redirect, `Vary`                                               |
+| `packages/auth-plugin/README.md`, `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, `ROADMAP.md`, `packages/session-plugin/README.md` | docs (§2, §3.6)                                                                                              |
+| `CLAUDE.md` "Current status", ROADMAP row `124`, `plans/archive/milestone-124-session-account-lifecycle.md`                               | status flip with the PR number and the plan archived, in the milestone PR                                    |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -225,7 +226,9 @@ an optional member; the `signIn` refusal is relaxed, not tightened. Ships in min
 | `test/integration/auth-session-strategy.test.ts`                                                          | `strategies/auth-session-strategy.ts`, `plugin/auth-plugin.ts` | match / mismatch / throw / non-string / both-null / legacy; digest compared, not the raw stamp; refresh + stamp order; password-only `refreshPrincipal` `null` → anonymous                                                             |
 | `test/unit/guards.test.ts`, `test/unit/guard-format.test.ts`, `test/unit/guard-security-metadata.test.ts` | `guards/index.ts`                                              | §3.2 table as data; `returnTo`; existing query kept; construction refusal; `Vary` appended after an existing `Vary: Origin`; the `signInPage` path itself answered 401; short-circuit; no-options output unchanged; metadata unchanged |
 | `test/unit/return-to.test.ts`                                                                             | `sign-in/return-to.ts`                                         | unchanged behaviour, imported from the barrel                                                                                                                                                                                          |
-| `test/e2e/session-lifecycle-e2e.test.ts`                                                                  | end to end                                                     | §3.5 (a)–(d) through `app.inject()`                                                                                                                                                                                                    |
+| `test/unit/session-stamp.test.ts`                                                                         | `sign-in/session-stamp.ts`                                     | digest (base64url SHA-256, null passthrough, malformed refused); compare through `constantTimeEquals` (recorded by a module mock); throw/reject/malformed → no match                                                                   |
+| `test/integration/require-auth-sign-in-page.test.ts`                                                      | `guards/index.ts`                                              | §3.2 navigation table as data through a real kernel; `Location`, `Vary` after `Vary: Origin`, own-path 401, query/fragment kept, invalid `signInPage` refused                                                                          |
+| `test/e2e/session-lifecycle-e2e.test.ts`                                                                  | end to end                                                     | §3.5 (a)–(d) through `app.fetch()`                                                                                                                                                                                                     |
 
 ## 7. Verification gates
 

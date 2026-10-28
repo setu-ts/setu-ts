@@ -22,6 +22,7 @@ import type {
   PasskeyOptions,
   ProviderTokens,
   RefreshPrincipal,
+  SessionStamp,
   SignInConfig,
   TokenEndpointAuth,
 } from '../interfaces/index.ts';
@@ -108,6 +109,11 @@ export interface CompiledSignIn {
    * have to re-read the raw option.
    */
   readonly refreshPrincipal: RefreshPrincipal | null;
+  /**
+   * The session-stamp reader handed to the auth-session service and strategy,
+   * or `null` when no stamp is recorded or compared.
+   */
+  readonly sessionStamp: SessionStamp | null;
   /**
    * The MFA policy, or `null` when no second factor is required.
    */
@@ -308,12 +314,13 @@ function compileOAuth2(
  *
  * @param config - The configured value
  * @returns The compiled configuration, with route paths and defaults applied
- * @throws {AuthPluginConfigurationError} On an empty provider list with no `mfa`, a duplicate or
+ * @throws {AuthPluginConfigurationError} On a non-array provider list, a duplicate or
  *   malformed name, a bad base path, a credential/secret mismatch, a `redirectUri`
  *   that does not end with the provider's callback path, a `failureRedirect` that is
  *   not same-origin, an `oidc` provider without the `openid` scope, an `oauth2`
- *   provider with `rpInitiatedLogout`, or more than one provider configured for
- *   RP-initiated logout, or an invalid `mfa` option (see {@linkcode compileMfa})
+ *   provider with `rpInitiatedLogout`, more than one provider configured for
+ *   RP-initiated logout, a non-function `refreshPrincipal` or `sessionStamp`, or an
+ *   invalid `mfa` option (see {@linkcode compileMfa})
  */
 export function compileSignIn(config: SignInConfig): CompiledSignIn {
   const configured = config.basePath ?? DEFAULT_SIGN_IN_BASE_PATH;
@@ -326,17 +333,12 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
   }
   // `/` means no prefix at all; keeping it literal would build `//acme/login`.
   const basePath = configured === '/' ? '' : configured;
-  // An empty list is a mistake UNLESS another sign-in method is configured: a
-  // password-only application (`mfa` set) signs in through
-  // IAuthSessionService.signIn itself, and a passkey-only application signs in
-  // through the passkey ceremony routes.
-  if (
-    !Array.isArray(config.providers) ||
-    (config.providers.length === 0 && config.mfa === undefined && config.passkeys == null)
-  ) {
+  // An empty list is a password-only sign-in: the application records its own
+  // principal through IAuthSessionService.signIn, and `signIn` still supplies
+  // the per-request refreshPrincipal and sessionStamp checks (M124 §3.1).
+  if (!Array.isArray(config.providers)) {
     throw new AuthPluginConfigurationError(
-      'auth-plugin: signIn needs at least one provider, signIn.passkeys for a passkey sign-in, ' +
-        'or signIn.mfa for a password-only sign-in',
+      'auth-plugin: signIn.providers must be an array; pass [] for a password-only sign-in',
     );
   }
 
@@ -390,6 +392,9 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
       'auth-plugin: signIn.refreshPrincipal must be a function',
     );
   }
+  if (config.sessionStamp !== undefined && !isFunction(config.sessionStamp)) {
+    throw new AuthPluginConfigurationError('auth-plugin: signIn.sessionStamp must be a function');
+  }
 
   return {
     basePath,
@@ -398,6 +403,7 @@ export function compileSignIn(config: SignInConfig): CompiledSignIn {
     logoutPath: `${basePath}/logout`,
     rpLogoutProvider: rpLogoutProviders[0] ?? null,
     refreshPrincipal: config.refreshPrincipal ?? null,
+    sessionStamp: config.sessionStamp ?? null,
     mfa: compileMfa(config.mfa),
     passkeys: config.passkeys ?? null,
   };

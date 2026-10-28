@@ -22,6 +22,8 @@ import type {
 import type { RefreshPrincipal } from '../interfaces/index.ts';
 import { AUTH_SESSION_KEY, parseAuthSessionRecord } from '../sign-in/auth-session-service.ts';
 import type { AuthSessionRecord } from '../sign-in/auth-session-service.ts';
+import { sessionStampMatches } from '../sign-in/session-stamp.ts';
+import type { SessionStampCheck } from '../sign-in/session-stamp.ts';
 
 /** Options for {@linkcode AuthSessionStrategy}. */
 export interface AuthSessionStrategyOptions {
@@ -33,6 +35,11 @@ export interface AuthSessionStrategyOptions {
    * force, which is why this is opt-in.
    */
   readonly refreshPrincipal?: RefreshPrincipal;
+  /**
+   * The session stamp (`signIn.sessionStamp`), compared after the principal is
+   * resolved. Absent means no stamp is compared.
+   */
+  readonly sessionStamp?: SessionStampCheck;
 }
 
 /**
@@ -60,7 +67,8 @@ function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
  *
  * Returns `null` — leaving the chain to continue — when the request carries no
  * usable session, when the session holds no record, when the record is
- * malformed, or when `refreshPrincipal` returns `null` (revocation).
+ * malformed, when `refreshPrincipal` returns `null` (revocation), or when the
+ * user's session stamp no longer matches the one recorded at sign-in.
  */
 export class AuthSessionStrategy implements IAuthStrategy {
   /** Strategy name for identification. */
@@ -70,13 +78,16 @@ export class AuthSessionStrategy implements IAuthStrategy {
   // `| undefined` explicitly: the project compiles with exactOptionalPropertyTypes,
   // so assigning an optional option to an optional field needs the wider type.
   readonly #refreshPrincipal: RefreshPrincipal | undefined;
+  readonly #sessionStamp: SessionStampCheck | undefined;
 
   /**
-   * @param options - The session service and the optional per-request re-read
+   * @param options - The session service, the optional per-request re-read and
+   *   the optional session stamp
    */
   constructor(options: AuthSessionStrategyOptions) {
     this.#sessionService = options.sessionService;
     this.#refreshPrincipal = options.refreshPrincipal;
+    this.#sessionStamp = options.sessionStamp;
   }
 
   /**
@@ -94,22 +105,35 @@ export class AuthSessionStrategy implements IAuthStrategy {
     if (record === null) {
       return null;
     }
+    const principal = await this.#resolve(record);
+    if (principal === null) {
+      return null;
+    }
+    // The stamp is compared against the principal the request resolved, so a
+    // `refreshPrincipal` that loaded the user can carry the stamp in a claim.
+    // A mismatch, a throw or a malformed value makes the request anonymous.
+    if (
+      this.#sessionStamp !== undefined &&
+      !(await sessionStampMatches(this.#sessionStamp, principal, record.stamp ?? null))
+    ) {
+      return null;
+    }
+    return withAmr(principal, record);
+  }
+
+  /** The record's principal, re-read through `refreshPrincipal` when configured. */
+  async #resolve(record: AuthSessionRecord): Promise<IPrincipal | null> {
     if (this.#refreshPrincipal === undefined) {
-      return withAmr(record.principal, record);
+      return record.principal;
     }
     // A re-read that throws is treated as "anonymous" rather than propagating:
     // a failing identity store must not turn every signed-in request into a 500,
     // and it must not fall back to the stale snapshot either — that would make
     // the revocation check fail open.
-    let refreshed: IPrincipal | null;
     try {
-      refreshed = await this.#refreshPrincipal(record.principal);
+      return await this.#refreshPrincipal(record.principal);
     } catch {
       return null;
     }
-    if (refreshed === null) {
-      return null;
-    }
-    return withAmr(refreshed, record);
   }
 }

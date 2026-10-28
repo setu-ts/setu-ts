@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`).**
+  `signIn: { providers: [] }` is accepted without `mfa` or `passkeys`, so a password-only
+  application gets `refreshPrincipal`'s per-request re-check (V10-65). `requireAuth({ signInPage })`
+  (`RequireAuthOptions`) answers an unauthenticated browser navigation with `302` to the sign-in
+  page carrying `returnTo`, and every other request with the existing `401`; both answers append
+  `Accept`, `Sec-Fetch-Mode` and `X-Requested-With` to `Vary` (V10-66). `signIn.sessionStamp`
+  (`SessionStamp`) reads a stamp from the application's user record: its SHA-256 digest is recorded
+  at sign-in and compared on every request in constant time, so changing the stamp ends every
+  session of that user on both session strategies. `safeReturnTo` is exported for an application's
+  own login handler. See
+  [ending every session of a user](packages/auth-plugin/README.md#ending-every-session-of-a-user)
+  and [upgrading](docs/upgrading.md#session-and-account-lifecycle-m124-0110-setu-tsauth-plugin).
+
 - **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
   Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
   fixed header/sidebar with scrolling content. `components.json` supports adding more components;

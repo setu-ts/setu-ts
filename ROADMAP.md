@@ -15647,9 +15647,9 @@ must reach the M120 image.
 
 ## Milestone 124: Session and Account Lifecycle
 
-**Package(s):** `packages/auth-plugin`, `packages/session-plugin`, `packages/common` (a per-user
-session stamp contract); docs. The CLI is touched only if the plan scaffolds the session-list screen
-(see "Named, not taken").
+**Package(s):** `packages/auth-plugin`; docs, including the `session-plugin` README. `common` and
+`session-plugin` code are unchanged: the stamp lives on the application's user record (see "Shipped
+design"), so no per-user session stamp contract was needed. The CLI is not touched.
 
 **Source:** the maintainer's review of a production React Router application whose API
 authentication uses the cookie session rather than JWTs (2026-10-24). The application keeps a
@@ -15664,7 +15664,9 @@ framework's responsibility and missing; three are application or generator mater
 **V10-65**, **V10-66**.
 
 **The framework comparison below is from knowledge, not measured** (the M97 precedent). The plan
-re-checks each framework's current behaviour before relying on it.
+re-checked each framework's current behaviour against its source before relying on it; its table
+supersedes this one where they differ (ASP.NET Core and Spring both answer an
+`X-Requested-With: XMLHttpRequest` request with 401 rather than the redirect).
 
 | Concern                                                            | Laravel                               | Django                                                         | Rails                                        | ASP.NET Core Identity          | Spring Security            | Setu-TS today                                                          |
 | ------------------------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------- |
@@ -15706,6 +15708,24 @@ compared on each request's re-check; bumping it invalidates every session at onc
   (`signOutEverywhere(userId)` or similar). How it behaves on the cookie strategy, where the session
   itself cannot be destroyed server-side.
 
+**Shipped design** (maintainer decisions 2026-10-29, recorded in the plan):
+
+- **1:** the `signIn` refusal is lifted — `providers: []` without `mfa` or `passkeys` is a
+  password-only sign-in. `AuthPlugin({ session })` stays synchronous and points to `signIn`; one
+  mechanism re-checks.
+- **2:** an option on the existing guard, `requireAuth({ signInPage })`. A navigation is a
+  `GET`/`HEAD` that is not `X-Requested-With: XMLHttpRequest` and carries `Sec-Fetch-Mode: navigate`
+  (or, without it, an `Accept` naming `text/html` or `application/xhtml+xml`; a bare `*/*` is not
+  enough). It gets `302` to the page with `returnTo` through `safeReturnTo`, now exported;
+  everything else keeps the 401, and both answers append to `Vary`.
+- **3:** the stamp lives on the application's user record, as in Laravel, Django, Devise and ASP.NET
+  Core: `signIn.sessionStamp(principal)` is read at sign-in, its SHA-256 digest recorded, and the
+  digest of the current value compared on every request in constant time. **This replaces the
+  suggested `common` port and stores**, which would have duplicated state the application already
+  owns. **No framework bump API ships:** the application bumps its own stamp (a one-line update),
+  and signs the current session in again to keep it. It works on the cookie strategy because the
+  compare, not a server-side delete, is what ends the session.
+
 **Named, not taken.** These are application or generator material; the reviewed application is right
 to own them, and other frameworks mostly leave them to packages or starter kits:
 
@@ -15719,14 +15739,14 @@ to own them, and other frameworks mostly leave them to packages or starter kits:
 
 **Deliverables:**
 
-- [ ] Items 1–3 implemented, each with tests that reproduce the gap first
-- [ ] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
+- [x] Items 1–3 implemented, each with tests that reproduce the gap first
+- [x] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
       authenticating on the next request; a page request redirected to sign-in with a safe return
       path while the same unauthenticated API request answers 401; and a stamp bump signing out two
       concurrent sessions of one user on the store strategy
-- [ ] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
+- [x] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
       the three "named, not taken" items or a stated decision not to write them
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `124`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `124`
 
 ---
 
@@ -16162,5 +16182,5 @@ patch by construction and gains nothing new here.
 | 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
-| 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
+| 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |

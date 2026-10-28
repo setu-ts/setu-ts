@@ -24,6 +24,8 @@ import type {
   SignInOutcome,
 } from '@setu-ts/common';
 import { readGrant } from '../scoped/model.ts';
+import { digestSessionStamp } from './session-stamp.ts';
+import type { SessionStampCheck } from './session-stamp.ts';
 
 /** The reserved session key holding the signed-in record. */
 export const AUTH_SESSION_KEY = '__setu_auth_principal';
@@ -54,6 +56,9 @@ export const SCOPED_GRANTS_SESSION_KEY = '__setu_auth_scoped_grants';
 
 /** The field of a pending record carrying grants resolved at the first factor. */
 const PENDING_GRANTS_FIELD = 'scopedGrants';
+
+/** The field of a pending record carrying the stamp digest read at the first factor. */
+const PENDING_STAMP_FIELD = 'stamp';
 
 /** What the session holds under {@linkcode SCOPED_GRANTS_SESSION_KEY}. */
 interface StoredGrants {
@@ -98,6 +103,23 @@ export interface AuthSessionRecord {
   readonly methods: readonly AuthMethod[];
   /** When the sign-in happened, from `runtime.now()`, in milliseconds. */
   readonly at: number;
+  /**
+   * The SHA-256 digest of the session stamp read at sign-in, or `null` when
+   * the user had none. Written only when `signIn.sessionStamp` is configured;
+   * a record without it parses as `null`.
+   */
+  readonly stamp?: string | null;
+}
+
+/**
+ * Reads a stored stamp digest: absent or `null` is `null`, a string is itself,
+ * anything else is `undefined` (malformed).
+ */
+function readStamp(value: unknown): string | null | undefined {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  return typeof value === 'string' ? value : undefined;
 }
 
 /**
@@ -140,7 +162,13 @@ export function parseAuthSessionRecord(raw: unknown): AuthSessionRecord | null {
   if (typeof candidate.at !== 'number' || !Number.isFinite(candidate.at)) {
     return null;
   }
-  return { principal: principal as IPrincipal, methods, at: candidate.at };
+  // A stamp of the wrong type is a corrupted record, read as "not signed in"
+  // rather than as "no stamp", which could match a user who has none.
+  const stamp = readStamp(candidate.stamp);
+  if (stamp === undefined) {
+    return null;
+  }
+  return { principal: principal as IPrincipal, methods, at: candidate.at, stamp };
 }
 
 /**
@@ -212,6 +240,12 @@ export interface AuthSessionServiceDeps {
   readonly scopedGrants?: {
     readonly resolveAll: (principal: IPrincipal) => Promise<readonly ScopedGrant[]>;
   };
+  /**
+   * The session stamp (`signIn.sessionStamp`). When present, `signIn` reads and
+   * digests the principal's stamp BEFORE writing anything and records the
+   * digest; a rejection rejects `signIn` and records nothing.
+   */
+  readonly sessionStamp?: SessionStampCheck;
 }
 
 /**
@@ -229,6 +263,7 @@ export class AuthSessionService implements IAuthSessionService {
   readonly #mfa: AuthSessionServiceDeps['mfa'];
   readonly #pendingTtlMs: number;
   readonly #scopedGrants: AuthSessionServiceDeps['scopedGrants'];
+  readonly #sessionStamp: SessionStampCheck | undefined;
 
   /**
    * Builds the plugin's sign-in owner.
@@ -242,6 +277,7 @@ export class AuthSessionService implements IAuthSessionService {
     this.#mfa = deps.mfa;
     this.#pendingTtlMs = deps.mfa?.pendingTtlMs ?? DEFAULT_PENDING_TTL_MS;
     this.#scopedGrants = deps.scopedGrants;
+    this.#sessionStamp = deps.sessionStamp;
   }
 
   /**
@@ -271,6 +307,12 @@ export class AuthSessionService implements IAuthSessionService {
     // (through the synchronous `promotePending`) still arrives with them.
     const grants =
       this.#scopedGrants === undefined ? undefined : await this.#scopedGrants.resolveAll(principal);
+    // The session stamp follows the same rule, and for the same reason: the
+    // promotion that completes a second factor is synchronous and cannot read it.
+    const stamp =
+      this.#sessionStamp === undefined
+        ? undefined
+        : await digestSessionStamp(this.#sessionStamp, principal);
 
     // Check the MFA policy: when it answers `true` and the methods hold no
     // second factor, hold the principal back in a pending record.
@@ -280,10 +322,11 @@ export class AuthSessionService implements IAuthSessionService {
         const required = await this.#mfa.required(principal, methods);
         if (required) {
           const pending: PendingSignIn = { principal, methods, at: this.#now() };
-          session.set(
-            PENDING_MFA_SESSION_KEY,
-            grants === undefined ? pending : { ...pending, [PENDING_GRANTS_FIELD]: grants },
-          );
+          session.set(PENDING_MFA_SESSION_KEY, {
+            ...pending,
+            ...(grants === undefined ? {} : { [PENDING_GRANTS_FIELD]: grants }),
+            ...(stamp === undefined ? {} : { [PENDING_STAMP_FIELD]: stamp }),
+          });
           if (grants !== undefined) {
             session.delete(SCOPED_GRANTS_SESSION_KEY);
           }
@@ -297,7 +340,12 @@ export class AuthSessionService implements IAuthSessionService {
       }
     }
 
-    const record: AuthSessionRecord = { principal, methods, at: this.#now() };
+    const record: AuthSessionRecord = {
+      principal,
+      methods,
+      at: this.#now(),
+      ...(stamp === undefined ? {} : { stamp }),
+    };
     session.set(AUTH_SESSION_KEY, record);
     if (grants !== undefined) {
       this.#storeGrants(session, principal.id, grants);
@@ -400,7 +448,19 @@ export class AuthSessionService implements IAuthSessionService {
       return 'no-pending';
     }
     const methods = [...pending.methods, method];
-    const record: AuthSessionRecord = { principal: pending.principal, methods, at: this.#now() };
+    // The stamp read at the first factor rides the pending record, like the
+    // grants. A malformed one records `null`, which matches only a user with no
+    // stamp; the strategy's compare is what decides.
+    const record: AuthSessionRecord = {
+      principal: pending.principal,
+      methods,
+      at: this.#now(),
+      ...(this.#sessionStamp === undefined
+        ? {}
+        : {
+            stamp: readStamp((raw as Record<string, unknown>)[PENDING_STAMP_FIELD]) ?? null,
+          }),
+    };
     session.set(AUTH_SESSION_KEY, record);
     // The grants resolved at the first factor ride the pending record; they are
     // moved in the same synchronous write that records the principal.
