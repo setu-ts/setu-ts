@@ -30,6 +30,41 @@ import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
 import { listTransports } from '../../../src/workspace/transport.ts';
 
 describe('M121 transport additions', () => {
+  // PR #519 review: guidance must not ask for the option this run just wrote, and must
+  // still name the value when an existing one was preserved.
+  for (const template of ['rest', 'full-stack'] as const) {
+    it(`prints no wiring note after writing the transport into a ${template} config`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--template', template, '--runtime', 'node']), {
+          fs: h.fs,
+          cwd: '/app',
+          log: () => {},
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+      const written = h.out.join('\n');
+      expect(h.read('/app/shop/setu.config.ts')).toContain("broker: 'redis-streams'");
+      expect(written).not.toContain('In setu.config.ts:');
+      expect(written).not.toContain('Set MessagingPlugin(');
+
+      // A re-run finds the identical value and says so instead of asking for it again.
+      h.out.length = 0;
+      expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+      const rerun = h.out.join('\n');
+      expect(rerun).toContain('setu.config.ts already ');
+      expect(rerun).not.toMatch(/Set MessagingPlugin\(|In setu\.config\.ts: messaging: /);
+
+      // A different existing value is preserved and the wanted value is named.
+      h.out.length = 0;
+      expect(await h.run(['messaging', '--broker', 'nats', '--dir', '/app/shop'])).toBe(0);
+      expect(h.out.join('\n')).toMatch(
+        template === 'rest' ? /Set MessagingPlugin\(\{/ : /In setu\.config\.ts: messaging: \{/,
+      );
+      expect(h.read('/app/shop/setu.config.ts')).not.toContain("broker: 'nats'");
+    });
+  }
   for (const runtime of ['node', 'deno'] as const) {
     for (const template of ['rest', 'microservice', 'full-stack']) {
       for (const transport of ['redis', 'nats']) {
@@ -76,7 +111,9 @@ describe('M121 transport additions', () => {
             expect(config).toContain('config.get<string>(');
             expect(config.includes('queue: {')).toBe(transport === 'redis');
           } else {
-            expect(h.out.join('\n')).toContain('existing call was preserved');
+            // Generated with the workspace transport, so a re-add finds it already set.
+            expect(h.out.join('\n')).toContain('already passes these options to MessagingPlugin');
+            expect(h.out.join('\n')).not.toContain('existing call was preserved');
           }
           expect(config).not.toContain("QueuePlugin({ adapter: 'nats'");
         });

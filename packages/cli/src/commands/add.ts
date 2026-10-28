@@ -332,6 +332,28 @@ function registrationLine(bare: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether the config already carries exactly these transport options.
+ *
+ * Compared with whitespace and trailing commas removed, because Prettier rewraps the
+ * literal an npm-target project was written with. Comments are masked first so a
+ * commented-out copy does not count; an unclassifiable config never matches, which
+ * keeps the guidance (fail open).
+ *
+ * @param source - The config source
+ * @param literal - The options this command would write
+ * @returns `true` when the same options are already present
+ */
+function configuresAlready(source: string, literal: string): boolean {
+  const visible = maskComments(source);
+  if (visible === undefined) return false;
+  const normalize = (text: string): string => text.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
+  // The literal's properties, not its braces: a generated call may carry a seam
+  // property first (`processors: [...QUEUE_PROCESSORS]`) in the same object.
+  const body = normalize(literal).replace(/^\{|\}$/g, '');
+  return body !== '' && normalize(visible).includes(body);
+}
+
 /** Explains the registration site without rewriting starter-owned composition. */
 function printWiringNote(
   source: string | undefined,
@@ -350,7 +372,9 @@ function printWiringNote(
         log(
           transportArgs === undefined
             ? `  ${starter.symbol} already registers ${key} in memory by default; select a backend with setu add ${key} --${flag} <name> (standalone), or configure its ${key} property.`
-            : `  In setu.config.ts: ${key}: ${transportArgs},`,
+            : source !== undefined && configuresAlready(source, transportArgs)
+              ? `  setu.config.ts already sets these ${key} options.`
+              : `  In setu.config.ts: ${key}: ${transportArgs},`,
         );
         return;
       }
@@ -385,7 +409,11 @@ function printWiringNote(
     factoryCallsProvider(source, bare, factory)
   ) {
     if (transportArgs !== undefined)
-      log(`  Set ${factory}(${transportArgs}) in setu.config.ts; the existing call was preserved.`);
+      log(
+        configuresAlready(source, transportArgs)
+          ? `  setu.config.ts already passes these options to ${factory}.`
+          : `  Set ${factory}(${transportArgs}) in setu.config.ts; the existing call was preserved.`,
+      );
     for (const line of seamGapLines(source, bare, seam)) log(line);
     return;
   }
@@ -1577,7 +1605,14 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+  // When this run wrote the transport into setu.config.ts, the guidance would ask
+  // for the very option it just wrote (PR #519 review). Any other config edit —
+  // a bare plugin insertion — still needs its note.
+  const transportWritten =
+    configWired &&
+    transportArgs !== undefined &&
+    (bare === 'messaging-plugin' || bare === 'queue-plugin');
+  if (!transportWritten) printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass

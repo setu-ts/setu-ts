@@ -3450,6 +3450,7 @@
           "npm:esbuild@0.28",
           "npm:prettier@^3.9.10",
           "npm:tsx@^4.23.0",
+          "npm:typescript@6.0.3",
           "npm:vitest@5.0.3"
         ]
       },
