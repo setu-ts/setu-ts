@@ -269,6 +269,16 @@ describe('installRequestIdentityGuard', () => {
     );
   });
 
+  it.each([
+    ['Object.prototype', Object.prototype],
+    ['Function.prototype', Function.prototype],
+  ])('refuses %s, which every object or function shares', (_name, prototype) => {
+    expect(() => installRequestIdentityGuard(prototype)).toThrow(
+      'installRequestIdentityGuard needs a request class prototype',
+    );
+    expect(Object.hasOwn(prototype, 'user')).toBe(false);
+  });
+
   it('does not treat a null-prototype object as guarded', () => {
     const req = Object.assign(Object.create(null) as object, request()) as IRequest;
     sealRequestIdentity(req);

@@ -166,10 +166,18 @@ function isSealed(request: IRequest, field: GuardedField): boolean {
  * own properties.
  *
  * @param prototype - The prototype of a class whose instances are requests
- * @throws {Error} If the prototype already defines `user`, `tenant` or `locale`
+ * @throws {Error} If the prototype is `Object.prototype` or `Function.prototype`
+ *   — the guard is non-configurable, so it would bind every object or function
+ *   in the process for good — or already defines `user`, `tenant` or `locale`
  * @since 0.11.0
  */
 export function installRequestIdentityGuard(prototype: object): void {
+  if (prototype === Object.prototype || prototype === Function.prototype) {
+    throw new Error(
+      'installRequestIdentityGuard needs a request class prototype, not a built-in one shared ' +
+        'by every object or function.',
+    );
+  }
   if (Object.hasOwn(prototype, GUARDED_PROTOTYPE)) return;
   for (const field of ['user', 'tenant', 'locale'] as const) {
     if (Object.hasOwn(prototype, field)) {

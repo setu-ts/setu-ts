@@ -122,17 +122,19 @@ As of Milestone 22, Hono is used as the **internal routing engine** inside the k
 class. Route matching is delegated to a `new Hono({ strict: false })` instance constructed with
 Hono's `TrieRouter` (M22 chose `LinearRouter`; `TrieRouter` replaced it in 0.11.0 because it returns
 the same full candidate set without re-parsing every pattern per request). The kernel calls the
-router directly, so it applies Hono's `strict: false` rule itself, dropping one trailing slash from
-any registered pattern or request path longer than `/`. The kernel's custom `(ctx, next)` middleware
-pipeline runs **inside** the Hono dispatch, and the application's `#handleRequest` method calls
-`router.match()` which maps Hono's matched route back to `{ definition, params }`. The kernel
-maintains its own `RouteEntry` map so `getAll()`/`listRoutes()` introspection is unchanged, and the
-kernel applies its own deterministic tie-break on top of Hono's match result: more static segments
-first, then FEWER `*` wildcard segments, then earliest registration order. The wildcard key is what
-stops an application catch-all (`GET /*`) from owning every single-segment route registered after it
-— before M70g a `*` counted as a static segment, so `/*` tied with `/openapi.json` and won merely by
-registering first. The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on
-`/a/b`; that limit is documented in `Router.match` and pinned by a test.
+router directly, so it applies its trailing-slash rule itself: a request may carry one extra
+trailing slash (`/users/` reaches `/users`), while a route registered with a trailing slash answers
+only that spelling. It matches the path as given and, when nothing matches, retries once without the
+slash. The kernel's custom `(ctx, next)` middleware pipeline runs **inside** the Hono dispatch, and
+the application's `#handleRequest` method calls `router.match()` which maps Hono's matched route
+back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map so
+`getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own deterministic
+tie-break on top of Hono's match result: more static segments first, then FEWER `*` wildcard
+segments, then earliest registration order. The wildcard key is what stops an application catch-all
+(`GET /*`) from owning every single-segment route registered after it — before M70g a `*` counted as
+a static segment, so `/*` tied with `/openapi.json` and won merely by registering first. The rule
+compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
+documented in `Router.match` and pinned by a test.
 
 `listRoutes()` and the kernel-diagnostics route projection are two DIFFERENT surfaces and neither
 replaces the other. `RouteInfo.definition` carries the live handler, its middleware functions and

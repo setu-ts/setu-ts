@@ -145,16 +145,21 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
 }
 
 /**
- * Hono's `strict: false` rule: drop one trailing slash from any path longer
- * than the root. Applied to both the registered pattern and the request path,
- * because the kernel calls `router.match()` directly and so bypasses Hono's
- * own `getPathNoStrict`; LinearRouter tolerated the slash, TrieRouter does not.
+ * Returns the request path without one trailing slash, or `undefined` when it
+ * has none to drop (the root `/` keeps its slash).
  *
- * @param path - a route pattern or request path
- * @returns the path without one trailing slash, or unchanged
+ * The kernel calls `router.match()` directly, bypassing Hono's `strict: false`
+ * handling, so it applies the rule the kernel has always had: a request may
+ * carry ONE extra trailing slash — `/users/` reaches a route registered as
+ * `/users` — but a route registered WITH a trailing slash answers only that
+ * spelling, so `/reports` does not reach `/reports/`. LinearRouter behaved
+ * this way; TrieRouter matches exactly, so the kernel retries once.
+ *
+ * @param path - The request path
+ * @returns The path minus one trailing slash, or `undefined`
  */
-function dropTrailingSlash(path: string): string {
-  return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : path;
+function withoutTrailingSlash(path: string): string | undefined {
+  return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : undefined;
 }
 
 export class Router implements IRouterApi {
@@ -242,11 +247,7 @@ export class Router implements IRouterApi {
     interface HonoOn {
       on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
     }
-    (this.#hono as unknown as HonoOn).on(
-      method.toUpperCase(),
-      dropTrailingSlash(path),
-      stubHandler as HonoOnHandler,
-    );
+    (this.#hono as unknown as HonoOn).on(method.toUpperCase(), path, stubHandler as HonoOnHandler);
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -324,14 +325,18 @@ export class Router implements IRouterApi {
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
     // Each candidate: [[handler, routeInfo], params] where routeInfo = {basePath, path, method}.
-    const honoMatch = this.#hono.router.match(method, dropTrailingSlash(path));
-
-    // Extract candidates from honoMatch[0].
     type HonoCandidate = [
       handlerRouteTuple: [unknown, Record<string, unknown>],
       params: Record<string, string>,
     ];
-    const candidatesRaw = honoMatch[0] as unknown as HonoCandidate[];
+    let candidatesRaw = this.#hono.router.match(method, path)[0] as unknown as HonoCandidate[];
+    if (candidatesRaw.length === 0) {
+      // One extra trailing slash on the request is tolerated: retry without it.
+      const trimmed = withoutTrailingSlash(path);
+      if (trimmed !== undefined) {
+        candidatesRaw = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
+      }
+    }
 
     // Hono always returns honoMatch[0] as an array; early-return when empty
     // covers the case where no routes are registered or nothing matches.
@@ -354,20 +359,16 @@ export class Router implements IRouterApi {
     }
 
     // Build candidates array: map each Hono candidate to the kernel RouteEntry.
-    // Hono always provides well-formed routeInfo/method/path on matched
-    // candidates, and every candidate maps back to #entryMap since we
-    // register both simultaneously with identical paths.
     const candidates: Array<{
-      routePath: string;
       params: Record<string, string>;
       entry: RouteEntry;
     }> = [];
 
     for (const [handlerRouteTuple, rawParams] of candidatesRaw) {
-      const routeInfo = handlerRouteTuple![1] as Record<string, unknown>;
-      const routePath = routeInfo.path as string;
-      const routeMethod = routeInfo.method as string;
-      const entry = this.#entryMap.get(`${routeMethod} ${routePath}`)!;
+      // The entry rides on the stub, as on the single-candidate path: one
+      // source for both, and no reconstructed `${method} ${path}` key that
+      // could disagree with the key the route was registered under.
+      const entry = (handlerRouteTuple[0] as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY];
       // Same decoder as the single-candidate path above (M87 review). Keeping
       // a second inline copy here let the two disagree on identity as well as
       // duplicating the rule: this one built a fresh `{}` for a param-less
@@ -379,7 +380,7 @@ export class Router implements IRouterApi {
       if (params === null) {
         continue;
       }
-      candidates.push({ routePath, params, entry });
+      candidates.push({ params, entry });
     }
 
     // Every candidate may have been dropped for a malformed param escape.

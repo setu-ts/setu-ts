@@ -115,13 +115,40 @@ describe('Hono router bridge — trailing slash parity', () => {
     expect(result!.params).toEqual({ id: '123' });
   });
 
-  it('a route registered with a trailing slash matches with and without it', () => {
+  it('a route registered with a trailing slash answers only that spelling', () => {
     const router = new Router();
     const def = { handler: () => ({ __handlerResult: true }) as never };
     router.get('/api/docs/', def);
     expect(router.match('GET', '/api/docs/')?.definition).toBe(def);
-    expect(router.match('GET', '/api/docs')?.definition).toBe(def);
+    expect(router.match('GET', '/api/docs')).toBe(null);
     expect(router.getAll()[0]!.pattern).toBe('/api/docs/');
+  });
+
+  it('resolves overlapping slash-terminated routes without losing their entries', () => {
+    const router = new Router();
+    const byId = { handler: () => ({ __handlerResult: true }) as never };
+    const me = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/users/:id/', byId);
+    router.get('/users/me/', me);
+    expect(router.match('GET', '/users/me/')?.definition).toBe(me);
+    expect(router.match('GET', '/users/42/')?.params).toEqual({ id: '42' });
+    expect(router.match('GET', '/users/me')).toBe(null);
+  });
+
+  it('keeps /a and /a/ as two reachable routes', () => {
+    const router = new Router();
+    const bare = { handler: () => ({ __handlerResult: true }) as never };
+    const slash = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/a/', slash);
+    router.get('/a', bare);
+    expect(router.match('GET', '/a')?.definition).toBe(bare);
+    expect(router.match('GET', '/a/')?.definition).toBe(slash);
+  });
+
+  it('does not retry the root, which has no slash to drop', () => {
+    const router = new Router();
+    router.get('/users', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/')).toBe(null);
   });
 });
 
