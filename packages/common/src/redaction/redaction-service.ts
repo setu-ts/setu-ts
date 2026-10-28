@@ -155,9 +155,11 @@ function descend(
 /**
  * Rebuilds `{ ...value }` from already-read string entries, adding the
  * enumerable symbol-keyed values a spread would also copy (read once each,
- * never traversed). Filled in one loop rather than `Object.fromEntries`; an
- * own `__proto__` key is defined, as `fromEntries` defines it, never assigned
- * (an assignment would replace the copy's prototype).
+ * never traversed). Every key becomes an own data property, as
+ * `Object.fromEntries` would make it, so no setter runs with an unredacted
+ * value: a key the empty copy already INHERITS — `__proto__`, or a setter
+ * placed on a polluted `Object.prototype` — is defined, any other is assigned
+ * (PR #518 review; assignment is cheaper than `fromEntries` on Node).
  */
 function snapshotCopy(
   value: Record<string, unknown>,
@@ -165,23 +167,31 @@ function snapshotCopy(
 ): Record<string, unknown> {
   const copy: Record<PropertyKey, unknown> = {};
   for (const [key, child] of entries) {
-    if (key === '__proto__') {
-      Object.defineProperty(copy, key, {
-        value: child,
-        writable: true,
-        enumerable: true,
-        configurable: true,
-      });
-    } else {
-      copy[key] = child;
-    }
+    setOwn(copy, key, child);
   }
   for (const symbol of Object.getOwnPropertySymbols(value)) {
     if (Object.prototype.propertyIsEnumerable.call(value, symbol)) {
-      copy[symbol] = Reflect.get(value, symbol);
+      setOwn(copy, symbol, Reflect.get(value, symbol));
     }
   }
   return copy;
+}
+
+/**
+ * Makes `key` an own data property of `target` without running an inherited
+ * setter. `in` reads no property, so the check itself runs no accessor.
+ */
+function setOwn(target: Record<PropertyKey, unknown>, key: PropertyKey, child: unknown): void {
+  if (key in target) {
+    Object.defineProperty(target, key, {
+      value: child,
+      writable: true,
+      enumerable: true,
+      configurable: true,
+    });
+  } else {
+    target[key] = child;
+  }
 }
 
 /** Limits structural traversal to arrays and dictionary-like objects. */

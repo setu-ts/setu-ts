@@ -391,4 +391,31 @@ describe('redactRecord reads each property once', () => {
     expect(output).not.toContain('leaked-if-unredacted');
     expect(prototypeReads).toBe(1);
   });
+
+  it('never hands a value to a setter on a polluted Object.prototype', () => {
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    const tag = Symbol('tag');
+    const captured: unknown[] = [];
+    const capture = {
+      configurable: true,
+      set(value: unknown) {
+        captured.push(value);
+      },
+    };
+    Object.defineProperty(Object.prototype, 'password', capture);
+    Object.defineProperty(Object.prototype, tag, capture);
+    try {
+      const record: Record<PropertyKey, unknown> = { user: { password: 'hunter2' } };
+      Object.defineProperty(record, 'password', { value: 'top-level', enumerable: true });
+      Object.defineProperty(record, tag, { value: 'tagged', enumerable: true });
+      const output = service.redactRecord(record as never) as Record<PropertyKey, unknown>;
+      expect(captured).toEqual([]);
+      expect(Object.getOwnPropertyDescriptor(output, 'password')?.value).toBe('[Redacted]');
+      expect(Object.getOwnPropertyDescriptor(output['user'], 'password')?.value).toBe('[Redacted]');
+      expect(Object.getOwnPropertyDescriptor(output, tag)?.value).toBe('tagged');
+    } finally {
+      delete (Object.prototype as Record<PropertyKey, unknown>)['password'];
+      delete (Object.prototype as Record<PropertyKey, unknown>)[tag];
+    }
+  });
 });
