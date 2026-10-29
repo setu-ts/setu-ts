@@ -401,6 +401,44 @@ A milestone that changes what `packages/cli` generates also boots a scaffold: th
 - Deno's root `test` line repeating looks like a loop → measured to run each member once; the e2e's
   Deno probe asserts it.
 
+## 8a. Design security review
+
+Added after the first committed-tree audit (fresh Claude agent, revision `f23b71f4`, verdict
+**failed**) found it missing; the diff crosses a trust boundary (cluster credentials, secret values,
+repository files the CLI acts on). The re-audit checks each obligation below with a positive control
+and a negative one.
+
+**Reviewed flow.** `setu workspace deploy`: read `setu.workspace.json`, each member's
+`.env.example`, `k8s/secrets/<member>/.env` and `k8s/members.yaml` → validate every input → read the
+git state and the kube context → build → load or push → apply Namespace → per member: read the
+Secret's version, apply the Secret server-side → list Deployments → apply the manifest → restart
+each running member whose Secret changed → wait for every rollout. `build` is the read, validate and
+build prefix of that flow.
+
+**Assets.** The secret values; the kube context and namespace that change; each image's contents;
+the operator's other files on the same host.
+
+**Attackers.** A1, a contributor whose branch the operator checks out and deploys (controls the
+manifest, `members.yaml`, `.env.example`, committed links, member code). A2, another local user
+(reads `/proc/*/cmdline`). A3, a careless operator (commits a values file, rotates a secret, runs a
+dry run in a shared terminal). A4, kubectl or an admission webhook (chooses stderr text).
+
+| #   | Threat                                                         | Obligation                                                                                                                                                                                                      | Proof                                                                                                                                                                                |
+| --- | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| O1  | A secret value on argv, in output or in an annotation (A2, A3) | Values only on stdin, base64 under `data:`, `kubectl apply --server-side`; dry run prints key names; kubectl's stderr for a Secret is never printed (audit F3: redaction missed overlapping and escaped forms). | `workspace-ops.test.ts` canary across argv, output and stdin; `check:deploy --workspace` asserts no `last-applied-configuration`, including over a Secret first created client-side. |
+| O2  | YAML or argument injection (A1, operator typo)                 | Member names, `--namespace` are DNS labels; `--registry`, `--tag`, `--timeout` match their grammars; every tool runs without a shell, one argument per value.                                                   | `workspace-ops.test.ts` refusal tables; audit NC2–NC5.                                                                                                                               |
+| O3  | Reading outside the workspace (A1)                             | `.env.example`, values files and `members.yaml` are read through `assertInsideProject` + `readExistingText`: no link, regular file only, at most 1 MiB; a read failure is reported, not thrown (audit F2).      | `test/integration/workspace-deploy-links.test.ts` on a real filesystem (linked directory, linked file, FIFO, unreadable file, linked manifest).                                      |
+| O4  | A committed values file deployed (A3)                          | `git ls-files --error-unmatch` inside a repository; only "not a repository" or "not tracked" continue — a missing `git` or any other answer refuses (audit F2).                                                 | `workspace-ops.test.ts` (tracked, not a repo, no git, unexpected exit).                                                                                                              |
+| O5  | A rotated secret never reaching pods (A3)                      | A Secret whose `resourceVersion` changes on apply restarts its member when that Deployment was already running; the version reveals nothing about the values (audit F1).                                        | `workspace-ops.test.ts` (changed, unchanged, created); `check:deploy --workspace` rotates and reads the new value from the pod.                                                      |
+| O6  | Deploying to the wrong cluster                                 | The context is read once and passed as `--context` to every kubectl call.                                                                                                                                       | `workspace-ops.test.ts` explicit-context case; audit P7.                                                                                                                             |
+| O7  | Secrets in images or Compose overriding topology               | `.dockerignore` keeps `k8s` and `**/.env` out; Compose's `environment:` wins over `env_file`.                                                                                                                   | Audit P9, P10.                                                                                                                                                                       |
+| O8  | Cost before refusal                                            | Every input, secret, git and context check runs before the first build.                                                                                                                                         | `workspace-ops.test.ts` refusal cases record no `docker` call.                                                                                                                       |
+
+**Accepted, documented:** `--build-arg` values are on the argument list and printed by `--dry-run`
+(credentials belong in `NPMRC`); `parseEnv` drops a `__proto__` key (pre-existing behaviour); a
+partial failure leaves earlier objects applied; removing a values file leaves its Secret in the
+cluster. **Not probed:** Windows executable search in the working directory (no Windows host).
+
 ## 9. Out of scope
 
 - Member filtering and affected-only runs — after `v0.11.0`, with the Turborepo/Nx question.

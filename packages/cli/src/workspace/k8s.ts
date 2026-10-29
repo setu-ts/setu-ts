@@ -314,7 +314,8 @@ ${wrapProse(
   "**Secrets.** A member's variables are the names its committed `.env.example` declares; their " +
     `values go in \`${K8S_DIR}/secrets/<member>/.env\`, which git ignores and no image copies. ` +
     'Deploy refuses, naming every missing variable, before it builds anything, and sends the values ' +
-    'to `kubectl` on stdin. Each Deployment reads its Secret, `<member>-env`, through `envFrom`. ' +
+    'to `kubectl` on stdin. Each Deployment reads its Secret, `<member>-env`, through `envFrom`, ' +
+    'and a running member is restarted when its Secret changes. ' +
     'For production, keep the values in a secret manager (Sealed Secrets, External Secrets) and ' +
     'create the same Secret from it.',
 )}

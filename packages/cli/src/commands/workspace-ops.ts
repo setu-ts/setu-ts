@@ -15,7 +15,12 @@ import { parseEnv } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag, stringFlags } from '../args.ts';
 import { EXIT_ERROR, EXIT_OK, EXIT_USAGE, PROGRAM_NAME } from '../constants.ts';
-import { joinPath, resolveDir } from '../utils/file-writer.ts';
+import {
+  assertInsideProject,
+  joinPath,
+  readExistingText,
+  resolveDir,
+} from '../utils/file-writer.ts';
 import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { escapeName } from '../utils/names.ts';
 import { COMMAND_NOT_FOUND, type CommandRunner } from '../utils/run-command.ts';
@@ -32,7 +37,6 @@ import {
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import {
-  base64Utf8,
   declaredSecretNames,
   envFromBlock,
   memberSecretName,
@@ -203,13 +207,36 @@ async function exists(fs: IFileSystem, path: string): Promise<boolean> {
   }
 }
 
-/** Reads a text file, or `undefined` when it does not exist. */
-async function readOptional(fs: IFileSystem, path: string): Promise<string | undefined> {
+/** What reading one workspace file produced. */
+type WorkspaceRead =
+  | { readonly ok: true; readonly text: string | undefined }
+  | { readonly ok: false; readonly message: string };
+
+/**
+ * Reads a file the operator or a contributor controls, inside the workspace only.
+ *
+ * Never through a link (M122 audit F2): a branch replacing `k8s/secrets/<member>` with a committed
+ * symlink would otherwise load any dotenv file on the host — another project's `.env` — into a pod
+ * that branch's code runs in, and the link also hid a tracked file from `git ls-files`. Regular
+ * files only (a FIFO hung the deploy) and at most 1 MiB, the CLI's bound for files it inspects. A
+ * read failure is reported, not thrown.
+ *
+ * @param fs - The CLI's filesystem
+ * @param root - The workspace root
+ * @param relative - The file, relative to the root
+ * @returns The text, `undefined` when absent, or the reason it was refused
+ */
+async function readWorkspaceText(
+  fs: IFileSystem,
+  root: string,
+  relative: string,
+): Promise<WorkspaceRead> {
+  const path = joinPath(root, relative);
   try {
-    return new TextDecoder().decode(await fs.readFile(path));
+    await assertInsideProject(fs, root, path);
+    return { ok: true, text: await readExistingText(fs, path) };
   } catch (cause) {
-    if (isMissingPath(cause)) return undefined;
-    throw cause;
+    return { ok: false, message: `${relative}: ${messageOf(cause)}` };
   }
 }
 
@@ -372,7 +399,34 @@ interface IMemberSecret {
   readonly member: string;
   readonly names: readonly string[];
   readonly manifest: string;
-  readonly values: readonly string[];
+}
+
+/**
+ * Whether a values file is committed, failing closed (M122 audit F2): only "not a repository" and
+ * "not tracked" let the deploy continue. A missing `git`, or any other answer, is a refusal.
+ *
+ * @returns The refusal, or `undefined` when the file is not tracked
+ */
+async function trackedByGit(
+  workspace: IWorkspace,
+  valuesPath: string,
+): Promise<string | undefined> {
+  const inside = await workspace.run('git', ['rev-parse', '--is-inside-work-tree'], {
+    cwd: workspace.dir,
+  });
+  if (inside.code === COMMAND_NOT_FOUND) {
+    return `git is not installed or not on PATH, so ${valuesPath} cannot be checked for being committed.`;
+  }
+  // Exit 128 with nothing on stdout: not a repository, so nothing can be committed.
+  if (inside.code !== 0) return undefined;
+  const listed = await workspace.run('git', ['ls-files', '--error-unmatch', valuesPath], {
+    cwd: workspace.dir,
+  });
+  if (listed.code === 1) return undefined;
+  if (listed.code === 0) {
+    return `${valuesPath} is tracked by git. Remove it from the index (git rm --cached ${valuesPath}) and rotate its values before deploying.`;
+  }
+  return `git could not say whether ${valuesPath} is committed (exit ${listed.code}); refusing to deploy it.`;
 }
 
 /** Collects every member's Secret, or every problem with them. */
@@ -391,8 +445,14 @@ async function collectSecrets(
     const generated = new Set(Object.keys(memberEnvironment(siblings, transport)));
     const examplePath = `${MEMBERS_DIR}/${member.name}/.env.example`;
     const valuesPath = secretValuesPath(member.name);
-    const example = await readOptional(deps.fs, joinPath(workspace.dir, examplePath));
-    const valuesText = await readOptional(deps.fs, joinPath(workspace.dir, valuesPath));
+    const exampleRead = await readWorkspaceText(deps.fs, workspace.dir, examplePath);
+    const valuesRead = await readWorkspaceText(deps.fs, workspace.dir, valuesPath);
+    if (!exampleRead.ok || !valuesRead.ok) {
+      for (const read of [exampleRead, valuesRead]) if (!read.ok) problems.push(read.message);
+      continue;
+    }
+    const example = exampleRead.text;
+    const valuesText = valuesRead.text;
     let declared: readonly string[];
     let values: Readonly<Record<string, string>>;
     try {
@@ -416,13 +476,9 @@ async function collectSecrets(
       continue;
     }
     if (valuesText === undefined && declared.length === 0) continue;
-    const tracked = await workspace.run('git', ['ls-files', '--error-unmatch', valuesPath], {
-      cwd: workspace.dir,
-    });
-    if (tracked.code === 0) {
-      problems.push(
-        `${valuesPath} is tracked by git. Remove it from the index (git rm --cached ${valuesPath}) and rotate its values before deploying.`,
-      );
+    const tracked = await trackedByGit(workspace, valuesPath);
+    if (tracked !== undefined) {
+      problems.push(tracked);
       continue;
     }
     if (!readsMemberSecret(membersYaml, member.name)) {
@@ -435,25 +491,12 @@ async function collectSecrets(
       member: member.name,
       names: Object.keys(values),
       manifest: renderMemberSecret(member.name, namespace, label, values),
-      values: Object.values(values).filter((value) => value !== ''),
     });
   }
   if (problems.length === 0) return secrets;
   deps.error('Deploy refused; nothing was built or applied:');
   for (const problem of problems) deps.error(`  ${problem}`);
   return undefined;
-}
-
-/** Replaces every secret value, raw or base64, before captured output is shown. */
-function redact(text: string, secrets: readonly IMemberSecret[]): string {
-  let out = text;
-  for (const secret of secrets) {
-    for (const value of secret.values) {
-      out = out.split(value).join('[redacted]');
-      out = out.split(base64Utf8(value)).join('[redacted]');
-    }
-  }
-  return out;
 }
 
 /** The kube context deploy uses, and the kind cluster behind it when there is one. */
@@ -481,31 +524,88 @@ async function resolveContext(
   return kind === null ? { context } : { context, kindCluster: kind[1]! };
 }
 
-/** Applies one manifest from stdin; returns whether it succeeded. */
+/** How one manifest is applied. */
+interface IApply {
+  readonly manifest: string;
+  readonly what: string;
+  /** A Secret: server-side, its resourceVersion printed, and kubectl's stderr never shown. */
+  readonly secret?: true;
+}
+
+/**
+ * Applies one manifest from stdin.
+ *
+ * kubectl's stderr is shown for every other object, never for a Secret (M122 audit F3): it can
+ * quote the values it rejected, and redacting them was incomplete for a value contained in
+ * another and for JSON-escaped forms.
+ *
+ * @returns kubectl's stdout (a Secret's resourceVersion), or `undefined` after reporting a failure
+ */
 async function applyManifest(
   workspace: IWorkspace,
   context: string,
-  manifest: string,
-  what: string,
-  secrets: readonly IMemberSecret[],
+  apply: IApply,
   deps: WorkspaceOpsDependencies,
-  serverSide = false,
-): Promise<boolean> {
+): Promise<string | undefined> {
   const args = [
     '--context',
     context,
     'apply',
-    ...(serverSide ? ['--server-side', '--field-manager=setu'] : []),
+    ...(apply.secret === true
+      ? ['--server-side', '--field-manager=setu', '-o', 'jsonpath={.metadata.resourceVersion}']
+      : []),
     '-f',
     '-',
   ];
-  const result = await workspace.run('kubectl', args, { cwd: workspace.dir, input: manifest });
+  const result = await workspace.run('kubectl', args, {
+    cwd: workspace.dir,
+    input: apply.manifest,
+  });
   if (result.code !== 0) {
-    reportFailure(deps, 'kubectl', `Applying ${what}`, result.code, redact(result.stderr, secrets));
-    return false;
+    reportFailure(
+      deps,
+      'kubectl',
+      `Applying ${apply.what}`,
+      result.code,
+      apply.secret === true
+        ? "kubectl's message is not shown for a Secret, because it can quote the values. Check the values file and this context's access to Secrets."
+        : result.stderr,
+    );
+    return undefined;
   }
-  deps.log(`  applied ${what}`);
-  return true;
+  deps.log(`  applied ${apply.what}`);
+  return result.stdout;
+}
+
+/** Reads a Secret's resourceVersion, or `''` when it does not exist yet. */
+async function secretVersion(
+  workspace: IWorkspace,
+  context: string,
+  namespace: string,
+  name: string,
+  deps: WorkspaceOpsDependencies,
+): Promise<string | undefined> {
+  const result = await workspace.run(
+    'kubectl',
+    [
+      '--context',
+      context,
+      '-n',
+      namespace,
+      'get',
+      'secret',
+      name,
+      '--ignore-not-found',
+      '-o',
+      'jsonpath={.metadata.resourceVersion}',
+    ],
+    { cwd: workspace.dir },
+  );
+  if (result.code !== 0) {
+    reportFailure(deps, 'kubectl', `Reading Secret ${name}`, result.code, result.stderr);
+    return undefined;
+  }
+  return result.stdout.trim();
 }
 
 /** Parses the options only deploy reads. */
@@ -570,7 +670,12 @@ export async function runWorkspaceDeploy(
   if (!opened.ok) return opened.code;
   const workspace = opened.value;
 
-  const membersYaml = await readOptional(deps.fs, joinPath(workspace.dir, MEMBERS_FILE));
+  const membersRead = await readWorkspaceText(deps.fs, workspace.dir, MEMBERS_FILE);
+  if (!membersRead.ok) {
+    deps.error(membersRead.message);
+    return EXIT_ERROR;
+  }
+  const membersYaml = membersRead.text;
   if (membersYaml === undefined) {
     deps.error(
       `${MEMBERS_FILE} is missing. ${PROGRAM_NAME} generate app writes it; restore it before deploying.`,
@@ -628,6 +733,7 @@ export async function runWorkspaceDeploy(
       );
     }
     deps.log(`  would apply: ${MEMBERS_FILE} with the namespace and images filled in`);
+    deps.log('  would restart: each running member whose Secret changes');
     for (const member of images.keys()) {
       deps.log(`  would wait: rollout of deployment/${member} (timeout ${deploy.timeout})`);
     }
@@ -647,30 +753,74 @@ export async function runWorkspaceDeploy(
   }
 
   const namespaceManifest = `apiVersion: v1\nkind: Namespace\nmetadata:\n  name: ${deploy.namespace}\n`;
+  const ctx = target.context;
   if (
-    !(await applyManifest(
+    (await applyManifest(
       workspace,
-      target.context,
-      namespaceManifest,
-      `Namespace ${deploy.namespace}`,
-      secrets,
+      ctx,
+      { manifest: namespaceManifest, what: `Namespace ${deploy.namespace}` },
       deps,
-    ))
+    )) === undefined
   ) {
     return EXIT_ERROR;
   }
+  // A Secret whose contents changed reaches running pods only through a restart: `envFrom` is
+  // read at container start, and a rotation on a clean tree keeps both the tag and the manifest,
+  // so nothing would roll out (M122 audit F1). A changed resourceVersion is the signal; it reveals
+  // nothing about the values.
+  const rotated: string[] = [];
   for (const secret of secrets) {
-    const what = `Secret ${memberSecretName(secret.member)} (${secret.names.length} key(s))`;
-    if (
-      !(await applyManifest(workspace, target.context, secret.manifest, what, secrets, deps, true))
-    ) {
+    const name = memberSecretName(secret.member);
+    const before = await secretVersion(workspace, ctx, deploy.namespace, name, deps);
+    if (before === undefined) return EXIT_ERROR;
+    const after = await applyManifest(
+      workspace,
+      ctx,
+      {
+        manifest: secret.manifest,
+        what: `Secret ${name} (${secret.names.length} key(s))`,
+        secret: true,
+      },
+      deps,
+    );
+    if (after === undefined) return EXIT_ERROR;
+    if (after.trim() !== before) rotated.push(secret.member);
+  }
+  const listed = await workspace.run(
+    'kubectl',
+    ['--context', ctx, '-n', deploy.namespace, 'get', 'deployments', '-o', 'name'],
+    { cwd: workspace.dir },
+  );
+  if (listed.code !== 0) {
+    reportFailure(deps, 'kubectl', 'Listing Deployments', listed.code, listed.stderr);
+    return EXIT_ERROR;
+  }
+  const existing = new Set(listed.stdout.split('\n').map((line) => line.trim().split('/').pop()));
+  if (
+    (await applyManifest(workspace, ctx, { manifest: prepared.text, what: MEMBERS_FILE }, deps)) ===
+    undefined
+  ) {
+    return EXIT_ERROR;
+  }
+  // A Deployment created by this apply already reads the new Secret; one that was running needs
+  // a restart to pick it up.
+  for (const member of rotated.filter((name) => existing.has(name))) {
+    const restarted = await workspace.run(
+      'kubectl',
+      ['--context', ctx, '-n', deploy.namespace, 'rollout', 'restart', `deployment/${member}`],
+      { cwd: workspace.dir },
+    );
+    if (restarted.code !== 0) {
+      reportFailure(
+        deps,
+        'kubectl',
+        `Restarting ${member} for its changed Secret`,
+        restarted.code,
+        restarted.stderr,
+      );
       return EXIT_ERROR;
     }
-  }
-  if (
-    !(await applyManifest(workspace, target.context, prepared.text, MEMBERS_FILE, secrets, deps))
-  ) {
-    return EXIT_ERROR;
+    deps.log(`  restarted deployment/${member}: its Secret changed`);
   }
 
   for (const member of images.keys()) {

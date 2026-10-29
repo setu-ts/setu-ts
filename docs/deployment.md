@@ -501,7 +501,12 @@ each Secret with `kubectl apply --server-side` from stdin, values base64-encoded
 measured on kind, a client-side apply stores every value in plaintext in the
 `last-applied-configuration` annotation, and `stringData` under a server-side apply keeps keys the
 file has dropped. Each generated Deployment reads `<member>-env` through `envFrom`, after its
-explicit `env:` entries, which keep precedence.
+explicit `env:` entries, which keep precedence. envFrom is read when a container starts, so when a
+Secret's contents change deploy restarts each member that was already running — a rotation on a
+clean tree keeps the tag and the manifest and would otherwise leave the old value live. Deploy reads
+the values files, `.env.example` and `k8s/members.yaml` only as regular files inside the workspace,
+never through a symbolic link: a branch that replaced `k8s/secrets/<member>` with a link could
+otherwise load any dotenv file on the host into a pod its code runs in.
 
 For production, keep the values in a secret manager —
 [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or

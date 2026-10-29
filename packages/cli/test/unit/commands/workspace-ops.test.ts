@@ -95,9 +95,14 @@ function harness(
     const fallback = (): Partial<RunCommandResult> => {
       const line = `${command} ${args.join(' ')}`;
       if (line === 'git rev-parse --short HEAD') return { stdout: 'abc1234\n' };
+      if (line === 'git rev-parse --is-inside-work-tree') return { stdout: 'true\n' };
       if (line === 'git status --porcelain') return { stdout: '' };
       if (line.startsWith('git ls-files')) return { code: 1 };
       if (line === 'kubectl config current-context') return { stdout: 'kind-dev\n' };
+      // A first deploy: no Secret yet, the apply creates resourceVersion 1, no Deployments.
+      if (args.includes('get') && args.includes('secret')) return { stdout: '' };
+      if (args.includes('--server-side')) return { stdout: '1' };
+      if (args.includes('deployments')) return { stdout: '' };
       return {};
     };
     const result = custom ?? fallback();
@@ -311,13 +316,16 @@ describe('setu workspace deploy', () => {
       'git rev-parse --short HEAD',
       'git status --porcelain',
       'kubectl config current-context',
+      'git rev-parse --is-inside-work-tree',
       'git ls-files --error-unmatch k8s/secrets/portal/.env',
       expect.stringContaining('docker build'),
       expect.stringContaining('docker build'),
       'kind load docker-image orders:abc1234 --name dev',
       'kind load docker-image portal:abc1234 --name dev',
       'kubectl --context kind-dev apply -f -',
-      'kubectl --context kind-dev apply --server-side --field-manager=setu -f -',
+      'kubectl --context kind-dev -n ws get secret portal-env --ignore-not-found -o jsonpath={.metadata.resourceVersion}',
+      'kubectl --context kind-dev apply --server-side --field-manager=setu -o jsonpath={.metadata.resourceVersion} -f -',
+      'kubectl --context kind-dev -n ws get deployments -o name',
       'kubectl --context kind-dev apply -f -',
       'kubectl --context kind-dev -n ws rollout status deployment/orders --timeout=120s',
       'kubectl --context kind-dev -n ws rollout status deployment/portal --timeout=120s',
@@ -468,17 +476,35 @@ describe('setu workspace deploy', () => {
     expect(await ship.run(['deploy'])).toBe(1);
     expect(ship.err.join('\n')).toContain('Shipping orders:abc1234 failed (exit 1).');
 
+    // Overlapping and JSON-escaped forms defeated redaction (audit F3), so a Secret's stderr is
+    // never shown at all.
     const apply = harness({
+      files: { '/ws/k8s/secrets/portal/.env': `TRUSTED_PROXIES=not\nSESSION_SECRET="${SECRET}"\n` },
       respond: (c) =>
         c.args.includes('--server-side')
-          ? { code: 1, stderr: `invalid value "${SECRET}" (${btoa(SECRET)})\n` }
+          ? {
+              code: 1,
+              stderr: `invalid "${SECRET}" ${JSON.stringify(SECRET)} ${btoa(SECRET)} not\n`,
+            }
           : undefined,
     });
     expect(await apply.run(['deploy'])).toBe(1);
     const message = apply.err.join('\n');
     expect(message).toContain('Applying Secret portal-env (2 key(s)) failed (exit 1).');
-    expect(message).toContain('invalid value "[redacted]" ([redacted])');
+    expect(message).toContain("kubectl's message is not shown for a Secret");
     expect(message).not.toContain(SECRET);
+    expect(message).not.toContain(btoa(SECRET));
+    expect(message).not.toContain('invalid');
+
+    // Any other object's stderr is shown, so the operator can see why.
+    const other = harness({
+      respond: (c) =>
+        c.input?.includes('kind: Namespace') === true
+          ? { code: 1, stderr: 'forbidden: namespaces\n' }
+          : undefined,
+    });
+    expect(await other.run(['deploy'])).toBe(1);
+    expect(other.err.join('\n')).toContain('forbidden: namespaces');
 
     for (const failing of ['kind: Namespace', 'kind: Deployment']) {
       const h = harness({
@@ -502,6 +528,91 @@ describe('setu workspace deploy', () => {
     expect(unset.err.join('\n')).toContain('Pass --context <name>');
   });
 
+  it('restarts a running member whose Secret changed, and only that member (audit F1)', async () => {
+    const rotate = (before: string, after: string) =>
+      harness({
+        respond: (c) => {
+          if (c.args.includes('get') && c.args.includes('secret')) return { stdout: before };
+          if (c.args.includes('--server-side')) return { stdout: after };
+          if (c.args.includes('deployments'))
+            return { stdout: 'deployment.apps/orders\ndeployment.apps/portal\n' };
+          return undefined;
+        },
+      });
+    const changed = rotate('41', '42');
+    expect(await changed.run(['deploy'])).toBe(0);
+    const lines = changed.calls.map(changed.line);
+    const restart = 'kubectl --context kind-dev -n ws rollout restart deployment/portal';
+    expect(lines).toContain(restart);
+    expect(lines.indexOf(restart)).toBeLessThan(
+      lines.indexOf(
+        'kubectl --context kind-dev -n ws rollout status deployment/portal --timeout=120s',
+      ),
+    );
+    expect(lines.some((line) => line.includes('restart deployment/orders'))).toBe(false);
+    expect(changed.out.join('\n')).toContain('restarted deployment/portal: its Secret changed');
+
+    // An unchanged Secret (server-side apply keeps its version) restarts nothing.
+    const same = rotate('42', '42');
+    expect(await same.run(['deploy'])).toBe(0);
+    expect(same.calls.some((c) => c.args.includes('restart'))).toBe(false);
+
+    // A Deployment this apply creates already reads the new Secret: no restart.
+    const first = harness({
+      respond: (c) => (c.args.includes('--server-side') ? { stdout: '7' } : undefined),
+    });
+    expect(await first.run(['deploy'])).toBe(0);
+    expect(first.calls.some((c) => c.args.includes('restart'))).toBe(false);
+  });
+
+  it('reports a failed Secret read, Deployment listing or restart', async () => {
+    for (const [match, label] of [
+      [
+        (c: ICall) => c.args.includes('get') && c.args.includes('secret'),
+        'Reading Secret portal-env',
+      ],
+      [(c: ICall) => c.args.includes('deployments'), 'Listing Deployments'],
+    ] as const) {
+      const h = harness({ respond: (c) => (match(c) ? { code: 1, stderr: 'nope\n' } : undefined) });
+      expect(await h.run(['deploy']), label).toBe(1);
+      expect(h.err.join('\n')).toContain(`${label} failed (exit 1).`);
+    }
+    const restart = harness({
+      respond: (c) => {
+        if (c.args.includes('get') && c.args.includes('secret')) return { stdout: '1' };
+        if (c.args.includes('--server-side')) return { stdout: '2' };
+        if (c.args.includes('deployments')) return { stdout: 'deployment.apps/portal\n' };
+        if (c.args.includes('restart')) return { code: 1, stderr: 'nope\n' };
+        return undefined;
+      },
+    });
+    expect(await restart.run(['deploy'])).toBe(1);
+    expect(restart.err.join('\n')).toContain('Restarting portal for its changed Secret failed');
+  });
+
+  it('checks a values file against git failing closed (audit F2)', async () => {
+    const notRepo = harness({
+      respond: (c) =>
+        c.args[0] === 'rev-parse' && c.args[1] === '--is-inside-work-tree'
+          ? { code: 128 }
+          : undefined,
+    });
+    expect(await notRepo.run(['deploy'])).toBe(0);
+    expect(notRepo.calls.some((c) => c.args[0] === 'ls-files')).toBe(false);
+
+    const noGit = harness({
+      respond: (c) => (c.args[1] === '--is-inside-work-tree' ? { code: 127 } : undefined),
+    });
+    expect(await noGit.run(['deploy', '--tag', 'v1'])).toBe(1);
+    expect(noGit.err.join('\n')).toContain('git is not installed or not on PATH');
+
+    const odd = harness({ respond: (c) => (c.args[0] === 'ls-files' ? { code: 128 } : undefined) });
+    expect(await odd.run(['deploy'])).toBe(1);
+    expect(odd.err.join('\n')).toContain(
+      'git could not say whether k8s/secrets/portal/.env is committed (exit 128)',
+    );
+  });
+
   it('prints the whole plan on --dry-run, key names only, and changes nothing', async () => {
     const h = harness();
     expect(await h.run(['deploy', '--dry-run'])).toBe(0);
@@ -511,6 +622,7 @@ describe('setu workspace deploy', () => {
     expect(text).toContain('would run: kind load docker-image portal:abc1234 --name dev');
     expect(text).toContain('Secret portal-env with TRUSTED_PROXIES, SESSION_SECRET');
     expect(text).toContain('would wait: rollout of deployment/portal (timeout 120s)');
+    expect(text).toContain('would restart: each running member whose Secret changes');
     expect(text).not.toContain(SECRET);
 
     const pushed = harness({

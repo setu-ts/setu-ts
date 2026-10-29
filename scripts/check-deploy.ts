@@ -1369,6 +1369,26 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
       `TRUSTED_PROXIES=\nSESSION_SECRET=${secret}\n`,
     );
 
+    // A Secret an earlier client-side apply created carries every value in plaintext in its
+    // last-applied-configuration annotation; deploy's server-side apply must take it over and drop
+    // it (M122 audit support limit).
+    const stale = `client-side-${randomBytes(24).toString('base64url')}`;
+    await run(kubectl('create', 'namespace', WORKSPACE_GATE.namespace), { quiet: true });
+    const preexisting = await run(
+      [
+        'sh',
+        '-c',
+        `kubectl --context ${context} -n ${WORKSPACE_GATE.namespace} create secret generic portal-env ` +
+          `--from-literal=SESSION_SECRET=${stale} --dry-run=client -o yaml | ` +
+          `kubectl --context ${context} apply -f -`,
+      ],
+      { quiet: true },
+    );
+    if (!preexisting.success) {
+      console.error(`  ✗ could not create the client-side Secret\n${preexisting.stderr}`);
+      return 'failed';
+    }
+
     console.log('  deploying with setu workspace deploy …');
     const deployed = await cli(deployArgs, false);
     if (!deployed.success) {
@@ -1439,12 +1459,55 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
     );
     if (
       annotations.stdout.includes('last-applied-configuration') ||
-      annotations.stdout.includes(secret)
+      annotations.stdout.includes(secret) ||
+      annotations.stdout.includes(stale)
     ) {
       console.error('  ✗ the Secret carries a last-applied-configuration annotation');
       return 'failed';
     }
-    console.log('  ✓ the Secret reaches the pod and carries no plaintext annotation');
+    console.log(
+      '  ✓ the Secret reaches the pod and carries no plaintext annotation, even taken over from a client-side apply',
+    );
+
+    // Rotation on a clean tree: same tag, same manifest; only the restart delivers the value (F1).
+    const rotated = randomBytes(32).toString('base64url');
+    await writeFile(
+      `${root}/k8s/secrets/portal/.env`,
+      `TRUSTED_PROXIES=\nSESSION_SECRET=${rotated}\n`,
+    );
+    const redeployed = await cli(deployArgs);
+    if (!redeployed.success || !redeployed.stdout.includes('restarted deployment/portal')) {
+      console.error(
+        `  ✗ a rotated Secret did not restart portal\n${redeployed.stdout}${redeployed.stderr}`,
+      );
+      return 'failed';
+    }
+    if (redeployed.stdout.includes('restarted deployment/orders')) {
+      console.error('  ✗ orders was restarted although its Secret did not change');
+      return 'failed';
+    }
+    let live = '';
+    for (let attempt = 0; attempt < 30 && live !== rotated; attempt += 1) {
+      const current = await run(
+        kubectl(
+          '-n',
+          WORKSPACE_GATE.namespace,
+          'exec',
+          'deploy/portal',
+          '--',
+          'printenv',
+          'SESSION_SECRET',
+        ),
+        { quiet: true },
+      );
+      live = current.stdout.trim();
+      if (live !== rotated) await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+    if (live !== rotated) {
+      console.error('  ✗ after rotation the portal pod still carries the old SESSION_SECRET');
+      return 'failed';
+    }
+    console.log('  ✓ a rotated Secret restarts its member, which then carries the new value');
     return (await checkDenoWorkspaceTest(directory, overlay.url)) ? 'passed' : 'failed';
   } finally {
     await run(kubectl('delete', 'namespace', WORKSPACE_GATE.namespace, '--wait=false'), {

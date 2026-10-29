@@ -192,7 +192,13 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   every missing variable, and refuses a values file that git tracks. Each member with values gets a
   `<member>-env` Secret, applied with `kubectl apply --server-side` from stdin with base64 `data:` —
   a client-side apply would store every value in plaintext in an annotation. Generated Deployments
-  read it through `envFrom`; explicit `env:` entries still win.
+  read it through `envFrom`; explicit `env:` entries still win. When a Secret's contents change, a
+  member already running is restarted (`kubectl rollout restart`), so a rotated value reaches its
+  pods even when the tag and manifest are unchanged. Values files, `.env.example` and
+  `k8s/members.yaml` are read only as regular files of at most 1 MiB inside the workspace — never
+  through a symbolic link — and a values file is refused when git cannot confirm it is uncommitted
+  (a missing `git` included; outside a repository there is nothing to commit). kubectl's message for
+  a failed Secret apply is never printed, because it can quote the values.
 - **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
   loads each image into that cluster; any other context needs `--registry`, and the images are
   pushed there.
