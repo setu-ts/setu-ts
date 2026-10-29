@@ -84,9 +84,10 @@ export const COMMAND_NOT_FOUND = 127;
 export function createCommandRunner(spawnImpl: typeof spawn = spawn): CommandRunner {
   return (command, args, options) =>
     new Promise((resolve) => {
+      const env = childEnvironment(options);
       const child = spawnImpl(command, [...args], {
         cwd: options.cwd,
-        ...(childEnvironment(options) === undefined ? {} : { env: childEnvironment(options) }),
+        ...(env === undefined ? {} : { env }),
         stdio: [
           options.input === undefined ? 'ignore' : 'pipe',
           options.stream === true ? 'inherit' : 'pipe',

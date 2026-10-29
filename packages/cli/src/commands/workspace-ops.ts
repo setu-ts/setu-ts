@@ -29,6 +29,7 @@ import {
   prepareDeployManifest,
   readsMemberSecret,
   stampSecretVersion,
+  unreadableSlot,
 } from '../workspace/deploy-manifest.ts';
 import { defaultImageTag, imageReference, isValidImageTag } from '../workspace/image-tag.ts';
 import { K8S_DIR } from '../workspace/k8s.ts';
@@ -510,7 +511,7 @@ async function collectSecrets(
     }
     if (!readsMemberSecret(membersYaml, member.name)) {
       problems.push(
-        `${MEMBERS_FILE} does not read ${memberSecretName(member.name)} for ${member.name}: it predates M122. Add this under the ${member.name} container (after its env: block), or regenerate the file with ${PROGRAM_NAME} generate app:\n${envFromBlock(member.name)}`,
+        `${MEMBERS_FILE} does not read ${memberSecretName(member.name)} for ${member.name}: it was generated before 0.11.0. Add this under the ${member.name} container (after its env: block), or regenerate the file with ${PROGRAM_NAME} generate app:\n${envFromBlock(member.name)}`,
       );
       continue;
     }
@@ -731,6 +732,12 @@ export async function runWorkspaceDeploy(
     deps,
   );
   if (secrets === undefined) return EXIT_ERROR;
+  const slots = secrets.flatMap((secret) => unreadableSlot(prepared.text, secret.member) ?? []);
+  if (slots.length > 0) {
+    deps.error('Deploy refused; nothing was built or applied:');
+    for (const problem of slots) deps.error(`  ${problem}`);
+    return EXIT_ERROR;
+  }
 
   const ship =
     target.kindCluster === undefined

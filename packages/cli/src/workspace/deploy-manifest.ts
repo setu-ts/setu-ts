@@ -150,3 +150,33 @@ export function stampSecretVersion(
     stamped: true,
   };
 }
+
+/**
+ * Why a member's Deployment carries a `setu-ts.dev/secret-version` entry the stamp cannot fill —
+ * flow style, a second slot, or not at the pod template's 8-space indent — or `undefined`.
+ *
+ * Such an entry is worse than none: client-side apply resets the live annotation to it on every
+ * deploy and the read-back then patches it back, rolling the member out twice each time (audit 6,
+ * A6-1). A manifest with no entry at all is fine: deploy patches the annotation once.
+ *
+ * @param text - The manifest as it will be applied
+ * @param member - The member
+ * @returns The refusal, or `undefined`
+ */
+export function unreadableSlot(text: string, member: string): string | undefined {
+  if (stampSecretVersion(text, member, '0').stamped) return undefined;
+  const own = new RegExp(`^  name:[ \\t]*${literal(member)}[ \\t]*$`, 'm');
+  const mentions = text
+    .split(/^---[ \t\f\v\r]*(?:#[^\n]*)?$/m)
+    .some(
+      (document) =>
+        /^kind:[ \t]*Deployment[ \t]*$/m.test(document) &&
+        own.test(document) &&
+        document.includes(SECRET_VERSION_ANNOTATION),
+    );
+  return mentions
+    ? `k8s/members.yaml has a ${SECRET_VERSION_ANNOTATION} entry for ${member} that deploy cannot ` +
+        "fill: it must be one line at the pod template's annotations (8 spaces in), as generated — " +
+        `not flow style or a second copy. Restore the generated line, or remove it.`
+    : undefined;
+}

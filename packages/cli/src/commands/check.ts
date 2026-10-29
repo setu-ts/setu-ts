@@ -27,6 +27,11 @@ export interface ICheckDependencies {
   readonly interrupt?: AbortSignal;
 }
 
+/** A thrown value's message. */
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 /**
  * Why a member's `.env` is unsafe for the generated Compose `env_file`, or `undefined` when it is
  * absent or a regular file inside the workspace.
@@ -46,7 +51,7 @@ export async function memberEnvProblem(
   } catch (cause) {
     // Always a PathEscapesProjectError naming the link or what could not be resolved.
     return (
-      `${cause instanceof Error ? cause.message : String(cause)} docker compose would follow it ` +
+      `${messageOf(cause)} docker compose would follow it ` +
       "into this member's container through the generated env_file."
     );
   }
@@ -55,7 +60,7 @@ export async function memberEnvProblem(
     stat = await fs.stat(path);
   } catch (cause) {
     if (isMissingPath(cause)) return undefined;
-    return `${escapeName(path)} cannot be inspected: ${cause instanceof Error ? cause.message : String(cause)}`;
+    return `${escapeName(path)} cannot be inspected: ${messageOf(cause)}`;
   }
   return stat.isFile
     ? undefined

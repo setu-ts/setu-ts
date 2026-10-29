@@ -474,6 +474,7 @@ describe('setu workspace deploy', () => {
     expect(await old.run(['deploy'])).toBe(1);
     const message = old.err.join('\n');
     expect(message).toContain('does not read portal-env');
+    expect(message).toContain('was generated before 0.11.0');
     expect(message).toContain(
       'envFrom:\n            - secretRef:\n                name: portal-env',
     );
@@ -655,6 +656,20 @@ describe('setu workspace deploy', () => {
         .filter((c) => c.args.includes('jsonpath={.spec.template.metadata.annotations}'))
         .map((c) => c.args.find((a) => a.startsWith('deployment/'))),
     ).toEqual(['deployment/portal']);
+  });
+
+  it('refuses before building a members.yaml slot it cannot fill (audit 6, A6-1)', async () => {
+    const yaml = harness().fs.read('/ws/k8s/members.yaml');
+    const twice = yaml.replace(
+      /^( {8}setu-ts\.dev\/secret-version: ''\n)/gm,
+      "$1        setu-ts.dev/secret-version: ''\n",
+    );
+    const h = harness({ files: { '/ws/k8s/members.yaml': twice } });
+    expect(await h.run(['deploy'])).toBe(1);
+    expect(h.err.join('\n')).toContain(
+      'setu-ts.dev/secret-version entry for portal that deploy cannot fill',
+    );
+    expect(h.calls.some((c) => c.command === 'docker' || c.input !== undefined)).toBe(false);
   });
 
   it('fails closed when the read-back or the patch fails', async () => {

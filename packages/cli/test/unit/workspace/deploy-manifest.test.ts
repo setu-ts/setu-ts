@@ -4,6 +4,7 @@ import {
   prepareDeployManifest,
   readsMemberSecret,
   stampSecretVersion,
+  unreadableSlot,
 } from '../../../src/workspace/deploy-manifest.ts';
 import { workspaceK8sFiles } from '../../../src/workspace/k8s.ts';
 import { WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
@@ -168,6 +169,32 @@ describe('stampSecretVersion (re-audit N2)', () => {
       '$1  annotations:\n    note: |\nkind: Service\n',
     );
     expect(stampSecretVersion(scalar, 'portal', '1').stamped).toBe(false);
+  });
+
+  it('refuses a slot it cannot fill, and accepts a generated or absent one (audit 6, A6-1)', () => {
+    expect(unreadableSlot(yaml, 'portal')).toBeUndefined();
+    const absent = yaml.replace(/^ +setu-ts\.dev\/secret-version: ''\n/gm, '');
+    expect(unreadableSlot(absent, 'portal')).toBeUndefined();
+    const flow = yaml.replace(
+      /^ {6}annotations:\n {8}# Set by[^\n]*\n {8}setu-ts\.dev\/secret-version: ''\n/m,
+      "      annotations: {setu-ts.dev/secret-version: ''}\n",
+    );
+    const shallow = yaml.replace(
+      /^ {8}setu-ts\.dev\/secret-version/m,
+      '          setu-ts.dev/secret-version',
+    );
+    const twice = yaml.replace(
+      /^( {8}setu-ts\.dev\/secret-version: ''\n)/m,
+      "$1        setu-ts.dev/secret-version: ''\n",
+    );
+    for (const [label, text] of [
+      ['flow', flow],
+      ['indent', shallow],
+      ['twice', twice],
+    ] as const) {
+      expect(text, label).not.toBe(yaml);
+      expect(unreadableSlot(text, 'portal'), label).toContain('that deploy cannot fill');
+    }
   });
 
   it('reports a manifest without the slot, and a member it does not contain', () => {

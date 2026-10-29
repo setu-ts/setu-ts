@@ -310,7 +310,7 @@ describe('valid arities still succeed', () => {
   it('help refuses a positional rather than ignoring it', async () => {
     const h = harness();
     expect(await h.run(['help', 'extra'])).toBe(2);
-    expect(h.err.text()).not.toBe('');
+    expect(h.err.text()).toContain('setu help takes no arguments; got 1.');
   });
 
   it('a plugin command still receives every positional verbatim', async () => {
