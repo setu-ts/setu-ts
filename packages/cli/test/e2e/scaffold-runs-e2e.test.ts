@@ -35,6 +35,7 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import type { Prompter } from '../../src/prompt.ts';
+import { listTransports } from '../../src/workspace/transport.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
@@ -220,7 +221,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await nodeFs.rm(root, { recursive: true }).catch(() => {});
-});
+}, 30_000);
 
 /**
  * Runs the CLI with the temp root as its working directory.
@@ -236,6 +237,48 @@ async function run(args: readonly string[]): Promise<number> {
     log: () => {},
     error: () => {},
   });
+}
+
+for (const spec of listTransports()) {
+  for (const flag of ['broker', 'queue'] as const) {
+    if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
+    for (const target of ['deno', 'node'] as const) {
+      it(
+        `formats full-stack ${target} --${flag} ${spec.name} as rendered`,
+        { timeout: 120_000 },
+        async () => {
+          expect(
+            await run([
+              'new',
+              'portal',
+              '--runtime',
+              target,
+              '--template',
+              'full-stack',
+              `--${flag}`,
+              spec.name,
+            ]),
+          ).toBe(0);
+          const project = `${root}/portal`;
+          const result =
+            target === 'deno'
+              ? await denoRun(project, ['fmt', '--check'])
+              : await runIn(project, process.execPath, [
+                  new URL('../../../../node_modules/prettier/bin/prettier.cjs', import.meta.url)
+                    .pathname,
+                  '--check',
+                  '.',
+                ]);
+          expect(result.code, result.output).toBe(0);
+          if (target === 'deno' && spec.name === 'redis') {
+            await useWorkspacePackages(project);
+            const checked = await denoRun(project, ['check', 'setu.config.ts']);
+            expect(checked.code, checked.output).toBe(0);
+          }
+        },
+      );
+    }
+  }
 }
 
 /**

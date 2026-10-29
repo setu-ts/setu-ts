@@ -246,35 +246,6 @@ function planMember(
   // may enable. Measured: a real `react-router build` and an SSR 200 both work
   // inside a member once the root declares it.
   if (choice.template?.manifest?.npmBuild !== undefined) {
-    // …but a starter-composed template cannot accept a transport that rewrites
-    // its starter-owned messaging or queue arguments. Direct plugin additions
-    // are registered after the factory returns — gRPC uses that path — but an
-    // argument rewrite would otherwise be silently dropped and leave the member
-    // connected to the template default instead of its workspace transport.
-    const rewritesStarterPlugin =
-      transport.messagingArgs !== undefined || transport.queueArgs !== undefined;
-    if (choice.template.appFactory !== undefined && rewritesStarterPlugin) {
-      // The advice is narrowed per what each transport actually delivers: for a
-      // BROKER the standalone escape now restores the choice (`--broker`
-      // exists), but a standalone full-stack project still cannot take one, so
-      // pointing there would suggest an equivalence that does not hold.
-      const advice =
-        transport.messagingArgs !== undefined
-          ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
-            `service with \`${cliInvocation(profile.runtime)} new <name> --template microservice --broker ` +
-            `${transport.name}\`.`
-          : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
-            `\`${cliInvocation(profile.runtime)} new <name> --template ${choice.template.name}\`.`;
-      return {
-        ok: false,
-        message:
-          `The "${choice.template.name}" template composes its whole plugin set through ` +
-          `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
-          `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
-          `would look connected while talking to nobody. ${advice}`,
-      };
-    }
-
     // Deno only. `nodeModulesDir` is a Deno setting that turns on the real
     // `node_modules` directory npm and Bun have BY CONSTRUCTION — so on an npm
     // workspace there is nothing to enable, and asking for the field would mean

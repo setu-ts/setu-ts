@@ -1,11 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
   mergeObjectArgs,
+  reindentLiteral,
   rewritePluginArgs,
   wrapPluginArgs,
 } from '../../src/templates/plugin-args.ts';
 import { type ResolvedHost, resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
+
+describe('reindentLiteral', () => {
+  it('passes single lines through and shifts nested arrays in either direction', () => {
+    expect(reindentLiteral('{ x: 1 }', 6, 8)).toBe('{ x: 1 }');
+    const literal = '{\n        brokers: [\n          CONNECTION,\n        ],\n      }';
+    const shifted = '{\n          brokers: [\n            CONNECTION,\n          ],\n        }';
+    expect(reindentLiteral(literal, 6, 8)).toBe(shifted);
+    expect(reindentLiteral(shifted, 8, 6)).toBe(literal);
+  });
+});
 
 describe('wrapPluginArgs', () => {
   it('merges only single-level CLI object arguments', () => {
