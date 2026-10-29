@@ -29,7 +29,7 @@ export const NPM_TOOLING_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
 
 /** The scripts that run them. */
 export const NPM_TOOLING_SCRIPTS: Readonly<Record<string, string>> = {
-  check: 'tsc --noEmit',
+  check: 'tsc --noEmit && setu check',
   lint: 'eslint .',
   format: 'prettier --write .',
   'format:check': 'prettier --check .',

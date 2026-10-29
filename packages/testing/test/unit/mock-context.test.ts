@@ -38,6 +38,20 @@ describe('createTestContext', () => {
     }).toThrow('ctx.request.user has already been set');
   });
 
+  it('guards identity on the mock request prototype, with no own identity property', () => {
+    const ctx = createTestContext({
+      request: { user: { id: 'seeded', roles: [] }, tenant: { id: 't', name: 'T' }, locale: 'fr' },
+    });
+    expect(
+      ['user', 'tenant', 'locale'].filter((field) => Object.hasOwn(ctx.request, field)),
+    ).toEqual([]);
+    expect(ctx.request.tenant?.id).toBe('t');
+    expect(ctx.request.locale).toBe('fr');
+    expect(() => {
+      ctx.request.locale = 'de';
+    }).toThrow('ctx.request.locale has already been set');
+  });
+
   it('default startTime is 0 (not Date.now())', () => {
     const ctx = createTestContext();
     expect(ctx.startTime).toBe(0);
@@ -646,5 +660,13 @@ describe('MockResponse', () => {
       thrown = error;
     }
     expect(httpStatusHintOf(thrown)?.status).toBe(415);
+  });
+
+  it('MockResponse.setHeaders sets each entry as header() would', () => {
+    const ctx = createTestContext();
+    ctx.response.setHeaders({ 'X-One': '1', 'x-two': '2' });
+    const headers = ctx.response.snapshot().headers;
+    expect(headers.get('x-one')).toBe('1');
+    expect(headers.get('x-two')).toBe('2');
   });
 });

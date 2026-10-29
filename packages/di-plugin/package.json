@@ -40,6 +40,8 @@
     "@setu-ts/common": "workspace:^"
   },
   "devDependencies": {
+    "@setu-ts/kernel": "workspace:^",
+    "@setu-ts/runtime": "workspace:^",
     "@types/node": "^24",
     "typescript": "6.0.3",
     "vitest": "5.0.3"

@@ -9,15 +9,25 @@ import {
   parseRunnerArgs,
   runTargets,
   selectMembers,
+  validateRunnerArgs,
+  vitestArgs,
 } from './codemods/node-runner-core.ts';
 export { coverageRows, runTargets, selectMembers } from './codemods/node-runner-core.ts';
 
 if (import.meta.main) {
   await (async () => {
-    const args = parseRunnerArgs(process.argv.slice(2));
+    let args;
+    let members;
+    try {
+      args = parseRunnerArgs(process.argv.slice(2));
+      members = selectMembers(await workspaceMembers(), args.selection, args.skip);
+      validateRunnerArgs(args, members);
+    } catch (error) {
+      console.error(String(error));
+      process.exitCode = 2;
+      return;
+    }
     const coverage = args.coverage;
-    const workspace = await workspaceMembers();
-    const members = selectMembers(workspace, args.selection, args.skip);
     const result = await runTargets(
       members,
       async (member) => {
@@ -29,18 +39,19 @@ if (import.meta.main) {
             if (!isNotFound(error)) throw error;
           });
         }
-        const output = await runProcess(
-          'pnpm',
-          ['exec', 'vitest', 'run', ...(coverage ? ['--coverage'] : [])],
-          {
-            env: {
-              ...process.env,
-              ...{ SETU_TEST_MEMBER: member, NODE_OPTIONS: '--max-old-space-size=4096' },
-            },
-            inherit: true,
-          },
-        );
-        if (!coverage) return { code: output.code, rows: [] };
+        const env: Record<string, string | undefined> = {
+          ...process.env,
+          SETU_TEST_MEMBER: member,
+          NODE_OPTIONS: '--max-old-space-size=4096',
+        };
+        // A merge must always enforce thresholds, even from a shard-marked parent.
+        delete env.SETU_TEST_SHARD;
+        if (args.shard !== undefined) env.SETU_TEST_SHARD = '1';
+        const output = await runProcess('pnpm', vitestArgs(args, target), {
+          env,
+          inherit: true,
+        });
+        if (!coverage || args.shard !== undefined) return { code: output.code, rows: [] };
         try {
           const summary = JSON.parse(await readFile(report, 'utf8'));
           const rows = coverageRows(summary, process.cwd());
@@ -53,7 +64,7 @@ if (import.meta.main) {
       },
       args.tooling,
     );
-    if (coverage) {
+    if (coverage && args.shard === undefined) {
       console.log(
         [
           '| File | Branch % | Function % | Line % |',

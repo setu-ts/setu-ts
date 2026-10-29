@@ -93,6 +93,13 @@ describe('parseArgs', () => {
     ).toEqual(['orders', 'billing']);
   });
 
+  it('keeps every repeated --build-arg in order (M122)', () => {
+    expect(parseArgs(['--build-arg', 'A=1', '--build-arg=B=2']).flags['build-arg']).toEqual([
+      'A=1',
+      'B=2',
+    ]);
+  });
+
   it('honours a caller-supplied value-flag set', () => {
     const args = parseArgs(['--out', 'x'], new Set(['out']));
     expect(args.flags['out']).toBe('x');

@@ -12,6 +12,187 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Workspace build, test and deploy from the root (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`)
+
+`setu workspace build` and `setu workspace deploy` work in any existing workspace; nothing has to be
+regenerated to run them. A workspace root created with 0.11.0 also gets `build` and `deploy` scripts
+(Deno: tasks) and, on npm and Bun, `test`; on Deno, run `deno task --recursive test` from the root —
+a root `test` task running it would call itself, because Deno's recursion includes the root. An
+older root keeps its manifest — the CLI writes it once — so add the three entries yourself if you
+want them: for npm, `"test": "npm run test --workspaces --if-present"`,
+`"build": "setu workspace build"` and `"deploy": "setu workspace deploy"`.
+
+Generated Deployments now read a `<member>-env` Secret through `envFrom`, and generated Compose
+services read the member's own `.env` through an optional `env_file` and name their image
+`<member>:dev`. That optional `env_file` form needs Docker Compose 2.24.0 or later. Existing
+`k8s/members.yaml` and `docker/compose.yaml` pick these up the next time `setu generate app` (or
+`setu workspace ports --reallocate`) regenerates them. Until then, `setu workspace deploy` refuses a
+member that has a Secret — a `k8s/secrets/<member>/.env` file, or variables declared in its
+`.env.example` — when its Deployment does not read that Secret, and prints the four `envFrom` lines
+to add — which matters for a full-stack member, because nothing else sets its `SESSION_SECRET`. Put
+each member's values in `k8s/secrets/<member>/.env`; the root `.env` ignore rule already covers that
+path in older roots.
+
+`parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
+internal to `@setu-ts/config-plugin`, whose own surface is unchanged.
+
+### Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`)
+
+Nothing breaks. Three things change what an existing application can rely on:
+
+- **`signIn: { providers: [] }` no longer throws** when neither `mfa` nor `passkeys` is set. An
+  application that worked around the refusal with `AuthPlugin({ session: { toPrincipal } })` and its
+  own session key can move to `IAuthSessionService.signIn` to get `refreshPrincipal`, `amr` and
+  session-id rotation at sign-in.
+- **Adding `signIn.sessionStamp` to a running application ends every session whose user already has
+  a stamp**: those sessions were recorded without one, and a recorded "no stamp" matches only a user
+  whose stamp is still `null`. Deploy it when a one-time sign-out is acceptable, or return `null`
+  until every session has been renewed.
+- **`requireAuth()` without options is unchanged.** With `signInPage`, an anonymous `fetch()` still
+  gets `401`; only a page navigation is redirected. A route guarded by a role or permission guard
+  alone keeps answering `401`; put `requireAuth({ signInPage })` first to redirect it.
+
+### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
+
+Full-stack projects now accept `new --broker` / `--queue`, and full-stack workspace members receive
+the workspace transport through their starter options. Existing standalone projects can run
+`setu add messaging --broker redis` or `setu add queue --queue redis`; members use the workspace
+transport automatically. Install again after adding so the selected client is available. Existing
+calls and option values are preserved; review the exact property printed when manual configuration
+is needed. Standalone `add` creates missing broker Compose files and prints the connection variable
+and default, while leaving dotenv files unchanged; an existing `docker/compose.yaml` is never
+rewritten, and a selected service it lacks is printed for you to add. Generated full-stack options
+use `config.get`, so both dotenv values and deployment environment variables apply, with environment
+taking precedence.
+
+`setu add react-router` now refuses an app without a full-stack factory or an existing
+ReactRouterPlugin. Create a full-stack project with `setu new <name> --template full-stack`, or a
+workspace member with `setu generate app <name> --template full-stack`. Adding the dependency alone
+does not create the frontend files, routes or build scripts. Workers continues to refuse broker and
+queue flags.
+
+### `setu add view` and the styled app shell (M123, 0.11.0, `@setu-ts/cli`)
+
+Fresh full-stack scaffolds include Tailwind 4 through Vite, neutral shadcn tokens, Button/Card,
+`components.json`, a fixed app shell and a light/dark/system theme toggle. Existing apps are not
+rewritten. When copying files from a fresh scaffold, replace `classNames` from `app/lib/utils.ts`
+with `cn` from shadcn's `cn` package (the copied components import it too) and add `cn`,
+`class-variance-authority` and `radix-ui` to runtime dependencies. Add `tailwindcss` and
+`@tailwindcss/vite` at `^4.3.3` to development dependencies and put `tailwindcss()` before
+`reactRouter()` in Vite's plugins. Copy the stylesheet and theme files together with the layouts;
+the shell resets its content scroll position on pathname changes.
+
+Rerun `setu add view` to fill missing view setup in an existing project; a project whose
+`setu.config.ts` already registers `ViewPlugin()` also gets the example `/ui` route. It preserves
+existing files, pins, compiler choices and CSS tasks and prints what needs manual work; review every
+note. A `build` or `start:dev` script the command creates or prefixes runs CSS once first; one that
+already called `css` is left as it was, so check its order. Run the separate CSS watcher while
+editing. Workers receives only the dependency/JSX/example-view pieces; use Wrangler static assets
+for CSS. See [styling server-rendered views](./mvc.md#styling-server-rendered-views). If adding a
+CSP, allow the static inline theme scripts by hash or nonce.
+
+### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
+
+Update existing Node scripts explicitly; the CLI does not rewrite scripts:
+
+```json
+{
+  "build": "tsc --noEmit && setu build",
+  "start": "node --enable-source-maps dist/main.js",
+  "start:dev": "tsx watch main.ts",
+  "start:debug": "node --inspect --import tsx main.ts"
+}
+```
+
+Keep TypeScript, tsx and the matching CLI version as development dependencies. Full-stack Node
+prefixes build and check with `react-router build && `; development/debug use dev.ts instead of
+main.ts (development is `tsx dev.ts`, without watch). Prefix full-stack tests with
+`react-router build && `, replacing `npm run build && `, so tests do not depend on wiring checks. In
+full-stack socket main.ts import `* as serverBuild` from `./build/server/index.js` and call
+`createApp(undefined, undefined, { serverBuild })`; in `setu.config.ts` that arm must also set
+`assetsDir: './build/client/assets'` on Node, Bun and Deno (not Workers), or the page renders and
+every `/assets/*.js` answers 404. Keep the config's path fallback for tests and set `allowJs: true`
+in tsconfig.json so the static server-build import can be checked.
+
+Bun keeps `start: bun run main.ts`; add `start:dev: bun --watch main.ts` and
+`start:debug: bun --inspect main.ts`. Full-stack uses `bun run dev.ts` and `bun --inspect dev.ts`;
+run its frontend build before starting, removing the build prefix from start. Deno keeps its
+production start; add watch/inspect to its existing run command with the same grants. Full-stack
+Deno instead uses `deno task install && deno run -A --watch dev.ts` and the inspect equivalent; its
+check prefixes `deno task build && `.
+
+Ignore dist/ in standalone Node projects. Workspace roots add `apps/*/build/` everywhere and
+`apps/*/dist/` on Node/Bun. Use the generated Dockerfile from a fresh scaffold as the migration
+template: Node builds in one stage, installs production dependencies in a separate stage and copies
+dist/ and frontend build/. Bun installs with --production. Deno builds a declared frontend in a
+Debian `frontend` stage, caches source, and switches a root `nodeModulesDir: "auto"` to `"manual"`
+after installing (under `"auto"` a read-only container cannot start). Copy the generated
+.dockerignore too: exclude node_modules, dist, build, coverage, git and dotenv files, keeping
+.env.example. Workspace images use the root context and MEMBER build argument. See
+[deployment](./deployment.md).
+
+Generated install steps mount an optional build secret `npmrc` at `/root/.npmrc` (M120b), so
+`docker build --secret id=npmrc,src=.npmrc …` or `NPMRC="$(cat .npmrc)" docker compose … up --build`
+supplies a private registry token or npm settings without copying `.npmrc` into the image. An
+existing project gets this by regenerating its Dockerfile and Compose file, or by adding
+`--mount=type=secret,id=npmrc,target=/root/.npmrc` after `RUN` on each install line and a
+`secrets: [npmrc]` build entry with a top-level `secrets: { npmrc: { environment: NPMRC } }`. The
+mount needs BuildKit.
+
+Bun workspace roots need bunfig.toml containing:
+
+```toml
+[install]
+linker = "hoisted"
+```
+
+Rerun bun install. This exposes sibling libraries to members. Library generation creates a missing
+file, preserves hoisted settings and refuses other or missing linker settings in existing TOML, with
+the line to add. The CLI never rewrites user-owned TOML. The Bun image copies this file too.
+
+For built Node migrations use `node dist/src/migrations/run.js`; in development use
+`npx tsx src/migrations/run.ts`. Bun and Deno keep their source runners. Native `bun build` and
+`deno compile` are available for custom packaging; generated services do not emit those steps.
+
+### `setu check` in the generated check script (M118, 0.11.0, `@setu-ts/cli`)
+
+New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
+scripts, so add it yourself. In a Node, Bun or Workers project, add the CLI as a development
+dependency at your framework version and append ` && setu check` to the end of your existing `check`
+script, keeping whatever runs before it:
+
+```json
+{
+  "scripts": { "check": "tsc --noEmit && setu check" },
+  "devDependencies": { "@setu-ts/cli": "^0.11.0" }
+}
+```
+
+A Workers project with a build keeps its build first: its script becomes
+`npm run build && tsc --noEmit && setu check`.
+
+In a Deno project, add a `check` task (`main.dev.ts` belongs in the `deno check` list only when you
+enabled the devtool):
+
+```json
+{
+  "tasks": {
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.11.0 check"
+  }
+}
+```
+
+Run `setu check` once before you add it. A project that copied or hand-wrote files into a seam
+directory reports `setu.E003`; `setu sync` rewrites the barrels from their directories. A finding
+you accept can be silenced in `.setu-ts/check.json` — see
+[Silencing a finding](./cli.md#silencing-a-finding).
+
+`setu devtool enable` replaces a scaffold's own `check` task with the devtool form, which adds
+`main.dev.ts`. In a project that enabled the devtool before this release, re-running it refuses the
+older `check` task by name; change the task to the form above, with `main.dev.ts` in the list.
+
+A plugin command named `check` or `sync` is now shadowed by the built-in verb; rename it.
+
 ### Optional peers and `setu add` workspace root entries (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli`)
 
 In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
@@ -239,6 +420,59 @@ health bridge.
   `<Pascal> not found.`; an existing module keeps its text until you edit the detail in its
   controller or routes. A test that asserted the old `<Pascal> <id> was not found.` must assert the
   fixed detail instead, and should not assert that the id is echoed.
+
+### DI lifetimes are enforced, and every request has a scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`, breaking)
+
+Affects applications that register `DiPlugin`, and any code implementing `IContainer` itself. An
+application without `DiPlugin` is unaffected.
+
+- **A boot failure naming a `captive` dependency** means a `singleton` reaches a `scoped` service,
+  directly or through `transient`s. Before 0.11.0 the singleton kept the first scope's instance for
+  the life of the application. Make the dependent `scoped` too, or resolve the scoped service per
+  request: `container.forRequest(ctx).resolve(token)` in a handler, or `@Params(Service(token))` on
+  a decorated one. A decorated **controller** is always a singleton (it is built once, at
+  registration, whatever `defaultScope` says), so a controller constructor that takes a scoped
+  service needs the handler-parameter form:
+
+  ```typescript
+  // Before: constructor(private readonly reports: ReportService) {} — now a boot failure
+  @Get()
+  @Params(Service<ReportService>('report-service'))
+  today(reports: ReportService) {
+    return reports.summary();
+  }
+  ```
+
+- **A boot failure naming a `missing` dependency or a `cycle`** used to surface on the first request
+  that resolved it; it now fails `app.start()`, listing every finding at once.
+- **`ScopeRequiredError`** replaces the old behaviour of a `scoped` token resolved on the root
+  container quietly acting as a singleton. It is also thrown for a `transient` with a `dispose`
+  option resolved on the root, which the root would otherwise keep until the application closes.
+  Resolve it through `forRequest(ctx)` or a scope from `createScope()`.
+- **`ContainerClosedError`**: `DiPlugin` closes the container after the last bootstrap hook. Move a
+  `register` that runs after `app.start()` into a plugin's `register()`, `onInit` or `onBootstrap`.
+  A scope may still register tokens its parent does not have, but registering one the parent has now
+  throws; register the replacement on the root, or use `overrideProvider` in tests.
+- **Factories receive their dependencies.** `useFactory` is called with the resolved `inject`
+  entries in order. A zero-argument factory that resolves from a captured container keeps working,
+  but boot validation cannot see what it uses; prefer
+  `{ useFactory: (db: Db) => new Repo(db), inject: [DB] }`.
+- **Own `IContainer` implementations** add `forRequest(ctx)` and `dispose()`. Delegating to the
+  wrapped container, as `OverridingContainer` in `@setu-ts/testing` does, is enough for a wrapper.
+- **`ScopeManager` is gone** from `@setu-ts/di-plugin`; nothing replaces it as an export.
+- **Unit tests of a request-scoped handler** need the kernel's request context, which implements
+  `ctx.defer`: test them through `createTestApp` and `inject()`. A `createTestContext` context makes
+  `forRequest` throw `RequestScopeUnavailableError`.
+- **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
+  disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
+  `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
+  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
+  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
+  settle after the kernel's own 5 s bound.
+- **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
+  means once per scope; it is no longer created and kept on the root.
+- **Shutdown and streamed responses.** A streamed response whose request used a scope stays
+  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
 
 ## 0.10.0
 
@@ -1213,8 +1447,8 @@ copy the fix from a fresh scaffold:
   fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
-- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
-  without it the first `start` fails with "Failed to load React Router server build".
+- **Full-stack on Node or Bun:** run the build before production start. Use start:dev for
+  development; see the M120 production scripts above.
 - **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
   answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
   is unchanged.

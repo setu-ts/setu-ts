@@ -91,6 +91,10 @@ describe('cacheMiddleware', () => {
           responseStatus.push(code);
           return ctx.response;
         },
+        setHeaders: (headers: Readonly<Record<string, string>>) => {
+          for (const name of Object.keys(headers)) ctx.response.header(name, headers[name]!);
+          return ctx.response;
+        },
         header: (name: string, value: string) => {
           responseHeaders.set(name.toLowerCase(), value);
           return ctx.response;
@@ -477,6 +481,7 @@ describe('cacheMiddleware', () => {
         },
         response: {
           status: () => ctx.response,
+          setHeaders: () => ctx.response,
           header: () => ctx.response,
           appendHeader: () => ctx.response,
           json: () => hr,
@@ -643,6 +648,10 @@ describe('cacheMiddleware', () => {
         },
         response: {
           status: (_code: number) => ctx.response,
+          setHeaders: (headers: Readonly<Record<string, string>>) => {
+            for (const name of Object.keys(headers)) ctx.response.header(name, headers[name]!);
+            return ctx.response;
+          },
           header: (name: string, value: string) => {
             responseHeaders.set(name.toLowerCase(), value);
             return ctx.response;

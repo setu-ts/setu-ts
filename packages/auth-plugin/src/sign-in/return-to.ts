@@ -1,5 +1,7 @@
 /**
- * The post-sign-in redirect target. Internal: used by the sign-in login route.
+ * The post-sign-in redirect target: used by the sign-in login routes and the
+ * `requireAuth({ signInPage })` redirect, and exported (M124) so an
+ * application's own login handler applies the same rule to `returnTo`.
  *
  * An open redirect after sign-in is a phishing primitive: the victim's request
  * carries their brand-new session to a host the operator does not control. Only
@@ -22,6 +24,12 @@
 export const MAX_RETURN_TO_BYTES = 256;
 
 /**
+ * The query parameter carrying the post-sign-in target: read by the login
+ * routes, written by the `requireAuth({ signInPage })` redirect.
+ */
+export const RETURN_TO_QUERY_PARAM = 'returnTo';
+
+/**
  * Returns `value` when it is a safe same-origin path, otherwise `fallback`.
  *
  * Accepted: a single leading `/`, no backslash, no scheme, no control character,
@@ -37,6 +45,16 @@ export const MAX_RETURN_TO_BYTES = 256;
  * @param value - The caller-supplied target, if any
  * @param fallback - What to use instead when `value` is unsafe; defaults to `/`
  * @returns A same-origin absolute path
+ *
+ * @example
+ * ```typescript
+ * import { safeReturnTo } from '@setu-ts/auth-plugin';
+ *
+ * safeReturnTo('/orders?page=2'); // '/orders?page=2'
+ * safeReturnTo('//evil.test'); // '/'
+ * ```
+ *
+ * @since 0.11.0
  */
 export function safeReturnTo(value: string | undefined, fallback = '/'): string {
   if (typeof value !== 'string' || value.length === 0) {

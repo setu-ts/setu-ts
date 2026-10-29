@@ -132,6 +132,7 @@ const NEW: ICommandFlagSpec = spec(
     'transport-url',
     'broker',
     'queue',
+    'logger',
     'yes',
     'y',
     'dir',
@@ -166,6 +167,7 @@ const GENERATE_APP: ICommandFlagSpec = spec(
   [
     'template',
     'style',
+    'logger',
     'port',
     'devtool',
     'devtool-port',
@@ -195,10 +197,27 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * package; got 3. Run it once per package.`), and this check must not preempt
  * that message with a second way of saying the same thing.
  */
-const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
+const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run', 'broker', 'queue']);
 
 /** Opt-in agent brief creation and read-only freshness checking. */
 const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+
+const BUILD: ICommandFlagSpec = spec('build', ['dir', 'dry-run'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+
+const CHECK: ICommandFlagSpec = spec('check', ['dir', 'strict'], [], {
+  fixed: 1,
+  taken: 0,
+  noun: 'no arguments',
+});
+const SYNC: ICommandFlagSpec = spec('sync', ['dir', 'dry-run'], [], {
   fixed: 1,
   taken: 0,
   noun: 'no arguments',
@@ -230,6 +249,22 @@ const WORKSPACE_PORTS: ICommandFlagSpec = spec(
   ['reallocate', 'dir', 'dry-run'],
   [],
   { fixed: 2, taken: 0, noun: 'no arguments beyond ports' },
+);
+
+/** `setu workspace build` (M122): every member's image. */
+const WORKSPACE_BUILD: ICommandFlagSpec = spec(
+  'workspace build',
+  ['dir', 'tag', 'registry', 'build-arg', 'network', 'dry-run'],
+  [],
+  { fixed: 2, taken: 0, noun: 'no arguments beyond build' },
+);
+
+/** `setu workspace deploy` (M122): build, ship, apply and roll out every member. */
+const WORKSPACE_DEPLOY: ICommandFlagSpec = spec(
+  'workspace deploy',
+  ['dir', 'context', 'namespace', 'registry', 'tag', 'timeout', 'build-arg', 'network', 'dry-run'],
+  [],
+  { fixed: 2, taken: 0, noun: 'no arguments beyond deploy' },
 );
 
 /**
@@ -289,6 +324,12 @@ export function commandFlagsFor(
       return GENERATE;
     case 'add':
       return ADD;
+    case 'build':
+      return BUILD;
+    case 'check':
+      return CHECK;
+    case 'sync':
+      return SYNC;
     case 'agents':
       return AGENTS;
     case 'devtool':
@@ -296,7 +337,10 @@ export function commandFlagsFor(
     case 'adopt':
       return ADOPT;
     case 'workspace':
-      return subcommand === 'ports' ? WORKSPACE_PORTS : WORKSPACE;
+      if (subcommand === 'ports') return WORKSPACE_PORTS;
+      if (subcommand === 'build') return WORKSPACE_BUILD;
+      if (subcommand === 'deploy') return WORKSPACE_DEPLOY;
+      return WORKSPACE;
     case 'commands':
       return COMMANDS;
     case 'help':
@@ -321,9 +365,14 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [GENERATE_LIBRARY.label, GENERATE_LIBRARY.documented],
   [ADD.label, ADD.documented],
   [AGENTS.label, AGENTS.documented],
+  [CHECK.label, CHECK.documented],
+  [BUILD.label, BUILD.documented],
+  [SYNC.label, SYNC.documented],
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],
+  [WORKSPACE_BUILD.label, WORKSPACE_BUILD.documented],
+  [WORKSPACE_DEPLOY.label, WORKSPACE_DEPLOY.documented],
 ]);
 
 /**

@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { readFile } from 'node:fs/promises';
-import { coverageRows, parseRunnerArgs, runTargets, selectMembers } from './node-runner-core.ts';
+import {
+  coverageRows,
+  parseRunnerArgs,
+  runTargets,
+  selectMembers,
+  validateRunnerArgs,
+  vitestArgs,
+} from './node-runner-core.ts';
 
 describe('Per-member Node test runner', () => {
   it('resolves member paths and short names, deduplicates and refuses unknown members', () => {
@@ -37,7 +44,77 @@ describe('Per-member Node test runner', () => {
     ).toEqual({ coverage: true, tooling: false, selection: ['common'], skip: ['cli', 'kernel'] });
     expect(() => parseRunnerArgs(['--skip'])).toThrow('--skip requires a workspace member');
     expect(() => parseRunnerArgs(['--skip', '--coverage'])).toThrow('--skip requires');
-    expect(() => parseRunnerArgs(['--shard'])).toThrow('Unknown option: --shard');
+    expect(() => parseRunnerArgs(['--unknown'])).toThrow('Unknown option: --unknown');
+  });
+  it('validates shard syntax and refuses incompatible selections before execution', () => {
+    for (const value of [
+      undefined,
+      '0/3',
+      '4/3',
+      '1/9',
+      '1.5/3',
+      '1/0',
+      '-1/3',
+      '01/3',
+      '1/3/4',
+      '--coverage',
+    ])
+      expect(() => parseRunnerArgs(value === undefined ? ['--shard'] : ['--shard', value])).toThrow(
+        '--shard requires',
+      );
+    for (const mode of [['--shard', '1/3'], ['--merge']]) {
+      const valid = parseRunnerArgs(['--coverage', '--no-tooling', 'cli', ...mode]);
+      expect(() => validateRunnerArgs(valid, ['packages/cli'])).not.toThrow();
+      expect(() => validateRunnerArgs({ ...valid, coverage: false }, ['packages/cli'])).toThrow(
+        'require --coverage',
+      );
+      expect(() => validateRunnerArgs(valid, ['packages/cli', 'packages/common'])).toThrow(
+        'exactly one',
+      );
+      expect(() => validateRunnerArgs(valid, [])).toThrow('exactly one');
+      expect(() => validateRunnerArgs({ ...valid, selection: [] }, ['packages/cli'])).toThrow(
+        'exactly one',
+      );
+      expect(() => validateRunnerArgs({ ...valid, tooling: true }, ['packages/cli'])).toThrow(
+        'refuse the tooling',
+      );
+    }
+    expect(() =>
+      validateRunnerArgs(parseRunnerArgs(['--coverage', '--shard', '1/3', '--merge']), ['cli']),
+    ).toThrow('mutually exclusive');
+    expect(() => validateRunnerArgs(parseRunnerArgs([]), [])).not.toThrow();
+    expect(parseRunnerArgs(['--shard', '8/8']).shard).toBe('8/8');
+  });
+  it('builds normal, shard and merge Vitest invocations', async () => {
+    expect(vitestArgs(parseRunnerArgs([]), 'cli')).toEqual(['exec', 'vitest', 'run']);
+    expect(vitestArgs(parseRunnerArgs(['--coverage']), 'cli')).toEqual([
+      'exec',
+      'vitest',
+      'run',
+      '--coverage',
+    ]);
+    expect(vitestArgs(parseRunnerArgs(['--coverage', '--shard', '2/3']), 'cli')).toEqual([
+      'exec',
+      'vitest',
+      'run',
+      '--coverage',
+      '--shard=2/3',
+      '--reporter=blob',
+      '--coverage.reporter=json-summary',
+      '--coverage.reporter=json',
+      '--coverage.reportsDirectory=coverage-node/cli/shard-2',
+      '--outputFile.blob=.vitest-reports/cli/blob-2.json',
+    ]);
+    expect(vitestArgs(parseRunnerArgs(['--coverage', '--merge']), 'cli')).toEqual([
+      'exec',
+      'vitest',
+      'run',
+      '--merge-reports=.vitest-reports/cli',
+      '--coverage',
+    ]);
+    expect(
+      (await runTargets(['cli'], () => Promise.resolve({ code: 7, rows: [] }), false)).code,
+    ).toBe(7);
   });
   it('omits the tooling target when asked', async () => {
     const calls: string[] = [];

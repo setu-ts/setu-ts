@@ -39,8 +39,8 @@ it('pins the package scripts that invoke deno directly', () => {
 });
 
 it('pins every repository script that launches a Deno subject', () => {
-  // The Deno lane, the Deno-only diagnostics listener and the deploy gate's
-  // Deno-target scaffold are the three that test Deno runtime support.
+  // The Deno lane and the deploy gate's Deno-target scaffold launch Deno.
+  // The diagnostics consumer now stays in the invoking runtime.
   const retained = readdirSync('scripts')
     .filter((file) => file.endsWith('.ts'))
     .filter((file) => {
@@ -48,11 +48,7 @@ it('pins every repository script that launches a Deno subject', () => {
       return /\b(?:runProcess|run|execute)\(\s*(?:'deno'|\[\s*'deno')/.test(source);
     })
     .sort();
-  expect(retained).toEqual([
-    'check-deploy.ts',
-    'inspect-local-diagnostics.ts',
-    'test-deno-lane.ts',
-  ]);
+  expect(retained).toEqual(['check-deploy.ts', 'test-deno-lane.ts']);
 });
 
 it('keeps every root test fixture off Deno', () => {

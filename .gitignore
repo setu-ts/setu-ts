@@ -89,6 +89,7 @@ website/.lighthouseci/
 
 # Per-member Vitest reports (M111b)
 coverage-node/
+.vitest-reports/
 coverage-deno-lane/
 
 # Standalone native-runtime lane installs.

@@ -217,6 +217,7 @@ function fakeContext(opts: {
 
   const respStub = {
     status: () => respStub,
+    setHeaders: () => respStub,
     header: () => respStub,
     appendHeader: () => respStub,
     json: () => hr,

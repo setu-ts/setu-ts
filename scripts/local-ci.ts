@@ -13,6 +13,7 @@ import {
   backendArgs,
   backendSpecs,
   ciEnvironment,
+  cliReportMounts,
   containerArgs,
   containerName,
   shardLabel,
@@ -204,6 +205,15 @@ async function main(): Promise<void> {
       const scratch = resolve(directory, shard);
       await mkdir(resolve(scratch, 'tmp'), { recursive: true });
       await mkdir(resolve(scratch, 'home'), { recursive: true });
+      // All CLI runners share only this invocation's blobs; logs stay outside it.
+      const cliReports = shard.startsWith('cli-');
+      const reports = resolve(directory, 'vitest-reports');
+      if (cliReports) {
+        await mkdir(reports, { recursive: true });
+        // Create nested mount destinations as the host user, before Docker can
+        // create root-owned directories inside the shared worktree mount.
+        await mkdir(resolve(root, '.vitest-reports'), { recursive: true });
+      }
       const socket = await stat('/var/run/docker.sock');
       const env = {
         ...ciEnvironment(source, shard),
@@ -238,6 +248,7 @@ async function main(): Promise<void> {
         `${root}:${root}`,
         '-v',
         `${resolve(scratch, 'tmp')}:/tmp`,
+        ...cliReportMounts(directory, root, shard),
         '-v',
         `${gitCommon}:${gitCommon}:ro`,
         '-v',

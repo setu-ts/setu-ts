@@ -15020,9 +15020,10 @@ What is missing is a way to run that detection on its own, and three gaps in it:
   classified, and a gate that fails on them gets switched off. Wired passes, not wired fails,
   unclassifiable warns and names the import line to check.
 - **Severity.** Errors (exit `1`): a skipped artifact, barrel drift, an unwired barrel, a duplicate
-  hand registration, a legacy layout still in use. Warnings (exit `0`): adoption of a hand-written
-  file that matches a family's naming convention (usually intended, and the M70g report already
-  treats it as information) and an unclassifiable config. `--strict` turns warnings into errors.
+  hand registration, a legacy layout still in use. Warnings (exit `0`): an unclassifiable config.
+  `--strict` turns warnings into errors. A hand-written file in a seam directory that its barrel
+  does not list is barrel drift, an error: `check` writes nothing, so it adopts nothing, and the
+  "adopted" notice stays `generate`'s, printed when a write actually adopts (M118 plan §2 C1).
 - **Scope.**
   - Standalone projects and workspace members. At a workspace root it checks every member and
     reports per member, as `setu agents --check` does; it refuses a directory that is not a project,
@@ -15049,15 +15050,21 @@ advice, which is gap 1 again. So:
   version, the pin `setu new` already writes for the framework). Today projects reach the CLI
   through `npx @setu-ts/cli@<version>`, which in a Docker build stage would download it on every
   build. A devDependency is installed by the build stage and stays out of the runtime image.
-- **The generated `check` script runs it** beside the type check, and a generated CI workflow (if
-  one exists) runs that script. The `dev` and `debug` scripts do not, so the edit loop is never
-  blocked.
+- **The generated `check` script runs it** beside the type check. The CLI generates no CI workflow,
+  so a project's own CI runs that script (M118 plan §2 C3). The `dev` and `debug` scripts do not, so
+  the edit loop is never blocked.
 - **Only errors fail it.** Warnings print and exit `0`, as the severity rule above says.
 - **The production build runs it too, before compiling** — M120 wires that, so M120 depends on this
   milestone. Bun and Deno projects have no build step today; for them the `check` script and CI are
   the gate. Workers projects are built by wrangler, so their `check` script carries it.
-- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script
-  through `setu add` or an upgrade-guide entry; nothing rewrites a developer's existing script.
+- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script from
+  an upgrade-guide entry; nothing rewrites a developer's existing script, and `setu add` has no
+  script-editing path (M118 plan §2 C2).
+- **Added at plan time (maintainer decision, 2026-10-26, after comparing Django `check`, ESLint, Nx
+  `sync:check`/`sync` and Rails `zeitwerk:check`):** `setu sync`, which rewrites every CLI-managed
+  barrel from its directory so drift has a command that fixes it; a stable id per finding
+  (`setu.E001`…, `setu.W001`…); and silencing by id, or by id and path, in `.setu-ts/check.json`. DI
+  graph validation stays at boot in `di-plugin` (M125); `check` does not boot the application.
 
 **Open questions for the plan.**
 
@@ -15071,20 +15078,20 @@ dependency on M117.
 
 **Deliverables**
 
-- [ ] `plans/milestone-118-setu-check.md`, settling the open questions above
-- [ ] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
-- [ ] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
+- [x] `plans/archive/milestone-118-setu-check.md`, settling the open questions above
+- [x] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
+- [x] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
       codes above
-- [ ] Barrel-drift and all-barrel config-wiring detection, comparing name sets
-- [ ] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
+- [x] Barrel-drift and all-barrel config-wiring detection, comparing name sets
+- [x] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
       each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
       removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
       naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
-- [ ] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
-      script (and CI, where generated); the scaffold e2e proves a fresh project's `check` passes and
-      a broken seam fails it
-- [ ] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `118`
+- [x] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
+      script; the scaffold e2e proves a fresh project's `check` passes and a broken seam fails it
+- [x] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
+- [x] `setu sync`, finding ids and `.setu-ts/check.json` silencing (added at plan time)
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `118`
 
 ## Milestone 119: The `v0.10.0` Smoke Closeout
 
@@ -15432,18 +15439,13 @@ Node service gains little and worsens stack traces.
 
 **Decisions the plan takes:**
 
-1. **Workspace libraries.** A `generate library` package exports its `.ts` source, so a per-service
-   `tsc` build emits imports that plain `node` cannot load. Either (a) `tsc -b` with project
-   references and conditional exports on libraries, the framework's own layout, or (b) bundle each
-   service with esbuild (`--platform=node --packages=external` except workspace libraries,
-   `--sourcemap`), keeping optional peers external so M113d's guarded `await import()` still works.
-   The review recommends evaluating (b) first; `tsc --noEmit` stays the type-check gate.
-2. **Scripts.** `build`, which runs `setu check` (M118) before compiling, so code that compiles but
-   is never registered fails the build — only errors fail it, warnings print; production
-   `start: node --enable-source-maps dist/main.js`; `dev: tsx watch main.ts`;
-   `debug: node --inspect --import tsx main.ts`; tests unchanged. Whether `start` keeps its
-   development meaning (least surprise) with a separate `start:prod`, or follows NestJS (`start`
-   compiled, `start:dev` watch) — an upgrade-guide entry either way.
+1. **Workspace libraries.** `setu build` bundles source libraries with esbuild and keeps npm
+   dependencies and optional peers external. Libraries keep source exports; tsc --noEmit remains the
+   type-check gate.
+2. **Scripts.** Node build runs tsc --noEmit then setu build (wiring errors refuse, warnings print).
+   Production start is node --enable-source-maps dist/main.js; start:dev watches source and
+   start:debug uses the inspector. Full-stack develops through dev.ts and builds its frontend before
+   the service. Tests build only the frontend when needed, without the wiring gate.
 3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
    `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
    `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
@@ -15452,27 +15454,29 @@ Node service gains little and worsens stack traces.
    today.
 4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
    out of the build, as M101f keeps it out of images).
-5. **Bun and Deno** run TypeScript natively; emit `bun build` / `deno compile` or document them.
-6. **Interim:** if this milestone is not soon, replace `sh -c "npx tsx main.ts"` with
-   `node --import tsx main.ts` — about 160 MB and 140 ms per container with no build.
+5. **Bun and Deno** retain native source execution. `bun build` and `deno compile` are documented
+   custom packaging choices, not generated steps.
+6. **Interim command superseded.** M120 ships compiled Node starts; Bun and Deno retain source.
 
 **Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
 generated projects; this milestone wires it into `build`.
 
-**Gate:** `scaffold-runs-e2e` builds, runs the COMPILED output, and runs the built image read-only
-with no network, for every template × runtime, including a workspace with a library (the M63 and
-M95a lesson: generated output is proven only by running it).
+**Gate:** Node scaffold e2e builds and serves compiled output, including full-stack SSR and a
+workspace library. The deploy gate runs the Node workspace/library, Node standalone, Bun
+workspace/library and Deno workspace (with a library under a root `nodeModulesDir: "auto"`) images
+read-only with no external network. Full-stack and standalone Deno Dockerfiles are unit-tested;
+full-stack images were built and run by hand in review.
 
 **Deliverables:**
 
-- [ ] Build, `dev` and `debug` scripts for every Node template and workspace member; `build` runs
-      `setu check` first, and the e2e proves a broken seam fails the build
-- [ ] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
+- [x] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
+      `build` runs `setu check` first, and the e2e proves a broken seam fails the build
+- [x] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
       it
-- [ ] `.gitignore` covers `dist/` and `build/`
-- [ ] The workspace-library build decided and implemented
-- [ ] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `120`
+- [x] `.gitignore` covers `dist/` and `build/`
+- [x] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
+- [x] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `120`
 
 ---
 
@@ -15519,13 +15523,13 @@ message crosses it.
 
 **Deliverables:**
 
-- [ ] The three entry points generate a full-stack project whose starter receives the transport
-- [ ] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
+- [x] The three entry points generate a full-stack project whose starter receives the transport
+- [x] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
       client
-- [ ] `setu add react-router` scaffolds or refuses with the right command
-- [ ] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
-- [ ] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `121`
+- [x] `setu add react-router` refuses with the right command (maintainer decision 2026-10-28)
+- [x] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
+- [x] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `121`
 
 ---
 
@@ -15544,21 +15548,24 @@ the builders hand-wrote the rest, including `scripts/deploy.sh` (build, kind-loa
 rollout), `scripts/bootstrap-secrets.mjs` (Secret wiring for 12 `secretKeyRef`s) and a root test
 task.
 
-**Decisions the plan takes:** which root tasks are generated (`test` across members, `build` of
-every image, `deploy` for the generated manifests) and how they stay correct as members are added (a
-managed script reading `setu.workspace.json`, the `dev` runner's pattern); whether Secret wiring is
-generated from each member's declared environment (the `envVariables` manifest field M67 added);
-whether `dev` watches (it should once M120 adds a `dev` script per member). This milestone depends
-on M120 for the per-member build it calls.
+**Decisions taken (plan `plans/archive/milestone-122-workspace-operations.md`, maintainer
+2026-10-29):** the operations are CLI commands, `setu workspace build` and `setu workspace deploy`,
+reading `setu.workspace.json` at run time — so existing workspaces get them without edits and fixes
+ship with the CLI — rather than a managed script; a new root also gets `test` (the package manager's
+own recursion), `build` and `deploy` scripts. Secrets are wired: names from each member's
+`.env.example`, values from a gitignored `k8s/secrets/<member>/.env`, one Secret per member applied
+server-side, read through `envFrom`. `dev` already watches: M120 made the dev runner start each
+member's `start:dev`.
 
 **Deliverables:**
 
-- [ ] Generated root `test`, `build` and `deploy` tasks, kept in step with `generate app`
-- [ ] Secret manifests generated from member environment declarations, or a documented decision not
-      to
-- [ ] Workspace e2e running the root tasks against a real kind cluster
-- [ ] CLI README, `docs/deployment.md`, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `122`
+- [x] `setu workspace build` / `setu workspace deploy`, plus root `test`, `build` and `deploy`
+      scripts in a new workspace; they read the manifest at run time, so they follow `generate app`
+- [x] Secret manifests from member environment declarations (`.env.example` names, operator values,
+      server-side apply), `envFrom` in every generated Deployment, `env_file` in Compose
+- [x] Workspace e2e running the root tasks against a real kind cluster (`check:deploy --workspace`)
+- [x] CLI README, `docs/deployment.md`, `docs/upgrading.md`, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `122`
 
 ---
 
@@ -15625,25 +15632,27 @@ must reach the M120 image.
 
 **Deliverables:**
 
-- [ ] The chosen styling foundation in the full-stack template, with a theme switch
-- [ ] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
+- [x] The chosen styling foundation in the full-stack template, with a theme switch
+- [x] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
       only the content region scrolls; the e2e scrolls the content and asserts the header and
       sidebar have not moved
-- [ ] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
+- [x] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
       runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
       styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
       cannot do in server-rendered views
-- [ ] Scaffold e2e: builds, serves styled pages, no unstyled flash, on every supported runtime
-- [ ] Template README and `docs/` entry; CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `123`
+- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash — the full-stack template on
+      every runtime it supports, `setu add view` on Node, Bun and Deno (Workers views carry no
+      Tailwind setup)
+- [x] Template README and `docs/` entry; CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `123`
 
 ---
 
 ## Milestone 124: Session and Account Lifecycle
 
-**Package(s):** `packages/auth-plugin`, `packages/session-plugin`, `packages/common` (a per-user
-session stamp contract); docs. The CLI is touched only if the plan scaffolds the session-list screen
-(see "Named, not taken").
+**Package(s):** `packages/auth-plugin`; docs, including the `session-plugin` README. `common` and
+`session-plugin` code are unchanged: the stamp lives on the application's user record (see "Shipped
+design"), so no per-user session stamp contract was needed. The CLI is not touched.
 
 **Source:** the maintainer's review of a production React Router application whose API
 authentication uses the cookie session rather than JWTs (2026-10-24). The application keeps a
@@ -15658,7 +15667,9 @@ framework's responsibility and missing; three are application or generator mater
 **V10-65**, **V10-66**.
 
 **The framework comparison below is from knowledge, not measured** (the M97 precedent). The plan
-re-checks each framework's current behaviour before relying on it.
+re-checked each framework's current behaviour against its source before relying on it; its table
+supersedes this one where they differ (ASP.NET Core and Spring both answer an
+`X-Requested-With: XMLHttpRequest` request with 401 rather than the redirect).
 
 | Concern                                                            | Laravel                               | Django                                                         | Rails                                        | ASP.NET Core Identity          | Spring Security            | Setu-TS today                                                          |
 | ------------------------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------- |
@@ -15700,6 +15711,24 @@ compared on each request's re-check; bumping it invalidates every session at onc
   (`signOutEverywhere(userId)` or similar). How it behaves on the cookie strategy, where the session
   itself cannot be destroyed server-side.
 
+**Shipped design** (maintainer decisions 2026-10-29, recorded in the plan):
+
+- **1:** the `signIn` refusal is lifted — `providers: []` without `mfa` or `passkeys` is a
+  password-only sign-in. `AuthPlugin({ session })` stays synchronous and points to `signIn`; one
+  mechanism re-checks.
+- **2:** an option on the existing guard, `requireAuth({ signInPage })`. A navigation is a
+  `GET`/`HEAD` that is not `X-Requested-With: XMLHttpRequest` and carries `Sec-Fetch-Mode: navigate`
+  (or, without it, an `Accept` naming `text/html` or `application/xhtml+xml`; a bare `*/*` is not
+  enough). It gets `302` to the page with `returnTo` through `safeReturnTo`, now exported;
+  everything else keeps the 401, and both answers append to `Vary`.
+- **3:** the stamp lives on the application's user record, as in Laravel, Django, Devise and ASP.NET
+  Core: `signIn.sessionStamp(principal)` is read at sign-in, its SHA-256 digest recorded, and the
+  digest of the current value compared on every request in constant time. **This replaces the
+  suggested `common` port and stores**, which would have duplicated state the application already
+  owns. **No framework bump API ships:** the application bumps its own stamp (a one-line update),
+  and signs the current session in again to keep it. It works on the cookie strategy because the
+  compare, not a server-side delete, is what ends the session.
+
 **Named, not taken.** These are application or generator material; the reviewed application is right
 to own them, and other frameworks mostly leave them to packages or starter kits:
 
@@ -15713,14 +15742,14 @@ to own them, and other frameworks mostly leave them to packages or starter kits:
 
 **Deliverables:**
 
-- [ ] Items 1–3 implemented, each with tests that reproduce the gap first
-- [ ] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
+- [x] Items 1–3 implemented, each with tests that reproduce the gap first
+- [x] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
       authenticating on the next request; a page request redirected to sign-in with a safe return
       path while the same unauthenticated API request answers 401; and a stamp bump signing out two
       concurrent sessions of one user on the store strategy
-- [ ] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
+- [x] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
       the three "named, not taken" items or a stated decision not to write them
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `124`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `124`
 
 ---
 
@@ -15785,58 +15814,60 @@ the few things that need a per-request instance, such as a unit of work.
 
 **Decisions the plan takes:**
 
-1. **Close and compile the graph at start.** Registration closes when the application starts. The
-   container then validates once — missing providers, cycles, and any singleton reaching a scoped
-   service on any path — and compiles each provider into a direct factory: singletons captured,
-   scoped dependencies as numbered slots. The per-resolve cycle detector goes; a closed, validated
-   graph cannot contain a cycle. Build-time generation (Dagger, Wire) is not taken: start-up
+1. **Close and compile the graph at the end of bootstrap.** The container stays open while plugins
+   register (the decorator plugin builds controllers during `register()`), compiling a token's
+   subgraph on its first resolve; it closes when the last bootstrap hook has run, the moment the
+   service registry seals. Closing compiles and validates every provider once — missing providers,
+   cycles, and any singleton reaching a scoped service on any path — into direct factories:
+   singletons captured, scoped dependencies as numbered slots. No resolve runs the cycle detector;
+   only the compile walk does. Build-time generation (Dagger, Wire) is not taken: start-up
    compilation gives the same safety on Bun, Deno and Workers, which M120 gives no build step, and
-   costs microseconds per provider once per process. The plan states what start-up compilation costs
-   on a Workers cold start.
-2. **Typed tokens.** `createToken<T>(name)` returns a frozen object — its `name` and a numeric `id`
-   unique in the process, assigned at creation — that `resolve` infers `T` from. A token is created
-   at module load, before any container exists, so it cannot carry a container's slot; instead each
-   compiled container indexes its plan by `id`, and a resolve is an array read whichever container
-   compiled it (several applications or test containers in one process share the ids, not the
-   slots). A branded string is rejected: it cannot carry an id, so every resolve would need a `Map`
-   lookup again. A class is also accepted as its own token, matched by identity through one
-   `WeakMap` read; a bare string through one `Map` read. Both keep working and stay the slower path.
-   Bundling and minification cannot break class tokens (identity only; `constructor.name` appears in
-   error messages and nowhere else).
+   costs microseconds per provider once per process.
+2. **Typed tokens.** `createToken<T>(name)` returns a frozen object `{ name }` that `resolve` infers
+   `T` from, keyed by identity. It carries no process-unique id: a creation counter would be
+   module-level mutable state, which AI_GUIDELINES §11.4 forbids, and the compiled graph makes the
+   id unnecessary — every dependency inside the graph is a direct reference with no lookup, so only
+   a top-level `resolve()` reads a `Map`, the same cost as a string token. A class is also accepted
+   as its own token, by identity, and bare strings keep working. Bundling and minification cannot
+   break class tokens (`constructor.name` appears in error messages and nowhere else). (Maintainer
+   decision, 2026-10-25, replacing an earlier id-based design.)
 3. **Dependencies that can be seen.** `ClassProvider.inject` and a new optional
    `FactoryProvider.inject` accept `{ token, optional: true }`, and a factory receives its resolved
    dependencies as arguments. That retires the `@Optional` closure (finding 2). A factory without
-   `inject` stays legal but opaque: it is resolved by the slower runtime path and the boot
-   validation names it as unchecked.
-4. **A kernel-owned, lazy request scope, on by default.** When `CAPABILITIES.DI_CONTAINER` is
-   registered, the kernel exposes `ctx.scope()` (name decided in the plan). The first call in a
-   request creates the scope — one slot array — and caches it on the request's context handle. A
-   request that never calls it allocates nothing. Completion — fast path, full path and error path —
-   checks `handle.scope !== undefined` and disposes only then. This is NOT an `onResponse` hook: any
-   registered hook moves every request off the M87 synchronous path
-   (`kernel/src/application/application.ts:1221`), which would tax every DI application whether or
-   not it uses a scope. Disposal runs after the response is handed back and logs its failures; a
-   transaction's commit is not disposal and stays in the handler or middleware.
-5. **Disposal is real.** A scoped provider may declare a dispose function (or the instance may carry
-   `Symbol.dispose` / `Symbol.asyncDispose` — the plan picks one), and `IContainer` gains the
-   dispose member `ServiceScope`'s JSDoc already promises. The compiled plan records which scoped
-   providers are disposable, so a request that creates none skips the loop.
+   `inject` stays legal but opaque: boot validation cannot see its dependencies, and the plugin
+   lists such tokens in one `debug` line.
+4. **A lazy request scope, on by default, without DI in the kernel.** The kernel gains two generic
+   per-request primitives: `ctx.defer(cleanup)`, whose list is allocated on first call — completion
+   (fast path, full path and error path) checks whether it exists and does nothing more when it does
+   not — and `ctx.slot(key, create)`, owner-keyed storage under a key only its owner holds (added
+   2026-10-26: caching the scope in a `WeakMap` cost a request scope 10% of hello-world throughput).
+   The scope itself is `container.forRequest(ctx)` in di-plugin: created on first call, kept in the
+   request's slot, disposed through `ctx.defer`. This is NOT an `onResponse` hook: any registered
+   hook moves every request off the M87 synchronous path
+   (`kernel/src/application/application.ts:1221`). Cleanup finishes before a buffered response is
+   handed back, and when the body stream ends, errors or is cancelled for a streaming one — work
+   after the response is not reliable on Workers without `waitUntil`, which the kernel cannot reach.
+   A transaction's commit is not disposal and stays in the handler or middleware.
+5. **Disposal is real.** A provider may declare a `dispose` option; `IContainer.dispose()` runs it
+   for what the container created, and returns a promise only when a dispose function did, so a
+   request scope with synchronous disposal stays on the synchronous path. `Symbol.dispose` is not
+   taken yet.
 6. **Scoped services reach decorated handlers per request.** A controller stays singleton-lived;
-   NestJS-style bubbling is rejected above. A request-scoped parameter source (the `@Params(Ctx())`
-   shape — `@Params(Scoped(TOKEN))` or similar, named in the plan) resolves from `ctx.scope()` on
-   each call. A controller constructor that injects a scoped service is refused at boot (decision
-   1), naming this source as the fix.
-7. **The defect fix (finding 1).** Inside `ctx.scope()` the captive refusal is enforced from the
-   first release: it is new surface with nothing to stay compatible with. For the existing paths —
-   hand-made `createScope()`, resolving `scoped` from the root, registering after start — the
-   Versioning Policy applies: they warn for one release and are refused in the next minor, and the
-   plan names that minor. `IContainer`'s new members ship optional per the same policy, with the
-   required form deferred to that minor; `OverridingContainer` in `packages/testing` implements them
-   either way.
+   NestJS-style bubbling is rejected above. `@Params(Service(TOKEN))` resolves from
+   `container.forRequest(ctx)` on each call (named `Service`, because `ScopedRoles` and
+   `ScopedPermissions` already mean RBAC scopes). A controller constructor that reaches a scoped
+   service fails the boot (decision 1), naming this source as the fix.
+7. **The defect fix (finding 1), in 0.11.0.** The next release, 0.11.0, is a minor that already
+   carries a BREAKING entry, and the Versioning Policy batches breaks into a minor, so every refusal
+   ships there with no warning phase: resolving `scoped` from the root, a captive graph, registering
+   after close, and a scope shadowing a parent token. `IContainer`'s new `forRequest` and `dispose`
+   are required in the same minor; `OverridingContainer` in `packages/testing` implements them. If
+   M125 misses the 0.11.0 cut, the entries move to the next minor unchanged. (Maintainer decision,
+   2026-10-25.)
 
 **Measured, not estimated.** The review's figures are estimates and the plan replaces them. The
 benchmark harness runs three configurations against the `develop` baseline: no DI; DI registered and
-`ctx.scope()` never called (must match the baseline — the fast path is the property under test); and
+`forRequest` never called (must match the baseline — the fast path is the property under test); and
 a request resolving scoped services. The plan sets the acceptance threshold for the third.
 
 **Coordination, not dependency.** Independent of M118 and M120. Whichever of M120 and this milestone
@@ -15854,17 +15885,218 @@ request scope in use, decorators lowered by whatever M120 bundles with.
 
 **Deliverables:**
 
-- [ ] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
-- [ ] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
-- [ ] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
+- [x] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
+- [x] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
+- [x] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
       sees the other's; a scoped service is disposed after its request, including a request that
       throws; a singleton reaching a scoped service fails the boot with both names; and a request
-      that never calls `ctx.scope()` stays on the synchronous path
-- [ ] The three-configuration benchmark, results in the PR
-- [ ] `apps/di-decorators` moved off hand-made scopes onto the request scope
-- [ ] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
+      that never calls `forRequest` stays on the synchronous path
+- [x] The three-configuration benchmark, results in the PR
+- [x] `apps/di-decorators` moved off hand-made scopes onto the request scope
+- [x] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
       refusals marked for their minor), and `docs/upgrading.md`
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `125`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `125`
+
+---
+
+## Milestone 126: A Local Diagnostics Listener on Node
+
+**Package(s):** `packages/runtime` (the listener), `packages/cli` (the devtool opt-in, the
+development entry and the workspace runner on a Node target), `scripts/` (test lanes and the
+consumer exercise); docs. `packages/common` and `packages/diagnostics-plugin` source do not change:
+the `ILocalDiagnosticsListenerFactory` contract is runtime-neutral, and it already says that a
+runtime with no supported transport refuses before it binds. The connector, its `Host` check and the
+native client contain no Deno API (checked: no `Deno` reference in `diagnostics-plugin/src`).
+
+**Source:** the maintainer's direction (2026-10-28), from refreshing the devtool roadmap against
+`v0.10.0`. Since M111d, Node has been the default target. The default `setu new` template is the
+plugin-list minimal host, which the devtool opt-in accepts, so a default project is a Node project
+the opt-in would otherwise accept. The local diagnostics listener (M98b) binds only on Deno, and
+M98c refuses every other runtime. The separately maintained devtool therefore cannot inspect a
+project generated with the defaults. This milestone is the only framework prerequisite for widening
+the devtool's support matrix beyond Deno.
+
+**Where things stand (checked against source, 2026-10-28):**
+
+1. **The listener refuses on Node before it binds.** `createLocalDiagnosticsListenerFactory` returns
+   the refusing factory for every platform except `deno`
+   (`runtime/src/diagnostics/local-diagnostics-listener.ts:305`). Its fixed error names Deno as the
+   only supported runtime (`:45`). The RuntimePlugin builds the factory once and registers
+   `closeActive()` on the close hook (`runtime/src/plugin/runtime-plugin.ts:248-256`). A Node
+   factory plugs into that seam unchanged.
+2. **`@hono/node-server`'s `serve()` cannot host this listener as it stands** (2.1.5, read from
+   `dist/index.mjs`):
+   - It answers a missing `Host`, an invalid `Host` or an invalid URL with its own
+     `new Response(null, { status: 400 })`, before the fetch callback runs. That is not the
+     protocol's fixed refusal.
+   - When a response fails, it writes `Error: ${err.message}` to the client.
+   - `serve()` returns the server synchronously and listens without an `'error'` listener. A port
+     conflict is therefore an uncaught `'error'` event, not a rejected `listen()`. The adapter's
+     `await host.serve(...)` (`node-http-adapter.ts:549`) awaits nothing.
+   - `getRequestListener` does accept an `errorHandler`, but `serve()` never passes one through.
+3. **Node exposes what Deno hides.** On Deno, duplicate singleton header lines can be detected only
+   by looking for a comma in the coalesced value (`SINGLETON_HEADER_NAMES`, `nativeFramingRefusal`
+   at `:127`). Node gives the real line multiplicity in `IncomingMessage.rawHeaders`. Node also
+   applies its own HTTP parser limits (`maxHeaderSize`, `headersTimeout`, `requestTimeout`,
+   keep-alive), and its `clientError` path answers a parse error before any application code runs.
+4. **The proof runs only on Deno.** `NODE_EXCLUDED_TESTS` in `scripts/test-lanes.ts` keeps 18 suites
+   that need a real connector off the Node lane:
+   - 16 diagnostics-plugin suites: every end-to-end observation family, plus the `activation`,
+     `core-conformance`, `lifecycle` and `security` integration suites;
+   - the Redis realtime-observations suite;
+   - the M98b consumer exercise (`test/inspect-local-diagnostics.test.ts`).
+
+   The listener source is in `DENO_ONLY_SOURCES`, so only the Deno lane measures its coverage. On
+   Node, nothing in the suite has ever reached a real connector.
+
+5. **The CLI's devtool output is Deno-shaped from end to end:**
+   - `devtoolRuntimeRefusal` (`cli/src/devtool/planner.ts:255`) refuses `new --devtool`,
+     `generate app --devtool` and `devtool enable` on any other target.
+   - `devtool enable` writes only into a `deno.json` and imports the plugin through the Deno
+     specifier (`cli/src/commands/devtool.ts:91`).
+   - The development entry reads its credentials with `Deno.env.get` and stops with `Deno.exit`
+     (`cli/src/devtool/dev-entry.ts:100-115`).
+   - `devtoolTasks` emits `deno run …` and a `deno check` that includes `main.dev.ts`
+     (`project-files.ts:1350`).
+   - Since M120, a Node project has `build` (`tsc --noEmit && setu build`) and `start` (the compiled
+     `dist/main.js`). It also has `start:dev` (`tsx watch main.ts`) and `start:debug`
+     (`project-files.ts:1637-1660`). No Node template has a `dev` script; Deno's devtool task is
+     named `dev`.
+6. **The Node workspace runner has no devtool path, and it leaves the devtool's process group.**
+   `nodeRunner` (`cli/src/workspace/dev-runner.ts:185`) always runs `npm run start:dev`, which is
+   watch mode (`:243`). It never reads `SETU_DEVTOOL_MEMBER`. Its `spawn` passes no `env`, so every
+   member would inherit the launcher's session pair; the Deno runner blanks it for every member
+   except the selected one (`:109-121`). It also starts each member with `detached: true`, in a
+   process group of its own, so that a non-forwarding shell cannot strand a server. The devtool's
+   supervisor is a process-group leader and tears down with `process.kill(0, …)`
+   (`setu-ts-devtool/src/launch/supervisor.ts:19,39`). A detached member escapes that teardown.
+7. **One more process level.** A Node project runs TypeScript under `tsx` (`project-files.ts:1680`),
+   and tsx's CLI (4.23.15) runs the script in a child `process.execPath`. Under `npm run`, the
+   application is four processes below the launcher: npm, a shell, tsx, then node. These all stay in
+   the launcher's group unless something detaches them (item 6).
+8. **The production image already excludes a development dependency.** M120's Node runtime stage
+   runs `npm ci --omit=dev` and copies only `dist` (`cli/src/workspace/compose.ts:371`).
+   `setu build` bundles `main.ts` alone (`cli/src/commands/build.ts:163`), and `.dockerignore`
+   excludes `main.dev.ts` (`compose.ts:298-299`). A `diagnostics-plugin` declared in
+   `devDependencies` therefore never reaches a Node image, with no strip step like the Deno image's
+   (`compose.ts:213`, the V8-21 fix).
+
+**Decisions:**
+
+1. **The listener is `node:http`, not `serve()`.** It uses `createServer` with node-server's own
+   request mapping and no node-server code: node-server normalizes the request-target
+   (`/v1/./status` arrives as `/v1/status`, measured), which would make the connector serve an alias
+   it must refuse. It sits behind an injectable host seam, as the Deno factory does. `listen()`
+   resolves on `'listening'` and rejects on `'error'`, so a port conflict fails closed and the
+   application never crashes. The server is created with explicit values for `maxHeaderSize`,
+   `headersTimeout`, `requestTimeout`, `keepAliveTimeout` and `maxRequestsPerSocket`, with
+   `insecureHTTPParser: false` and a `clientError` handler that writes fixed bytes and destroys the
+   socket.
+2. **The protocol is identical on both runtimes; the transport is not.** For every request that
+   reaches the protocol, status, body bytes, refusal code and the protocol's own headers
+   (`content-type`, `cache-control`, `x-content-type-options`, the `x-setu-*` set) match the Deno
+   listener. Each HTTP parser refuses some malformed requests before the protocol sees them, with a
+   bare `400` and no body. The two parsers draw that line in different places (measured: Node
+   refuses a duplicate `Content-Length`, Deno a duplicate `Host`), and the conformance table records
+   each row's outcome per runtime. Headers the HTTP stack adds (`date`, `connection`, `keep-alive`,
+   `content-length` versus chunked) are documented, not asserted equal. The native client checks
+   only the protocol headers.
+3. **Duplicate-header refusal on Node uses `rawHeaders`**, the real line multiplicity, and keeps the
+   comma check, so Node refuses a superset of what Deno refuses. Tests write to a raw `node:net`
+   socket, never through `fetch`.
+4. **Every existing real-connector suite runs on both lanes.** The 18 suites in item 4 leave
+   `NODE_EXCLUDED_TESTS`, and the listener source leaves `DENO_ONLY_SOURCES`. Only the Deno
+   listener's own host-specific cases stay Deno-only. This is the conformance proof; a new
+   two-runtime table covers only the framing and parser cases the existing suites do not reach.
+5. **`close()` is bounded, as on Deno.** `server.close()` stops accepting connections; idle
+   keep-alive sockets are closed immediately, and an in-flight poll is given the same bound the Deno
+   listener gives it before `closeAllConnections()`. The close hook can never hang shutdown.
+6. **`onListen` keeps its meaning.** It receives `{ hostname, port }` mapped from
+   `server.address()`. Without it, the Node listener prints the same default banner Deno prints, so
+   the bind is never silent (the reason `diagnostics-plugin.ts:417-427` omits the key).
+7. **The CLI emits the devtool for a Node target from the planner that `new`, `generate app` and
+   `enable` already share:**
+   - The development entry reads its credentials through `runtime.env` and stops with the
+     runtime-neutral shutdown block, so one rendering serves every runtime that has a listener.
+   - `diagnostics-plugin` goes in `devDependencies`. Framework pins that disagree with the CLI are
+     refused with the upgrade guide named, never bumped (the shipped V8-19 rule).
+   - The script is named `dev` and runs `tsx main.dev.ts` (the maintainer deferred the name until
+     M120 merged; it is chosen against what M120 shipped). M120 took `start:dev` and `start:debug`,
+     so `dev` collides with nothing. It is the name the Deno devtool task already has, so the
+     launcher runs `dev` on both runtimes. It is never `tsx watch`: a watch restart is a new
+     instance, and a new instance ends the session.
+   - `diagnostics-plugin` in `devDependencies` is what keeps it out of the production image (item
+     8). A test asserts that the Node runtime stage's dependency tree contains no
+     `diagnostics-plugin`.
+   - The project's `tsc --noEmit` check covers `main.dev.ts`.
+   - The refusal narrows to Bun and Workers.
+8. **The Node workspace runner gains the devtool path:**
+   - It reads the three variables. It runs `dev` for the selected member and `start:dev` for every
+     other member, as today.
+   - It passes every child an explicit environment that blanks the pair for every other member.
+   - When the launcher selects a member, it does not detach, so the devtool's group teardown reaches
+     every process it started. It still forwards `SIGINT`/`SIGTERM` itself.
+   - A workspace whose `scripts/dev.ts` is the pre-M126 Node runner is refused by name, as M98c
+     refuses a stale Deno runner.
+
+**Open questions the plan resolves rather than inherits:**
+
+- **Whether an in-flight poll is bounded at all today on Deno.** The plan measures it, and decision
+  5 matches whatever bound it finds.
+
+**Security.** This milestone opens an authenticated loopback listener on a second runtime and
+changes which processes receive session credentials, so it crosses a trust boundary. The plan
+carries a design security review written as a delta against `docs/diagnostics-security-review.md`
+(T13 and the "Non-Deno runtimes refuse" line at `:189` change). The committed tree gets an
+independent security audit before merge. The audit covers:
+
+- DNS rebinding and `Host`, including node-server's missing-`Host` default (it falls back to the
+  configured hostname);
+- every framing and parser refusal, over raw sockets;
+- no reflected error text on any path, including a response that fails mid-write;
+- sibling members never holding a working credential;
+- a Node project's dependency install never binding the listener without the explicit opt-in.
+
+**Builds on M120** (merged, PR #515). Item 5's scripts and item 8's image are what M120 ships, and
+decisions 7 and 8 are written against them. The devtool's own Node support is milestone D06 in the
+devtool repository, which consumes this one: npm project discovery, the Node recipe catalog, launch
+through the `dev` script, and teardown across the npm/shell/tsx/node chain.
+
+**Named, not taken:**
+
+- **Bun.** `Bun.serve` resembles `Deno.serve`, and Bun also runs `node:http`. Take it as a small
+  follow-up letter only when the devtool asks for Bun.
+- **Workers.** A Worker has no loopback socket of its own; inspecting one needs a different
+  transport design.
+
+**Deliverables:**
+
+- [x] A Node `ILocalDiagnosticsListenerFactory` per decisions 1, 5 and 6: `127.0.0.1` only, the same
+      port bounds, one active listener, a port conflict that rejects `listen()`, and a bounded,
+      idempotent `close()` released by the RuntimePlugin close hook on every shutdown and
+      failed-startup path
+- [x] The diagnostics-plugin real-connector suites, the listener suite and the consumer exercise
+      running on BOTH lanes (decision 4), plus a raw-socket table for duplicate headers, malformed
+      requests, a missing or invalid `Host`, oversized headers and slow headers (decisions 2 and 3)
+- [x] The CLI Node arm at all three entry points (decision 7), with the refusal narrowed to Bun and
+      Workers, and the production-image assertion
+- [x] The Node workspace runner's devtool path, with no detach under the devtool, sibling blanks,
+      and a refusal of a pre-M126 runner (decision 8)
+- [x] A scaffold end-to-end test that boots a standalone Node devtool project AND a Node workspace
+      member under the generated runner, pairs with each, renews, and proves that no other member's
+      environment holds the pair
+- [x] The design security review delta, and the committed-tree audit record in the PR
+- [x] Docs that say Deno-only today, corrected:
+  - `docs/runtime-deployment.md:336`
+  - `docs/diagnostics-protocol.md:17`
+  - `docs/diagnostics-security-review.md:189`
+  - `packages/cli/README.md:274,307`
+  - `packages/diagnostics-plugin/AGENT_CARD.md:36`
+  - the runtime and diagnostics-plugin READMEs
+  - `PUBLIC_API.md` (`--devtool` row)
+  - the CHANGELOG
+  - the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher
+- [x] **ROADMAP.md**: this section and the Progress Tracking row `126`
 
 ---
 
@@ -16139,7 +16371,7 @@ patch by construction and gains nothing new here.
 | 115       | ✅     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
-| 118       | ⬜     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
+| 118       | ✅     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
 | 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
@@ -16149,10 +16381,11 @@ patch by construction and gains nothing new here.
 | 119f      | ✅     | telemetry + optional-peer packages + packaging — optional peers in an npm workspace                                                                                                                                                                                                       |
 | 119g      | ✅     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
 | 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
-| 119i      | ✅     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
-| 120       | ⬜     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
-| 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
-| 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
-| 123       | ⬜     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
-| 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
-| 125       | ⬜     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
+| 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
+| 121       | ✅     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
+| 122       | ✅     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
+| 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
+| 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |
+| 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
+| 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |

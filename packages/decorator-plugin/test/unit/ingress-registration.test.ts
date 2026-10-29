@@ -1,3 +1,4 @@
+import type { ContainerToken } from '@setu-ts/common';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type {
@@ -257,13 +258,17 @@ describe('non-HTTP ingress registration', () => {
     const queue = queueDouble(recorded);
     const container: IContainer = {
       register() {},
-      resolve<T>(token: string): T {
+      resolve<T>(token: ContainerToken<T>): T {
         if (token === CAPABILITIES.QUEUE) return queue as unknown as T;
         throw new Error(`Unexpected token: ${token}`);
       },
-      has(token: string): boolean {
+      has(token: ContainerToken): boolean {
         return token === CAPABILITIES.QUEUE;
       },
+      forRequest(): IContainer {
+        return container;
+      },
+      dispose(): void {},
       createScope(): IContainer {
         return container;
       },

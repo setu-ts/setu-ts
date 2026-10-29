@@ -57,6 +57,10 @@ The metrics middleware runs at **priority 20 — outermost**, so it observes all
 response status. The record path is wrapped in `try/finally`, so a request that throws still
 decrements the active-requests gauge rather than leaking it.
 
+HTTP series use only `method` and `status` labels. The case-sensitive known methods are `GET`,
+`HEAD`, `POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`, and `PATCH`; every other method uses
+`_OTHER`, including on thrown-error paths. This bounds method-label cardinality.
+
 ## Exports
 
 | Export                 | Kind      |

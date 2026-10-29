@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
 import { ProviderRegistry } from '../../src/container/provider-registry.ts';
+import { createToken } from '@setu-ts/common';
 
 describe('ProviderRegistry', () => {
+  it('keys tokens by identity, lists local entries, and refuses parent shadowing', () => {
+    const token = createToken<number>('value');
+    class Service {}
+    const reg = new ProviderRegistry();
+    const entry = { provider: { useValue: 1 }, scope: 'singleton' as const };
+    reg.register(token, entry);
+    reg.register(Service, entry);
+    expect(reg.get(createToken<number>('value'))).toBeUndefined();
+    expect([...reg.entries()]).toEqual([
+      [token, entry],
+      [Service, entry],
+    ]);
+    expect(() => reg.createChild().register(token, entry)).toThrow(/already registered/);
+  });
   describe('register', () => {
     it('stores a provider entry under a token', () => {
       const reg = new ProviderRegistry();

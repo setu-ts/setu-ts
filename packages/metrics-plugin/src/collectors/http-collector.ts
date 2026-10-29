@@ -16,6 +16,24 @@ import type {
 import { createPathMatcher } from '@setu-ts/common';
 import type { MetricsService } from '../services/metrics-service.ts';
 
+/** Case-sensitive known HTTP methods; keep traffic from creating arbitrary series. */
+const KNOWN_HTTP_METHODS: ReadonlySet<string> = new Set([
+  'GET',
+  'HEAD',
+  'POST',
+  'PUT',
+  'DELETE',
+  'CONNECT',
+  'OPTIONS',
+  'TRACE',
+  'PATCH',
+]);
+
+/** Maps unknown methods to the OpenTelemetry HTTP semantic-convention label. */
+function methodLabel(method: string): string {
+  return KNOWN_HTTP_METHODS.has(method) ? method : '_OTHER';
+}
+
 /**
  * Priority constant for metrics middleware (outermost, just inside error-handler).
  */
@@ -150,7 +168,7 @@ export class HttpCollector {
       errorOccurred = true;
       // Record error (status 500)
       const status = '500';
-      const method = ctx.request.method;
+      const method = methodLabel(ctx.request.method);
 
       this.#errorsCounter?.inc(1, { method, status });
       this.#requestsCounter?.inc(1, { method, status });
@@ -165,7 +183,7 @@ export class HttpCollector {
       if (!errorOccurred) {
         // `snapshot().status` is a non-optional number (IResponse contract).
         const status = ctx.response.snapshot().status.toString();
-        const method = ctx.request.method;
+        const method = methodLabel(ctx.request.method);
 
         // Decrement active requests
         this.#activeGauge?.dec(1);

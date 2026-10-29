@@ -18,6 +18,26 @@ import type { TransportName } from '../../src/workspace/transport.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
+describe('Node workspace devtool scaffold', () => {
+  it('writes only the member npm manifest and uses the Node runner and dev script', async () => {
+    const h = harness([], 3000, 'http', undefined, 'node');
+    const rootBefore = h.fs.read('/ws/package.json');
+    expect(await h.run(['app', 'a', '--devtool']), h.err.text()).toBe(0);
+    const member = JSON.parse(h.fs.read('/ws/apps/a/package.json'));
+    expect(member.scripts.dev).toBe('tsx main.dev.ts');
+    expect(member.devDependencies['@setu-ts/diagnostics-plugin']).toBeDefined();
+    expect(member.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
+    expect(h.fs.read('/ws/package.json')).toBe(rootBefore);
+    expect(h.fs.writes).not.toContain('/ws/package.json');
+    expect(h.fs.read('/ws/scripts/dev.mjs')).toContain('SETU_DEVTOOL_MEMBER');
+    expect(h.fs.read('/ws/apps/a/main.dev.ts')).toContain('npx @setu-ts/cli@');
+    expect(h.out.text()).toContain('cd apps/a && npm run start:dev');
+    expect(h.out.text()).toContain(
+      'With the devtool, from the workspace root: SETU_DEVTOOL_MEMBER=a npm run dev',
+    );
+  });
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;
@@ -188,20 +208,17 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
     });
 
-    // A starter-composed template can accept a DIRECT plugin contribution: the
-    // config renderer registers it after the starter factory returns. A broker
-    // still needs to rewrite starter-owned wiring, which the factory cannot
-    // represent, so its refusal remains the no-silent-miswire guard.
-    it('refuses a starter-composed template on a transport that rewrites a plugin', async () => {
-      const h = harness([], 3000, 'redis');
-      expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
-      expect(h.err.text()).toContain('createFullStackAppFromConfig');
-      expect(h.err.text()).toContain('talking to nobody');
-      // C4: for a BROKER the advice names what actually delivers one standalone,
-      // since a standalone full-stack project still cannot take --broker.
-      expect(h.err.text()).toContain('--template microservice --broker redis');
-      expect(h.fs.writes).toEqual([]);
-    });
+    for (const transport of ['redis', 'rabbitmq', 'nats', 'kafka'] as const) {
+      it(`renders a full-stack member on ${transport}`, async () => {
+        const h = harness([], 3000, transport);
+        expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(0);
+        const config = h.fs.read('/ws/apps/shop/setu.config.ts');
+        expect(config).toContain('messaging: {');
+        expect(config).toContain('config.get<string>(');
+        expect(config.includes('queue: {')).toBe(['redis', 'rabbitmq'].includes(transport));
+        expect(h.err.text()).not.toContain('talking to nobody');
+      });
+    }
 
     it('accepts a starter-composed template on the grpc transport', async () => {
       const h = harness([], 3000, 'grpc');
@@ -281,9 +298,9 @@ describe('runAppCommand', () => {
   // testing the profile's renderer alone leaves this line free to drift back.
   it('names each toolchain own commands in the next step it prints', async () => {
     const expected = {
-      deno: 'deno install && cd apps/orders && deno task start',
-      node: 'npm install && cd apps/orders && npm run start',
-      bun: 'bun install && cd apps/orders && bun run start',
+      deno: 'deno install && cd apps/orders && deno task start:dev',
+      node: 'npm install && cd apps/orders && npm run start:dev',
+      bun: 'bun install && cd apps/orders && bun run start:dev',
     } as const;
 
     for (const [runtime, line] of Object.entries(expected)) {
@@ -647,7 +664,7 @@ describe('runAppCommand', () => {
       const h = harness([]);
       await h.run(['app', 'orders']);
       expect(h.out.text()).toContain('Added orders on port 3000');
-      expect(h.out.text()).toContain('cd apps/orders && deno task start');
+      expect(h.out.text()).toContain('cd apps/orders && deno task start:dev');
     });
 
     it('normalizes the member name', async () => {

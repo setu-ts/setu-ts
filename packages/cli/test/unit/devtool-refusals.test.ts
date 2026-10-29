@@ -112,11 +112,87 @@ function workspaceSeed(
 }
 
 describe('devtool enable refuses by name and writes nothing', () => {
-  for (const runtime of ['node', 'bun', 'cloudflare-workers'] as const) {
+  for (const member of [false, true]) {
+    const project = member ? '/ws/apps/a' : '/ws';
+    for (const row of [
+      { name: 'invalid manifest', file: 'package.json', source: '{', expected: 'Invalid JSON' },
+      { name: 'missing tsx', file: 'package.json', source: '{}', expected: 'requires tsx' },
+      {
+        name: 'starter factory',
+        file: 'setu.config.ts',
+        source: 'export async function createApp(',
+        expected: 'async',
+      },
+      {
+        name: 'legacy factory',
+        file: 'setu.config.ts',
+        source: 'export function createApp(): IApplication {',
+        expected: 'SECOND parameter',
+      },
+      {
+        name: 'edited entry',
+        file: 'main.dev.ts',
+        source: '// mine',
+        expected: 'Refusing to overwrite',
+      },
+    ]) {
+      it(`refuses Node ${member ? 'member' : 'standalone'} ${row.name} without a partial write`, async () => {
+        const seed: Record<string, string> = {
+          [`${project}/package.json`]: JSON.stringify({
+            scripts: { start: 'node dist/main.js' },
+            devDependencies: { tsx: '^4.20.0' },
+          }),
+          [`${project}/setu.config.ts`]: CURRENT_CONFIG,
+          ...(member
+            ? {
+                '/ws/setu.workspace.json': renderWorkspaceManifest({
+                  version: 1,
+                  runtime: 'node',
+                  transport: 'http',
+                  basePort: 3000,
+                  members: [{ name: 'a', port: 3000 }],
+                }),
+                '/ws/package.json': '{}',
+                '/ws/apps/a/.setu-member': '',
+              }
+            : {}),
+          [`${project}/${row.file}`]: row.source,
+        };
+        const h = workspaceHarness(seed);
+        for (const dry of [false, true]) {
+          expect(
+            await h.run(['enable', ...(member ? ['a'] : []), ...(dry ? ['--dry-run'] : [])]),
+          ).toBe(1);
+          expect(h.err.text()).toContain(row.expected);
+          expect(h.fs.writes).toEqual([]);
+        }
+      });
+    }
+  }
+  it('refuses a stale Node workspace runner with the delete-and-rerun remedy', async () => {
+    const h = workspaceHarness({
+      '/ws/setu.workspace.json': renderWorkspaceManifest({
+        version: 1,
+        runtime: 'node',
+        transport: 'http',
+        basePort: 3000,
+        members: [{ name: 'a', port: 3000 }],
+      }),
+      '/ws/package.json': '{}',
+      '/ws/apps/a/package.json': JSON.stringify({ devDependencies: { tsx: '^4.20.0' } }),
+      '/ws/apps/a/setu.config.ts': CURRENT_CONFIG,
+      '/ws/apps/a/.setu-member': '',
+      '/ws/scripts/dev.mjs': '// old runner',
+    });
+    expect(await h.run(['enable', 'a'])).toBe(1);
+    expect(h.err.text()).toContain('Delete scripts/dev.mjs and run this again');
+    expect(h.fs.writes).toEqual([]);
+  });
+  for (const runtime of ['bun', 'cloudflare-workers'] as const) {
     it(`uses enable context for ${runtime}`, () => {
       const message = devtoolRuntimeRefusal(runtime, 'enable')!;
       expect(message).toContain(
-        `This project targets ${runtime}; the devtool can only be enabled on a Deno project.`,
+        `This project targets ${runtime}; the devtool can only be enabled on Deno or Node.`,
       );
       expect(message).toContain('could never start its diagnostics connector');
       expect(message.toLowerCase()).not.toContain('scaffold');
@@ -127,20 +203,20 @@ describe('devtool enable refuses by name and writes nothing', () => {
     expect(devtoolRuntimeRefusal('deno', 'enable')).toBeUndefined();
     expect(devtoolRuntimeRefusal('deno', 'scaffold')).toBeUndefined();
   });
-  it('uses enable wording through the Node project command', async () => {
+  it('uses enable wording through the Bun project command', async () => {
     const h = workspaceHarness({
-      '/ws/package.json': JSON.stringify({ scripts: { start: 'tsx main.ts' } }),
+      '/ws/package.json': JSON.stringify({ scripts: { start: 'bun main.ts' } }),
     });
     expect(await h.run(['enable'])).toBe(1);
-    expect(h.err.text()).toContain('This project targets node');
+    expect(h.err.text()).toContain('This project targets bun');
     expect(h.err.text().toLowerCase()).not.toContain('scaffold');
     expect(h.fs.writes).toEqual([]);
   });
-  it('refuses a non-Deno workspace runtime — the listener refuses every non-Deno listen', async () => {
+  it('refuses a unsupported workspace runtime — the listener refuses every unsupported listen', async () => {
     const h = workspaceHarness({
       [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
-        runtime: 'node',
+        runtime: 'bun',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
@@ -150,7 +226,7 @@ describe('devtool enable refuses by name and writes nothing', () => {
       '/ws/apps/orders/setu.config.ts': CURRENT_CONFIG,
     });
     expect(await h.run(['enable', 'orders'])).toBe(1);
-    expect(h.err.text()).toContain('requires the Deno runtime');
+    expect(h.err.text()).toContain('requires Deno or Node');
     expect(h.fs.writes).toEqual([]);
   });
 
@@ -366,17 +442,17 @@ describe('devtool enable refuses by name and writes nothing', () => {
 });
 
 describe('the devtool opt-in refusals on the creating commands', () => {
-  it('refuses --devtool on a non-Deno standalone project', async () => {
+  it('refuses --devtool on a unsupported standalone project', async () => {
     const fs = createFakeFs({});
     const err = createRecorder();
-    const code = await runNewCommand(parseArgs(['shop', '--devtool', '--runtime', 'node']), {
+    const code = await runNewCommand(parseArgs(['shop', '--devtool', '--runtime', 'bun']), {
       fs,
       cwd: '/ws',
       log: () => {},
       error: err.sink,
     });
     expect(code).toBe(2);
-    expect(err.text()).toContain('requires the Deno runtime');
+    expect(err.text()).toContain('requires Deno or Node');
     expect(fs.writes).toEqual([]);
   });
 
@@ -493,7 +569,7 @@ describe('the workspace runner must honor the credential contract', () => {
   it('proceeds against a runner that already reads the three names', async () => {
     const h = workspaceHarness({
       ...workspaceSeed([{ name: 'orders', port: 3000 }]),
-      '/ws/scripts/dev.ts': devtoolDevRunner().contents,
+      '/ws/scripts/dev.ts': devtoolDevRunner('deno').contents,
     });
     expect(await h.run(['enable', 'orders']), h.err.text()).toBe(0);
     // A runner that honors the contract is left exactly as it was found: this
@@ -505,7 +581,7 @@ describe('the workspace runner must honor the credential contract', () => {
     const h = workspaceHarness(workspaceSeed([{ name: 'orders', port: 3000 }]));
     expect(await h.run(['enable', 'orders']), h.err.text()).toBe(0);
     const written = h.fs.read('/ws/scripts/dev.ts');
-    expect(written).toBe(devtoolDevRunner().contents);
+    expect(written).toBe(devtoolDevRunner('deno').contents);
     for (const name of DEVTOOL_ENV_NAMES) expect(written).toContain(name);
   });
 });
@@ -652,17 +728,14 @@ describe('devtool enable branch coverage', () => {
   // The devtool is Deno-only. A project with no Deno manifest but an npm one is
   // the wrong runtime, named by what it IS; only a directory with neither
   // manifest is "not a project".
-  for (const [runtime, start] of [
-    ['node', 'tsx main.ts'],
-    ['bun', 'bun run main.ts'],
-  ] as const) {
+  for (const [runtime, start] of [['bun', 'bun run main.ts']] as const) {
     it(`refuses a ${runtime} project by naming its runtime`, async () => {
       const h = workspaceHarness({
         '/ws/package.json': JSON.stringify({ scripts: { start } }),
         '/ws/setu.config.ts': 'export function createApp() {}',
       });
       expect(await h.run(['enable'])).toBe(1);
-      expect(h.err.text()).toContain('The devtool requires the Deno runtime');
+      expect(h.err.text()).toContain('The devtool requires Deno or Node');
       expect(h.err.text()).toContain(`a ${runtime} project could never start`);
       expect(h.fs.writes).toEqual([]);
     });
@@ -823,11 +896,11 @@ describe('generate app --devtool branch coverage', () => {
     expect(errors.at(-1)).toContain('no port left to allocate');
   });
 
-  it('refuses --devtool on a non-Deno workspace runtime', async () => {
+  it('refuses --devtool on a unsupported workspace runtime', async () => {
     const fs = createFakeFs({
       [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
         version: WORKSPACE_VERSION,
-        runtime: 'node',
+        runtime: 'bun',
         basePort: 3000,
         transport: 'http',
         members: [{ name: 'orders', port: 3000 }],
@@ -843,7 +916,7 @@ describe('generate app --devtool branch coverage', () => {
       error: (message) => errors.push(message),
     });
     expect(code).toBe(2);
-    expect(errors.at(-1)).toContain('requires the Deno runtime');
+    expect(errors.at(-1)).toContain('requires Deno or Node');
   });
 
   it('refuses --devtool-port without --devtool', async () => {
@@ -939,7 +1012,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: 'deno check main.ts setu.config.ts main.dev.ts',
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
         },
         // The pin the enable flow merges: byte-identical, so the whole run is
         // a no-op, which is what makes the command idempotent.
@@ -947,7 +1020,7 @@ describe('devtool enable derives the dev task, refusing when it cannot', () => {
       }),
       '/ws/setu.config.ts': CURRENT_CONFIG,
       // Byte-identical to what the command would write.
-      '/ws/main.dev.ts': renderDevEntry({ devtoolPort: DEFAULT_DEVTOOL_PORT }),
+      '/ws/main.dev.ts': renderDevEntry({ devtoolPort: DEFAULT_DEVTOOL_PORT }, 'deno'),
       '/ws/src/devtool/diagnostics.ts': renderDevtoolSources(new Set(['diagnostics-plugin']), {
         project: 'ws',
       }).contents,

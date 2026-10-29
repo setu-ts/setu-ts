@@ -221,15 +221,16 @@ describe('what an npm workspace renders', () => {
     expect(dockerfile).not.toContain('denoland/deno');
     // The install runs at the ROOT, because both npm and Bun resolve a member's
     // dependencies through the root manifest and lockfile.
-    expect(dockerfile).toContain(NODE.install);
+    expect(dockerfile).toContain('npm ci');
     expect(dockerfile).toContain('COPY package.json');
-    // No registry mapping is copied: the framework installs from npm.
-    expect(dockerfile).not.toContain('.npmrc');
+    // No registry mapping is copied: the framework installs from npm. (A private
+    // registry's .npmrc reaches the install only as the M120b build secret.)
+    expect(dockerfile).not.toMatch(/^COPY[^\n]*\.npmrc/m);
     // Shared libraries BEFORE the install, not after: a member that depends on one
     // is linked by the install itself, so a library arriving later is a dependency
     // the install could not resolve.
     expect(dockerfile.indexOf('COPY lib[s]')).toBeGreaterThan(-1);
-    expect(dockerfile.indexOf('COPY lib[s]')).toBeLessThan(dockerfile.indexOf(NODE.install));
+    expect(dockerfile.indexOf('COPY lib[s]')).toBeLessThan(dockerfile.indexOf('npm ci'));
     // Numeric for the same reason every other image here is.
     expect(dockerfile).toMatch(/^USER \d+:\d+$/m);
   });
@@ -273,7 +274,7 @@ describe('what a Bun workspace renders differently', () => {
     expect(dockerfile).toContain('bun install');
     // Bun's own lockfile, so the copy that seeds the install layer finds one.
     expect(dockerfile).toContain(BUN.lockfile);
-    expect(dockerfile).toContain('bun run main.ts');
+    expect(dockerfile).toContain('CMD ["bun", "run", "main.ts"]');
     expect(dockerfile).not.toContain('tsx');
   });
 

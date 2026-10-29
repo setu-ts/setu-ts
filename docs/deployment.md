@@ -485,14 +485,111 @@ every named template registers `HealthPlugin` and `MetricsPlugin`; `setu adopt` 
 the installed health or metrics plugin, or from a starter package, which registers both. To switch a
 TCP member to HTTP probes, add `HealthPlugin` and `healthProbes: true` to its record.
 
+### Build, test and deploy from the root
+
+Since 0.11.0 the CLI runs these across every member, reading `setu.workspace.json` each time:
+
+```bash
+npm test                                    # every member's tests (Deno: deno task --recursive test)
+setu workspace build                        # one image per member, tagged with the commit
+setu workspace deploy --dry-run             # every check and the plan; nothing changes
+setu workspace deploy                       # build, ship, apply k8s/, wait for each rollout
+```
+
+`deploy` loads the images into a `kind-<cluster>` context's cluster, or pushes them to `--registry`
+for any other context. It applies the namespace (`--namespace`, default the workspace directory
+name), one Secret per member, and `k8s/members.yaml` as it is on disk with the namespace and each
+member's image filled in, then waits for `kubectl rollout status` (`--timeout`, default `120s`).
+
+**Member secrets.** A member's variables are the names its committed `.env.example` declares — a
+full-stack member's `SESSION_SECRET` and `TRUSTED_PROXIES`, for instance — less those the generated
+manifest already sets. Their values go in `k8s/secrets/<member>/.env`, which the root's `.env`
+ignore rule and the generated `.dockerignore` keep out of git and out of every image. Deploy refuses
+before building, naming every missing variable, and refuses a values file git tracks. It applies
+each Secret with `kubectl apply --server-side --force-conflicts` from stdin (it owns `<member>-env`,
+including one first made by hand), values base64-encoded under `data:`: measured on kind, a
+client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
+and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
+Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
+precedence. envFrom is read when a container starts, so deploy writes each Secret's
+`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
+changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
+keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
+keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
+member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
+is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
+deploy that failed part-way — so the cluster's state, not the run's history, decides what rolls out.
+Deploy reads the values files, `.env.example` and `k8s/members.yaml` only as regular files inside
+the workspace, never through a symbolic link: a branch that replaced `k8s/secrets/<member>` with a
+link could otherwise load any dotenv file on the host into a pod its code runs in.
+
+For production, keep the values in a secret manager —
+[Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or
+[External Secrets](https://external-secrets.io/) — and have it create the same `<member>-env`
+Secret; the Deployments read it unchanged. The generated Compose stack reads each member's own
+`.env` through an optional `env_file`, so local values apply there too; the optional form
+(`required: false`) needs Docker Compose 2.24.0 or later. Compose follows a symbolic link there, so
+`setu check` refuses a linked member `.env`; it does not check `docker/compose.yaml` itself, which a
+branch can edit to name any host file — review a branch's `docker/` changes before running
+`docker compose up` on it.
+
+A registry other than npm pins its tarball URLs in the lockfile: pass
+`--build-arg NPM_CONFIG_REGISTRY=<url>` (and `--network host` for one on `localhost`), with its
+token in the `NPMRC` build secret rather than in a build argument.
+
 ### The default Node workspace image
 
-A workspace defaults to Node. Its generated `docker/Dockerfile` uses `node:24-alpine`, selects a
-member with `ARG MEMBER`, and installs from the workspace root: it copies the root manifest and
-`package-lock.json`, the member manifest, and shared libraries before `npm install`, then copies the
-member source. It runs as numeric UID 1000 from `/srv/apps/${MEMBER}`, starting with
-`npx tsx main.ts`. Build with the workspace root as context; the member directory alone omits the
-workspace manifest and shared libraries.
+`build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
+an image.
+
+Generated Node services use a build stage with `npm ci` and `npm run build`; the latter type-checks
+and runs the wiring gate before bundling. The runtime stage installs only production dependencies
+and copies dist/ and the full-stack frontend build/. A standalone project has a root Dockerfile:
+
+```sh
+npm run build
+npm start
+docker build -t my-service .
+```
+
+Workspace builds use `docker build -f docker/Dockerfile --build-arg MEMBER=orders -t orders .`.
+Shared libraries are bundled, their production dependencies stay external and are installed with the
+member. A runtime import of a devDependency fails the build. `start:dev` and `start:debug` run
+source; production start never rebuilds. Full-stack main.ts passes its compiled server module to
+createApp so its location survives bundling. User import.meta.url paths move with the bundle:
+resolve application data from process.cwd() or pass modules in explicitly.
+
+Bun runs source with production dependencies, builds a declared frontend script first, and copies
+the workspace's hoisted-linker bunfig.toml. Deno builds a declared frontend in a `frontend` stage on
+`denoland/deno:debian-2.9.5` (Vite's native bundler binding has no musl build, so it cannot run on
+the Alpine image), copies only `build/` into the Alpine image before caching main.ts, then retains
+the frozen, scoped source run. When the root sets `nodeModulesDir: "auto"` (a workspace with a
+full-stack member does), the image switches it to `"manual"` after installing: under `"auto"` every
+start re-syncs `node_modules`, which a read-only root refuses. A full-stack socket server serves its
+own client bundle from `build/client/assets`. Native bun build and deno compile are optional custom
+packaging choices, not generated commands. Workers continues using Wrangler.
+
+Both standalone and workspace ignore files exclude host node_modules, dist, build, coverage, git and
+dotenv files, preserving .env.example, and every `.npmrc`. To use one in the image's install — a
+private registry's token, or a setting such as `legacy-peer-deps` — pass it as a build secret. Every
+generated install step (Node and Bun `npm ci` / `bun install`, Deno's frontend build and install)
+already mounts the optional secret `npmrc` at `/root/.npmrc`, as npm's own Docker guide does:
+`docker build --secret id=npmrc,src=.npmrc …`, or through the generated Compose file,
+`NPMRC="$(cat .npmrc)" docker compose -f docker/compose.yaml up --build`. In CI, set `NPMRC` from
+the CI's secret store rather than expanding it on a traced command line (`set -x` would print it).
+The secret exists only for that step, so it never reaches a layer, the history or the cache; without
+one the install runs as before. The mount needs BuildKit, Docker's default builder; the deprecated
+legacy builder (`DOCKER_BUILDKIT=0`) refuses it, and Podman/Buildah document the same `--secret`
+form. A Bun `bunfig.toml` is copied into the image, so it must name tokens through environment
+variables. Images run as numeric UID 1000. The generated-deploy gate exercises the Deno workspace
+(with a library under a root `nodeModulesDir: "auto"`), the Node workspace/library and standalone
+images, and a Bun workspace member importing a library, read-only with no external network.
+Full-stack images and the standalone Deno image have rendered shapes unit-tested; the gate does not
+build them.
+
+The generated workspace Dockerfile uses node:24-alpine, selects a member with ARG MEMBER and starts
+with node --enable-source-maps dist/main.js from /srv/apps/${MEMBER}. Build with the workspace root
+as context; the member directory alone omits shared libraries and root metadata.
 
 ### The Deno image is the member's only dependency source at runtime
 
@@ -628,6 +725,7 @@ pnpm run check:deploy               # render drift + image builds + compose + ge
 pnpm run check:deploy --render      # just the manifest/chart drift check
 pnpm run check:deploy --cluster     # real kind cluster: apply, roll out, serve, check RBAC
 pnpm run check:deploy --generated   # scaffold a workspace, build ITS image, serve it air-gapped
+pnpm run check:deploy --workspace   # scaffold a workspace, root test, setu workspace deploy to kind
 pnpm run deploy:render              # regenerate k8s/manifests/ from the chart
 ```
 

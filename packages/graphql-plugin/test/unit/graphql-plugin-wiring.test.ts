@@ -134,6 +134,19 @@ describe('GraphqlPlugin — subscriptions / APQ / lifecycle wiring', () => {
     expect(wired.routes.map(([r]) => r)).toContain('POST /api/graphql/stream');
   });
 
+  it.each([
+    ['/graphql/', '/graphql/ws', '/graphql/stream'],
+    ['/api/graphql/', '/api/graphql/ws', '/api/graphql/stream'],
+    ['/', '/ws', '/stream'],
+  ])('joins endpoint %s to its transports with one slash', async (path, ws, stream) => {
+    const wired = createWiredContext();
+    const plugin = GraphqlPlugin({ typeDefs, resolvers, path, subscriptions: {} });
+    await plugin.register(wired.ctx);
+
+    expect(wired.wsRoutes[0]!.path).toBe(ws);
+    expect(wired.routes.map(([r]) => r)).toContain(`POST ${stream}`);
+  });
+
   it('skips the WS transport when CAPABILITIES.WEBSOCKET is absent', async () => {
     const wired = createWiredContext({ hasWebsocket: false });
     const plugin = GraphqlPlugin({ typeDefs, resolvers, subscriptions: {} });

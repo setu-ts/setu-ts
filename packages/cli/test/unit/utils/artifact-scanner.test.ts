@@ -19,7 +19,8 @@ const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
 /** A directory stat. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
 /** A stat rejection shaped like a real runtime's missing-path error. */
-const MISSING = new Error('NotFound');
+// The shape the real adapters throw for a vanished path (`filesystem-errors.ts`).
+const MISSING = Object.assign(new Error('gone'), { code: 'ENOENT' });
 
 const ROUTES = seamSpecFor('route')!;
 const PLUGINS = seamSpecFor('plugin')!;
@@ -109,10 +110,12 @@ describe('readArtifactNames', () => {
   // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
   // artifact is opened unless stat reports a regular file under the cap.
   it('never opens a barrel or artifact that is not a regular file under the cap', async () => {
-    const base = fsWith(['user.routes.ts', 'huge.routes.ts'], {
+    const base = fsWith(['user.routes.ts', 'huge.routes.ts', 'pipe.routes.ts'], {
       stats: {
         'index.ts': { isFile: false, isDirectory: false, size: 0 },
         'huge.routes.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+        // A FIFO or a link to a device: neither a file nor a directory.
+        'pipe.routes.ts': { isFile: false, isDirectory: false, size: 0 },
       },
     });
     const opened: string[] = [];
@@ -126,6 +129,11 @@ describe('readArtifactNames', () => {
     const scan = await readArtifactNames(fs, '/app', ROUTES);
     expect(scan.names).toEqual(['user']);
     expect(opened).toEqual(['user.routes.ts']);
+    // Left out of the barrel, as before, but reported rather than silently dropped.
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/huge.routes.ts`, reason: 'too-large' },
+      { path: `${ROUTES.dir}/pipe.routes.ts`, reason: 'not-a-file' },
+    ]);
   });
 
   it('returns names sorted, with the suffix stripped', async () => {
@@ -173,6 +181,8 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not a rejection: nothing is wrong with an unrelated directory.
     expect(scan.skipped).toEqual([]);
+    // Nor an unreadable artifact: `setu check` must not fail a project over it.
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('excludes a bare suffix, which would derive an empty symbol name', async () => {
@@ -198,6 +208,7 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not reported: the filesystem moved under us, the artifact is not at fault.
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('skips an entry whose source cannot be read', async () => {
@@ -210,6 +221,9 @@ describe('readArtifactNames', () => {
     );
     expect(scan.names).toEqual(['user']);
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/locked.routes.ts`, reason: 'unclassifiable' },
+    ]);
   });
 
   // The regression that motivated the export check. `middleware` and `metric` each gained

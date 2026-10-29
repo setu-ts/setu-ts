@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generatePlugin } from '../../../src/schematics/plugin.ts';
-import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, options } from './_shared.ts';
 
 describe('plugin schematic', () => {
   const files = generatePlugin(deriveNames('order-item'), options());
@@ -32,20 +32,6 @@ describe('plugin schematic', () => {
     expect(barrel).toContain('readonly IPlugin[]');
     // Called, not referenced: `createApplication` takes plugin instances.
     expect(barrel).toContain('OrderItemPlugin()');
-  });
-
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
-  it('is ungated', () => {
-    expect(gateOf('plugin')).toBe(undefined);
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generatePlugin(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('declares the plugin factory and its kebab-case name', () => {

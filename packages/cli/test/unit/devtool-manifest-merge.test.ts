@@ -59,6 +59,107 @@ function harness(rootDev: string) {
 }
 
 describe('the devtool manifest merge', () => {
+  for (const member of [false, true]) {
+    it(`enables Node ${member ? 'member' : 'standalone'} with exact dry-run parity and an idempotent rerun`, async () => {
+      const project = member ? '/ws/apps/a' : '/ws';
+      const npm = JSON.stringify({
+        private: true,
+        scripts: { start: 'node dist/main.js', check: 'my-check', custom: 'mine' },
+        dependencies: { '@setu-ts/common': `^${VERSION}` },
+        devDependencies: { tsx: '^4.20.0' },
+      });
+      const root = '{"private":true,"workspaces":["apps/*"],"overrides":{"@setu-ts/common":"old"}}';
+      const seed: Record<string, string> = {
+        [`${project}/package.json`]: npm,
+        [`${project}/setu.config.ts`]: CONFIG,
+        ...(member
+          ? {
+              '/ws/package.json': root,
+              '/ws/apps/a/.setu-member': '',
+              '/ws/setu.workspace.json': renderWorkspaceManifest({
+                version: 1,
+                runtime: 'node',
+                basePort: 3000,
+                transport: 'http',
+                members: [{ name: 'a', port: 3000 }],
+              }),
+            }
+          : {}),
+      };
+      const fs = createFakeFs(seed);
+      const log = createRecorder();
+      const error = createRecorder();
+      const args = ['enable', ...(member ? ['a'] : [])];
+      const deps = { fs, cwd: '/ws', log: log.sink, error: error.sink };
+      expect(await runDevtoolCommand(parseArgs([...args, '--dry-run']), deps), error.text()).toBe(
+        0,
+      );
+      expect(fs.writes).toEqual([]);
+      const planned = log.lines
+        .filter((line) => /^would (create|update) /.test(line))
+        .map((line) => line.replace(/^would (create|update) /, ''));
+      expect(await runDevtoolCommand(parseArgs(args), deps), error.text()).toBe(0);
+      expect([...fs.writes].sort()).toEqual(planned.sort());
+      const manifest = JSON.parse(fs.read(`${project}/package.json`));
+      expect(manifest.scripts).toEqual({
+        start: 'node dist/main.js',
+        check: 'my-check',
+        custom: 'mine',
+        dev: 'tsx main.dev.ts',
+      });
+      expect(manifest.devDependencies).toEqual({
+        tsx: '^4.20.0',
+        '@setu-ts/diagnostics-plugin': `^${VERSION}`,
+      });
+      expect(log.text()).toContain('npm install');
+      if (member) {
+        expect(fs.read('/ws/package.json')).toBe(root);
+        expect(fs.writes).not.toContain('/ws/package.json');
+        expect(fs.read('/ws/scripts/dev.mjs')).toContain('SETU_DEVTOOL_SESSION_KEY');
+      }
+      const before = fs.writes.length;
+      expect(await runDevtoolCommand(parseArgs(args), deps), error.text()).toBe(0);
+      expect(fs.writes).toHaveLength(before);
+      expect(log.lines.at(-1)).toContain('already enabled');
+    });
+  }
+  for (const standalone of [false, true]) {
+    it(`replaces the exact scaffold check predecessor (${standalone ? 'standalone' : 'member'}) and refuses a foreign check`, async () => {
+      for (const foreign of [false, true]) {
+        const h = harness(LEGACY_DENO_RUN_ALL);
+        const path = standalone ? '/ws/deno.json' : '/ws/apps/orders/deno.json';
+        if (standalone) {
+          await h.fs.rm('/ws/setu.workspace.json');
+          await h.fs.writeFile('/ws/setu.config.ts', new TextEncoder().encode(CONFIG));
+        }
+        await h.fs.writeFile(
+          path,
+          new TextEncoder().encode(
+            JSON.stringify({
+              tasks: {
+                start: 'deno run --allow-net --allow-env main.ts',
+                check: foreign
+                  ? 'my-check'
+                  : `deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+              },
+              imports: { '@setu-ts/common': `npm:@setu-ts/common@^${VERSION}` },
+            }),
+          ),
+        );
+        const writes = h.fs.writes.length;
+        expect(await h.run(standalone ? ['enable'] : ['enable', 'orders']), h.err.text()).toBe(
+          foreign ? 1 : 0,
+        );
+        if (foreign) {
+          expect(h.err.text()).toContain('Refusing to replace the existing "check" task');
+          expect(h.fs.writes).toHaveLength(writes);
+        } else
+          expect(JSON.parse(h.fs.read(path)).tasks.check).toBe(
+            `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
+          );
+      }
+    });
+  }
   it('preserves every unrelated key and task, including a developer-owned one', async () => {
     const h = harness(LEGACY_DENO_RUN_ALL);
     expect(await h.run(['enable', 'orders'])).toBe(0);
@@ -134,7 +235,7 @@ describe('the devtool manifest merge', () => {
         tasks: {
           start: 'deno run --allow-net --allow-env main.ts',
           dev: 'deno run --allow-net --allow-env main.dev.ts',
-          check: 'deno check main.ts setu.config.ts main.dev.ts',
+          check: `deno check main.ts setu.config.ts main.dev.ts && deno run -A npm:@setu-ts/cli@^${VERSION} check`,
         },
         imports: { '@setu-ts/diagnostics-plugin': `npm:@setu-ts/diagnostics-plugin@^${VERSION}` },
       }) + '\n';

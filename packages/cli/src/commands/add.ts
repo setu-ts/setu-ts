@@ -15,6 +15,7 @@
  * @module
  */
 
+import { planViewSetup } from './add-view.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import { escapeName } from '../utils/names.ts';
@@ -29,13 +30,28 @@ import {
 } from '../constants.ts';
 import {
   type GeneratedFile,
+  findExisting,
   joinPath,
   readExistingText,
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
-import { cliInvocation } from '../templates/project-files.ts';
+import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
+import { MINIMAL_HOST } from '../templates/minimal.ts';
+import {
+  brokerComposeFiles,
+  missingComposeServices,
+  readArmFlag,
+  standaloneOverlayRefusal,
+  starterOptionLiteral,
+} from '../templates/broker.ts';
+import {
+  starterOptionValue,
+  withStarterOption,
+  withStarterArmEntry,
+  starterLiteralEntries,
+} from './starter-options.ts';
 import { stringFlag } from '../args.ts';
 import { BRIEF_BEGIN } from '../agents/brief-file.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
@@ -46,10 +62,16 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
-import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import {
+  seamFiles,
+  seamLocalImports,
+  withPluginOptionSeams,
+  STARTER_SEAMS,
+  starterSeamLiteral,
+} from '../templates/seam.ts';
 import { installSearchDirs } from '../app-loader.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
-import { transportSpec, renderConnection } from '../workspace/transport.ts';
+import { transportSpec, renderConnection, type TransportSpec } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
@@ -174,7 +196,13 @@ export const ADDABLE: ReadonlyMap<string, IAddablePackage> = new Map([
       peers: { runtimes: ['deno', 'node', 'bun', 'cloudflare-workers'], packages: ['zod'] },
     },
   ],
-  ['view', { pkg: 'view-plugin' }],
+  [
+    'view',
+    {
+      pkg: 'view-plugin',
+      peers: { runtimes: ['node', 'bun', 'deno', 'cloudflare-workers'], packages: ['hono'] },
+    },
+  ],
   ['websocket', { pkg: 'websocket-plugin', peers: { runtimes: ['node'], packages: ['ws'] } }],
   ['worker-pool', { pkg: 'worker-pool-plugin' }],
 ]);
@@ -316,17 +344,91 @@ function registrationLine(bare: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Whether an existing option or call argument already carries exactly these options.
+ *
+ * Compared with whitespace and trailing commas removed, because Prettier rewraps the
+ * literal an npm-target project was written with, and on the literal's properties rather
+ * than its braces, because a generated call may carry a seam property first
+ * (`processors: [...QUEUE_PROCESSORS]`). Callers pass the one option or call they read, never
+ * the whole file, so an unrelated object cannot match (PR #519 review).
+ *
+ * @param existing - The existing option value or call arguments
+ * @param literal - The options this command would write
+ * @returns `true` when the same options are present
+ */
+function sameOptions(existing: string, literal: string): boolean {
+  const normalize = (text: string): string => text.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
+  const body = normalize(literal).replace(/^\{|\}$/g, '');
+  return body !== '' && normalize(existing).includes(body);
+}
+
+/**
+ * The source text of each call's arguments to a provider inside the app factory.
+ *
+ * Calls are found on masked code, so a mention in a comment or string is not a call, and
+ * read back from the source at the same offsets, so string values can be compared.
+ *
+ * @param source - The config source
+ * @param bare - Bare package name of the provider
+ * @param symbol - The provider's factory export
+ * @returns Each call's argument text; empty when the factory is not classified
+ */
+function providerCallArguments(source: string, bare: string, symbol: string): readonly string[] {
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  if (binding === undefined || scope === undefined) return [];
+  const found: string[] = [];
+  const call = new RegExp(`(?<![\\w$.])${binding}\\s*\\(`, 'g');
+  for (const match of scope.code.slice(scope.start, scope.end).matchAll(call)) {
+    const open = scope.start + match.index + match[0].length - 1;
+    let depth = 0;
+    for (let at = open; at < scope.end; at++) {
+      const c = scope.code[at];
+      if (c === '(' || c === '{' || c === '[') depth++;
+      else if ((c === ')' || c === '}' || c === ']') && --depth === 0) {
+        found.push(source.slice(open + 1, at));
+        break;
+      }
+    }
+  }
+  return found;
+}
+
 /** Explains the registration site without rewriting starter-owned composition. */
 function printWiringNote(
   source: string | undefined,
   bare: string,
   log: (line: string) => void,
   seam?: AddSeam,
+  transportArgs?: string,
 ): void {
   const starter = source === undefined ? undefined : composingStarter(source);
   if (starter !== undefined) {
     const arm = starter.arms.get(bare);
     if (arm !== undefined) {
+      if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
+        const key = bare === 'messaging-plugin' ? 'messaging' : 'queue';
+        const flag = key === 'messaging' ? 'broker' : 'queue';
+        // The factory's own option, read with the same analysis withStarterOption edits
+        // through; undefined for a hand-written starter config the CLI does not classify.
+        const existing = source === undefined ? undefined : starterOptionValue(source, key);
+        if (transportArgs === undefined) {
+          log(
+            existing === undefined
+              ? `  ${starter.symbol} already registers ${key} in memory by default; select a backend with setu add ${key} --${flag} <name> (standalone), or configure its ${key} property.`
+              : `  setu.config.ts already sets its own ${key} option; it was left as it is.`,
+          );
+        } else if (existing !== undefined && sameOptions(existing, transportArgs)) {
+          log(`  setu.config.ts already sets these ${key} options.`);
+        } else if (existing !== undefined) {
+          log(`  The existing ${key} option was preserved; to use this transport, set:`);
+          log(`  ${key}: ${transportArgs},`);
+        } else {
+          log(`  In setu.config.ts: ${key}: ${transportArgs},`);
+        }
+        return;
+      }
       log(`  ${starter.symbol} owns this plugin; configure its ${arm} arm in setu.config.ts.`);
       // The barrel exists by now; without this line nothing would ever pass it to
       // the arm, so every handler generated into it would register nowhere.
@@ -346,22 +448,25 @@ function printWiringNote(
   }
   const registration = registrationLine(bare);
   const factory = registration?.slice(0, registration.indexOf('('));
-  const binding =
-    source === undefined || factory === undefined
-      ? undefined
-      : providerBinding(source, bare, factory);
   // Guidance is suppressed only by a real call in code. Inserting refuses on any
   // possible use (fail closed); guidance must not ALSO go quiet then, or a mention
   // in a string would leave the plugin unregistered with nothing said (audit 4).
   // Only a call inside the createApp body counts: a same-named method or
   // signature elsewhere registers nothing (audit round 6, G-R6). A plugin built at
   // module scope therefore still gets the line — guidance fails open.
-  const scope = source === undefined ? undefined : factoryScope(source);
   if (
-    binding !== undefined &&
-    scope !== undefined &&
-    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
+    source !== undefined &&
+    factory !== undefined &&
+    factoryCallsProvider(source, bare, factory)
   ) {
+    if (transportArgs !== undefined)
+      log(
+        providerCallArguments(source, bare, factory).some((args) =>
+          sameOptions(args, transportArgs),
+        )
+          ? `  setu.config.ts already passes these options to ${factory}.`
+          : `  Set ${factory}(${transportArgs}) in setu.config.ts; the existing call was preserved.`,
+      );
     for (const line of seamGapLines(source, bare, seam)) log(line);
     return;
   }
@@ -369,7 +474,12 @@ function printWiringNote(
   // text silenced the guidance for a plugin nothing registers (audit round 5).
   // Only a real call in classified code, checked above, suppresses it.
   if (registration !== undefined) {
-    const call = seam === undefined ? registration : `${factory}(${seam.args})`;
+    const call =
+      transportArgs !== undefined
+        ? `${factory}(${transportArgs})`
+        : seam === undefined
+          ? registration
+          : `${factory}(${seam.args})`;
     log(
       starter === undefined
         ? `  Register ${call} in setu.config.ts.`
@@ -824,11 +934,19 @@ function providerBinding(source: string, bare: string, symbol: string): string |
  * @param bare - Bare package name being added
  * @param seam - The generated-artifact seam the provider consumes, if any: the
  * call then carries its options and the barrel imports are added
+ * @param args - Explicit options for a classified insertion (including StaticPlugin); takes precedence over seam args
  * @returns The updated config, or `undefined` when it is not an eligible
  * generated config or needs no change
  */
-export function withPluginWiring(source: string, bare: string, seam?: AddSeam): string | undefined {
-  const provider = ZERO_CONFIG_WIRINGS.get(bare);
+export function withPluginWiring(
+  source: string,
+  bare: string,
+  seam?: AddSeam,
+  args?: string,
+): string | undefined {
+  const provider =
+    ZERO_CONFIG_WIRINGS.get(bare) ??
+    (bare === 'static-plugin' && args !== undefined ? { symbol: 'StaticPlugin' } : undefined);
   if (provider === undefined) return undefined;
 
   const anchor = '...(devtool?.plugins ?? [])';
@@ -876,10 +994,7 @@ export function withPluginWiring(source: string, bare: string, seam?: AddSeam): 
   // A barrel symbol already bound, or the barrel already imported, means the file
   // carries wiring this edit cannot see the whole of: fail closed to guidance
   // rather than declare an identifier twice.
-  for (const item of seam?.imports ?? []) {
-    if (visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`)) return undefined;
-    if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
-  }
+  if (barrelImportPlan(source, seam?.imports ?? [], false) === undefined) return undefined;
 
   const prefix =
     (importedBinding === undefined ? `${providerImport}\n` : '') +
@@ -893,7 +1008,148 @@ export function withPluginWiring(source: string, bare: string, seam?: AddSeam): 
   // On its own line the new call takes a line of its own at the same indentation;
   // inline it joins the array where it stands.
   const separator = before.trim() === '' ? `\n${before}` : ' ';
-  return `${withImport.slice(0, insertion)}${factory}(${seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
+  return `${withImport.slice(0, insertion)}${factory}(${args ?? seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
+}
+
+/** Shared fail-closed barrel admission for inline and starter composition. */
+function barrelImportPlan(
+  source: string,
+  imports: AddSeam['imports'],
+  reuse: boolean,
+): { text: string; at: number } | undefined {
+  const visible = maskComments(source);
+  if (visible === undefined) return undefined;
+  const without = maskImportDeclarations(visible);
+  const missing: string[] = [];
+  for (const item of imports) {
+    const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
+    if (mentioned) {
+      if (!reuse) return undefined;
+      const declarations = [
+        ...visible.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+      ].filter((match) => match[3] === item.from);
+      if (
+        declarations.length !== 1 ||
+        !item.symbols.every((symbol) =>
+          declarations[0]![1]!
+            .split(',')
+            .map((name) => name.trim())
+            .includes(symbol),
+        )
+      )
+        return undefined;
+    } else {
+      if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
+      missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
+    }
+  }
+  let at = 0;
+  for (let i = 0; i < visible.length; i++) if (visible[i] !== without[i]) at = i + 1;
+  // maskImportDeclarations blanks only the clause through `from`, not its specifier.
+  // Finish that statement before choosing the end of its line as the insertion point.
+  if (at > 0) {
+    const specifier = /^[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[ \t]*;?/.exec(
+      visible.slice(at),
+    );
+    if (specifier === null) return undefined;
+    at += specifier[0].length;
+    const lineEnd = source.indexOf('\n', at);
+    at = lineEnd < 0 ? source.length : lineEnd;
+  }
+  // Side-effect imports carry no `from` clause, but can still be the last import.
+  for (const match of visible.matchAll(
+    /^[ \t]*import[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[^\r\n]*/gm,
+  )) {
+    at = Math.max(at, match.index + match[0].length);
+  }
+  return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
+}
+
+/** Existing top-level keys must bind the same expressions; nested mentions do not count. */
+function carriesStarterOptions(existing: string, literal: string): boolean {
+  const actual = starterLiteralEntries(existing);
+  const expected = starterLiteralEntries(literal);
+  const normalize = (value: string): string =>
+    value.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
+  return (
+    actual !== undefined &&
+    expected !== undefined &&
+    expected.every(([key, value]) => {
+      const entry = actual.find(([name]) => name === key);
+      return entry !== undefined && normalize(entry[1]) === normalize(value);
+    })
+  );
+}
+
+/** Merges seam options and selected transport atomically; uncertain edits retain guidance. */
+function withStarterWiring(
+  source: string,
+  bare: string,
+  seam: AddSeam | undefined,
+  transportArgs: string | undefined,
+): string | undefined {
+  const starter = composingStarter(source);
+  const arm = starter?.arms.get(bare);
+  if (arm === undefined) return undefined;
+  const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
+  const key = shape?.arm ?? (bare === 'messaging-plugin' ? 'messaging' : undefined);
+  if (key === undefined) return undefined;
+  const plan = barrelImportPlan(source, seam?.imports ?? [], true);
+  if (plan === undefined) return undefined;
+  let result = source;
+  if (seam !== undefined && shape !== undefined) {
+    const existing = starterOptionValue(result, key);
+    if (existing === undefined) {
+      const edited = withStarterOption(result, key, starterSeamLiteral(shape));
+      if (edited === undefined) return undefined;
+      result = edited;
+    } else if (!carriesStarterOptions(existing, seam.args)) {
+      for (const [property, value] of shape.entries) {
+        const edited = withStarterArmEntry(result, key, property, value);
+        if (edited === undefined) return undefined;
+        result = edited;
+      }
+    }
+  }
+  if (transportArgs !== undefined) {
+    const existing = starterOptionValue(result, key);
+    if (existing === undefined) {
+      const edited = withStarterOption(result, key, transportArgs);
+      if (edited === undefined) return undefined;
+      result = edited;
+    } else if (!carriesStarterOptions(existing, transportArgs)) {
+      const entries = starterLiteralEntries(transportArgs);
+      if (entries === undefined) return undefined;
+      for (const [property, value] of entries) {
+        const edited = withStarterArmEntry(result, key, property, value);
+        if (edited === undefined) return undefined;
+        result = edited;
+      }
+    }
+  }
+  if (result === source) return undefined;
+  return `${result.slice(0, plan.at)}${plan.text}${result.slice(plan.at)}`;
+}
+
+/**
+ * Whether the app factory body calls a provider through its recognized import.
+ *
+ * The same test {@linkcode printWiringNote} uses to stay quiet: a real call in
+ * classified code, never a mention in a string or comment.
+ *
+ * @param source - The config source
+ * @param bare - Bare package name of the provider
+ * @param symbol - The provider's factory export
+ * @returns `true` when the factory calls it
+ */
+function factoryCallsProvider(source: string, bare: string, symbol: string): boolean {
+  const binding = providerBinding(source, bare, symbol);
+  const scope = factoryScope(source);
+  return (
+    binding !== undefined &&
+    scope !== undefined &&
+    callsIdentifier(scope.code.slice(scope.start, scope.end), binding)
+  );
 }
 
 /** Reads transport options only for a listed workspace member. */
@@ -902,23 +1158,47 @@ async function workspaceAddArgs(
   dirs: readonly string[],
   bare: string,
   runtime: TargetRuntime,
-): Promise<string | undefined> {
-  if (!['cache-plugin', 'scheduler-plugin', 'realtime-backplane-plugin'].includes(bare))
-    return undefined;
+  starter: boolean,
+): Promise<{ readonly args: string; readonly clients: readonly string[] } | undefined> {
   if (dirs.length === 1) return undefined;
   const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
   if (!read.ok) return undefined;
   const transport = transportSpec(read.manifest.transport);
+  return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl);
+}
+
+/** Shares arm selection and literal rendering between workspace and standalone adds. */
+function transportAddArgs(
+  transport: TransportSpec,
+  bare: string,
+  runtime: TargetRuntime,
+  starter: boolean,
+  override?: string,
+): { readonly args: string; readonly clients: readonly string[] } | undefined {
   const builder =
     bare === 'cache-plugin'
       ? transport.cacheArgs
       : bare === 'scheduler-plugin'
         ? transport.schedulerArgs
-        : transport.backplaneArgs;
+        : bare === 'realtime-backplane-plugin'
+          ? transport.backplaneArgs
+          : bare === 'messaging-plugin'
+            ? transport.messagingArgs
+            : bare === 'queue-plugin'
+              ? transport.queueArgs
+              : undefined;
   if (builder === undefined || transport.connection === undefined) return undefined;
-  return builder(
-    renderConnection(transport.connection, workspaceProfile(runtime), read.manifest.transportUrl),
-  );
+  return {
+    args: starter
+      ? starterOptionLiteral(builder, transport, override)
+      : builder(renderConnection(transport.connection, workspaceProfile(runtime), override)),
+    clients:
+      bare === 'messaging-plugin'
+        ? (transport.messagingClients ?? [])
+        : bare === 'queue-plugin'
+          ? (transport.queueClients ?? [])
+          : ['ioredis'],
+  };
 }
 
 /** Uses the same JSONC/JSON refusal for a member or workspace root. */
@@ -944,8 +1224,9 @@ async function reportManifestRefusal(
  * Adds a framework package to the project's manifest. For zero-configuration
  * providers, it also activates the provider in a recognized emitted
  * scaffold, whose `DecoratorPlugin` already receives the ingress barrel.
- * Redis workspace members receive the selected transport's cache, scheduler
- * lock and realtime backplane options and the optional ioredis driver.
+ * Workspace members receive the selected transport's messaging, queue, cache,
+ * scheduler lock and realtime backplane options and their optional clients.
+ * Standalone messaging/queue flags select the same transport arms.
  * In npm/Bun Setu workspaces, optional peers are also recorded in the root's
  * dependencies so hoisted framework packages can load them (since 0.11.0).
  *
@@ -1051,13 +1332,69 @@ export async function runAddCommand(
   ];
 
   const edits: { readonly path: string; readonly contents: string }[] = [];
+  const createOnlyPaths = new Set<string>();
   let found = false;
   let alreadyPresent = false;
   const searchDirs = await installSearchDirs(deps.fs, dir);
-  const transportArgs = await workspaceAddArgs(deps, searchDirs, bare, runtime);
+  const configPath = joinPath(dir, 'setu.config.ts');
+  let initialConfig: string | undefined;
+  try {
+    initialConfig = new TextDecoder().decode(await deps.fs.readFile(configPath));
+  } catch {
+    // A project may have no CLI-owned configuration.
+  }
+  if (
+    bare === 'react-router-plugin' &&
+    (initialConfig === undefined ||
+      (composingStarter(initialConfig)?.symbol !== 'createFullStackAppFromConfig' &&
+        !factoryCallsProvider(initialConfig, bare, 'ReactRouterPlugin')))
+  ) {
+    deps.error(
+      `React Router requires a full-stack app. Run ${cliInvocation(runtime)} ` +
+        (searchDirs.length > 1
+          ? 'generate app <name> --template full-stack.'
+          : 'new <name> --template full-stack.'),
+    );
+    return EXIT_ERROR;
+  }
+  let selected: TransportSpec | undefined;
+  for (const flag of ['broker', 'queue'] as const) {
+    if (args.flags[flag] === undefined) continue;
+    const expected = flag === 'broker' ? 'messaging-plugin' : 'queue-plugin';
+    if (bare !== expected) {
+      deps.error(
+        `--${flag} applies only to setu add ${flag === 'broker' ? 'messaging' : 'queue'}.`,
+      );
+      return EXIT_USAGE;
+    }
+    if (searchDirs.length > 1) {
+      deps.error(
+        `--${flag} cannot apply inside a workspace member: members share the workspace --transport.`,
+      );
+      return EXIT_USAGE;
+    }
+    if (runtime === 'cloudflare-workers') {
+      deps.error(standaloneOverlayRefusal(flag, runtime, resolveHost(MINIMAL_HOST, runtime))!);
+      return EXIT_USAGE;
+    }
+    const arm = readArmFlag(args, flag);
+    if (!arm.ok) {
+      deps.error(arm.message);
+      return EXIT_USAGE;
+    }
+    selected = arm.spec;
+  }
+  const starter =
+    initialConfig !== undefined &&
+    composingStarter(initialConfig)?.symbol === 'createFullStackAppFromConfig';
+  const transport =
+    selected === undefined
+      ? await workspaceAddArgs(deps, searchDirs, bare, runtime, starter)
+      : transportAddArgs(selected, bare, runtime, starter);
+  const transportArgs = transport?.args;
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
-    ...(transportArgs === undefined ? [] : [{ name: 'ioredis', range: CLIENT_RANGES['ioredis']! }]),
+    ...(transport?.clients ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
   ];
   const addedPeers: string[] = [];
   const movedPeers: { readonly name: string; readonly path: string }[] = [];
@@ -1224,15 +1561,23 @@ export async function runAddCommand(
   // Taken before the config is considered: a manifest edit means a real install.
   const installing = edits.length > 0;
 
-  const configPath = joinPath(dir, 'setu.config.ts');
   let configSource: string | undefined;
+  let configRetargeted = false;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
-    const wired = (await frameworkImportsRetargeted(deps.fs, dir))
+    configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
+    const wired = configRetargeted
       ? undefined
-      : withPluginWiring(config, bare, seam);
+      : composingStarter(config)?.arms.has(bare) === true
+        ? withStarterWiring(config, bare, artifactSeam, transportArgs)
+        : withPluginWiring(
+            config,
+            bare,
+            seam,
+            transportArgs === undefined ? undefined : seam?.args,
+          );
     if (wired !== undefined) edits.push({ path: configPath, contents: wired });
     configSource = wired ?? config;
   } catch {
@@ -1261,6 +1606,31 @@ export async function runAddCommand(
       `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
     );
     return EXIT_ERROR;
+  }
+
+  if (selected?.connection !== undefined) {
+    deps.log(
+      `  ${selected.connection.variable}=${selected.connection.localDefault} (local default; .env files are unchanged).`,
+    );
+    const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
+    const existingCompose = await readExistingText(deps.fs, composePath);
+    // Every file is create-only: an existing Compose file is never rewritten, so a
+    // service it lacks is printed for the developer to add (PR #519 review).
+    for (const file of brokerComposeFiles([selected])) {
+      const path = joinPath(dir, file.path);
+      if ((await findExisting(deps.fs, [{ ...file, path }])).length > 0) continue;
+      createOnlyPaths.add(path);
+      edits.push({ path, contents: file.contents });
+    }
+    const missing =
+      existingCompose === undefined ? undefined : missingComposeServices(existingCompose, selected);
+    if (missing !== undefined) {
+      deps.log(
+        `  ${BROKER_COMPOSE_FILE} exists and has no ${selected.name} service; add this under services: and keep the rest:`,
+      );
+      // Unprefixed: the block is printed at the file's own indentation, ready to paste.
+      for (const line of missing.split('\n')) deps.log(line);
+    }
   }
 
   let existingSources: string | undefined;
@@ -1298,9 +1668,65 @@ export async function runAddCommand(
     }
   }
 
+  if (bare === 'view-plugin') {
+    const existing = new Map<string, string>();
+    for (const path of [
+      'package.json',
+      'deno.json',
+      'deno.jsonc',
+      'tsconfig.json',
+      'setu.config.ts',
+      '.gitignore',
+      'src/views/styles.css',
+      'src/views/layout.tsx',
+      'src/views/home.tsx',
+      'src/views/routes.ts',
+    ]) {
+      const fullPath = joinPath(dir, path);
+      const pending = edits.find((edit) => edit.path === fullPath);
+      let text: string | undefined;
+      try {
+        text = pending?.contents ?? (await readExistingText(deps.fs, fullPath));
+      } catch (cause) {
+        // A linked or unreadable view file refuses the whole add, before any write.
+        deps.error(
+          `Failed to read the project for the view setup: ${escapeName(
+            cause instanceof Error ? cause.message : String(cause),
+          )}`,
+        );
+        return EXIT_ERROR;
+      }
+      if (text !== undefined) existing.set(path, text);
+    }
+    const plan = planViewSetup({
+      runtime,
+      existing,
+      // An earlier `setu add view` (0.10.0 wired only the plugin) or a hand
+      // registration counts too, so re-running the command wires the example route.
+      viewPluginRegistered:
+        configWired ||
+        (!configRetargeted &&
+          configSource !== undefined &&
+          factoryCallsProvider(configSource, 'view-plugin', 'ViewPlugin')),
+      wireStatic: (source, args) =>
+        configRetargeted ? undefined : withPluginWiring(source, 'static-plugin', undefined, args),
+    });
+    for (const file of plan.files) createOnlyPaths.add(joinPath(dir, file.path));
+    for (const file of [...plan.files, ...plan.manifestEdits, ...plan.configEdits]) {
+      const path = joinPath(dir, file.path);
+      const previous = edits.findIndex((edit) => edit.path === path);
+      if (previous >= 0) edits.splice(previous, 1);
+      edits.push({ path, contents: file.contents });
+      if (file.path === 'setu.config.ts') configSource = file.contents;
+    }
+    for (const line of plan.notes) deps.log(escapeName(line));
+  }
+
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
+    if (bare === 'messaging-plugin' || bare === 'queue-plugin')
+      printWiringNote(configSource, bare, deps.log, seam, transportArgs);
     if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
@@ -1312,14 +1738,19 @@ export async function runAddCommand(
 
   let outcomes: Awaited<ReturnType<typeof writeFiles>>;
   try {
+    const planned = await formatForTarget(
+      edits.map((edit) => ({ ...edit, managed: !createOnlyPaths.has(edit.path) })),
+      runtime,
+      dir,
+      deps.error,
+    );
+    // New view files remain developer-owned, even if one appeared while formatting.
+    const appeared = new Set(await findExisting(deps.fs, planned));
+    for (const path of appeared)
+      deps.log(`left ${escapeName(path)} unchanged: appeared after planning.`);
     outcomes = await writeFiles(
       deps.fs,
-      await formatForTarget(
-        edits.map((edit) => ({ ...edit, managed: true })),
-        runtime,
-        dir,
-        deps.error,
-      ),
+      planned.filter((file) => !appeared.has(file.path)),
       deps.interrupt === undefined
         ? { root: writeRoot }
         : { root: writeRoot, signal: deps.interrupt },
@@ -1350,7 +1781,20 @@ export async function runAddCommand(
   deps.log('');
   deps.log('Next:');
   deps.log(`  ${installCommand(runtime)}`);
-  printWiringNote(configSource, bare, deps.log, seam);
+  // When this run wrote the transport into setu.config.ts, the guidance would ask
+  // for the very option it just wrote (PR #519 review). Any other config edit —
+  // a bare plugin insertion — still needs its note.
+  const transportWritten =
+    configWired &&
+    transportArgs !== undefined &&
+    (bare === 'messaging-plugin' || bare === 'queue-plugin');
+  const wiredArm =
+    configWired && configSource !== undefined
+      ? composingStarter(configSource)?.arms.get(bare)
+      : undefined;
+  if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
+  if (!transportWritten && wiredArm === undefined)
+    printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass
@@ -1487,6 +1931,9 @@ function printAddHelp(log: (message: string) => void): void {
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");
+  log('');
+  log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
+  log('Workspace members use their workspace transport; existing configuration is preserved.');
   log('');
   log('Available:');
   for (const name of addableNames()) {

@@ -30,6 +30,7 @@ function makeResponse() {
       recorded.status = code;
       return response;
     },
+    setHeaders: () => response,
     header: () => response,
     appendHeader: () => response,
     json(body: unknown) {

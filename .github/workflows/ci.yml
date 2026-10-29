@@ -43,6 +43,12 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: 12.11.2
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: 2.9.6
       - name: Install Chromium for the pinned browser suite
         run: npx --yes playwright@1.63.0 install --with-deps chromium
       - name: Browser gate (example and fresh scaffold)
@@ -71,10 +77,10 @@ jobs:
   # The gates and the test suite run as parallel shards of one job, each on its
   # own runner with the full set of backends; `node-gate` below reports them
   # under the one required check name. Every package measures and enforces its
-  # own per-file coverage in its own Vitest run, so splitting by package needs
-  # no report merging: the shards together run exactly what the single job ran.
+  # own per-file coverage in its own Vitest run. The CLI splits within one member:
+  # its three blobs are merged by cli-coverage, which enforces full per-file coverage.
   #   static     — format, lint, type check, docs, examples, async guard
-  #   cli        — the CLI suite, the longest single member
+  #   cli-1..3   — isolated CLI suites split by Vitest, with merged coverage
   #   messaging  — messaging-plugin, the second longest
   #   packages   — every other member (a new member lands here by default)
   #   tooling    — root and script tests
@@ -87,7 +93,7 @@ jobs:
       # saves a second push.
       fail-fast: false
       matrix:
-        shard: [static, cli, messaging, packages, tooling]
+        shard: [static, cli-1, cli-2, cli-3, messaging, packages, tooling]
     env:
       # Includes guarded messaging Redis Streams restart/redelivery tests.
       REDIS_URL: redis://localhost:6379
@@ -485,9 +491,44 @@ jobs:
       # each package shard passes `--no-tooling` and the tooling shard runs it
       # exactly once. The `packages` shard is every member except the ones with
       # a shard of their own; a misspelt `--skip` refuses rather than running.
-      - name: Node package tests with coverage (cli)
-        if: matrix.shard == 'cli'
-        run: pnpm test:coverage --no-tooling cli
+      - name: Node package tests with coverage (cli-1)
+        if: matrix.shard == 'cli-1'
+        run: pnpm test:coverage --no-tooling cli --shard 1/3
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.shard == 'cli-1'
+        with:
+          name: cli-blob-1
+          path: .vitest-reports/cli/blob-1.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Node package tests with coverage (cli-2)
+        if: matrix.shard == 'cli-2'
+        run: pnpm test:coverage --no-tooling cli --shard 2/3
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.shard == 'cli-2'
+        with:
+          name: cli-blob-2
+          path: .vitest-reports/cli/blob-2.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Node package tests with coverage (cli-3)
+        if: matrix.shard == 'cli-3'
+        run: pnpm test:coverage --no-tooling cli --shard 3/3
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.shard == 'cli-3'
+        with:
+          name: cli-blob-3
+          path: .vitest-reports/cli/blob-3.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Node package tests with coverage (messaging-plugin)
         if: matrix.shard == 'messaging'
@@ -501,6 +542,35 @@ jobs:
         if: matrix.shard == 'tooling'
         run: pnpm run test:tooling:coverage
 
+  cli-coverage:
+    needs: node
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Report merging reads local sources and needs no Git credential.
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.11.2
+      - name: Frozen dependency install
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cli-blob-*
+          path: .vitest-reports/cli/
+          merge-multiple: true
+      - name: Require all CLI blobs and enforce merged coverage
+        run: |
+          for i in 1 2 3; do
+            test -f ".vitest-reports/cli/blob-$i.json"
+          done
+          pnpm test:coverage --no-tooling cli --merge
+
   # The required status check. A matrix reports one check per shard, under
   # names the rulesets do not list, so this job carries the name they do. It
   # runs `always()`: a skipped required check counts as passing, so without it
@@ -510,15 +580,18 @@ jobs:
   node-gate:
     if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
     name: Format / Lint / Check / Test
-    needs: node
+    needs: [node, cli-coverage]
     runs-on: ubuntu-latest
     steps:
       - name: Every shard passed
         env:
           RESULT: ${{ needs.node.result }}
+          CLI_COVERAGE_RESULT: ${{ needs.cli-coverage.result }}
         run: |
           echo "node shards: $RESULT"
           test "$RESULT" = success
+          echo "cli coverage: $CLI_COVERAGE_RESULT"
+          test "$CLI_COVERAGE_RESULT" = success
 
   deno-lane:
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
@@ -645,6 +718,12 @@ jobs:
         with:
           deno-version: 2.9.6
 
+      # M120: the generated gate also installs a Bun workspace's lockfile on the
+      # host before building its image.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
       # Docker is preinstalled on ubuntu-latest; kind, kubectl and helm are not.
       - uses: helm/kind-action@v1
         with:
@@ -691,7 +770,9 @@ jobs:
       # kind-action already created the cluster, so the gate reuses it.
       # KEEP_CLUSTER stops the gate deleting a cluster the action owns.
       - name: Cluster end-to-end
-        run: pnpm run check:deploy --cluster
+        # --workspace (M122) runs first: a scaffolded workspace's root test, then
+        # `setu workspace deploy` into this cluster.
+        run: pnpm run check:deploy --cluster --workspace
         env:
           KEEP_CLUSTER: '1'
 

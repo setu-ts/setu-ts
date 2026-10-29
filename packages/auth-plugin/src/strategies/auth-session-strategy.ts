@@ -20,8 +20,13 @@ import type {
   SessionView,
 } from '@setu-ts/common';
 import type { RefreshPrincipal } from '../interfaces/index.ts';
-import { AUTH_SESSION_KEY, parseAuthSessionRecord } from '../sign-in/auth-session-service.ts';
-import type { AuthSessionRecord } from '../sign-in/auth-session-service.ts';
+import {
+  AUTH_SESSION_KEY,
+  parseAuthSessionRecord,
+  verifyAuthSessionRecord,
+} from '../sign-in/auth-session-service.ts';
+import type { AuthSessionChecks } from '../sign-in/auth-session-service.ts';
+import type { SessionStampCheck } from '../sign-in/session-stamp.ts';
 
 /** Options for {@linkcode AuthSessionStrategy}. */
 export interface AuthSessionStrategyOptions {
@@ -33,26 +38,11 @@ export interface AuthSessionStrategyOptions {
    * force, which is why this is opt-in.
    */
   readonly refreshPrincipal?: RefreshPrincipal;
-}
-
-/**
- * A principal carrying `amr` from the session record.
- *
- * The record's `methods` is the ONLY source: any `amr` the stored principal
- * itself carried is overwritten, so a provider that put `amr` in an ID token
- * cannot claim a stronger authentication than the plugin recorded.
- */
-function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
-  // `amr` is placed AFTER the spread so it replaces any value the stored
-  // principal carried, and the result is frozen so nothing downstream can
-  // quietly upgrade the authentication method of an authenticated request.
-  return Object.freeze({
-    ...principal,
-    claims: Object.freeze({
-      ...(principal.claims ?? {}),
-      amr: Object.freeze([...record.methods]),
-    }),
-  });
+  /**
+   * The session stamp (`signIn.sessionStamp`), compared after the principal is
+   * resolved. Absent means no stamp is compared.
+   */
+  readonly sessionStamp?: SessionStampCheck;
 }
 
 /**
@@ -60,7 +50,8 @@ function withAmr(principal: IPrincipal, record: AuthSessionRecord): IPrincipal {
  *
  * Returns `null` — leaving the chain to continue — when the request carries no
  * usable session, when the session holds no record, when the record is
- * malformed, or when `refreshPrincipal` returns `null` (revocation).
+ * malformed, when `refreshPrincipal` returns `null` (revocation), or when the
+ * user's session stamp no longer matches the one recorded at sign-in.
  */
 export class AuthSessionStrategy implements IAuthStrategy {
   /** Strategy name for identification. */
@@ -69,14 +60,20 @@ export class AuthSessionStrategy implements IAuthStrategy {
   readonly #sessionService: ISessionService;
   // `| undefined` explicitly: the project compiles with exactOptionalPropertyTypes,
   // so assigning an optional option to an optional field needs the wider type.
-  readonly #refreshPrincipal: RefreshPrincipal | undefined;
+  readonly #checks: AuthSessionChecks;
 
   /**
-   * @param options - The session service and the optional per-request re-read
+   * @param options - The session service, the optional per-request re-read and
+   *   the optional session stamp
    */
   constructor(options: AuthSessionStrategyOptions) {
     this.#sessionService = options.sessionService;
-    this.#refreshPrincipal = options.refreshPrincipal;
+    this.#checks = {
+      ...(options.refreshPrincipal === undefined
+        ? {}
+        : { refreshPrincipal: options.refreshPrincipal }),
+      ...(options.sessionStamp === undefined ? {} : { sessionStamp: options.sessionStamp }),
+    };
   }
 
   /**
@@ -94,22 +91,6 @@ export class AuthSessionStrategy implements IAuthStrategy {
     if (record === null) {
       return null;
     }
-    if (this.#refreshPrincipal === undefined) {
-      return withAmr(record.principal, record);
-    }
-    // A re-read that throws is treated as "anonymous" rather than propagating:
-    // a failing identity store must not turn every signed-in request into a 500,
-    // and it must not fall back to the stale snapshot either — that would make
-    // the revocation check fail open.
-    let refreshed: IPrincipal | null;
-    try {
-      refreshed = await this.#refreshPrincipal(record.principal);
-    } catch {
-      return null;
-    }
-    if (refreshed === null) {
-      return null;
-    }
-    return withAmr(refreshed, record);
+    return verifyAuthSessionRecord(record, this.#checks);
   }
 }

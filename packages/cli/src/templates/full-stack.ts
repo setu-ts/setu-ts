@@ -21,6 +21,7 @@ import {
   seamsFor,
 } from './seam.ts';
 import { renderConfigOptions } from './env-file.ts';
+import { FULL_STACK_UI_FILES } from './full-stack-ui-files.ts';
 import { FULL_STACK_APP_FILES, FULL_STACK_README_SECTION } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -34,6 +35,7 @@ import {
   FULL_STACK_TSCONFIG_OPTIONS,
 } from './full-stack-build-files.ts';
 import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
+import { defaultLogger } from './logger.ts';
 
 /**
  * Framework packages the emitted `app/` tree imports.
@@ -120,7 +122,10 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
             // module rather than this project.
             serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
             ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),
-          }),`;
+          }),
+          // The production entry passes the module, and the socket server then
+          // serves the client bundle the page loads itself (M120).
+          ...('serverBuild' in (ssr ?? {}) ? { assetsDir: './build/client/assets' } : {}),`;
 
   // The call wraps onto its own line and the body sits two spaces deeper than
   // the single-line form: this argument is long enough that Prettier wraps the
@@ -131,11 +136,10 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         .split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
       return {
         reactRouter: {
-          // M113d §3.10: the arm is chosen at runtime. On Workers the entry passes
-          // the compiled server build as a MODULE — a bundled Worker cannot resolve
-          // \`new URL(…, import.meta.url)\` against the application. On the socket
-          // targets — and for \`setu commands\`, which loads this config without
-          // the entry — the path arm is unchanged.
+          // Production entries pass the compiled server build as a MODULE so
+          // bundling cannot relocate a path relative to import.meta.url.
+          // Config callers without the entry (tests and setu commands) keep
+          // the absolute path fallback; development supplies the Vite runtime.
           ${reactRouterArm}
           populateLoadContext: (ctx, context) => {
             // The bridge between the kernel request context and a React Router
@@ -156,7 +160,11 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
         // Opted in by the scaffold, with the probe and scrape paths excluded so a
         // kubelet does not write a log line per poll. The plugin's own default
         // (off) is unchanged.
-        logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },${discovery}
+        logger: {
+          transport: '${context.logger ?? defaultLogger(runtime)}',
+          requestLogging: true,
+          excludePaths: ['/live', '/ready', '/health', '/metrics'],
+        },${context.messaging === undefined ? '' : `\n        messaging: ${context.messaging},`}${context.queue === undefined ? '' : `\n        queue: ${context.queue},`}${discovery}
         // Preserve Origin on native form posts; send no cross-origin referrer.
         httpSecurity: {
           headers: { referrerPolicy: 'same-origin' },
@@ -219,11 +227,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     args: fullStackArgs,
     // The REST starter underneath registers these unconditionally; listed here
     // because the factory hides them from the plugin list the README reads.
-    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
+    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin', 'logger-plugin'],
     parameter: {
       name: 'ssr',
       type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The development SSR runtime `dev.ts` supplies; on Workers the entry passes the compiled server build module.',
+      doc: 'The Vite runtime start:dev supplies; production entries pass the compiled server build module.',
       readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
@@ -247,6 +255,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   files: [
     ...FULL_STACK_APP_FILES,
+    ...FULL_STACK_UI_FILES,
     ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES),
     ...seamFiles(FULL_STACK_SEAMS),
   ],

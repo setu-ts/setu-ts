@@ -1,6 +1,6 @@
 /**
  * Integration tests for activation over a REAL kernel application: no
- * plugin means no socket, missing diagnostics refuses startup, a non-Deno
+ * plugin means no socket, missing diagnostics refuses startup, an unsupported
  * runtime refuses before any bind, and an honest composition opens a
  * working signed endpoint.
  */
@@ -13,22 +13,11 @@ import { RuntimePlugin } from '../../../runtime/src/index.ts';
 import { DiagnosticsPlugin } from '../../src/index.ts';
 import { createDiagnosticsClient } from '../../src/index.ts';
 import { minimalSnapshot, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
-
-/**
- * Discovers a free loopback port.
- *
- * @returns A free port
- */
-function freePort(): number {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-  return port;
-}
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 describe('Activation', () => {
   it('opens no listener when the plugin is absent', async () => {
-    const port = freePort();
+    const port = await unusedPort();
     const app = createApplication({ plugins: [RuntimePlugin()] });
     await app.start();
     const registry = app.services;
@@ -39,7 +28,7 @@ describe('Activation', () => {
       // Closed on the branch that FAILS the assertion: an open connection
       // here trips Deno's resource sanitizer, and the leak report masks the
       // assertion that actually matters.
-      const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+      const connection = await connect({ port, hostname: '127.0.0.1' });
       connection.close();
     } catch {
       connectFailed = true;
@@ -54,7 +43,7 @@ describe('Activation', () => {
         RuntimePlugin(),
         DiagnosticsPlugin({
           enabled: true,
-          port: freePort(),
+          port: await unusedPort(),
           sessionId: TEST_SESSION_ID,
           sessionKey: TEST_KEY_BYTES,
         }),
@@ -64,10 +53,10 @@ describe('Activation', () => {
     await expect(app.start()).rejects.toThrow(/not created with kernel diagnostics enabled/);
   });
 
-  it('refuses listen before any bind on a non-Deno runtime', async () => {
+  it('refuses listen before any bind on an unsupported runtime', async () => {
     const factory = await (async () => {
       const app = createApplication({
-        plugins: [RuntimePlugin({ platform: 'node' })],
+        plugins: [RuntimePlugin({ platform: 'cloudflare-workers' })],
       });
       await app.start();
       const factory = app.services.get<ILocalDiagnosticsListenerFactory>(
@@ -82,7 +71,7 @@ describe('Activation', () => {
   });
 
   it('activates on an honest composition and answers a real signed read', async () => {
-    const port = freePort();
+    const port = await unusedPort();
     const diagnostics = DiagnosticsPlugin({
       enabled: true,
       port,
@@ -120,7 +109,7 @@ describe('Activation', () => {
   });
 
   it('a second listen on the same factory refuses while the first is active', async () => {
-    const port = freePort();
+    const port = await unusedPort();
     const diagnostics = DiagnosticsPlugin({
       enabled: true,
       port,
@@ -136,7 +125,7 @@ describe('Activation', () => {
       CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER,
     );
     await expect(
-      factory.listen({ port: freePort(), handler: () => undefined as never }),
+      factory.listen({ port: await unusedPort(), handler: () => undefined as never }),
     ).rejects.toThrow(/already active/);
     await app.stop();
   });

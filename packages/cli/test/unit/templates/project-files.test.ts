@@ -91,9 +91,9 @@ describe('functional module hosts and generated test tasks', () => {
             ? ''
             : target === 'deno'
               ? 'deno task build && '
-              : target === 'bun'
-                ? 'bun run build && '
-                : 'npm run build && ';
+              : target === 'cloudflare-workers'
+                ? 'npm run build && '
+                : 'react-router build && ';
         expect(tasks['test']).toBe(prefix + unit);
         expect(tasks['test:e2e']).toBe(prefix + e2e);
         const test = contentsOf(files, 'test/e2e/app.e2e.test.ts');
@@ -471,9 +471,9 @@ describe('a template with a frontend build, on a Deno target', () => {
           scripts: Record<string, string>;
         }
       ).scripts;
-      expect(scripts['dev']).toBe(dev);
+      expect(scripts['start:dev']).toBe(dev);
       expect(contentsOf(files, 'README.md')).toContain(
-        runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
+        runtime === 'bun' ? '```bash\nbun run start:dev\n```' : '```bash\nnpm run start:dev\n```',
       );
       // `ssr` is read on these targets, not underscore-prefixed.
       expect(contentsOf(files, 'setu.config.ts')).toContain(
@@ -582,7 +582,7 @@ describe('the Cloudflare Workers target', () => {
     // `wrangler` bundles with esbuild, which strips types without checking them,
     // and `deno check` types `cloudflare:workers` as `any` — so the README's own
     // Durable Object snippet failed under the only checker present.
-    expect(pkg.scripts['check']).toBe('tsc --noEmit');
+    expect(pkg.scripts['check']).toBe('tsc --noEmit && setu check');
     expect(pkg.devDependencies['typescript']).toBeDefined();
     expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
@@ -595,13 +595,13 @@ describe('the Cloudflare Workers target', () => {
     const fullStackPkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
     ) as { scripts: Record<string, string> };
-    expect(fullStackPkg.scripts['check']).toBe('npm run build && tsc --noEmit');
+    expect(fullStackPkg.scripts['check']).toBe('npm run build && tsc --noEmit && setu check');
 
     // A rest Worker imports no build output, so its check stays the bare one.
     const restPkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
       scripts: Record<string, string>;
     };
-    expect(restPkg.scripts['check']).toBe('tsc --noEmit');
+    expect(restPkg.scripts['check']).toBe('tsc --noEmit && setu check');
   });
 
   it("ignores the frontend toolchain's generated directories (V9-11)", () => {

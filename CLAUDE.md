@@ -670,12 +670,43 @@ here.
   npm workspace: the load error names who loads the peer and that it belongs where that package is
   installed, and `setu add` in an npm/Bun workspace member also records peers in the root; V10-50,
   V10-58) — complete (PR #505).
-- **Milestone 119i** (docs + agent cards + `scripts/check-docs.ts` — documentation that matches the
-  code, every package README compiled, release-breaking repository links refused; V10-7, V10-8,
-  V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46…V10-48, V10-56, V10-57, V9-29) —
-  complete (PR pending).
-- **Next milestone** — not yet chosen: M118 and M120–M123 are open in the ROADMAP; M120 depends on
-  M118. M119 closes its rows on a published 0.11.0 re-run.
+- **Milestone 125** (`di-plugin` + `common` + `kernel` + `decorator-plugin` + `testing` — a compiled
+  container and a request scope: typed tokens, boot-time graph validation, `forRequest` kept in
+  `ctx.slot` and disposed through `ctx.defer`, the singleton-captures-scoped fix) — complete (PR
+  #508).
+- **Milestone 118** (`packages/cli` — `setu check`, a read-only wiring gate run by every generated
+  `check` script, plus `setu sync`, stable finding ids and `.setu-ts/check.json` silencing) —
+  complete (PR #510).
+- **Milestone 120** (`packages/cli` — `setu build` (esbuild after the `setu check` gate), compiled
+  Node starts with `start:dev`/`start:debug`, multi-stage production images for Node, Bun and Deno,
+  Bun's hoisted linker for workspace libraries, Deno read-only start under `nodeModulesDir: "auto"`)
+  — complete (PR #515).
+- **Milestone 120b** (`packages/cli` — `.npmrc` as an optional BuildKit secret on every generated
+  install step and in Compose, plus the one-member Compose `environment:` fix; no ROADMAP entry, by
+  the maintainer's direction) — complete (PR #516).
+- **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
+  package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
+  `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
+- **Milestone 121** (`packages/cli` — full-stack projects and workspace members on a broker through
+  the starter's `messaging`/`queue` options, `setu add messaging`/`queue` reading the workspace
+  transport and taking `--broker`/`--queue`, `setu add react-router` refused outside full-stack;
+  V10-51, V10-52) — complete (PR #519).
+- **Milestone 124** (`packages/auth-plugin` — password-only `signIn` with `providers: []`,
+  `requireAuth({ signInPage })` redirecting browser navigations with a safe `returnTo` while APIs
+  get 401, and `signIn.sessionStamp` ending every session of a user from a stamp on the user record;
+  V10-65, V10-66) — complete (PR #520).
+- **Milestone 126** (`packages/runtime` + `packages/cli` — a local diagnostics listener on Node:
+  `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
+  connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
+  #521).
+- **Milestone 122** (`packages/cli` + `packages/common` — `setu workspace build` and
+  `setu workspace deploy` reading `setu.workspace.json` at run time: images tagged with the commit,
+  kind load or registry push, one server-side Secret per member from `k8s/secrets/<member>/.env`,
+  the Secret version stamped into each pod template and patched where not current, root
+  `test`/`build`/`deploy` scripts, Compose `env_file`, `parseEnv` in common, and
+  `check:deploy --workspace` on kind; V10-60) — complete (PR #522).
+- **Next milestone** — M119i (documentation that does not match the code, or is missing). M117 is
+  also open.
 
 ## Verification (run before declaring any work done)
 

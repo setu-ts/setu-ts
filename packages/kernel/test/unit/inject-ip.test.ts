@@ -34,4 +34,42 @@ describe('inject socket peer', () => {
       await app.stop();
     }
   });
+  it('guards the identity fields through the request prototype, as a served request does', async () => {
+    const app = createApplication({
+      plugins: [
+        {
+          name: 'runtime',
+          version: '0.0.0',
+          provides: [CAPABILITIES.RUNTIME],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.RUNTIME, createFakeRuntime().runtime);
+          },
+        },
+      ],
+    });
+    app.router.get('/', (ctx) => {
+      ctx.request.user = { id: 'first', roles: [] };
+      let refused = false;
+      try {
+        ctx.request.user = { id: 'second', roles: [] };
+      } catch {
+        refused = true;
+      }
+      return ctx.response.json({
+        user: ctx.request.user.id,
+        refused,
+        own: ['user', 'tenant', 'locale'].filter((field) => Object.hasOwn(ctx.request, field)),
+      });
+    });
+    await app.start();
+    try {
+      expect((await app.inject({ method: 'GET', url: '/' })).json()).toEqual({
+        user: 'first',
+        refused: true,
+        own: [],
+      });
+    } finally {
+      await app.stop();
+    }
+  });
 });

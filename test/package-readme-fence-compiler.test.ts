@@ -88,7 +88,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M110a: +1 for the Authorization Policies example.
   // M110b: +1 for the Scoped Roles example.
   // M101h: +1 for the authorization-diagnostics registration example.
-  'packages/auth-plugin/README.md': 19,
+  'packages/auth-plugin/README.md': 22,
   'packages/static-plugin/README.md': 3,
   // M94c: +1 for the escaping Hono-template `raw(csrfTokenField(ctx))` example.
   // M101c: +1 for the Tenant binding opt-out example.
@@ -140,7 +140,7 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/idempotency-plugin/README.md': 3,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
-  'packages/logger-plugin/README.md': 3,
+  'packages/logger-plugin/README.md': 4,
   // M102: +1 for the component-template example rendered through the view engine.
   'packages/mail-plugin/README.md': 3,
   'packages/metrics-plugin/README.md': 2,

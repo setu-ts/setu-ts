@@ -36,11 +36,11 @@ export class Gauge extends MetricBase {
    * @param labels - Label values keyed by label name
    */
   set(value: number, labels?: Readonly<Record<string, string>>): void {
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    const key = this.seriesKey(snapshot);
     const entry: GaugeValue = { value };
-    if (labels) {
-      entry.labels = { ...labels }; // Defensive shallow copy
+    if (snapshot) {
+      entry.labels = snapshot;
     }
     this.#values.set(key, entry);
   }
@@ -52,12 +52,12 @@ export class Gauge extends MetricBase {
    * @param labels - Label values keyed by label name
    */
   inc(value: number = 1, labels?: Readonly<Record<string, string>>): void {
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    const key = this.seriesKey(snapshot);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current + value };
-    if (labels) {
-      entry.labels = { ...labels }; // Defensive shallow copy
+    if (snapshot) {
+      entry.labels = snapshot;
     }
     this.#values.set(key, entry);
   }
@@ -69,12 +69,12 @@ export class Gauge extends MetricBase {
    * @param labels - Label values keyed by label name
    */
   dec(value: number = 1, labels?: Readonly<Record<string, string>>): void {
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    const key = this.seriesKey(snapshot);
     const current = this.#values.get(key)?.value ?? 0;
     const entry: GaugeValue = { value: current - value };
-    if (labels) {
-      entry.labels = { ...labels }; // Defensive shallow copy
+    if (snapshot) {
+      entry.labels = snapshot;
     }
     this.#values.set(key, entry);
   }

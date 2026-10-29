@@ -114,6 +114,69 @@ describe('Hono router bridge — trailing slash parity', () => {
     expect(result).not.toBe(null);
     expect(result!.params).toEqual({ id: '123' });
   });
+
+  it('a route registered with a trailing slash answers only that spelling', () => {
+    const router = new Router();
+    const def = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/api/docs/', def);
+    expect(router.match('GET', '/api/docs/')?.definition).toBe(def);
+    expect(router.match('GET', '/api/docs')).toBe(null);
+    expect(router.getAll()[0]!.pattern).toBe('/api/docs/');
+  });
+
+  it('resolves overlapping slash-terminated routes without losing their entries', () => {
+    const router = new Router();
+    const byId = { handler: () => ({ __handlerResult: true }) as never };
+    const me = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/users/:id/', byId);
+    router.get('/users/me/', me);
+    expect(router.match('GET', '/users/me/')?.definition).toBe(me);
+    expect(router.match('GET', '/users/42/')?.params).toEqual({ id: '42' });
+    // A parameter pattern's trailing slash is not significant (LinearRouter's
+    // rule before 0.11.0), so the slashless path reaches the parameter route.
+    expect(router.match('GET', '/users/me')?.definition).toBe(byId);
+  });
+
+  it('lets a parameter route registered with a trailing slash answer the slashless path', () => {
+    const router = new Router();
+    router.get('/users/:id/', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/users/42')?.params).toEqual({ id: '42' });
+    expect(router.match('GET', '/users/42/')?.params).toEqual({ id: '42' });
+  });
+
+  // Re-audit N1: the trailing-slash spelling ranks every candidate together,
+  // so a wildcard cannot win over the specific route that carries a guard.
+  it.each([
+    ['/admin', '/admin/*', '/admin/'],
+    ['/api/v1/items', '/*', '/api/v1/items/'],
+    ['/openapi.json', '/*', '/openapi.json/'],
+  ])('prefers %s over %s for %s', (specific, wildcard, request) => {
+    const router = new Router();
+    const guarded = {
+      middleware: [(_ctx: never, _next: never) => Promise.resolve()],
+      handler: () => ({ __handlerResult: true }) as never,
+    };
+    const catchAll = { handler: () => ({ __handlerResult: true }) as never };
+    router.get(wildcard, catchAll);
+    router.get(specific, guarded as never);
+    expect(router.match('GET', request)?.definition).toBe(guarded);
+  });
+
+  it('keeps /a and /a/ as two reachable routes', () => {
+    const router = new Router();
+    const bare = { handler: () => ({ __handlerResult: true }) as never };
+    const slash = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('/a/', slash);
+    router.get('/a', bare);
+    expect(router.match('GET', '/a')?.definition).toBe(bare);
+    expect(router.match('GET', '/a/')?.definition).toBe(slash);
+  });
+
+  it('does not retry the root, which has no slash to drop', () => {
+    const router = new Router();
+    router.get('/users', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/')).toBe(null);
+  });
 });
 
 // C1 regression — same-path-different-method must return correct definition identity
@@ -134,5 +197,211 @@ describe('C1 regression — same path, different methods', () => {
     expect(postResult).not.toBe(null);
     expect(postResult!.definition).toBe(postDef);
     expect(postResult!.params).toEqual({});
+  });
+});
+
+// Security audit F2: TrieRouter's cost for a `:name{…}` constraint that can
+// match '/' grows quadratically with the path, so the syntax is refused.
+describe('regular-expression route parameters', () => {
+  it.each(['/files/:path{.+}/download', '/users/:id{[0-9]+}', '/:slug{[a-z-]+}/edit'])(
+    'refuses %s at registration',
+    (pattern) => {
+      const router = new Router();
+      expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).toThrow(
+        `Route 'GET ${pattern}' uses a regular-expression parameter (':name{…}')`,
+      );
+      expect(router.getAll()).toEqual([]);
+    },
+  );
+
+  it('refuses one written without a leading slash', () => {
+    const router = new Router();
+    expect(() =>
+      router.get(':path{.+}/download', () => ({ __handlerResult: true }) as never),
+    ).toThrow("uses a regular-expression parameter (':name{…}')");
+  });
+
+  it('refuses one registered through a group prefix', () => {
+    const router = new Router();
+    expect(() =>
+      router.group('/api', (api) => {
+        api.post('/items/:id{\\d+}', () => ({ __handlerResult: true }) as never);
+      }),
+    ).toThrow("Route 'POST /api/items/:id{");
+  });
+
+  it('still accepts plain parameters, wildcards and braces outside a parameter', () => {
+    const router = new Router();
+    expect(() => {
+      router.get('/users/:id', () => ({ __handlerResult: true }) as never);
+      router.get('/files/*', () => ({ __handlerResult: true }) as never);
+      router.get('/literal{brace}', () => ({ __handlerResult: true }) as never);
+    }).not.toThrow();
+    expect(router.match('GET', '/users/7')?.params).toEqual({ id: '7' });
+  });
+});
+
+// Re-audit N2: Hono gives a pattern written without a leading slash one, so
+// `admin` and `/admin` are the same route and the second is a duplicate.
+describe('patterns written without a leading slash', () => {
+  it('match as their slash-prefixed spelling', () => {
+    const router = new Router();
+    const def = { handler: () => ({ __handlerResult: true }) as never };
+    router.get('admin', def);
+    expect(router.match('GET', '/admin')?.definition).toBe(def);
+  });
+
+  it('rank as parameters, so a literal route still wins its own path', () => {
+    const router = new Router();
+    const param = { handler: () => ({ __handlerResult: true }) as never };
+    const literal = { handler: () => ({ __handlerResult: true }) as never };
+    router.get(':id', param);
+    router.get('/foo', literal);
+    expect(router.match('GET', '/foo')?.definition).toBe(literal);
+    expect(router.match('GET', '/bar')?.definition).toBe(param);
+  });
+
+  it('collide with the slash-prefixed spelling of the same route', () => {
+    const router = new Router();
+    router.get('admin', () => ({ __handlerResult: true }) as never);
+    expect(() => router.get('/admin', () => ({ __handlerResult: true }) as never)).toThrow(
+      "Route 'GET /admin' is already registered",
+    );
+  });
+});
+
+// Security re-audit N4: shapes outside the route grammar routed differently
+// under TrieRouter than under LinearRouter, so they are refused at
+// registration. The table is the grammar's edge, as data.
+describe('patterns outside the route grammar', () => {
+  it.each([
+    ['/api//:id', 'an empty segment (`//`)'],
+    ['/trailing//', 'an empty segment (`//`)'],
+    ['/v*/admin', "the wildcard segment 'v*'"],
+    ['/a*b', "the wildcard segment 'a*b'"],
+    ['/users/:user-id', "the parameter name 'user-id'"],
+    ['/x/:__proto__', "the parameter name '__proto__'"],
+    ['/u/:id?/', 'an optional parameter that is not the final segment'],
+    ['/p/:id?/edit', 'an optional parameter that is not the final segment'],
+    ['/search?q', "'?' outside a final optional parameter"],
+  ])('refuses %s', (pattern, reason) => {
+    const router = new Router();
+    expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).toThrow(
+      `Route 'GET ${pattern}' uses ${reason}`,
+    );
+    expect(router.getAll()).toEqual([]);
+  });
+
+  it.each([
+    '/',
+    '/users',
+    '/users/',
+    '/users/:id',
+    '/users/:id/',
+    '/u/:id?',
+    '/files/*',
+    '/*',
+    '/files*',
+    '/:a/*',
+    '/_x/:snake_case',
+    '/users/:1st',
+    '/x/:constructor',
+  ])('accepts %s', (pattern) => {
+    const router = new Router();
+    expect(() => router.get(pattern, () => ({ __handlerResult: true }) as never)).not.toThrow();
+  });
+
+  it('optional final parameter answers with and without it', () => {
+    const router = new Router();
+    router.get('/u/:id?', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/u/7')?.params).toEqual({ id: '7' });
+    expect(router.match('GET', '/u')).not.toBe(null);
+  });
+});
+
+describe('group prefixes join with exactly one slash', () => {
+  it.each([
+    ['/api/', '/:id', '/api/:id'],
+    ['/api', '/:id', '/api/:id'],
+    ['/api', ':id', '/api/:id'],
+    ['/', '/x', '/x'],
+    ['/api', '/', '/api'],
+    ['/api/', '/', '/api/'],
+  ])('group(%s) + %s registers %s', (prefix, path, expected) => {
+    const router = new Router();
+    router.group(prefix, (group) => {
+      group.get(path, () => ({ __handlerResult: true }) as never);
+    });
+    expect(router.getAll()[0]!.pattern).toBe(expected);
+  });
+
+  it('joins nested group prefixes the same way', () => {
+    const router = new Router();
+    router.group('/api/', (api) => {
+      api.group('/v1/', (v1) => {
+        v1.get('/items', () => ({ __handlerResult: true }) as never);
+      });
+    });
+    expect(router.getAll()[0]!.pattern).toBe('/api/v1/items');
+    expect(router.match('GET', '/api/v1/items')).not.toBe(null);
+  });
+});
+
+describe('parameter decoding', () => {
+  it('routes a parameter named after an Object.prototype member as develop did', () => {
+    const router = new Router();
+    router.get('/x/:constructor', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/x/abc')?.params).toEqual({ constructor: 'abc' });
+  });
+
+  it('accepts a parameter name starting with a digit, as LinearRouter did', () => {
+    const router = new Router();
+    router.get('/users/:1st', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/users/a')?.params).toEqual({ '1st': 'a' });
+  });
+});
+
+// Security re-audit N6: TrieRouter keeps the parameters after a `*` segment on
+// a plain object, so a developer's name was read back as an inherited member.
+// Parameters reach Hono under the kernel's own names; every Object.prototype
+// member name (but `__proto__`, refused at registration) routes in every shape.
+describe('parameter names that are Object.prototype members', () => {
+  const NAMES = Object.getOwnPropertyNames(Object.prototype).filter((name) => name !== '__proto__');
+  const SHAPES: readonly (readonly [
+    string,
+    (name: string) => string,
+    string,
+    Record<string, string>,
+  ])[] = [
+    ['after * (last)', (n) => `/files/*/:${n}`, '/files/a/b', { v: 'b' }],
+    ['after a leading *', (n) => `/*/:${n}`, '/a/b', { v: 'b' }],
+    ['after * then static', (n) => `/*/:${n}/s`, '/a/b/s', { v: 'b' }],
+    ['second after *', (n) => `/*/:a/:${n}`, '/x/y/z', { a: 'y', v: 'z' }],
+    ['plain', (n) => `/x/:${n}`, '/x/b', { v: 'b' }],
+  ];
+
+  it.each(
+    SHAPES.flatMap(([shape, pattern, path, expected]) =>
+      NAMES.map((name) => [name, shape, pattern(name), path, expected] as const),
+    ),
+  )('routes :%s %s', (name, _shape, pattern, path, expected) => {
+    const router = new Router();
+    router.get(pattern, () => ({ __handlerResult: true }) as never);
+    const want = Object.fromEntries(
+      Object.entries(expected).map(([key, value]) => [key === 'v' ? name : key, value]),
+    );
+    expect(router.match('GET', path)?.params).toEqual(want);
+  });
+
+  it('keeps the first value when two parameters share a name', () => {
+    const router = new Router();
+    router.get('/x/:id/:id', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/x/1/2')?.params).toEqual({ id: '1' });
+  });
+
+  it('leaves an omitted optional parameter out of params', () => {
+    const router = new Router();
+    router.get('/u/:id?', () => ({ __handlerResult: true }) as never);
+    expect(router.match('GET', '/u')?.params).toEqual({});
   });
 });

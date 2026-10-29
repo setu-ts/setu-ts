@@ -135,6 +135,7 @@ function createProbeRequestContext(
       statusCode = code;
       return resp;
     },
+    setHeaders: () => resp,
     header: () => resp,
     appendHeader: () => resp,
     json: (): HandlerResult => ({ __handlerResult: true }),

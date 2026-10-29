@@ -4,7 +4,8 @@
  * @module
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 import type { ConnectionErrorReporter, RealtimeFrame } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
@@ -142,6 +143,58 @@ class FakeRedisClient implements IRedisBackplaneClient {
 }
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
+
+it('captures asynchronous redis subscriber errors in history and reporter', async () => {
+  const client = new FakeRedisClient();
+  const subscriber = new FakeRedisClient();
+  const failed = vi.fn();
+  const succeeded = vi.fn();
+  const backplane = new RedisBackplane(
+    { transport: 'redis', client, subscriber },
+    'node-a',
+    'realtime',
+    { failed, succeeded },
+  );
+  const error = new Error('async redis');
+  const bad = async (): Promise<void> => {
+    await Promise.resolve();
+    throw error;
+  };
+  await backplane.connect();
+  try {
+    await backplane.subscribe(bad);
+    subscriber.emit('realtime', JSON.stringify(FRAME));
+    await setImmediate();
+    expect(backplane.handlerErrors).toEqual([error]);
+    expect(failed).toHaveBeenCalledExactlyOnceWith(bad, error, FRAME);
+  } finally {
+    await backplane.close();
+  }
+});
+
+it('D3 retains only the latest 100 of 1,000 Redis handler errors in delivery order', async () => {
+  const client = new FakeRedisClient();
+  const subscriber = new FakeRedisClient();
+  const backplane = new RedisBackplane(
+    { transport: 'redis', client, subscriber },
+    'node-a',
+    'realtime',
+  );
+  await backplane.connect();
+  const thrown = Array.from({ length: 1_000 }, (_, i) => new Error(`failure-${i}`));
+  let calls = 0;
+  await backplane.subscribe(() => {
+    throw thrown[calls++];
+  });
+  try {
+    for (let i = 0; i < 1_000; i++) subscriber.emit('realtime', JSON.stringify(FRAME));
+    expect(calls).toBe(1_000);
+    expect(backplane.handlerErrors).toHaveLength(100);
+    expect(backplane.handlerErrors).toEqual(thrown.slice(-100));
+  } finally {
+    await backplane.close();
+  }
+});
 
 describe('RedisBackplane construction', () => {
   it('rejects a client injected without a subscriber', () => {

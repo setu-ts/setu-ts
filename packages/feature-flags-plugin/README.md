@@ -101,6 +101,14 @@ A context whose snapshot has not loaded yet returns `fallbackValue` and schedule
 refill, coalesced per key so a hot loop over uncached users does not stampede. `isEnabledAsync`
 carries no such caveat — it awaits the SDK and is the accurate entry point when a cold read matters.
 
+Set `maxCachedContexts` alongside `provider` and `options` on the `'launchdarkly'` plugin arm:
+`FeatureFlagsPlugin({ provider: 'launchdarkly', maxCachedContexts: 1_000, options: { sdkKey } })`.
+The default is 10,000 snapshots. A positive integer is required; invalid limits throw a `RangeError`
+naming `maxCachedContexts` at provider construction. Hits refresh recency; insertion past the limit
+evicts the least recently used snapshot. An evicted user behaves like a first-time user: fallback
+while a background refill runs. Direct construction accepts the same limit as the third argument:
+`new LaunchDarklyProvider(config, logger, maxCachedContexts)`.
+
 | Option               | Type                      | Default | Description                                                                                  |
 | -------------------- | ------------------------- | ------- | -------------------------------------------------------------------------------------------- |
 | `sdkKey`             | `string`                  | —       | Required unless `client` is injected.                                                        |

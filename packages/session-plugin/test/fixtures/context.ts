@@ -31,6 +31,11 @@ export class FakeResponse implements IResponse {
     return this;
   }
 
+  setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+    for (const name of Object.keys(headers)) this.header(name, headers[name]!);
+    return this;
+  }
+
   header(name: string, value: string): IResponse {
     this.headers.set(name, value);
     return this;

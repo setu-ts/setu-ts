@@ -7,6 +7,7 @@
  *
  * @module
  */
+import { CAPABILITIES } from '@setu-ts/common';
 import type {
   IApplication,
   IPluginContext,
@@ -19,8 +20,7 @@ import type {
 } from '@setu-ts/common';
 
 /**
- * Creates a minimal fake runtime for the context (the DI plugin does not
- * use runtime services, but IPluginContext requires it).
+ * Creates a minimal fake runtime for the context and disposal deadlines.
  */
 function createFakeRuntime(): IRuntimeServices {
   return {
@@ -58,6 +58,7 @@ export function createFakeContext(): {
   const services = new Map<string, unknown>();
   const middleware: { fn: MiddlewareFunction; options?: MiddlewareOptions }[] = [];
   const runtime = createFakeRuntime();
+  services.set(CAPABILITIES.RUNTIME, runtime);
 
   const serviceRegistry: IServiceRegistry = {
     register<T extends object>(token: string, service: T): void {

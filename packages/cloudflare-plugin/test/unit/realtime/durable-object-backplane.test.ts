@@ -17,7 +17,8 @@ afterAll(() => {
  * reference to shut it down.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { setImmediate } from 'node:timers/promises';
 
 import type { ILogger, RealtimeFrame } from '@setu-ts/common';
 import type { IServiceBinding } from '../../../src/bindings/facades.ts';
@@ -87,6 +88,76 @@ function build(namespace: IDurableObjectNamespace, logger?: () => ILogger | unde
     ...(logger === undefined ? {} : { logger }),
   });
 }
+
+describe('Durable Object subscriber reporting', () => {
+  it('captures async rejection, sanitizes diagnostics and suppresses warning floods', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    let sink: ILogger | undefined = undefined;
+    const backplane = build(namespace, () => sink);
+    await backplane.connect();
+    const error = new Error('bad\r\nforged');
+    let fail = true;
+    await backplane.subscribe(async () => {
+      await Promise.resolve();
+      if (fail) throw error;
+    });
+    sink = logger;
+    const wire = JSON.stringify({ ...FRAME, origin: 'other' });
+    try {
+      namespace.sockets[0]!.receive(wire);
+      await setImmediate();
+      namespace.sockets[0]!.receive(wire);
+      await setImmediate();
+      fail = false;
+      namespace.sockets[0]!.receive(wire);
+      await setImmediate();
+      expect(logger.records.map((entry) => entry.level)).toEqual(['warn', 'debug', 'info']);
+      expect(logger.records[0]?.message).toContain('Error: bad forged');
+      expect(logger.records[0]?.meta).toMatchObject({
+        frameKind: 'ws-room',
+        frameName: 'lobby',
+        error: 'Error: bad forged',
+      });
+    } finally {
+      await backplane.close();
+    }
+  });
+
+  it('uses onHandlerError for sync and async failures instead of logging, even if it throws', async () => {
+    const namespace = new ScriptedNamespace();
+    const logger = new RecordingLogger();
+    const hook = vi.fn<(error: unknown, frame: RealtimeFrame) => void>(() => {
+      throw new Error('hook');
+    });
+    const backplane = new DurableObjectBackplane(namespace, {
+      origin: 'self',
+      binding: 'REALTIME',
+      topic: 'realtime',
+      logger: () => logger,
+      onHandlerError: hook,
+    });
+    await backplane.connect();
+    try {
+      await backplane.subscribe(() => {
+        throw 'sync';
+      });
+      await backplane.subscribe(async () => {
+        await Promise.resolve();
+        throw 'async';
+      });
+      namespace.sockets[0]!.receive(JSON.stringify(FRAME));
+      await setImmediate();
+      expect(hook.mock.calls).toEqual([
+        ['sync', FRAME],
+        ['async', FRAME],
+      ]);
+      expect(logger.records).toEqual([]);
+    } finally {
+      await backplane.close();
+    }
+  });
+});
 
 describe('DurableObjectBackplane.connect', () => {
   it('joins one attempt when called concurrently', async () => {
@@ -299,7 +370,7 @@ describe('DurableObjectBackplane.subscribe', () => {
     namespace.sockets[0]!.receive(JSON.stringify({ ...FRAME, origin: 'replica-b' }));
 
     expect(seen).toEqual(['lobby']);
-    expect(logger.records[0]?.message).toContain('subscriber threw');
+    expect(logger.records[0]?.message).toContain('subscriber failed');
   });
 
   it('reports a non-Error thrown by a subscriber without losing the value', async () => {
@@ -313,7 +384,7 @@ describe('DurableObjectBackplane.subscribe', () => {
 
     namespace.sockets[0]!.receive(JSON.stringify({ ...FRAME, origin: 'replica-b' }));
 
-    expect(logger.records[0]?.meta).toMatchObject({ error: 'handler blew up' });
+    expect(logger.records[0]?.meta).toMatchObject({ error: 'Error: handler blew up' });
   });
 
   it('stops delivering after unsubscribe', async () => {

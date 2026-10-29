@@ -190,16 +190,53 @@ import { spawn } from 'node:child_process';
 
 const manifest = JSON.parse(await readFile('setu.workspace.json', 'utf8'));
 const members = new Map(manifest.members.map((member) => [member.name, member]));
+// The launcher selects exactly one development entry and owns its process group.
+const devtoolSelectedName = process.env['SETU_DEVTOOL_MEMBER'];
+const devtoolSessionId = process.env['SETU_DEVTOOL_SESSION_ID'];
+const devtoolSessionKey = process.env['SETU_DEVTOOL_SESSION_KEY'];
+let devtoolSelected;
+if (devtoolSelectedName !== undefined && devtoolSelectedName !== '') {
+  const named = members.get(devtoolSelectedName);
+  if (named === undefined) {
+    throw new Error(
+      \`SETU_DEVTOOL_MEMBER names "\${devtoolSelectedName}", which setu.workspace.json \` +
+        \`does not carry. Members: \${[...members.keys()].join(', ')}.\`,
+    );
+  }
+  if (named.devtoolPort === undefined) {
+    throw new Error(
+      \`SETU_DEVTOOL_MEMBER names "\${devtoolSelectedName}", but that member carries no \` +
+        \`devtoolPort. Run ${cliInvocation(runtime)} devtool enable \${devtoolSelectedName} first.\`,
+    );
+  }
+  devtoolSelected = named;
+}
+
+const childEnv = (member) => {
+  const selected = devtoolSelected !== undefined && devtoolSelected.name === member.name;
+  return {
+    ...process.env,
+    SETU_DEVTOOL_MEMBER: selected ? (devtoolSelectedName ?? '') : '',
+    SETU_DEVTOOL_SESSION_ID: selected ? (devtoolSessionId ?? '') : '',
+    SETU_DEVTOOL_SESSION_KEY: selected ? (devtoolSessionKey ?? '') : '',
+  };
+};
+
+const entryTask = (member) =>
+  devtoolSelected !== undefined && devtoolSelected.name === member.name ? 'dev' : 'start:dev';
+
 const started = new Set();
 const visiting = new Set();
 const children = [];
 
 const pause = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
 
-// Each member runs in a process group of its own (POSIX), and shutdown signals the GROUP:
+// Without a selection each member owns a process group (POSIX); under selection
+// the launcher owns the whole group, so no child may detach from it.
+// Shutdown signals each owned group or direct child:
 // the package manager runs \`start\` through a shell, and a shell that does not forward the
 // signal (dash, as on Ubuntu) would otherwise leave the server running, holding its port.
-const grouped = process.platform !== 'win32';
+const grouped = process.platform !== 'win32' && devtoolSelected === undefined;
 
 const shutdown = () => {
   for (const child of children) {
@@ -240,9 +277,10 @@ async function start(member) {
     await waitForReady(dependency);
   }
   visiting.delete(member.name);
-  const child = spawn('${executable}', ['run', 'start'], {
+  const child = spawn('${executable}', ['run', entryTask(member)], {
     cwd: \`apps/\${member.name}\`,
     stdio: 'inherit',
+    env: childEnv(member),
     detached: grouped,
   });
   children.push(child);

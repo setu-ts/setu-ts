@@ -21,6 +21,55 @@ const HTML_INIT = responseInit({ 'content-type': 'text/html; charset=utf-8' });
 const BINARY_INIT = responseInit({ 'content-type': 'application/octet-stream' });
 
 /**
+ * Validated `Headers` templates for frozen header records, keyed by the record
+ * itself, and the frozen records that cannot have one. Both are weak: an entry
+ * lives exactly as long as the record a caller holds.
+ */
+const HEADER_TEMPLATES = new WeakMap<object, Headers>();
+const UNTEMPLATABLE = new WeakSet<object>();
+
+/**
+ * Returns the validated template for a header record, building it on first
+ * use, or `undefined` when the record must be applied entry by entry.
+ *
+ * Only a record that cannot change after it was checked gets a template:
+ * frozen, with an ordinary or null prototype, and every string-keyed own
+ * property a data property holding a string. Validation is the platform's
+ * own — the template is built with `Headers.set`, as `header()` would — and a
+ * record it refuses is remembered as untemplatable and applied entry by entry,
+ * so it throws exactly where the same `header()` calls would.
+ */
+function headerTemplate(record: Readonly<Record<string, string>>): Headers | undefined {
+  const cached = HEADER_TEMPLATES.get(record);
+  if (cached !== undefined) return cached;
+  if (!Object.isFrozen(record) || UNTEMPLATABLE.has(record)) return undefined;
+  const prototype: unknown = Object.getPrototypeOf(record);
+  let template: Headers | undefined;
+  if (prototype === Object.prototype || prototype === null) {
+    const descriptors = Object.getOwnPropertyDescriptors(record);
+    template = new Headers();
+    try {
+      for (const name of Object.keys(record)) {
+        const descriptor = descriptors[name]!;
+        if (!('value' in descriptor) || typeof descriptor.value !== 'string') {
+          template = undefined;
+          break;
+        }
+        template.set(name, descriptor.value);
+      }
+    } catch {
+      template = undefined;
+    }
+  }
+  if (template === undefined) {
+    UNTEMPLATABLE.add(record);
+    return undefined;
+  }
+  HEADER_TEMPLATES.set(record, template);
+  return template;
+}
+
+/**
  * Default implementation of {@linkcode IResponse}. Configuration methods
  * chain; terminal methods mark the builder as ended and return the brand.
  */
@@ -45,6 +94,27 @@ export class ResponseBuilder implements IResponse {
 
   appendHeader(name: string, value: string): IResponse {
     this.#materializeHeaders().append(name, value);
+    return this;
+  }
+
+  /**
+   * Sets several headers. A frozen record's validated template is copied in
+   * one step when no headers exist yet; otherwise each entry goes through
+   * {@linkcode ResponseBuilder.header}.
+   *
+   * @param headers - Header names and values
+   * @returns This response, for chaining
+   */
+  setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+    const template = headerTemplate(headers);
+    if (template !== undefined && this.#headers === undefined && this.#responseInit === undefined) {
+      // Each response gets its own copy; the template itself is never exposed.
+      this.#headers = new Headers(template);
+      return this;
+    }
+    for (const name of Object.keys(headers)) {
+      this.header(name, headers[name]!);
+    }
     return this;
   }
 
@@ -133,6 +203,16 @@ export class ResponseBuilder implements IResponse {
   /** Whether a terminal method has been called (used to detect short-circuits). */
   get ended(): boolean {
     return this.#ended;
+  }
+
+  /**
+   * Reads the streaming body without allocating a snapshot.
+   * @returns The streaming body, or undefined for a buffered response
+   * @since 0.11.0
+   * @internal
+   */
+  get streamingBody(): ReadableStream<Uint8Array> | undefined {
+    return this.#streaming ? (this.#body as ReadableStream<Uint8Array>) : undefined;
   }
 
   /**

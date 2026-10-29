@@ -23,6 +23,7 @@ import { ConfigPlugin, loadConfig } from '@setu-ts/config-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY_FILE_VALUE = 'canary-file-value-SYNTHETIC';
 const CANARY_FILE_HOST = 'file-host-SYNTHETIC';
@@ -63,17 +64,13 @@ interface Started {
  * the milestone exists to serve.
  */
 async function startConfigProvenanceApplication(): Promise<Started> {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const httpPort = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  const connectorProbe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const connectorPort = (connectorProbe.addr as Deno.NetAddr).port;
-  connectorProbe.close();
+  const httpPort = await unusedPort();
+  const connectorPort = await unusedPort();
 
   // The environment half of the snapshot: M98E_PORT displaces the file's
   // PORT; M98E_WS carries the expansion grammar referencing the file's HOST.
-  Deno.env.set('M98E_PORT', '3000');
-  Deno.env.set('M98E_WS', 'ws://${HOST}:1234');
+  process.env['M98E_PORT'] = '3000';
+  process.env['M98E_WS'] = 'ws://${HOST}:1234';
 
   // Resolve the runtime services the way an application composer would, so
   // the standalone load sees the real environment and filesystem — and the
@@ -174,8 +171,8 @@ describe('Configuration provenance e2e (M98e canary)', () => {
       }
     } finally {
       await app.stop();
-      Deno.env.delete('M98E_PORT');
-      Deno.env.delete('M98E_WS');
+      delete process.env['M98E_PORT'];
+      delete process.env['M98E_WS'];
     }
   });
 });

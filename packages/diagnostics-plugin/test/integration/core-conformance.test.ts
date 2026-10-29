@@ -17,6 +17,7 @@ import { RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { isBatchProjection, isSnapshotProjection } from '../../src/protocol/protocol.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 /** The labelled composition every node family is drawn from. */
 const LABELS = {
@@ -164,9 +165,7 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
   });
 
   it('serves the rich composition through the real connector and signed client, frozen', async () => {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const port = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const port = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -208,9 +207,7 @@ describe('Strict core validators — the real kernel output conforms (F02)', () 
   });
 
   it('serves unusual priorities and statuses without refusal, never as null (audits F-A, F-B)', async () => {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const port = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const port = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),

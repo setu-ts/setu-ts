@@ -210,3 +210,60 @@ describe('setu generate — an unwired decorator barrel is reported', () => {
     expect(h.err.text()).toContain("  import { INGRESS_HANDLERS } from './src/ingress/index.ts';");
   });
 });
+
+it('names the queue starter arm for an unwired processors barrel', async () => {
+  const h = harness({
+    '/app/deno.json': manifest('queue-plugin'),
+    '/app/setu.config.ts':
+      "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';",
+  });
+  expect(await h.run(['job', 'email'])).toBe(0);
+  expect(h.err.text()).toContain(
+    'createFullStackAppFromConfig owns QueuePlugin; merge the barrel into its queue arm:',
+  );
+  expect(h.err.text()).toContain('queue: { processors: [...QUEUE_PROCESSORS] }');
+  expect(h.err.text()).not.toContain('Pass the barrel to QueuePlugin:');
+});
+it('refuses an uninstalled starter-owned job queue before writing, including dry-run', async () => {
+  for (const [pkg, symbol] of [
+    ['full-stack-starter', 'createFullStackAppFromConfig'],
+    ['microservice-starter', 'createMicroserviceApp'],
+  ] as const) {
+    for (const dryRun of [false, true]) {
+      const h = harness({
+        '/app/deno.json': manifest(),
+        '/app/setu.config.ts': `import { ${symbol} } from '@setu-ts/${pkg}';`,
+      });
+      expect(await h.run(['job', 'email', ...(dryRun ? ['--dry-run'] : [])])).toBe(1);
+      expect(h.fs.writes).toEqual([]);
+      expect(h.out.lines).toEqual([]);
+      expect(h.err.text()).toContain(
+        'The "job" schematic requires @setu-ts/queue-plugin, which is not installed in /app.',
+      );
+      expect(h.err.text()).toContain(
+        `${symbol} already runs queue-plugin; add installs its package and wires the generated handlers into setu.config.ts.`,
+      );
+      expect(h.err.text()).toContain('add queue');
+    }
+  }
+});
+it('keeps functional jobs ungated without a queue-owning starter', async () => {
+  for (const config of ['', "import { createRestApp } from '@setu-ts/rest-starter';"]) {
+    const h = harness({ '/app/deno.json': manifest(), '/app/setu.config.ts': config });
+    expect(await h.run(['job', 'email'])).toBe(0);
+    expect(h.fs.read('/app/src/jobs/email.job.ts')).toContain('runEmailJob');
+    expect(h.err.text()).not.toContain('already runs queue-plugin');
+  }
+});
+it('explains starter-owned plugin gates before the add command', async () => {
+  const h = harness({
+    '/app/deno.json': manifest(),
+    '/app/setu.config.ts':
+      "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';",
+  });
+  expect(await h.run(['event-handler', 'placed'])).toBe(1);
+  expect(h.err.text()).toContain(
+    'createFullStackAppFromConfig already runs events-plugin; add installs its package and wires the generated handlers into setu.config.ts.',
+  );
+  expect(h.err.text().indexOf('already runs')).toBeLessThan(h.err.text().indexOf('Run `'));
+});

@@ -1,3 +1,4 @@
+import { cliInvocation } from '../../../src/templates/project-files.ts';
 import * as nodeFs from 'node:fs/promises';
 /**
  * Tests for `setu add <plugin>` (D3).
@@ -26,6 +27,350 @@ import { EVENTS_SEAM } from '../../../src/seams/events.ts';
 import { COMMAND_HANDLER_SEAM } from '../../../src/seams/cqrs.ts';
 import { runCli } from '../../../src/cli.ts';
 import { CLIENT_RANGES } from '../../../src/templates/client-dependencies.ts';
+import { listTransports } from '../../../src/workspace/transport.ts';
+
+describe('M121 transport additions', () => {
+  // PR #519 review: guidance reads the starter's actual option and the provider's actual call.
+  it('reports a full-stack option the factory already sets instead of the memory default', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['messaging', '--dir', '/app/shop'])).toBe(0);
+    expect(h.out.join('\n')).toContain('already registers messaging in memory by default');
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+    for (const flags of [[], ['--broker', 'memory']]) {
+      h.out.length = 0;
+      expect(await h.run(['messaging', ...flags, '--dir', '/app/shop'])).toBe(0);
+      const out = h.out.join('\n');
+      expect(out).toContain('setu.config.ts already sets its own messaging option');
+      expect(out).not.toContain('in memory by default');
+    }
+  });
+  it('does not take an unrelated object with the same literal for the configured call', async () => {
+    const source = `import { MessagingPlugin } from '@setu-ts/messaging-plugin';
+const unrelated = { broker: 'redis-streams', url: process.env.REDIS_URL ?? 'redis://127.0.0.1:6379' };
+export function createApp(): IKernelApplication {
+  return createApplication({ plugins: [MessagingPlugin(), ...(devtool?.plugins ?? [])] });
+}
+`;
+    const h = harness({
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/messaging-plugin': `^${VERSION}` },
+      }),
+      '/app/setu.config.ts': source,
+    });
+    expect(await h.run(['messaging', '--broker', 'redis'])).toBe(0);
+    const out = h.out.join('\n');
+    expect(out).toContain('Set MessagingPlugin(');
+    expect(out).not.toContain('already passes these options');
+  });
+  // PR #519 review: an existing Compose file is never rewritten, and a selected service it
+  // lacks is printed rather than silently skipped.
+  it('prints the service an existing Compose file lacks, and nothing when it has it', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+    const compose = h.read('/app/shop/docker/compose.yaml');
+    expect(compose).toContain('  redis:');
+
+    h.out.length = 0;
+    expect(await h.run(['queue', '--queue', 'rabbitmq', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read('/app/shop/docker/compose.yaml')).toBe(compose);
+    const out = h.out.join('\n');
+    expect(out).toContain('docker/compose.yaml exists and has no rabbitmq service');
+    // Printed at the file's own two-space service depth, so it pastes as a sibling.
+    expect(h.out).toContain('  rabbitmq:');
+
+    h.out.length = 0;
+    expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/shop'])).toBe(0);
+    expect(h.out.join('\n')).not.toContain('has no redis service');
+  });
+  // PR #519 review: guidance must not ask for the option this run just wrote, and must
+  // still name the value when an existing one was preserved.
+  for (const template of ['rest', 'full-stack'] as const) {
+    it(`prints no wiring note after writing the transport into a ${template} config`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--template', template, '--runtime', 'node']), {
+          fs: h.fs,
+          cwd: '/app',
+          log: () => {},
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+      const written = h.out.join('\n');
+      expect(h.read('/app/shop/setu.config.ts')).toContain("broker: 'redis-streams'");
+      expect(written).not.toContain('In setu.config.ts:');
+      expect(written).not.toContain('Set MessagingPlugin(');
+
+      // A re-run finds the identical value and says so instead of asking for it again.
+      h.out.length = 0;
+      expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/shop'])).toBe(0);
+      const rerun = h.out.join('\n');
+      expect(rerun).toContain('setu.config.ts already ');
+      expect(rerun).not.toMatch(/Set MessagingPlugin\(|In setu\.config\.ts: messaging: /);
+
+      // A different existing value is preserved and the wanted value is named.
+      h.out.length = 0;
+      expect(await h.run(['messaging', '--broker', 'nats', '--dir', '/app/shop'])).toBe(0);
+      expect(h.out.join('\n')).toMatch(
+        template === 'rest'
+          ? /Set MessagingPlugin\(\{/
+          : /existing messaging option was preserved; to use this transport, set:\n {2}messaging: \{/,
+      );
+      expect(h.read('/app/shop/setu.config.ts')).not.toContain("broker: 'nats'");
+    });
+  }
+  for (const runtime of ['node', 'deno'] as const) {
+    for (const template of ['rest', 'microservice', 'full-stack']) {
+      for (const transport of ['redis', 'nats']) {
+        it(`uses ${transport} for ${runtime} ${template} workspace additions`, async () => {
+          const h = harness();
+          const cli = (args: readonly string[]) =>
+            runCli(args, {
+              fs: h.fs,
+              cwd: '/app',
+              now: () => 0,
+              log: (m) => h.out.push(m),
+              error: (m) => h.err.push(m),
+            });
+          expect(
+            await cli(['new', 'ws', '--workspace', '--runtime', runtime, '--transport', transport]),
+          ).toBe(0);
+          if (runtime === 'deno') {
+            const path = '/app/ws/deno.json';
+            const manifest = JSON.parse(h.read(path)) as Record<string, unknown>;
+            await h.fs.writeFile(
+              path,
+              new TextEncoder().encode(JSON.stringify({ ...manifest, nodeModulesDir: 'auto' })),
+            );
+          }
+          expect(
+            await cli(['g', 'app', 'api', '--template', template, '--dir', '/app/ws']),
+            h.err.join('\n'),
+          ).toBe(0);
+          const dir = '/app/ws/apps/api';
+          for (const plugin of ['messaging', 'queue'])
+            expect(await h.run([plugin, '--dir', dir]), h.err.join('\n')).toBe(0);
+          const config = h.read(`${dir}/setu.config.ts`);
+          const client = transport === 'redis' ? 'ioredis' : 'nats';
+          const manifest = h.read(`${dir}/${runtime === 'deno' ? 'deno.json' : 'package.json'}`);
+          expect(manifest).toContain(client);
+          if (runtime === 'node') expect(h.read('/app/ws/package.json')).toContain(client);
+          if (template === 'rest') {
+            // Existing calls are preserved. REST has neither provider originally.
+            expect(config).toContain(
+              `broker: '${transport === 'redis' ? 'redis-streams' : 'nats'}'`,
+            );
+          } else if (template === 'full-stack') {
+            expect(config).toContain('messaging: {');
+            expect(config).toContain('config.get<string>(');
+            // `add queue` wires the starter's queue arm with the job barrel on every
+            // transport; only Redis also selects a queue backend there.
+            expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
+            expect(config.includes("adapter: 'redis'")).toBe(transport === 'redis');
+          } else {
+            // Generated with the workspace transport, so a re-add finds it already set.
+            expect(h.out.join('\n')).toContain('already passes these options to MessagingPlugin');
+            expect(h.out.join('\n')).not.toContain('existing call was preserved');
+          }
+          expect(config).not.toContain("QueuePlugin({ adapter: 'nats'");
+        });
+      }
+    }
+    for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
+      for (const flag of ['broker', 'queue'] as const) {
+        if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
+        it(`adds standalone ${runtime} ${flag} ${spec.name} and preserves Compose and dotenv on re-add`, async () => {
+          const h = harness();
+          expect(
+            await runNewCommand(
+              parseArgs(['portal', '--runtime', runtime, '--template', 'full-stack']),
+              { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+            ),
+          ).toBe(0);
+          const env = h.read('/app/portal/.env');
+          const args = [
+            flag === 'broker' ? 'messaging' : 'queue',
+            `--${flag}`,
+            spec.name,
+            '--dir',
+            '/app/portal',
+          ];
+          const beforeDryRun = h.fs.writes.length;
+          expect(await h.run([...args, '--dry-run'])).toBe(0);
+          expect(h.fs.writes.length).toBe(beforeDryRun);
+          expect(h.out.join('\n')).toContain('docker/compose.yaml');
+          expect(h.out.join('\n')).toContain('setu.config.ts');
+          expect(await h.run(args), h.err.join('\n')).toBe(0);
+          const config = h.read('/app/portal/setu.config.ts');
+          expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
+          const manifest = h.read(
+            `/app/portal/${runtime === 'deno' ? 'deno.json' : 'package.json'}`,
+          );
+          for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
+            [])
+            expect(manifest).toContain(client);
+          expect(h.read('/app/portal/.env')).toBe(env);
+          const compose = h.read('/app/portal/docker/compose.yaml');
+          const beforeReAdd = h.fs.writes.length;
+          expect(await h.run(args)).toBe(0);
+          expect(h.read('/app/portal/setu.config.ts')).toBe(config);
+          expect(h.read('/app/portal/docker/compose.yaml')).toBe(compose);
+          expect(h.fs.writes.length).toBe(beforeReAdd);
+          expect(h.out.join('\n')).toContain(
+            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+          );
+        });
+      }
+    }
+  }
+
+  for (const args of [
+    ['cache', '--broker', 'redis'],
+    ['cache', '--queue', 'redis'],
+    ['messaging', '--queue', 'redis'],
+    ['queue', '--broker', 'redis'],
+    ['messaging', '--broker'],
+    ['messaging', '--broker', 'unknown'],
+    ['queue', '--queue', 'nats'],
+    ['messaging', '--broker', 'http'],
+  ]) {
+    it(`refuses ${args.join(' ')} without writing`, async () => {
+      const h = harness({ '/app/package.json': '{}' });
+      expect(await h.run(args)).toBe(2);
+      expect(h.fs.writes).toEqual([]);
+      expect(h.err.join('\n')).toContain('--');
+    });
+  }
+  for (const flag of ['broker', 'queue'] as const) {
+    it(`refuses --${flag} on Workers`, async () => {
+      const h = harness({ '/app/package.json': '{}', '/app/wrangler.toml': '' });
+      expect(await h.run([flag === 'broker' ? 'messaging' : 'queue', `--${flag}`, 'redis'])).toBe(
+        2,
+      );
+      expect(h.err.join('\n')).toContain('Cloudflare Workers');
+      expect(h.fs.writes).toEqual([]);
+    });
+    it(`refuses --${flag} in a workspace member`, async () => {
+      const h = harness();
+      const cli = (args: readonly string[]) =>
+        runCli(args, { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} });
+      expect(await cli(['new', 'ws', '--workspace'])).toBe(0);
+      expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+      const before = h.fs.writes.length;
+      expect(
+        await h.run([
+          flag === 'broker' ? 'messaging' : 'queue',
+          `--${flag}`,
+          'redis',
+          '--dir',
+          '/app/ws/apps/api',
+        ]),
+      ).toBe(2);
+      expect(h.err.join('\n')).toContain('workspace --transport');
+      expect(h.fs.writes.length).toBe(before);
+    });
+  }
+  it('accepts explicit memory without a connection or Compose file', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['messaging', '--broker', 'memory'])).toBe(0);
+    expect(await h.run(['queue', '--queue', 'memory'])).toBe(0);
+    expect(h.fs.writes).toEqual([
+      '/app/package.json',
+      '/app/package.json',
+      '/app/src/jobs/index.ts',
+    ]);
+  });
+  // A starter with a messaging arm gets the property; createRestApp has none
+  // (RestStarterOptions), so it gets the after-factory registration (M121 §3.7).
+  for (const [pkg, symbol, shape] of [
+    ['rest', 'createRestApp', 'app.register(MessagingPlugin({'],
+    ['microservice', 'createMicroserviceApp', 'messaging: {'],
+    ['full-stack', 'createFullStackAppFromConfig', 'messaging: {'],
+  ]) {
+    it(`prints the ${pkg} starter's own registration for a hand-written config`, async () => {
+      const source = `import { ${symbol} } from '@setu-ts/${pkg}-starter';\nexport async function createApp() { return ${symbol}({}); }\n`;
+      const h = harness({ '/app/package.json': '{}', '/app/setu.config.ts': source });
+      expect(await h.run(['messaging', '--broker', 'redis'])).toBe(0);
+      expect(h.read('/app/setu.config.ts')).toBe(source);
+      const out = h.out.join('\n');
+      expect(out).toContain(shape!);
+      expect(out).toContain("broker: 'redis-streams'");
+      if (pkg === 'rest') expect(out).not.toContain('messaging: {');
+    });
+  }
+  // PR #519 review: an option a hand-written createMicroserviceApp call already sets is
+  // read and reported, not printed as if it were absent.
+  it('reports an existing createMicroserviceApp messaging option', async () => {
+    const options = "{ broker: 'redis-streams', options: { url: 'redis://cache:6379' } }";
+    const source = `import { createMicroserviceApp } from '@setu-ts/microservice-starter';\nexport async function createApp() { return createMicroserviceApp({ name: 'x', messaging: ${options} }); }\n`;
+    const h = harness({ '/app/package.json': '{}', '/app/setu.config.ts': source });
+    expect(await h.run(['messaging', '--broker', 'nats'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(source);
+    const out = h.out.join('\n');
+    expect(out).toContain(
+      'The existing messaging option was preserved; to use this transport, set:',
+    );
+    expect(out).not.toContain('In setu.config.ts: messaging:');
+  });
+  it('refuses react-router before writing and accepts a full-stack project', async () => {
+    const h = harness({ '/app/package.json': '{}' });
+    expect(await h.run(['react-router'])).toBe(1);
+    expect(h.err.join('\n')).toContain(
+      `Run ${cliInvocation('node')} new <name> --template full-stack.`,
+    );
+    expect(h.fs.writes).toEqual([]);
+    expect(
+      await runNewCommand(parseArgs(['portal', '--template', 'full-stack']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    expect(await h.run(['react-router', '--dir', '/app/portal'])).toBe(0);
+  });
+  it('keeps an existing inline ReactRouterPlugin installed', async () => {
+    const config =
+      "import { ReactRouterPlugin } from '@setu-ts/react-router-plugin';\nexport function createApp() { const app = makeApp(); app.register(ReactRouterPlugin({ serverBuildPath: 'build.js' })); return app; }\n";
+    const h = harness({
+      '/app/package.json': JSON.stringify({
+        dependencies: { '@setu-ts/react-router-plugin': `^${VERSION}` },
+      }),
+      '/app/setu.config.ts': config,
+    });
+    expect(await h.run(['react-router'])).toBe(0);
+    expect(h.fs.writes).toEqual([]);
+  });
+  it('refuses react-router in a non-full-stack workspace with the member creation command', async () => {
+    const h = harness();
+    const cli = (args: readonly string[]) =>
+      runCli(args, { fs: h.fs, cwd: '/app', now: () => 0, log: () => {}, error: () => {} });
+    expect(await cli(['new', 'ws', '--workspace'])).toBe(0);
+    expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+    const before = h.fs.writes.length;
+    expect(await h.run(['react-router', '--dir', '/app/ws/apps/api'])).toBe(1);
+    expect(h.err.join('\n')).toContain(
+      `Run ${cliInvocation('node')} generate app <name> --template full-stack.`,
+    );
+    expect(h.fs.writes.length).toBe(before);
+  });
+});
 
 describe('safe-default additions (M119c)', () => {
   for (const runtime of ['node', 'bun', 'deno']) {
@@ -1093,12 +1438,17 @@ describe('runAddCommand', () => {
         const arm = ['websocket', 'sse', 'backplane'].includes(key) ? `realtime.${key}` : key;
         const h = harness({ '/app/deno.json': DENO_MANIFEST, '/app/setu.config.ts': config });
         expect(await h.run([bare]), bare).toBe(0);
-        expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
+        if (['messaging', 'queue'].includes(arm)) {
+          expect(h.out.join('\n'), bare).toContain('in memory by default');
+        } else {
+          expect(h.out.join('\n'), bare).toContain(`configure its ${arm} arm`);
+        }
         // Scoped: a gated arm registers nothing until configured, so an
         // unconditional "would fail" was false for it.
-        expect(h.out.join('\n'), bare).toContain(
-          'Once that arm is configured, registering a second instance with app.register fails',
-        );
+        if (!['messaging', 'queue'].includes(arm))
+          expect(h.out.join('\n'), bare).toContain(
+            'Once that arm is configured, registering a second instance with app.register fails',
+          );
         expect(h.read('/app/setu.config.ts')).toBe(config);
         count += 1;
       }
@@ -1150,7 +1500,6 @@ describe('runAddCommand', () => {
       ['notification', 'NotificationPlugin'],
       ['graphql', 'GraphqlPlugin'],
       ['static', 'StaticPlugin'],
-      ['react-router', 'ReactRouterPlugin'],
       ['multi-tenancy', 'MultiTenancyPlugin'],
       ['service-discovery', 'ServiceDiscoveryPlugin'],
     ]) {
@@ -1188,7 +1537,6 @@ describe('runAddCommand', () => {
       'notification',
       'graphql',
       'static',
-      'react-router',
       'multi-tenancy',
       'service-discovery',
       'cloudflare',
@@ -2049,5 +2397,311 @@ describe('setu add — the Node ws peer (M113h §3.8a)', () => {
     expect(await h.run(['auth'])).toBe(0);
 
     expect(JSON.parse(h.read('/app/package.json')).dependencies['ws']).toBeUndefined();
+  });
+});
+
+describe('setu add view styling (M123)', () => {
+  for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers']) {
+    it(`writes the view plan and hono peer on ${runtime}, then is idempotent`, async () => {
+      const h = harness();
+      expect(
+        await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', runtime]), {
+          fs: h.fs,
+          cwd: '/app',
+          log: (line) => h.out.push(line),
+          error: (line) => h.err.push(line),
+        }),
+      ).toBe(0);
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      const path = runtime === 'deno' ? 'deno.json' : 'package.json';
+      const manifest = JSON.parse(h.read(`/app/shop/${path}`));
+      expect(manifest[runtime === 'deno' ? 'imports' : 'dependencies'].hono).toBe(
+        runtime === 'deno' ? 'npm:hono@^4.12.30' : '^4.12.30',
+      );
+      expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
+      expect(h.read('/app/shop/src/views/home.tsx')).toContain('bg-primary');
+      const before = h.read(`/app/shop/${path}`);
+      h.out.length = 0;
+      expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(`/app/shop/${path}`)).toBe(before);
+      expect(h.out.some((line) => /^(created|updated) /.test(line))).toBe(false);
+    });
+  }
+  it('wires the example route when ViewPlugin was registered by an earlier add', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+    // The 0.10.0 shape: ViewPlugin() registered, no example route and no views.
+    const config = h
+      .read('/app/shop/setu.config.ts')
+      .replace("import { registerViewRoutes } from './src/views/routes.ts';\n", '')
+      .replace(/\n\s*registerViewRoutes\(app\.router\);/, '');
+    expect(config).toContain('ViewPlugin()');
+    expect(config).not.toContain('registerViewRoutes');
+    await h.fs.writeFile('/app/shop/setu.config.ts', new TextEncoder().encode(config));
+    for (const file of ['layout.tsx', 'home.tsx', 'routes.ts', 'styles.css'])
+      await h.fs.rm(`/app/shop/src/views/${file}`);
+
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+    const rewired = h.read('/app/shop/setu.config.ts');
+    expect(rewired).toContain("import { registerViewRoutes } from './src/views/routes.ts';");
+    expect(rewired).toMatch(
+      /registerGeneratedRoutes\(app\.router, app\.services\);\n\s*registerViewRoutes\(app\.router\);/,
+    );
+    expect(rewired.match(/ViewPlugin\(\)/g)).toHaveLength(1);
+    expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
+  });
+  it('refuses an unreadable view file by name, before writing anything', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    const before = h.read('/app/shop/package.json');
+    await h.fs.writeFile('/app/shop/src/views/home.tsx', new TextEncoder().encode('linked'));
+    const readFile = h.fs.readFile.bind(h.fs);
+    // What the Node filesystem reports for a symbolic link (O_NOFOLLOW).
+    h.fs.readFile = (path: string) =>
+      path === '/app/shop/src/views/home.tsx'
+        ? Promise.reject(new Error(`${path}: is a symbolic link; Setu does not read through links`))
+        : readFile(path);
+    h.err.length = 0;
+    expect(await h.run(['view', '--dir', '/app/shop'])).toBe(1);
+    expect(h.err).toEqual([
+      'Failed to read the project for the view setup: /app/shop/src/views/home.tsx: is a symbolic link; Setu does not read through links',
+    ]);
+    expect(h.read('/app/shop/package.json')).toBe(before);
+    expect(h.fs.has('/app/shop/src/views/layout.tsx')).toBe(false);
+  });
+  it('lists every planned file in a dry-run and writes nothing', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: (line) => h.err.push(line),
+      }),
+    ).toBe(0);
+    const before = h.read('/app/shop/package.json');
+    expect(await h.run(['view', '--dir', '/app/shop', '--dry-run'])).toBe(0);
+    for (const path of [
+      'src/views/layout.tsx',
+      'src/views/home.tsx',
+      'src/views/routes.ts',
+      'src/views/styles.css',
+      'tsconfig.json',
+      'setu.config.ts',
+      'package.json',
+    ]) {
+      expect(h.out).toContain(`would update /app/shop/${path}`);
+    }
+    expect(h.read('/app/shop/package.json')).toBe(before);
+    expect(h.fs.has('/app/shop/src/views/home.tsx')).toBe(false);
+  });
+  it('uses the existing peer override path for hono in a workspace', async () => {
+    const h = harness();
+    const cli = (args: string[]) =>
+      runCli(args, {
+        fs: h.fs,
+        cwd: '/app',
+        now: () => 0,
+        log: () => {},
+        error: (line) => h.err.push(line),
+      });
+    expect(await cli(['new', 'ws', '--workspace', '--runtime', 'node'])).toBe(0);
+    expect(await cli(['g', 'app', 'api', '--dir', '/app/ws'])).toBe(0);
+    const path = '/app/ws/package.json';
+    const root = JSON.parse(h.read(path));
+    root.overrides = { hono: '4.12.30' };
+    await h.fs.writeFile(path, new TextEncoder().encode(JSON.stringify(root)));
+    expect(await h.run(['view', '--dir', '/app/ws/apps/api'])).toBe(0);
+    expect(JSON.parse(h.read(path)).dependencies.hono).toBe('4.12.30');
+  });
+  it('uses explicit StaticPlugin args while keeping add static manifest-only', () => {
+    const config = `export function createApp(): IKernelApplication {\n  const app = createApplication({ plugins: [...(devtool?.plugins ?? [])] });\n  return app;\n}`;
+    expect(withPluginWiring(config, 'static-plugin')).toBeUndefined();
+    expect(
+      withPluginWiring(
+        config,
+        'static-plugin',
+        undefined,
+        "{ root: './build/assets', urlPrefix: '/assets' }",
+      ),
+    ).toContain("StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })");
+    const seam = { args: '{ old: true }', imports: [], files: [] };
+    expect(withPluginWiring(config, 'view-plugin', seam, '{ explicit: true }')).toContain(
+      'ViewPlugin({ explicit: true })',
+    );
+  });
+  it('pins hono to the framework dependency table', async () => {
+    const { EXTERNAL_RANGES } = await import('../../../../../scripts/node-dependency-ranges.ts');
+    expect(CLIENT_RANGES['hono']).toBe(EXTERNAL_RANGES['hono']);
+  });
+});
+
+it('does not wire either view provider through a retargeted framework import map', async () => {
+  const h = harness();
+  expect(
+    await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
+      fs: h.fs,
+      cwd: '/app',
+      log: () => {},
+      error: () => {},
+    }),
+  ).toBe(0);
+  const config = h.read('/app/shop/setu.config.ts');
+  await h.fs.writeFile(
+    '/app/shop/deno.json',
+    new TextEncoder().encode(
+      JSON.stringify({ imports: { '@setu-ts/view-plugin': './custom-view.ts' } }),
+    ),
+  );
+  expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
+  expect(h.read('/app/shop/setu.config.ts')).toBe(config);
+});
+
+it('preserves a view file created between planning and the writer preflight', async () => {
+  const h = harness({ '/app/package.json': '{}' });
+  const path = '/app/src/views/home.tsx';
+  let raced = false;
+  const fs = {
+    ...h.fs,
+    async stat(file: string) {
+      if (file === path && !raced) {
+        raced = true;
+        try {
+          return await h.fs.stat(file);
+        } catch (error) {
+          await h.fs.writeFile(path, new TextEncoder().encode('created by the developer'));
+          throw error;
+        }
+      }
+      return h.fs.stat(file);
+    },
+  };
+  expect(
+    await runAddCommand(parseArgs(['view']), {
+      fs,
+      cwd: '/app',
+      log: (line) => h.out.push(line),
+      error: (line) => h.err.push(line),
+    }),
+  ).toBe(0);
+  expect(raced).toBe(true);
+  expect(h.read(path)).toBe('created by the developer');
+});
+
+describe('starter handler-arm wiring', () => {
+  async function fullStack() {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    return h;
+  }
+  for (const [name, arm, symbols] of [
+    ['events', 'events', ['EVENT_HANDLERS']],
+    ['cqrs', 'cqrs', ['COMMAND_HANDLERS', 'QUERY_HANDLERS']],
+    ['queue', 'queue', ['QUEUE_PROCESSORS']],
+  ] as const) {
+    it(`wires ${name} arm and import once in a full-stack config`, async () => {
+      const h = await fullStack();
+      expect(await h.run([name, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      const source = h.read('/app/shop/setu.config.ts');
+      expect(source).toContain(`${arm}: {`);
+      for (const symbol of symbols) expect(source).toContain(symbol);
+      const seam = name === 'queue' ? 'jobs' : name;
+      expect(source).toContain(`from './src/${seam}/index.ts'`);
+      expect(source.indexOf(`from './src/${seam}/index.ts'`)).toBeGreaterThan(
+        source.indexOf("from './src/plugins/index.ts'"),
+      );
+      expect(h.out.join('\n')).toContain(`wired ${arm} in setu.config.ts`);
+      const writes = h.fs.writes.length;
+      expect(await h.run([name, '--dir', '/app/shop'])).toBe(0);
+      expect(h.fs.writes.length).toBe(writes);
+      expect(h.read('/app/shop/setu.config.ts')).toBe(source);
+    });
+  }
+  it('merges the queue transport and processors identically in either add order', async () => {
+    const sources: string[] = [];
+    for (const order of [
+      [[], ['--queue', 'redis']],
+      [['--queue', 'redis'], []],
+    ]) {
+      const h = await fullStack();
+      for (const flags of order)
+        expect(await h.run(['queue', ...flags, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      sources.push(h.read('/app/shop/setu.config.ts'));
+    }
+    expect(sources[0]).toBe(sources[1]);
+    expect(sources[0]).toContain("adapter: 'redis'");
+    expect(sources[0]).toContain('processors: [...QUEUE_PROCESSORS]');
+  });
+  it('retains manual queue arms on a microservice starter and prints the existing guidance', async () => {
+    const source = `import { createMicroserviceApp } from '@setu-ts/microservice-starter';\nexport function createApp() { return createMicroserviceApp({ queue: queueOptions }); }\n`;
+    const h = harness({ '/app/package.json': '{}', '/app/setu.config.ts': source });
+    expect(await h.run(['queue'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(source);
+    expect(h.out.join('\n')).toContain('already sets its own queue option');
+  });
+  for (const edit of [
+    (source: string) => source.replace('return {', 'return { events: options,'),
+    (source: string) => source.replace('return {', 'return { events: { ...options },'),
+    (source: string) => `import { OTHER } from './src/events/index.ts';\n${source}`,
+    (source: string) => `import * as handlers from './src/events/index.ts';\n${source}`,
+    (source: string) => `const EVENT_HANDLERS = [];\n${source}`,
+  ]) {
+    it('fails closed and retains events guidance for an uncertain arm or import', async () => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const source = edit(h.read(path));
+      await h.fs.writeFile(path, new TextEncoder().encode(source));
+      expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(path)).toBe(source);
+      expect(h.out.join('\n')).toContain(
+        'Pass the generated artifacts through it: events: { handlers: EVENT_HANDLERS }',
+      );
+    });
+  }
+  it('does not mistake a nested handler mention for a wired top-level property', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const source = `import { EVENT_HANDLERS } from './src/events/index.ts';\n${h.read(path).replace('return {', 'return { events: { custom: { handlers: EVENT_HANDLERS } },')}`;
+    await h.fs.writeFile(path, new TextEncoder().encode(source));
+    expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toContain(
+      'events: {\n          custom: { handlers: EVENT_HANDLERS },\n          handlers: EVENT_HANDLERS,',
+    );
+    expect(h.read(path)).toContain('custom: { handlers: EVENT_HANDLERS }');
+  });
+  it('reuses an existing complete named barrel import while adding the absent arm', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    await h.fs.writeFile(
+      path,
+      new TextEncoder().encode(
+        `import { EVENT_HANDLERS } from './src/events/index.ts';\n${h.read(path)}`,
+      ),
+    );
+    expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
+    expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
   });
 });

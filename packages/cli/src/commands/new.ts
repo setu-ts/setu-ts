@@ -8,6 +8,7 @@
  * @module
  */
 
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
@@ -15,6 +16,7 @@ import { stringFlag } from '../args.ts';
 import type { Prompter } from '../prompt.ts';
 import { resolveNewChoices } from './new-interactive.ts';
 import {
+  readArmFlag,
   brokerComposeFiles,
   brokerEnvVariables,
   standaloneOverlayRefusal,
@@ -43,6 +45,7 @@ import {
 } from '../constants.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import {
   cliInvocation,
@@ -210,6 +213,14 @@ function planWorkspace(
     };
   }
 
+  if (args.flags['logger'] !== undefined) {
+    return {
+      ok: false,
+      message:
+        '--logger applies to an application, not a workspace root. Use setu generate app <name> --template rest --logger <name>.',
+    };
+  }
+
   if (args.flags['depends-on'] !== undefined) {
     return { ok: false, message: dependsOnRefusal() };
   }
@@ -354,56 +365,6 @@ function dependsOnRefusal(): string {
 }
 
 /**
- * Reads and validates one standalone transport-backend flag.
- *
- * The accepted set is DERIVED from the registry (`listBrokers`/`listQueues`), so
- * help text, refusal text and validation cannot drift from the arms that exist.
- * `memory` is always accepted: it states the default the plugin already takes
- * and rewrites nothing.
- *
- * @param args - The parsed arguments
- * @param flag - Which flag is being read
- * @returns The selected spec (undefined when the flag is absent), or the refusal
- */
-function readArmFlag(
-  args: ParsedArgs,
-  flag: 'broker' | 'queue',
-):
-  | { readonly ok: true; readonly spec?: TransportSpec }
-  | {
-      readonly ok: false;
-      readonly message: string;
-    } {
-  const raw = args.flags[flag];
-  if (raw === undefined) return { ok: true };
-
-  const accepted = flag === 'broker' ? listBrokers() : listQueues();
-  if (typeof raw !== 'string') {
-    return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
-  }
-
-  const spec = getTransport(raw);
-  const hasArm =
-    spec !== undefined &&
-    (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
-  if (spec === undefined || (raw !== 'memory' && !hasArm)) {
-    // The two failures are told apart, because "no such transport" and "this
-    // transport has no arm for this flag" are different mistakes.
-    const prefix =
-      spec === undefined
-        ? `Unknown ${flag} "${escapeName(raw)}".`
-        : flag === 'broker'
-          ? `"${raw}" declares no message-broker wiring.`
-          : `"${raw}" declares no queue wiring.`;
-    return {
-      ok: false,
-      message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
-    };
-  }
-  return { ok: true, spec };
-}
-
-/**
  * Applies the standalone broker overlay to a resolved host.
  *
  * Composes the SAME wiring rewrites the workspace transport uses with the two
@@ -470,7 +431,12 @@ async function planProject(
   args: ParsedArgs,
   probe?: PortProbe,
 ): Promise<
-  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: true;
+      readonly files: readonly GeneratedFile[];
+      readonly notice?: string;
+      readonly logger?: string;
+    }
   | {
       readonly ok: false;
       readonly message: string;
@@ -529,7 +495,11 @@ async function planProject(
   //
   // The HOST, not the template: `--style class-based` resolves to the
   // template's precomputed variant, and the alias resolves to itself.
-  const host = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const loggerChoice = resolveLoggerChoice(args, runtime, resolved);
+  if (!loggerChoice.ok) return loggerChoice;
+  const host =
+    loggerChoice.logger === undefined ? resolved : withLogger(resolved, loggerChoice.logger);
   const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
   if (configured === undefined) {
     return {
@@ -561,9 +531,7 @@ async function planProject(
     return { ok: false, message: '--devtool-port requires --devtool.' };
   }
   if (devtoolRequested) {
-    // Refused before anything is resolved: the listener refuses every
-    // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
-    // startup rather than degrade.
+    // Refuse unsupported listener runtimes before any files are planned.
     const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'scaffold');
     if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
     // A starter factory owns its construction, and kernel diagnostics reach
@@ -586,6 +554,7 @@ async function planProject(
     return {
       ok: true,
       files: projectFiles(name, runtime, overlaid),
+      ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
       ...(notice === undefined ? {} : { notice }),
     };
   }
@@ -598,10 +567,19 @@ async function planProject(
       message: 'No bindable standalone devtool port remains between 4919 and 5019.',
     };
   }
-  const devHost = withDevtool(overlaid, devtoolPort);
+  const devHost = withDevtool(overlaid, devtoolPort, runtime);
+  const files = [...projectFiles(name, runtime, devHost)];
+  if (runtime === 'node') {
+    const index = files.findIndex((file) => file.path === 'package.json');
+    const manifest = files[index]!;
+    const plan = planNodeDevtool(manifest.contents);
+    if (!plan.ok) return plan;
+    if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
+  }
   return {
     ok: true,
-    files: projectFiles(name, runtime, devHost),
+    files,
+    ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
     ...(notice === undefined ? {} : { notice }),
   };
 }
@@ -660,9 +638,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
       `  --queue <name>      Job queue backend for a standalone project: ` +
         `${listQueues().join(' | ')} (default memory)`,
     );
+    deps.log('  --logger <name>     console | pino (default pino; console on Cloudflare Workers)');
     deps.log(
       '  --devtool           Emit the development entry for the local diagnostics connector ' +
-        '(Deno only)',
+        '(Deno or Node)',
     );
     deps.log(
       `  --devtool-port <n>  The loopback port the connector binds (default ${DEFAULT_DEVTOOL_PORT})`,
@@ -742,6 +721,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   // an error: the alias is byte-identical and stays. Only the standalone plan
   // carries one: a workspace root refuses --template, so it can never be an alias.
   let planNotice: string | undefined;
+  let planLogger: string | undefined;
   let plan:
     | { readonly ok: true; readonly files: readonly GeneratedFile[] }
     | {
@@ -752,7 +732,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
     const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
-    if (projectPlan.ok) planNotice = projectPlan.notice;
+    if (projectPlan.ok) {
+      planNotice = projectPlan.notice;
+      planLogger = projectPlan.logger;
+    }
     plan = projectPlan;
   }
   if (!plan.ok) {
@@ -795,6 +778,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }));
 
   if (args.flags['dry-run'] === true) {
+    if (planLogger !== undefined) deps.log(`Logger: ${planLogger}`);
     const code = await reportDryRunPlan(deps, files);
     return code;
   }
@@ -844,12 +828,19 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   deps.log(`  cd ${projectName}`);
   deps.log(
     runtime === 'deno'
-      ? '  deno task start'
+      ? '  deno task start:dev'
       : runtime === 'cloudflare-workers'
         ? '  npm install && npx wrangler dev'
         : runtime === 'bun'
-          ? '  bun install && bun run start'
-          : '  npm install && npm start',
+          ? '  bun install && bun run start:dev'
+          : '  npm install && npm run start:dev',
   );
+  // `dev` runs main.dev.ts, which exits without the launcher's session pair, so
+  // it is named as the launcher's command rather than printed as a next step.
+  if (chosen.flags['devtool'] !== undefined) {
+    deps.log(
+      `  With the devtool, the launcher runs ${runtime === 'deno' ? '`deno task dev`' : '`npm run dev`'} and supplies the session credentials`,
+    );
+  }
   return EXIT_OK;
 }

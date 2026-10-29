@@ -18,6 +18,7 @@ import type {
 } from '@setu-ts/common';
 import { CAPABILITIES, PLUGIN_PRIORITY } from '@setu-ts/common';
 import manifest from '../../deno.json' with { type: 'json' };
+import { createFakeContext } from '../fixtures/fake-context.ts';
 
 describe('SsePlugin', () => {
   it('should have correct name and version', () => {
@@ -177,13 +178,14 @@ describe('SsePlugin registration', () => {
       // ...then make the two numbers DIFFER before asserting again. At zero the
       // assertion above cannot tell `channels` from `connections`: wiring
       // `channels: sseService.connectionCount` leaves it green (verified), so
-      // a copy-paste in the indicator would ship unnoticed. Creating a channel
-      // without opening a connection separates them.
-      registeredService.channel('deploys');
-      registeredService.channel('builds');
+      // a copy-paste in the indicator would ship unnoticed. One connection
+      // joined to two channels separates the two readings.
+      const member = registeredService.open(createFakeContext({ runtime: ctx.runtime }));
+      registeredService.channel('deploys').add(member);
+      registeredService.channel('builds').add(member);
 
       const afterChannels = await healthIndicatorFn();
-      expect(afterChannels.data).toEqual({ connections: 0, channels: 2 });
+      expect(afterChannels.data).toEqual({ connections: 1, channels: 2 });
     }
 
     expect(onCloseHandler).not.toBeNull();
@@ -191,10 +193,7 @@ describe('SsePlugin registration', () => {
       await onCloseHandler();
       // After closeAll, connectionCount should be 0.
       expect(registeredService.connectionCount).toBe(0);
-      // ...and so is channelCount: shutdown is the one thing that lowers it,
-      // which is why the contract says "only rises for the life of a running
-      // application" rather than "never decreases". Non-vacuous because the
-      // two channels created above made it 2.
+      // Both memberships were live before shutdown.
       expect(registeredService.channelCount).toBe(0);
     }
   });

@@ -3,7 +3,7 @@
  * bucket, the reserved authenticated slot, burst/refill behavior, hostile
  * traffic isolation, and the UTF-8 header budget.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { CONNECTOR_LIMITS, ConnectorLimits } from '../../src/transport/limits.ts';
 import { MutableClock, TEST_SESSION_ID } from '../fixtures/helpers.ts';
@@ -101,6 +101,45 @@ describe('Limits — concurrency lanes', () => {
 });
 
 describe('Limits — session bucket', () => {
+  it('D6 reclaims refilled session buckets at the next threshold and preserves drained buckets', () => {
+    const clock = new MutableClock();
+    const limits = new ConnectorLimits(clock);
+    const promote = (id: string): boolean => {
+      expect(limits.beginHandler(true)).toBe(true);
+      expect(limits.beginVerify()).toBe(true);
+      const allowed = limits.promote(id);
+      if (!allowed) limits.endVerify();
+      limits.release(true);
+      return allowed;
+    };
+    const writes = vi.spyOn(Map.prototype, 'set');
+    let entries: Map<unknown, unknown> | undefined;
+    try {
+      expect(promote('session-0')).toBe(true);
+      entries = writes.mock.contexts.find(
+        (map): map is Map<unknown, unknown> => map instanceof Map && map.has('session-0'),
+      );
+    } finally {
+      writes.mockRestore();
+    }
+    expect(entries).toBeDefined();
+    // 1,000 sessions, then fill to the next doubling threshold (1,024).
+    for (let i = 1; i < 1_024; i++) expect(promote(`session-${i}`)).toBe(true);
+    clock.advance(2_000);
+    expect(promote('fresh-session')).toBe(true);
+    expect.soft(entries!.size).toBe(1);
+
+    for (let i = 1; i < CONNECTOR_LIMITS.sessionBurst; i++) {
+      expect(promote('fresh-session')).toBe(true);
+    }
+    // Force another sweep while this bucket is empty: it must not be evicted.
+    for (let i = 0; i < 64; i++) expect(promote(`other-${i}`)).toBe(true);
+    expect(promote('fresh-session')).toBe(false);
+    clock.advance(50);
+    expect(promote('fresh-session')).toBe(true);
+    expect(promote('fresh-session')).toBe(false);
+  });
+
   it('debits only on promotion, at the fixed rate, exhausted by burst', () => {
     const clock = new MutableClock();
     const limits = new ConnectorLimits(clock);

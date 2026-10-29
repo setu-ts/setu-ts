@@ -14,7 +14,12 @@
  */
 
 import type { FormBody, HttpMethod, IRequest, ResponseSnapshot } from '@setu-ts/common';
-import { parseFormBody, parseJsonBody, withHttpStatusHint } from '@setu-ts/common';
+import {
+  installRequestIdentityGuard,
+  parseFormBody,
+  parseJsonBody,
+  withHttpStatusHint,
+} from '@setu-ts/common';
 
 // Hoisted TextDecoder — avoids per-call allocation (A1 — no slice needed).
 const decoder = new TextDecoder();
@@ -101,6 +106,13 @@ class FrameworkRequest implements IRequest {
     maxBodyBytes?: number,
     peerAddress?: string,
   ) {
+    // The single-write guard over `user`, `tenant` and `locale` lives on this
+    // class's prototype, installed by the first construction (idempotent after
+    // that), so the kernel's per-request seal returns at once. Not a static
+    // block: that would run at import, an effect the manifests do not list.
+    // The three fields must never be class fields: an own property would
+    // shadow the guard.
+    installRequestIdentityGuard(FrameworkRequest.prototype);
     this.#raw = raw;
     this.method = method;
     this.url = url;
@@ -409,6 +421,30 @@ export function mapWebRequestToFrameworkRequest(
     request.url,
     extractPath(request.url),
     maxBodyBytes,
+    peerAddress,
+  );
+}
+
+/**
+ * Maps a body-less diagnostics request while retaining its original target.
+ * Unlike `Request.url` and `extractPath`, this path never resolves dot segments
+ * or backslashes. The protocol must be able to refuse those aliases itself.
+ *
+ * @param raw - Native request carrying the method and headers
+ * @param url - Absolute URL with the request-target concatenated verbatim
+ * @param peerAddress - Optional socket peer supplied by the runtime host
+ * @returns A guarded framework request whose URL retains the supplied spelling
+ * @internal
+ */
+export function mapWebRequestWithTarget(raw: Request, url: string, peerAddress?: string): IRequest {
+  const target = url.slice(url.indexOf('/', url.indexOf('://') + 3));
+  const end = target.search(/[?#]/);
+  return new FrameworkRequest(
+    raw,
+    raw.method.toUpperCase() as HttpMethod,
+    url,
+    end === -1 ? target : target.slice(0, end),
+    undefined,
     peerAddress,
   );
 }

@@ -15,7 +15,6 @@ import type {
   Component,
   Constructor,
   DecoratorHandler,
-  FactoryProvider,
   HttpMethod,
   IAuthorizationPolicyService,
   IAuthorizationService,
@@ -53,7 +52,11 @@ import type {
   ServiceMetadata,
 } from '../metadata/metadata-store.ts';
 import { discoverControllers } from '../discovery/controller-discovery.ts';
-import { findUnresolvableParameters, resolveParameters } from '../resolvers/parameter-resolver.ts';
+import {
+  classifyCustom,
+  findUnresolvableParameters,
+  resolveParameters,
+} from '../resolvers/parameter-resolver.ts';
 import { className, isHandlerResult, joinPaths } from '../internal.ts';
 import { VERSION } from '../version.ts';
 
@@ -226,61 +229,41 @@ function resolveDeps(
   });
 }
 
-/**
- * Registers a class in the DI container (when present) under its token, with
- * its inject tokens and scope. No-op if the container is absent or the token
- * is already registered.
- *
- * A class with no `@Optional` argument registers as a {@linkcode ClassProvider},
- * so the container resolves each token itself — unchanged behaviour, and the
- * dependencies stay affine to the container the resolution happens on.
- *
- * A class WITH an `@Optional` argument cannot use that form, because
- * `ClassProvider.inject` is a bare token list with nowhere to record
- * optionality. It registers a lazy `useFactory` instead, which resolves its own
- * arguments and so can skip an absent one. `FactoryProvider.useFactory` takes no
- * arguments, so that factory closes over the container the class was registered
- * on: the class's own scope is still honored by the container (the provider
- * entry carries it), but its dependencies resolve from the registering
- * container rather than the resolving scope.
- */
+/** Registers class recipes with explicit optional dependencies and class aliases. */
 function registerInContainer(
   ctx: IPluginContext,
   target: Constructor,
   meta: ServiceMetadata | undefined,
+  controller = false,
 ): void {
   const container = ctx.container;
-  if (container === undefined) {
-    return;
-  }
+  if (container === undefined) return;
   const token = serviceToken(meta, target);
-  if (container.has(token)) {
-    return;
-  }
   const inject = meta?.inject;
   const optional = effectiveOptional(target, inject);
-  const opts: ProviderOptions | undefined =
-    meta?.scope !== undefined ? { scope: meta.scope } : undefined;
-  if (optional.size > 0 && inject !== undefined) {
-    const factory: FactoryProvider<unknown> = {
-      useFactory: (): unknown =>
-        new (target as new (...args: unknown[]) => unknown)(
-          ...resolveDeps(
-            inject,
-            optional,
-            (t) => container.has(t),
-            (t) => container.resolve<unknown>(t),
-          ),
-        ),
-    };
-    container.register<unknown>(token, factory, opts);
+  const opts: ProviderOptions | undefined = controller
+    ? { scope: 'singleton' }
+    : meta?.scope !== undefined
+      ? { scope: meta.scope }
+      : undefined;
+  if (container.has(token)) {
+    // Test overrides and previously registered services retain their identity.
+    if (!container.has(target))
+      container.register(target, { useFactory: (value: unknown) => value, inject: [token] }, opts);
     return;
   }
   const provider: ClassProvider<unknown> = {
     useClass: target,
-    ...(inject !== undefined ? { inject } : {}),
+    ...(inject === undefined
+      ? {}
+      : {
+          inject: inject.map((token, index) =>
+            optional.has(index) ? { token, optional: true as const } : token,
+          ),
+        }),
   };
-  container.register<unknown>(token, provider, opts);
+  container.register(token, provider, opts);
+  container.register(target, provider, opts);
 }
 
 /**
@@ -325,7 +308,7 @@ function instantiate(target: Constructor, ctx: IPluginContext): unknown {
  * Registers a service class — with the DI container when present, otherwise
  * instantiated directly and registered in the service registry.
  */
-function registerService(ctx: IPluginContext, target: Constructor): void {
+function registerService(ctx: IPluginContext, target: Constructor, controller = false): void {
   const meta = metadataStore.getService(target);
   if (meta?.inject === undefined && target.length > 0) {
     throw new Error(
@@ -336,7 +319,7 @@ function registerService(ctx: IPluginContext, target: Constructor): void {
   }
   const token = serviceToken(meta, target);
   if (ctx.container !== undefined) {
-    registerInContainer(ctx, target, meta);
+    registerInContainer(ctx, target, meta, controller);
     return;
   }
   if (ctx.services.has(token)) {
@@ -958,18 +941,25 @@ function warnUnresolvableParameters(
   if (ctx.logger === undefined) {
     return;
   }
-  for (const param of findUnresolvableParameters(route.params)) {
-    ctx.logger.warn('Decorated parameter cannot be resolved and will be undefined', {
-      controller: className(target),
-      handler: route.handler,
-      parameterIndex: param.index,
-      customType: param.customType ?? '(none)',
-      hint:
-        'Register a resolver with registerParameterResolver() for this custom type. ' +
-        'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
-        'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
-        'registration.',
-    });
+  for (const param of findUnresolvableParameters(route.params, ctx.container !== undefined)) {
+    const service = classifyCustom(param).kind === 'service';
+    ctx.logger.warn(
+      service
+        ? 'Decorated Service parameter cannot be resolved: the request will fail because no DI container is registered'
+        : 'Decorated parameter cannot be resolved and will be undefined',
+      {
+        controller: className(target),
+        handler: route.handler,
+        parameterIndex: param.index,
+        customType: param.customType ?? '(none)',
+        hint: service
+          ? 'Register DiPlugin to provide the DI container used by @Params(Service(...)).'
+          : 'Register a resolver with registerParameterResolver() for this custom type. ' +
+            'The built-in @Params(Ctx()) is unaffected by package duplication or version skew: ' +
+            'its marker is process-global, and a duplicated copy fails earlier, at controller ' +
+            'registration.',
+      },
+    );
   }
 }
 
@@ -993,7 +983,7 @@ function registerController(
   if (ctrlMeta === undefined) {
     return;
   }
-  registerInContainer(ctx, target, metadataStore.getService(target));
+  registerInContainer(ctx, target, metadataStore.getService(target), true);
   const instance = instantiate(target, ctx);
   for (const route of metadataStore.getRoutesFor(target)) {
     const fullPath = joinPaths(ctrlMeta.version ?? '', ctrlMeta.path, route.path);
@@ -1098,6 +1088,7 @@ function replayCustomDecorators(ctx: IPluginContext): void {
  *   controllers: [UserController, OrderController],
  * }));
  * ```
+ * @throws {Error} During registration for invalid decorated metadata or captive controller dependencies
  * @since 0.1.0
  */
 export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
@@ -1206,7 +1197,7 @@ export function DecoratorPlugin(options?: DecoratorPluginOptions): IPlugin {
       ]);
 
       for (const svc of services) {
-        registerService(ctx, svc);
+        registerService(ctx, svc, controllers.includes(svc));
       }
 
       // Resolved AFTER the service loop, and only then, because

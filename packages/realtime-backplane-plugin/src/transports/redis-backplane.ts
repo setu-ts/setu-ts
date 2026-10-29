@@ -5,8 +5,13 @@
  * @since 0.2.0
  */
 
-import { attachConnectionErrorReporter } from '@setu-ts/common';
-import type { IRealtimeBackplane, RealtimeFrame, RealtimeFrameHandler } from '@setu-ts/common';
+import { attachConnectionErrorReporter, dispatchRealtimeFrame } from '@setu-ts/common';
+import type {
+  IRealtimeBackplane,
+  IRealtimeHandlerErrorReporter,
+  RealtimeFrame,
+  RealtimeFrameHandler,
+} from '@setu-ts/common';
 import type { IRedisBackplaneClient, RedisBackplaneOptions } from '../interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
 
@@ -17,7 +22,7 @@ import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../interfaces/index.ts';
  */
 const MAX_REDIS_COMMAND_TIMEOUT_MS = 2_147_483_647;
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
-import { dispatchFrame } from './dispatch.ts';
+import { createTransportHandlerReporter } from './handler-errors.ts';
 import { isRealtimeFrame } from './messaging-backplane.ts';
 import { loadRedisModule } from './redis-module.ts';
 
@@ -47,8 +52,9 @@ export class RedisBackplane implements IRealtimeBackplane {
   /** The resolved per-command timeout; `0` means unbounded. */
   readonly #commandTimeoutMs: number;
   readonly #handlers = new Set<RealtimeFrameHandler>();
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
+  readonly #handlerReporter: IRealtimeHandlerErrorReporter;
 
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
@@ -82,12 +88,18 @@ export class RedisBackplane implements IRealtimeBackplane {
    * @param options - The Redis arm's options
    * @param origin - This instance's identity
    * @param topic - The Redis channel every instance shares
+   * @param reporter - Optional subscriber failure and recovery sink; history is always retained
    * @throws {Error} When exactly one of `client` and `subscriber` is injected,
    * or when neither those nor a `url` is configured
    * @throws {RangeError} When `commandTimeoutMs` is not a number from `0` to
    * `2147483647` (the largest timer delay; beyond it the timer overflows to 1 ms)
    */
-  constructor(options: RedisBackplaneOptions, origin: string, topic: string) {
+  constructor(
+    options: RedisBackplaneOptions,
+    origin: string,
+    topic: string,
+    reporter?: IRealtimeHandlerErrorReporter,
+  ) {
     const hasClient = options.client !== undefined;
     const hasSubscriber = options.subscriber !== undefined;
 
@@ -126,9 +138,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#commandTimeoutMs = commandTimeoutMs;
     this.origin = origin;
     this.#topic = topic;
+    this.#handlerReporter = createTransportHandlerReporter(this.#handlerErrors, reporter);
   }
 
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;
   }
@@ -454,9 +467,7 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Isolated per handler: this runs inside ioredis's `message` listener,
     // where a throw would be unhandled, and the WebSocket and SSE plugins share
     // this subscription so one must not starve the other.
-    const delivered = dispatchFrame(this.#handlers, parsed, (error) => {
-      this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
-    });
+    const delivered = dispatchRealtimeFrame(this.#handlers, parsed, this.#handlerReporter);
     // M98l: counted only after the parse, shape and own-origin filters.
     realtimeObserverOf(this)?.observe('backplane-receive', delivered);
   }

@@ -13,6 +13,8 @@
 
 import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
+import { renderDockerfile, renderDockerignore } from '../workspace/compose.ts';
+import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { renderDevtoolSources, withSourceArgs } from '../devtool/sources.ts';
 import type {
   AppFactoryRenderContext,
@@ -31,6 +33,7 @@ import type {
 } from './registry.ts';
 import { packagesOf } from './registry.ts';
 import { renderConfigOptions } from './env-file.ts';
+import { defaultLogger, withLogger } from './logger.ts';
 import { GENERATED_LINE_WIDTH, rootManifestSettings } from './root-settings.ts';
 import { wrapProse } from '../utils/wrap-prose.ts';
 import {
@@ -221,49 +224,52 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       ? withoutWorkersFilesystemNeeds(host.manifest)
       : host.manifest;
 
-  return {
-    plugins: withPluginOptionSeams(swapped, seams),
-    workerExports: swap?.workerExports ?? [],
-    entryReExports: swap?.entryReExports ?? [],
-    wranglerToml: swap?.wranglerToml ?? '',
-    middleware: host.middleware,
-    localImports: [
-      ...(host.localImports ?? []),
-      ...seamLocalImports(seams),
-      ...(functional
-        ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
-        : []),
-    ],
-    packageImports: host.packageImports ?? [],
-    files: [
-      ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
-      ...seamFiles(seams, host.seamArtifacts ?? {}),
-      ...(swap?.files ?? []),
-      ...(functional
-        ? [
-            {
-              path: 'src/modules/index.ts',
-              contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
-            },
-          ]
-        : []),
-    ],
-    pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
-    setupCalls,
-    extraTasks: { ...host.extraTasks },
-    extraImports: {},
-    extraDependencies: {},
-    extraScripts: {},
-    extraDevDependencies: {},
-    appFactory: host.appFactory,
-    routes: host.routes ?? [],
-    appFactoryContext: {
-      ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
-      ...host.appFactoryContext,
-      ...swap?.appFactoryContext,
+  return withLogger(
+    {
+      plugins: withPluginOptionSeams(swapped, seams),
+      workerExports: swap?.workerExports ?? [],
+      entryReExports: swap?.entryReExports ?? [],
+      wranglerToml: swap?.wranglerToml ?? '',
+      middleware: host.middleware,
+      localImports: [
+        ...(host.localImports ?? []),
+        ...seamLocalImports(seams),
+        ...(functional
+          ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
+          : []),
+      ],
+      packageImports: host.packageImports ?? [],
+      files: [
+        ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
+        ...seamFiles(seams, host.seamArtifacts ?? {}),
+        ...(swap?.files ?? []),
+        ...(functional
+          ? [
+              {
+                path: 'src/modules/index.ts',
+                contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
+              },
+            ]
+          : []),
+      ],
+      pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
+      setupCalls,
+      extraTasks: { ...host.extraTasks },
+      extraImports: {},
+      extraDependencies: {},
+      extraScripts: {},
+      extraDevDependencies: {},
+      appFactory: host.appFactory,
+      routes: host.routes ?? [],
+      appFactoryContext: {
+        ...(manifest?.envFilePath === undefined ? {} : { envFilePath: manifest.envFilePath }),
+        ...host.appFactoryContext,
+        ...swap?.appFactoryContext,
+      },
+      manifest,
     },
-    manifest,
-  };
+    defaultLogger(runtime),
+  );
 }
 
 /**
@@ -683,7 +689,7 @@ function consumesWaitUntil(plugins: readonly Wiring[]): boolean {
  * siblings dial are one datum rather than two that can drift.
  * @returns The `main.ts` contents
  */
-function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
+function serveEntry(runtime: TargetRuntime, port?: EntryPort, serverBuild = false): string {
   const portImport = port === undefined ? '' : `import { ${port.symbol} } from '${port.from}';\n`;
   // A workspace member binds the port the CLI allocated it, imported from the
   // generated discovery module so the port it binds and the port its siblings
@@ -699,7 +705,7 @@ function serveEntry(runtime: TargetRuntime, port?: EntryPort): string {
   // and not by this.
   const portExpression = port === undefined ? "Number(runtime.env.PORT ?? '3000')" : port.symbol;
 
-  return `import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
+  return `${serverBuild ? "import * as serverBuild from './build/server/index.js';\n" : ''}import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
@@ -709,7 +715,7 @@ ${portImport}
 // own instance: runtime services are a stateless facade over platform globals.
 const runtime = createRuntimeServices();
 
-const app = await ${CONFIG_EXPORT}();
+const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
 
 await app.start({ port: ${portExpression} });
 ${shutdownBlock(runtime)}`;
@@ -1171,6 +1177,9 @@ function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<str
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
+    // The Node devtool planner adds this development-only pin at the command boundary.
+    if (runtime === 'node' && host.devtoolPort !== undefined && pkg === 'diagnostics-plugin')
+      continue;
     deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
   return { ...deps, ...host.extraDependencies, ...host.manifest?.npmDependencies };
@@ -1255,8 +1264,24 @@ function denoTasks(
         }
       : undefined;
 
+  const development =
+    runtime === 'deno'
+      ? {
+          'start:dev': `deno run --watch ${denoPermissions(manifest)} main.ts`,
+          'start:debug': `deno run --inspect ${denoPermissions(manifest)} main.ts`,
+        }
+      : {};
+
   if (manifest?.npmBuild === undefined) {
-    return { start, ...test, ...host.extraTasks };
+    return {
+      start,
+      ...development,
+      ...test,
+      ...(runtime === 'deno'
+        ? { check: `deno check main.ts ${CONFIG_MODULE} && ${cliCheckCommand(runtime)}` }
+        : {}),
+      ...host.extraTasks,
+    };
   }
 
   return {
@@ -1268,6 +1293,13 @@ function denoTasks(
     install: 'deno install --allow-scripts --min-dep-age 0',
     build: `deno task install && ${manifest.npmBuild.denoCommand}`,
     start: `deno task build && ${start}`,
+    ...development,
+    ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
+      ? {
+          'start:dev': `deno task install && deno run -A --watch ${manifest.npmBuild.devEntry.path}`,
+          'start:debug': `deno task install && deno run -A --inspect ${manifest.npmBuild.devEntry.path}`,
+        }
+      : {}),
     // The generated smoke test boots `createApp()`, which loads the server
     // build, so a fresh project's first `deno task test` needs it as much as
     // `start` does — without it the test fails on a missing build (V8-39).
@@ -1278,8 +1310,32 @@ function denoTasks(
     ...(runtime === 'deno' && manifest.npmBuild.devEntry !== undefined
       ? { dev: `deno task install && deno run -A ${manifest.npmBuild.devEntry.path}` }
       : {}),
+    ...(runtime === 'deno'
+      ? {
+          check: `deno task build && deno check main.ts ${CONFIG_MODULE} && ${cliCheckCommand(runtime)}`,
+        }
+      : {}),
     ...host.extraTasks,
   };
+}
+
+/**
+ * A generated task's invocation of the CLI: the pinned specifier under Deno, the `setu` bin a
+ * member's devDependency installs everywhere else.
+ *
+ * @param runtime - The project's runtime
+ * @param args - The CLI arguments, such as `check` or `workspace build`
+ * @returns The command
+ */
+export function cliCommand(runtime: TargetRuntime, args: string): string {
+  return runtime === 'deno'
+    ? `deno run -A ${frameworkSpecifier('cli', 'deno')} ${args}`
+    : `setu ${args}`;
+}
+
+/** The pinned CLI half of a generated project's check task. */
+export function cliCheckCommand(runtime: TargetRuntime): string {
+  return cliCommand(runtime, 'check');
 }
 
 /** The development entry module the devtool opt-in emits. */
@@ -1296,9 +1352,8 @@ export const DEVTOOL_ENTRY_MODULE = 'main.dev.ts';
  * the project makes (measured, M98c §3.7). The loopback guarantee is the
  * listener's, not a permission flag's.
  *
- * `check` is what puts `main.dev.ts` inside a check path the project already
- * runs: `denoTasks` emits no check task of its own, so without this the dev
- * entry sits outside every gate a generated project executes.
+ * `check` extends the scaffold gate to include `main.dev.ts`, and retains
+ * the pinned CLI wiring check.
  *
  * Rendered here — beside `denoTasks`, reading the same permission helper —
  * rather than in the devtool planner, so both this create-time path and
@@ -1311,7 +1366,7 @@ export function devtoolTasks(manifest?: TemplateManifest): Record<string, string
   const run = `deno run ${denoPermissions(manifest)} ${DEVTOOL_ENTRY_MODULE}`;
   return {
     dev: manifest?.npmBuild === undefined ? run : `deno task build && ${run}`,
-    check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE}`,
+    check: `deno check main.ts ${CONFIG_MODULE} ${DEVTOOL_ENTRY_MODULE} && ${cliCheckCommand('deno')}`,
   };
 }
 
@@ -1455,19 +1510,17 @@ function tsconfigOptions(
             'node',
             ...templateTypes(template),
           ],
-          // The Workers entry statically imports the compiled React Router
-          // server build (`build/server/index.js`), which has no declarations.
-          // The `check` script builds first, so the file exists; without
-          // `allowJs`, `tsc --noEmit` still reports TS7016 on it even though
-          // that import is what `wrangler dev` runs. A rest or microservice
-          // Worker imports no JavaScript build.
-          ...(manifest?.npmBuild === undefined ? {} : { allowJs: true }),
         }
       : {};
   // Every npm-manifest target type-checks with its own `tsc` (M111d §3.7), and
   // its imports end in `.ts` — which `tsc` accepts only alongside `noEmit`. A
   // Deno project's `tsconfig.json` serves its frontend build alone.
-  const checked = runtime === 'deno' ? {} : { allowImportingTsExtensions: true, noEmit: true };
+  // Every full-stack entry now statically imports the JavaScript server build.
+  // Extend the existing Workers option to the socket targets as well.
+  const checked = {
+    ...(runtime === 'deno' ? {} : { allowImportingTsExtensions: true, noEmit: true }),
+    ...(manifest?.npmBuild === undefined ? {} : { allowJs: true }),
+  };
   // TypeScript 6 includes no `@types/*` package unless `types` names it, so the
   // runtime's own declarations are named — `process` and `node:test` on Node,
   // `bun:test` on Bun. Workers names its own below.
@@ -1579,7 +1632,7 @@ function generatedTestScripts(
     runtime === 'bun'
       ? 'bun test .e2e.test'
       : `${NODE_RUNNER} --test --test-force-exit '**/*.e2e.test.ts'`;
-  const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
+  const build = runtime === 'cloudflare-workers' ? 'npm run build' : manifest?.npmBuild?.script;
   return manifest?.npmBuild === undefined
     ? { test, 'test:e2e': e2e }
     : { test: `${build} && ${test}`, 'test:e2e': `${build} && ${e2e}` };
@@ -1588,38 +1641,38 @@ function generatedTestScripts(
 /**
  * The `scripts` a generated `package.json` carries.
  *
- * A template with a frontend build gets a `build` script, and its `start` and
- * `test` run it first, because neither can work until the build has produced
- * the server bundle the SSR plugin loads.
+ * Node builds type-check and bundle; Bun builds only a declared frontend.
+ * Production start consumes existing output. Tests build only the frontend,
+ * and development runs source through the runtime's own runner.
  *
  * @param runtime - The selected runtime target
  * @param manifest - The template's manifest contributions, when it declares them
  * @returns The scripts block
  */
 function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record<string, string> {
-  const start = runtime === 'bun' ? 'bun run main.ts' : `${NODE_RUNNER} main.ts`;
-  // With a frontend build `start` boots an app that loads the server bundle, so
-  // it builds first, as the Deno `start` task does. A `start` without it is what
-  // the next-step hint and the README tell a new user to run, and it crashed
-  // with "Failed to load React Router server build" on a fresh Node or Bun
-  // project. The build runs FIRST, so `start` still begins with `bun` on Bun,
-  // which is how `detectTargetRuntime` tells a Bun project from a Node one.
-  const build = runtime === 'bun' ? 'bun run build' : 'npm run build';
   const devEntry = manifest?.npmBuild?.devEntry;
-  return manifest?.npmBuild === undefined
-    ? { start, ...generatedTestScripts(runtime, manifest) }
-    : {
-        build: manifest.npmBuild.script,
-        start: `${build} && ${start}`,
-        ...generatedTestScripts(runtime, manifest),
-        // No build first: Vite serves the route modules itself in development.
-        ...(devEntry === undefined
-          ? {}
-          : {
-              dev:
-                runtime === 'bun' ? `bun run ${devEntry.path}` : `${NODE_RUNNER} ${devEntry.path}`,
-            }),
-      };
+  const frontend = manifest?.npmBuild?.script;
+  const entry = devEntry?.path ?? 'main.ts';
+  const bun = runtime === 'bun';
+  return {
+    ...(bun
+      ? frontend === undefined
+        ? {}
+        : { build: frontend }
+      : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
+    start: bun ? 'bun run main.ts' : 'node --enable-source-maps dist/main.js',
+    'start:dev':
+      devEntry === undefined
+        ? bun
+          ? 'bun --watch main.ts'
+          : `${NODE_RUNNER} watch main.ts`
+        : bun
+          ? `bun run ${entry}`
+          : `${NODE_RUNNER} ${entry}`,
+    'start:debug': bun ? `bun --inspect ${entry}` : `node --inspect --import tsx ${entry}`,
+    ...generatedTestScripts(runtime, manifest),
+    ...(frontend === undefined ? {} : { check: `${frontend} && tsc --noEmit && setu check` }),
+  };
 }
 
 /**
@@ -1665,7 +1718,7 @@ const NODE_TYPES_RANGE = '^24.0.0';
  * @returns devDependencies to merge, empty for Deno
  */
 function runtimeDevDependencies(runtime: TargetRuntime): Readonly<Record<string, string>> {
-  // Node: see NODE_RUNNER — the start script invokes it, so it must be
+  // Node: see NODE_RUNNER — source development and tests invoke it, so it must be
   // installed. `@types/node` is what declares the `process` the entry's shutdown
   // listener registers on; without it a generated project's own `tsc` reports an
   // undeclared name while `tsx` runs the file regardless, so nothing but this
@@ -1765,7 +1818,9 @@ function standaloneNpmFiles(
     // devDependencies have ONE home. Inlining Workers' here meant a package
     // added to that helper would be silently ignored on this path.
     ...runtimeDevDependencies(runtime),
-    ...(onWorkers ? NPM_TOOLING_DEV_DEPENDENCIES : {}),
+    ...(onWorkers
+      ? { ...NPM_TOOLING_DEV_DEPENDENCIES, '@setu-ts/cli': frameworkSpecifier('cli', 'npm') }
+      : {}),
     ...manifest?.npmDevDependencies,
   };
   const scripts = {
@@ -1779,8 +1834,10 @@ function standaloneNpmFiles(
           // A template with a build has its Workers entry import the compiled
           // server module, which does not exist until that build runs. The
           // check therefore builds first, the same order `start` and `test`
-          // use. Every other target and template keeps the bare `tsc --noEmit`.
-          ...(manifest?.npmBuild === undefined ? {} : { check: 'npm run build && tsc --noEmit' }),
+          // use. Every form then runs the CLI wiring check after TypeScript.
+          ...(manifest?.npmBuild === undefined
+            ? {}
+            : { check: 'npm run build && tsc --noEmit && setu check' }),
           dev: 'wrangler dev',
           deploy: 'wrangler deploy',
         }
@@ -1937,37 +1994,62 @@ ${
 \`\`\`bash
 ${
   runtime === 'deno'
-    ? 'deno task start'
+    ? 'deno task start:dev'
     : runtime === 'cloudflare-workers'
       ? 'npx wrangler dev'
       : runtime === 'bun'
-        ? 'bun run start'
-        : 'npm start'
+        ? 'bun run start:dev'
+        : 'npm run start:dev'
 }
 \`\`\`
 ${servedRoutesSection(host, runtime, port)}
 ${
   runtime !== 'cloudflare-workers' && manifest?.npmBuild?.devEntry !== undefined
     ? `## Develop\n\n\`\`\`bash\n${
-        runtime === 'deno' ? 'deno task dev' : runtime === 'bun' ? 'bun run dev' : 'npm run dev'
+        runtime === 'deno'
+          ? 'deno task dev'
+          : runtime === 'bun'
+            ? 'bun run start:dev'
+            : 'npm run start:dev'
       }\n\`\`\`\n\nServes the app through Vite, so an edited route renders on the next request with no restart. Vite\nlistens on \`VITE_PORT\` (default 5173); open the app's own port.\n\n`
     : ''
 }${
     host.devtoolPort === undefined
       ? ''
-      : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
+      : `## Devtool\n\nRun \`${runtime === 'deno' ? 'deno task dev' : 'npm run dev'}\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
   }## Generate code
 
 \`\`\`bash
 ${cliInvocation(runtime)} generate service billing
 ${cliInvocation(runtime)} generate --help
 \`\`\`
-${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}`;
+${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSection === 'string' ? manifest.readmeSection : manifest.readmeSection(cliInvocation(runtime))}`}${
+    runtime === 'cloudflare-workers'
+      ? ''
+      : `
+## Production
+
+\`\`\`bash
+${runtime === 'deno' ? 'deno task build\ndeno task start' : runtime === 'bun' ? `${manifest?.npmBuild === undefined ? '' : 'bun run build\n'}bun run start` : 'npm run build\nnpm start'}
+\`\`\`
+
+${runtime === 'node' ? 'The build type-checks, checks CLI wiring and bundles the service into dist/. Run npm test before building an image: DI graph validation happens at boot.' : 'The service runs TypeScript source; a full-stack project builds its frontend before production.'}
+${
+  port === undefined
+    ? `
+\`\`\`bash
+docker build -t ${projectName} .
+docker run --rm -p 3000:3000 ${projectName}
+\`\`\`
+`
+    : ''
+}`
+  }`;
 
   // A Deno frontend build creates node_modules too; other Deno projects do not.
   const gitignore = `${
     runtime !== 'deno' || host.manifest?.npmBuild !== undefined ? 'node_modules/\n' : ''
-  }coverage/\n${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
+  }coverage/\n${runtime === 'node' ? 'dist/\n' : ''}${runtime === 'cloudflare-workers' ? '.wrangler/\n' : ''}${
     // A frontend build's output and its typegen directory are generated, so
     // they are ignored like any other build artifact — the generated file used
     // to list only `coverage/` and the env file, which left a minified bundle
@@ -1986,6 +2068,12 @@ ${manifest?.readmeSection === undefined ? '' : `\n${typeof manifest.readmeSectio
   const files: GeneratedFile[] = [
     { path: 'README.md', contents: readme },
     { path: '.gitignore', contents: gitignore },
+    ...(runtime !== 'cloudflare-workers' && port === undefined
+      ? [
+          { path: 'Dockerfile', contents: renderDockerfile(workspaceProfile(runtime), false) },
+          { path: '.dockerignore', contents: renderDockerignore() },
+        ]
+      : []),
   ];
 
   if (runtime === 'cloudflare-workers') {
@@ -2122,8 +2210,8 @@ describe('application composition', () => {
           version: '0.1.0',
           type: 'module',
           scripts: {
-            ...npmScripts(runtime, manifest),
             ...NPM_TOOLING_SCRIPTS,
+            ...npmScripts(runtime, manifest),
             ...host.extraScripts,
           },
           dependencies: npmDependencies(host, runtime),
@@ -2141,6 +2229,7 @@ describe('application composition', () => {
             ...npmDevFrameworkDependencies(host, runtime),
             ...runtimeDevDependencies(runtime),
             ...NPM_TOOLING_DEV_DEPENDENCIES,
+            '@setu-ts/cli': frameworkSpecifier('cli', 'npm'),
             ...host.extraDevDependencies,
             ...manifest?.npmDevDependencies,
           },
@@ -2290,7 +2379,10 @@ compatibility_flags = ["nodejs_compat"]
 ${host.wranglerToml}`,
     });
   } else {
-    files.push({ path: 'main.ts', contents: serveEntry(runtime, port) });
+    files.push({
+      path: 'main.ts',
+      contents: serveEntry(runtime, port, manifest?.npmBuild !== undefined),
+    });
   }
 
   // Every server runtime, never Workers: the entry runs Vite in-process and

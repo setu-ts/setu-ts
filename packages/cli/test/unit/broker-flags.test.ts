@@ -4,7 +4,11 @@ import { parseArgs } from '../../src/args.ts';
 import { runNewCommand } from '../../src/commands/new.ts';
 import { listBrokers, listQueues, listTransports } from '../../src/workspace/transport.ts';
 import type { TransportSpec } from '../../src/workspace/transport.ts';
-import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
+import {
+  missingComposeServices,
+  withBrokerArgs,
+  withQueueArgs,
+} from '../../src/templates/broker.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { getTemplate } from '../../src/templates/registry.ts';
@@ -61,6 +65,43 @@ describe('the derived broker and queue lists', () => {
 });
 
 describe('a --broker scaffold', () => {
+  for (const spec of listTransports()) {
+    for (const flag of ['broker', 'queue'] as const) {
+      const builder = flag === 'broker' ? spec.messagingArgs : spec.queueArgs;
+      if (builder === undefined) continue;
+      for (const runtime of ['node', 'deno'] as const) {
+        it(`renders full-stack ${flag} ${spec.name} with clients, dotenv and Compose on ${runtime}`, async () => {
+          const h = harness();
+          expect(
+            await h.run([
+              'portal',
+              '--template',
+              'full-stack',
+              '--runtime',
+              runtime,
+              `--${flag}`,
+              spec.name,
+            ]),
+          ).toBe(0);
+          const config = h.fs.read('/work/portal/setu.config.ts');
+          expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
+          expect(config).toContain(`'${spec.connection!.variable}'`);
+          expect(config).toContain('config.get<string>(');
+          for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
+            []) {
+            expect(
+              h.fs.read(`/work/portal/${runtime === 'deno' ? 'deno.json' : 'package.json'}`),
+            ).toContain(client);
+          }
+          expect(h.fs.read('/work/portal/.env')).toContain(
+            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+          );
+          expect(h.fs.read('/work/portal/.env.example')).toContain(`${spec.connection!.variable}=`);
+          expect(h.fs.read('/work/portal/docker/compose.yaml')).toContain('services:');
+        });
+      }
+    }
+  }
   it('renders the redis-streams wiring with the environment read', async () => {
     const h = harness();
     expect(await h.run(['svc', '--template', 'microservice', '--broker', 'redis'])).toBe(0);
@@ -251,13 +292,6 @@ describe('broker and queue refusals', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
-  it('refuses a starter-composed template, naming --template microservice', async () => {
-    const h = harness();
-    expect(await h.run(['svc', '--template', 'full-stack', '--broker', 'redis'])).toBe(2);
-    expect(h.errText()).toContain('--template microservice');
-    expect(h.fs.writes).toEqual([]);
-  });
-
   it('refuses --workspace, naming the workspace-wide flag', async () => {
     const h = harness({});
     expect(await h.run(['mono', '--workspace', '--broker', 'redis'])).toBe(2);
@@ -310,5 +344,86 @@ describe('the transport note carried by both overlay arms', () => {
 
     expect(afterBroker.plugins.some((wiring) => wiring.pkg === 'messaging-plugin')).toBe(true);
     expect(afterQueue.plugins.some((wiring) => wiring.pkg === 'queue-plugin')).toBe(true);
+  });
+});
+
+/** Shifts every non-blank line of a Compose block right by `by` spaces. */
+function reindented(block: string, by: number): string {
+  return block
+    .split('\n')
+    .map((line) => (line === '' ? '' : ' '.repeat(by) + line))
+    .join('\n');
+}
+
+describe('missingComposeServices (PR #519 review)', () => {
+  for (const spec of listTransports().filter((arm) => arm.compose !== undefined)) {
+    it(`reports ${spec.name} as missing from a file without it, and nothing once present`, () => {
+      const block = spec.compose!.services.replace(/\n$/, '');
+      expect(missingComposeServices('services:\n  other:\n    image: x\n', spec)).toBe(block);
+      expect(missingComposeServices(`services:\n${block}\n`, spec)).toBeUndefined();
+    });
+  }
+  it('reports an arm when only some of its services are present', () => {
+    const multi = listTransports()
+      .map((arm) => ({
+        arm,
+        names: [...(arm.compose?.services ?? '').matchAll(/^ {2}([\w-]+):\s*$/gm)].map(
+          (m) => m[1]!,
+        ),
+      }))
+      .filter(({ names }) => names.length > 1);
+    expect(multi.map(({ arm }) => arm.name)).toContain('service-bus');
+    for (const { arm, names } of multi) {
+      const partial = `services:\n  ${names[0]}:\n    image: x\n`;
+      const printed = missingComposeServices(partial, arm) ?? '';
+      // Only the absent services: printing the present one would duplicate its key.
+      const keys = [...printed.matchAll(/^ {2}([\w-]+):/gm)].map((m) => m[1]);
+      expect(keys, arm.name).toEqual(names.slice(1));
+    }
+  });
+  it('does not count a same-named entry outside services:', () => {
+    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    const lookalike = 'services:\n  other:\n    image: x\nvolumes:\n  redis:\n';
+    expect(missingComposeServices(lookalike, redis)).toBeDefined();
+    expect(missingComposeServices('volumes:\n  redis:\n', redis)).toBeDefined();
+  });
+  it('accepts comments, CRLF line endings and any service indentation', () => {
+    const redis = listTransports().find((arm) => arm.name === 'redis')!;
+    for (const file of [
+      'services: # local backing services\n  redis: # the broker\n    image: redis:7\n',
+      'services:\r\n  redis:\r\n    image: redis:7\r\n',
+      'services:\n    redis:\n        image: redis:7\n',
+      'services:\n# a comment at column 0\n  other:\n    image: x\n  redis:\n    image: redis:7\n',
+    ]) {
+      expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
+    }
+    // Anchors and inline values after the key still declare the service.
+    for (const file of [
+      'services:\n  redis: &redis\n    image: redis:7\n',
+      'services:\n  web: &web\n    image: x\n  redis: { image: redis:7 }\n',
+    ]) {
+      expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
+    }
+    // Quoted keys name the same service.
+    for (const file of [
+      'services:\n  "redis":\n    image: x\n',
+      "services:\n  'redis':\n    image: x\n",
+    ]) {
+      expect(missingComposeServices(file, redis), file).toBeUndefined();
+    }
+    // The block comes back at the file's own service depth.
+    const deep = missingComposeServices('services:\n    other:\n        image: x\n', redis)!;
+    expect(deep.split('\n')[0]).toBe('    redis:');
+    expect(deep).toBe(reindented(redis.compose!.services.replace(/\n$/, ''), 2));
+    // An anchored service sets the depth, so a nested `redis:` under it is not a service.
+    const anchored = 'services:\n  web: &web\n    redis:\n      image: x\n';
+    expect(missingComposeServices(anchored, redis)).toBeDefined();
+    // A nested key with the service's name is not a service.
+    const nested = 'services:\n  other:\n    redis:\n      image: x\n';
+    expect(missingComposeServices(nested, redis)).toBeDefined();
+  });
+  it('has nothing to report for an arm with no backing service', () => {
+    const none = listTransports().find((arm) => arm.compose === undefined)!;
+    expect(missingComposeServices('services:\n', none)).toBeUndefined();
   });
 });

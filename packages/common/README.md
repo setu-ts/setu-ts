@@ -37,7 +37,7 @@ Without `requiredBy`, the message says `the package that loads it` generically.
 | Service registry    | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory`                                                                                                                                                                                                                                      |
 | HTTP abstractions   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `RouteHandler`, `RouteDefinition`, `ResponseSnapshot`, `ResponseSnapshotInit`                                                                                                                               |
 | Runtime abstraction | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`                                                                                                                                                                                                                                            |
-| Optional DI         | `IContainer`, `Provider`, `ServiceScope`                                                                                                                                                                                                                                                     |
+| Optional DI         | `IContainer`, `Provider`, `ServiceScope`, `createToken`, `InjectionToken`, `ContainerToken`, `InjectEntry`                                                                                                                                                                                   |
 | Domain contracts    | `ILogger`, `IConfig`, `IValidationService`, `IHealthIndicator`, `IMetric`, `IJwtService`, `IOrmAdapter`, `ICacheStore`, `IEventBus`, `IMessageBroker`, `IQueue`, `ISecretManager`, `IAuditLogger`, `ICircuitBreaker`, `IStorage`, `IMailer`, `INotifier`, `IFeatureFlags`, `ITenantResolver` |
 | Shared types        | `HttpMethod`, `RuntimePlatform`, `LogLevel`, `LifecyclePhase`, `HealthStatus`, `MetricType`, `PLUGIN_PRIORITY`                                                                                                                                                                               |
 | Utility types       | `Result<T, E>` (`ok`, `err`, `isOk`, `isErr`, `unwrap`), `Option<T>` (`some`, `none`, `isSome`, `isNone`, `fromNullable`), `PathPattern` (`createPathMatcher`)                                                                                                                               |
@@ -205,12 +205,15 @@ package fits the plugin architecture.
 | `createConnectionErrorReporter`       | function  |
 | `createMaskRedactor`                  | function  |
 | `createPathMatcher`                   | function  |
+| `createRealtimeHandlerErrorReporter`  | function  |
 | `createRealtimeObservationCollector`  | function  |
 | `createRedactionService`              | function  |
+| `createToken`                         | function  |
 | `deadlineRangeError`                  | function  |
 | `decodeCursor`                        | function  |
 | `decodeFrameData`                     | function  |
 | `describeError`                       | function  |
+| `dispatchRealtimeFrame`               | function  |
 | `encodeCursor`                        | function  |
 | `encodeFrameData`                     | function  |
 | `eraseRedactor`                       | function  |
@@ -222,6 +225,7 @@ package fits the plugin architecture.
 | `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
 | `httpStatusHintOf`                    | function  |
+| `installRequestIdentityGuard`         | function  |
 | `isConnectionFault`                   | function  |
 | `isConnectionFaultCode`               | function  |
 | `isErr`                               | function  |
@@ -241,6 +245,7 @@ package fits the plugin architecture.
 | `none`                                | function  |
 | `ok`                                  | function  |
 | `parseCookie`                         | function  |
+| `parseEnv`                            | function  |
 | `parseFormBody`                       | function  |
 | `parseJsonBody`                       | function  |
 | `parsePublishOptions`                 | function  |
@@ -451,6 +456,7 @@ package fits the plugin architecture.
 | `InboxRecord`                         | interface |
 | `InboxStoreStats`                     | interface |
 | `IngressContext`                      | interface |
+| `InjectionToken`                      | interface |
 | `INotifier`                           | interface |
 | `IOpenApiApi`                         | interface |
 | `IOrmAdapter`                         | interface |
@@ -467,6 +473,7 @@ package fits the plugin architecture.
 | `IQueueDiagnosticsSource`             | interface |
 | `IRealtimeBackplane`                  | interface |
 | `IRealtimeDiagnosticsSource`          | interface |
+| `IRealtimeHandlerErrorReporter`       | interface |
 | `IRealtimeObservationCollector`       | interface |
 | `IRedactionService`                   | interface |
 | `IRequest`                            | interface |
@@ -554,6 +561,7 @@ package fits the plugin architecture.
 | `RealtimeDiagnosticsSnapshot`         | interface |
 | `RealtimeFrame`                       | interface |
 | `RealtimeGaugeReading`                | interface |
+| `RealtimeHandlerErrorReporterOptions` | interface |
 | `RealtimeObservationCollectorInit`    | interface |
 | `ReconnectSupervisorOptions`          | interface |
 | `RecurringOptions`                    | interface |
@@ -641,6 +649,7 @@ package fits the plugin architecture.
 | `ConfigSchemaEffect`                  | type      |
 | `ConnectionErrorLogger`               | type      |
 | `Constructor`                         | type      |
+| `ContainerToken`                      | type      |
 | `CursorValue`                         | type      |
 | `DataClassification`                  | type      |
 | `DecoratorHandler`                    | type      |
@@ -680,6 +689,7 @@ package fits the plugin architecture.
 | `IngressIdempotencyFingerprintSource` | type      |
 | `IngressIdempotencyKeySource`         | type      |
 | `IngressKind`                         | type      |
+| `InjectEntry`                         | type      |
 | `ITenantIsolationStrategy`            | type      |
 | `JobProcessor`                        | type      |
 | `JsonValue`                           | type      |

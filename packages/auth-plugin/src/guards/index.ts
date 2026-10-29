@@ -11,6 +11,9 @@ import {
   withSecurityMetadata,
 } from '@setu-ts/common';
 import type { RouteSecurityMetadata } from '@setu-ts/common';
+import { AuthPluginConfigurationError } from '../errors.ts';
+import type { RequireAuthOptions } from '../interfaces/index.ts';
+import { RETURN_TO_QUERY_PARAM, safeReturnTo } from '../sign-in/return-to.ts';
 
 /**
  * Brand for a guard that requires an authenticated principal. Shared and
@@ -57,23 +60,150 @@ function resolveAuthorization(ctx: IRequestContext): IAuthorizationService | nul
 }
 
 /**
- * Guard that requires authentication. Returns 401 if no principal.
+ * The request headers the sign-in redirect decision reads. Appended to `Vary`
+ * on both unauthenticated answers, so a shared cache cannot hand one client's
+ * redirect to another's API call.
+ */
+const NAVIGATION_VARY = ['Accept', 'Sec-Fetch-Mode', 'X-Requested-With'] as const;
+
+/** A base for parsing the request URL, which an injected request may give as a path. */
+const URL_BASE = 'http://localhost';
+
+/**
+ * Whether a request is a browser page navigation (M124 §3.2).
  *
+ * Only `GET` and `HEAD`: a redirect would turn a form `POST` into a `GET` and
+ * drop its body. An `X-Requested-With: XMLHttpRequest` request is script, never
+ * a navigation (ASP.NET Core, Spring). `Sec-Fetch-Mode` decides when present —
+ * a browser sends `navigate` for a page load and something else for `fetch()`.
+ * Without it, `Accept` must NAME `text/html` or `application/xhtml+xml`; the bare
+ * any-type wildcard is not enough, because `curl` and most HTTP clients send
+ * only that (Spring).
+ *
+ * @param method - The request method
+ * @param headers - The request headers
+ * @returns `true` for a navigation
+ */
+function isNavigation(method: string, headers: Headers): boolean {
+  if (method !== 'GET' && method !== 'HEAD') {
+    return false;
+  }
+  if (headers.get('x-requested-with')?.trim().toLowerCase() === 'xmlhttprequest') {
+    return false;
+  }
+  const mode = headers.get('sec-fetch-mode');
+  if (mode !== null) {
+    return mode.trim().toLowerCase() === 'navigate';
+  }
+  const accept = headers.get('accept');
+  if (accept === null) {
+    return false;
+  }
+  return accept.split(',').some((range) => {
+    const type = (range.split(';')[0] ?? '').trim().toLowerCase();
+    return type === 'text/html' || type === 'application/xhtml+xml';
+  });
+}
+
+/**
+ * Validates `signInPage` once, when the guard is built.
+ *
+ * @param signInPage - The configured page
+ * @returns The page parsed against a placeholder origin
+ * @throws {AuthPluginConfigurationError} When it is not a same-origin absolute path,
+ *   or when the URL parser would normalize it to a different one
+ */
+function compileSignInPage(signInPage: unknown): URL {
+  /** Throws the one refusal every invalid page gets. */
+  const refuse = (): never => {
+    throw new AuthPluginConfigurationError(
+      `auth-plugin: requireAuth signInPage must be a same-origin absolute path, got '${String(
+        signInPage,
+      )}'`,
+    );
+  };
+  // The empty fallback cannot equal a non-empty page, so only a value
+  // safeReturnTo keeps unchanged passes; '' is refused on its own, since it
+  // would equal that fallback.
+  if (
+    typeof signInPage !== 'string' ||
+    signInPage === '' ||
+    safeReturnTo(signInPage, '') !== signInPage
+  ) {
+    return refuse();
+  }
+  // The redirect is built from the PARSED page, so the parser must give back
+  // exactly the string that was checked: dot segments ('/x/..//evil.test',
+  // '/%2e%2e//evil.test') pass safeReturnTo but normalize to a
+  // protocol-relative `//evil.test` (M124 audit F2).
+  const page = new URL(signInPage, URL_BASE);
+  if (page.origin !== URL_BASE || page.pathname + page.search + page.hash !== signInPage) {
+    return refuse();
+  }
+  return page;
+}
+
+/**
+ * Guard that requires authentication.
+ *
+ * Without options an unauthenticated request is answered `401` Problem
+ * Details. With `signInPage`, an unauthenticated browser navigation (see
+ * {@linkcode RequireAuthOptions.signInPage}) is answered `302` to the sign-in
+ * page instead, carrying the requested path and query as `returnTo` — validated
+ * by {@linkcode safeReturnTo}, which the application's own login handler should
+ * apply again before redirecting back. Every other unauthenticated request keeps
+ * the `401`.
+ *
+ * @param options - Optional sign-in page for browser navigations
  * @returns Middleware function
+ * @throws {AuthPluginConfigurationError} When `signInPage` is not a same-origin
+ *   absolute path
  *
  * @example
  * ```typescript
  * app.router.get('/protected', { middleware: [requireAuth()], handler });
+ * app.router.get('/account', { middleware: [requireAuth({ signInPage: '/login' })], handler });
  * ```
  */
-export function requireAuth(): MiddlewareFunction {
+export function requireAuth(options?: RequireAuthOptions): MiddlewareFunction {
+  const signInPage = options?.signInPage;
+  if (signInPage === undefined) {
+    const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
+      const user = ctx.request.user;
+      if (!user) {
+        respondWithAuthorizationFailure(ctx, 'authentication-required');
+        return;
+      }
+      await next();
+    };
+    return withSecurityMetadata(guard, AUTHENTICATED);
+  }
+
+  const page = compileSignInPage(signInPage);
   const guard = async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
-    const user = ctx.request.user;
-    if (!user) {
+    if (ctx.request.user) {
+      await next();
+      return;
+    }
+    for (const name of NAVIGATION_VARY) {
+      ctx.response.appendHeader('Vary', name);
+    }
+    const requested = new URL(ctx.request.url, URL_BASE);
+    // The sign-in page's own path is never redirected: a guarded sign-in page
+    // would otherwise send the browser to itself forever.
+    if (
+      requested.pathname === page.pathname ||
+      !isNavigation(ctx.request.method, ctx.request.headers)
+    ) {
       respondWithAuthorizationFailure(ctx, 'authentication-required');
       return;
     }
-    await next();
+    const target = new URL(page);
+    target.searchParams.set(
+      RETURN_TO_QUERY_PARAM,
+      safeReturnTo(requested.pathname + requested.search),
+    );
+    ctx.response.redirect(target.pathname + target.search + target.hash, 302);
   };
   return withSecurityMetadata(guard, AUTHENTICATED);
 }

@@ -55,6 +55,43 @@ describe('generated Dockerfile chown fold (X10-5)', () => {
 });
 
 describe('generated Dockerfile lockfile verification', () => {
+  it('builds a declared frontend on glibc and copies only its output before caching', () => {
+    const contents = dockerfile();
+    const frontend = contents.slice(
+      contents.indexOf('FROM denoland/deno:debian-2.9.5 AS frontend'),
+      contents.indexOf('FROM denoland/deno:alpine-2.9.5'),
+    );
+    expect(frontend).not.toBe('');
+    // Parsed from the MEMBER manifest (the stage's working directory), never a
+    // root task, and never by matching text.
+    expect(frontend).toContain('"jsr:@std/jsonc@1.0.3"');
+    expect(frontend).toContain('if (manifest.tasks && "build" in manifest.tasks)');
+    expect(frontend).toContain(
+      '--allow-read=./deno.json,./deno.jsonc --allow-write=./.setu-build-task -',
+    );
+    expect(frontend).toContain(
+      'if [ -f .setu-build-task ]; then deno task build; else mkdir -p build; fi',
+    );
+    const runtime = contents.slice(contents.indexOf('FROM denoland/deno:alpine-2.9.5'));
+    const copy = runtime.indexOf('COPY --from=frontend /srv/apps/${MEMBER}/buil[d] ./build/');
+    expect(copy).toBeGreaterThan(-1);
+    expect(copy).toBeLessThan(runtime.indexOf('deno cache main.ts'));
+    expect(runtime).not.toContain('deno task build');
+  });
+  it('switches an auto node_modules root to manual after installing, before the chown', () => {
+    const buildRun = dockerfile()
+      .split('\n')
+      .find((line) => line.startsWith('RUN ') && line.includes('deno cache main.ts'))!;
+    const rewrite = buildRun.indexOf('manifest.nodeModulesDir === "auto"');
+    expect(rewrite).toBeGreaterThan(
+      buildRun.lastIndexOf('deno install --entrypoint main.ts --frozen'),
+    );
+    expect(rewrite).toBeLessThan(buildRun.indexOf('chown -R'));
+    expect(buildRun).toContain('manifest.nodeModulesDir = "manual"');
+    expect(buildRun).toContain(
+      '--allow-read=/srv/deno.json,/srv/deno.jsonc --allow-write=/srv/deno.json,/srv/deno.jsonc -',
+    );
+  });
   it('completes the lockfile and then VERIFIES it, in one build layer', () => {
     const contents = dockerfile();
     const buildRun = contents

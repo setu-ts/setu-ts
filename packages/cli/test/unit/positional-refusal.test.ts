@@ -119,6 +119,13 @@ describe('extra-positional refusal', () => {
     expect(h.fs.writes).toEqual([]);
   });
 
+  it('refuses positionals on build before bundling or writing', async () => {
+    const h = harness();
+    expect(await h.run(['build', 'extra'])).toBe(2);
+    expect(h.err.text()).toContain('setu build takes no arguments; got 1.');
+    expect(h.fs.writes).toEqual([]);
+  });
+
   it('refuses any positional on adopt, which takes none', async () => {
     const h = harness({
       seed: {
@@ -300,10 +307,10 @@ describe('valid arities still succeed', () => {
     expect(h.out.text()).toContain('db:migrate');
   });
 
-  it('help takes no positionals and still prints usage', async () => {
+  it('help refuses a positional rather than ignoring it', async () => {
     const h = harness();
-    expect(await h.run(['help'])).toBe(0);
-    expect(h.out.text()).toContain('Usage:');
+    expect(await h.run(['help', 'extra'])).toBe(2);
+    expect(h.err.text()).toContain('setu help takes no arguments; got 1.');
   });
 
   it('a plugin command still receives every positional verbatim', async () => {
@@ -332,3 +339,12 @@ describe('valid arities still succeed', () => {
     expect(received).toEqual(['prod', 'extra']);
   });
 });
+
+for (const command of ['check', 'sync']) {
+  it(`refuses extra arguments to ${command} before touching the project`, async () => {
+    const h = harness();
+    expect(await h.run([command, 'extra'])).toBe(2);
+    expect(h.err.text()).toContain(`setu ${command} takes no arguments; got 1.`);
+    expect(h.fs.writes).toEqual([]);
+  });
+}

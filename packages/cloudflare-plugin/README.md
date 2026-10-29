@@ -372,6 +372,13 @@ its members together. The socket opens lazily on first publish and reopens after
 Two applications sharing one namespace must set different `topic` values, or each receives the
 other's frames.
 
+Subscriber throws and returned promise rejections are isolated through common's shared dispatch. The
+default reporter reads the logger at call time: first failure per handler at warn, repeats at debug
+with a count, and recovery at info. Errors use `describeError`, so CR/LF cannot forge log lines;
+frame data is never logged. A directly constructed `DurableObjectBackplane` accepts
+`onHandlerError(error, frame)` in `DurableObjectBackplaneOptions` to receive every failure instead
+of default logging. Hook and logger failures are swallowed.
+
 ### Distributed lock
 
 `DurableObjectLock` implements scheduler-plugin's `IDistributedLock` seam, so the lock can be handed

@@ -21,6 +21,7 @@ import type { IPlugin, IPluginContext } from '@setu-ts/common';
 
 import { createApplication } from '../../src/application/application.ts';
 import type { InjectRequest } from '../../src/application/application.ts';
+import { InjectedRequest } from '../../src/application/inject-body.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 
 const encoder = new TextEncoder();
@@ -327,5 +328,40 @@ describe('inject() never mutates the caller-supplied Headers', () => {
     expect(echoed.headers['x-api-key']).toBe('k');
     expect(echoed.headers['accept-language']).toBe('en, fr');
     expect(echoed.contentType).toBe('application/json');
+  });
+});
+
+describe('InjectedRequest', () => {
+  it('reads an absent body as empty text, empty bytes and an empty JSON object', async () => {
+    const request = new InjectedRequest(
+      'GET',
+      'http://localhost/a/b?x=1',
+      new Headers(),
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(request.path).toBe('/a/b');
+    expect(await request.text()).toBe('');
+    expect(await request.bytes()).toEqual(new Uint8Array(0));
+    expect(await request.json()).toEqual({});
+    expect(Object.hasOwn(request, 'ip')).toBe(false);
+    expect(Object.hasOwn(request, 'raw')).toBe(false);
+  });
+
+  it('parses an absent form body once and returns the same promise again', async () => {
+    const request = new InjectedRequest(
+      'POST',
+      'http://localhost/',
+      new Headers({ 'content-type': 'application/x-www-form-urlencoded' }),
+      undefined,
+      '192.0.2.9',
+      new Request('http://localhost/'),
+    );
+    const first = request.formData();
+    expect(request.formData()).toBe(first);
+    expect(await first).toBeDefined();
+    expect(request.ip).toBe('192.0.2.9');
+    expect(request.raw).toBeInstanceOf(Request);
   });
 });

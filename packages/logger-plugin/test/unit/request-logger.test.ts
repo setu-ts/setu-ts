@@ -28,8 +28,13 @@ interface RecordedEntry {
  * array, so the test can inspect what the middleware logged via the child.
  */
 class SharedRecordingLogger implements ILogger {
-  readonly level: LogLevel = 'info';
+  readonly level: LogLevel;
   readonly entries: RecordedEntry[] = [];
+  readonly children: LogMetadata[] = [];
+
+  constructor(level: LogLevel = 'info') {
+    this.level = level;
+  }
 
   fatal(message: string, metadata?: LogMetadata): void {
     this.entries.push({ level: 'fatal', message, metadata: metadata ?? {} });
@@ -49,7 +54,8 @@ class SharedRecordingLogger implements ILogger {
   trace(message: string, metadata?: LogMetadata): void {
     this.entries.push({ level: 'trace', message, metadata: metadata ?? {} });
   }
-  child(_bindings: LogMetadata): ILogger {
+  child(bindings: LogMetadata): ILogger {
+    this.children.push(bindings);
     return this;
   }
 }
@@ -115,6 +121,10 @@ function createFakeResponse(ctx: { response: IResponse }): IResponse {
   return {
     status: (code: number) => {
       status = code;
+      return ctx.response;
+    },
+    setHeaders: (headers: Readonly<Record<string, string>>) => {
+      for (const name of Object.keys(headers)) ctx.response.header(name, headers[name]!);
       return ctx.response;
     },
     header: (name: string, value: string) => {
@@ -191,7 +201,7 @@ describe('createRequestLoggerMiddleware', () => {
     logger = new SharedRecordingLogger();
   });
 
-  it('logs incoming request and completed response', async () => {
+  it('logs one self-contained completed response at info', async () => {
     const middleware = createRequestLoggerMiddleware();
     const { ctx } = createFakeContext(logger);
 
@@ -201,16 +211,20 @@ describe('createRequestLoggerMiddleware', () => {
     });
 
     expect(nextCalled).toBe(true);
-    const messages = logger.entries.map((e) => e.message);
-    expect(messages).toContain('request received');
-    expect(messages).toContain('request completed');
+    expect(logger.entries).toEqual([
+      {
+        level: 'info',
+        message: 'request completed',
+        metadata: { method: 'GET', path: '/users', status: 200, duration: 0 },
+      },
+    ]);
   });
 
   it('computes correct duration using monotonic clock (tick test)', async () => {
     const middleware = createRequestLoggerMiddleware({ slowRequestThreshold: 10000 });
     const { ctx, tick } = createFakeContext(logger);
 
-    // Advance the clock by 100 ms between "request received" and completion.
+    // Advance the monotonic clock 100 ms from the context's start reading.
     tick(100);
 
     await middleware(ctx, async () => {});
@@ -320,7 +334,7 @@ describe('createRequestLoggerMiddleware', () => {
     expect(completed!.metadata.status).toBe(200);
   });
 
-  it('logs request method and path in the incoming entry', async () => {
+  it('logs request method and path in the completion entry', async () => {
     const middleware = createRequestLoggerMiddleware();
     const { ctx } = createFakeContext(logger, {
       request: createFakeRequest('POST', '/api/users'),
@@ -328,10 +342,10 @@ describe('createRequestLoggerMiddleware', () => {
 
     await middleware(ctx, async () => {});
 
-    const received = logger.entries.find((e) => e.message === 'request received');
-    expect(received).toBeDefined();
-    expect(received!.metadata.method).toBe('POST');
-    expect(received!.metadata.path).toBe('/api/users');
+    const completed = logger.entries.find((e) => e.message === 'request completed');
+    expect(completed).toBeDefined();
+    expect(completed!.metadata.method).toBe('POST');
+    expect(completed!.metadata.path).toBe('/api/users');
   });
 
   it('binds requestId into the child logger', async () => {
@@ -340,12 +354,8 @@ describe('createRequestLoggerMiddleware', () => {
 
     await middleware(ctx, async () => {});
 
-    // SharedRecordingLogger.child() returns self, so entries are on the same logger.
-    const received = logger.entries.find((e) => e.message === 'request received');
-    expect(received).toBeDefined();
-    // The child logger was created with { requestId: ctx.id }
-    // Since child() returns self in our fake, we verify the middleware called child()
-    // by checking that logging happened at all (it would only happen if a logger was resolved).
+    expect(logger.children).toEqual([{ requestId: 'req-xyz' }]);
+    expect(logger.entries.map((entry) => entry.message)).toEqual(['request completed']);
   });
 
   it('logs a non-Error throw as its string form, with no stack', async () => {
@@ -364,5 +374,147 @@ describe('createRequestLoggerMiddleware', () => {
     expect(logger.entries.find((e) => e.message === 'request completed')?.metadata.status).toBe(
       500,
     );
+  });
+});
+
+describe('D6 request log contract', () => {
+  for (const outcome of ['200', '404', 'throw'] as const) {
+    it(`emits exactly one info entry with all four fields for ${outcome}`, async () => {
+      const logger = new SharedRecordingLogger();
+      const { ctx, tick } = createFakeContext(logger, {
+        request: createFakeRequest('POST', '/contract'),
+      });
+      const middleware = createRequestLoggerMiddleware();
+      const failure = new Error('downstream');
+      const operation = middleware(ctx, async () => {
+        tick(25);
+        if (outcome === 'throw') throw failure;
+        if (outcome === '404') ctx.response.status(404);
+      });
+      if (outcome === 'throw') await expect(operation).rejects.toBe(failure);
+      else await operation;
+      expect(logger.entries).toEqual([
+        {
+          level: 'info',
+          message: 'request completed',
+          metadata: {
+            method: 'POST',
+            path: '/contract',
+            status: outcome === 'throw' ? 500 : Number(outcome),
+            duration: 25,
+          },
+        },
+      ]);
+      expect(logger.children).toEqual([{ requestId: 'req-1' }]);
+    });
+  }
+
+  for (const level of ['debug', 'trace'] as const) {
+    it(`emits debug arrival then info completion at ${level}`, async () => {
+      const logger = new SharedRecordingLogger(level);
+      const { ctx, tick } = createFakeContext(logger);
+      await createRequestLoggerMiddleware()(ctx, async () => {
+        tick(12);
+      });
+      expect(logger.entries).toEqual([
+        {
+          level: 'debug',
+          message: 'request received',
+          metadata: { method: 'GET', path: '/users' },
+        },
+        {
+          level: 'info',
+          message: 'request completed',
+          metadata: { method: 'GET', path: '/users', status: 200, duration: 12 },
+        },
+      ]);
+      expect(logger.children).toHaveLength(1);
+    });
+  }
+
+  for (const level of ['info', 'warn', 'error', 'fatal'] as const) {
+    it(`does not build arrival metadata when the exposed child level is ${level}`, async () => {
+      const logger = new SharedRecordingLogger(level);
+      const { ctx } = createFakeContext(logger);
+      let downstream = false;
+      let earlyMethodReads = 0;
+      let methodReads = 0;
+      Object.defineProperty(ctx.request, 'method', {
+        get() {
+          methodReads++;
+          if (!downstream) earlyMethodReads++;
+          return 'GET';
+        },
+      });
+      await createRequestLoggerMiddleware()(ctx, async () => {
+        downstream = true;
+      });
+      expect(earlyMethodReads).toBe(0);
+      expect(methodReads).toBe(1);
+      expect(logger.entries.map((entry) => entry.message)).toEqual(['request completed']);
+    });
+  }
+
+  for (const mode of ['missing', 'unknown', 'throwing'] as const) {
+    it(`delegates debug filtering when the level is ${mode}`, async () => {
+      const logger = new SharedRecordingLogger();
+      Object.defineProperty(logger, 'level', {
+        get() {
+          if (mode === 'throwing') throw new Error('unreadable level');
+          return mode === 'unknown' ? 'application-level' : undefined;
+        },
+      });
+      const { ctx } = createFakeContext(logger);
+      await createRequestLoggerMiddleware()(ctx, async () => {});
+      expect(logger.entries.map((entry) => [entry.level, entry.message])).toEqual([
+        ['debug', 'request received'],
+        ['info', 'request completed'],
+      ]);
+    });
+  }
+
+  it('uses the child logger exposed level for the arrival decision', async () => {
+    for (const [parentLevel, childLevel] of [
+      ['info', 'debug'],
+      ['debug', 'info'],
+    ] as const) {
+      const parent = new SharedRecordingLogger(parentLevel);
+      const child = new SharedRecordingLogger(childLevel);
+      parent.child = (bindings) => {
+        parent.children.push(bindings);
+        return child;
+      };
+      const { ctx } = createFakeContext(parent);
+      await createRequestLoggerMiddleware()(ctx, async () => {});
+      expect(child.entries.map((entry) => [entry.level, entry.message])).toEqual(
+        childLevel === 'debug'
+          ? [
+              ['debug', 'request received'],
+              ['info', 'request completed'],
+            ]
+          : [['info', 'request completed']],
+      );
+      expect(parent.children).toEqual([{ requestId: 'req-1' }]);
+    }
+  });
+
+  it('keeps the slow warning beside one complete info record', async () => {
+    const logger = new SharedRecordingLogger();
+    const { ctx, tick } = createFakeContext(logger);
+    await createRequestLoggerMiddleware({ slowRequestThreshold: 10 })(ctx, async () => {
+      tick(11);
+    });
+    expect(logger.entries).toEqual([
+      {
+        level: 'info',
+        message: 'request completed',
+        metadata: { method: 'GET', path: '/users', status: 200, duration: 11 },
+      },
+      {
+        level: 'warn',
+        message: 'slow request',
+        metadata: { method: 'GET', path: '/users', duration: 11, threshold: 10 },
+      },
+    ]);
   });
 });

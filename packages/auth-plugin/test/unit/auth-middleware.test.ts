@@ -45,6 +45,7 @@ function createContext(authService: IAuthService): {
 
   const response: IResponse = {
     status: () => response,
+    setHeaders: () => response,
     header: () => response,
     appendHeader: () => response,
     json: (): HandlerResult => ({ __handlerResult: true }),

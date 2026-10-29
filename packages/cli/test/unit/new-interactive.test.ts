@@ -64,7 +64,7 @@ describe('resolveNewChoices', () => {
     expect(await resolveNewChoices(args, undefined, () => {})).toEqual({ kind: 'resolved', args });
   });
 
-  it('asks runtime, template, style, broker and queue for a bare standalone scaffold', async () => {
+  it('asks runtime, template, style, broker, queue and logger for a bare standalone scaffold', async () => {
     const { args, questions } = await resolve(
       ['svc'],
       ['deno', 'microservice', 'functional', 'redis', 'redis'],
@@ -75,6 +75,7 @@ describe('resolveNewChoices', () => {
       'Code style?',
       'Message broker?',
       'Job queue?',
+      'Logger?',
     ]);
     expect(args.flags['runtime']).toBe('deno');
     expect(args.flags['template']).toBe('microservice');
@@ -119,6 +120,8 @@ describe('resolveNewChoices', () => {
         'memory',
         '--queue',
         'memory',
+        '--logger',
+        'pino',
       ],
       [],
     );
@@ -127,7 +130,7 @@ describe('resolveNewChoices', () => {
 
   it('skips the broker and queue questions for a template with no messaging wiring', async () => {
     const { args, questions } = await resolve(['svc'], ['deno', 'rest', 'functional']);
-    expect(questions).toEqual(['Runtime?', 'Template?', 'Code style?']);
+    expect(questions).toEqual(['Runtime?', 'Template?', 'Code style?', 'Logger?']);
     expect(args.flags['broker']).toBeUndefined();
   });
 
@@ -138,7 +141,7 @@ describe('resolveNewChoices', () => {
       ['svc', '--template', 'microservice'],
       ['cloudflare-workers', 'functional'],
     );
-    expect(questions).toEqual(['Runtime?', 'Code style?']);
+    expect(questions).toEqual(['Runtime?', 'Code style?', 'Logger?']);
   });
 
   it('leaves later flags absent but still asked when one answer is EOF', async () => {
@@ -152,6 +155,7 @@ describe('resolveNewChoices', () => {
       'Code style?',
       'Message broker?',
       'Job queue?',
+      'Logger?',
     ]);
     expect(args.flags['runtime']).toBeUndefined();
     expect(args.flags['broker']).toBe('redis');
@@ -162,7 +166,13 @@ describe('resolveNewChoices', () => {
     // full-stack composes through a starter and has no controller or ingress
     // seam, so it has no style axis at all.
     const { questions } = await resolve(['svc'], ['deno', 'full-stack']);
-    expect(questions).toEqual(['Runtime?', 'Template?']);
+    expect(questions).toEqual([
+      'Runtime?',
+      'Template?',
+      'Message broker?',
+      'Job queue?',
+      'Logger?',
+    ]);
   });
 
   it('skips the style question when --style was supplied on the command line', async () => {
@@ -170,7 +180,7 @@ describe('resolveNewChoices', () => {
       ['svc', '--template', 'rest', '--style', 'class-based'],
       ['deno'],
     );
-    expect(questions).toEqual(['Runtime?']);
+    expect(questions).toEqual(['Runtime?', 'Logger?']);
     expect(args.flags['style']).toBe('class-based');
   });
 
@@ -191,7 +201,7 @@ describe('resolveNewChoices', () => {
       ['svc', '--template', 'microservice', '--style', 'class-based'],
       ['deno', 'redis', 'redis'],
     );
-    expect(questions).toEqual(['Runtime?', 'Message broker?', 'Job queue?']);
+    expect(questions).toEqual(['Runtime?', 'Message broker?', 'Job queue?', 'Logger?']);
     expect(args.flags['broker']).toBe('redis');
     expect(args.flags['queue']).toBe('redis');
   });
@@ -271,6 +281,7 @@ for (const question of [
   'Code style?',
   'Message broker?',
   'Job queue?',
+  'Logger?',
   'How should the workspace members reach each other?',
 ]) {
   it(`stops at a cancelled ${question} prompt`, async () => {

@@ -29,6 +29,48 @@ import { QUEUE_PROCESSORS_EXPORT } from '../seams/jobs.ts';
 import { mergeObjectArgs, wrapPluginArgs } from './plugin-args.ts';
 import type { LocalImport, Wiring } from './registry.ts';
 
+/** One internal starter arm and the generated handlers it consumes. */
+export interface IStarterSeam {
+  readonly plugin: string;
+  readonly arm: 'events' | 'cqrs' | 'queue';
+  readonly barrel: string;
+  readonly schematic: string;
+  readonly entries: readonly (readonly [string, string])[];
+}
+
+/** Shared starter-arm entries: advice, automatic edits and inline plugin options agree. */
+export const STARTER_SEAMS: readonly IStarterSeam[] = [
+  {
+    plugin: 'events-plugin',
+    arm: 'events',
+    barrel: 'src/events/index.ts',
+    schematic: 'event-handler',
+    entries: [['handlers', EVENT_HANDLERS_EXPORT]],
+  },
+  {
+    plugin: 'cqrs-plugin',
+    arm: 'cqrs',
+    barrel: 'src/cqrs/index.ts',
+    schematic: 'command-handler',
+    entries: [
+      ['commandHandlers', COMMAND_HANDLERS_EXPORT],
+      ['queryHandlers', QUERY_HANDLERS_EXPORT],
+    ],
+  },
+  {
+    plugin: 'queue-plugin',
+    arm: 'queue',
+    barrel: 'src/jobs/index.ts',
+    schematic: 'job',
+    entries: [['processors', `[...${QUEUE_PROCESSORS_EXPORT}]`]],
+  },
+];
+
+/** Renders the shared property table as a plugin/starter option literal. */
+export function starterSeamLiteral(seam: IStarterSeam): string {
+  return `{ ${seam.entries.map(([key, value]) => `${key}: ${value}`).join(', ')} }`;
+}
+
 /**
  * Selects the seams a host can actually consume.
  *
@@ -178,8 +220,8 @@ export function withPluginOptionSeams(
 ): readonly Wiring[] {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   const args = new Map<string, string>();
-  if (schematics.has('job')) {
-    args.set('queue-plugin', `{ processors: [...${QUEUE_PROCESSORS_EXPORT}] }`);
+  for (const seam of STARTER_SEAMS) {
+    if (schematics.has(seam.schematic)) args.set(seam.plugin, starterSeamLiteral(seam));
   }
 
   if (schematics.has('health-indicator')) {
@@ -187,15 +229,6 @@ export function withPluginOptionSeams(
   }
   if (schematics.has('metric')) {
     args.set('metrics-plugin', `{ customMetrics: [...${CUSTOM_METRICS_EXPORT}] }`);
-  }
-  if (schematics.has('command-handler')) {
-    args.set(
-      'cqrs-plugin',
-      `{ commandHandlers: ${COMMAND_HANDLERS_EXPORT}, queryHandlers: ${QUERY_HANDLERS_EXPORT} }`,
-    );
-  }
-  if (schematics.has('event-handler')) {
-    args.set('events-plugin', `{ handlers: ${EVENT_HANDLERS_EXPORT} }`);
   }
 
   return wirings.map((wiring) => {

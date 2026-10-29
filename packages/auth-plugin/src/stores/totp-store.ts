@@ -11,6 +11,8 @@
  * @module
  */
 
+import { sweepExpired } from './sweep-expired.ts';
+
 /** A TOTP enrolment record. */
 export interface TotpEnrolment {
   /**
@@ -173,15 +175,7 @@ export function sweepExpiredAttempts(
   cutoff: number,
   sweepAt: number,
 ): number {
-  if (attempts.size < sweepAt) {
-    return sweepAt;
-  }
-  for (const [principalId, entry] of attempts) {
-    if (entry.timestamps.every((ts) => ts <= cutoff)) {
-      attempts.delete(principalId);
-    }
-  }
-  return Math.max(1_024, attempts.size * 2);
+  return sweepExpired(attempts, sweepAt, (entry) => entry.timestamps.every((ts) => ts <= cutoff));
 }
 
 /** Attempt tracking for the memory store. */

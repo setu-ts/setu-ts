@@ -51,8 +51,11 @@ function resolveRegistration(registration: Registration): object {
  * while keeping their own registrations isolated.
  */
 export class ServiceRegistry implements IServiceRegistry {
-  readonly #single = new Map<CapabilityToken, Registration>();
-  readonly #multi = new Map<CapabilityToken, Registration[]>();
+  // Created by the first registration: a request-scoped child is built for
+  // every request that reads `ctx.services`, and almost all of them only
+  // resolve through the parent.
+  #single: Map<CapabilityToken, Registration> | undefined;
+  #multi: Map<CapabilityToken, Registration[]> | undefined;
   readonly #parent: ServiceRegistry | undefined;
   #sealed = false;
   #observer: ((kind: 'override' | 'unregister', token: CapabilityToken) => void) | undefined;
@@ -116,7 +119,7 @@ export class ServiceRegistry implements IServiceRegistry {
    * @since 0.8.0
    */
   peekResolved<T extends object>(token: CapabilityToken): T | undefined {
-    const own = this.#single.get(token) ?? this.#multi.get(token)?.[0];
+    const own = this.#single?.get(token) ?? this.#multi?.get(token)?.[0];
     if (own !== undefined) {
       return own.instance === undefined ? undefined : (own.instance as T);
     }
@@ -151,7 +154,7 @@ export class ServiceRegistry implements IServiceRegistry {
    * @since 0.8.0
    */
   isCurrent<T extends object>(token: CapabilityToken, instance: T): boolean {
-    const own = this.#single.get(token) ?? this.#multi.get(token)?.[0];
+    const own = this.#single?.get(token) ?? this.#multi?.get(token)?.[0];
     if (own !== undefined) {
       return own.instance === instance;
     }
@@ -190,9 +193,9 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   getAll<T extends object>(token: CapabilityToken): readonly T[] {
-    const own = this.#multi.get(token) ?? [];
+    const own = this.#multi?.get(token) ?? [];
     const inherited = this.#parent?.getAll<T>(token) ?? [];
-    const single = this.#single.get(token);
+    const single = this.#single?.get(token);
     return [
       ...inherited,
       ...(single ? [resolveRegistration(single) as T] : []),
@@ -201,13 +204,17 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   has(token: CapabilityToken): boolean {
-    return this.#single.has(token) || this.#multi.has(token) || (this.#parent?.has(token) ?? false);
+    return (
+      this.#single?.has(token) === true ||
+      this.#multi?.has(token) === true ||
+      (this.#parent?.has(token) ?? false)
+    );
   }
 
   unregister(token: CapabilityToken): boolean {
     this.#assertMutable(token, 'unregister');
-    const hadSingle = this.#single.delete(token);
-    const hadMulti = this.#multi.delete(token);
+    const hadSingle = this.#single?.delete(token) ?? false;
+    const hadMulti = this.#multi?.delete(token) ?? false;
     const removed = hadSingle || hadMulti;
     if (removed) {
       this.#observer?.('unregister', token);
@@ -217,7 +224,7 @@ export class ServiceRegistry implements IServiceRegistry {
   }
 
   #lookup(token: CapabilityToken): Registration | undefined {
-    const own = this.#single.get(token) ?? this.#multi.get(token)?.[0];
+    const own = this.#single?.get(token) ?? this.#multi?.get(token)?.[0];
     if (own !== undefined) {
       return own;
     }
@@ -230,23 +237,25 @@ export class ServiceRegistry implements IServiceRegistry {
   #store(token: CapabilityToken, registration: Registration, options?: RegisterOptions): void {
     this.#assertMutable(token, 'register');
     if (options?.multi) {
-      const providers = this.#multi.get(token) ?? [];
+      const multi = (this.#multi ??= new Map());
+      const providers = multi.get(token) ?? [];
       providers.push(registration);
-      this.#multi.set(token, providers);
+      multi.set(token, providers);
       this.#diagnosticsSink?.({ kind: 'register-multi', token });
       return;
     }
     // Conflicts are checked against this registry only: a request-scoped
     // child may deliberately shadow an application-scoped service.
-    if (this.#single.has(token) && !options?.override) {
+    const single = (this.#single ??= new Map());
+    if (single.has(token) && !options?.override) {
       throw new Error(
         `Capability '${token}' is already registered. Use { override: true } to replace it.`,
       );
     }
-    if (this.#single.has(token) && options?.override) {
+    if (single.has(token) && options?.override) {
       this.#observer?.('override', token);
     }
-    this.#single.set(token, registration);
+    single.set(token, registration);
     this.#diagnosticsSink?.({ kind: 'register-single', token });
   }
 

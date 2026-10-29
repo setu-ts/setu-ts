@@ -2,6 +2,7 @@ import { VERSION } from '../../../src/constants.ts';
 import { describe, expect, it } from 'vitest';
 import { firstDuplicatePath } from '../../../src/utils/file-writer.ts';
 import { workspaceRootFiles } from '../../../src/workspace/root-files.ts';
+import { frameworkSpecifier } from '../../../src/templates/framework-specifier.ts';
 import { WORKSPACE_MANIFEST, WORKSPACE_VERSION } from '../../../src/workspace/manifest.ts';
 import { transportSpec } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
@@ -30,6 +31,65 @@ function contentsOf(path: string): string {
 }
 
 describe('workspaceRootFiles', () => {
+  it('ignores production outputs and selects the hoisted linker only on Bun', () => {
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      const files = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime));
+      const ignored = files.find((file) => file.path === '.gitignore')!.contents;
+      expect(ignored).toContain('apps/*/build/');
+      expect(ignored.includes('apps/*/dist/')).toBe(runtime !== 'deno');
+      expect(files.find((file) => file.path === 'bunfig.toml')?.contents).toBe(
+        runtime === 'bun' ? '[install]\nlinker = "hoisted"\n' : undefined,
+      );
+    }
+  });
+  // M122: the root's test, build and deploy, measured per toolchain; the root manifest is
+  // written once, so a new workspace gets them at creation.
+  it('gives every root test, build and deploy beside dev, and ignores operator secrets', () => {
+    const expected = {
+      deno: {
+        file: 'deno.json',
+        key: 'tasks',
+        test: undefined,
+        build: `deno run -A ${frameworkSpecifier('cli', 'deno')} workspace build`,
+        deploy: `deno run -A ${frameworkSpecifier('cli', 'deno')} workspace deploy`,
+      },
+      node: {
+        file: 'package.json',
+        key: 'scripts',
+        test: 'npm run test --workspaces --if-present',
+        build: 'setu workspace build',
+        deploy: 'setu workspace deploy',
+      },
+      bun: {
+        file: 'package.json',
+        key: 'scripts',
+        test: "bun run --filter '*' test",
+        build: 'setu workspace build',
+        deploy: 'setu workspace deploy',
+      },
+    } as const;
+    for (const [runtime, want] of Object.entries(expected)) {
+      const files = workspaceRootFiles('acme', 3000, HTTP, workspaceProfile(runtime as 'deno'));
+      const root = JSON.parse(files.find((file) => file.path === want.file)!.contents) as Record<
+        string,
+        Record<string, string>
+      >;
+      expect(root[want.key], runtime).toMatchObject({ build: want.build, deploy: want.deploy });
+      // Deno's recursion includes the root, so a root `test` running it would call itself
+      // without end (measured, M122): a Deno root has none, and the README gives the command.
+      expect(root[want.key]?.['test'], runtime).toBe(want.test);
+      expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
+        workspaceProfile(runtime as 'deno').testFromRoot,
+      );
+      expect(files.find((file) => file.path === '.gitignore')!.contents).toContain(
+        'k8s/secrets/\n',
+      );
+      const readme = files.find((file) => file.path === 'README.md')!.contents;
+      expect(readme).toContain('## Test, build and deploy');
+      expect(readme).not.toContain('The root does not build all members');
+    }
+  });
+
   it('wraps port-repair guidance around the pinned command on every workspace runtime', () => {
     for (const [runtime, invocation] of [
       ['deno', `deno run -A npm:@setu-ts/cli@${VERSION}`],
@@ -101,7 +161,10 @@ describe('workspaceRootFiles', () => {
   // by reading ONE directory's manifest and never walks up, so pins living only
   // here would make every gated schematic refuse inside a member.
   it('pins no framework package at the root', () => {
-    expect(contentsOf('deno.json')).not.toContain('@setu-ts/');
+    // The import map, not the task strings: a task runs the pinned CLI (M122), which pins
+    // nothing a member imports.
+    const root = JSON.parse(contentsOf('deno.json')) as { imports?: Record<string, string> };
+    expect(JSON.stringify(root.imports ?? {})).not.toContain('@setu-ts/');
   });
 
   it('starts the workspace manifest empty, at the supported version', () => {

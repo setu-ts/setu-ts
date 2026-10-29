@@ -148,7 +148,7 @@ export function registerPasskeyRoutes(deps: PasskeyRouteDeps): void {
   deps.router.post(
     `${prefix}/register/verify`,
     ceremonyRoute(async (ctx) => {
-      const principal = ceremonies.currentPrincipal(ctx);
+      const principal = await ceremonies.currentPrincipal(ctx);
       if (principal === null) {
         return 'sign-in-required';
       }

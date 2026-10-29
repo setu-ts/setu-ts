@@ -37,6 +37,12 @@ export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
 // One bounded diagnostic line for string-only log sinks (M119g)
 export { describeError } from './errors/describe-error.ts';
+export { dispatchRealtimeFrame } from './realtime/dispatch.ts';
+export { createRealtimeHandlerErrorReporter } from './realtime/handler-errors.ts';
+export type {
+  IRealtimeHandlerErrorReporter,
+  RealtimeHandlerErrorReporterOptions,
+} from './realtime/handler-errors.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';
@@ -104,6 +110,7 @@ export type {
 
 // Request identity and cross-package state keys
 export {
+  installRequestIdentityGuard,
   replaceLocale,
   replacePrincipal,
   replaceTenant,
@@ -207,7 +214,11 @@ export type {
   ProviderOptions,
   ServiceScope,
   ValueProvider,
+  InjectionToken,
+  ContainerToken,
+  InjectEntry,
 } from './container.ts';
+export { createToken } from './container.ts';
 
 // Plugin contract
 export type {
@@ -715,3 +726,6 @@ export type {
   ReconnectMode,
   ReconnectSupervisorOptions,
 } from './reconnect/reconnect-supervisor.ts';
+
+/** Strict dotenv parser shared by config loading and workspace deploy (M122). */
+export { parseEnv } from './env-file.ts';

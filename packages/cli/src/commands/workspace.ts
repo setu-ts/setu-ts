@@ -33,6 +33,8 @@ import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import { transportSpec } from '../workspace/transport.ts';
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
+import type { CommandRunner } from '../utils/run-command.ts';
+import { runWorkspaceBuild, runWorkspaceDeploy } from './workspace-ops.ts';
 
 /** Dependencies reached by workspace maintenance commands. */
 export interface WorkspaceCommandDependencies {
@@ -42,6 +44,10 @@ export interface WorkspaceCommandDependencies {
   readonly error: (message: string) => void;
   readonly portAvailable?: PortProbe;
   readonly interrupt?: AbortSignal;
+  /** The CLI's clock, for the timestamp image tag outside a git repository. */
+  readonly now?: () => number;
+  /** Runs `docker`, `kind`, `kubectl` and `git` for `build` and `deploy`. */
+  readonly runCommand?: CommandRunner;
 }
 
 /**
@@ -99,10 +105,13 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
       .filter((member) => member.devtoolPort !== undefined)
       .map((member) => ({
         path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
-        contents: renderDevEntry({
-          devtoolPort: member.devtoolPort!,
-          port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
-        }),
+        contents: renderDevEntry(
+          {
+            devtoolPort: member.devtoolPort!,
+            port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
+          },
+          manifest.runtime,
+        ),
       })),
     ...manifest.members.map((member) => ({
       path: joinPath('apps', member.name, DISCOVERY_MODULE),
@@ -114,13 +123,29 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
   ];
 }
 
-/** Runs `setu workspace ports --reallocate`. */
+/** Runs `setu workspace ports --reallocate`, `setu workspace build` or `setu workspace deploy`. */
 export async function runWorkspaceCommand(
   args: ParsedArgs,
   deps: WorkspaceCommandDependencies,
 ): Promise<number> {
+  const operation = args.positionals[0];
+  if (operation === 'build' || operation === 'deploy') {
+    const opsDeps = {
+      fs: deps.fs,
+      cwd: deps.cwd,
+      log: deps.log,
+      error: deps.error,
+      now: deps.now ?? (() => 0),
+      ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
+    };
+    const rest = { ...args, positionals: args.positionals.slice(1) };
+    return operation === 'build'
+      ? await runWorkspaceBuild(rest, opsDeps)
+      : await runWorkspaceDeploy(rest, opsDeps);
+  }
   if (args.flags['help'] === true || args.flags['h'] === true) {
     deps.log(`Usage: ${PROGRAM_NAME} workspace ports --reallocate [--dir <path>] [--dry-run]`);
+    deps.log(`       ${PROGRAM_NAME} workspace build|deploy --help`);
     return EXIT_OK;
   }
   if (args.positionals[0] !== 'ports' || args.flags['reallocate'] !== true) {

@@ -44,6 +44,48 @@ const seed = {
 };
 
 describe('M101f lifecycle refusals and allocation', () => {
+  for (const member of [false, true]) {
+    it(`upgrades a captured Deno entry to the Node ${member ? 'member' : 'standalone'} rendering without moving its port`, async () => {
+      const fs = createFakeFs();
+      const error = createRecorder();
+      const deps = { fs, log: () => {}, error: error.sink };
+      if (member) {
+        expect(await runNewCommand(parseArgs(['ws', '--workspace']), { ...deps, cwd: '/' })).toBe(
+          0,
+        );
+        expect(
+          await runAppCommand(parseArgs(['app', 'a', '--devtool', '--devtool-port', '5123']), {
+            ...deps,
+            dir: '/ws',
+          }),
+        ).toBe(0);
+      } else {
+        expect(
+          await runNewCommand(parseArgs(['ws', '--devtool', '--devtool-port', '5123']), {
+            ...deps,
+            cwd: '/',
+          }),
+        ).toBe(0);
+      }
+      const project = member ? '/ws/apps/a' : '/ws';
+      const older = devEntryVariants(5123, member)[2]!;
+      await fs.writeFile(`${project}/main.dev.ts`, new TextEncoder().encode(older));
+      expect(
+        await runDevtoolCommand(parseArgs(['enable', ...(member ? ['a'] : [])]), {
+          ...deps,
+          cwd: '/ws',
+          portAvailable: () => {
+            throw new Error('must retain its recorded port');
+          },
+        }),
+        error.text(),
+      ).toBe(0);
+      const entry = fs.read(`${project}/main.dev.ts`);
+      expect(entry).toContain('port: 5123,');
+      expect(entry).toContain('npx @setu-ts/cli@');
+      expect(entry).not.toMatch(/Deno\.|process\./);
+    });
+  }
   it('retains a standalone entry port without probing again when availability changes', async () => {
     for (const port of [4919, 4920, 6200]) {
       for (const entry of devEntryVariants(port, false)) {
@@ -73,7 +115,7 @@ describe('M101f lifecycle refusals and allocation', () => {
             },
           }),
         ).toBe(0);
-        const current = renderDevEntry({ devtoolPort: port });
+        const current = renderDevEntry({ devtoolPort: port }, 'deno');
         // Either way the recorded port is kept and the file ends up current: an
         // unchanged current entry is left alone, a 0.8.0 entry is upgraded in place.
         expect(fs.read('/ws/shop/main.dev.ts')).toBe(current);
@@ -117,10 +159,13 @@ describe('M101f lifecycle refusals and allocation', () => {
       }),
     ).toBe(0);
     expect(fs.read('/ws/apps/orders/main.dev.ts')).toBe(
-      renderDevEntry({
-        devtoolPort: 5123,
-        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
-      }),
+      renderDevEntry(
+        {
+          devtoolPort: 5123,
+          port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+        },
+        'deno',
+      ),
     );
     expect(log.text()).toContain('updated /ws/apps/orders/main.dev.ts');
   });
@@ -236,9 +281,8 @@ describe('M101f lifecycle refusals and allocation', () => {
     }
   });
 
-  it('names Node, Bun and Workers before looking for a Deno project', async () => {
+  it('names Bun and Workers before looking for a supported project', async () => {
     for (const [runtime, files] of [
-      ['node', { '/ws/package.json': '{"scripts":{"start":"node main.ts"}}' }],
       ['bun', { '/ws/package.json': '{"scripts":{"start":"bun main.ts"}}' }],
       [
         'cloudflare-workers',
@@ -357,10 +401,13 @@ describe('M101f lifecycle refusals and allocation', () => {
       }),
     ).toBe(0);
     expect(fs.read('/ws/apps/orders/main.dev.ts')).toBe(
-      renderDevEntry({
-        devtoolPort: 6000,
-        port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
-      }),
+      renderDevEntry(
+        {
+          devtoolPort: 6000,
+          port: { symbol: 'SERVICE_PORT', from: './src/discovery/services.ts' },
+        },
+        'deno',
+      ),
     );
     expect(log.text()).toContain('updated /ws/apps/orders/main.dev.ts');
   });

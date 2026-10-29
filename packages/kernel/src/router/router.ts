@@ -44,6 +44,13 @@ export interface RouteEntry {
    * route registered after it.
    */
   wildcards: number;
+  /**
+   * The developer's parameter names, in pattern order. Hono sees the pattern
+   * with each parameter renamed to the kernel's own `p0`, `p1`, …, and
+   * {@linkcode decodeParams} maps the captured values back to these names, so
+   * no developer-chosen name is ever a key on Hono's parameter object.
+   */
+  paramNames: readonly string[];
   /** Plugin that registered this route, if it was registered by a plugin. */
   owner?: string;
 }
@@ -72,14 +79,16 @@ export interface RouteRegistrationEvent {
   readonly middlewareCount: number;
 }
 
-// Hono imports — use LinearRouter (not the default SmartRouter) because the
+// Hono imports — use TrieRouter (not the default SmartRouter) because the
 // kernel's tie-break (§3.6) needs Hono to return EVERY overlapping candidate
 // for a path so it can re-rank them by static-segment count + registration
-// order. LinearRouter matches routes linearly and yields all candidates;
-// it also never raises RegExpRouter's UnsupportedPathError on overlapping
-// param patterns. Extracted params are strings either way.
+// order. TrieRouter yields all candidates and never raises RegExpRouter's
+// UnsupportedPathError on overlapping param patterns, like the LinearRouter
+// M22 chose; unlike it, TrieRouter compiles routes into a tree at registration
+// instead of re-parsing every pattern on every request (13-20% of request CPU
+// on Bun, 2026-10-28). Extracted params are strings either way.
 import { Hono } from 'hono';
-import { LinearRouter } from 'hono/router/linear-router';
+import { TrieRouter } from 'hono/router/trie-router';
 import type { Context as HonoContext, Next as HonoNext } from 'hono';
 
 /**
@@ -115,18 +124,22 @@ const EMPTY_PARAMS: Record<string, string> = Object.freeze({});
  * @param raw - Hono's raw param record
  * @returns The decoded params, or `null` when a value carries a malformed escape
  */
-function decodeParams(raw: Record<string, string>): Record<string, string> | null {
+function decodeParams(
+  raw: Record<string, string>,
+  names: readonly string[],
+): Record<string, string> | null {
   let params: Record<string, string> | undefined;
-  // `Object.keys`, not `for...in`: own enumerable properties only. Hono
-  // currently builds its params with a null prototype, so `for...in` happens
-  // to be equivalent — verified, not assumed — but that is an undocumented
-  // internal of a dependency, and if it ever became a `{}` literal a polluted
-  // `Object.prototype` would start injecting route params on every match. The
-  // `Object.entries` form this replaced was immune by construction; keeping
-  // that property costs nothing, since `keys` allocates one array where
-  // `entries` allocated one array plus a pair per key.
-  for (const key of Object.keys(raw)) {
-    const value = raw[key]!;
+  // Only the kernel's own keys are read, by index, so the shape of Hono's
+  // object — null-prototype or a plain `{}`, which TrieRouter uses after a
+  // `*` segment — cannot matter: an inherited `constructor` or `toString`
+  // there answered every request with a 500 (security re-audit N6).
+  for (let index = 0; index < names.length; index++) {
+    const value = raw[internalParameterKey(index)];
+    // An optional parameter the request omitted has no value.
+    if (value === undefined) continue;
+    const name = names[index]!;
+    // Two parameters sharing a name keep the first value, as before.
+    if (params !== undefined && Object.hasOwn(params, name)) continue;
     let decoded: string;
     if (value.includes('%')) {
       try {
@@ -137,15 +150,179 @@ function decodeParams(raw: Record<string, string>): Record<string, string> | nul
     } else {
       decoded = value;
     }
-    (params ??= {})[key] = decoded;
+    (params ??= {})[name] = decoded;
   }
   return params ?? EMPTY_PARAMS;
+}
+
+/** The kernel's own parameter keys, built once per index rather than per request. */
+const INTERNAL_PARAMETER_KEYS: string[] = [];
+
+/**
+ * The key a route's `index`-th parameter has on Hono's parameter object.
+ *
+ * @param index - The parameter's position in its pattern
+ * @returns `p` followed by the index
+ */
+function internalParameterKey(index: number): string {
+  return (INTERNAL_PARAMETER_KEYS[index] ??= `p${index}`);
+}
+
+/**
+ * Renames every `:name` parameter in a pattern to the kernel's own key, keeping
+ * a final `?`, and returns the developer's names in pattern order.
+ *
+ * @param pattern - The pattern with a leading slash, already inside the grammar
+ * @returns The renamed pattern and the original names
+ */
+function internalParameters(pattern: string): {
+  readonly pattern: string;
+  readonly names: readonly string[];
+} {
+  const names: string[] = [];
+  const renamed = pattern
+    .split('/')
+    .map((segment) => {
+      if (segment.charCodeAt(0) !== 58) return segment;
+      const optional = segment.endsWith('?');
+      const key = internalParameterKey(names.length);
+      names.push(segment.slice(1, optional ? -1 : undefined));
+      return optional ? `:${key}?` : `:${key}`;
+    })
+    .join('/');
+  return { pattern: renamed, names };
+}
+
+/**
+ * A `:name{…}` parameter — Hono's regular-expression constraint syntax. Refused
+ * at registration: it is not part of the kernel's route grammar, the kernel's
+ * static-over-parameter ranking does not model it, and under TrieRouter a
+ * constraint that can match `/` (`/files/:path{.+}/download`) costs time
+ * quadratic in the path's segment count — an 8 KB path blocked the event loop
+ * for ~313 ms (security audit F2).
+ */
+const REGEX_PARAMETER = /(?:^|\/):[^/]*\{/;
+
+/**
+ * A route parameter name: LinearRouter's `:\w+` before 0.11.0, so `:1st` is a
+ * name as it was. `__proto__` is excluded: the kernel builds `ctx.params` as a
+ * plain object, where that name would hit the inherited setter rather than
+ * become a parameter.
+ */
+const PARAMETER_NAME = /^\w+$/;
+
+/**
+ * Names the first part of a pattern outside the route grammar — static
+ * segments, `:name` parameters, a final optional `:name?`, `*` segments and a
+ * final `prefix*` — or returns `undefined` for a pattern inside it. These
+ * shapes were never documented, and each routes differently under TrieRouter
+ * than it did under LinearRouter (security re-audit N4), so they are refused
+ * at registration rather than left to route somewhere unexpected.
+ *
+ * @param path - The pattern with a leading slash
+ * @returns Why the pattern is refused, or `undefined`
+ */
+function unsupportedPatternReason(path: string): string | undefined {
+  if (path === '/') return undefined;
+  const segments = path.slice(1).split('/');
+  const last = segments.length - 1;
+  for (let index = 0; index <= last; index++) {
+    const segment = segments[index]!;
+    // A trailing slash leaves one final empty segment, which is fine.
+    if (segment === '') {
+      if (index === last) continue;
+      return 'an empty segment (`//`)';
+    }
+    if (segment.charCodeAt(0) === 58) {
+      const optional = segment.endsWith('?');
+      const name = segment.slice(1, optional ? -1 : undefined);
+      if (!PARAMETER_NAME.test(name) || name === '__proto__') {
+        return `the parameter name '${name}' (use letters, digits and '_'; not '__proto__')`;
+      }
+      if (optional && index !== last) {
+        return 'an optional parameter that is not the final segment';
+      }
+      continue;
+    }
+    if (segment.includes('?')) return `'?' outside a final optional parameter`;
+    if (segment.includes('*') && segment !== '*') {
+      const finalPrefix = index === last && segment.indexOf('*') === segment.length - 1;
+      if (!finalPrefix)
+        return `the wildcard segment '${segment}' ('*' must be a whole segment or end the final one)`;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Joins a group prefix and a path with exactly one `/` between them. The path
+ * `/` (or an empty path) is the prefix itself, as it always was.
+ *
+ * @param prefix - The group prefix
+ * @param path - The path registered inside the group
+ * @returns The joined pattern
+ */
+function joinGroupPath(prefix: string, path: string): string {
+  if (path === '/' || path === '') return prefix;
+  const head = prefix.endsWith('/') ? prefix.slice(0, -1) : prefix;
+  return path.charCodeAt(0) === 47 ? head + path : `${head}/${path}`;
+}
+
+/**
+ * The pattern as Hono registers it: Hono prefixes a pattern written without a
+ * leading slash (`admin` → `/admin`), so the kernel's duplicate check keys on
+ * that spelling too — `admin` and `/admin` are one route (security re-audit N2).
+ *
+ * @param path - The pattern as the caller wrote it
+ * @returns The pattern with a leading slash
+ */
+function withLeadingSlash(path: string): string {
+  return path.charCodeAt(0) === 47 ? path : `/${path}`;
+}
+
+/**
+ * The pattern handed to TrieRouter. LinearRouter, which the kernel matched with
+ * before 0.11.0, ignored a trailing slash written after a parameter pattern —
+ * `/users/:id/` answered `/users/42` exactly as `/users/:id` did — so such a
+ * pattern is registered without it, and the request-side rule in
+ * {@linkcode Router.match} supplies the slash-terminated spelling. A static
+ * pattern keeps its slash: `/reports/` never answered `/reports` (re-audit N3).
+ *
+ * @param path - The pattern with a leading slash
+ * @returns The pattern TrieRouter should match
+ */
+function honoPattern(path: string): string {
+  return path.length > 1 &&
+    path.charCodeAt(path.length - 1) === 47 &&
+    path.includes(':') &&
+    !path.includes('*')
+    ? path.slice(0, -1)
+    : path;
+}
+
+/**
+ * Returns the request path without one trailing slash, or `undefined` when it
+ * has none to drop (the root `/` keeps its slash).
+ *
+ * The kernel calls `router.match()` directly, bypassing Hono's `strict: false`
+ * handling, so it applies the rule LinearRouter gave it before 0.11.0: a
+ * request may carry ONE extra trailing slash — `/users/` reaches a route
+ * registered as `/users` — while a static route registered WITH a trailing
+ * slash answers only that spelling (`/reports` does not reach `/reports/`).
+ * TrieRouter matches exactly, so {@linkcode Router.match} also matches this
+ * trimmed path and ranks both candidate sets together.
+ *
+ * @param path - The request path
+ * @returns The path minus one trailing slash, or `undefined`
+ */
+function withoutTrailingSlash(path: string): string | undefined {
+  return path.length > 1 && path.charCodeAt(path.length - 1) === 47 ? path.slice(0, -1) : undefined;
 }
 
 export class Router implements IRouterApi {
   readonly #routes: RouteEntry[] = [];
   #index = 0;
-  readonly #hono = new Hono({ strict: false, router: new LinearRouter() });
+  readonly #hono = new Hono({ strict: false, router: new TrieRouter() });
   /** Maps `${method} ${path}` → the kernel's RouteEntry. */
   readonly #entryMap = new Map<string, RouteEntry>();
   readonly #owner: () => string | undefined;
@@ -167,7 +344,22 @@ export class Router implements IRouterApi {
   }
 
   #registerMethod(method: HttpMethod, path: string, route: RouteHandler | RouteDefinition): void {
-    const key = `${method} ${path}`;
+    const key = `${method} ${withLeadingSlash(path)}`;
+    if (REGEX_PARAMETER.test(path)) {
+      throw new Error(
+        `Route '${key}' uses a regular-expression parameter (':name{…}'), which the router does ` +
+          `not support. Use ':name' or '*' and validate the value in the handler or with ` +
+          `@setu-ts/validation-plugin.`,
+      );
+    }
+    const unsupported = unsupportedPatternReason(withLeadingSlash(path));
+    if (unsupported !== undefined) {
+      throw new Error(
+        `Route '${key}' uses ${unsupported}, which the router does not support. Route patterns ` +
+          `are static segments, ':name' parameters, a final optional ':name?', '*' segments and ` +
+          `a final 'prefix*'.`,
+      );
+    }
     const existing = this.#entryMap.get(key);
     if (existing !== undefined) {
       // Name the FIRST claimant. The message used to give the pattern and the
@@ -179,7 +371,10 @@ export class Router implements IRouterApi {
     }
     const definition: RouteDefinition = typeof route === 'function' ? { handler: route } : route;
     const owner = this.#owner();
-    const segments = parsePattern(path);
+    // Ranked on the slash-normalized spelling, as Hono registers it: parsed raw,
+    // `:id` lost its colon and counted as a static segment (PR #518 review).
+    const segments = parsePattern(withLeadingSlash(path));
+    const internal = internalParameters(withLeadingSlash(path));
     // Hoist per-request work to registration time (AI_GUIDELINES §14): parse
     // the pattern once here and keep only the static count the tie-break reads.
     const entry: RouteEntry = {
@@ -189,6 +384,7 @@ export class Router implements IRouterApi {
       index: this.#index++,
       statics: staticSegmentCount(segments),
       wildcards: wildcardSegmentCount(segments),
+      paramNames: internal.names,
       ...(owner === undefined ? {} : { owner }),
     };
     this.#routes.push(entry);
@@ -227,7 +423,11 @@ export class Router implements IRouterApi {
     interface HonoOn {
       on(method: string, path: string, handler: HonoOnHandler): Response | Promise<Response>;
     }
-    (this.#hono as unknown as HonoOn).on(method.toUpperCase(), path, stubHandler as HonoOnHandler);
+    (this.#hono as unknown as HonoOn).on(
+      method.toUpperCase(),
+      honoPattern(internal.pattern),
+      stubHandler as HonoOnHandler,
+    );
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -305,14 +505,22 @@ export class Router implements IRouterApi {
     // honoMatch shape: [[[handler, routeInfo], params], ...]
     // honoMatch[0] is the flat array of candidates.
     // Each candidate: [[handler, routeInfo], params] where routeInfo = {basePath, path, method}.
-    const honoMatch = this.#hono.router.match(method, path);
-
-    // Extract candidates from honoMatch[0].
     type HonoCandidate = [
       handlerRouteTuple: [unknown, Record<string, unknown>],
       params: Record<string, string>,
     ];
-    const candidatesRaw = honoMatch[0] as unknown as HonoCandidate[];
+    let candidatesRaw = this.#hono.router.match(method, path)[0] as unknown as HonoCandidate[];
+    // A request may carry one extra trailing slash, as under LinearRouter: the
+    // routes matching the path without it join the SAME candidate set and are
+    // ranked together. Retrying only when nothing matched let a wildcard that
+    // happens to match `/admin/` win over the specific `/admin` (re-audit N1).
+    const trimmed = withoutTrailingSlash(path);
+    if (trimmed !== undefined) {
+      const lenient = this.#hono.router.match(method, trimmed)[0] as unknown as HonoCandidate[];
+      if (lenient.length > 0) {
+        candidatesRaw = candidatesRaw.length === 0 ? lenient : [...candidatesRaw, ...lenient];
+      }
+    }
 
     // Hono always returns honoMatch[0] as an array; early-return when empty
     // covers the case where no routes are registered or nothing matches.
@@ -328,27 +536,24 @@ export class Router implements IRouterApi {
     if (candidatesRaw.length === 1) {
       const [handlerRouteTuple, rawParams] = candidatesRaw[0]!;
       const entry = (handlerRouteTuple[0] as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY];
-      const params = decodeParams(rawParams);
+      const params = decodeParams(rawParams, entry.paramNames);
       // A malformed escape means this route does not match, mirroring the
       // multi-candidate path's `continue` when every candidate is dropped.
       return params === null ? null : { definition: entry.definition, params, entry };
     }
 
     // Build candidates array: map each Hono candidate to the kernel RouteEntry.
-    // Hono always provides well-formed routeInfo/method/path on matched
-    // candidates, and every candidate maps back to #entryMap since we
-    // register both simultaneously with identical paths.
     const candidates: Array<{
-      routePath: string;
       params: Record<string, string>;
       entry: RouteEntry;
     }> = [];
 
+    const seen = new Set<RouteEntry>();
     for (const [handlerRouteTuple, rawParams] of candidatesRaw) {
-      const routeInfo = handlerRouteTuple![1] as Record<string, unknown>;
-      const routePath = routeInfo.path as string;
-      const routeMethod = routeInfo.method as string;
-      const entry = this.#entryMap.get(`${routeMethod} ${routePath}`)!;
+      // The entry rides on the stub, as on the single-candidate path: one
+      // source for both, and no reconstructed `${method} ${path}` key that
+      // could disagree with the key the route was registered under.
+      const entry = (handlerRouteTuple[0] as unknown as { [ROUTE_ENTRY]: RouteEntry })[ROUTE_ENTRY];
       // Same decoder as the single-candidate path above (M87 review). Keeping
       // a second inline copy here let the two disagree on identity as well as
       // duplicating the rule: this one built a fresh `{}` for a param-less
@@ -356,11 +561,18 @@ export class Router implements IRouterApi {
       // whether `params` was mutable depended on how many routes happened to
       // match. A malformed escape means this candidate does not match,
       // mirroring the old matcher's `null` return.
-      const params = decodeParams(rawParams as Record<string, string>);
+      // One route can arrive twice — through the path and through the path
+      // without its trailing slash; the first arrival stands for it. A set,
+      // so the check stays linear in how many routes match one path.
+      if (seen.has(entry)) {
+        continue;
+      }
+      seen.add(entry);
+      const params = decodeParams(rawParams as Record<string, string>, entry.paramNames);
       if (params === null) {
         continue;
       }
-      candidates.push({ routePath, params, entry });
+      candidates.push({ params, entry });
     }
 
     // Every candidate may have been dropped for a malformed param escape.
@@ -442,9 +654,7 @@ class GroupRouter implements IRouterApi {
   }
 
   #resolvePath(path: string): string {
-    // Normalize: ensure single slash between prefix and path
-    const p = path === '/' ? '' : path;
-    return this.#prefix + p;
+    return joinGroupPath(this.#prefix, path);
   }
 
   get(path: string, route: RouteHandler | RouteDefinition): void {
@@ -476,7 +686,7 @@ class GroupRouter implements IRouterApi {
   }
 
   group(prefix: string, configure: (router: IRouterApi) => void): void {
-    this.#parent.group(this.#prefix + prefix, configure);
+    this.#parent.group(joinGroupPath(this.#prefix, prefix), configure);
   }
 
   listRoutes(): readonly RouteInfo[] {

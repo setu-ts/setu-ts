@@ -35,6 +35,7 @@ const _moduleOptions: ModuleOptions = {};
 
 /** The complete published surface, in barrel order. */
 const EXPECTED_VALUES = [
+  'Service',
   'MetadataStore',
   // M110a authorization policies
   'Ability',

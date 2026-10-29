@@ -1,4 +1,5 @@
 import { denoBinary, spawnProcess, tempDir } from '../../../../test/node-helpers.ts';
+import { tmpdir } from 'node:os';
 import * as nodeFs from 'node:fs/promises';
 /**
  * The gate for the generated workspace dev runner.
@@ -23,11 +24,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { workspaceDevRunner } from '../../src/workspace/dev-runner.ts';
 import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
 import { unusedPort } from '../fixtures/generated-project.ts';
+import { eventually, launchGroup, liveProcesses } from '../fixtures/process-group.ts';
 
 let root = '';
 
 beforeEach(async () => {
-  root = await tempDir({ prefix: 'setu-dev-runner-' });
+  root = await tempDir({ dir: tmpdir(), prefix: 'setu-dev-runner-' });
 });
 
 afterEach(async () => {
@@ -39,7 +41,140 @@ interface Member {
   readonly name: string;
   readonly port: number;
   readonly dependsOn?: readonly string[];
+  readonly devtoolPort?: number;
 }
+
+/** Writes observable npm members without changing the generated runner under test. */
+async function writeNodeHandoffWorkspace(members: readonly Member[]): Promise<void> {
+  await nodeFs.writeFile(`${root}/setu.workspace.json`, JSON.stringify({ members }));
+  const runner = workspaceDevRunner(workspaceProfile('node'));
+  await nodeFs.mkdir(`${root}/scripts`, { recursive: true });
+  await nodeFs.writeFile(`${root}/${runner.path}`, runner.contents);
+  for (const member of members) {
+    const dir = `${root}/apps/${member.name}`;
+    await nodeFs.mkdir(dir, { recursive: true });
+    await nodeFs.writeFile(
+      `${dir}/package.json`,
+      JSON.stringify({
+        private: true,
+        scripts: { dev: 'node server.mjs dev', 'start:dev': 'node server.mjs start:dev' },
+      }),
+    );
+    await nodeFs.writeFile(
+      `${dir}/server.mjs`,
+      `import { writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+writeFileSync(${JSON.stringify(`${root}/${member.name}-env.json`)}, JSON.stringify({
+  pid: process.pid,
+  script: process.argv[2],
+  member: process.env.SETU_DEVTOOL_MEMBER,
+  id: process.env.SETU_DEVTOOL_SESSION_ID,
+  key: process.env.SETU_DEVTOOL_SESSION_KEY,
+}));
+createServer((_request, response) => response.end('ok')).listen(${member.port}, '127.0.0.1');
+`,
+    );
+  }
+}
+
+describe('the npm-profile dev runner, forwarding the devtool environment', () => {
+  it(
+    'hands the pair to the selected child, blanks its sibling and keeps both in the launcher group',
+    { timeout: 45_000 },
+    async () => {
+      await writeNodeHandoffWorkspace([
+        { name: 'a', port: await unusedPort(), devtoolPort: await unusedPort() },
+        { name: 'b', port: await unusedPort() },
+      ]);
+      const pair = {
+        SETU_DEVTOOL_MEMBER: 'a',
+        SETU_DEVTOOL_SESSION_ID: Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString(
+          'hex',
+        ),
+        SETU_DEVTOOL_SESSION_KEY: Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString(
+          'hex',
+        ),
+      };
+      const launched = launchGroup(process.execPath, ['scripts/dev.mjs'], root, pair);
+      try {
+        await eventually(
+          async () =>
+            (await nodeFs.stat(`${root}/a-env.json`).then(
+              () => true,
+              () => false,
+            )) &&
+            (await nodeFs.stat(`${root}/b-env.json`).then(
+              () => true,
+              () => false,
+            )),
+          'Both npm children must report their startup environment',
+        );
+        const selected = JSON.parse(await nodeFs.readFile(`${root}/a-env.json`, 'utf8')) as {
+          pid: number;
+          script: string;
+          member: string;
+          id: string;
+          key: string;
+        };
+        const sibling = JSON.parse(
+          await nodeFs.readFile(`${root}/b-env.json`, 'utf8'),
+        ) as typeof selected;
+        expect(selected.script).toBe('dev');
+        expect(selected.member).toBe('a');
+        expect(selected.id === pair.SETU_DEVTOOL_SESSION_ID).toBe(true);
+        expect(selected.key === pair.SETU_DEVTOOL_SESSION_KEY).toBe(true);
+        expect(sibling.script).toBe('start:dev');
+        for (const field of ['member', 'id', 'key'] as const)
+          expect(sibling[field] === '').toBe(true);
+        if (process.platform === 'linux') {
+          const processes = await liveProcesses();
+          for (const pid of [selected.pid, sibling.pid]) {
+            expect(processes.find((row) => row.pid === pid)?.group).toBe(launched.pid);
+          }
+        }
+        expect(launched.output().includes(pair.SETU_DEVTOOL_SESSION_ID)).toBe(false);
+        expect(launched.output().includes(pair.SETU_DEVTOOL_SESSION_KEY)).toBe(false);
+      } finally {
+        await launched.stop();
+      }
+    },
+  );
+
+  for (const row of [
+    { member: 'absent', expected: 'which setu.workspace.json does not carry.' },
+    { member: 'b', expected: 'but that member carries no devtoolPort.' },
+  ]) {
+    it(`refuses selection ${row.member} before spawning any child`, async () => {
+      await writeNodeHandoffWorkspace([
+        { name: 'a', port: await unusedPort(), devtoolPort: await unusedPort() },
+        { name: 'b', port: await unusedPort() },
+      ]);
+      const launched = launchGroup(process.execPath, ['scripts/dev.mjs'], root, {
+        SETU_DEVTOOL_MEMBER: row.member,
+        SETU_DEVTOOL_SESSION_ID: '',
+        SETU_DEVTOOL_SESSION_KEY: '',
+      });
+      try {
+        let code: number | null | undefined;
+        void launched.status.then((value) => {
+          code = value;
+        });
+        await eventually(() => code !== undefined, 'Invalid selection must fail before spawning');
+        expect(code).not.toBe(0);
+        expect(launched.output()).toContain(row.expected);
+        for (const name of ['a', 'b'])
+          expect(
+            await nodeFs.stat(`${root}/${name}-env.json`).then(
+              () => true,
+              () => false,
+            ),
+          ).toBe(false);
+      } finally {
+        await launched.stop();
+      }
+    });
+  }
+});
 
 /**
  * Writes a workspace whose members are observable fixtures.
@@ -142,8 +277,7 @@ async function observed(): Promise<string | undefined> {
 }
 
 /**
- * The npm profile's members: a `package.json` whose `start` script serves, as
- * the npm runner (`node scripts/dev.mjs`) starts each member with `npm start`.
+ * The npm profile's members expose start:dev, which the root development runner uses.
  */
 async function writeNodeWorkspace(
   members: readonly Member[],
@@ -162,7 +296,11 @@ async function writeNodeWorkspace(
     await nodeFs.mkdir(`${root}/apps/${member.name}`, { recursive: true });
     await nodeFs.writeFile(
       `${root}/apps/${member.name}/package.json`,
-      JSON.stringify({ name: member.name, private: true, scripts: { start: 'node server.mjs' } }),
+      JSON.stringify({
+        name: member.name,
+        private: true,
+        scripts: { 'start:dev': 'node server.mjs' },
+      }),
     );
   }
   await nodeFs.writeFile(

@@ -32,7 +32,8 @@ Register a config provider for that token; add the class to the existing control
 
 - Decorators only capture metadata; routes become active when the plugin registers their classes.
 - These are standard decorators: `@Params(...)` goes on the method with one source per argument.
-  Constructor injection uses class-level `@Inject(...)`, one token per constructor argument.
+  Constructor injection uses class-level `@Inject(...)`; a controller is a singleton, so it takes
+  `'scoped'` services as `@Params(Service(token))`.
 - A plain handler return is serialized as JSON. `Ctx()` supplies request context for returning a
   response writer directly; an explicit writer result takes precedence over response-shaping
   metadata.
