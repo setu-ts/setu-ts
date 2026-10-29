@@ -312,7 +312,8 @@ setu devtool enable                     # a standalone project that already exis
 ```
 
 After a Node manifest changes, run `npm install`; the CLI prints this next step and never runs it.
-Run the development entry with `npm run dev` on Node or `deno task dev` on Deno. The entry reads
+The devtool launcher runs the development entry with `npm run dev` on Node or `deno task dev` on
+Deno, supplying the session pair; run without it, use `start:dev` as usual. The entry reads
 `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` through the runtime services and refuses to
 start when either is absent or malformed. It never generates, writes or prints a pair. Older
 CLI-owned entries remain recognized and are upgraded when enabled again or reallocated.

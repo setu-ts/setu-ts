@@ -833,9 +833,14 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
         ? '  npm install && npx wrangler dev'
         : runtime === 'bun'
           ? '  bun install && bun run start:dev'
-          : chosen.flags['devtool'] !== undefined
-            ? '  npm install && npm run dev'
-            : '  npm install && npm run start:dev',
+          : '  npm install && npm run start:dev',
   );
+  // `dev` runs main.dev.ts, which exits without the launcher's session pair, so
+  // it is named as the launcher's command rather than printed as a next step.
+  if (chosen.flags['devtool'] !== undefined) {
+    deps.log(
+      `  With the devtool, the launcher runs ${runtime === 'deno' ? '`deno task dev`' : '`npm run dev`'} and supplies the session credentials`,
+    );
+  }
   return EXIT_OK;
 }

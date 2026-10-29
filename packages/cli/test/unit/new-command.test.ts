@@ -21,7 +21,11 @@ describe('Node standalone devtool scaffold', () => {
     expect(manifest.devDependencies['@setu-ts/diagnostics-plugin']).toBe(`^${VERSION}`);
     expect(manifest.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
     expect(real.fs.read('/work/shop/main.dev.ts')).not.toMatch(/Deno\.|process\./);
-    expect(real.out.text()).toContain('npm install && npm run dev');
+    // The runnable next step needs no credentials; `dev` is named as the launcher's.
+    expect(real.out.text()).toContain('npm install && npm run start:dev');
+    expect(real.out.text()).toContain(
+      'With the devtool, the launcher runs `npm run dev` and supplies the session credentials',
+    );
     const planned = dry.out.lines
       .filter((line) => line.startsWith('would create '))
       .map((line) => line.slice('would create '.length));

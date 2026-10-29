@@ -31,8 +31,10 @@ describe('Node workspace devtool scaffold', () => {
     expect(h.fs.writes).not.toContain('/ws/package.json');
     expect(h.fs.read('/ws/scripts/dev.mjs')).toContain('SETU_DEVTOOL_MEMBER');
     expect(h.fs.read('/ws/apps/a/main.dev.ts')).toContain('npx @setu-ts/cli@');
-    expect(h.out.text()).toContain('npm install');
-    expect(h.out.text()).toContain('npm run dev');
+    expect(h.out.text()).toContain('cd apps/a && npm run start:dev');
+    expect(h.out.text()).toContain(
+      'With the devtool, from the workspace root: SETU_DEVTOOL_MEMBER=a npm run dev',
+    );
   });
 });
 

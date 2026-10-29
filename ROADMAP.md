@@ -16083,13 +16083,16 @@ through the `dev` script, and teardown across the npm/shell/tsx/node chain.
       member under the generated runner, pairs with each, renews, and proves that no other member's
       environment holds the pair
 - [x] The design security review delta, and the committed-tree audit record in the PR
-- [x] Docs that say Deno-only today, corrected: - `docs/runtime-deployment.md:336` -
-      `docs/diagnostics-protocol.md:17` - `docs/diagnostics-security-review.md:189` -
-      `packages/cli/README.md:274,307` - `packages/diagnostics-plugin/AGENT_CARD.md:36` - the
-      runtime and diagnostics-plugin READMEs - `PUBLIC_API.md` (`--devtool` row) - the CHANGELOG
-
-      Plus the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher.
-
+- [x] Docs that say Deno-only today, corrected:
+  - `docs/runtime-deployment.md:336`
+  - `docs/diagnostics-protocol.md:17`
+  - `docs/diagnostics-security-review.md:189`
+  - `packages/cli/README.md:274,307`
+  - `packages/diagnostics-plugin/AGENT_CARD.md:36`
+  - the runtime and diagnostics-plugin READMEs
+  - `PUBLIC_API.md` (`--devtool` row)
+  - the CHANGELOG
+  - the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher
 - [x] **ROADMAP.md**: this section and the Progress Tracking row `126`
 
 ---

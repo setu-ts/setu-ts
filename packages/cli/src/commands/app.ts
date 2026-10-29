@@ -805,7 +805,15 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // after being told to run `bun install`.
   deps.log(
     `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
-      `${profile.runScript(devtoolRequested ? 'dev' : 'start:dev')}`,
+      `${profile.runScript('start:dev')}`,
   );
+  // The member's `dev` entry exits without the launcher's session pair, so the
+  // devtool instruction runs the workspace root's runner, as `devtool enable` prints.
+  if (devtoolRequested) {
+    deps.log(
+      `  With the devtool, from the workspace root: SETU_DEVTOOL_MEMBER=${name} ` +
+        `${profile.runScript('dev')} (the launcher supplies the session credentials)`,
+    );
+  }
   return EXIT_OK;
 }
