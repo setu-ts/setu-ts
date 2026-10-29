@@ -552,7 +552,16 @@ async function applyManifest(
     context,
     'apply',
     ...(apply.secret === true
-      ? ['--server-side', '--field-manager=setu', '-o', 'jsonpath={.metadata.resourceVersion}']
+      ? // --force-conflicts: deploy owns `<member>-env`. A Secret first created by a client-side
+        // apply (or by hand) has its keys owned by another field manager, and taking those keys
+        // over is otherwise refused as a conflict (measured on kind, M122).
+        [
+          '--server-side',
+          '--field-manager=setu',
+          '--force-conflicts',
+          '-o',
+          'jsonpath={.metadata.resourceVersion}',
+        ]
       : []),
     '-f',
     '-',

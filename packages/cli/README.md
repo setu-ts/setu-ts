@@ -190,8 +190,9 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   the generated manifest already sets (sibling hosts, the transport URL). Their values go in
   `k8s/secrets/<member>/.env`, read with the same parser as the app's `.env`. Deploy refuses, naming
   every missing variable, and refuses a values file that git tracks. Each member with values gets a
-  `<member>-env` Secret, applied with `kubectl apply --server-side` from stdin with base64 `data:` —
-  a client-side apply would store every value in plaintext in an annotation. Generated Deployments
+  `<member>-env` Secret, applied with `kubectl apply --server-side --force-conflicts` from stdin
+  (deploy owns that Secret, so it takes over keys an earlier hand-made one set) with base64 `data:`
+  — a client-side apply would store every value in plaintext in an annotation. Generated Deployments
   read it through `envFrom`; explicit `env:` entries still win. When a Secret's contents change, a
   member already running is restarted (`kubectl rollout restart`), so a rotated value reaches its
   pods even when the tag and manifest are unchanged. Values files, `.env.example` and

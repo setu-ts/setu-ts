@@ -324,7 +324,7 @@ describe('setu workspace deploy', () => {
       'kind load docker-image portal:abc1234 --name dev',
       'kubectl --context kind-dev apply -f -',
       'kubectl --context kind-dev -n ws get secret portal-env --ignore-not-found -o jsonpath={.metadata.resourceVersion}',
-      'kubectl --context kind-dev apply --server-side --field-manager=setu -o jsonpath={.metadata.resourceVersion} -f -',
+      'kubectl --context kind-dev apply --server-side --field-manager=setu --force-conflicts -o jsonpath={.metadata.resourceVersion} -f -',
       'kubectl --context kind-dev -n ws get deployments -o name',
       'kubectl --context kind-dev apply -f -',
       'kubectl --context kind-dev -n ws rollout status deployment/orders --timeout=120s',
