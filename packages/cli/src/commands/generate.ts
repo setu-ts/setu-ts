@@ -64,6 +64,8 @@ import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 
+import { createCommandRunner, type CommandRunner } from '../utils/run-command.ts';
+import { kernelShadows, readPagePaths } from '../utils/react-router-routes.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 
 /**
@@ -72,6 +74,8 @@ import { cliInvocation } from '../templates/project-files.ts';
 export interface GenerateDependencies {
   /** The filesystem to detect plugins on and write generated files through. */
   readonly fs: IFileSystem;
+  /** Runs the installed React Router route-tree command. */
+  readonly runCommand?: CommandRunner;
   /** The project directory to operate on (absolute). */
   readonly cwd: string;
   /** Wall-clock milliseconds, for timestamped output. */
@@ -331,6 +335,20 @@ export async function runGenerateCommand(
     return EXIT_USAGE;
   }
 
+  // Read unconditionally, like `detectPlugins` above: the `module` schematic
+  // needs it to render its aggregate barrel, and branching on the schematic name
+  // here would put a second dispatch beside the registry.
+  const diagnosis = await diagnoseProject(
+    deps.fs,
+    dir,
+    installed,
+    module === undefined ? undefined : { module },
+  );
+
+  if (schematicName === 'job' && diagnosis.starter?.arms.has('queue-plugin') === true) {
+    requiredPlugin = 'queue-plugin';
+  }
+
   // Resolve project-owned code and plugin gates only after the target has been
   // established as a readable project. Otherwise a missing plugin or custom
   // module can mask the more fundamental wrong-directory refusal.
@@ -346,6 +364,11 @@ export async function runGenerateCommand(
       `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
         `which is not installed in ${escapeName(dir)}.`,
     );
+    if (diagnosis.starter?.arms.has(requiredPlugin) === true) {
+      deps.error(
+        `${diagnosis.starter.symbol} already runs ${requiredPlugin}; add installs its package and wires the generated handlers into setu.config.ts.`,
+      );
+    }
     deps.error(
       `Run \`${cliInvocation(runtime)} add ${requiredPlugin.replace(
         /-plugin$/,
@@ -359,15 +382,6 @@ export async function runGenerateCommand(
     deps.error(`Could not resolve schematic: ${escapeName(schematicName)}`);
     return EXIT_ERROR;
   }
-  // Read unconditionally, like `detectPlugins` above: the `module` schematic
-  // needs it to render its aggregate barrel, and branching on the schematic name
-  // here would put a second dispatch beside the registry.
-  const diagnosis = await diagnoseProject(
-    deps.fs,
-    dir,
-    installed,
-    module === undefined ? undefined : { module },
-  );
   const { mode, modules, legacyModules } = diagnosis;
   const scan = diagnosis;
   if (module !== undefined) {
@@ -407,6 +421,32 @@ export async function runGenerateCommand(
     deps.error(`If both existed, ${escapeName(conflict.consequence)}.`);
     deps.error(`Choose a different name, or ${escapeName(conflict.remedy)}.`);
     return EXIT_ERROR;
+  }
+
+  if (
+    installed.has('react-router-plugin') &&
+    ['route', 'controller', 'module'].includes(schematicName)
+  ) {
+    const base = `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner());
+    if (!pages.ok) {
+      deps.error(
+        `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
+      );
+    } else {
+      const page = pages.paths.find((path) => kernelShadows(base, path));
+      if (page !== undefined) {
+        deps.error(
+          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(page)} (${escapeName(pages.files.get(page)!)}).`,
+        );
+        deps.error(
+          schematicName === 'module'
+            ? `Choose another module name: a module's routes are mounted at /<module name>.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module api, then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
+        );
+        return EXIT_ERROR;
+      }
+    }
   }
 
   const options: SchematicOptions = {

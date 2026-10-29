@@ -47,7 +47,12 @@ import {
   standaloneOverlayRefusal,
   starterOptionLiteral,
 } from '../templates/broker.ts';
-import { starterOptionValue, withStarterOption } from './starter-options.ts';
+import {
+  starterOptionValue,
+  withStarterOption,
+  withStarterArmEntry,
+  starterLiteralEntries,
+} from './starter-options.ts';
 import { stringFlag } from '../args.ts';
 import { BRIEF_BEGIN } from '../agents/brief-file.ts';
 import { detectTargetRuntime, RuntimeMarkerUnreadableError } from '../utils/runtime-detector.ts';
@@ -58,7 +63,13 @@ import { detectPlugins } from '../utils/plugin-detector.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
-import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import {
+  seamFiles,
+  seamLocalImports,
+  withPluginOptionSeams,
+  STARTER_SEAMS,
+  starterSeamLiteral,
+} from '../templates/seam.ts';
 import { renderPluginCall } from '../utils/render-call.ts';
 import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
@@ -1039,10 +1050,7 @@ export function withPluginWiring(
   // A barrel symbol already bound, or the barrel already imported, means the file
   // carries wiring this edit cannot see the whole of: fail closed to guidance
   // rather than declare an identifier twice.
-  for (const item of seam?.imports ?? []) {
-    if (visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`)) return undefined;
-    if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
-  }
+  if (barrelImportPlan(source, seam?.imports ?? [], false) === undefined) return undefined;
 
   const prefix =
     (importedBinding === undefined ? `${providerImport}\n` : '') +
@@ -1063,6 +1071,126 @@ export function withPluginWiring(
     ? renderPluginCall(factory, callArgs, before.length)
     : `${factory}(${callArgs})`;
   return `${withImport.slice(0, insertion)}${call},${ownLine ? `\n${before}` : ' '}${withImport.slice(insertion)}`;
+}
+
+/** Shared fail-closed barrel admission for inline and starter composition. */
+function barrelImportPlan(
+  source: string,
+  imports: AddSeam['imports'],
+  reuse: boolean,
+): { text: string; at: number } | undefined {
+  const visible = maskComments(source);
+  if (visible === undefined) return undefined;
+  const without = maskImportDeclarations(visible);
+  const missing: string[] = [];
+  for (const item of imports) {
+    const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
+    if (mentioned) {
+      if (!reuse) return undefined;
+      const declarations = [
+        ...visible.matchAll(/\bimport\s*\{([^}]+)\}\s*from\s*(['"])([^'"]+)\2\s*;?/g),
+      ].filter((match) => match[3] === item.from);
+      if (
+        declarations.length !== 1 ||
+        !item.symbols.every((symbol) =>
+          declarations[0]![1]!
+            .split(',')
+            .map((name) => name.trim())
+            .includes(symbol),
+        )
+      )
+        return undefined;
+    } else {
+      if (item.symbols.some((symbol) => referencesIdentifier(visible, symbol))) return undefined;
+      missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
+    }
+  }
+  let at = 0;
+  for (let i = 0; i < visible.length; i++) if (visible[i] !== without[i]) at = i + 1;
+  // maskImportDeclarations blanks only the clause through `from`, not its specifier.
+  // Finish that statement before choosing the end of its line as the insertion point.
+  if (at > 0) {
+    const specifier = /^[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[ \t]*;?/.exec(
+      visible.slice(at),
+    );
+    if (specifier === null) return undefined;
+    at += specifier[0].length;
+    const lineEnd = source.indexOf('\n', at);
+    at = lineEnd < 0 ? source.length : lineEnd;
+  }
+  // Side-effect imports carry no `from` clause, but can still be the last import.
+  for (const match of visible.matchAll(
+    /^[ \t]*import[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[^\r\n]*/gm,
+  )) {
+    at = Math.max(at, match.index + match[0].length);
+  }
+  return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
+}
+
+/** Existing top-level keys must bind the same expressions; nested mentions do not count. */
+function carriesStarterOptions(existing: string, literal: string): boolean {
+  const actual = starterLiteralEntries(existing);
+  const expected = starterLiteralEntries(literal);
+  const normalize = (value: string): string =>
+    value.replace(/\s+/g, '').replace(/,([}\])])/g, '$1');
+  return (
+    actual !== undefined &&
+    expected !== undefined &&
+    expected.every(([key, value]) => {
+      const entry = actual.find(([name]) => name === key);
+      return entry !== undefined && normalize(entry[1]) === normalize(value);
+    })
+  );
+}
+
+/** Merges seam options and selected transport atomically; uncertain edits retain guidance. */
+function withStarterWiring(
+  source: string,
+  bare: string,
+  seam: AddSeam | undefined,
+  transportArgs: string | undefined,
+): string | undefined {
+  const starter = composingStarter(source);
+  const arm = starter?.arms.get(bare);
+  if (arm === undefined) return undefined;
+  const shape = STARTER_SEAMS.find((entry) => entry.plugin === bare);
+  const key = shape?.arm ?? (bare === 'messaging-plugin' ? 'messaging' : undefined);
+  if (key === undefined) return undefined;
+  const plan = barrelImportPlan(source, seam?.imports ?? [], true);
+  if (plan === undefined) return undefined;
+  let result = source;
+  if (seam !== undefined && shape !== undefined) {
+    const existing = starterOptionValue(result, key);
+    if (existing === undefined) {
+      const edited = withStarterOption(result, key, starterSeamLiteral(shape));
+      if (edited === undefined) return undefined;
+      result = edited;
+    } else if (!carriesStarterOptions(existing, seam.args)) {
+      for (const [property, value] of shape.entries) {
+        const edited = withStarterArmEntry(result, key, property, value);
+        if (edited === undefined) return undefined;
+        result = edited;
+      }
+    }
+  }
+  if (transportArgs !== undefined) {
+    const existing = starterOptionValue(result, key);
+    if (existing === undefined) {
+      const edited = withStarterOption(result, key, transportArgs);
+      if (edited === undefined) return undefined;
+      result = edited;
+    } else if (!carriesStarterOptions(existing, transportArgs)) {
+      const entries = starterLiteralEntries(transportArgs);
+      if (entries === undefined) return undefined;
+      for (const [property, value] of entries) {
+        const edited = withStarterArmEntry(result, key, property, value);
+        if (edited === undefined) return undefined;
+        result = edited;
+      }
+    }
+  }
+  if (result === source) return undefined;
+  return `${result.slice(0, plan.at)}${plan.text}${result.slice(plan.at)}`;
 }
 
 /**
@@ -1542,12 +1670,10 @@ export async function runAddCommand(
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
-    const key =
-      bare === 'messaging-plugin' ? 'messaging' : bare === 'queue-plugin' ? 'queue' : undefined;
     const wired = configRetargeted
       ? undefined
-      : starter && key !== undefined && transportArgs !== undefined
-        ? withStarterOption(config, key, transportArgs)
+      : composingStarter(config)?.arms.has(bare) === true
+        ? withStarterWiring(config, bare, artifactSeam, transportArgs)
         : withPluginWiring(
             config,
             bare,
@@ -1782,7 +1908,13 @@ export async function runAddCommand(
     configWired &&
     transportArgs !== undefined &&
     (bare === 'messaging-plugin' || bare === 'queue-plugin');
-  if (!transportWritten) printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+  const wiredArm =
+    configWired && configSource !== undefined
+      ? composingStarter(configSource)?.arms.get(bare)
+      : undefined;
+  if (wiredArm !== undefined) deps.log(`wired ${wiredArm} in setu.config.ts`);
+  if (!transportWritten && wiredArm === undefined)
+    printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`

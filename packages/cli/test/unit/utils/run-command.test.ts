@@ -12,6 +12,16 @@ const run = createCommandRunner();
 const node = process.execPath;
 
 describe('createCommandRunner (real children)', () => {
+  it('cancels a running child through the caller signal', async () => {
+    const controller = new AbortController();
+    const result = run(node, ['-e', 'setInterval(() => {}, 1000)'], {
+      cwd: process.cwd(),
+      signal: controller.signal,
+    });
+    controller.abort();
+    expect((await result).code).toBe(1);
+  });
+
   it('captures stdout, stderr and the exit code', async () => {
     const result = await run(
       node,
