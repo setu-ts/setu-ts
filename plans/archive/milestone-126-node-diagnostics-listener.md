@@ -458,6 +458,38 @@ Also measured: `new Request('http://h/v1/./s').url` is `http://h/v1/s`. Any path
   Checking the emitted text proves the renderer, not the feature (`devtool-e2e.test.ts:1-15`).
 - **Test home:** `packages/cli/test/e2e/devtool-e2e.test.ts`.
 
+### 3.13 A connection flood evicts the oldest idle socket instead of locking the client out (audit F1)
+
+- **Decision:** `server.maxConnections` is no longer set; Node's refusal of every connection past
+  the cap is what let 32 held partial-request sockets lock the paired client out (audit F1, contrary
+  to T8). The listener tracks its sockets itself, in arrival order, each marked busy while a request
+  is being handled (from `'request'` until the response's `'finish'` or `'close'`, after which the
+  socket moves to the back as most recently used). When a new connection arrives and 32 are open,
+  the oldest socket that is NOT busy is destroyed — a partial-request socket, a slowloris socket or
+  an idle keep-alive socket — and the new one is admitted. Only when all 32 are busy is the new
+  socket destroyed. The cap value stays `NODE_LISTENER_SERVER_OPTIONS.maxConnections` (32).
+- **Why:** the client sends its request as soon as it connects, so its socket is busy while it is
+  served and cannot be evicted; a flood can at most cost it an idle keep-alive socket, after which
+  its reconnect evicts a flood socket. Open sockets stay bounded at 32, which was the cap's purpose.
+  Deno has no cap at all (measured), so this keeps the bound without reintroducing a lockout Deno
+  does not have.
+- **Test home:** `node-local-diagnostics-listener-real.test.ts`: 32 held partial-request sockets,
+  then 8 real-client `snapshot()` calls all succeed (the auditor's F1 probe, now a regression test);
+  open sockets never exceed 32 (counted by a delegating host); the 33rd-connection test becomes
+  "evicts the oldest idle socket". Unit (fake sockets): eviction order, busy sockets never evicted,
+  all-busy refuses the newcomer, recency move after a response.
+
+### 3.14 `Expect` requests take the ordinary path (audit F2)
+
+- **Decision:** the listener registers `'checkContinue'` and `'checkExpectation'` and hands both to
+  the same request path as `'request'`. Node then sends neither an interim `100 Continue` nor its
+  own `417 Expectation Failed`; the request is mapped, framed and answered exactly like any other.
+- **Why:** measured on Deno 2.9.6: both `Expect: 100-continue` and an unknown expectation reach the
+  handler with no interim response. Node's defaults answered outside the fixed refusal family and
+  fingerprinted the runtime (audit F2). Taking the ordinary path gives byte parity.
+- **Test home:** two conformance rows (`Expect: 100-continue`, `Expect: <token>`), `served` on both
+  runtimes, and the raw reply asserted to contain no `100 Continue` and no `417`.
+
 ### 3.12 Release shape
 
 - **Decision:** No public API changes: no new export, no changed signature, no new capability token.
@@ -601,6 +633,8 @@ fresh context and checks each obligation with a positive control.
 | Reflection / fingerprinting in refusals            | Node default `clientError` and node-server error writers.                                  | Fixed bytes (§3.3); node-server not on the path (§3.1); every refusal row asserts the exact bytes; a canary in the request line and headers never appears in any reply.       |
 | Resource exhaustion (slowloris, connection flood)  | Node keeps sockets until its timeouts are checked.                                         | §3.3 options; slowloris and 33rd-connection tests; close bounded (§3.5).                                                                                                      |
 | T1/T11 credential handling in the launcher handoff | Credentials now pass through npm → sh → tsx → node, and through the Node workspace runner. | Entry reads via `runtime.env` and never prints (§3.7); runner blanks siblings (§3.10, `/proc` assertion); the canary suite (security review case 10) runs on Node.            |
+| Connection flood (T8, audit F1)                    | A connection cap that refuses newcomers locks the paired client out.                       | §3.13 oldest-idle eviction; regression test with 32 held sockets and 8/8 client snapshots served.                                                                             |
+| Interim and expectation replies (audit F2)         | Node's default `100 Continue` / `417` sit outside the fixed refusal family.                | §3.14; conformance rows assert neither appears.                                                                                                                               |
 | Process ownership                                  | The Node runner detached members from the launcher's group.                                | No `detached` under selection (§3.10); e2e asserts the group and that no process survives a group SIGTERM (§3.11).                                                            |
 | Production image                                   | Node image could carry the connector.                                                      | §3.9 assertions on the Dockerfile and on `dist/main.js`.                                                                                                                      |
 
