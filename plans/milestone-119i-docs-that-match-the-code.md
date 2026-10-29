@@ -36,7 +36,9 @@ links whose target heading is renamed at release.
 
 The documentation batch held until M121–M124 landed, and the agent-brief gaps those milestones left,
 are taken here rather than on separate branches. None has a register row. Each is documentation that
-does not match the code, except §3.18–§3.20, which change what `setu agents` writes.
+does not match the code, except §3.18–§3.20, which change what `setu agents` writes — the one
+behaviour change in this letter, so §0's "no behaviour change" holds for everything else, and
+§3.13's single `### Fixed` entry gains a `### Changed` entry for `@setu-ts/cli` (§5).
 
 - **In scope (folded):** the generated agent brief lists no development command (§3.18) and its
   full-stack and messaging rules predate M120, M121, M123 and #524 (§3.19, §3.20); two agent cards
@@ -91,26 +93,34 @@ does not match the code, except §3.18–§3.20, which change what `setu agents`
 | card cap                             | `test/agent-card-gate.test.ts` — 2560 bytes; the auth-plugin card is 2349                                                                                                                                                                                                                                                                     |
 | M124 auth options                    | `packages/auth-plugin/src/interfaces/index.ts:651` (`signInPage`), `:774` (`providers`, empty = password-only), `:790` (`sessionStamp`)                                                                                                                                                                                                       |
 | starter `messaging`, `queue`         | `packages/starters/microservice-starter/src/options.ts:23,28`; the full-stack starter passes them through                                                                                                                                                                                                                                     |
-| M123 styling                         | `packages/cli/src/templates/full-stack-ui-files.ts` — `app/app.css`, `app/components/ui/button.tsx`, `app/components/ui/card.tsx`; `cn` imported from the `cn` package (`full-stack-app-files.ts:500`)                                                                                                                                        |
+| M123 styling                         | `packages/cli/src/templates/full-stack-app-files.ts:784` emits `app/app.css`; `full-stack-ui-files.ts` emits `app/components/ui/button.tsx` and `card.tsx`; `cn` imported from the `cn` package (`full-stack-app-files.ts:500`)                                                                                                               |
 | #524 page collision                  | `packages/cli/src/commands/generate.ts:434-440`                                                                                                                                                                                                                                                                                               |
 | create forms                         | probed 2026-10-30 on published `@setu-ts/create` 0.10.0: `npm create @setu-ts x -- <flags>`, `pnpm create @setu-ts x <flags>`, `bun create @setu-ts x <flags>` each reach `setu new` (`--help` prints its usage; `--template full-stack --dry-run` lists 41 files). Yarn is not installed here, so it is not documented                       |
 | wrong script name                    | `docs/react-router-dev.md:17`                                                                                                                                                                                                                                                                                                                 |
 | JSR rationale                        | `docs/react-router-dev.md:20`; `packages/cli/src/templates/full-stack-build-files.ts:340-345` (comment); `packages/react-router-plugin/src/dev/vite-dev-externals.ts` JSDoc gives the identity reason                                                                                                                                         |
 | plugin publishing                    | `docs/custom-plugins.md:548-603` (`deno.json`, `deno add jsr:`); first-party manifests, e.g. `packages/cache-plugin/package.json`                                                                                                                                                                                                             |
 | homepage install block               | `website/src/pages/index.astro:74-79`; `website/test/landing-positioning.test.ts`                                                                                                                                                                                                                                                             |
-| examples guide                       | `docs/examples.md:1-7` (proof framing), deep dives `:110-416`; pins `test/guide-fence-compiler.test.ts:116`, `test/snippet-validation.test.ts:44`                                                                                                                                                                                             |
+| examples guide                       | `docs/examples.md:1-7` (proof framing), capability table `:88-108`, deep dives `:110-416`; fence pins in `test/guide-fence-compiler.test.ts` (per-guide entries `:51-80, :116`, aggregate `:258-264`); `test/snippet-validation.test.ts:31-45` maps fixtures to guides (no counts)                                                            |
+| Workers scripts                      | `packages/cli/src/templates/project-files.ts:1826-1843` — `dev: wrangler dev`, `deploy`; no `start`, `start:dev`, `start:debug`; `full-stack.ts:341-360` builds on every `wrangler dev`                                                                                                                                                       |
+| `dev` meanings                       | Deno full-stack `dev` without `--watch` (`project-files.ts:1309-1312`); devtool `dev` runs `main.dev.ts` (`:1365-1368`; Node `devtool/npm-manifest.ts:7`); Workers `wrangler dev`                                                                                                                                                             |
+| workspace root brief                 | `packages/cli/src/agents/render.ts:86-90` (`cd apps/<member> && start`); root runner calls `start:dev` (`workspace/dev-runner.ts:225-226`); root budget 4096 bytes                                                                                                                                                                            |
+| setu new next step                   | `packages/cli/src/commands/new.ts:829-837` prints `npm install && npm run start:dev` (Bun, Deno, Workers forms)                                                                                                                                                                                                                               |
+| identity-matched values              | `packages/exceptions/src/middleware/error-handler.ts:189` (`instanceof HttpError`); `packages/common/src/request-identity.ts` (module-private symbols); `packages/common/src/http.ts:602-612` (`Symbol.for` where copies must agree)                                                                                                          |
+| library generator                    | `packages/cli/src/workspace/library.ts:100-105, 145-160` — no framework dependency pinned, source export, workspace only                                                                                                                                                                                                                      |
+| homepage count                       | `website/src/pages/index.astro:99` says 48; `scripts/release-packages.ts` `PUBLISHED_PACKAGES` has 52                                                                                                                                                                                                                                         |
+| website gate                         | `.github/workflows/website.yml` builds and tests the site on `docs/**` and `website/**` changes; `website/` is its own pnpm project                                                                                                                                                                                                           |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                                               | Resolution (picked side)                                                                                       | Doc deliverable (same PR)                             |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| C1  | `docs/cli.md`, CHANGELOG, CLI README, PUBLIC_API say `<module>-<name>-service`; the generator writes `<module>.<name>-service`                         | The generator (and its printed guidance) is right                                                              | §3.6 sites                                            |
-| C2  | React Router "v7" in four places vs "8" in the card, the peer range and other docs                                                                     | 8                                                                                                              | §3.11 sites                                           |
-| C3  | ROADMAP / register: `swagger-ui-dist` "goes in the workspace ROOT `deno.json`"                                                                         | The measurement (§1): an `npm:` entry in the member's or the root `deno.json`, then `deno install` at the root | §3.3 wording; the ROADMAP row text is left as history |
-| C4  | `PUBLIC_API.md:5026` "Node and Bun were not measured" vs the worker-pool README, which already dropped it                                              | The README                                                                                                     | §3.14                                                 |
-| C5  | Resilience README: timeout does not cancel; `resilience.ts` JSDoc and `timeout.ts`: it aborts the signal                                               | The code                                                                                                       | §3.15                                                 |
-| C6  | `docs/react-router-dev.md:17` says `npm run dev` / `bun run dev`; `docs/cli.md` and the generated scripts say `start:dev` (Node and Bun have no `dev`) | The generated scripts: `start:dev` on every runtime                                                            | §3.23                                                 |
-| C7  | `docs/react-router-dev.md:20` and the template comment say Vite cannot resolve a JSR import; since M111 every `@setu-ts` package is on npm             | The identity reason `vite-dev-externals.ts` gives                                                              | §3.23                                                 |
+| #   | Conflict                                                                                                                       | Resolution (picked side)                                                                                       | Doc deliverable (same PR)                             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| C1  | `docs/cli.md`, CHANGELOG, CLI README, PUBLIC_API say `<module>-<name>-service`; the generator writes `<module>.<name>-service` | The generator (and its printed guidance) is right                                                              | §3.6 sites                                            |
+| C2  | React Router "v7" in four places vs "8" in the card, the peer range and other docs                                             | 8                                                                                                              | §3.11 sites                                           |
+| C3  | ROADMAP / register: `swagger-ui-dist` "goes in the workspace ROOT `deno.json`"                                                 | The measurement (§1): an `npm:` entry in the member's or the root `deno.json`, then `deno install` at the root | §3.3 wording; the ROADMAP row text is left as history |
+| C4  | `PUBLIC_API.md:5026` "Node and Bun were not measured" vs the worker-pool README, which already dropped it                      | The README                                                                                                     | §3.14                                                 |
+| C5  | Resilience README: timeout does not cancel; `resilience.ts` JSDoc and `timeout.ts`: it aborts the signal                       | The code                                                                                                       | §3.15                                                 |
+| C6  | `docs/react-router-dev.md:17` says `npm run dev` / `bun run dev`; `docs/cli.md` and the generated scripts say `start:dev`      | The generated scripts: `start:dev` on Node, Bun and Deno; Workers develops with `npm run dev` (wrangler dev)   | §3.23, §3.24                                          |
+| C7  | Seven sites say Vite fails because framework packages are JSR imports; since M111 they are npm specifiers                      | The identity reason, at every site §3.23 lists                                                                 | §3.23                                                 |
 
 ## 3. Design decisions
 
@@ -269,125 +279,203 @@ that line before writing it.
 
 ### 3.18 Agent brief — the development commands
 
-- **Change:** `facts.ts` gathers `start:dev` and `start:debug` too, in the order `start`,
-  `start:dev`, `start:debug`, `check`, `test`, `test:e2e`, `dev`, `build`, `db:migrate`. `render.ts`
-  adds a short gloss to the three entry commands only, which an agent cannot tell apart from their
-  names: `start` — the production entry; `start:dev` — the development loop, used while editing;
-  `start:debug` — the development entry with the inspector. A command the project lacks is not
-  listed, as today.
-- **Why here:** M120 made `start:dev` the development loop after M116 fixed the list; every project
-  except a Deno full-stack one gets a brief with no development command.
-- **Test home:** `render-brief.test.ts` scaffolds each runtime's `rest` and `full-stack` project
-  with `runCli`, gathers facts from the fake file system, and asserts the brief carries the
-  runtime's `start:dev` line with its gloss (the real-path shape `budget.test.ts` already uses), and
-  that a project without the script does not get the line. `budget.test.ts` adds the two names to
-  its list.
+- **Change (project brief):** `facts.ts` gathers `start:dev` and `start:debug` too, in the order
+  `start`, `start:dev`, `start:debug`, `check`, `test`, `test:e2e`, `dev`, `build`, `db:migrate`,
+  and keeps each gathered command's script body (an internal field of `ProjectFacts`, read only by
+  `render.ts`). `render.ts` glosses the entry commands an agent cannot tell apart by name:
+  - `start` — "production entry; on Node, run build first" when the runtime is Node, else
+    "production entry" (Deno's full-stack `start` builds itself; Bun runs source).
+  - `start:dev` — "development loop; use this while editing".
+  - `start:debug` — "development entry with the inspector".
+  - `dev`, by its body: contains `wrangler dev` → "development loop on workerd (builds first)";
+    contains `main.dev.ts` → "development entry for a devtool session"; otherwise, when `start:dev`
+    is also listed → "development entry without file watching; prefer start:dev"; otherwise no
+    gloss. A command the project lacks is not listed, as today.
+- **Change (workspace root brief):** `renderWorkspaceRoot` replaces `cd apps/<member> && <start>`
+  with `cd apps/<member> && <start:dev>` glossed as the member's development loop, keeps a `start`
+  line glossed as production, and glosses the root `dev` as "every member's development entry, in
+  dependency order" (the root runner already calls each member's `start:dev`,
+  `workspace/dev-runner.ts:225-226`). Workspaces are Node, Bun or Deno only.
+- **Why here:** M120 made `start:dev` the development loop after M116 fixed the list. Node and Bun
+  briefs list no development command; Deno lists only `dev` where a full-stack or devtool project
+  has one; Workers lists `dev` (wrangler dev) unexplained.
+- **Test home:** `render-brief.test.ts` scaffolds `rest` and `full-stack` per runtime with `runCli`
+  and gathers facts from the fake file system (the shape `budget.test.ts` uses). Expectations: Node,
+  Bun and Deno carry `start:dev` and `start:debug` with their glosses; Deno full-stack carries both
+  `start:dev` and `dev`, with the `dev` "prefer start:dev" gloss; a Deno `--devtool` project's `dev`
+  carries the devtool gloss; Cloudflare Workers carries no `start`, `start:dev` or `start:debug`
+  line and carries `dev` with the workerd gloss. `workspace-brief.test.ts` asserts the root member
+  line names `start:dev` for Node and Deno manifests. `budget.test.ts` adds the two names and keeps
+  the 12288-byte project and 4096-byte root budgets.
 
-### 3.19 Agent brief — the full-stack rule
+### 3.19 Agent brief — the full-stack rules
 
-- **Text (applies when `react-router-plugin` is installed):** route modules live under app/routes/;
-  loaders read framework services through the context keys `setu.config.ts` declares; never
-  introduce module-level caches. Develop with the start:dev script, where Vite serves the routes and
-  nothing is built; the start script needs a build first. Style with Tailwind classes and the
-  components in app/components/ui/, merging class names with cn from the cn package. Kernel routes
-  cannot take a page's path — generation refuses them — so give API routes their own prefix.
-- **Constraint:** the rule's prose is checked against the exports of the packages it lists
-  (`rule-blocks.test.ts`), so paths, script names and `cn` are written plainly, as the existing
-  rules write paths, not as backticked identifiers.
-- **Test home:** `rule-blocks.test.ts` (identifier check passes; the rule names start:dev and
-  app/components/ui/); `budget.test.ts` keeps every brief within 12288 bytes.
+- **Change:** the one `full-stack` block becomes two, both requiring `react-router-plugin`:
+  - `full-stack` (runtime is not `cloudflare-workers`): route modules live under app/routes/;
+    loaders read framework services through the context keys `setu.config.ts` declares; never
+    introduce module-level caches. Develop with the start:dev script: Vite serves the routes in the
+    same process and nothing is built. Production runs the built output (Node: build, then start;
+    Deno's start builds; Bun: build the frontend, then start). Style with Tailwind classes and the
+    components in app/components/ui/, merging class names with cn from the cn package. A kernel
+    route on a page's path takes precedence over the page (setu generate refuses one), so give API
+    routes their own prefix such as /api/.
+  - `full-stack-workers` (runtime is `cloudflare-workers`): the same route, loader, cache, styling
+    and prefix sentences; develop with the dev script (wrangler dev, which builds the client and
+    server first; there is no in-process Vite loop) and ship with the deploy script.
+- **Constraint:** rule prose is checked against the exports of the packages each block lists
+  (`rule-blocks.test.ts`), so paths, script names and cn are written plainly, as existing rules
+  write paths. The implementer runs the test and adjusts wording, never the test.
+- **Test home:** `rule-blocks.test.ts` — its rule-selection table gains a Workers +
+  `react-router-plugin` row selecting `full-stack-workers` and not `full-stack`; the Workers text
+  does not name start:dev and does name the dev script; identifier checks pass.
 
 ### 3.20 Agent brief — the messaging rule
 
-- **Text:** publish integration events through `CAPABILITIES.MESSAGING` with versioned topics;
-  declare consumers in the messaging options — `MessagingPlugin`'s, or the starter's messaging arm
-  when `setu.config.ts` composes through a starter (`setu add messaging` writes the arm there,
-  M121).
-- **Test home:** `rule-blocks.test.ts`.
+- **Change:** `applies` widens to `messaging-plugin`, `full-stack-starter` or `microservice-starter`
+  installed (both starters always register `MessagingPlugin`,
+  `packages/starters/microservice-starter/src/options.ts:17-23`; a full-stack scaffold's manifest
+  has no `messaging-plugin`). Text: publish integration events through `CAPABILITIES.MESSAGING` with
+  versioned topics; declare consumers in the messaging options — `MessagingPlugin`'s, or the
+  starter's `messaging` option when `setu.config.ts` composes through a starter.
+  `setu add messaging --broker <name>` writes that option into a generated full-stack
+  `setu.config.ts`; otherwise it prints the line to add.
+- **Test home:** `rule-blocks.test.ts` — a full-stack-starter-only composition selects `messaging`;
+  `budget.test.ts` re-checks the 12288-byte budget now that the rule appears in every full-stack
+  brief.
 
 ### 3.21 auth-plugin card — M124
 
-- **Change:** one behaviour bullet: an unauthenticated browser navigation to a guard built with a
-  `signInPage` is redirected with a `returnTo`; API requests keep the 401. One "Other options"
-  entry: a `signIn` with no providers is password-only sign-in, and `signIn.sessionStamp` ends every
-  session of a user. Existing text is shortened so the card stays within 2560 bytes.
-- **Constraint:** option names that are not exports are written so the identifier gate accepts them
-  (it allows the exports of the card's package, of `common` and of any package the card names, plus
-  a `card-allow` comment's list); the gate decides, not the author.
-- **Test home:** `test/agent-card-gate.test.ts` (cap, identifiers, fences unchanged).
+- **Change:** one behaviour bullet: a guard built with `requireAuth({ signInPage })` redirects an
+  unauthenticated browser navigation there with a `returnTo`; API requests keep the 401. One "Other
+  options" entry: `signIn` with `providers: []` is password-only sign-in; `signIn.sessionStamp`
+  reads a stamp from the user record, and changing that stamp ends every session the user holds.
+  Existing text is shortened so the card stays within 2560 bytes.
+- **Constraint:** non-export names must pass the identifier gate (exports of the card's package,
+  `common` and any package the card names, plus a `card-allow` comment list); the gate decides.
+- **Test home:** `test/agent-card-gate.test.ts`.
 
 ### 3.22 full-stack-starter card — M121
 
 - **Change:** an "Other options" entry: the microservice tier's `messaging` and `queue` options pick
-  the broker and the queue backend; `setu add messaging` and `setu add queue` write them.
+  the broker and the queue backend; `setu add messaging --broker <name>` and `setu add queue` write
+  them into a generated `setu.config.ts`.
 - **Test home:** `test/agent-card-gate.test.ts`.
 
-### 3.23 `docs/react-router-dev.md` — scaffold first
+### 3.23 `docs/react-router-dev.md` — scaffold first, and the JSR rationale everywhere
 
-- **Change:** a new first section, "In a scaffolded project": create the project
-  (`npm create @setu-ts my-app -- --template full-stack`), run `npm run start:dev`
-  (`deno task start:dev`, `bun run start:dev`), what the loop does (one application port; Vite
-  in-process on its own port; client URLs under `/__vite/` through one proxy route; route edits
-  served without a restart), and `npm run build` then `npm start` for production. The existing
-  material moves under "Wiring it by hand (an existing application)", unchanged except: the script
-  names (C6), and the JSR sentence replaced by the identity reason (C7). The template comment at
-  `full-stack-build-files.ts:340-345` gets the same correction (comment only; generated output
-  unchanged). The version sentence stays as the record of what was verified.
-- **Test home:** `pnpm run check:docs` (links and anchors). The page is not in the guide fence gate,
-  and this letter does not add it: its fences are application wiring the template already compiles.
+- **Change (guide):** a new first section, "In a scaffolded project":
+  - create: `npm create @setu-ts my-app -- --template full-stack`;
+  - develop: `npm run start:dev` (`bun run start:dev`, `deno task start:dev`); what the loop does
+    (one application port; Vite in-process on its own port; client URLs under `/__vite/` through one
+    proxy route; route edits served without a restart);
+  - production, per runtime as the generated README gives it: Node `npm run build` then `npm start`;
+    Bun `bun run build` then `bun run start`; Deno `deno task start`, which builds;
+  - Cloudflare Workers: no `dev.ts`; `npm run dev` runs `wrangler dev`, which builds first, with no
+    hot module replacement; `npm run deploy` ships. The existing material moves under "Wiring it by
+    hand (an existing application)", unchanged except the script names (C6) and the JSR sentence
+    (C7). The version sentence stays as the record of what was verified.
+- **Change (C7, every site):** the stale claim that Vite fails on Deno because packages are JSR
+  imports is replaced by the identity reason — `viteDevExternals` keeps framework packages and
+  workspace libraries resolved by the server runtime, so a route module and the entry share one
+  module instance, and context keys from `contextKeyFor()` match by identity. No measured failure is
+  claimed for today's npm specifiers. Sites: `docs/react-router-dev.md:20`;
+  `packages/react-router-plugin/src/dev/vite-dev-externals.ts:119-129` (JSDoc);
+  `PUBLIC_API.md:4913-4920`; `packages/react-router-plugin/README.md:66-70`;
+  `packages/cli/src/templates/full-stack-build-files.ts` at `:71-76` (inside the GENERATED
+  `vite.config.ts`: keep the identity reason, drop the JSR one), `:229` (JSDoc), `:333-345` (also
+  "run by its `dev` task or script" becomes "run by its start:dev script, and on Deno also by
+  `dev`"), and `:363-364` (inside the GENERATED `dev.ts`: "the start task or script builds and runs
+  main.ts" becomes "production runs the built output, not this file"); and
+  `apps/full-stack/vite.config.ts:13-19` (resolution is tsx with the repository's tsconfig paths;
+  keep the identity reason).
+- **Generated output changes** (`vite.config.ts`, `dev.ts` comments), so CLAUDE.md's scaffold rule
+  applies (§7), and any byte-identity fixture pinning those files is re-captured.
+- **Test home:** `packages/cli/test/unit/full-stack-template.test.ts` asserts the generated
+  `vite.config.ts` and `dev.ts` contain no `JSR`; `check:docs`; the closing grep in §7.
 
 ### 3.24 `docs/getting-started.md` — `npm create` first, and a full-stack path
 
 - **Change:** "Two ways to start" leads with `npm create @setu-ts my-app -- --template rest`, with
   the pnpm and Bun forms beside it (neither needs `--`; §1 probe) and `npx @setu-ts/cli new` as the
-  equivalent. A new subsection, "A full-stack project": create with `--template full-stack`, develop
-  with `npm run start:dev`, ship with `npm run build` and `npm start`; one paragraph on what each
-  does, linking the CLI guide's production build section and §3.23's page.
-- **Test home:** `test/guide-fence-compiler.test.ts` and `test/snippet-validation.test.ts` pins
-  updated to the new fence counts; `check:docs`.
+  equivalent. The next line becomes what `setu new` itself prints (`new.ts:829-837`):
+  `cd my-app && npm install && npm run start:dev`, with the Bun
+  (`bun install && bun run start:dev`), Deno (`deno task start:dev`) and Workers
+  (`npm install && npx wrangler dev`) forms; `npm run build && npm start` appears only as the
+  production path. A new subsection, "A full-stack project": create with `--template full-stack`,
+  develop with `start:dev` (Workers: `npm run dev`), production per runtime as in §3.23; one
+  paragraph on what each does, linking §3.23's page and the CLI guide's production-build section.
+- **Test home:** `test/guide-fence-compiler.test.ts` — the per-guide entry for getting-started and
+  the aggregate total (with an M119i comment line); `check:docs`.
 
-### 3.25 Website homepage — create a project
+### 3.25 Website homepage — create a project, and the package count
 
-- **Change:** the install block in `website/src/pages/index.astro` leads with "New project" and
-  `npm create @setu-ts my-app`, then the existing two lines relabelled "Existing app — Node" and
-  "Existing app — Deno".
+- **Change:** the install block in `website/src/pages/index.astro` leads with a "New project" label
+  and `npm create @setu-ts my-app`, then the existing two lines relabelled "Existing app — Node" and
+  "Existing app — Deno", reusing the block's existing `label` and `pre` markup. The capabilities
+  paragraph's "48 published packages" (`index.astro:99`) and its breakdown are corrected from
+  `scripts/release-packages.ts` `PUBLISHED_PACKAGES` (52 today), counted by kind.
 - **Test home:** `website/test/landing-positioning.test.ts` asserts the page carries
-  `npm create @setu-ts`.
+  `npm create @setu-ts`; the site build (§7).
 
 ### 3.26 `docs/custom-plugins.md` — publishing to npm
 
-- **Change:** "Publishing Your Plugin" becomes an npm package: `package.json` with `name`,
-  `"type": "module"`, `exports` (`types` and `default` from `dist`), `files`, and `@setu-ts/common`
-  in `peerDependencies` at the application's range (plus `devDependencies` to build), built with
-  `tsc`; the README example installs with `npm install @acme/my-plugin`. A new subsection, "Sharing
-  a plugin inside one workspace": `setu generate library <name>` creates `libs/<name>/`, whose
-  manifest declares the `@setu-ts` packages it imports at the members' range, linking the
-  duplicate-copy warning in `docs/plugins.md`.
-- **Why a peer:** the application owns the one `@setu-ts/common`; a plugin that brings its own copy
-  is the two-copies case `docs/plugins.md` warns about. First-party packages use `dependencies`
-  because they release in lockstep with each other.
-- **Test home:** `test/guide-fence-compiler.test.ts` and `test/snippet-validation.test.ts` pins;
-  `check:docs`.
+- **Change:** "Publishing Your Plugin" becomes an npm package:
+  - `package.json`: `name`, `"type": "module"`, `exports` (`types` and `default` from `dist`),
+    `files: ["dist"]`, a `build: "tsc"` script, every `@setu-ts` package the plugin imports at run
+    time in `peerDependencies` at the application's range, and the same in `devDependencies` to
+    build;
+  - `tsconfig.json`: `module` and `moduleResolution` `nodenext`, `declaration: true`,
+    `rootDir: "src"`, `outDir: "dist"`, `rewriteRelativeImportExtensions: true` (sources import
+    `./x.ts`, as the guide's own examples do);
+  - the README example installs with `npm install @acme/my-plugin`.
+- **Why peers:** the application must hold one copy of each framework package, because several of
+  their values are matched by identity: the exceptions error handler checks
+  `rawError instanceof HttpError` (`packages/exceptions/src/middleware/error-handler.ts:189`),
+  common keeps request state under module-private symbols
+  (`packages/common/src/request-identity.ts`), and React Router context keys from `contextKeyFor()`
+  match by identity. A plugin with its own copy throws errors the application treats as 500s and
+  reads slots the application never wrote. The guide states this in its own words; it does not link
+  `docs/plugins.md`'s optional-peer warning, which is about something else. First-party packages use
+  `dependencies` because they release in lockstep.
+- **Change (workspace):** a subsection, "Sharing a plugin inside one workspace":
+  `setu generate library <name>` (in a workspace from `setu new <name> --workspace`) creates
+  `libs/<name>/`, consumed as TypeScript source with no build; its manifest starts with no framework
+  dependency, so add each `@setu-ts` package the library imports to that manifest at the members'
+  range.
+- **Test home:** `test/guide-fence-compiler.test.ts` — the custom-plugins entry and the aggregate;
+  the JSON fences are counted as the gate already counts non-TS fences; `check:docs`.
 
 ### 3.27 `docs/examples.md` — teaching, not only proof
 
-- **Change:** the introduction says each example teaches one concept and its smoke check proves it.
-  A new "Before you start": clone the repository, `pnpm install`, Node 24; the examples run from
-  repository source, so outside it start from `npm create @setu-ts`. A new "A learning path" table
-  orders the examples (minimal → rest-api → di-decorators → database → cqrs → multi-tenant →
-  plugin-development → realtime → microservices → full-stack, then the specialised ones) with the
-  concept each teaches. Each deep dive gains **Concept** (one paragraph) and **Read, in order** (two
-  or three files, each linked, each with what to notice), keeping its run commands and proof. Each
-  `apps/<name>/README.md` gains one line pointing at its deep dive.
-- **Drift:** every file a walkthrough names is a relative link, which `check:docs` resolves; every
-  symbol a walkthrough names is grep-checked against the app at review. No new code is quoted.
-- **Test home:** `check:docs`; `test/guide-fence-compiler.test.ts` and
-  `test/snippet-validation.test.ts` pins if fences change; `test/apps-layout.test.ts` unchanged.
+- **Change (framing):** the introduction says each example teaches one concept and its smoke check
+  proves it.
+- **Change ("Before you start"):** clone the repository, `corepack enable` (the repository pins pnpm
+  through `packageManager`), `pnpm install`, Node 24; the examples run from repository source, so
+  outside the repository start from `npm create @setu-ts`.
+- **Change ("A learning path"):** a table — step, example, concept, Needs — in this order: minimal,
+  rest-api, database, di-decorators, cqrs, multi-tenant, plugin-development, graphql-demo, grpc,
+  static-site, worker-pool, full-stack, realtime (Redis), microservices (Redis for the second half),
+  realtime-clients (Node and Bun), cloudflare (Wrangler), compiled-binary. Each concept is the
+  existing "Examples by capability" row restated as what the reader learns.
+- **Change (deep dives):** each gains **Concept** (one paragraph) and **Read, in order**, which
+  replaces the existing "Read:" line and keeps its files, in order. Each file entry names the file
+  path and the symbol in plain text and says what to notice in prose that stands without opening the
+  file: on the website these links go to GitHub, which some readers cannot reach, until the deferred
+  example-rendering milestone.
+- **Change (app READMEs):** each `apps/<name>/README.md` gains one line pointing at its deep dive;
+  `apps/realtime-clients` and `apps/static-site`, which have none, get a minimal README (title, one
+  paragraph, run commands, the pointer).
+- **Evidence rule:** every Concept and every "what to notice" rests on the app's source or its
+  `smoke.ts`; the implementer's report cites the file and line for each, and review checks them. No
+  new code is quoted.
+- **Test home:** `check:docs`; `test/guide-fence-compiler.test.ts` (the examples entry and the
+  aggregate, if fences change); `test/apps-layout.test.ts` and `pnpm run check:apps` stay green with
+  the two new READMEs.
 
 ## 4. Exported surface — every symbol names its consumer
 
-**Breaking for implementors:** none. No package export changes; the one source edit is a module
-JSDoc line (§3.11).
+**Breaking for implementors:** none. No package export changes. Source edits are comments and JSDoc
+(§3.11, §3.23) and the internal `setu agents` renderer (§3.18–§3.20).
 
 | Exported symbol  | Kind | Consumer / real code path that READS it |
 | ---------------- | ---- | --------------------------------------- |
@@ -401,47 +489,51 @@ JSDoc line (§3.11).
 
 ## 5. Implementation files
 
-| File                                                                                                             | Purpose                                      |
-| ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `docs/upgrading.md`                                                                                              | §3.3, §3.4, §3.5, §3.7                       |
-| `docs/deployment.md`                                                                                             | §3.2                                         |
-| `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, `CHANGELOG.md`                                         | §3.1, §3.6, §3.9, §3.10, §3.12, §3.13, §3.14 |
-| `docs/custom-plugins.md`, `docs/programmatic-api.md`                                                             | §3.5, §3.7                                   |
-| `packages/openapi-plugin/README.md`                                                                              | §3.1, §3.3, §3.12                            |
-| `packages/service-discovery-plugin/README.md`                                                                    | §3.8                                         |
-| `packages/logger-plugin/README.md`, `packages/database-plugin/README.md`                                         | §3.9                                         |
-| `packages/*/AGENT_CARD.md` (32)                                                                                  | §3.10                                        |
-| `packages/react-router-plugin/README.md`, `packages/react-router-plugin/src/index.ts` (JSDoc), `ARCHITECTURE.md` | §3.11                                        |
-| `packages/worker-pool-plugin/README.md`                                                                          | §3.14                                        |
-| `packages/resilience-plugin/README.md`                                                                           | §3.15                                        |
-| the 8 newly gated READMEs                                                                                        | §3.16 fence repairs                          |
-| `test/package-readme-fence-compiler.test.ts`                                                                     | §3.16                                        |
-| `scripts/check-docs.ts`, `test/docs-gate.test.ts`                                                                | §3.17                                        |
-| `packages/cli/src/agents/facts.ts`, `packages/cli/src/agents/render.ts`                                          | §3.18                                        |
-| `packages/cli/src/agents/rules.ts`                                                                               | §3.19, §3.20                                 |
-| `packages/auth-plugin/AGENT_CARD.md`, `packages/starters/full-stack-starter/AGENT_CARD.md`                       | §3.21, §3.22                                 |
-| `docs/react-router-dev.md`, `packages/cli/src/templates/full-stack-build-files.ts` (comment)                     | §3.23                                        |
-| `docs/getting-started.md`                                                                                        | §3.24                                        |
-| `website/src/pages/index.astro`                                                                                  | §3.25                                        |
-| `docs/custom-plugins.md`                                                                                         | §3.26                                        |
-| `docs/examples.md`, `apps/*/README.md`                                                                           | §3.27                                        |
-| `ROADMAP.md` (M119i section), `CHANGELOG.md` (M119i entry)                                                       | §0.1                                         |
+| File                                                                                                                                                                                                                                                                                                                                               | Purpose                                      |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `docs/upgrading.md`                                                                                                                                                                                                                                                                                                                                | §3.3, §3.4, §3.5, §3.7                       |
+| `docs/deployment.md`                                                                                                                                                                                                                                                                                                                               | §3.2                                         |
+| `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, `CHANGELOG.md`                                                                                                                                                                                                                                                                           | §3.1, §3.6, §3.9, §3.10, §3.12, §3.13, §3.14 |
+| `docs/custom-plugins.md`, `docs/programmatic-api.md`                                                                                                                                                                                                                                                                                               | §3.5, §3.7                                   |
+| `packages/openapi-plugin/README.md`                                                                                                                                                                                                                                                                                                                | §3.1, §3.3, §3.12                            |
+| `packages/service-discovery-plugin/README.md`                                                                                                                                                                                                                                                                                                      | §3.8                                         |
+| `packages/logger-plugin/README.md`, `packages/database-plugin/README.md`                                                                                                                                                                                                                                                                           | §3.9                                         |
+| `packages/*/AGENT_CARD.md` (32)                                                                                                                                                                                                                                                                                                                    | §3.10                                        |
+| `packages/react-router-plugin/README.md`, `packages/react-router-plugin/src/index.ts` (JSDoc), `ARCHITECTURE.md`                                                                                                                                                                                                                                   | §3.11                                        |
+| `packages/worker-pool-plugin/README.md`                                                                                                                                                                                                                                                                                                            | §3.14                                        |
+| `packages/resilience-plugin/README.md`                                                                                                                                                                                                                                                                                                             | §3.15                                        |
+| the 8 newly gated READMEs                                                                                                                                                                                                                                                                                                                          | §3.16 fence repairs                          |
+| `test/package-readme-fence-compiler.test.ts`                                                                                                                                                                                                                                                                                                       | §3.16                                        |
+| `scripts/check-docs.ts`, `test/docs-gate.test.ts`                                                                                                                                                                                                                                                                                                  | §3.17                                        |
+| `packages/cli/src/agents/facts.ts`, `packages/cli/src/agents/render.ts`                                                                                                                                                                                                                                                                            | §3.18                                        |
+| `packages/cli/src/agents/rules.ts`                                                                                                                                                                                                                                                                                                                 | §3.19, §3.20                                 |
+| `packages/auth-plugin/AGENT_CARD.md`, `packages/starters/full-stack-starter/AGENT_CARD.md`                                                                                                                                                                                                                                                         | §3.21, §3.22                                 |
+| `docs/react-router-dev.md`, `packages/react-router-plugin/src/dev/vite-dev-externals.ts` (JSDoc), `packages/react-router-plugin/README.md`, `PUBLIC_API.md`, `packages/cli/src/templates/full-stack-build-files.ts` (comments, two of them in generated files), `apps/full-stack/vite.config.ts` (comment)                                         | §3.23                                        |
+| `docs/getting-started.md`                                                                                                                                                                                                                                                                                                                          | §3.24                                        |
+| `website/src/pages/index.astro`                                                                                                                                                                                                                                                                                                                    | §3.25                                        |
+| `docs/custom-plugins.md`                                                                                                                                                                                                                                                                                                                           | §3.26                                        |
+| `docs/examples.md`, `apps/*/README.md` (15 edited, 2 new)                                                                                                                                                                                                                                                                                          | §3.27                                        |
+| `ROADMAP.md` M119i section: the Package(s) line gains `packages/cli` (agents), the two cards, the website and the four guides, plus one bullet for the folded scope                                                                                                                                                                                | §0.1                                         |
+| `CHANGELOG.md`: the existing M119i `### Fixed` entry gains the folded documentation; a new `### Changed` entry for `@setu-ts/cli` says the brief now lists and glosses the development commands, splits the full-stack rule for Workers, widens the messaging rule, and that existing projects re-run `setu agents` (`--check` reports them stale) | §0.1, §3.18–§3.20                            |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                              | src covered                                          | Key assertions                                                                                |
-| ---------------------------------------------------------------------- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `test/docs-gate.test.ts`                                               | `scripts/check-docs.ts`                              | §3.17 rules 1–3, valid and refused cases; real tree                                           |
-| `test/package-readme-fence-compiler.test.ts`                           | the 52 package READMEs                               | §3.16 coverage = every README; all fences compile                                             |
-| `test/agent-card-gate.test.ts`                                         | the 32 edited cards                                  | §3.10 cap and identifiers                                                                     |
-| `test/guide-fence-compiler.test.ts`                                    | `docs/custom-plugins.md`, `docs/programmatic-api.md` | §3.7 edits keep counts and compile                                                            |
-| `packages/react-router-plugin` (none)                                  | `src/index.ts` JSDoc line only                       | no behaviour; `check:docs` API JSDoc gate                                                     |
-| `packages/cli/test/unit/agents/render-brief.test.ts`                   | `facts.ts`, `render.ts`                              | §3.18 real scaffolds per runtime carry `start:dev` with its gloss; absent script, absent line |
-| `packages/cli/test/unit/agents/rule-blocks.test.ts`                    | `rules.ts`                                           | §3.19, §3.20 identifiers pass; rule text names start:dev and app/components/ui/               |
-| `packages/cli/test/unit/agents/budget.test.ts`                         | `render.ts`                                          | every brief ≤ 12288 bytes with the new commands                                               |
-| `test/agent-card-gate.test.ts`                                         | the two edited cards                                 | §3.21, §3.22 cap and identifiers                                                              |
-| `website/test/landing-positioning.test.ts`                             | `index.astro`                                        | §3.25 `npm create @setu-ts` present                                                           |
-| `test/guide-fence-compiler.test.ts`, `test/snippet-validation.test.ts` | the edited guides                                    | §3.24, §3.26, §3.27 counts and compile                                                        |
+| Test file                                               | src covered                                          | Key assertions                                                 |
+| ------------------------------------------------------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+| `test/docs-gate.test.ts`                                | `scripts/check-docs.ts`                              | §3.17 rules 1–3, valid and refused cases; real tree            |
+| `test/package-readme-fence-compiler.test.ts`            | the 52 package READMEs                               | §3.16 coverage = every README; all fences compile              |
+| `test/agent-card-gate.test.ts`                          | the 32 edited cards                                  | §3.10 cap and identifiers                                      |
+| `test/guide-fence-compiler.test.ts`                     | `docs/custom-plugins.md`, `docs/programmatic-api.md` | §3.7 edits keep counts and compile                             |
+| `packages/react-router-plugin` (none)                   | `src/index.ts` JSDoc line only                       | no behaviour; `check:docs` API JSDoc gate                      |
+| `packages/cli/test/unit/agents/render-brief.test.ts`    | `facts.ts`, `render.ts`                              | §3.18 per-runtime expectations, glosses, Workers absent lines  |
+| `packages/cli/test/unit/agents/workspace-brief.test.ts` | `render.ts`                                          | §3.18 root member line names `start:dev`                       |
+| `packages/cli/test/unit/agents/rule-blocks.test.ts`     | `rules.ts`                                           | §3.19 Workers split, §3.20 widened predicate; identifiers pass |
+| `packages/cli/test/unit/agents/budget.test.ts`          | `render.ts`                                          | 12288-byte project and 4096-byte root budgets                  |
+| `packages/cli/test/unit/full-stack-template.test.ts`    | `full-stack-build-files.ts`                          | §3.23 generated `vite.config.ts` and `dev.ts` carry no `JSR`   |
+| `test/agent-card-gate.test.ts`                          | the two edited cards                                 | §3.21, §3.22 cap and identifiers                               |
+| `website/test/landing-positioning.test.ts`              | `index.astro`                                        | §3.25 `npm create @setu-ts` present                            |
+| `test/guide-fence-compiler.test.ts`                     | the edited guides                                    | §3.24, §3.26, §3.27 per-guide entries and aggregate            |
+| `react-router-plugin` (none)                            | `vite-dev-externals.ts` JSDoc only                   | no behaviour; `check:docs` API JSDoc gate                      |
 
 Gate proof: §3.16 and §3.17 each shown failing on the unfixed tree (the V10-12 fence, the V10-7 link
 and prose) and passing after.
@@ -459,10 +551,23 @@ pnpm run test:tooling:coverage   # docs-gate, both fence gates, agent cards; scr
 pnpm run release:verify 0.10.0
 ```
 
-Folded scope adds `pnpm test:coverage cli` (`facts.ts`, `render.ts`, `rules.ts` ≥ 90% each),
-`pnpm --dir website test`, and one manual proof: `setu new app --template full-stack --agents` on
-Node and on Deno, with the written `AGENTS.md` read for the `start:dev` line and the new rules. The
-final commit runs `pnpm run ci:local`, the Deno lane and both publish gates.
+Folded scope adds:
+
+- `pnpm test:coverage cli` — `facts.ts`, `render.ts`, `rules.ts`, `full-stack-build-files.ts` ≥ 90%
+  each.
+- `pnpm --dir website install --frozen-lockfile && pnpm --dir website run build && pnpm --dir website test`
+  — the site renders the edited guides and passes its own tests.
+- `packages/cli/test/e2e/scaffold-runs-e2e.test.ts` for the full-stack template (generated comments
+  change).
+- `pnpm run check:apps` (two new READMEs).
+- Manual proof: `setu new app --template full-stack --agents` on Node, Deno and Cloudflare Workers,
+  and a Node `--workspace` root brief, each `AGENTS.md` read for the commands and rules.
+- Closing grep, empty outside archived plans, `smoke/` and CHANGELOG history:
+  `grep -rn 'JSR import\|JSR specifier\|JSR-published\|npm run dev\|bun run dev' docs packages/*/README.md packages/*/src PUBLIC_API.md apps website/src`
+  (Workers' `npm run dev` lines are the exception and are named in the report).
+- A code review of the `packages/cli/src` changes with the code-review skill, since a `docs/` PR
+  gets no CodeRabbit review.
+- Final commit: `pnpm run ci:local`, the Deno lane, and both publish gates.
 
 ## 8. Risks & mitigations
 
@@ -477,8 +582,11 @@ final commit runs `pnpm run ci:local`, the Deno lane and both publish gates.
 - Changing the brief changes every existing project's `AGENTS.md`, so `setu agents --check` reports
   it stale until `setu agents` is re-run → intended; the CHANGELOG entry says to re-run
   `setu agents`.
-- The examples rewrite can name a symbol an app later renames → names are grep-checked at review,
-  and files are links `check:docs` resolves.
+- The examples rewrite can invent a concept or name a symbol an app later renames → every claim
+  cites a source or `smoke.ts` line in the report and review checks them; files are links
+  `check:docs` resolves.
+- Some readers cannot reach GitHub, where the website sends example links → each walkthrough stands
+  in prose; rendering the code on the site is the deferred milestone (§0.1).
 
 ## 9. Out of scope
 
