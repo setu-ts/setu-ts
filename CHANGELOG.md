@@ -8,6 +8,19 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Workspace build, test and deploy (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`).**
+  `setu workspace build` builds one image per member, tagged with the commit.
+  `setu workspace deploy` builds, loads into a `kind-*` cluster or pushes to `--registry`, applies
+  one Secret per member from `k8s/secrets/<member>/.env` (names from `.env.example`; server-side,
+  base64 `data:`), applies `k8s/members.yaml` with the namespace and images filled in, and waits for
+  every rollout; it refuses first, naming every missing variable, and `--dry-run` shows the plan.
+  New roots get `build` and `deploy` scripts, and `test` on npm and Bun (Deno:
+  `deno task --recursive test`, since a recursive root task would call itself). Generated
+  Deployments read the Secret through `envFrom`, and Compose services read each member's `.env` — a
+  full-stack member's `SESSION_SECRET` was set by neither. `parseEnv` moves from config-plugin into
+  `@setu-ts/common`. See [deployment](docs/deployment.md#build-test-and-deploy-from-the-root) and
+  [upgrading](docs/upgrading.md#workspace-build-test-and-deploy-from-the-root-m122-0110-setu-tscli-setu-tscommon).
+
 - **Full-stack broker configuration (M121, #519, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
   workspace members render messaging and queue transport options with config-backed connection reads
   and the selected clients. `setu add messaging` / `queue` reads workspace transports and accepts

@@ -245,6 +245,7 @@ package fits the plugin architecture.
 | `none`                                | function  |
 | `ok`                                  | function  |
 | `parseCookie`                         | function  |
+| `parseEnv`                            | function  |
 | `parseFormBody`                       | function  |
 | `parseJsonBody`                       | function  |
 | `parsePublishOptions`                 | function  |

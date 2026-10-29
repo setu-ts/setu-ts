@@ -1316,11 +1316,23 @@ function denoTasks(
   };
 }
 
+/**
+ * A generated task's invocation of the CLI: the pinned specifier under Deno, the `setu` bin a
+ * member's devDependency installs everywhere else.
+ *
+ * @param runtime - The project's runtime
+ * @param args - The CLI arguments, such as `check` or `workspace build`
+ * @returns The command
+ */
+export function cliCommand(runtime: TargetRuntime, args: string): string {
+  return runtime === 'deno'
+    ? `deno run -A ${frameworkSpecifier('cli', 'deno')} ${args}`
+    : `setu ${args}`;
+}
+
 /** The pinned CLI half of a generated project's check task. */
 export function cliCheckCommand(runtime: TargetRuntime): string {
-  return runtime === 'deno'
-    ? `deno run -A ${frameworkSpecifier('cli', 'deno')} check`
-    : 'setu check';
+  return cliCommand(runtime, 'check');
 }
 
 /** The development entry module the devtool opt-in emits. */

@@ -12,6 +12,28 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Workspace build, test and deploy from the root (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`)
+
+`setu workspace build` and `setu workspace deploy` work in any existing workspace; nothing has to be
+regenerated to run them. A workspace root created with 0.11.0 also gets `build` and `deploy` scripts
+(Deno: tasks) and, on npm and Bun, `test`; on Deno, run `deno task --recursive test` from the root —
+a root `test` task running it would call itself, because Deno's recursion includes the root. An
+older root keeps its manifest — the CLI writes it once — so add the three entries yourself if you
+want them: for npm, `"test": "npm run test --workspaces --if-present"`,
+`"build": "setu workspace build"` and `"deploy": "setu workspace deploy"`.
+
+Generated Deployments now read a `<member>-env` Secret through `envFrom`, and generated Compose
+services read the member's own `.env` through an optional `env_file` and name their image
+`<member>:dev`. Existing `k8s/members.yaml` and `docker/compose.yaml` pick these up the next time
+`setu generate app` (or `setu workspace ports --reallocate`) regenerates them. Until then,
+`setu workspace deploy` refuses a member whose Deployment does not read its Secret and prints the
+four `envFrom` lines to add — which matters for a full-stack member, because nothing else sets its
+`SESSION_SECRET`. Put each member's values in `k8s/secrets/<member>/.env`; the root `.env` ignore
+rule already covers that path in older roots.
+
+`parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
+internal to `@setu-ts/config-plugin`, whose own surface is unchanged.
+
 ### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
 
 Full-stack projects now accept `new --broker` / `--queue`, and full-stack workspace members receive

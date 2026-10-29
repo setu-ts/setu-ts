@@ -446,6 +446,9 @@ ${dependsOn
   .join('\n')}`;
 
   return `  ${name}:
+    # The name the Kubernetes manifest's comment builds, so \`docker compose build\`
+    # and a hand-built image are the same image.
+    image: ${name}:dev
     build:
       context: ..
       dockerfile: ${DOCKERFILE}
@@ -456,7 +459,13 @@ ${dependsOn
       secrets:
         - npmrc
     ports:
-      - '${port}:${port}'${environmentBlock}${dependsBlock}
+      - '${port}:${port}'
+    # The member's own variables (SESSION_SECRET, …) from its gitignored .env,
+    # when it has one. The environment: entries below win over it, so it cannot
+    # redirect a sibling host.
+    env_file:
+      - path: ../${MEMBERS_DIR}/${name}/.env
+        required: false${environmentBlock}${dependsBlock}
     # The messaging plugin connects to its broker during plugin registration and
     # does not retry, so a member that loses the race to a backing service whose
     # image cannot be health-probed exits. Compose brings it back until the broker

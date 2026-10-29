@@ -156,6 +156,56 @@ Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill 
 end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
 `generate` can leave the files it wrote, which the next run lists in its overwrite refusal.
 
+## Workspace operations
+
+Since 0.11.0, a workspace root builds, tests and deploys every member from one place. The commands
+read `setu.workspace.json` when they run, so a member added later is included without editing
+anything.
+
+```bash
+setu workspace build                  # one image per member: <member>:<short commit>
+setu workspace deploy --dry-run       # every check, and the plan, with nothing changed
+setu workspace deploy                 # build, ship, apply k8s/, wait for each rollout
+```
+
+A workspace created with 0.11.0 or later also has root `build` and `deploy` scripts (Deno: tasks)
+and, on npm and Bun, a root `test` script. It is the package manager's own recursion —
+`npm run test --workspaces --if-present` or `bun run --filter '*' test` — so `npm test` runs every
+member and library that has tests and fails if any fails. A Deno root has no `test` task: Deno's
+recursion includes the root, so such a task would call itself without end. Run
+`deno task --recursive test` from the root instead. An older root keeps its scripts; run the
+commands above, or add the entries yourself.
+
+`build` runs `docker build -f docker/Dockerfile --build-arg MEMBER=<member>` from the root for each
+member, always passing the optional `NPMRC` build secret. `--tag` replaces the default tag (the
+short commit; `<commit>-dirty-<UTC time>` with uncommitted changes, so each deploy of new edits
+rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names the images
+`<prefix>/<member>:<tag>`; `build` itself never pushes. `--build-arg KEY=VALUE` (repeatable) and
+`--network <name>` are passed to every build — for a registry other than npm, pass
+`--build-arg NPM_CONFIG_REGISTRY=<url>`, and keep its token in `NPMRC`, never in a build argument.
+
+`deploy` decides everything before it changes anything:
+
+- **Secrets.** A member's variables are the names its committed `.env.example` declares, less those
+  the generated manifest already sets (sibling hosts, the transport URL). Their values go in
+  `k8s/secrets/<member>/.env`, read with the same parser as the app's `.env`. Deploy refuses, naming
+  every missing variable, and refuses a values file that git tracks. Each member with values gets a
+  `<member>-env` Secret, applied with `kubectl apply --server-side` from stdin with base64 `data:` —
+  a client-side apply would store every value in plaintext in an annotation. Generated Deployments
+  read it through `envFrom`; explicit `env:` entries still win.
+- **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
+  loads each image into that cluster; any other context needs `--registry`, and the images are
+  pushed there.
+- **What is applied.** The namespace (`--namespace`, default the workspace directory name), the
+  Secrets, then `k8s/members.yaml` as it is on disk with `${NAMESPACE}`, `${WORKSPACE}` and each
+  member's `image:` line filled in. A missing generated image line, an unknown placeholder, or a
+  `members.yaml` written before 0.11.0 without `envFrom` is refused, with the lines to add.
+- **Waiting.** `kubectl rollout status` per member, `--timeout` in kubectl's form (`300s`, `5m`;
+  default `120s`). A rollout that does not finish names the member and the commands to inspect it.
+
+Exit codes are the CLI's own: `1` for a refusal or a failed tool, `2` for a usage error (including
+`deploy` on a non-kind context without `--registry`). A tool that is not installed is named.
+
 ## Wiring check
 
 ```bash
@@ -274,12 +324,13 @@ install, and `setu generate --help` lists only what is available here.
 | `--version`, `-v`     | Prints the version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Every command refuses an option outside its own set — subcommand-aware for `generate app`,
-`generate library`, and `workspace ports` — with exit `2` and nothing written, suggesting the
-nearest known name when one is within a small edit distance (`--templat` suggests `--template`;
-`--base-port` suggests `--port`). A flag kept deliberately recognized for a named refusal (`--di`
-and `--depends-on` on `new`, the transport flags and `--runtime` on `generate app`) still reaches
-that specific message. Plugin-registered commands accept only `--dir` and `--config`: a handler
-receives positionals only, so no plugin command can read any other flag.
+`generate library`, `workspace ports`, `workspace build` and `workspace deploy` — with exit `2` and
+nothing written, suggesting the nearest known name when one is within a small edit distance
+(`--templat` suggests `--template`; `--base-port` suggests `--port`). A flag kept deliberately
+recognized for a named refusal (`--di` and `--depends-on` on `new`, the transport flags and
+`--runtime` on `generate app`) still reaches that specific message. Plugin-registered commands
+accept only `--dir` and `--config`: a handler receives positionals only, so no plugin command can
+read any other flag.
 
 Exit codes: `0` success, `1` runtime error (plugin missing, file exists, write failed), `2` usage
 error (unknown command or schematic, missing argument, unknown `--runtime`, an option the command

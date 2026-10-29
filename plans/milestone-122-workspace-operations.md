@@ -54,18 +54,18 @@ Compose service ever sets it, so that member crashes on start in both.
 
 **External tools, probed 2026-10-29 (Docker 5.6.0 Compose, Bun 1.4.2, Deno 2.9.6, npm 11):**
 
-| Behaviour                                                                  | Measured                                                                                                                             |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| Compose `env_file: [{ path, required: false }]`, file absent               | Config resolves; nothing added                                                                                                       |
-| Same, file present                                                         | Its keys are added; a key also under `environment:` keeps the `environment:` value                                                   |
-| `npm run test --workspaces --if-present`                                   | Runs every member (a failing first member does not stop the second), skips one without the script, exits with the failure code       |
-| `bun run --filter '*' test`                                                | Same three properties; excludes the root even when the root's own `test` is this command                                             |
-| `deno task --recursive test`                                               | Same three properties; when it is the root's own `test`, the root line repeats once but each member runs exactly once                |
-| `docker build --secret id=npmrc,env=NPMRC` with `NPMRC` unset              | Builds; the secret mounts as a 0-byte file (npm ignores it)                                                                          |
-| `kubectl create secret generic --from-env-file`                            | Takes values literally (quotes kept) — differs from `parseEnv`, so it is NOT used (§3.4)                                             |
-| Client-side `kubectl apply` of a Secret with `stringData` (kind, k8s 1.31) | The value is stored in PLAINTEXT in `kubectl.kubernetes.io/last-applied-configuration` (`describe` hides it, `get -o yaml` shows it) |
-| `kubectl apply --server-side` with `stringData`                            | No annotation, but a key removed from the file STAYS in the Secret                                                                   |
-| `kubectl apply --server-side --field-manager=setu` with `data:` (base64)   | No annotation; a removed key is removed; taking over a Secret first created client-side drops its old key and its leaked annotation  |
+| Behaviour                                                                  | Measured                                                                                                                                                                                                             |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Compose `env_file: [{ path, required: false }]`, file absent               | Config resolves; nothing added                                                                                                                                                                                       |
+| Same, file present                                                         | Its keys are added; a key also under `environment:` keeps the `environment:` value                                                                                                                                   |
+| `npm run test --workspaces --if-present`                                   | Runs every member (a failing first member does not stop the second), skips one without the script, exits with the failure code                                                                                       |
+| `bun run --filter '*' test`                                                | Same three properties; excludes the root even when the root's own `test` is this command                                                                                                                             |
+| `deno task --recursive test`                                               | Same three properties when the root has no `test` task. As the root's own `test` (or with `--filter '*'`) it INCLUDES the root and calls itself without end — corrected in verification; the first probe was misread |
+| `docker build --secret id=npmrc,env=NPMRC` with `NPMRC` unset              | Builds; the secret mounts as a 0-byte file (npm ignores it)                                                                                                                                                          |
+| `kubectl create secret generic --from-env-file`                            | Takes values literally (quotes kept) — differs from `parseEnv`, so it is NOT used (§3.4)                                                                                                                             |
+| Client-side `kubectl apply` of a Secret with `stringData` (kind, k8s 1.31) | The value is stored in PLAINTEXT in `kubectl.kubernetes.io/last-applied-configuration` (`describe` hides it, `get -o yaml` shows it)                                                                                 |
+| `kubectl apply --server-side` with `stringData`                            | No annotation, but a key removed from the file STAYS in the Secret                                                                                                                                                   |
+| `kubectl apply --server-side --field-manager=setu` with `data:` (base64)   | No annotation; a removed key is removed; taking over a Secret first created client-side drops its old key and its leaked annotation                                                                                  |
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
@@ -164,8 +164,10 @@ Compose service ever sets it, so that member crashes on start in both.
 ### 3.6 Image tag
 
 - **Decision:** `--tag` wins. Otherwise the short git commit (`git rev-parse --short HEAD`), with
-  `-dirty` appended when `git status --porcelain` is non-empty; outside a git repository,
-  `build-<YYYYMMDDHHmmss>` from `deps.now()` (UTC). Tags are validated against Docker's tag grammar
+  `-dirty-<YYYYMMDDHHmmss>` (UTC) appended when `git status --porcelain` is non-empty or cannot be
+  read — amended in review: a bare `-dirty` gave two deploys of different uncommitted edits one tag,
+  so the second rolled nothing out; outside a git repository, `build-<YYYYMMDDHHmmss>` from
+  `deps.now()` (UTC). Tags are validated against Docker's tag grammar
   (`[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}`); an invalid `--tag` is a usage error.
 - **Why:** Skaffold's default `gitCommit` tagger; a fixed tag (`dev`) under `IfNotPresent` makes
   Kubernetes keep running the old image after a redeploy.
@@ -235,9 +237,14 @@ Compose service ever sets it, so that member crashes on start in both.
 ### 3.12 Root scripts in a new workspace
 
 - **Decision:** a new root gains `test`, `build` and `deploy` next to `dev`. `test` is the profile's
-  native recursion — npm `npm run test --workspaces --if-present`, Bun `bun run --filter '*' test`,
-  Deno `deno task --recursive test`. `build` and `deploy` call the CLI as each member's `check` does
-  (`cliCheckCommand`'s rule, generalised to `cliCommand(runtime, args)`): `setu workspace build` /
+  native recursion — npm `npm run test --workspaces --if-present`, Bun `bun run --filter '*' test`.
+  **Amended in verification:** a Deno root gets NO `test` task. Deno's recursion (and
+  `--filter '*'`) includes the root, so a root `test` running `deno task --recursive test` calls
+  itself without end — the gate's first Deno run nested dozens deep, and a probe ran thousands of
+  times in 30 s. The §1 row recording "the root line repeats once" read a truncated run wrong. Deno
+  users run `deno task --recursive test` from the root (`profile.testFromRoot`), which runs each
+  member once. `build` and `deploy` call the CLI as each member's `check` does (`cliCheckCommand`'s
+  rule, generalised to `cliCommand(runtime, args)`): `setu workspace build` /
   `setu workspace deploy` on Node and Bun, `deno run -A <pinned cli> workspace …` on Deno. Existing
   roots are not edited (the root is written once); the README and `docs/deployment.md` give the
   commands for them. The root `.gitignore` of a new workspace also lists `k8s/secrets/`.
@@ -285,6 +292,20 @@ Compose service ever sets it, so that member crashes on start in both.
 - **Why:** ROADMAP deliverables and C1–C4.
 - **Test home:** `pnpm run check:docs`.
 
+### 3.16 Build arguments and the build network (amendment, implementation)
+
+- **Decision:** both commands accept a repeatable `--build-arg KEY=VALUE` and a `--network <name>`,
+  forwarded to every `docker build` before the generated `MEMBER` argument. `parseArgs` keeps every
+  `--build-arg` occurrence, as it already does for `--depends-on`. A value without `KEY=` is a usage
+  error. Credentials never belong there (they reach the argument list); the npm token stays the
+  `NPMRC` build secret.
+- **Why:** found while writing §3.13. A workspace installed from a registry other than npm — a
+  private registry, a proxy, the gate's local registry overlay — pins those tarball URLs in its
+  lockfile, and the generated Dockerfile already declares `ARG NPM_CONFIG_REGISTRY` for exactly that
+  case (M120b). Without forwarding, `setu workspace build` could not build such a workspace, and the
+  §3.13 gate (which builds with `--network host` against `127.0.0.1`) could not run at all.
+- **Test home:** `workspace-ops.test.ts` (forwarding order, refusals); `args.test.ts` (repeatable).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none.
@@ -306,6 +327,8 @@ The CLI adds no library export: the commands are reached through `bin`.
 | `--namespace`                  | `deploy`           | §3.8                                                                |
 | `--timeout`                    | `deploy`           | Rollout wait, kubectl duration (`300s`, `5m`, `1h`); default `120s` |
 | `--dry-run`                    | both commands      | §3.9                                                                |
+| `--build-arg`                  | both commands      | §3.16; repeatable, forwarded to every build                         |
+| `--network`                    | both commands      | §3.16; forwarded to every build                                     |
 | `runCommand` (CliDependencies) | `workspace-ops.ts` | §3.2                                                                |
 
 ## 5. Implementation files

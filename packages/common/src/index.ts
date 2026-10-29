@@ -726,3 +726,6 @@ export type {
   ReconnectMode,
   ReconnectSupervisorOptions,
 } from './reconnect/reconnect-supervisor.ts';
+
+/** Strict dotenv parser shared by config loading and workspace deploy (M122). */
+export { parseEnv } from './env-file.ts';

@@ -15548,21 +15548,24 @@ the builders hand-wrote the rest, including `scripts/deploy.sh` (build, kind-loa
 rollout), `scripts/bootstrap-secrets.mjs` (Secret wiring for 12 `secretKeyRef`s) and a root test
 task.
 
-**Decisions the plan takes:** which root tasks are generated (`test` across members, `build` of
-every image, `deploy` for the generated manifests) and how they stay correct as members are added (a
-managed script reading `setu.workspace.json`, the `dev` runner's pattern); whether Secret wiring is
-generated from each member's declared environment (the `envVariables` manifest field M67 added);
-whether `dev` watches (it should once M120 adds a `dev` script per member). This milestone depends
-on M120 for the per-member build it calls.
+**Decisions taken (plan `plans/milestone-122-workspace-operations.md`, maintainer 2026-10-29):** the
+operations are CLI commands, `setu workspace build` and `setu workspace deploy`, reading
+`setu.workspace.json` at run time — so existing workspaces get them without edits and fixes ship
+with the CLI — rather than a managed script; a new root also gets `test` (the package manager's own
+recursion), `build` and `deploy` scripts. Secrets are wired: names from each member's
+`.env.example`, values from a gitignored `k8s/secrets/<member>/.env`, one Secret per member applied
+server-side, read through `envFrom`. `dev` already watches: M120 made the dev runner start each
+member's `start:dev`.
 
 **Deliverables:**
 
-- [ ] Generated root `test`, `build` and `deploy` tasks, kept in step with `generate app`
-- [ ] Secret manifests generated from member environment declarations, or a documented decision not
-      to
-- [ ] Workspace e2e running the root tasks against a real kind cluster
-- [ ] CLI README, `docs/deployment.md`, CHANGELOG
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `122`
+- [x] `setu workspace build` / `setu workspace deploy`, plus root `test`, `build` and `deploy`
+      scripts in a new workspace; they read the manifest at run time, so they follow `generate app`
+- [x] Secret manifests from member environment declarations (`.env.example` names, operator values,
+      server-side apply), `envFrom` in every generated Deployment, `env_file` in Compose
+- [x] Workspace e2e running the root tasks against a real kind cluster (`check:deploy --workspace`)
+- [x] CLI README, `docs/deployment.md`, `docs/upgrading.md`, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `122`
 
 ---
 

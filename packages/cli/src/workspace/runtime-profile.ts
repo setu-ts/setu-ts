@@ -86,6 +86,19 @@ export interface WorkspaceRuntimeProfile {
   /** What invokes this workspace's dependency-aware development runner. */
   readonly runAll: string;
   /**
+   * The toolchain's own recursion over every member's and library's `test` (M122). Measured for
+   * all three: every package with a `test` script runs even after one fails, one without it is
+   * skipped, and the exit code is the failure's. npm's `--workspaces` and Bun's `*` filter leave
+   * the root out, so a root `test` script may run it. Deno's recursion (and `--filter '*'`)
+   * INCLUDES the root: a root `test` task running it calls itself without end (measured: thousands
+   * of nested runs in 30 s), so a Deno root carries no `test` task — see {@linkcode rootTestTask}.
+   */
+  readonly testAll: string;
+  /** Whether the root manifest may carry a `test` entry that runs {@linkcode testAll}. */
+  readonly rootTestTask: boolean;
+  /** What a developer runs at the root to test every member. */
+  readonly testFromRoot: string;
+  /**
    * Renders the command that runs one named script in the current directory.
    *
    * Bun is why this exists rather than a branch on
@@ -203,6 +216,9 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
       'deno run --allow-read --allow-run --allow-net ' +
       `--allow-env=${DEVTOOL_ENV_NAMES.join(',')} scripts/dev.ts`,
     runScript: (script) => `deno task ${script}`,
+    testAll: 'deno task --recursive test',
+    rootTestTask: false,
+    testFromRoot: 'deno task --recursive test',
     lockfile: 'deno.lock',
   },
   ['node']: {
@@ -214,10 +230,13 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     memberGlob: (directory) => `${directory}/*`,
     envRead: nodeEnvRead,
     install: 'npm install',
-    // `--workspaces` rather than `--filter`: npm's own flag, and it runs the
-    // script in every workspace that declares it.
     runAll: 'node scripts/dev.mjs',
     runScript: (script) => `npm run ${script}`,
+    // `--workspaces` rather than `--filter`: npm's own flag, and it runs the
+    // script in every workspace that declares it.
+    testAll: 'npm run test --workspaces --if-present',
+    rootTestTask: true,
+    testFromRoot: 'npm test',
     lockfile: 'package-lock.json',
   },
   ['bun']: {
@@ -231,6 +250,9 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     install: 'bun install',
     runAll: 'bun scripts/dev.mjs',
     runScript: (script) => `bun run ${script}`,
+    testAll: "bun run --filter '*' test",
+    rootTestTask: true,
+    testFromRoot: 'bun run test',
     // Measured: `bun install` populates each MEMBER's `node_modules` as well as
     // the hoisted root — which is why the generated `.gitignore` and
     // `.dockerignore` both name the member locations, not only the root one.
@@ -251,6 +273,9 @@ const PROFILES: Readonly<Record<TargetRuntime, WorkspaceRuntimeProfile>> = {
     install: 'npm install',
     runAll: 'node scripts/dev.mjs',
     runScript: (script) => `npm run ${script}`,
+    testAll: 'npm run test --workspaces --if-present',
+    rootTestTask: true,
+    testFromRoot: 'npm test',
     lockfile: 'package-lock.json',
   },
 };

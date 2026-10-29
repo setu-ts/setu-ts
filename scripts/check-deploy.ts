@@ -19,12 +19,15 @@
  * pnpm run check:deploy --render        # rendered manifests match the chart
  * pnpm run check:deploy --cluster       # real kind apply + serve + RBAC
  * pnpm run check:deploy --generated     # scaffold → build its image → serve it air-gapped
+ * pnpm run check:deploy --workspace     # scaffold a workspace → root test → setu workspace deploy
  * ```
  *
  * A mode whose tooling is absent exits with {@linkcode SKIP_EXIT_CODE} (77) — the same code
  * `scripts/check-apps.ts` reserves — so a missing prerequisite can never read as a pass.
  */
 
+import { randomBytes } from 'node:crypto';
+import { stripVTControlCharacters } from 'node:util';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { run as runProcess } from './lib/run.ts';
@@ -168,6 +171,13 @@ export interface ModeSet {
    */
   readonly generated: boolean;
   /**
+   * Scaffold a Node workspace with a `rest` and a `full-stack` member, run its root `test`, and
+   * deploy it into kind with `setu workspace deploy` (M122): rollouts, a request through each
+   * Service, the Secret reaching the pod, and the refusal without one. Without a cluster tool it
+   * reports a skip, like `--cluster`.
+   */
+  readonly workspace: boolean;
+  /**
    * Render mode rewrites `k8s/manifests/` instead of failing on drift.
    *
    * One implementation serves both directions — the `scripts/generate-api-docs.ts` precedent —
@@ -195,6 +205,7 @@ const DEFAULT_MODES: ModeSet = {
   compose: true,
   cluster: false,
   generated: true,
+  workspace: false,
   write: false,
 };
 
@@ -204,6 +215,7 @@ const ALL_MODE_FLAGS = [
   '--compose',
   '--cluster',
   '--generated',
+  '--workspace',
   '--write',
 ] as const;
 
@@ -238,6 +250,7 @@ export function parseModes(args: readonly string[]): ModeSet {
     compose: args.includes('--compose'),
     cluster: args.includes('--cluster'),
     generated: args.includes('--generated'),
+    workspace: args.includes('--workspace'),
     write: args.includes('--write'),
   };
 }
@@ -657,7 +670,8 @@ export async function buildGeneratedImage(
   registry: string,
   execute: typeof run = run,
 ): ReturnType<typeof run> {
-  const env = { NPM_CONFIG_REGISTRY: registry };
+  // NO_COLOR so the summary line can be matched as written.
+  const env = { NPM_CONFIG_REGISTRY: registry, NO_COLOR: '1' };
   const installed = await execute(['deno', 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
@@ -1176,6 +1190,337 @@ const CLUSTER_NAME = 'setu-deploy-gate';
 const NAMESPACE = 'setu';
 const RELEASE = 'setu';
 
+/** The workspace the M122 gate scaffolds, its namespace, and its members' first port. */
+const WORKSPACE_GATE = { name: 'shop', namespace: 'setu-m122', port: 3700 } as const;
+
+/**
+ * Requests `url` from inside the cluster through a one-shot curl pod and returns the status code.
+ *
+ * The code is read from the pod's logs, not an attached stream, for the race `checkCluster`
+ * documents.
+ */
+async function serviceStatus(context: string, namespace: string, url: string): Promise<string> {
+  const kubectl = (...args: string[]) => [
+    'kubectl',
+    '--context',
+    context,
+    '-n',
+    namespace,
+    ...args,
+  ];
+  const pod = 'm122-probe';
+  await run(kubectl('delete', 'pod', pod, '--ignore-not-found'), { quiet: true });
+  const started = await run(
+    kubectl(
+      'run',
+      pod,
+      '--restart=Never',
+      '--image=curlimages/curl:8.11.1',
+      '--command',
+      '--',
+      'curl',
+      '-sS',
+      '-o',
+      '/dev/null',
+      '-w',
+      '%{http_code}',
+      url,
+    ),
+    { quiet: true },
+  );
+  if (!started.success) return `probe pod did not start: ${started.stderr.trim()}`;
+  await run(
+    kubectl('wait', '--for=jsonpath={.status.phase}=Succeeded', `pod/${pod}`, '--timeout=90s'),
+    { quiet: true },
+  );
+  const logs = await run(kubectl('logs', `pod/${pod}`), { quiet: true });
+  await run(kubectl('delete', 'pod', pod, '--ignore-not-found'), { quiet: true });
+  return logs.stdout.trim();
+}
+
+/**
+ * The M122 gate: a workspace's root `test`, then `setu workspace deploy` into a real kind
+ * cluster, then the same checks a developer would make by hand.
+ *
+ * @param clusterModeFollows - Whether `--cluster` runs after this and owns deleting the cluster
+ */
+async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome> {
+  console.log('\n▸ workspace: root test, build and deploy into kind (M122)');
+  const required = ['kind', 'kubectl', 'docker', 'npm'];
+  const present: string[] = [];
+  for (const tool of required) if (await onPath(tool)) present.push(tool);
+  const missing = missingTools(required, present);
+  if (missing.length > 0) {
+    console.log(`  SKIP — missing tool(s): ${missing.join(', ')}`);
+    return 'skipped';
+  }
+
+  const context = `kind-${CLUSTER_NAME}`;
+  const kubectl = (...args: string[]) => ['kubectl', '--context', context, ...args];
+  const existing = await run(['kind', 'get', 'clusters'], { quiet: true });
+  const created = !existing.stdout.split('\n').includes(CLUSTER_NAME);
+  if (created) {
+    console.log(`  creating cluster ${CLUSTER_NAME} …`);
+    if (!(await run(['kind', 'create', 'cluster', '--name', CLUSTER_NAME])).success) {
+      console.error('  ✗ could not create the kind cluster');
+      return 'failed';
+    }
+  }
+
+  await mkdir('.tmp', { recursive: true });
+  const directory = resolve(await mkdtemp('.tmp/test-'));
+  const root = `${directory}/${WORKSPACE_GATE.name}`;
+  const tag = 'm122';
+  let overlay: Awaited<ReturnType<typeof startRegistryOverlay>> | undefined;
+  try {
+    try {
+      overlay = await startRegistryOverlay({ root: process.cwd() });
+    } catch (cause) {
+      console.error(
+        `  ✗ the local registry overlay did not start (run \`pnpm install\` first): ${
+          cause instanceof Error ? cause.message : String(cause)
+        }`,
+      );
+      return 'failed';
+    }
+    const cli = (args: readonly string[], quiet = true) =>
+      run([...CLI_COMMAND, ...args], { quiet, cwd: directory });
+    for (const args of [
+      [
+        'new',
+        WORKSPACE_GATE.name,
+        '--workspace',
+        '--runtime',
+        'node',
+        '--transport',
+        'http',
+        '--port',
+        String(WORKSPACE_GATE.port),
+      ],
+      ['generate', 'app', 'orders', '--template', 'rest', '--dir', root],
+      ['generate', 'app', 'portal', '--template', 'full-stack', '--dir', root],
+    ]) {
+      const step = await cli(args);
+      if (!step.success) {
+        console.error(`  ✗ setu ${args.join(' ')} failed\n${step.stdout}${step.stderr}`);
+        return 'failed';
+      }
+    }
+    const installed = await run(['npm', 'install', '--no-audit', '--no-fund'], {
+      quiet: true,
+      cwd: root,
+      env: { NPM_CONFIG_REGISTRY: overlay.url },
+    });
+    if (!installed.success) {
+      console.error(`  ✗ npm install failed\n${installed.stderr}`);
+      return 'failed';
+    }
+
+    // The root test script: every member's tests through npm's own recursion.
+    const tested = await run(['npm', 'test'], { quiet: true, cwd: root });
+    for (const member of ['orders', 'portal']) {
+      if (!tested.stdout.includes(`> ${member}@`)) {
+        console.error(`  ✗ the root test script did not run ${member}'s tests\n${tested.stdout}`);
+        return 'failed';
+      }
+    }
+    if (!tested.success) {
+      console.error(`  ✗ the root test script failed\n${tested.stdout}${tested.stderr}`);
+      return 'failed';
+    }
+    console.log("  ✓ the root test script ran every member's tests");
+
+    const deployArgs = [
+      'workspace',
+      'deploy',
+      '--dir',
+      root,
+      '--context',
+      context,
+      '--namespace',
+      WORKSPACE_GATE.namespace,
+      '--tag',
+      tag,
+      '--timeout',
+      '300s',
+      '--build-arg',
+      `NPM_CONFIG_REGISTRY=${overlay.url}`,
+      '--network',
+      'host',
+    ];
+
+    // Without the portal's values file deploy refuses, and the cluster stays unchanged.
+    const refused = await cli(deployArgs);
+    const absent = await run(kubectl('get', 'namespace', WORKSPACE_GATE.namespace), {
+      quiet: true,
+    });
+    if (refused.success || !refused.stderr.includes('portal needs') || absent.success) {
+      console.error(
+        `  ✗ deploy without k8s/secrets/portal/.env did not refuse cleanly\n${refused.stdout}${refused.stderr}`,
+      );
+      return 'failed';
+    }
+    console.log('  ✓ deploy refuses a missing secret and changes nothing');
+
+    // The session plugin refuses a secret shorter than 32 characters; 32 random bytes is 43.
+    const secret = randomBytes(32).toString('base64url');
+    await mkdir(`${root}/k8s/secrets/portal`, { recursive: true });
+    await writeFile(
+      `${root}/k8s/secrets/portal/.env`,
+      `TRUSTED_PROXIES=\nSESSION_SECRET=${secret}\n`,
+    );
+
+    console.log('  deploying with setu workspace deploy …');
+    const deployed = await cli(deployArgs, false);
+    if (!deployed.success) {
+      console.error('  ✗ setu workspace deploy failed');
+      await run(kubectl('-n', WORKSPACE_GATE.namespace, 'get', 'pods'));
+      await run(kubectl('-n', WORKSPACE_GATE.namespace, 'describe', 'pods'));
+      // A crash-looping container's reason is in its previous run's output, not in describe.
+      for (const member of ['orders', 'portal']) {
+        console.error(`  --- ${member} logs (previous run, then current) ---`);
+        await run(
+          kubectl(
+            '-n',
+            WORKSPACE_GATE.namespace,
+            'logs',
+            `deploy/${member}`,
+            '--previous',
+            '--tail=80',
+          ),
+        );
+        await run(kubectl('-n', WORKSPACE_GATE.namespace, 'logs', `deploy/${member}`, '--tail=80'));
+      }
+      return 'failed';
+    }
+
+    for (const [member, port] of [
+      ['orders', WORKSPACE_GATE.port],
+      ['portal', WORKSPACE_GATE.port + 1],
+    ] as const) {
+      const status = await serviceStatus(
+        context,
+        WORKSPACE_GATE.namespace,
+        `http://${member}:${port}/health`,
+      );
+      if (status !== '200') {
+        console.error(`  ✗ ${member} /health through its Service returned "${status}"`);
+        return 'failed';
+      }
+    }
+    console.log('  ✓ both members serve /health through their Services');
+
+    const seen = await run(
+      kubectl(
+        '-n',
+        WORKSPACE_GATE.namespace,
+        'exec',
+        'deploy/portal',
+        '--',
+        'printenv',
+        'SESSION_SECRET',
+      ),
+      { quiet: true },
+    );
+    if (seen.stdout.trim() !== secret) {
+      console.error('  ✗ the portal pod does not carry SESSION_SECRET from its Secret');
+      return 'failed';
+    }
+    const annotations = await run(
+      kubectl(
+        '-n',
+        WORKSPACE_GATE.namespace,
+        'get',
+        'secret',
+        'portal-env',
+        '-o',
+        'jsonpath={.metadata.annotations}',
+      ),
+      { quiet: true },
+    );
+    if (
+      annotations.stdout.includes('last-applied-configuration') ||
+      annotations.stdout.includes(secret)
+    ) {
+      console.error('  ✗ the Secret carries a last-applied-configuration annotation');
+      return 'failed';
+    }
+    console.log('  ✓ the Secret reaches the pod and carries no plaintext annotation');
+    return (await checkDenoWorkspaceTest(directory, overlay.url)) ? 'passed' : 'failed';
+  } finally {
+    await run(kubectl('delete', 'namespace', WORKSPACE_GATE.namespace, '--wait=false'), {
+      quiet: true,
+    });
+    for (const member of ['orders', 'portal']) {
+      await run(['docker', 'image', 'rm', '-f', `${member}:${tag}`], { quiet: true });
+    }
+    await overlay?.close();
+    await rm(directory, { recursive: true, force: true });
+    if (created && !clusterModeFollows && process.env['KEEP_CLUSTER'] === undefined) {
+      console.log(`  deleting cluster ${CLUSTER_NAME} …`);
+      await run(['kind', 'delete', 'cluster', '--name', CLUSTER_NAME], { quiet: true });
+    }
+  }
+}
+
+/**
+ * A Deno workspace tested from its root. Deno's recursion includes the root, so a root `test`
+ * task running it would call itself without end (measured, M122): the generated root has none,
+ * and `deno task --recursive test` must run the member's tests exactly once.
+ *
+ * @returns Whether it passed; a missing Deno is reported as a skip of this case, by name
+ */
+async function checkDenoWorkspaceTest(directory: string, registry: string): Promise<boolean> {
+  if (!(await onPath('deno'))) {
+    console.log('  SKIP — deno-workspace test: missing tool(s): deno');
+    return true;
+  }
+  const root = `${directory}/denows`;
+  const cli = (args: readonly string[]) =>
+    run([...CLI_COMMAND, ...args], { quiet: true, cwd: directory });
+  for (const args of [
+    ['new', 'denows', '--workspace', '--runtime', 'deno', '--transport', 'http'],
+    ['generate', 'app', 'api', '--template', 'rest', '--dir', root],
+  ]) {
+    const step = await cli(args);
+    if (!step.success) {
+      console.error(`  ✗ setu ${args.join(' ')} failed\n${step.stderr}`);
+      return false;
+    }
+  }
+  const env = { NPM_CONFIG_REGISTRY: registry };
+  const installed = await run(['deno', 'install'], { quiet: true, cwd: root, env });
+  if (!installed.success) {
+    console.error(`  ✗ deno install failed\n${installed.stderr}`);
+    return false;
+  }
+  const manifest = JSON.parse(await readFile(`${root}/deno.json`, 'utf8')) as {
+    tasks?: Record<string, string>;
+  };
+  if (manifest.tasks?.['test'] !== undefined) {
+    console.error('  ✗ the Deno root declares a test task, which recurses into itself');
+    return false;
+  }
+  const tested = await run(['deno', 'task', '--recursive', 'test'], {
+    quiet: true,
+    cwd: root,
+    env,
+  });
+  // Stripped: Deno colours its summary even under NO_COLOR here (measured).
+  const output = stripVTControlCharacters(`${tested.stdout}${tested.stderr}`);
+  // `deno test` prints one `ok | N passed | …` summary per run, prefixed `[member#task]` under
+  // `--recursive`; two would mean the member ran twice.
+  const runs = (output.match(/\bok \| \d+ passed/g) ?? []).length;
+  if (!tested.success || runs !== 1) {
+    console.error(
+      `  ✗ deno task --recursive test ran the member ${runs} time(s)\n${output.slice(-4000)}`,
+    );
+    return false;
+  }
+  console.log('  ✓ deno task --recursive test ran the member exactly once');
+  return true;
+}
+
 async function checkCluster(): Promise<CheckOutcome> {
   console.log('\n▸ cluster: real apply + serve on kind');
 
@@ -1394,6 +1739,8 @@ async function main(): Promise<void> {
   if (modes.build) results.push(await checkBuild());
   if (modes.compose) results.push(await checkCompose());
   if (modes.generated) results.push(await checkGenerated());
+  // Before --cluster, which deletes the cluster when it finishes (unless KEEP_CLUSTER).
+  if (modes.workspace) results.push(await checkWorkspace(modes.cluster));
   if (modes.cluster) results.push(await checkCluster());
 
   if (results.includes('failed')) {
