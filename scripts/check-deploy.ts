@@ -670,8 +670,7 @@ export async function buildGeneratedImage(
   registry: string,
   execute: typeof run = run,
 ): ReturnType<typeof run> {
-  // NO_COLOR so the summary line can be matched as written.
-  const env = { NPM_CONFIG_REGISTRY: registry, NO_COLOR: '1' };
+  const env = { NPM_CONFIG_REGISTRY: registry };
   const installed = await execute(['deno', 'install'], { quiet: true, cwd: root, env });
   if (!installed.success) return installed;
 
@@ -1506,7 +1505,7 @@ async function checkDenoWorkspaceTest(directory: string, registry: string): Prom
     cwd: root,
     env,
   });
-  // Stripped: Deno colours its summary even under NO_COLOR here (measured).
+  // Stripped: Deno colours its test summary, which would hide it from the match below.
   const output = stripVTControlCharacters(`${tested.stdout}${tested.stderr}`);
   // `deno test` prints one `ok | N passed | …` summary per run, prefixed `[member#task]` under
   // `--recursive`; two would mean the member ran twice.
