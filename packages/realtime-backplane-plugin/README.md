@@ -88,6 +88,14 @@ first error of an outage at `warn`, identical repeats at `debug`, the recovery a
 of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
 listener: it belongs to the caller. Set `connectionErrorReporter` to route them elsewhere.
 
+**node-redis.** To use node-redis instead of ioredis, pass two adapters —
+`client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
+`base = createClient({ url })` from `redis` — mirroring the two connections the transport builds.
+When the backplane starts it connects an injected client that has not connected yet
+(`status === 'wait'`, a lazy ioredis client included), so its health reports the publisher's state
+from the start. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 ## Options
 
 | Option                    | Applies to         | Default                  | Description                                                                                                                                                       |

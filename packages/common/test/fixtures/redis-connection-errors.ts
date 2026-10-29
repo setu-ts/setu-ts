@@ -171,11 +171,19 @@ export async function expectOutageRoutedToLogger(scenario: OutageScenario): Prom
 
     await docker(['stop', containerId]);
     stopped = true;
-    // A warn plus at least one repeat is enough to prove de-duplication. Also
+    // A warn plus at least one repeat is enough to prove de-duplication.
+    // node-redis can emit multiple distinct errors before its first repeat,
+    // so a count alone does not establish that a duplicate has arrived. Also
     // stop waiting on the first console line, so a missing listener fails on
     // the console assertion below rather than on a timeout.
     await waitFor(
-      () => printed.length > 0 || scenario.logger.forSource(scenario.source).length >= 3,
+      () => {
+        const entries = scenario.logger.forSource(scenario.source);
+        return (
+          printed.length > 0 ||
+          (entries.length >= 3 && entries.some((entry) => entry.level === 'debug'))
+        );
+      },
       `connection errors from ${scenario.source}`,
       30_000,
     );

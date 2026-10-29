@@ -221,6 +221,7 @@ package fits the plugin architecture.
 | `errorResponderOf`                    | function  |
 | `extractContextFromHeaders`           | function  |
 | `formEncodingOf`                      | function  |
+| `fromNodeRedis`                       | function  |
 | `fromNullable`                        | function  |
 | `fullJitterDelay`                     | function  |
 | `hasForbiddenAliasCharacter`          | function  |
@@ -703,6 +704,10 @@ package fits the plugin architecture.
 | `MetricType`                          | type      |
 | `MiddlewareFunction`                  | type      |
 | `NextFunction`                        | type      |
+| `NodeRedisAdapter`                    | type      |
+| `NodeRedisAdapterOptions`             | type      |
+| `NodeRedisClientFactory`              | type      |
+| `NodeRedisClientLike`                 | type      |
 | `Option`                              | type      |
 | `OrderDirection`                      | type      |
 | `OutboundHttpStatusClass`             | type      |
@@ -781,13 +786,63 @@ drifts.
 ## Readiness and dependency outages (M113b)
 
 `isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
-recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections. It
-never mutates errors. Command errors such as WRONGTYPE remain unclassified.
+recognises the eight node/net connection-fault codes plus measured ioredis 5 and node-redis 6 outage
+rejections (closed, offline, socket closed, connect timeout, socket timeout). It never mutates
+errors. Command errors such as WRONGTYPE remain unclassified.
 
 `isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
 `EAI_AGAIN`, `EPIPE`. Use the predicate instead of the removed, unreleased `CONNECTION_FAULT_CODES`
 export; callers cannot mutate the classification vocabulary.
+
+## Using node-redis (0.11.0)
+
+Every Redis-backed plugin uses ioredis by default and takes an injected `client`. To use
+[node-redis](https://www.npmjs.com/package/redis) (`redis`, v5 or v6) instead, wrap a client you
+build in `fromNodeRedis` and pass it to that option:
+
+```typescript
+import { fromNodeRedis } from '@setu-ts/common';
+import { createClient } from 'redis';
+
+const url = 'redis://127.0.0.1:6379';
+const cacheClient = fromNodeRedis(createClient({ url }));
+const queueClient = fromNodeRedis(createClient({ url }), { commandTimeoutMs: 5_000 });
+```
+
+No Setu-TS package depends on `redis`: install it in your application. `fromNodeRedis` types its
+argument structurally, and the one adapter fits every plugin's `client` option — cache, queue, Redis
+Streams messaging, the realtime backplane (`client` and `subscriber`), the scheduler lock,
+idempotency and the auth rate-limit store.
+
+- **One client per plugin.** Most plugins close their client when the application stops, so a client
+  shared between plugins would be closed under the others. The backplane takes two:
+  `client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`.
+- **Lazy connect.** The adapter connects on its first command (or when a plugin calls `connect()`),
+  as ioredis does by default, so building it opens no socket. A client you already connected is used
+  as it is.
+- **A bound on every command.** node-redis does not bound a command once it is written: against a
+  paused or stopped server it waits indefinitely. The adapter rejects any command — and the lazy
+  connect — after `commandTimeoutMs` (default 15 000; `0` disables; otherwise a finite number up to
+  2 147 483 647, else `RangeError`) with `Error('Command timed out')`, the error ioredis raises, so
+  the plugins report an outage. The command is not cancelled; a late reply is discarded. A plugin's
+  own `commandTimeoutMs` option applies only to a client the plugin builds.
+- **An `'error'` listener is always attached**, because node-redis rethrows an unlistened `'error'`
+  event and would crash the process. `onError(error)` receives each event; without it the listener
+  stays silent and failures surface through the rejected commands and health.
+- **Traces: pass a factory.** OpenTelemetry's `redis` instrumentation patches node-redis as Node
+  loads it, and `TelemetryPlugin` registers it when the application starts — after a configuration
+  that imports `redis` has already loaded it, so those commands record no spans. Pass a factory
+  instead of a client and `redis` loads on the first connect:
+  `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`. The factory runs once
+  (a failure is retried on the next connect), and `on`/`off` listeners registered before it wait for
+  the client. A `setu new --redis-client node-redis` project does this in `src/node-redis.ts`.
+- **RESP3.** node-redis 6 speaks RESP3 by default, where some replies are maps. The adapter turns
+  map replies back into the RESP2 shapes the plugins read, so either protocol works.
+- **Closing.** `quit()` closes the client (falling back to `destroy()` when that exceeds the bound)
+  and is idempotent; `status` reports `'wait'`, `'connecting'`, `'ready'` or `'end'`.
+
+Cluster and sentinel clients (`createCluster`, `createSentinel`) are not supported.
 
 ## Portable database refusals (0.11.0)
 

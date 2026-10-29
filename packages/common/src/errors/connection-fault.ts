@@ -44,6 +44,12 @@ const MAX_CAUSE_DEPTH = 5;
  * writeable and enableOfflineQueue options is false". All four command
  * rejections had no code and no cause. Connection refusal also emitted Error /
  * "connect ECONNREFUSED 127.0.0.1:63799" / code ECONNREFUSED, with no cause.
+ * Measured with node-redis 6.3.1: never-connected/closed → "The client is
+ * closed"; offline queue disabled → "The client is offline"; stopped server
+ * → "Socket closed unexpectedly"; connect timeout → "Connection timeout";
+ * paused server with socketTimeout → "Socket timeout timeout. Expecting data,
+ * but didn't receive any in 300ms." All have name "Error"; the timeout's
+ * milliseconds vary with configuration. WRONGTYPE stays unclassified.
  *
  * Walks at most five objects, stopping at cycles. Unknown values, frozen
  * errors and throwing accessors are safe; Redis command errors such as
@@ -68,7 +74,15 @@ export function isConnectionFault(error: unknown): boolean {
         (entry.name === 'Error' &&
           (entry.message === 'Command timed out' ||
             entry.message === 'Connection is closed.' ||
-            entry.message === "Stream isn't writeable and enableOfflineQueue options is false"))
+            entry.message === "Stream isn't writeable and enableOfflineQueue options is false" ||
+            entry.message === 'The client is closed' ||
+            entry.message === 'The client is offline' ||
+            entry.message === 'Socket closed unexpectedly' ||
+            entry.message === 'Connection timeout' ||
+            (typeof entry.message === 'string' &&
+              /^Socket timeout timeout\. Expecting data, but didn't receive any in \d+ms\.$/.test(
+                entry.message,
+              ))))
       ) {
         return true;
       }

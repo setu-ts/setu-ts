@@ -52,6 +52,7 @@ import type {
   MessagingPluginOptions,
   SubscriptionEntry,
 } from '../../src/index.ts';
+import { REDIS_CLIENTS, redisOptions } from '../../../common/test/fixtures/redis-clients.ts';
 
 const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
 const rabbitUrl = process.env['RABBITMQ_URL'];
@@ -129,18 +130,18 @@ const transports: readonly Transport[] = [
       consumerRetry: { maxAttempts: 5, delaysMs: [100] },
     }),
   },
-  {
-    name: 'Redis Streams',
+  ...REDIS_CLIENTS.map((redisVariant) => ({
+    name: `Redis Streams ${redisVariant}`,
     ignore: postgresUrl === undefined || redisUrl === undefined,
     messaging: () => ({
       broker: 'redis-streams',
-      url: redisUrl!,
+      ...redisOptions(redisVariant, redisUrl!),
       pollIntervalMs: 10,
       blockSizeMs: 10,
       reclaimIntervalMs: 20,
       consumerRetry: { maxAttempts: 5, delaysMs: [150] },
     }),
-  },
+  })),
 ];
 
 /** One process: runtime, scheduler, Drizzle over the schema, messaging + inbox + outbox. */

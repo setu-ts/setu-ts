@@ -263,6 +263,12 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
+      path: 'packages/cli/test/fixtures/redis-develop-outputs.json',
+      category: 'fixture',
+      reason:
+        'Exact pre-M117 ioredis scaffold output, Deno projects included, captured from develop.',
+    },
+    {
       path: 'packages/cli/test/fixtures/dev-entry-0.10.0-member.txt',
       category: 'fixture',
       reason: 'Exact pre-M126 Deno output captured before changing the renderer.',
