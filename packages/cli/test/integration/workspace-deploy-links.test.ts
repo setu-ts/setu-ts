@@ -191,7 +191,8 @@ describe('setu check refuses a member .env that Compose would follow (re-audit N
     await nodeFs.symlink(`${outside}/.env`, `${root}/apps/portal/.env`);
     const linked = await check();
     expect(linked.code).toBe(1);
-    expect(linked.err).toContain('apps/portal/.env is a symbolic link. docker compose follows it');
+    expect(linked.err).toContain('through a symbolic link');
+    expect(linked.err).toContain('docker compose would follow it');
     await nodeFs.rm(`${root}/apps/portal/.env`);
     await nodeFs.mkdir(`${root}/apps/portal/.env`);
     const directory = await check();

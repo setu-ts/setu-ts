@@ -97,7 +97,8 @@ export function readsMemberSecret(text: string, member: string): boolean {
  * Writes a member's Secret version into its Deployment's pod-template annotation.
  *
  * Strict, because a misplaced stamp is silent: the rotation would never roll out (audit 3, L2).
- * The document separator may carry a comment (`--- # x`); exactly one document must be a
+ * A best effort that deploy verifies against the cluster afterwards (audit 4, A4-1). Documents
+ * split by kubectl's rule (a comment may follow `---`); exactly one document must be a
  * Deployment whose top-level `metadata.name` is the member, and it must hold exactly one slot at
  * the pod template's annotation indent (8 spaces, as generated). Anything else — no slot, two
  * owning documents, two slots — is reported as not stamped, and the caller falls back to
@@ -113,7 +114,9 @@ export function stampSecretVersion(
   member: string,
   version: string,
 ): { readonly text: string; readonly stamped: boolean } {
-  const separator = /^---(?:[ \t]+#[^\n]*)?[ \t]*$/gm;
+  // kubectl's own rule: a line starting `---` whose remainder, trimmed, is empty or a comment —
+  // `---#x`, `--- `, `---\f` included (audit 4, A4-1).
+  const separator = /^---[ \t\f\v\r]*(?:#[^\n]*)?$/gm;
   const pieces: string[] = [];
   const separators: string[] = [];
   let last = 0;
@@ -128,7 +131,12 @@ export function stampSecretVersion(
   const owners = pieces
     .map((document, index) => ({ document, index }))
     .filter(
-      ({ document }) => /^kind:[ \t]*Deployment[ \t]*$/m.test(document) && own.test(document),
+      ({ document }) =>
+        // Exactly one top-level `kind:`: a block scalar holding a `kind:` line makes the document
+        // one this function cannot read with certainty.
+        (document.match(/^kind:/gm) ?? []).length === 1 &&
+        /^kind:[ \t]*Deployment[ \t]*$/m.test(document) &&
+        own.test(document),
     );
   if (owners.length !== 1) return { text, stamped: false };
   const owner = owners[0]!;

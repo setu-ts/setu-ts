@@ -53,10 +53,12 @@ export async function defaultImageTag(
   cwd: string,
   now: () => number,
 ): Promise<string> {
-  const head = await run('git', ['rev-parse', '--short', 'HEAD'], { cwd });
+  // An inherited GIT_DIR would name another repository's commit (audit 4).
+  const options = { cwd, unsetPrefixes: ['GIT_'] };
+  const head = await run('git', ['rev-parse', '--short', 'HEAD'], options);
   const commit = head.stdout.trim();
   if (head.code !== 0 || !isValidImageTag(commit)) return timestampTag(now());
-  const status = await run('git', ['status', '--porcelain'], { cwd });
+  const status = await run('git', ['status', '--porcelain'], options);
   return status.code === 0 && status.stdout.trim() === ''
     ? commit
     : `${commit}-dirty-${utcStamp(now())}`;

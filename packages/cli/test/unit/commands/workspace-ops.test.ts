@@ -107,6 +107,23 @@ function harness(
       if (args.includes('get') && args.includes('secret')) return { stdout: '' };
       if (args.includes('--server-side')) return { stdout: '1' };
       if (args.includes('deployments')) return { stdout: '' };
+      // Like the cluster: a Deployment's pod template carries what the last members.yaml apply
+      // stamped into that member's document.
+      if (args.includes('jsonpath={.spec.template.metadata.annotations}')) {
+        const member = args
+          .find((arg) => arg.startsWith('deployment/'))!
+          .slice('deployment/'.length);
+        const applied = [...calls]
+          .reverse()
+          .find((c) => c.input?.includes('kind: Deployment') === true);
+        const doc = applied?.input
+          ?.split(/^---$/m)
+          .find(
+            (d) => d.includes('kind: Deployment') && new RegExp(`^  name: ${member}$`, 'm').test(d),
+          );
+        const version = /setu-ts\.dev\/secret-version: '([^']*)'/.exec(doc ?? '')?.[1] ?? '';
+        return { stdout: JSON.stringify({ 'setu-ts.dev/secret-version': version }) };
+      }
       return {};
     };
     const result = custom ?? fallback();
@@ -330,6 +347,7 @@ describe('setu workspace deploy', () => {
       'kubectl --context kind-dev -n ws get secret portal-env --ignore-not-found -o jsonpath={.metadata.resourceVersion}',
       'kubectl --context kind-dev apply --server-side --field-manager=setu --force-conflicts -o jsonpath={.metadata.resourceVersion} -f -',
       'kubectl --context kind-dev apply -f -',
+      'kubectl --context kind-dev -n ws get deployment/portal -o jsonpath={.spec.template.metadata.annotations}',
       'kubectl --context kind-dev -n ws rollout status deployment/orders --timeout=120s',
       'kubectl --context kind-dev -n ws rollout status deployment/portal --timeout=120s',
     ]);
@@ -474,7 +492,9 @@ describe('setu workspace deploy', () => {
     const message = h.err.join('\n');
     expect(message).toContain('orders did not finish rolling out within 120s');
     expect(message).toContain('kubectl --context kind-dev -n ws logs deployment/orders');
-    expect(h.calls.some((c) => c.args.includes('deployment/portal'))).toBe(false);
+    expect(
+      h.calls.some((c) => c.args.includes('status') && c.args.includes('deployment/portal')),
+    ).toBe(false);
   });
 
   it('reports failed ships and applies, redacting secret values from kubectl output', async () => {
@@ -629,6 +649,44 @@ describe('setu workspace deploy', () => {
     }
   });
 
+  it('restarts a member whose applied template does not carry its stamp (audit 4, A4-1)', async () => {
+    for (const answer of [
+      JSON.stringify({ 'setu-ts.dev/secret-version': '0' }),
+      '',
+      'not json',
+      JSON.stringify(['x']),
+    ]) {
+      const h = harness({
+        respond: (c) =>
+          c.args.includes('jsonpath={.spec.template.metadata.annotations}')
+            ? { stdout: answer }
+            : undefined,
+      });
+      expect(await h.run(['deploy']), answer).toBe(0);
+      expect(h.calls.map(h.line)).toContain(
+        'kubectl --context kind-dev -n ws rollout restart deployment/portal',
+      );
+    }
+    // A matching stamp needs no restart, and only stamped members are read back.
+    const ok = harness();
+    expect(await ok.run(['deploy'])).toBe(0);
+    expect(ok.calls.some((c) => c.args.includes('restart'))).toBe(false);
+    expect(
+      ok.calls
+        .filter((c) => c.args.includes('jsonpath={.spec.template.metadata.annotations}'))
+        .map((c) => c.args.find((a) => a.startsWith('deployment/'))),
+    ).toEqual(['deployment/portal']);
+
+    const failed = harness({
+      respond: (c) =>
+        c.args.includes('jsonpath={.spec.template.metadata.annotations}')
+          ? { code: 1, stderr: 'nope\n' }
+          : undefined,
+    });
+    expect(await failed.run(['deploy'])).toBe(1);
+    expect(failed.err.join('\n')).toContain('Reading deployment/portal failed (exit 1).');
+  });
+
   it('reports a failed Secret read', async () => {
     const h = harness({
       respond: (c) =>
@@ -659,9 +717,10 @@ describe('setu workspace deploy', () => {
     for (const call of plain.calls.filter(
       (c) => c.args[0] === 'ls-files' || c.args[1] === '--is-inside-work-tree',
     )) {
-      expect(call.env).toEqual({ LC_ALL: 'C' });
       // Inherited GIT_DIR, GIT_INDEX_FILE and the like would aim git at another repository.
       expect(call.unsetPrefixes).toEqual(['GIT_']);
+      // Discovery crosses filesystems, so a workspace mounted inside a repository is found (A4-2).
+      expect(call.env).toEqual({ LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' });
     }
 
     const noGit = harness({
@@ -682,6 +741,14 @@ describe('setu workspace deploy', () => {
         'git could not inspect this workspace (exit 129',
       ],
       [{ code: 0, stdout: 'false\n' }, 'git does not report a work tree here ("false")'],
+      // Stopping at a mount point is not "no repository" (audit 4, A4-2).
+      [
+        {
+          code: 128,
+          stderr: 'fatal: not a git repository (or any parent up to mount point /ws)\n',
+        },
+        'git could not inspect this workspace (exit 128',
+      ],
       // GIT_DIR's own failure names that directory, not the parent search (audit 3, L1).
       [
         { code: 128, stderr: "fatal: not a git repository: '/nonexistent'\n" },

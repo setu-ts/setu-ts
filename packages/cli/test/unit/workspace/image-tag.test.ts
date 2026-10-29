@@ -12,8 +12,11 @@ function git(
   head: { code: number; stdout: string },
   status = { code: 0, stdout: '' },
 ): CommandRunner {
-  return (_command, args) =>
-    Promise.resolve({ ...(args[0] === 'rev-parse' ? head : status), stderr: '' });
+  return (_command, args, options) => {
+    // An inherited GIT_DIR must not choose the commit (audit 4).
+    expect(options.unsetPrefixes).toEqual(['GIT_']);
+    return Promise.resolve({ ...(args[0] === 'rev-parse' ? head : status), stderr: '' });
+  };
 }
 
 describe('image tags', () => {

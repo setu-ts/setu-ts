@@ -149,6 +149,27 @@ describe('stampSecretVersion (re-audit N2)', () => {
     expect(stampSecretVersion(shallow, 'portal', '42').stamped).toBe(false);
   });
 
+  it("splits documents by kubectl's rule and refuses a document with two kinds (audit 4, A4-1)", () => {
+    for (const separator of ['---#x', '--- ', '---\f', '--- # c']) {
+      const split = yaml.replace(/^---$/gm, separator);
+      const stamped = stampSecretVersion(split, 'portal', '42');
+      expect(stamped.stamped, JSON.stringify(separator)).toBe(true);
+      const portal = stamped.text
+        .split(/^---.*$/m)
+        .find((doc) => doc.includes('kind: Deployment') && /^ {2}name: portal$/m.test(doc));
+      expect(portal, JSON.stringify(separator)).toContain("secret-version: '42'");
+    }
+    // `--- foo` is not a separator for kubectl, so the documents it would join are refused.
+    const joined = yaml.replace(/^---$/m, '--- foo');
+    expect(stampSecretVersion(joined, 'orders', '1').stamped).toBe(false);
+    // A block scalar holding a column-0 `kind:` line: two kinds, refused.
+    const scalar = yaml.replace(
+      /(kind: Deployment\nmetadata:\n {2}name: portal\n)/,
+      '$1  annotations:\n    note: |\nkind: Service\n',
+    );
+    expect(stampSecretVersion(scalar, 'portal', '1').stamped).toBe(false);
+  });
+
   it('reports a manifest without the slot, and a member it does not contain', () => {
     const old = yaml.replace(/^ +setu-ts\.dev\/secret-version: ''\n/gm, '');
     expect(stampSecretVersion(old, 'portal', '1')).toEqual({ text: old, stamped: false });

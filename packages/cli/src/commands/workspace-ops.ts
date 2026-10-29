@@ -41,6 +41,7 @@ import {
 import { describeReconcileFailure, reconcileMembers } from '../workspace/reconcile.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import {
+  SECRET_VERSION_ANNOTATION,
   declaredSecretNames,
   envFromBlock,
   memberSecretName,
@@ -408,8 +409,13 @@ interface IMemberSecret {
   readonly manifest: string;
 }
 
-/** git's messages in English, so "not a git repository" can be recognized. */
-const GIT_ENV = { LC_ALL: 'C' } as const;
+/**
+ * git's messages in English, so "not a git repository" can be recognized; and discovery that
+ * crosses filesystems, so a workspace mounted below an enclosing repository is still found inside
+ * it (audit 4, A4-2: git otherwise stopped at the mount point and the check deployed a committed
+ * file).
+ */
+const GIT_ENV = { LC_ALL: 'C', GIT_DISCOVERY_ACROSS_FILESYSTEM: '1' } as const;
 
 /**
  * Whether a values file is committed, failing closed (M122 audit F2, re-audit N1). The deploy
@@ -433,11 +439,7 @@ async function trackedByGit(
   }
   if (inside.code !== 0) {
     // Only git's own discovery failure: with GIT_DIR set, the message names that directory instead.
-    if (
-      /not a git repository \(or any (of the parent directories|parent up to mount point)/.test(
-        inside.stderr,
-      )
-    ) {
+    if (/not a git repository \(or any of the parent directories\)/.test(inside.stderr)) {
       return undefined;
     }
     const reason = inside.stderr.trim().split('\n')[0] ?? '';
@@ -609,6 +611,24 @@ async function applyManifest(
   }
   deps.log(`  applied ${apply.what}`);
   return result.stdout;
+}
+
+/**
+ * The Secret version a Deployment's applied pod template carries, from kubectl's JSON output of
+ * `.spec.template.metadata.annotations`; `undefined` when there is none or it cannot be read.
+ *
+ * @param json - kubectl's output
+ * @returns The annotation's value
+ */
+function templateVersion(json: string): string | undefined {
+  try {
+    const annotations: unknown = JSON.parse(json.trim() === '' ? '{}' : json);
+    if (typeof annotations !== 'object' || annotations === null) return undefined;
+    const value = (annotations as Record<string, unknown>)[SECRET_VERSION_ANNOTATION];
+    return typeof value === 'string' ? value : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Reads a Secret's resourceVersion, or `''` when it does not exist yet. */
@@ -809,6 +829,7 @@ export async function runWorkspaceDeploy(
   // fall back to comparing versions and `kubectl rollout restart`.
   let manifest = prepared.text;
   const fallback: string[] = [];
+  const stamped = new Map<string, string>();
   for (const secret of secrets) {
     const name = memberSecretName(secret.member);
     const before = await secretVersion(workspace, ctx, deploy.namespace, name, deps);
@@ -834,7 +855,8 @@ export async function runWorkspaceDeploy(
     }
     const stamp = stampSecretVersion(manifest, secret.member, after.trim());
     manifest = stamp.text;
-    if (!stamp.stamped && after.trim() !== before) fallback.push(secret.member);
+    if (stamp.stamped) stamped.set(secret.member, after.trim());
+    else if (after.trim() !== before) fallback.push(secret.member);
   }
   let existing: ReadonlySet<string> = new Set();
   if (fallback.length > 0) {
@@ -852,9 +874,33 @@ export async function runWorkspaceDeploy(
   if ((await applyManifest(workspace, ctx, { manifest, what: MEMBERS_FILE }, deps)) === undefined) {
     return EXIT_ERROR;
   }
-  // Only for a pre-annotation manifest: a Deployment this apply created already reads the new
-  // Secret; one that was running needs a restart to pick it up.
-  for (const member of fallback.filter((name) => existing.has(name))) {
+  // The stamp is a text edit, so the cluster is asked what it now holds (audit 4, A4-1). A stamped
+  // member whose applied pod template does not carry its Secret version — a hand-edited file the
+  // text match misread — is restarted rather than left on the old value. A pre-annotation manifest
+  // restarts a changed member only when its Deployment already existed: a new one reads the Secret.
+  const restart = fallback.filter((name) => existing.has(name));
+  for (const [member, version] of stamped) {
+    const read = await workspace.run(
+      'kubectl',
+      [
+        '--context',
+        ctx,
+        '-n',
+        deploy.namespace,
+        'get',
+        `deployment/${member}`,
+        '-o',
+        'jsonpath={.spec.template.metadata.annotations}',
+      ],
+      { cwd: workspace.dir },
+    );
+    if (read.code !== 0) {
+      reportFailure(deps, 'kubectl', `Reading deployment/${member}`, read.code, read.stderr);
+      return EXIT_ERROR;
+    }
+    if (templateVersion(read.stdout) !== version) restart.push(member);
+  }
+  for (const member of restart) {
     const restarted = await workspace.run(
       'kubectl',
       ['--context', ctx, '-n', deploy.namespace, 'rollout', 'restart', `deployment/${member}`],

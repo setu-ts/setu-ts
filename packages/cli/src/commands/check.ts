@@ -44,11 +44,10 @@ export async function memberEnvProblem(
   try {
     await assertInsideProject(fs, root, path);
   } catch (cause) {
-    if (!(cause instanceof PathEscapesProjectError)) throw cause;
+    // Always a PathEscapesProjectError naming the link or what could not be resolved.
     return (
-      `${escapeName(path)} is a symbolic link. docker compose follows it into this member's ` +
-      'container through the generated env_file, so a committed link can load a file from ' +
-      'anywhere on this host. Replace it with a regular file, then run this again.'
+      `${cause instanceof Error ? cause.message : String(cause)} docker compose would follow it ` +
+      "into this member's container through the generated env_file."
     );
   }
   let stat;
