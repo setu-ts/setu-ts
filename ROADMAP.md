@@ -16048,29 +16048,29 @@ through the `dev` script, and teardown across the npm/shell/tsx/node chain.
 
 **Deliverables:**
 
-- [ ] A Node `ILocalDiagnosticsListenerFactory` per decisions 1, 5 and 6: `127.0.0.1` only, the same
+- [x] A Node `ILocalDiagnosticsListenerFactory` per decisions 1, 5 and 6: `127.0.0.1` only, the same
       port bounds, one active listener, a port conflict that rejects `listen()`, and a bounded,
       idempotent `close()` released by the RuntimePlugin close hook on every shutdown and
       failed-startup path
-- [ ] The diagnostics-plugin real-connector suites, the listener suite and the consumer exercise
+- [x] The diagnostics-plugin real-connector suites, the listener suite and the consumer exercise
       running on BOTH lanes (decision 4), plus a raw-socket table for duplicate headers, malformed
       requests, a missing or invalid `Host`, oversized headers and slow headers (decisions 2 and 3)
-- [ ] The CLI Node arm at all three entry points (decision 7), with the refusal narrowed to Bun and
+- [x] The CLI Node arm at all three entry points (decision 7), with the refusal narrowed to Bun and
       Workers, and the production-image assertion
-- [ ] The Node workspace runner's devtool path, with no detach under the devtool, sibling blanks,
+- [x] The Node workspace runner's devtool path, with no detach under the devtool, sibling blanks,
       and a refusal of a pre-M126 runner (decision 8)
-- [ ] A scaffold end-to-end test that boots a standalone Node devtool project AND a Node workspace
+- [x] A scaffold end-to-end test that boots a standalone Node devtool project AND a Node workspace
       member under the generated runner, pairs with each, renews, and proves that no other member's
       environment holds the pair
-- [ ] The design security review delta, and the committed-tree audit record in the PR
-- [ ] Docs that say Deno-only today, corrected: - `docs/runtime-deployment.md:336` -
+- [x] The design security review delta, and the committed-tree audit record in the PR
+- [x] Docs that say Deno-only today, corrected: - `docs/runtime-deployment.md:336` -
       `docs/diagnostics-protocol.md:17` - `docs/diagnostics-security-review.md:189` -
       `packages/cli/README.md:274,307` - `packages/diagnostics-plugin/AGENT_CARD.md:36` - the
       runtime and diagnostics-plugin READMEs - `PUBLIC_API.md` (`--devtool` row) - the CHANGELOG
 
       Plus the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher.
 
-- [ ] **ROADMAP.md**: this section and the Progress Tracking row `126`
+- [x] **ROADMAP.md**: this section and the Progress Tracking row `126`
 
 ---
 
@@ -16362,4 +16362,4 @@ patch by construction and gains nothing new here.
 | 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ⬜     | auth-plugin + session-plugin + common — session and account lifecycle: per-request re-check for every session setup, page redirect vs API 401, sign out all of a user's sessions                                                                                                          |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
-| 126       | ⬜     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
+| 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |

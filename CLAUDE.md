@@ -687,9 +687,12 @@ here.
 - **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
   package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
   `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
-- **Next milestone** — M126 (`packages/runtime` + `packages/cli` — a local diagnostics listener on
-  Node, so the devtool can inspect a default-runtime project; maintainer direction 2026-10-28). M121
-  (full-stack members with a broker), M122, M124 and M119i are also open.
+- **Milestone 126** (`packages/runtime` + `packages/cli` — a local diagnostics listener on Node:
+  `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
+  connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
+  pending).
+- **Next milestone** — M121 (full-stack members with a broker), then M122. M124 and M119i are also
+  open.
 
 ## Verification (run before declaring any work done)
 
