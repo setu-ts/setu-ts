@@ -27,17 +27,11 @@ import { authMiddleware, AuthPlugin, requireAnyRole, requireRole } from '@setu-t
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsClient } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const SUB_CANARY = 'user-CANARY-sub-0001';
 const CLAIM_CANARY = 'claim-CANARY-0002';
 const PATH_CANARY = '/secret-path-CANARY-0003';
-
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
 
 interface App {
   app: Awaited<ReturnType<typeof createApplication>>;
@@ -47,8 +41,8 @@ interface App {
 }
 
 async function startAuthorizationApplication(): Promise<App> {
-  const httpPort = freePort();
-  const connectorPort = freePort();
+  const httpPort = await unusedPort();
+  const connectorPort = await unusedPort();
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -194,8 +188,8 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
   });
 
   it('a JWT-only application (no RBAC) that opted in answers unsupported with rbac-not-configured', async () => {
-    const httpPort = freePort();
-    const connectorPort = freePort();
+    const httpPort = await unusedPort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -234,8 +228,8 @@ describe('Authorization decision explanations (M98h) — end to end', () => {
   });
 
   it('a custom authorization provider latches the source to unsupported (custom-provider)', async () => {
-    const httpPort = freePort();
-    const connectorPort = freePort();
+    const httpPort = await unusedPort();
+    const connectorPort = await unusedPort();
     // A replacement authorization service that grants everything: the guards
     // serve through it, but the first-party collector can no longer explain
     // its decisions and must latch unsupported rather than guess.

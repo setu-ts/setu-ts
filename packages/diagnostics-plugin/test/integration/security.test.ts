@@ -12,6 +12,7 @@ import { RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { requestMacFields, signFields } from '../../src/security/authentication.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 /**
  * Signs an honest request against the ACTUAL bound port (the MAC covers
@@ -52,9 +53,7 @@ async function startApp(options?: {
   port: number;
   plugin: { revoke(): Promise<void> };
 }> {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
+  const port = await unusedPort();
   const plugin = DiagnosticsPlugin({
     enabled: true,
     port,
@@ -97,14 +96,15 @@ async function rawRequest(
   port: number,
   raw: string,
 ): Promise<{ status: number; headers: Headers; body: string }> {
-  const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+  const connection = await connect({ port, hostname: '127.0.0.1' });
   await connection.write(new TextEncoder().encode(raw));
-  const response = await connection.readable.getReader().read();
-  await connection.close();
-  if (response.value === undefined) {
+  const buffer = new Uint8Array(64 * 1024);
+  const count = await connection.read(buffer);
+  connection.close();
+  if (count === null) {
     throw new Error('no response');
   }
-  const text = new TextDecoder().decode(response.value);
+  const text = new TextDecoder().decode(buffer.subarray(0, count));
   const [head, ...rest] = text.split('\r\n\r\n');
   const lines = head.split('\r\n');
   const status = Number.parseInt(lines[0].split(' ')[1], 10);
@@ -302,6 +302,27 @@ describe('Security — hostile raw requests over a real socket', () => {
     await expect(
       rawRequest(port, signedRaw(port, '/v1/renew', 3, lateMac, instance)),
     ).rejects.toThrow();
+    await app.stop();
+  });
+
+  it('refuses a request signed for the canonical target but sent as an alias of it', async () => {
+    // The MAC covers the canonical target. A runtime that normalized the
+    // request-target before the connector saw it (node-server, or any web
+    // Request) would turn each alias into a correctly signed `/v1/status`
+    // and serve it; the connector must see the target as sent (M126 §3.2).
+    const { app, port } = await startApp();
+    const key = await importTestKey(crypto.subtle);
+    const aliases = ['/v1/./status', '/x/../v1/status', '/v1\\status'];
+    for (const [index, alias] of aliases.entries()) {
+      const mac = await signForPort(crypto.subtle, key, port, '/v1/status', index + 1);
+      const refused = await rawRequest(port, signedRaw(port, alias, index + 1, mac));
+      expect(refused.status, alias).toEqual(400);
+      expect(refused.body, alias).toEqual('{"version":1,"error":"invalid-request"}');
+    }
+    // Positive control: the same signing, sent canonically, is served.
+    const next = aliases.length + 1;
+    const mac = await signForPort(crypto.subtle, key, port, '/v1/status', next);
+    expect((await rawRequest(port, signedRaw(port, '/v1/status', next, mac))).status).toEqual(200);
     await app.stop();
   });
 

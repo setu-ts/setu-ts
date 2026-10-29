@@ -11,12 +11,13 @@ import {
   type WorkspaceMember,
 } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
+import type { TargetRuntime } from '../../src/constants.ts';
 
-function harness(members: readonly WorkspaceMember[]) {
+function harness(members: readonly WorkspaceMember[], runtime: TargetRuntime = 'deno') {
   const fs = createFakeFs({
     [`/ws/${WORKSPACE_MANIFEST}`]: renderWorkspaceManifest({
       version: WORKSPACE_VERSION,
-      runtime: 'deno',
+      runtime,
       basePort: 3000,
       transport: 'http',
       members,
@@ -48,6 +49,15 @@ function harness(members: readonly WorkspaceMember[]) {
 }
 
 describe('ports --reallocate', () => {
+  it('rewrites a Node member at its new connector port with Node CLI guidance', async () => {
+    const h = harness([{ name: 'a', port: 3000, devtoolPort: 4919 }], 'node');
+    expect(await h.run()).toBe(0);
+    const source = h.fs.read('/ws/apps/a/main.dev.ts');
+    expect(source).toContain('port: 4000,');
+    expect(source).toContain('npx @setu-ts/cli@');
+    expect(source).not.toMatch(/Deno\.|process\./);
+    expect(source).toContain('await app.start({ port: SERVICE_PORT });');
+  });
   it('moves a member application port and devtool port together', async () => {
     const h = harness([
       { name: 'orders', port: 3000, devtoolPort: 4919 },

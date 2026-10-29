@@ -12,6 +12,7 @@
  * @module
  */
 
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -134,7 +135,9 @@ function printUsage(log: (message: string) => void): void {
   log('  --style <name>      Code style for a styleable template: functional | class-based');
   log('  --logger <name>     console | pino (default pino)');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
-  log('  --devtool           Enable the local diagnostics connector for this member (Deno only)');
+  log(
+    '  --devtool           Enable the local diagnostics connector for this member (Deno or Node)',
+  );
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
   log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
@@ -307,12 +310,23 @@ function planMember(
   const devHost =
     devtoolPort === undefined
       ? host
-      : withDevtool(host, devtoolPort, { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER });
+      : withDevtool(host, devtoolPort, profile.runtime, {
+          symbol: SERVICE_PORT_EXPORT,
+          from: DISCOVERY_SPECIFIER,
+        });
 
   const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
+
+  if (devtoolPort !== undefined && profile.runtime === 'node') {
+    const index = files.findIndex((file) => file.path === joinPath(memberRoot, 'package.json'));
+    const manifest = files[index]!;
+    const plan = planNodeDevtool(manifest.contents, manifest.path);
+    if (!plan.ok) return plan;
+    if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
+  }
 
   // Every member, not only the new one: adding a service registers it with its
   // callers, which is the whole point — a sibling that never learns the new name
@@ -561,7 +575,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       deps.error(runtimeRefusal);
       return EXIT_USAGE;
     }
-    const runner = devtoolDevRunner();
+    const runner = devtoolDevRunner(read.manifest.runtime);
     let existingRunner: string | undefined;
     try {
       existingRunner = new TextDecoder().decode(
@@ -793,5 +807,13 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
       `${profile.runScript('start:dev')}`,
   );
+  // The member's `dev` entry exits without the launcher's session pair, so the
+  // devtool instruction runs the workspace root's runner, as `devtool enable` prints.
+  if (devtoolRequested) {
+    deps.log(
+      `  With the devtool, from the workspace root: SETU_DEVTOOL_MEMBER=${name} ` +
+        `${profile.runScript('dev')} (the launcher supplies the session credentials)`,
+    );
+  }
   return EXIT_OK;
 }

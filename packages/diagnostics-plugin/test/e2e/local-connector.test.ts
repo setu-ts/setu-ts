@@ -12,6 +12,7 @@ import { RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsPlugin } from '../../src/interfaces/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, serveHttp, unusedPort } from '../../../../test/node-helpers.ts';
 
 /**
  * Starts a REAL two-listener application: the kernel's HTTP adapter on one
@@ -28,12 +29,8 @@ async function startRealApplication(options?: {
   connectorPort: number;
   plugin: IDiagnosticsPlugin;
 }> {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const httpPort = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  const connectorProbe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const connectorPort = (connectorProbe.addr as Deno.NetAddr).port;
-  connectorProbe.close();
+  const httpPort = await unusedPort();
+  const connectorPort = await unusedPort();
 
   const plugin = DiagnosticsPlugin({
     enabled: true,
@@ -134,8 +131,8 @@ describe('Local connector e2e', () => {
 
   it('a port conflict on the connector port fails startup closed', async () => {
     // Occupy a port first.
-    const occupant = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const occupiedPort = (occupant.addr as Deno.NetAddr).port;
+    const occupant = await serveHttp({ port: 0, hostname: '127.0.0.1' }, () => new Response());
+    const occupiedPort = occupant.addr.port;
     const plugin = DiagnosticsPlugin({
       enabled: true,
       port: occupiedPort,
@@ -149,8 +146,8 @@ describe('Local connector e2e', () => {
     // No scan, no fallback: the bind conflict refuses startup.
     await expect(app.start()).rejects.toThrow();
     // The occupant is untouched.
-    expect((occupant.addr as Deno.NetAddr).port).toEqual(occupiedPort);
-    occupant.close();
+    expect(occupant.addr.port).toEqual(occupiedPort);
+    await occupant.shutdown();
   });
 
   it('cleanup after shutdown releases the connector port', async () => {
@@ -167,7 +164,7 @@ describe('Local connector e2e', () => {
     await app.stop();
     let refused = false;
     try {
-      const connection = await Deno.connect({
+      const connection = await connect({
         port: connectorPort,
         hostname: '127.0.0.1',
       });

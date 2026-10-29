@@ -33,7 +33,7 @@ export async function endInspection(connector: IDiagnosticsPlugin): Promise<void
 
 ## Behaviour the types do not show
 
-- Activation supports Deno only and binds IPv4 loopback. Missing kernel diagnostics or an
+- Activation supports Deno and Node and binds IPv4 loopback. Missing kernel diagnostics or an
   unavailable port fails startup; there is no fallback port or address.
 - Every request and response is MAC-verified. The launcher supplies a fresh session id and 32-byte
   key in memory; the plugin has no environment fallback.

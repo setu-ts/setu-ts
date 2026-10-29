@@ -695,6 +695,10 @@ here.
   `requireAuth({ signInPage })` redirecting browser navigations with a safe `returnTo` while APIs
   get 401, and `signIn.sessionStamp` ending every session of a user from a stamp on the user record;
   V10-65, V10-66) — complete (PR #520).
+- **Milestone 126** (`packages/runtime` + `packages/cli` — a local diagnostics listener on Node:
+  `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
+  connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
+  #521).
 - **Next milestone** — M122 (workspace operations from the root). M119i is also open.
 
 ## Verification (run before declaring any work done)

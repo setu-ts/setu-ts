@@ -292,43 +292,46 @@ A relative `--dir` is resolved against the working directory.
 
 ## Devtool development
 
-The devtool is Deno-only — the diagnostics listener refuses every other runtime before it binds — so
-these commands need a Deno project (`--runtime deno`). `setu new --devtool` and
-`setu devtool enable <member>` opt a project into the
-[local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md):
-they emit a `main.dev.ts` development entry the production graph never imports, add `dev` and
-`check` tasks, and — for a workspace member — record a `devtoolPort` in `setu.workspace.json`,
-allocated so it never collides with any member's application port
-(`setu workspace ports --reallocate` moves both together).
+The devtool supports Deno and Node projects. `setu new --devtool`, `setu generate app --devtool` and
+`setu devtool enable` opt a project into the
+[local diagnostics connector](https://github.com/setu-ts/setu-ts/blob/main/packages/diagnostics-plugin/README.md).
+They emit a runtime-neutral `main.dev.ts` development entry the production graph never imports. Node
+adds the non-watching `dev` script (`tsx main.dev.ts`) and pins `@setu-ts/diagnostics-plugin` in
+`devDependencies`; its existing `check` script already covers the entry. Deno adds `dev` and widens
+`check`. A workspace member also records a `devtoolPort` in `setu.workspace.json`, allocated without
+colliding with any member's application port (`setu workspace ports --reallocate` moves both
+together).
 
 ```bash
-setu new my-app --runtime deno --devtool   # standalone; connector probes from 4919; override with --devtool-port <n>
-setu new acme --workspace --runtime deno && cd acme
-setu generate app orders --devtool     # member; the devtool port is allocated
-setu devtool enable billing            # a member that already exists
-setu devtool enable                    # a standalone project that already exists
+setu new my-app --devtool               # Node by default; connector probes from 4919
+setu new acme --workspace && cd acme
+setu generate app orders --devtool      # member; the devtool port is allocated
+setu devtool enable billing             # a member that already exists
+setu devtool enable                     # a standalone project that already exists
+# Use --runtime deno when creating a Deno project or workspace.
 ```
 
-Run the development entry with `deno task dev`. The entry reads two environment variables the
-trusted launcher supplies — `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` — and refuses
-to start when either is absent or malformed. It never generates, writes, or prints a pair; renaming
-either variable stops the devtool connecting and nothing else will say why. In a workspace the
-launcher also names the member it is inspecting (`SETU_DEVTOOL_MEMBER`), and the generated
-`scripts/dev.ts` forwards the pair to that member's child alone, blanking it for every sibling.
-Those three names are published CLI surface: renaming one is a breaking change, and the root `dev`
-task's `--allow-env` grant is scoped to exactly them.
+After a Node manifest changes, run `npm install`; the CLI prints this next step and never runs it.
+The devtool launcher runs the development entry with `npm run dev` on Node or `deno task dev` on
+Deno, supplying the session pair; run without it, use `start:dev` as usual. The entry reads
+`SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` through the runtime services and refuses to
+start when either is absent or malformed. It never generates, writes or prints a pair. Older
+CLI-owned entries remain recognized and are upgraded when enabled again or reallocated.
 
-`setu devtool enable` merges into an existing `deno.json` — every task and key you added survives, a
-task or import pin you wrote is never replaced, and running the command twice is a no-op. A
-workspace created before the devtool existed carries a `scripts/dev.ts` that nothing regenerates,
-and that runner starts every member with its `start` task; the command refuses such a workspace by
-name rather than reporting a success the launcher could not use, and names the one-line remedy
-(delete the runner and run the command again). It also adds the `@setu-ts/diagnostics-plugin` pin
-the development entry resolves through, so the project's own `check` task passes on the new entry
-without any edit. The refusals name their fix: a non-Deno runtime (the connector's listener refuses
-every non-Deno bind), a starter-composed template (kernel diagnostics must be enabled at
-construction), and a factory scaffolded before the devtool existed, which needs its signature
-widened AND its composition passed to createApplication before the command proceeds.
+In a workspace the launcher also names `SETU_DEVTOOL_MEMBER`. The generated `scripts/dev.mjs` (Node)
+or `scripts/dev.ts` (Deno) forwards all three values only to that member and blanks them for every
+sibling. On Node it selects the member's `dev` script and runs `start:dev` for the others; selected
+children stay in the launcher's process group for shutdown. All three variable names are published
+CLI surface. Deno's root `dev` task grants environment access to exactly those names.
+
+`setu devtool enable` merges the member's own manifest and preserves unrelated keys. On Node it
+never writes the root workspace `package.json`; it refuses mixed framework pins, a missing `tsx`
+devDependency, a different existing `dev` script, or diagnostics in production dependencies. On Deno
+it preserves developer-owned tasks and import pins. Running it twice is a no-op. A stale
+`scripts/dev.mjs` or `scripts/dev.ts` without the handoff is refused: delete it and re-run to get
+the current runner. Bun and Workers, starter-composed templates, and known legacy factories are
+refused with their remedies. A legacy factory must widen its signature and pass the composition
+through to `createApplication` before enablement can proceed.
 
 ```typescript
 import type { IPlugin } from '@setu-ts/common';
@@ -588,12 +591,12 @@ Every export and option is documented in
 
 ## Development source policies and registration guidance
 
-Opted-in Deno scaffolds and `setu devtool enable` write the CLI-managed `src/devtool/diagnostics.ts`
-approval module. `setu add` refreshes an existing module, using artifact names and env-example keys
-rather than values. Source options activate only when the factory receives its devtool argument;
-production keeps disabled defaults. Unknown source shapes receive manual guidance, including the
-`DEVTOOL_SOURCES` import and the `sources` declaration those lines read. The module is regenerated,
-so preserve application-specific policy outside that file.
+Opted-in Deno and Node scaffolds and `setu devtool enable` write the CLI-managed
+`src/devtool/diagnostics.ts` approval module. `setu add` refreshes an existing module, using
+artifact names and env-example keys rather than values. Source options activate only when the
+factory receives its devtool argument; production keeps disabled defaults. Unknown source shapes
+receive manual guidance, including the `DEVTOOL_SOURCES` import and the `sources` declaration those
+lines read. The module is regenerated, so preserve application-specific policy outside that file.
 
 Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack members receive
 `messaging` / `queue` options from their workspace transport. Standalone projects can use

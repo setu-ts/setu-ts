@@ -17,8 +17,8 @@ describe('workspaceDevRunner', () => {
     const node = workspaceDevRunner(workspaceProfile('node'));
     const bun = workspaceDevRunner(workspaceProfile('bun'));
     expect(node.path).toBe('scripts/dev.mjs');
-    expect(node.contents).toContain("spawn('npm', ['run', 'start:dev']");
-    expect(bun.contents).toContain("spawn('bun', ['run', 'start:dev']");
+    expect(node.contents).toContain("spawn('npm', ['run', entryTask(member)]");
+    expect(bun.contents).toContain("spawn('bun', ['run', entryTask(member)]");
     expect(node.contents).toContain('/ready');
     expect(bun.contents).toContain('Dependency cycle includes');
   });
@@ -39,5 +39,29 @@ describe('workspaceDevRunner', () => {
   // first broke every Deno workspace's runner before it landed.
   it('keeps the Deno runner free of the Node process global', () => {
     expect(workspaceDevRunner(workspaceProfile('deno')).contents).not.toMatch(/\bprocess\./);
+  });
+
+  it('hands the pair to one selected member and keeps all selected children in the launcher group', () => {
+    const runner = workspaceDevRunner(workspaceProfile('node')).contents;
+    for (const name of [
+      'SETU_DEVTOOL_MEMBER',
+      'SETU_DEVTOOL_SESSION_ID',
+      'SETU_DEVTOOL_SESSION_KEY',
+    ]) {
+      expect(runner).toContain(`process.env['${name}']`);
+      expect(runner).toContain(`${name}: selected ? (`);
+    }
+    expect(runner).toContain("devtoolSessionId ?? '') : ''");
+    expect(runner).toContain("devtoolSessionKey ?? '') : ''");
+    expect(runner).toContain('...process.env,');
+    expect(runner).toContain('env: childEnv(member)');
+    expect(runner).toContain("? 'dev' : 'start:dev'");
+    expect(runner).toContain(
+      "const grouped = process.platform !== 'win32' && devtoolSelected === undefined;",
+    );
+    expect(runner).toContain('detached: grouped');
+    expect(runner.indexOf('which setu.workspace.json')).toBeLessThan(runner.indexOf("spawn('npm'"));
+    expect(runner).toContain('but that member carries no ');
+    expect(runner).toContain('devtoolPort. Run npx @setu-ts/cli@');
   });
 });

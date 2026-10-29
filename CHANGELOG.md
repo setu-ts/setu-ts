@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated
+  diagnostics connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http`
+  server. Request-target spellings are preserved, duplicate singleton lines are refused, parser
+  errors answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open
+  connections; the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary
+  request path. Bun and Workers continue to refuse this transport.
+
 - **Session and account lifecycle (M124, #520, 0.11.0, `@setu-ts/auth-plugin`).**
   `signIn: { providers: [] }` is accepted without `mfa` or `passkeys`, so a password-only
   application gets `refreshPrincipal`'s per-request re-check (V10-65). `requireAuth({ signInPage })`
@@ -187,6 +194,12 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
+  support Node projects and workspace members. Development entries read credentials and exit through
+  runtime services; older CLI-owned entries remain recognized and can be upgraded. Node uses
+  `tsx main.dev.ts`, keeps the diagnostics dependency development-only, and forwards a workspace
+  session only to its selected member within the launcher process group.
 
 - **`redactRecord()` returns a snapshot (#513, 0.11.0, `@setu-ts/common`).** Every plain object and
   array it walks is now copied, unclassified subtrees included, instead of being returned by

@@ -239,7 +239,7 @@ export function RuntimePlugin(options?: RuntimeOptions): IPlugin {
 
       // Register the runtime-owned local diagnostics listener factory (M98b).
       // One factory per application: it permits one active loopback listener
-      // on Deno and refuses every listen on other platforms before any bind.
+      // on Deno and Node and refuses unsupported platforms before any bind.
       // The close hook releases an open listener on the normal shutdown path
       // AND the failed-startup path — the kernel runs close hooks from both —
       // so a connector's bind can never outlive the application that allowed
