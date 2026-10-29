@@ -8,12 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Local diagnostics on Node (M126, `@setu-ts/runtime`).** The explicitly activated diagnostics
-  connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http` server.
-  Request-target spellings are preserved, duplicate singleton lines are refused, parser errors
-  answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open connections;
-  the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary request path.
-  Bun and Workers continue to refuse this transport.
+- **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated
+  diagnostics connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http`
+  server. Request-target spellings are preserved, duplicate singleton lines are refused, parser
+  errors answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open
+  connections; the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary
+  request path. Bun and Workers continue to refuse this transport.
 
 - **Full-stack broker configuration (M121, #519, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
   workspace members render messaging and queue transport options with config-backed connection reads
@@ -179,9 +179,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Node devtool scaffolding (M126, `@setu-ts/cli`).** `--devtool` and `devtool enable` now support
-  Node projects and workspace members. Development entries read credentials and exit through runtime
-  services; older CLI-owned entries remain recognized and can be upgraded. Node uses
+- **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
+  support Node projects and workspace members. Development entries read credentials and exit through
+  runtime services; older CLI-owned entries remain recognized and can be upgraded. Node uses
   `tsx main.dev.ts`, keeps the diagnostics dependency development-only, and forwards a workspace
   session only to its selected member within the launcher process group.
 

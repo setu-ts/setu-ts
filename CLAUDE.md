@@ -694,7 +694,7 @@ here.
 - **Milestone 126** (`packages/runtime` + `packages/cli` — a local diagnostics listener on Node:
   `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
   connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
-  pending).
+  #521).
 - **Next milestone** — M122 (workspace operations from the root). M124 and M119i are also open.
 
 ## Verification (run before declaring any work done)
