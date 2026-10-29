@@ -1005,7 +1005,7 @@ export type TraceCoverage =
 
 /**
  * The auto-instrumentation families whose spans the trace observations can
- * include (M98g).
+ * include: `http`, `fetch`, `ioredis`, `redis`, `amqplib`, and `kafkajs` (M98g).
  *
  * The vocabulary mirrors the telemetry plugin's own instrumentation kinds,
  * restated here because this is the protocol's wire vocabulary and `common`
@@ -1017,7 +1017,8 @@ export type TraceCoverage =
  *
  * @since 0.8.0
  */
-export type TraceInstrumentationKind = 'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs';
+export type TraceInstrumentationKind =
+  'http' | 'fetch' | 'ioredis' | 'redis' | 'amqplib' | 'kafkajs';
 
 /**
  * The configured sampler as the batch reports it (M98g).

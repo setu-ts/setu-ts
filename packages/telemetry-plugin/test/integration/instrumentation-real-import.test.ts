@@ -1,7 +1,7 @@
 /**
  * Real-import integration test for auto-instrumentation packages.
  *
- * Drives each of the five loaders through their **default** `importFn` (no
+ * Drives each of the six loaders through their **default** `importFn` (no
  * injection), so the real literal `import()` path — the branch no unit test
  * runs — is exercised against the installed OTel packages.
  *
@@ -20,7 +20,10 @@ import {
   loadFetchInstrumentation,
   loadHttpInstrumentation,
 } from '../../src/instrumentation/http-instrumentation.ts';
-import { loadIORedisInstrumentation } from '../../src/instrumentation/database-instrumentation.ts';
+import {
+  loadIORedisInstrumentation,
+  loadRedisInstrumentation,
+} from '../../src/instrumentation/database-instrumentation.ts';
 import {
   loadAmqplibInstrumentation,
   loadKafkaJsInstrumentation,
@@ -32,6 +35,7 @@ const EXPORT_BY_KIND = {
   http: 'HttpInstrumentation',
   fetch: 'UndiciInstrumentation',
   ioredis: 'IORedisInstrumentation',
+  redis: 'RedisInstrumentation',
   amqplib: 'AmqplibInstrumentation',
   kafkajs: 'KafkaJsInstrumentation',
 } as const;
@@ -44,6 +48,7 @@ describe('Auto-instrumentation real-imports', () => {
     { kind: 'http', load: () => loadHttpInstrumentation(undefined) },
     { kind: 'fetch', load: () => loadFetchInstrumentation(undefined) },
     { kind: 'ioredis', load: () => loadIORedisInstrumentation(undefined) },
+    { kind: 'redis', load: () => loadRedisInstrumentation(undefined) },
     { kind: 'amqplib', load: () => loadAmqplibInstrumentation(undefined) },
     { kind: 'kafkajs', load: () => loadKafkaJsInstrumentation(undefined) },
   ];

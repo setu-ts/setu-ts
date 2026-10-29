@@ -4,7 +4,7 @@
  * @module
  * @since 0.2.0
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { InstrumentationKind } from '../../src/interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import {
@@ -14,7 +14,7 @@ import {
 } from '../../src/instrumentation/instrumentation-registry.ts';
 
 describe('isInstrumentationSupported', () => {
-  const kinds: InstrumentationKind[] = ['http', 'fetch', 'ioredis', 'amqplib', 'kafkajs'];
+  const kinds: InstrumentationKind[] = ['http', 'fetch', 'ioredis', 'redis', 'amqplib', 'kafkajs'];
 
   for (const kind of kinds) {
     it(`should return true for '${kind}' on node`, () => {
@@ -75,6 +75,7 @@ describe('buildInstrumentationRegistry', () => {
       http: overrides.http ?? unused('http'),
       fetch: overrides.fetch ?? unused('fetch'),
       ioredis: overrides.ioredis ?? unused('ioredis'),
+      redis: overrides.redis ?? unused('redis'),
       amqplib: overrides.amqplib ?? unused('amqplib'),
       kafkajs: overrides.kafkajs ?? unused('kafkajs'),
     };
@@ -85,6 +86,59 @@ describe('buildInstrumentationRegistry', () => {
     const handle = await buildInstrumentationRegistry(undefined, runtime, {});
     expect(handle.outcomes).toHaveLength(0);
     await handle.shutdown(); // exercise the no-op shutdown function
+  });
+
+  describe.each(['ioredis', 'redis'] as const)('%s registry parity', (kind) => {
+    it.each([true, { config: { requireParentSpan: true } }] as const)(
+      'loads and enables configuration %j',
+      async (option) => {
+        const instance = { setTracerProvider: vi.fn(), enable: vi.fn(), disable: vi.fn() };
+        const loader = vi.fn(() => Promise.resolve({ instance, specifier: kind }));
+        const provider = {};
+        const handle = await buildInstrumentationRegistry(
+          { [kind]: option },
+          createFakeRuntime('node'),
+          provider,
+          undefined,
+          createFakeLoaders({ [kind]: loader }),
+        );
+        expect(loader).toHaveBeenCalledExactlyOnceWith(option === true ? undefined : option.config);
+        expect(instance.setTracerProvider).toHaveBeenCalledExactlyOnceWith(provider);
+        expect(instance.enable).toHaveBeenCalledTimes(1);
+        expect(handle.outcomes).toEqual([{ kind, enabled: true }]);
+        await handle.shutdown();
+        expect(instance.disable).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('uses an injected instrumentation without loading a package', async () => {
+      const instance = { setTracerProvider: vi.fn(), enable: vi.fn(), disable: vi.fn() };
+      const loader = vi.fn(() => Promise.reject(new Error('must not load')));
+      const handle = await buildInstrumentationRegistry(
+        { [kind]: { instrumentation: instance } },
+        createFakeRuntime('node'),
+        {},
+        undefined,
+        createFakeLoaders({ [kind]: loader }),
+      );
+      expect(loader).not.toHaveBeenCalled();
+      expect(handle.outcomes).toEqual([{ kind, enabled: true }]);
+      await handle.shutdown();
+    });
+
+    it.each(['deno', 'bun', 'cloudflare-workers'])('does not load on %s', async (platform) => {
+      const loader = vi.fn(() => Promise.reject(new Error('must not load')));
+      const handle = await buildInstrumentationRegistry(
+        { [kind]: true },
+        createFakeRuntime(platform),
+        {},
+        undefined,
+        createFakeLoaders({ [kind]: loader }),
+      );
+      expect(loader).not.toHaveBeenCalled();
+      expect(handle.outcomes).toEqual([{ kind, enabled: false, reason: 'unsupported platform' }]);
+      await handle.shutdown();
+    });
   });
 
   it('should return a no-op handle when provider is undefined', async () => {
@@ -369,7 +423,7 @@ describe('buildInstrumentationRegistry', () => {
     const provider = { id: 'fake-provider' };
 
     const handle = await buildInstrumentationRegistry(
-      { http: true, ioredis: true, amqplib: true },
+      { http: true, ioredis: true, redis: true, amqplib: true },
       runtime,
       provider,
     );
@@ -390,20 +444,21 @@ describe('buildInstrumentationRegistry', () => {
     expect(amqplibOutcome?.reason).toBe('unsupported platform');
   });
 
-  it('should record unsupported-platform outcome for all five lazy instrumentations', async () => {
+  it('should record unsupported-platform outcome for all six lazy instrumentations', async () => {
     const runtime = createFakeRuntime('deno');
     const provider = { id: 'fake-provider' };
 
     const handle = await buildInstrumentationRegistry(
-      { http: true, fetch: true, ioredis: true, amqplib: true, kafkajs: true },
+      { http: true, fetch: true, ioredis: true, redis: true, amqplib: true, kafkajs: true },
       runtime,
       provider,
     );
 
-    const kinds: Array<'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs'> = [
+    const kinds: InstrumentationKind[] = [
       'http',
       'fetch',
       'ioredis',
+      'redis',
       'amqplib',
       'kafkajs',
     ];
@@ -538,14 +593,16 @@ describe('buildInstrumentationRegistry', () => {
     const provider = { id: 'fake-provider' };
 
     const handle = await buildInstrumentationRegistry(
-      { http: true, fetch: true, ioredis: true },
+      { http: true, fetch: true, ioredis: true, redis: true },
       runtime,
       provider,
     );
 
-    // All three configured kinds must appear in outcomes immediately —
+    // All four configured kinds must appear in outcomes immediately —
     // none are pending or missing.
-    expect(handle.outcomes.map((o) => o.kind).sort()).toEqual(['fetch', 'http', 'ioredis'].sort());
+    expect(handle.outcomes.map((o) => o.kind).sort()).toEqual(
+      ['fetch', 'http', 'ioredis', 'redis'].sort(),
+    );
   });
 
   // --- Reporter (M70e §3.6) ---
@@ -694,6 +751,7 @@ describe('buildInstrumentationRegistry — non-Error thrown values (never throws
           http: throwingLoader(value),
           fetch: throwingLoader(value),
           ioredis: throwingLoader(value),
+          redis: throwingLoader(value),
           amqplib: throwingLoader(value),
           kafkajs: throwingLoader(value),
         },
@@ -754,26 +812,30 @@ describe('buildInstrumentationRegistry — non-Error thrown values (never throws
     expect(httpOutcome?.reason).toBe('enable blew up');
   });
 
-  it('records a non-empty string reason for a lazy loader that throws a number (no throw)', async () => {
-    const runtime = createFakeRuntime('node');
-    const provider = { id: 'fake-provider' };
+  it.each(['ioredis', 'redis'] as const)(
+    'records a reason for %s loader throwing a number',
+    async (kind) => {
+      const runtime = createFakeRuntime('node');
+      const provider = { id: 'fake-provider' };
 
-    const handle = await buildInstrumentationRegistry(
-      { ioredis: true },
-      runtime,
-      provider,
-      undefined,
-      {
-        http: throwingLoader(null),
-        fetch: throwingLoader(null),
-        ioredis: throwingLoader(42),
-        amqplib: throwingLoader(null),
-        kafkajs: throwingLoader(null),
-      },
-    );
+      const handle = await buildInstrumentationRegistry(
+        { [kind]: true },
+        runtime,
+        provider,
+        undefined,
+        {
+          http: throwingLoader(null),
+          fetch: throwingLoader(null),
+          ioredis: throwingLoader(42),
+          redis: throwingLoader(42),
+          amqplib: throwingLoader(null),
+          kafkajs: throwingLoader(null),
+        },
+      );
 
-    const ioredisOutcome = handle.outcomes.find((o) => o.kind === 'ioredis');
-    expect(ioredisOutcome?.enabled).toBe(false);
-    expect(ioredisOutcome?.reason).toBe('42');
-  });
+      const outcome = handle.outcomes.find((o) => o.kind === kind);
+      expect(outcome?.enabled).toBe(false);
+      expect(outcome?.reason).toBe('42');
+    },
+  );
 });

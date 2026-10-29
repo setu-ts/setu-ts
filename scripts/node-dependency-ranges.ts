@@ -42,6 +42,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@opentelemetry/instrumentation-amqplib': '^0.67.0',
   '@opentelemetry/instrumentation-http': '^0.220.0',
   '@opentelemetry/instrumentation-ioredis': '^0.68.0',
+  '@opentelemetry/instrumentation-redis': '^0.69.0',
   '@opentelemetry/instrumentation-kafkajs': '^0.29.0',
   '@opentelemetry/instrumentation-undici': '^0.30.0',
   '@opentelemetry/resources': '^2.9.0',
