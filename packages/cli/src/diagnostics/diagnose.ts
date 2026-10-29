@@ -12,6 +12,7 @@ import { diagnoseBarrels, readBarrel } from './barrel-drift.ts';
 import { moduleActive, moduleSymbol, withoutImports } from './modules.ts';
 import { maskSourceCode } from '../devtool/sources.ts';
 import { wiringFinding, wiringSites } from './wiring.ts';
+import { composingStarter } from '../utils/starter-arms.ts';
 
 /** Typed findings carry facts; renderers own prose and exit policy. */
 export type Finding =
@@ -77,6 +78,7 @@ export type Finding =
 
 /** Raw generator inputs plus read-only diagnostics and legacy reporting projections. */
 export interface ProjectDiagnosis {
+  readonly starter?: NonNullable<ReturnType<typeof composingStarter>>;
   readonly artifacts: ArtifactScanAll['artifacts'];
   readonly adopted: ArtifactScanAll['adopted'];
   readonly modules: readonly string[];
@@ -221,7 +223,9 @@ export async function diagnoseProject(
       )),
     );
   }
+  const starter = composingStarter(config);
   return {
+    ...(starter === undefined ? {} : { starter }),
     mode,
     artifacts: scan.artifacts,
     adopted: scan.adopted,

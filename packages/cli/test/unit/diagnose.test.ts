@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import { renderCheckFindings } from '../../src/diagnostics/render.ts';
 import { diagnoseProject } from '../../src/diagnostics/diagnose.ts';
 import { moduleActive, moduleSymbol } from '../../src/diagnostics/modules.ts';
 import { runCli } from '../../src/cli.ts';
@@ -109,5 +110,57 @@ it('uses calls and MODULES elements rather than imports, exports or another arra
         mode,
       ),
     ).toBe(true);
+  }
+});
+
+it('exposes the composing starter and its arms from the single bounded config snapshot', async () => {
+  const fs = createFakeFs({
+    '/app/setu.config.ts':
+      "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';",
+  });
+  let reads = 0;
+  const result = await diagnoseProject(
+    {
+      ...fs,
+      readFile: (path) => {
+        if (path === '/app/setu.config.ts') reads++;
+        return fs.readFile(path);
+      },
+    },
+    '/app',
+    new Set(),
+  );
+  expect(reads).toBe(1);
+  expect(result.starter?.symbol).toBe('createFullStackAppFromConfig');
+  expect(result.starter?.arms.get('queue-plugin')).toBe('queue');
+});
+
+it('renders owned functional config arms and keeps non-starter advice', () => {
+  for (const [barrel, symbols, arm] of [
+    ['src/events/index.ts', ['EVENT_HANDLERS'], 'events: { handlers: EVENT_HANDLERS }'],
+    [
+      'src/cqrs/index.ts',
+      ['COMMAND_HANDLERS', 'QUERY_HANDLERS'],
+      'cqrs: { commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }',
+    ],
+  ] as const) {
+    const finding = {
+      kind: 'unwired',
+      barrel,
+      symbols,
+      site: 'config',
+      outcome: 'unwired',
+    } as const;
+    const lines: string[] = [];
+    renderCheckFindings([{ ...finding, starter: 'createFullStackAppFromConfig' }], (line) =>
+      lines.push(line),
+    );
+    expect(lines.join('\n')).toContain(arm);
+    lines.length = 0;
+    renderCheckFindings([finding, { ...finding, starter: 'createRestApp' }], (line) =>
+      lines.push(line),
+    );
+    expect(lines.join('\n')).toContain('consume the barrel exports:');
+    expect(lines.join('\n')).not.toContain(arm);
   }
 });

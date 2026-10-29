@@ -443,6 +443,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Full-stack generator wiring and page collisions (#524, 0.11.0, `@setu-ts/cli`).** Route,
+  controller and module generation refuses kernel routes that would shadow existing React Router
+  pages, naming the page file and advising a separate API module. `setu add events`, `cqrs` and
+  `queue` wire managed handler barrels into the starter's option arms, merging queue processors and
+  transport options in either add order. Unwired queue advice now names the starter's `queue` arm
+  instead of a duplicate `QueuePlugin` registration. Jobs in a queue-owning starter refuse before
+  writing until `setu add queue` installs the package and wires its processor barrel.
+
 - **Route matching with Hono's `TrieRouter` (#518, 0.11.0, `@setu-ts/kernel`).** The kernel now
   matches routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route
   pattern on every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full

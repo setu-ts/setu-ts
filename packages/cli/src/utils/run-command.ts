@@ -15,6 +15,8 @@ import process from 'node:process';
 export interface RunCommandOptions {
   /** The directory it runs in. */
   readonly cwd: string;
+  /** Cancels the child when its caller reaches a deadline. */
+  readonly signal?: AbortSignal;
   /**
    * Written to the child's stdin, which is then closed. This is how secret values reach `kubectl`:
    * never on the argument list, which other local users can read.
@@ -87,6 +89,7 @@ export function createCommandRunner(spawnImpl: typeof spawn = spawn): CommandRun
       const env = childEnvironment(options);
       const child = spawnImpl(command, [...args], {
         cwd: options.cwd,
+        ...(options.signal === undefined ? {} : { signal: options.signal }),
         ...(env === undefined ? {} : { env }),
         stdio: [
           options.input === undefined ? 'ignore' : 'pipe',

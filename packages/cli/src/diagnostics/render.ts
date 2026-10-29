@@ -1,6 +1,8 @@
 /** Plain diagnostic rendering; generate's historic stderr stays pinned. @module */
 import type { Finding, ProjectDiagnosis } from './diagnose.ts';
 import { findingId, findingPath } from './ids.ts';
+import { STARTER_SEAMS, starterSeamLiteral } from '../templates/seam.ts';
+import { STARTER_ARMS } from '../utils/starter-arms.ts';
 import { escapeName } from '../utils/names.ts';
 import { legacyLayoutNotice, legacyRegistrarNotice } from '../utils/legacy-layout.ts';
 
@@ -50,8 +52,18 @@ function lines(finding: Finding): readonly string[] {
           "  import { registerModules } from './src/modules/index.ts';",
           '  registerModules(app.router, app.services);',
         ];
+      const seam = STARTER_SEAMS.find((entry) => entry.barrel === f.barrel);
+      const owner = STARTER_ARMS.find((entry) => entry.symbol === f.starter);
+      const starterAdvice =
+        seam !== undefined && owner?.arms.has(seam.plugin) === true
+          ? [
+              `${f.starter} owns ${seam.plugin === 'queue-plugin' ? 'QueuePlugin' : seam.plugin === 'events-plugin' ? 'EventsPlugin' : 'CqrsPlugin'}; merge the barrel into its ${seam.arm} arm:`,
+              `  ${seam.arm}: ${starterSeamLiteral(seam)}`,
+            ]
+          : undefined;
       const result =
-        f.site === 'processors'
+        starterAdvice ??
+        (f.site === 'processors'
           ? [`Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...${symbol}] })`]
           : f.site === 'config'
             ? [`setu.config.ts does not reference ${symbol}; consume the barrel exports:`]
@@ -63,7 +75,7 @@ function lines(finding: Finding): readonly string[] {
               : [
                   `setu.config.ts does not reference ${symbol}; add it to DecoratorPlugin:`,
                   `  ${f.site}: [...${symbol}]`,
-                ];
+                ]);
       return [...result, `  import { ${symbol} } from './${f.barrel}';`];
     }
     case 'barrel-drift':

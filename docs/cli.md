@@ -234,37 +234,57 @@ There are seventeen built-in schematics. Every one except `guard`, `migration`, 
 functional project — `service` and `job` lands in a barrel the generated `setu.config.ts` already
 imports, so a generated artifact reaches its registration site with **no edit to a file you own**:
 
-| Schematic          | Requires                    | Emits into                                                                                         | Reaches                                                                                                                                         |
-| ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `module`           | —                           | `src/modules/<name>/` (no file in the controllers folder)                                          | `DecoratorPlugin({ modules })` (class mode), or `registerModules(app.router, app.services)` from `src/modules/index.ts` (functional mode)       |
-| `controller`       | —                           | `src/controllers/`                                                                                 | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call                                                            |
-| `service`          | —                           | `src/services/`                                                                                    | `DecoratorPlugin({ services })`, when installed                                                                                                 |
-| `route`            | —                           | `src/controllers/`; `src/modules/<module>/` with `--module`                                        | A `register…Routes(router)` call in `createApp()`, or the module's `index.ts` (functional mode)                                                 |
-| `schema`           | `validation-plugin`         | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/` with `--module`                    | Nothing — the feature that uses it imports it                                                                                                   |
-| `middleware`       | —                           | `src/middleware/`                                                                                  | The global middleware pipeline                                                                                                                  |
-| `plugin`           | —                           | `src/plugins/`                                                                                     | The `plugins: [...]` array                                                                                                                      |
-| `health-indicator` | `health-plugin`             | `src/health/`                                                                                      | `HealthPlugin({ indicators })` → `GET /health`                                                                                                  |
-| `metric`           | `metrics-plugin`            | `src/metrics/`                                                                                     | `MetricsPlugin({ customMetrics })` → `/metrics`                                                                                                 |
-| `command-handler`  | `cqrs-plugin`               | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts` | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                              |
-| `query-handler`    | `cqrs-plugin`               | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`     | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                |
-| `event-handler`    | `events-plugin`             | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`   | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                   |
-| `guard`            | `auth-plugin`               | `src/guards/`                                                                                      | Nothing — attach it per route                                                                                                                   |
-| `job`              | `queue-plugin` (class mode) | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                         | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })` |
-| `migration`        | `database-plugin`, `common` | `src/migrations/`                                                                                  | Nothing — no framework code reads migrations                                                                                                    |
-| `ws-route`         | `websocket-plugin`          | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`              | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode                                                                     |
-| `sse`              | `sse-plugin`                | `src/controllers/`                                                                                 | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode                                                           |
+| Schematic          | Requires                                            | Emits into                                                                                         | Reaches                                                                                                                                         |
+| ------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`           | —                                                   | `src/modules/<name>/` (no file in the controllers folder)                                          | `DecoratorPlugin({ modules })` (class mode), or `registerModules(app.router, app.services)` from `src/modules/index.ts` (functional mode)       |
+| `controller`       | —                                                   | `src/controllers/`                                                                                 | `DecoratorPlugin({ controllers })` (class mode), or a `register…Routes(router)` call                                                            |
+| `service`          | —                                                   | `src/services/`                                                                                    | `DecoratorPlugin({ services })`, when installed                                                                                                 |
+| `route`            | —                                                   | `src/controllers/`; `src/modules/<module>/` with `--module`                                        | A `register…Routes(router)` call in `createApp()`, or the module's `index.ts` (functional mode)                                                 |
+| `schema`           | `validation-plugin`                                 | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/` with `--module`                    | Nothing — the feature that uses it imports it                                                                                                   |
+| `middleware`       | —                                                   | `src/middleware/`                                                                                  | The global middleware pipeline                                                                                                                  |
+| `plugin`           | —                                                   | `src/plugins/`                                                                                     | The `plugins: [...]` array                                                                                                                      |
+| `health-indicator` | `health-plugin`                                     | `src/health/`                                                                                      | `HealthPlugin({ indicators })` → `GET /health`                                                                                                  |
+| `metric`           | `metrics-plugin`                                    | `src/metrics/`                                                                                     | `MetricsPlugin({ customMetrics })` → `/metrics`                                                                                                 |
+| `command-handler`  | `cqrs-plugin`                                       | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts` | `CqrsPlugin({ commandHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                              |
+| `query-handler`    | `cqrs-plugin`                                       | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`     | `CqrsPlugin({ queryHandlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                |
+| `event-handler`    | `events-plugin`                                     | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`   | `EventsPlugin({ handlers })`, or `DecoratorPlugin({ ingress })` in class mode                                                                   |
+| `guard`            | `auth-plugin`                                       | `src/guards/`                                                                                      | Nothing — attach it per route                                                                                                                   |
+| `job`              | `queue-plugin` (class mode or queue-owning starter) | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                         | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })` |
+| `migration`        | `database-plugin`, `common`                         | `src/migrations/`                                                                                  | Nothing — no framework code reads migrations                                                                                                    |
+| `ws-route`         | `websocket-plugin`                                  | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`              | The `plugins: [...]` array, or `DecoratorPlugin({ ingress })` in class mode                                                                     |
+| `sse`              | `sse-plugin`                                        | `src/controllers/`                                                                                 | A `register…Routes(router)` call, or `DecoratorPlugin({ controllers })` in class mode                                                           |
+
+In a full-stack project, first run `setu add events`, `setu add cqrs` or `setu add queue` for the
+corresponding handler generator. The command imports the managed barrel and wires the starter's
+`events: { handlers: EVENT_HANDLERS }`,
+`cqrs: { commandHandlers: COMMAND_HANDLERS, queryHandlers: QUERY_HANDLERS }` or
+`queue: { processors: [...QUEUE_PROCESSORS] }` arm when the generated callback can be safely edited.
+Existing queue transport options are retained, and `add queue --queue redis` merges with the
+processor arm in either add order. Uncertain edits retain the existing configuration and print
+guidance. The starter owns these plugins; use its arm instead of registering a second instance. A
+job in a starter that owns the queue requires `setu add queue` first; otherwise generation refuses
+before writing and explains that the starter already runs the queue. Functional jobs outside a
+queue-owning starter remain ungated.
+
+In projects with `react-router-plugin`, `g route`, `g controller` and `g module` refuse kernel
+routes that would shadow an existing page, with its file named. To put an API at `/api/products`
+while keeping the `/products` page, run `setu g module api`, then
+`setu g route products --module api`. The check runs the installed `react-router routes --json` in
+the project with a 15-second deadline; if it cannot run, generation continues with a notice and the
+paths to check manually. `setu check` does not run React Router, so a page added after the route is
+not detected.
 
 `guard`, `migration` and `schema` are unwired deliberately, not by omission. A `guard` answers `401`
 when `ctx.request.user` is absent, so registering it globally would 401 `/health`, `/metrics` and
 `/` — turning a generated file into an outage; its positions are per route (`@UseGuards`, a route's
 `middleware` list). With `QueuePlugin` installed, a functional `job` exports a processor factory
 through `src/jobs/index.ts`, consumed by `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`.
-Without queue it remains a standalone function. Class-based jobs require queue and use the ingress
-barrel. Nothing in the framework reads migration files at all. A functional `service` is a plain
-exported function, which has no registration site; `src/services/index.ts` re-exports it for
-convenience and registers nothing. A `schema` file has no registration site either: it is the shapes
-file a feature imports — [Domain modules](#domain-modules) says where shapes live and what
-`--module` does with them.
+Outside a queue-owning starter, without queue it remains a standalone function. Class-based jobs
+require queue and use the ingress barrel. Nothing in the framework reads migration files at all. A
+functional `service` is a plain exported function, which has no registration site;
+`src/services/index.ts` re-exports it for convenience and registers nothing. A `schema` file has no
+registration site either: it is the shapes file a feature imports —
+[Domain modules](#domain-modules) says where shapes live and what `--module` does with them.
 
 `--module <name>` is the feature-scoped form of the four schematics a feature owns — `service`,
 `route`, `controller` and `schema`: it places the file inside the named module rather than the

@@ -179,7 +179,10 @@ export function createApp(): IKernelApplication {
           } else if (template === 'full-stack') {
             expect(config).toContain('messaging: {');
             expect(config).toContain('config.get<string>(');
-            expect(config.includes('queue: {')).toBe(transport === 'redis');
+            // `add queue` wires the starter's queue arm with the job barrel on every
+            // transport; only Redis also selects a queue backend there.
+            expect(config).toContain('processors: [...QUEUE_PROCESSORS]');
+            expect(config.includes("adapter: 'redis'")).toBe(transport === 'redis');
           } else {
             // Generated with the workspace transport, so a re-add finds it already set.
             expect(h.out.join('\n')).toContain('already passes these options to MessagingPlugin');
@@ -2598,4 +2601,107 @@ it('preserves a view file created between planning and the writer preflight', as
   ).toBe(0);
   expect(raced).toBe(true);
   expect(h.read(path)).toBe('created by the developer');
+});
+
+describe('starter handler-arm wiring', () => {
+  async function fullStack() {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['shop', '--template', 'full-stack', '--runtime', 'node']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    return h;
+  }
+  for (const [name, arm, symbols] of [
+    ['events', 'events', ['EVENT_HANDLERS']],
+    ['cqrs', 'cqrs', ['COMMAND_HANDLERS', 'QUERY_HANDLERS']],
+    ['queue', 'queue', ['QUEUE_PROCESSORS']],
+  ] as const) {
+    it(`wires ${name} arm and import once in a full-stack config`, async () => {
+      const h = await fullStack();
+      expect(await h.run([name, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      const source = h.read('/app/shop/setu.config.ts');
+      expect(source).toContain(`${arm}: {`);
+      for (const symbol of symbols) expect(source).toContain(symbol);
+      const seam = name === 'queue' ? 'jobs' : name;
+      expect(source).toContain(`from './src/${seam}/index.ts'`);
+      expect(source.indexOf(`from './src/${seam}/index.ts'`)).toBeGreaterThan(
+        source.indexOf("from './src/plugins/index.ts'"),
+      );
+      expect(h.out.join('\n')).toContain(`wired ${arm} in setu.config.ts`);
+      const writes = h.fs.writes.length;
+      expect(await h.run([name, '--dir', '/app/shop'])).toBe(0);
+      expect(h.fs.writes.length).toBe(writes);
+      expect(h.read('/app/shop/setu.config.ts')).toBe(source);
+    });
+  }
+  it('merges the queue transport and processors identically in either add order', async () => {
+    const sources: string[] = [];
+    for (const order of [
+      [[], ['--queue', 'redis']],
+      [['--queue', 'redis'], []],
+    ]) {
+      const h = await fullStack();
+      for (const flags of order)
+        expect(await h.run(['queue', ...flags, '--dir', '/app/shop']), h.err.join('\n')).toBe(0);
+      sources.push(h.read('/app/shop/setu.config.ts'));
+    }
+    expect(sources[0]).toBe(sources[1]);
+    expect(sources[0]).toContain("adapter: 'redis'");
+    expect(sources[0]).toContain('processors: [...QUEUE_PROCESSORS]');
+  });
+  it('retains manual queue arms on a microservice starter and prints the existing guidance', async () => {
+    const source = `import { createMicroserviceApp } from '@setu-ts/microservice-starter';\nexport function createApp() { return createMicroserviceApp({ queue: queueOptions }); }\n`;
+    const h = harness({ '/app/package.json': '{}', '/app/setu.config.ts': source });
+    expect(await h.run(['queue'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(source);
+    expect(h.out.join('\n')).toContain('already sets its own queue option');
+  });
+  for (const edit of [
+    (source: string) => source.replace('return {', 'return { events: options,'),
+    (source: string) => source.replace('return {', 'return { events: { ...options },'),
+    (source: string) => `import { OTHER } from './src/events/index.ts';\n${source}`,
+    (source: string) => `import * as handlers from './src/events/index.ts';\n${source}`,
+    (source: string) => `const EVENT_HANDLERS = [];\n${source}`,
+  ]) {
+    it('fails closed and retains events guidance for an uncertain arm or import', async () => {
+      const h = await fullStack();
+      const path = '/app/shop/setu.config.ts';
+      const source = edit(h.read(path));
+      await h.fs.writeFile(path, new TextEncoder().encode(source));
+      expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+      expect(h.read(path)).toBe(source);
+      expect(h.out.join('\n')).toContain(
+        'Pass the generated artifacts through it: events: { handlers: EVENT_HANDLERS }',
+      );
+    });
+  }
+  it('does not mistake a nested handler mention for a wired top-level property', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    const source = `import { EVENT_HANDLERS } from './src/events/index.ts';\n${h.read(path).replace('return {', 'return { events: { custom: { handlers: EVENT_HANDLERS } },')}`;
+    await h.fs.writeFile(path, new TextEncoder().encode(source));
+    expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path)).toContain(
+      'events: {\n          custom: { handlers: EVENT_HANDLERS },\n          handlers: EVENT_HANDLERS,',
+    );
+    expect(h.read(path)).toContain('custom: { handlers: EVENT_HANDLERS }');
+  });
+  it('reuses an existing complete named barrel import while adding the absent arm', async () => {
+    const h = await fullStack();
+    const path = '/app/shop/setu.config.ts';
+    await h.fs.writeFile(
+      path,
+      new TextEncoder().encode(
+        `import { EVENT_HANDLERS } from './src/events/index.ts';\n${h.read(path)}`,
+      ),
+    );
+    expect(await h.run(['events', '--dir', '/app/shop'])).toBe(0);
+    expect(h.read(path).match(/import \{ EVENT_HANDLERS \}/g)).toHaveLength(1);
+    expect(h.read(path)).toContain('events: { handlers: EVENT_HANDLERS }');
+  });
 });
