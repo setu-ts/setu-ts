@@ -197,7 +197,7 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * package; got 3. Run it once per package.`), and this check must not preempt
  * that message with a second way of saying the same thing.
  */
-const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run']);
+const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run', 'broker', 'queue']);
 
 /** Opt-in agent brief creation and read-only freshness checking. */
 const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-run'], [], {

@@ -166,7 +166,13 @@ describe('resolveNewChoices', () => {
     // full-stack composes through a starter and has no controller or ingress
     // seam, so it has no style axis at all.
     const { questions } = await resolve(['svc'], ['deno', 'full-stack']);
-    expect(questions).toEqual(['Runtime?', 'Template?', 'Logger?']);
+    expect(questions).toEqual([
+      'Runtime?',
+      'Template?',
+      'Message broker?',
+      'Job queue?',
+      'Logger?',
+    ]);
   });
 
   it('skips the style question when --style was supplied on the command line', async () => {

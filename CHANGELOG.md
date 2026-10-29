@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary request path.
   Bun and Workers continue to refuse this transport.
 
+- **Full-stack broker configuration (M121, #519, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
+  workspace members render messaging and queue transport options with config-backed connection reads
+  and the selected clients. `setu add messaging` / `queue` reads workspace transports and accepts
+  standalone `--broker` / `--queue`, preserving existing values and printing exact manual guidance.
+  `setu add react-router` refuses non-full-stack projects with the command to create one. See
+  [upgrading](docs/upgrading.md#setu-add-messaging-and-full-stack-brokers-m121-0110-setu-tscli).
+
 - **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
   Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
   fixed header/sidebar with scrolling content. `components.json` supports adding more components;

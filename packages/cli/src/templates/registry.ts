@@ -183,6 +183,10 @@ export interface AppFactoryRenderContext {
   readonly envFilePath?: string;
   /** Mounted RPC prefix supplied by a workspace transport, when any. */
   readonly grpcBasePath?: string;
+  /** Rendered messaging options supplied by a transport. @since 0.11.0 */
+  readonly messaging?: string;
+  /** Rendered queue options supplied by a transport. @since 0.11.0 */
+  readonly queue?: string;
 }
 
 /**

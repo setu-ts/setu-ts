@@ -687,12 +687,15 @@ here.
 - **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
   package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
   `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
+- **Milestone 121** (`packages/cli` — full-stack projects and workspace members on a broker through
+  the starter's `messaging`/`queue` options, `setu add messaging`/`queue` reading the workspace
+  transport and taking `--broker`/`--queue`, `setu add react-router` refused outside full-stack;
+  V10-51, V10-52) — complete (PR #519).
 - **Milestone 126** (`packages/runtime` + `packages/cli` — a local diagnostics listener on Node:
   `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
   connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
   pending).
-- **Next milestone** — M121 (full-stack members with a broker), then M122. M124 and M119i are also
-  open.
+- **Next milestone** — M122 (workspace operations from the root). M124 and M119i are also open.
 
 ## Verification (run before declaring any work done)
 

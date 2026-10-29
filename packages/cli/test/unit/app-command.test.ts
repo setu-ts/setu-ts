@@ -206,20 +206,17 @@ describe('runAppCommand', () => {
       expect(await h.run(['app', 'orders', '--runtime', 'deno'])).toBe(0);
     });
 
-    // A starter-composed template can accept a DIRECT plugin contribution: the
-    // config renderer registers it after the starter factory returns. A broker
-    // still needs to rewrite starter-owned wiring, which the factory cannot
-    // represent, so its refusal remains the no-silent-miswire guard.
-    it('refuses a starter-composed template on a transport that rewrites a plugin', async () => {
-      const h = harness([], 3000, 'redis');
-      expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(2);
-      expect(h.err.text()).toContain('createFullStackAppFromConfig');
-      expect(h.err.text()).toContain('talking to nobody');
-      // C4: for a BROKER the advice names what actually delivers one standalone,
-      // since a standalone full-stack project still cannot take --broker.
-      expect(h.err.text()).toContain('--template microservice --broker redis');
-      expect(h.fs.writes).toEqual([]);
-    });
+    for (const transport of ['redis', 'rabbitmq', 'nats', 'kafka'] as const) {
+      it(`renders a full-stack member on ${transport}`, async () => {
+        const h = harness([], 3000, transport);
+        expect(await h.run(['app', 'shop', '--template', 'full-stack'])).toBe(0);
+        const config = h.fs.read('/ws/apps/shop/setu.config.ts');
+        expect(config).toContain('messaging: {');
+        expect(config).toContain('config.get<string>(');
+        expect(config.includes('queue: {')).toBe(['redis', 'rabbitmq'].includes(transport));
+        expect(h.err.text()).not.toContain('talking to nobody');
+      });
+    }
 
     it('accepts a starter-composed template on the grpc transport', async () => {
       const h = harness([], 3000, 'grpc');
