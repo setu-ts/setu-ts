@@ -182,12 +182,25 @@ that default and to the tracked `.env.example` empty. The project also gets `doc
 starting the broker it named — the messaging plugin connects during registration and does not retry,
 so nothing else would make the first boot succeed.
 
-Three refusals are worth knowing, because each names why silence would be a lie: on Cloudflare
-Workers (the runtime swap has already removed both wirings), on starter-composed templates like
-`full-stack` (the factory renders the whole plugin list, so a rewrite would be dropped), and on
-templates registering no messaging at all (`rest`, no template) — where the honest answer is "use
-`--template microservice`" (add `--style class-based` for decorators). `memory` is accepted
-everywhere the flags are and rewrites nothing, because stating the default is not a mistake.
+Full-stack projects accept both flags: the factory receives `messaging:` / `queue:` options and
+reads the connection through `config.get`, including the project's dotenv file. Broker clients are
+installed as runtime dependencies (Deno import-map entries). Workers still refuses both flags, as do
+templates registering no messaging at all (`rest`, no template) — use `--template microservice` (add
+`--style class-based` for decorators). `memory` is accepted everywhere the flags are and rewrites
+nothing, because stating the default is not a mistake.
+
+Existing standalone projects can use `setu add messaging --broker redis` or
+`setu add queue --queue redis`. These flags apply only to their named package; Workers and workspace
+members refuse them. Members instead read the workspace transport. `add` installs the selected
+client, writes only an absent inline call or generated full-stack option, and prints the exact
+configuration when it already exists or cannot safely be edited. An absent `docker/compose.yaml` is
+created for a standalone selection; existing Compose and dotenv files are preserved. The command
+prints the connection variable and local default. Without a selection the full-stack starter uses
+memory. Changing an existing value is a manual edit.
+
+`setu add react-router` refuses a project without a full-stack factory or existing
+ReactRouterPlugin: create one with `setu new <name> --template full-stack`, or in a workspace with
+`setu generate app <name> --template full-stack`.
 
 ## Interactive scaffolding
 
@@ -196,11 +209,10 @@ template and style on a standalone project, runtime and transport on a workspace
 is asked only for the styleable templates (`rest` and `microservice`), and the `class-based` alias
 is omitted from the template choices because two names for one project would tell a user nothing.
 Broker and queue are asked only when the answers already given can take them, which is the same test
-the flags apply: a template registering no messaging (the minimal default, `rest`), the
-starter-composed `full-stack`, and Cloudflare Workers are all skipped, so a `microservice` answer
-gets five questions, `rest` three, and accepting the default template two. It never invents a
-question whose answer no flag can express, and `--dry-run` stays exact because prompting only
-rewrites the flag record before the ordinary pipeline runs.
+the flags apply: a template registering no messaging (the minimal default, `rest`) and Cloudflare
+Workers skip them; full-stack offers both. A host with logging also asks for its logger. It never
+invents a question whose answer no flag can express, and `--dry-run` stays exact because prompting
+only rewrites the flag record before the ordinary pipeline runs.
 
 It fails closed in three layers, so scripts, CI and editors are never blocked: programmatic callers
 pass no prompter at all; the installed executable supplies one only when stdin is a terminal; and
@@ -573,10 +585,10 @@ This is the **local development** topology. A deployed one comes from a real pro
 `generate app` outside a workspace names `setu new <name> --workspace`. A duplicate member names the
 directory it already has. A member's runtime is the workspace's, so `generate app --runtime` is
 refused when it **disagrees** with the root rather than when it is not Deno — members share one
-manifest and one lockfile, and the root is what installs them. `--template full-stack` is refused
-only on a **broker** transport, because that template composes its whole plugin set through a
-starter factory, so a transport's contribution would be silently dropped; on `http` and `memory` it
-is allowed, and the root gains `nodeModulesDir` when such a member arrives.
+manifest and one lockfile, and the root is what installs them. `--template full-stack` accepts
+broker transports through its starter's `messaging` and `queue` options. A transport with no queue
+arm leaves the queue in memory. Deno roots need `nodeModulesDir: "auto"` for the frontend build; the
+command plans that setting when absent and refuses a conflicting existing value.
 
 `new --workspace` refuses `--template` rather than ignoring it, and refuses
 `--runtime cloudflare-workers` — each Worker is its own deploy unit with its own `wrangler.toml`, so

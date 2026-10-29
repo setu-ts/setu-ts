@@ -687,11 +687,15 @@ here.
 - **Milestone 123** (`packages/cli` — Tailwind 4, shadcn's theme, copied Button/Card and the `cn`
   package in the full-stack template, a fixed app shell and no-flash light/dark/system theme, and
   `setu add view` scaffolding the Tailwind setup; V10-59, V10-64) — complete (PR #517).
+- **Milestone 121** (`packages/cli` — full-stack projects and workspace members on a broker through
+  the starter's `messaging`/`queue` options, `setu add messaging`/`queue` reading the workspace
+  transport and taking `--broker`/`--queue`, `setu add react-router` refused outside full-stack;
+  V10-51, V10-52) — complete (PR #519).
 - **Milestone 124** (`packages/auth-plugin` — password-only `signIn` with `providers: []`,
   `requireAuth({ signInPage })` redirecting browser navigations with a safe `returnTo` while APIs
   get 401, and `signIn.sessionStamp` ending every session of a user from a stamp on the user record;
   V10-65, V10-66) — complete (PR #520).
-- **Next milestone** — M121 (full-stack members with a broker), then M122. M119i is also open.
+- **Next milestone** — M122 (workspace operations from the root). M119i is also open.
 
 ## Verification (run before declaring any work done)
 

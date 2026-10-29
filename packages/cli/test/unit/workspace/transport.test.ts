@@ -4,11 +4,60 @@ import {
   getTransport,
   listTransports,
   renderConnection,
+  renderConfigConnection,
   TRANSPORT_ALIASES,
   TRANSPORTS,
   transportSpec,
 } from '../../../src/workspace/transport.ts';
 import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
+
+describe('config connection reads', () => {
+  for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
+    it(`reads ${spec.name} with its default and an override`, () => {
+      const connection = spec.connection!;
+      for (const override of [undefined, 'override']) {
+        const rendered = renderConfigConnection(connection, override);
+        expect(rendered).toContain('config.get<string>(');
+        expect(rendered).toContain(`'${connection.variable}'`);
+        expect(rendered).toContain(`'${override ?? connection.localDefault}'`);
+        expect(rendered.includes('\n')).toBe(spec.name === 'service-bus' && override === undefined);
+      }
+    });
+  }
+  it('escapes quotes, backslashes and line terminators in a default', () => {
+    expect(
+      renderConfigConnection({
+        variable: 'URL',
+        localDefault: "a'b\\c\nd\r",
+        urlOverridable: true,
+      }),
+    ).toBe("config.get<string>('URL', { default: 'a\\'b\\\\c\\nd\\r' })");
+  });
+  // The two overflowing shapes are what `deno fmt` and Prettier both print (measured
+  // 2026-10-28): the last argument hugs the call, and `default:` breaks only when its
+  // value still overflows.
+  it('hugs the options object when the call overflows at the caller column', () => {
+    const value = renderConfigConnection(
+      { variable: 'URL', localDefault: 'x', urlOverridable: true },
+      undefined,
+      90,
+      6,
+    );
+    expect(value).toBe("config.get<string>('URL', {\n        default: 'x',\n      })");
+  });
+  it('breaks the default onto its own line when the value itself overflows', () => {
+    const long = 'x'.repeat(90);
+    const value = renderConfigConnection(
+      { variable: 'URL', localDefault: long, urlOverridable: true },
+      undefined,
+      28,
+      8,
+    );
+    expect(value).toBe(
+      `config.get<string>('URL', {\n          default:\n            '${long}',\n        })`,
+    );
+  });
+});
 
 describe('the transport registry', () => {
   it('lists every declared transport, in order', () => {

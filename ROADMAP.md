@@ -15523,13 +15523,13 @@ message crosses it.
 
 **Deliverables:**
 
-- [ ] The three entry points generate a full-stack project whose starter receives the transport
-- [ ] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
+- [x] The three entry points generate a full-stack project whose starter receives the transport
+- [x] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
       client
-- [ ] `setu add react-router` scaffolds or refuses with the right command
-- [ ] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
-- [ ] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `121`
+- [x] `setu add react-router` refuses with the right command (maintainer decision 2026-10-28)
+- [x] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
+- [x] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `121`
 
 ---
 
@@ -16179,7 +16179,7 @@ patch by construction and gains nothing new here.
 | 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
 | 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
-| 121       | ⬜     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
+| 121       | ✅     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ⬜     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
 | 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
 | 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |

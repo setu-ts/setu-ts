@@ -13,11 +13,20 @@
  */
 import type { TargetRuntime } from '../constants.ts';
 import type { WorkspaceRuntimeProfile } from '../workspace/runtime-profile.ts';
-import { renderConnection, type TransportSpec } from '../workspace/transport.ts';
+import {
+  getTransport,
+  listBrokers,
+  listQueues,
+  renderConfigConnection,
+  renderConnection,
+  type TransportSpec,
+} from '../workspace/transport.ts';
+import type { ParsedArgs } from '../args.ts';
+import { escapeName } from '../utils/names.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { EnvVariable } from './registry.ts';
 import { BROKER_COMPOSE_FILE, type ResolvedHost } from './project-files.ts';
-import { rewritePluginArgs } from './plugin-args.ts';
+import { reindentLiteral, rewritePluginArgs, wrapPluginArgs } from './plugin-args.ts';
 import { withClientDependencies } from './client-dependencies.ts';
 
 /** The package whose wiring a broker arm rewrites. */
@@ -46,6 +55,36 @@ function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHos
 }
 
 /**
+ * Renders a transport arm as the value of a full-stack starter option.
+ *
+ * The ONE rendering of a starter option, shared by `setu new`/`generate app` (through
+ * {@linkcode withBrokerArgs}/{@linkcode withQueueArgs}) and `setu add`, so the three entry
+ * points cannot drift. The arm's literal is written for the inline plugin list, so it is
+ * rendered there with a ConfigPlugin read and shifted two spaces deeper, to a property of
+ * the generated factory's returned object (M121 §3.1, §3.2).
+ *
+ * @param builder - The arm's `messagingArgs` or `queueArgs`
+ * @param spec - The selected transport, which declares a connection
+ * @param override - The workspace's replacement fallback, when it set one
+ * @returns The option literal, indented for an eight-space property
+ */
+export function starterOptionLiteral(
+  builder: (connection: string) => string,
+  spec: TransportSpec,
+  override?: string,
+): string {
+  const connection = spec.connection!;
+  // The read's first column once shifted: the property sits at 10 and the one long
+  // value (the Service Bus emulator string) is the `connectionString:` property.
+  const column = spec.name === 'service-bus' ? 28 : 15;
+  return reindentLiteral(
+    wrapPluginArgs(builder(renderConfigConnection(connection, override, column, 8))),
+    6,
+    8,
+  );
+}
+
+/**
  * Rewrites the host's `MessagingPlugin` wiring to the transport's broker arm.
  *
  * A no-op when the spec declares no messaging arm or no connection (the
@@ -66,6 +105,21 @@ export function withBrokerArgs(
   override?: string,
 ): ResolvedHost {
   if (spec.connection === undefined || spec.messagingArgs === undefined) return host;
+  if (host.appFactory !== undefined) {
+    return withTransportNote(
+      withClientDependencies(
+        {
+          ...host,
+          appFactoryContext: {
+            ...host.appFactoryContext,
+            messaging: starterOptionLiteral(spec.messagingArgs, spec, override),
+          },
+        },
+        spec.messagingClients ?? [],
+      ),
+      spec,
+    );
+  }
   if (!host.plugins.some((wiring) => wiring.pkg === MESSAGING_PACKAGE)) return host;
   return withTransportNote(
     withClientDependencies(
@@ -102,6 +156,21 @@ export function withQueueArgs(
   override?: string,
 ): ResolvedHost {
   if (spec.connection === undefined || spec.queueArgs === undefined) return host;
+  if (host.appFactory !== undefined) {
+    return withTransportNote(
+      withClientDependencies(
+        {
+          ...host,
+          appFactoryContext: {
+            ...host.appFactoryContext,
+            queue: starterOptionLiteral(spec.queueArgs, spec, override),
+          },
+        },
+        spec.queueClients ?? [],
+      ),
+      spec,
+    );
+  }
   if (!host.plugins.some((wiring) => wiring.pkg === QUEUE_PACKAGE)) return host;
   return withTransportNote(
     withClientDependencies(
@@ -139,6 +208,48 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
       develop: connection.localDefault,
     },
   ];
+}
+
+/**
+ * The Compose service block an existing file lacks for a transport, if any.
+ *
+ * `setu add --broker/--queue` never rewrites a developer's `docker/compose.yaml`; when the
+ * file exists without the selected arm's services, the caller prints this block instead of
+ * staying silent (PR #519 review). Services are matched by their top-level key
+ * (`  rabbitmq:`), and only the services the file lacks are returned.
+ *
+ * @param existing - The current Compose file
+ * @param spec - The selected transport
+ * @returns The block to add under `services:`, or undefined when nothing is missing
+ */
+export function missingComposeServices(existing: string, spec: TransportSpec): string | undefined {
+  const block = spec.compose?.services;
+  if (block === undefined) return undefined;
+  // One entry per service the block declares (a two-space key), so only the absent ones
+  // are printed: adding one already present would duplicate its key (PR #519 review).
+  const entries = block
+    .replace(/\n$/, '')
+    .split(/^(?= {2}[\w-]+:)/m)
+    .map((entry) => ({ name: /^ {2}([\w-]+):/.exec(entry)?.[1], text: entry.replace(/\n$/, '') }));
+  // Only the `services:` section counts: a same-named `volumes:` entry is not a service.
+  // The section runs to the next top-level key; a column-0 comment does not end it. CRLF
+  // files, trailing comments, anchors (`redis: &redis`) and inline values are accepted.
+  const text = existing.replace(/\r\n?/g, '\n');
+  const section = /^services:[ \t]*(?:#.*)?$/m.exec(text);
+  const tail = section === null ? '' : text.slice(section.index + section[0].length);
+  const services = tail.slice(0, /^[^\s#]/m.exec(tail)?.index ?? tail.length);
+  // A service is a key at the section's shallowest key indentation, whatever it is.
+  // Quoted keys (`"redis":`, `'redis':`) name the same service as bare ones.
+  const keys = [
+    ...services.matchAll(/^( +)(?:"([\w.-]+)"|'([\w.-]+)'|([\w.-]+)):(?=[ \t]|$)/gm),
+  ].map((match) => ({ depth: match[1]!.length, name: (match[2] ?? match[3] ?? match[4])! }));
+  const depth = keys.length === 0 ? 2 : Math.min(...keys.map((key) => key.depth));
+  const declared = new Set(keys.filter((key) => key.depth === depth).map((key) => key.name));
+  const missing = entries.filter((entry) => entry.name !== undefined && !declared.has(entry.name));
+  if (missing.length === 0) return undefined;
+  // At the file's own service indentation, so the block pastes as a sibling, not nested.
+  const printed = missing.map((entry) => entry.text).join('\n');
+  return reindentLiteral(`\n${printed}`, 2, depth).slice(1);
 }
 
 /**
@@ -190,9 +301,9 @@ ${backing.map((spec) => (spec.compose?.services ?? '').replace(/\n$/, '')).join(
 /**
  * Why a standalone broker/queue flag would be a silent no-op, as source text.
  *
- * The three structural cases mirror §3.4 of the M72 plan exactly, and BOTH the
- * command refusals and the interactive question skip derive from THIS function,
- * so a prompt whose answer would be refused cannot be asked.
+ * Both command refusals and the interactive question skip derive from this
+ * function. Starter-composed hosts receive their option arms; inline hosts need
+ * matching wiring. Workers continues to use platform queues.
  *
  * @param flag - Which flag the refusal is worded for
  * @param runtime - The selected runtime target
@@ -212,14 +323,7 @@ export function standaloneOverlayRefusal(
       `while the project talked to Cloudflare. Scaffold for deno, node or bun to select one.`
     );
   }
-  if (host.appFactory !== undefined) {
-    return (
-      `--${flag} cannot apply to a starter-composed template: the whole plugin set is ` +
-      `rendered through the starter factory, so a plugin-list rewrite would be dropped and the ` +
-      `project would look connected while talking to nobody. Use --template microservice to ` +
-      `select a ${flag}.`
-    );
-  }
+  if (host.appFactory !== undefined) return undefined;
   const pkg = flag === 'broker' ? MESSAGING_PACKAGE : QUEUE_PACKAGE;
   if (!host.plugins.some((wiring) => wiring.pkg === pkg)) {
     return (
@@ -229,4 +333,54 @@ export function standaloneOverlayRefusal(
     );
   }
   return undefined;
+}
+
+/**
+ * Reads and validates one standalone transport-backend flag.
+ *
+ * The accepted set is DERIVED from the registry (`listBrokers`/`listQueues`), so
+ * help text, refusal text and validation cannot drift from the arms that exist.
+ * `memory` is always accepted: it states the default the plugin already takes
+ * and rewrites nothing.
+ *
+ * @param args - The parsed arguments
+ * @param flag - Which flag is being read
+ * @returns The selected spec (undefined when the flag is absent), or the refusal
+ */
+export function readArmFlag(
+  args: ParsedArgs,
+  flag: 'broker' | 'queue',
+):
+  | { readonly ok: true; readonly spec?: TransportSpec }
+  | {
+      readonly ok: false;
+      readonly message: string;
+    } {
+  const raw = args.flags[flag];
+  if (raw === undefined) return { ok: true };
+
+  const accepted = flag === 'broker' ? listBrokers() : listQueues();
+  if (typeof raw !== 'string') {
+    return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
+  }
+
+  const spec = getTransport(raw);
+  const hasArm =
+    spec !== undefined &&
+    (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
+  if (spec === undefined || (raw !== 'memory' && !hasArm)) {
+    // The two failures are told apart, because "no such transport" and "this
+    // transport has no arm for this flag" are different mistakes.
+    const prefix =
+      spec === undefined
+        ? `Unknown ${flag} "${escapeName(raw)}".`
+        : flag === 'broker'
+          ? `"${raw}" declares no message-broker wiring.`
+          : `"${raw}" declares no queue wiring.`;
+    return {
+      ok: false,
+      message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
+    };
+  }
+  return { ok: true, spec };
 }

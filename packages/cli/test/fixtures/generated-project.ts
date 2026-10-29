@@ -5,6 +5,7 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workspaceMembers } from '../../../../scripts/lib/workspace.ts';
@@ -274,6 +275,37 @@ export async function collectSources(dir: string): Promise<string[]> {
  */
 export function unusedPort(): Promise<number> {
   return nodeUnusedPort();
+}
+
+/**
+ * A run of `count` consecutive free TCP ports, for a workspace whose members bind
+ * `base`, `base + 1`, ….
+ *
+ * {@linkcode unusedPort} proves only `base` free; `base + 1` can belong to anything,
+ * and a member that loses that race exits with `AddrInUse` before it binds (the
+ * `workspace-mesh-e2e` "never bound" failure, PR #519). Every port is held at once,
+ * then released, and a run with a taken port is retried from a new base.
+ *
+ * @param count - How many consecutive ports the workspace binds
+ * @returns The first port of the run
+ */
+export async function unusedPortRange(count: number): Promise<number> {
+  const bind = (port: number): Promise<Server | undefined> =>
+    new Promise((accept) => {
+      const server = createServer();
+      server.once('error', () => accept(undefined));
+      server.listen(port, '127.0.0.1', () => accept(server));
+    });
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const base = await unusedPort();
+    if (base + count - 1 > 65_535) continue;
+    const held = await Promise.all(Array.from({ length: count }, (_, i) => bind(base + i)));
+    await Promise.all(
+      held.map((server) => server && new Promise<void>((done) => server.close(() => done()))),
+    );
+    if (held.every((server) => server !== undefined)) return base;
+  }
+  throw new Error(`no run of ${count} free ports found`);
 }
 
 /** How a booted project ended after it was signalled. */

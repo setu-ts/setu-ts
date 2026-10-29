@@ -25,7 +25,33 @@ import {
   FULL_STACK_TSCONFIG_OPTIONS,
 } from '../../src/templates/full-stack-build-files.ts';
 import { FULL_STACK_APP_FRAMEWORK_PACKAGES } from '../../src/templates/full-stack.ts';
-import { getTemplate } from '../../src/templates/registry.ts';
+import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
+import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
+import { transportSpec } from '../../src/workspace/transport.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+
+it('renders both transport options after logger on every starter-composed template', () => {
+  for (const template of listTemplates().filter((entry) => entry.appFactory !== undefined)) {
+    const host = resolveHost(template, 'deno');
+    const args = (resolved: typeof host) =>
+      projectFiles('portal', 'deno', resolved).find((file) => file.path === 'setu.config.ts')!
+        .contents;
+    expect(args(host)).not.toContain('messaging:');
+    expect(args(host)).not.toContain('queue:');
+    const spec = transportSpec('redis');
+    const connected = args(
+      withQueueArgs(
+        withBrokerArgs(host, spec, workspaceProfile('deno')),
+        spec,
+        workspaceProfile('deno'),
+      ),
+    );
+    expect(connected).toContain("messaging: {\n          broker: 'redis-streams'");
+    expect(connected).toContain("queue: {\n          adapter: 'redis'");
+    expect(connected.indexOf('messaging:')).toBeGreaterThan(connected.indexOf('logger:'));
+    expect(connected.indexOf('queue:')).toBeGreaterThan(connected.indexOf('messaging:'));
+  }
+});
 
 it('passes the same static server-build module from every socket entry', () => {
   const entries = ['node', 'bun', 'deno'].map((runtime) => {

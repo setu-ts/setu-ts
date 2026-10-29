@@ -164,7 +164,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
           transport: '${context.logger ?? defaultLogger(runtime)}',
           requestLogging: true,
           excludePaths: ['/live', '/ready', '/health', '/metrics'],
-        },${discovery}
+        },${context.messaging === undefined ? '' : `\n        messaging: ${context.messaging},`}${context.queue === undefined ? '' : `\n        queue: ${context.queue},`}${discovery}
         // Preserve Origin on native form posts; send no cross-origin referrer.
         httpSecurity: {
           headers: { referrerPolicy: 'same-origin' },

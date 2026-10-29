@@ -277,14 +277,26 @@ Plugin options must be decided **before** the plugins are constructed — which 
 yet. `createFullStackAppFromConfig` closes that ordering gap for every option at once:
 
 ```typescript
-import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
+import {
+  createFullStackAppFromConfig,
+  fullStackConfigOf,
+  type FullStackStarterOptions,
+} from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig(
-  (config) => ({
+  (config): FullStackStarterOptions => ({
     // `prismaClient` is generated and constructed by the application — a Prisma v7
     // client carries its own connection configuration, so `url` is not an option.
     database: { type: 'prisma', options: { prismaClient } },
     session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+    messaging: {
+      broker: 'redis-streams',
+      url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+    },
+    queue: {
+      adapter: 'redis',
+      url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+    },
   }),
   { config: { envFilePath: ['.env.local', '.env'] } },
 );
@@ -293,6 +305,11 @@ const config = fullStackConfigOf(app); // the exact snapshot passed to the callb
 
 await app.start({ port: 3000 });
 ```
+
+The Redis options above require `ioredis` installed in the application. The CLI supplies that client
+and these options with `setu new portal --template full-stack --broker redis --queue redis`, or from
+a workspace's `--transport redis` when generating a full-stack member. The same config read sees
+dotenv and deployment environment values; omitting the options keeps the starter's memory defaults.
 
 Configuration is loaded once and the **same snapshot** is registered under `CAPABILITIES.CONFIG`, so
 the values the composition branched on are the values handlers read — not a second snapshot taken a

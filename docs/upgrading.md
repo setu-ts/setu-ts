@@ -28,6 +28,25 @@ Nothing breaks. Three things change what an existing application can rely on:
   gets `401`; only a page navigation is redirected. A route guarded by a role or permission guard
   alone keeps answering `401`; put `requireAuth({ signInPage })` first to redirect it.
 
+### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
+
+Full-stack projects now accept `new --broker` / `--queue`, and full-stack workspace members receive
+the workspace transport through their starter options. Existing standalone projects can run
+`setu add messaging --broker redis` or `setu add queue --queue redis`; members use the workspace
+transport automatically. Install again after adding so the selected client is available. Existing
+calls and option values are preserved; review the exact property printed when manual configuration
+is needed. Standalone `add` creates missing broker Compose files and prints the connection variable
+and default, while leaving dotenv files unchanged; an existing `docker/compose.yaml` is never
+rewritten, and a selected service it lacks is printed for you to add. Generated full-stack options
+use `config.get`, so both dotenv values and deployment environment variables apply, with environment
+taking precedence.
+
+`setu add react-router` now refuses an app without a full-stack factory or an existing
+ReactRouterPlugin. Create a full-stack project with `setu new <name> --template full-stack`, or a
+workspace member with `setu generate app <name> --template full-stack`. Adding the dependency alone
+does not create the frontend files, routes or build scripts. Workers continues to refuse broker and
+queue flags.
+
 ### `setu add view` and the styled app shell (M123, 0.11.0, `@setu-ts/cli`)
 
 Fresh full-stack scaffolds include Tailwind 4 through Vite, neutral shadcn tokens, Button/Card,
