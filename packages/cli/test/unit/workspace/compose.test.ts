@@ -48,6 +48,28 @@ const NPMRC_MOUNT = '--mount=type=secret,id=npmrc,target=/root/.npmrc';
 const GUARD = `RUN ${NPMRC_MOUNT} if [ -z "$NPM_CONFIG_REGISTRY" ]; then unset NPM_CONFIG_REGISTRY; fi && `;
 
 describe('workspaceContainerFiles', () => {
+  it('keeps the Node devtool out of the runtime image without a strip step', () => {
+    const manifest: WorkspaceManifest = {
+      ...manifestOf([{ name: 'a', port: 3000 }]),
+      runtime: 'node',
+      members: [{ name: 'a', port: 3000, devtoolPort: 4919 }],
+    };
+    const files = workspaceContainerFiles(
+      manifest,
+      transportSpec('http'),
+      workspaceProfile('node'),
+    );
+    const dockerfile = contentsOf(files, DOCKERFILE);
+    const runtimeStage = dockerfile.slice(dockerfile.indexOf(' AS runtime'));
+    expect(runtimeStage).toContain('npm ci --omit=dev');
+    const copied = runtimeStage.split('\n').filter((line) => line.startsWith('COPY --from=build'));
+    expect(copied).toEqual([
+      'COPY --from=build /srv/apps/${MEMBER}/dist ./dist',
+      'COPY --from=build /srv/apps/${MEMBER}/buil[d] ./build/',
+    ]);
+    expect(runtimeStage).not.toContain('diagnostics-plugin');
+    expect(contentsOf(files, DOCKERIGNORE)).toContain('apps/*/main.dev.ts');
+  });
   it('emits a Dockerfile, an ignore file and a Compose file, all managed', () => {
     const files = workspaceContainerFiles(
       manifestOf([{ name: 'orders', port: 3000 }]),

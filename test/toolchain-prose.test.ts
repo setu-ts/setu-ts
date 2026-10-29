@@ -22,6 +22,25 @@ const scan = (text: string, path = 'AGENTS.md', config = rules) =>
   scanToolchainProse([{ path, text }], config);
 
 describe('toolchain prose refusals', () => {
+  it('classifies captured pre-M126 development entries as historical fixture text', () => {
+    for (const kind of ['member', 'standalone']) {
+      const path = `packages/cli/test/fixtures/dev-entry-0.10.0-${kind}.txt`;
+      expect(TOOLCHAIN_PROSE_RULES.allowlist.find((entry) => entry.path === path)?.category).toBe(
+        'fixture',
+      );
+      expect(
+        scan(`Run ${task('dev')}`, path, {
+          ...TOOLCHAIN_PROSE_RULES,
+          allowlist: TOOLCHAIN_PROSE_RULES.allowlist.filter((entry) => entry.path === path),
+        }),
+      ).toEqual([]);
+    }
+    expect(
+      TOOLCHAIN_PROSE_RULES.allowlist.some(
+        (entry) => entry.path === 'packages/cli/src/commands/devtool.ts',
+      ),
+    ).toBe(false);
+  });
   it.each(['deno task', 'jsr:@setu-ts/kernel', '@jsr/setu-ts__kernel', 'dEnO-FiRsT'])(
     'P1 reports %s with the original path and line',
     (text) => {

@@ -18,6 +18,24 @@ import type { TransportName } from '../../src/workspace/transport.ts';
 import type { TargetRuntime } from '../../src/constants.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
+describe('Node workspace devtool scaffold', () => {
+  it('writes only the member npm manifest and uses the Node runner and dev script', async () => {
+    const h = harness([], 3000, 'http', undefined, 'node');
+    const rootBefore = h.fs.read('/ws/package.json');
+    expect(await h.run(['app', 'a', '--devtool']), h.err.text()).toBe(0);
+    const member = JSON.parse(h.fs.read('/ws/apps/a/package.json'));
+    expect(member.scripts.dev).toBe('tsx main.dev.ts');
+    expect(member.devDependencies['@setu-ts/diagnostics-plugin']).toBeDefined();
+    expect(member.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
+    expect(h.fs.read('/ws/package.json')).toBe(rootBefore);
+    expect(h.fs.writes).not.toContain('/ws/package.json');
+    expect(h.fs.read('/ws/scripts/dev.mjs')).toContain('SETU_DEVTOOL_MEMBER');
+    expect(h.fs.read('/ws/apps/a/main.dev.ts')).toContain('npx @setu-ts/cli@');
+    expect(h.out.text()).toContain('npm install');
+    expect(h.out.text()).toContain('npm run dev');
+  });
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;

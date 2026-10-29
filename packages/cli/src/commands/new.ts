@@ -8,6 +8,7 @@
  * @module
  */
 
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
@@ -579,9 +580,7 @@ async function planProject(
     return { ok: false, message: '--devtool-port requires --devtool.' };
   }
   if (devtoolRequested) {
-    // Refused before anything is resolved: the listener refuses every
-    // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
-    // startup rather than degrade.
+    // Refuse unsupported listener runtimes before any files are planned.
     const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'scaffold');
     if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
     // A starter factory owns its construction, and kernel diagnostics reach
@@ -617,10 +616,18 @@ async function planProject(
       message: 'No bindable standalone devtool port remains between 4919 and 5019.',
     };
   }
-  const devHost = withDevtool(overlaid, devtoolPort);
+  const devHost = withDevtool(overlaid, devtoolPort, runtime);
+  const files = [...projectFiles(name, runtime, devHost)];
+  if (runtime === 'node') {
+    const index = files.findIndex((file) => file.path === 'package.json');
+    const manifest = files[index]!;
+    const plan = planNodeDevtool(manifest.contents);
+    if (!plan.ok) return plan;
+    if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
+  }
   return {
     ok: true,
-    files: projectFiles(name, runtime, devHost),
+    files,
     ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
     ...(notice === undefined ? {} : { notice }),
   };
@@ -683,7 +690,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log('  --logger <name>     console | pino (default pino; console on Cloudflare Workers)');
     deps.log(
       '  --devtool           Emit the development entry for the local diagnostics connector ' +
-        '(Deno only)',
+        '(Deno or Node)',
     );
     deps.log(
       `  --devtool-port <n>  The loopback port the connector binds (default ${DEFAULT_DEVTOOL_PORT})`,
@@ -875,7 +882,9 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
         ? '  npm install && npx wrangler dev'
         : runtime === 'bun'
           ? '  bun install && bun run start:dev'
-          : '  npm install && npm run start:dev',
+          : chosen.flags['devtool'] !== undefined
+            ? '  npm install && npm run dev'
+            : '  npm install && npm run start:dev',
   );
   return EXIT_OK;
 }

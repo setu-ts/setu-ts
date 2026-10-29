@@ -37,18 +37,21 @@ export const DEFAULT_DEVTOOL_PORT = 4919;
 /**
  * The workspace runner a devtool-enabled member needs, and where it goes.
  *
- * Only the Deno runner can host a devtool member — the connector refuses every
- * non-Deno `listen`, and the opt-in is refused on the other two profiles before
- * anything is written.
+ * Deno and Node use their profile's runner; Bun and Workers are refused before
+ * this planner is reached.
  *
+ * @param runtime - The workspace's target runtime
  * @returns The runner's workspace-relative path and its current rendering
  */
-export function devtoolDevRunner(): { readonly path: string; readonly contents: string } {
-  return workspaceDevRunner(workspaceProfile('deno'));
+export function devtoolDevRunner(runtime: TargetRuntime): {
+  readonly path: string;
+  readonly contents: string;
+} {
+  return workspaceDevRunner(workspaceProfile(runtime));
 }
 
 /**
- * Names why a workspace's existing `scripts/dev.ts` cannot host the devtool.
+ * Names why a workspace's existing `scripts/dev.ts` or `scripts/dev.mjs` cannot host the devtool.
  *
  * This is the three-outcome merge contract applied to the runner SCRIPT rather
  * than only to the root `dev` task string that invokes it. The root task is
@@ -67,7 +70,7 @@ export function devtoolDevRunner(): { readonly path: string; readonly contents: 
  * nothing regenerates it — so a runner this cannot classify is refused with its
  * remedy rather than overwritten.
  *
- * @param existing - The current `scripts/dev.ts`, or `undefined` when absent
+ * @param existing - The current runner, or `undefined` when absent
  * @param path - The runner's path, for the refusal
  * @returns The refusal message, or `undefined` when the runner already honors
  * the contract, or is absent and will be created
@@ -213,28 +216,34 @@ export function starterConfigRefusal(source: string): string | undefined {
  *
  * @param host - The resolved template host, after its runtime and env overlays
  * @param devtoolPort - The loopback port the connector binds
+ * @param runtime - The project's target runtime
  * @param port - The application port import, for a workspace member
  * @returns The host with the devtool composition applied
  */
 export function withDevtool(
   host: ResolvedHost,
   devtoolPort: number,
+  runtime: TargetRuntime,
   port?: EntryPort,
 ): ResolvedHost {
   return {
     ...host,
     devtoolPort,
-    extraTasks: { ...host.extraTasks, ...devtoolTasks(host.manifest) },
+    extraTasks:
+      runtime === 'deno' ? { ...host.extraTasks, ...devtoolTasks(host.manifest) } : host.extraTasks,
     packageImports: [...host.packageImports, { pkg: 'diagnostics-plugin' }],
     files: [
       ...host.files,
       {
         path: DEVTOOL_ENTRY_MODULE,
         // Omitted rather than passed as `undefined`: exactOptionalPropertyTypes.
-        contents: renderDevEntry({
-          devtoolPort,
-          ...(port === undefined ? {} : { port }),
-        }),
+        contents: renderDevEntry(
+          {
+            devtoolPort,
+            ...(port === undefined ? {} : { port }),
+          },
+          runtime,
+        ),
       },
     ],
   };
@@ -243,27 +252,25 @@ export function withDevtool(
 /**
  * Names why the devtool opt-in cannot apply to a runtime, when it cannot.
  *
- * The listener rejects every non-Deno `listen` before any bind
- * (`local-diagnostics-listener.ts`), so a devtool-enabled non-Deno project
- * would fail at startup rather than degrade — refused here, at every entry
- * point, before anything is written.
+ * The listener supports Deno and Node. Other runtimes are refused at every
+ * entry point before anything is written.
  *
  * @param runtime - The target runtime
  * @param context - Whether scaffolding or enabling an existing project was requested
- * @returns The refusal message, or `undefined` for Deno
+ * @returns The refusal message, or `undefined` for Deno or Node
  */
 export function devtoolRuntimeRefusal(
   runtime: TargetRuntime,
   context: 'scaffold' | 'enable',
 ): string | undefined {
-  if (runtime === 'deno') return undefined;
+  if (runtime === 'deno' || runtime === 'node') return undefined;
   return (
-    `The devtool requires the Deno runtime: the diagnostics listener refuses every` +
-    ` non-Deno \`listen\` before it binds, so a ${runtime} project could never start` +
+    `The devtool requires Deno or Node: the diagnostics listener refuses unsupported` +
+    ` runtimes before it binds, so a ${runtime} project could never start` +
     ` its diagnostics connector. ` +
     (context === 'scaffold'
-      ? 'Scaffold without --devtool, or create the project with --runtime deno.'
-      : `This project targets ${runtime}; the devtool can only be enabled on a Deno project.`)
+      ? 'Scaffold without --devtool, or create the project with --runtime deno or --runtime node.'
+      : `This project targets ${runtime}; the devtool can only be enabled on Deno or Node.`)
   );
 }
 

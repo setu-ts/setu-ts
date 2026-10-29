@@ -59,6 +59,70 @@ function harness(rootDev: string) {
 }
 
 describe('the devtool manifest merge', () => {
+  for (const member of [false, true]) {
+    it(`enables Node ${member ? 'member' : 'standalone'} with exact dry-run parity and an idempotent rerun`, async () => {
+      const project = member ? '/ws/apps/a' : '/ws';
+      const npm = JSON.stringify({
+        private: true,
+        scripts: { start: 'node dist/main.js', check: 'my-check', custom: 'mine' },
+        dependencies: { '@setu-ts/common': `^${VERSION}` },
+        devDependencies: { tsx: '^4.20.0' },
+      });
+      const root = '{"private":true,"workspaces":["apps/*"],"overrides":{"@setu-ts/common":"old"}}';
+      const seed: Record<string, string> = {
+        [`${project}/package.json`]: npm,
+        [`${project}/setu.config.ts`]: CONFIG,
+        ...(member
+          ? {
+              '/ws/package.json': root,
+              '/ws/apps/a/.setu-member': '',
+              '/ws/setu.workspace.json': renderWorkspaceManifest({
+                version: 1,
+                runtime: 'node',
+                basePort: 3000,
+                transport: 'http',
+                members: [{ name: 'a', port: 3000 }],
+              }),
+            }
+          : {}),
+      };
+      const fs = createFakeFs(seed);
+      const log = createRecorder();
+      const error = createRecorder();
+      const args = ['enable', ...(member ? ['a'] : [])];
+      const deps = { fs, cwd: '/ws', log: log.sink, error: error.sink };
+      expect(await runDevtoolCommand(parseArgs([...args, '--dry-run']), deps), error.text()).toBe(
+        0,
+      );
+      expect(fs.writes).toEqual([]);
+      const planned = log.lines
+        .filter((line) => /^would (create|update) /.test(line))
+        .map((line) => line.replace(/^would (create|update) /, ''));
+      expect(await runDevtoolCommand(parseArgs(args), deps), error.text()).toBe(0);
+      expect([...fs.writes].sort()).toEqual(planned.sort());
+      const manifest = JSON.parse(fs.read(`${project}/package.json`));
+      expect(manifest.scripts).toEqual({
+        start: 'node dist/main.js',
+        check: 'my-check',
+        custom: 'mine',
+        dev: 'tsx main.dev.ts',
+      });
+      expect(manifest.devDependencies).toEqual({
+        tsx: '^4.20.0',
+        '@setu-ts/diagnostics-plugin': `^${VERSION}`,
+      });
+      expect(log.text()).toContain('npm install');
+      if (member) {
+        expect(fs.read('/ws/package.json')).toBe(root);
+        expect(fs.writes).not.toContain('/ws/package.json');
+        expect(fs.read('/ws/scripts/dev.mjs')).toContain('SETU_DEVTOOL_SESSION_KEY');
+      }
+      const before = fs.writes.length;
+      expect(await runDevtoolCommand(parseArgs(args), deps), error.text()).toBe(0);
+      expect(fs.writes).toHaveLength(before);
+      expect(log.lines.at(-1)).toContain('already enabled');
+    });
+  }
   for (const standalone of [false, true]) {
     it(`replaces the exact scaffold check predecessor (${standalone ? 'standalone' : 'member'}) and refuses a foreign check`, async () => {
       for (const foreign of [false, true]) {

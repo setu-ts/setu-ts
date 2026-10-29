@@ -1177,6 +1177,9 @@ function npmDependencies(host: ResolvedHost, runtime: TargetRuntime): Record<str
   const deps: Record<string, string> = {};
   for (const pkg of frameworkPackages(host, runtime)) {
     if (DEV_FRAMEWORK_PACKAGES.has(pkg)) continue;
+    // The Node devtool planner adds this development-only pin at the command boundary.
+    if (runtime === 'node' && host.devtoolPort !== undefined && pkg === 'diagnostics-plugin')
+      continue;
     deps[`@setu-ts/${pkg}`] = frameworkSpecifier(pkg, 'npm');
   }
   return { ...deps, ...host.extraDependencies, ...host.manifest?.npmDependencies };
@@ -2001,7 +2004,7 @@ ${
 }${
     host.devtoolPort === undefined
       ? ''
-      : `## Devtool\n\nRun \`deno task dev\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
+      : `## Devtool\n\nRun \`${runtime === 'deno' ? 'deno task dev' : 'npm run dev'}\` with session credentials from the launcher. The connector listens on\n127.0.0.1:${host.devtoolPort}; enter this port in the extension.\n\n`
   }## Generate code
 
 \`\`\`bash

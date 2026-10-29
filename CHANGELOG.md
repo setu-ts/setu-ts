@@ -171,6 +171,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Node devtool scaffolding (M126, `@setu-ts/cli`).** `--devtool` and `devtool enable` now support
+  Node projects and workspace members. Development entries read credentials and exit through runtime
+  services; older CLI-owned entries remain recognized and can be upgraded. Node uses
+  `tsx main.dev.ts`, keeps the diagnostics dependency development-only, and forwards a workspace
+  session only to its selected member within the launcher process group.
+
 - **`redactRecord()` returns a snapshot (#513, 0.11.0, `@setu-ts/common`).** Every plain object and
   array it walks is now copied, unclassified subtrees included, instead of being returned by
   identity, so a logger serializes exactly the values redaction checked (the same choice pino's own
