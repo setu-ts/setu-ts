@@ -502,9 +502,12 @@ including one first made by hand), values base64-encoded under `data:`: measured
 client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
 and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
 Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
-precedence. envFrom is read when a container starts, so when a Secret's contents change deploy
-restarts each member that was already running — a rotation on a clean tree keeps the tag and the
-manifest and would otherwise leave the old value live. Deploy reads the values files, `.env.example`
+precedence. envFrom is read when a container starts, so deploy writes each Secret's
+`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
+changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
+keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
+keeps a re-run after a partial failure from losing the rollout. A `members.yaml` from before the
+annotation falls back to `kubectl rollout restart`. Deploy reads the values files, `.env.example`
 and `k8s/members.yaml` only as regular files inside the workspace, never through a symbolic link: a
 branch that replaced `k8s/secrets/<member>` with a link could otherwise load any dotenv file on the
 host into a pod its code runs in.

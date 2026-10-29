@@ -193,13 +193,19 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   `<member>-env` Secret, applied with `kubectl apply --server-side --force-conflicts` from stdin
   (deploy owns that Secret, so it takes over keys an earlier hand-made one set) with base64 `data:`
   — a client-side apply would store every value in plaintext in an annotation. Generated Deployments
-  read it through `envFrom`; explicit `env:` entries still win. When a Secret's contents change, a
-  member already running is restarted (`kubectl rollout restart`), so a rotated value reaches its
-  pods even when the tag and manifest are unchanged. Values files, `.env.example` and
-  `k8s/members.yaml` are read only as regular files of at most 1 MiB inside the workspace — never
-  through a symbolic link — and a values file is refused when git cannot confirm it is uncommitted
-  (a missing `git` included; outside a repository there is nothing to commit). kubectl's message for
-  a failed Secret apply is never printed, because it can quote the values.
+  read it through `envFrom`; explicit `env:` entries still win. Deploy writes each Secret's
+  `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`), so a
+  changed Secret rolls the member out even when the tag and manifest are unchanged, and a deploy
+  re-run after failing part-way still does. A `members.yaml` from before that annotation falls back
+  to `kubectl rollout restart`. `--force-conflicts` takes over keys another writer set in
+  `<member>-env`; keys only that writer owns are left in place, so remove them by hand (or delete
+  the Secret once) when moving an existing Secret to deploy. Compose follows a symbolic link at
+  `apps/<member>/.env`, so `setu check` refuses one — run it before `docker compose up` on a branch
+  you did not write. Values files, `.env.example` and `k8s/members.yaml` are read only as regular
+  files of at most 1 MiB inside the workspace — never through a symbolic link — and a values file is
+  refused when git cannot confirm it is uncommitted (a missing `git` included; outside a repository
+  there is nothing to commit). kubectl's message for a failed Secret apply is never printed, because
+  it can quote the values.
 - **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
   loads each image into that cluster; any other context needs `--registry`, and the images are
   pushed there.

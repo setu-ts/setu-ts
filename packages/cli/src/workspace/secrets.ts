@@ -37,6 +37,13 @@ export function memberSecretName(member: string): string {
 }
 
 /**
+ * The pod-template annotation carrying the member's Secret version (M122 re-audit N2).
+ *
+ * The value is the Secret's `resourceVersion`, which reveals nothing about its contents.
+ */
+export const SECRET_VERSION_ANNOTATION = 'setu-ts.dev/secret-version';
+
+/**
  * The container's `envFrom` block reading the member's Secret.
  *
  * Rendered into every generated Deployment, and printed by `deploy` when a pre-M122 manifest lacks

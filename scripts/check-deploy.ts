@@ -1459,8 +1459,12 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
     );
     if (
       annotations.stdout.includes('last-applied-configuration') ||
-      annotations.stdout.includes(secret) ||
-      annotations.stdout.includes(stale)
+      // Plaintext and base64: an annotation could hold either form (re-audit I2).
+      [secret, stale].some(
+        (value) =>
+          annotations.stdout.includes(value) ||
+          annotations.stdout.includes(Buffer.from(value).toString('base64')),
+      )
     ) {
       console.error('  ✗ the Secret carries a last-applied-configuration annotation');
       return 'failed';
@@ -1469,21 +1473,44 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
       '  ✓ the Secret reaches the pod and carries no plaintext annotation, even taken over from a client-side apply',
     );
 
-    // Rotation on a clean tree: same tag, same manifest; only the restart delivers the value (F1).
+    // Rotation on a clean tree: same tag, same manifest. The Secret's new resourceVersion in
+    // portal's pod template is what rolls it out (F1, re-audit N2); orders, whose Secret did not
+    // change, must not roll.
+    const generation = async (member: string) =>
+      (
+        await run(
+          kubectl(
+            '-n',
+            WORKSPACE_GATE.namespace,
+            'get',
+            `deployment/${member}`,
+            '-o',
+            'jsonpath={.metadata.generation}',
+          ),
+          { quiet: true },
+        )
+      ).stdout.trim();
+    const ordersBefore = await generation('orders');
+    const portalBefore = await generation('portal');
     const rotated = randomBytes(32).toString('base64url');
     await writeFile(
       `${root}/k8s/secrets/portal/.env`,
       `TRUSTED_PROXIES=\nSESSION_SECRET=${rotated}\n`,
     );
     const redeployed = await cli(deployArgs);
-    if (!redeployed.success || !redeployed.stdout.includes('restarted deployment/portal')) {
+    if (!redeployed.success) {
       console.error(
-        `  ✗ a rotated Secret did not restart portal\n${redeployed.stdout}${redeployed.stderr}`,
+        `  ✗ redeploying a rotated Secret failed\n${redeployed.stdout}${redeployed.stderr}`,
       );
       return 'failed';
     }
-    if (redeployed.stdout.includes('restarted deployment/orders')) {
-      console.error('  ✗ orders was restarted although its Secret did not change');
+    if (
+      (await generation('orders')) !== ordersBefore ||
+      (await generation('portal')) === portalBefore
+    ) {
+      console.error(
+        '  ✗ the rotation rolled the wrong Deployments (orders must stay, portal must roll)',
+      );
       return 'failed';
     }
     let live = '';
@@ -1507,7 +1534,7 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
       console.error('  ✗ after rotation the portal pod still carries the old SESSION_SECRET');
       return 'failed';
     }
-    console.log('  ✓ a rotated Secret restarts its member, which then carries the new value');
+    console.log('  ✓ a rotated Secret rolls out only its member, which then carries the new value');
     return (await checkDenoWorkspaceTest(directory, overlay.url)) ? 'passed' : 'failed';
   } finally {
     await run(kubectl('delete', 'namespace', WORKSPACE_GATE.namespace, '--wait=false'), {

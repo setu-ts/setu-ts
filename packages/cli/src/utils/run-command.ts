@@ -9,6 +9,7 @@
  */
 
 import { spawn } from 'node:child_process';
+import process from 'node:process';
 
 /** How one command runs. */
 export interface RunCommandOptions {
@@ -24,6 +25,8 @@ export interface RunCommandOptions {
    * capturing it. A streamed result carries empty `stdout` and `stderr`.
    */
   readonly stream?: boolean;
+  /** Variables set for the child on top of this process's environment (`LC_ALL=C` for git). */
+  readonly env?: Readonly<Record<string, string>>;
 }
 
 /** What one command produced. */
@@ -60,6 +63,7 @@ export function createCommandRunner(spawnImpl: typeof spawn = spawn): CommandRun
     new Promise((resolve) => {
       const child = spawnImpl(command, [...args], {
         cwd: options.cwd,
+        ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
         stdio: [
           options.input === undefined ? 'ignore' : 'pipe',
           options.stream === true ? 'inherit' : 'pipe',

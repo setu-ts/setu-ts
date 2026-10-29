@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { parseArgs } from '../../src/args.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
+import { runCheckCommand } from '../../src/commands/check.ts';
 import type { CommandRunner } from '../../src/utils/run-command.ts';
 import { workspaceK8sFiles } from '../../src/workspace/k8s.ts';
 import {
@@ -72,7 +73,11 @@ async function deploy() {
     if (line === 'git rev-parse --short HEAD')
       return Promise.resolve({ code: 128, stdout: '', stderr: '' });
     if (line === 'git rev-parse --is-inside-work-tree') {
-      return Promise.resolve({ code: 128, stdout: '', stderr: '' });
+      return Promise.resolve({
+        code: 128,
+        stdout: '',
+        stderr: 'fatal: not a git repository (or any of the parent directories): .git\n',
+      });
     }
     if (line === 'kubectl config current-context') {
       return Promise.resolve({ code: 0, stdout: 'kind-dev\n', stderr: '' });
@@ -153,5 +158,41 @@ describe('setu workspace deploy reads only regular files inside the workspace', 
     expect(result.code).toBe(1);
     expect(result.err).toContain('k8s/members.yaml');
     expect(result.inputs).toEqual([]);
+  });
+});
+
+describe('setu check refuses a member .env that Compose would follow (re-audit N4)', () => {
+  /** Runs `setu check` on the workspace; returns its exit code and errors. */
+  async function check() {
+    const err: string[] = [];
+    await nodeFs.writeFile(
+      `${root}/package.json`,
+      '{"name":"ws","private":true,"workspaces":["apps/*"]}',
+    );
+    await nodeFs.writeFile(`${root}/apps/portal/package.json`, '{"name":"portal"}');
+    const code = await runCheckCommand(parseArgs(['check']), {
+      fs,
+      cwd: root,
+      log: () => {},
+      error: (m) => err.push(m),
+    });
+    return { code, err: err.join('\n') };
+  }
+
+  it('accepts a regular .env (positive control)', async () => {
+    await nodeFs.writeFile(`${root}/apps/portal/.env`, 'SESSION_SECRET=local\n');
+    expect((await check()).err).not.toContain('apps/portal/.env');
+  });
+
+  it('refuses a linked .env and a non-regular one', async () => {
+    await nodeFs.symlink(`${outside}/.env`, `${root}/apps/portal/.env`);
+    const linked = await check();
+    expect(linked.code).toBe(1);
+    expect(linked.err).toContain('apps/portal/.env is a symbolic link. docker compose follows it');
+    await nodeFs.rm(`${root}/apps/portal/.env`);
+    await nodeFs.mkdir(`${root}/apps/portal/.env`);
+    const directory = await check();
+    expect(directory.code).toBe(1);
+    expect(directory.err).toContain('apps/portal/.env is not a regular file');
   });
 });

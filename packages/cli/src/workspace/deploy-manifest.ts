@@ -10,7 +10,7 @@
  * @module
  */
 
-import { memberSecretName } from './secrets.ts';
+import { memberSecretName, SECRET_VERSION_ANNOTATION } from './secrets.ts';
 
 /** What preparing the manifest produced. */
 export type DeployManifestResult =
@@ -18,7 +18,10 @@ export type DeployManifestResult =
 
 /** The inputs the manifest is filled from. */
 export interface DeployManifestInputs {
-  /** The namespace every object is pinned to. */
+  /**
+   * Written into every `${NAMESPACE}` placeholder. An object in the file that names its own
+   * namespace, or a cluster-scoped kind, applies as written: the file is the workspace's own.
+   */
   readonly namespace: string;
   /** The workspace name, for the `part-of` labels. */
   readonly workspace: string;
@@ -47,7 +50,9 @@ export function prepareDeployManifest(
     .replaceAll('${WORKSPACE}', inputs.workspace);
   for (const [member, image] of inputs.images) {
     // The line the generator writes: `image: <member>:dev`, nothing after it.
-    const line = new RegExp(`^(\\s*image:\\s*)${literal(member)}:dev[ \\t]*$`, 'gm');
+    // `[ \t]*`, never `\s*`: `\s` spans newlines, and a hostile file of blank lines then
+    // backtracks quadratically (M122 re-audit N3: 40k newlines took 0.8 s).
+    const line = new RegExp(`^([ \\t]*image:[ \\t]*)${literal(member)}:dev[ \\t]*$`, 'gm');
     const matches = [...filled.matchAll(line)].length;
     if (matches !== 1) {
       return {
@@ -83,5 +88,39 @@ export function prepareDeployManifest(
  */
 export function readsMemberSecret(text: string, member: string): boolean {
   const name = literal(memberSecretName(member));
-  return new RegExp(`secretRef:\\s*\\n\\s*name:\\s*['"]?${name}['"]?\\s*$`, 'm').test(text);
+  return new RegExp(`secretRef:[ \\t]*\\n[ \\t]*name:[ \\t]*['"]?${name}['"]?[ \\t]*$`, 'm').test(
+    text,
+  );
+}
+
+/**
+ * Writes a member's Secret version into its Deployment's pod-template annotation.
+ *
+ * Only inside that member's own Deployment document (`kind: Deployment` with `metadata.name` equal
+ * to the member), so another member's annotation is never touched. A `members.yaml` written before
+ * the annotation existed has no slot; the caller falls back to `kubectl rollout restart`.
+ *
+ * @param text - The manifest being applied
+ * @param member - The member
+ * @param version - The Secret's `resourceVersion`
+ * @returns The manifest with the slot filled, and whether the slot was found
+ */
+export function stampSecretVersion(
+  text: string,
+  member: string,
+  version: string,
+): { readonly text: string; readonly stamped: boolean } {
+  const documents = text.split(/^---[ \t]*$/m);
+  const slot = new RegExp(`^([ \\t]*${literal(SECRET_VERSION_ANNOTATION)}:[ \\t]*).*$`, 'm');
+  const own = new RegExp(`^  name:[ \\t]*${literal(member)}[ \\t]*$`, 'm');
+  let stamped = false;
+  const next = documents.map((document) => {
+    if (stamped || !/^kind:[ \t]*Deployment[ \t]*$/m.test(document) || !own.test(document)) {
+      return document;
+    }
+    if (!slot.test(document)) return document;
+    stamped = true;
+    return document.replace(slot, (_line, lead: string) => `${lead}'${version}'`);
+  });
+  return { text: next.join('---'), stamped };
 }

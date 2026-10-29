@@ -146,6 +146,15 @@ describe('workspaceK8sFiles', () => {
     expect(yaml).toContain('`setu workspace deploy` builds this member and replaces this line');
   });
 
+  it('gives every pod template an empty Secret-version slot for deploy to fill (re-audit N2)', () => {
+    const yaml = objectsFor([
+      { name: 'orders', port: 3000 },
+      { name: 'portal', port: 3001 },
+    ]);
+    expect(yaml.match(/^ {8}setu-ts\.dev\/secret-version: ''$/gm)).toHaveLength(2);
+    expect(yaml).toMatch(/template:\n {4}metadata:\n {6}annotations:\n/);
+  });
+
   it('carries the transport connection variable too', () => {
     const yaml = objectsFor([{ name: 'orders', port: 3000 }], 'redis');
     expect(yaml).toContain('- name: REDIS_URL');

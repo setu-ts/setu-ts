@@ -25,7 +25,11 @@ import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { escapeName } from '../utils/names.ts';
 import { COMMAND_NOT_FOUND, type CommandRunner } from '../utils/run-command.ts';
 import { DOCKERFILE, memberEnvironment } from '../workspace/compose.ts';
-import { prepareDeployManifest, readsMemberSecret } from '../workspace/deploy-manifest.ts';
+import {
+  prepareDeployManifest,
+  readsMemberSecret,
+  stampSecretVersion,
+} from '../workspace/deploy-manifest.ts';
 import { defaultImageTag, imageReference, isValidImageTag } from '../workspace/image-tag.ts';
 import { K8S_DIR } from '../workspace/k8s.ts';
 import {
@@ -401,9 +405,16 @@ interface IMemberSecret {
   readonly manifest: string;
 }
 
+/** git's messages in English, so "not a git repository" can be recognized. */
+const GIT_ENV = { LC_ALL: 'C' } as const;
+
 /**
- * Whether a values file is committed, failing closed (M122 audit F2): only "not a repository" and
- * "not tracked" let the deploy continue. A missing `git`, or any other answer, is a refusal.
+ * Whether a values file is committed, failing closed (M122 audit F2, re-audit N1). The deploy
+ * continues only for a work tree whose `git ls-files` says "not tracked", or for a directory git
+ * itself calls "not a git repository". Every other answer refuses: a missing `git`, a repository
+ * git declines to read (dubious ownership, `safe.bareRepository`), `GIT_DIR` pointing elsewhere, or
+ * `false` from inside a bare repository's directory — each of which made the old "any non-zero exit
+ * means no repository" rule deploy a committed file.
  *
  * @returns The refusal, or `undefined` when the file is not tracked
  */
@@ -411,17 +422,20 @@ async function trackedByGit(
   workspace: IWorkspace,
   valuesPath: string,
 ): Promise<string | undefined> {
-  const inside = await workspace.run('git', ['rev-parse', '--is-inside-work-tree'], {
-    cwd: workspace.dir,
-  });
+  const options = { cwd: workspace.dir, env: GIT_ENV };
+  const inside = await workspace.run('git', ['rev-parse', '--is-inside-work-tree'], options);
   if (inside.code === COMMAND_NOT_FOUND) {
     return `git is not installed or not on PATH, so ${valuesPath} cannot be checked for being committed.`;
   }
-  // Exit 128 with nothing on stdout: not a repository, so nothing can be committed.
-  if (inside.code !== 0) return undefined;
-  const listed = await workspace.run('git', ['ls-files', '--error-unmatch', valuesPath], {
-    cwd: workspace.dir,
-  });
+  if (inside.code !== 0) {
+    if (/not a git repository/.test(inside.stderr)) return undefined;
+    const reason = inside.stderr.trim().split('\n')[0] ?? '';
+    return `git could not inspect this workspace (exit ${inside.code}: ${reason}), so ${valuesPath} cannot be checked for being committed.`;
+  }
+  if (inside.stdout.trim() !== 'true') {
+    return `git does not report a work tree here (${JSON.stringify(inside.stdout.trim())}), so ${valuesPath} cannot be checked for being committed.`;
+  }
+  const listed = await workspace.run('git', ['ls-files', '--error-unmatch', valuesPath], options);
   if (listed.code === 1) return undefined;
   if (listed.code === 0) {
     return `${valuesPath} is tracked by git. Remove it from the index (git rm --cached ${valuesPath}) and rotate its values before deploying.`;
@@ -742,7 +756,9 @@ export async function runWorkspaceDeploy(
       );
     }
     deps.log(`  would apply: ${MEMBERS_FILE} with the namespace and images filled in`);
-    deps.log('  would restart: each running member whose Secret changes');
+    deps.log(
+      "  would roll out: each member whose Secret version changes (its pod template's setu-ts.dev/secret-version)",
+    );
     for (const member of images.keys()) {
       deps.log(`  would wait: rollout of deployment/${member} (timeout ${deploy.timeout})`);
     }
@@ -773,11 +789,15 @@ export async function runWorkspaceDeploy(
   ) {
     return EXIT_ERROR;
   }
-  // A Secret whose contents changed reaches running pods only through a restart: `envFrom` is
-  // read at container start, and a rotation on a clean tree keeps both the tag and the manifest,
-  // so nothing would roll out (M122 audit F1). A changed resourceVersion is the signal; it reveals
-  // nothing about the values.
-  const rotated: string[] = [];
+  // A Secret whose contents changed reaches running pods only through a new rollout: `envFrom` is
+  // read at container start, and a rotation on a clean tree keeps both the tag and the manifest
+  // (M122 audit F1). Each member's Secret resourceVersion — which reveals nothing about the values
+  // — is written into its pod template, so a changed Secret changes the template and Kubernetes
+  // rolls out by itself; a deploy re-run after failing part-way still sees the difference
+  // (re-audit N2). A members.yaml from before that annotation existed has no slot: those members
+  // fall back to comparing versions and `kubectl rollout restart`.
+  let manifest = prepared.text;
+  const fallback: string[] = [];
   for (const secret of secrets) {
     const name = memberSecretName(secret.member);
     const before = await secretVersion(workspace, ctx, deploy.namespace, name, deps);
@@ -793,27 +813,29 @@ export async function runWorkspaceDeploy(
       deps,
     );
     if (after === undefined) return EXIT_ERROR;
-    if (after.trim() !== before) rotated.push(secret.member);
+    const stamp = stampSecretVersion(manifest, secret.member, after.trim());
+    manifest = stamp.text;
+    if (!stamp.stamped && after.trim() !== before) fallback.push(secret.member);
   }
-  const listed = await workspace.run(
-    'kubectl',
-    ['--context', ctx, '-n', deploy.namespace, 'get', 'deployments', '-o', 'name'],
-    { cwd: workspace.dir },
-  );
-  if (listed.code !== 0) {
-    reportFailure(deps, 'kubectl', 'Listing Deployments', listed.code, listed.stderr);
+  let existing: ReadonlySet<string> = new Set();
+  if (fallback.length > 0) {
+    const listed = await workspace.run(
+      'kubectl',
+      ['--context', ctx, '-n', deploy.namespace, 'get', 'deployments', '-o', 'name'],
+      { cwd: workspace.dir },
+    );
+    if (listed.code !== 0) {
+      reportFailure(deps, 'kubectl', 'Listing Deployments', listed.code, listed.stderr);
+      return EXIT_ERROR;
+    }
+    existing = new Set(listed.stdout.split('\n').map((line) => line.trim().split('/').pop() ?? ''));
+  }
+  if ((await applyManifest(workspace, ctx, { manifest, what: MEMBERS_FILE }, deps)) === undefined) {
     return EXIT_ERROR;
   }
-  const existing = new Set(listed.stdout.split('\n').map((line) => line.trim().split('/').pop()));
-  if (
-    (await applyManifest(workspace, ctx, { manifest: prepared.text, what: MEMBERS_FILE }, deps)) ===
-    undefined
-  ) {
-    return EXIT_ERROR;
-  }
-  // A Deployment created by this apply already reads the new Secret; one that was running needs
-  // a restart to pick it up.
-  for (const member of rotated.filter((name) => existing.has(name))) {
+  // Only for a pre-annotation manifest: a Deployment this apply created already reads the new
+  // Secret; one that was running needs a restart to pick it up.
+  for (const member of fallback.filter((name) => existing.has(name))) {
     const restarted = await workspace.run(
       'kubectl',
       ['--context', ctx, '-n', deploy.namespace, 'rollout', 'restart', `deployment/${member}`],

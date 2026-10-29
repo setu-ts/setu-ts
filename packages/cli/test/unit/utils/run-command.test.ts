@@ -39,6 +39,15 @@ describe('createCommandRunner (real children)', () => {
     expect(result.code).toBe(5);
   });
 
+  it('adds env on top of this process environment', async () => {
+    const result = await run(
+      node,
+      ['-e', "process.stdout.write(`${process.env.LC_ALL}:${process.env.PATH ? 'path' : 'none'}`)"],
+      { cwd: process.cwd(), env: { LC_ALL: 'C' } },
+    );
+    expect(result.stdout).toBe('C:path');
+  });
+
   it('streams to the terminal instead of capturing', async () => {
     const result = await run(node, ['-e', "process.stdout.write('')"], {
       cwd: process.cwd(),

@@ -34,7 +34,7 @@
 
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { memberEnvironment } from './compose.ts';
-import { envFromBlock } from './secrets.ts';
+import { envFromBlock, SECRET_VERSION_ANNOTATION } from './secrets.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 import type { WorkspaceManifest } from './manifest.ts';
 import type { TransportSpec } from './transport.ts';
@@ -132,13 +132,19 @@ ${Object.entries(env)
   // such endpoint makes Prometheus report a permanently-down target — worse
   // than not discovering it. ABSENT (pre-M70l manifests) means unknown, and
   // unknown omits them, exactly like `healthProbes`.
-  const annotationsBlock = metricsEndpoint
-    ? `      annotations:
+  const metricsAnnotations = metricsEndpoint
+    ? `
         prometheus.io/scrape: 'true'
         prometheus.io/port: '${port}'
-        prometheus.io/path: '/metrics'
-`
+        prometheus.io/path: '/metrics'`
     : '';
+  // M122: the version of this member's Secret the pods were rolled out with. `setu workspace
+  // deploy` writes it, so a changed Secret changes the pod template and Kubernetes rolls the
+  // Deployment out by itself — also when a deploy is re-run after failing part-way.
+  const annotationsBlock = `      annotations:
+        # Set by \`setu workspace deploy\` to the ${name}-env Secret's resourceVersion.
+        ${SECRET_VERSION_ANNOTATION}: ''${metricsAnnotations}
+`;
 
   // X10-4: the chart's preStop sleep (M39's cluster finding). Covers the gap
   // between the pod leaving the Service endpoints and every node's kube-proxy
@@ -315,7 +321,7 @@ ${wrapProse(
     `values go in \`${K8S_DIR}/secrets/<member>/.env\`, which git ignores and no image copies. ` +
     'Deploy refuses, naming every missing variable, before it builds anything, and sends the values ' +
     'to `kubectl` on stdin. Each Deployment reads its Secret, `<member>-env`, through `envFrom`, ' +
-    'and a running member is restarted when its Secret changes. ' +
+    'and its Secret version is stamped into the pod template, so a changed Secret rolls it out. ' +
     'For production, keep the values in a secret manager (Sealed Secrets, External Secrets) and ' +
     'create the same Secret from it.',
 )}
