@@ -209,6 +209,9 @@ export async function serveHttp(
       fetch: handler,
       port: options.port ?? 0,
       hostname: options.hostname ?? '127.0.0.1',
+      // A test helper must not replace the global Request/Response: on the Deno
+      // lane, Deno.serve refuses a Response built from node-server's class.
+      overrideGlobalObjects: false,
     },
     (address) => ready({ port: address.port }),
   );
