@@ -15,6 +15,9 @@
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { LocalImport } from './registry.ts';
 
+/** The line width generated projects format to (`deno.json` `lineWidth`, Prettier `printWidth`). */
+const LINE_WIDTH = 100;
+
 /** The helper's path, relative to the project root. */
 export const NODE_REDIS_MODULE_PATH = 'src/node-redis.ts';
 
@@ -37,7 +40,30 @@ export const NODE_REDIS_IMPORT_LINE: string = `import { ${NODE_REDIS_FACTORY} } 
  * @returns The call expression, one connection per call
  */
 export function nodeRedisClientCall(connection: string): string {
-  return `${NODE_REDIS_FACTORY}(${connection})`;
+  const lines = connection.split('\n');
+  if (lines.length === 1) {
+    const call = `${NODE_REDIS_FACTORY}(${connection})`;
+    // A single-line read reaches column 10 after `client: ` at its widest site,
+    // a full-stack starter option. Past the generated 100-column line width,
+    // emit the wrapped call `deno fmt` would (a Deno project is not reformatted
+    // at scaffold time); the builders render for a property at 8, and the
+    // starter rendering shifts the continuation two columns deeper.
+    if (10 + 'client: '.length + call.length + ','.length <= LINE_WIDTH) return call;
+    return `${NODE_REDIS_FACTORY}(\n${' '.repeat(10)}${connection},\n${' '.repeat(8)})`;
+  }
+  // A multi-line read (Deno: `Deno.env.get('X') ??` then the fallback, its
+  // continuation indented for a `url:` property) is laid out as `deno fmt` lays
+  // out a wrapped call argument: the argument on its own lines one level in,
+  // a trailing comma, and the closing parenthesis back at the property's
+  // indent. Derived from the read's own continuation indent, so it holds at
+  // whatever depth the read was rendered for.
+  const continuation = /^ */.exec(lines[1]!)![0].length;
+  const property = Math.max(0, continuation - 2);
+  const argument = [
+    `${' '.repeat(continuation)}${lines[0]!}`,
+    ...lines.slice(1).map((line) => `  ${line}`),
+  ];
+  return `${NODE_REDIS_FACTORY}(\n${argument.join('\n')},\n${' '.repeat(property)})`;
 }
 
 /**

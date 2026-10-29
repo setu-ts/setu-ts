@@ -252,6 +252,53 @@ describe('fromNodeRedis', () => {
     expect(raw.off).not.toHaveBeenCalled();
   });
 
+  it('subscribes every channel with ONE dispatcher, so a repeated subscribe delivers once', async () => {
+    const raw = nodeRedisFake();
+    const adapter = fromNodeRedis(raw);
+    const listener = vi.fn();
+    adapter.on('message', listener);
+    await adapter.subscribe('ch');
+    await adapter.subscribe('ch');
+    await adapter.subscribe('other');
+    const passed = raw.subscribe.mock.calls.map((call) => call[1]);
+    expect(new Set(passed).size).toBe(1);
+    // node-redis keeps a channel's listeners in a Set: the same function twice is once.
+    const registered = new Set(
+      raw.subscribe.mock.calls.filter((call) => call[0] === 'ch').map((call) => call[1]),
+    );
+    for (const dispatch of registered) dispatch('hello', 'ch');
+    expect(listener).toHaveBeenCalledExactlyOnceWith('ch', 'hello');
+  });
+
+  it('tolerates node-redis 5 throwing from destroy() on an already closed client', async () => {
+    const raw = nodeRedisFake();
+    raw.destroy.mockImplementation(() => {
+      throw new Error('The client is closed');
+    });
+    const adapter = fromNodeRedis(raw);
+    expect(() => adapter.disconnect()).not.toThrow();
+    expect(adapter.status).toBe('end');
+    // quit()'s fallback after a rejected close reaches the same best-effort destroy.
+    const closing = nodeRedisFake();
+    closing.isOpen = true;
+    closing.close.mockRejectedValue(new Error('close failed'));
+    closing.destroy.mockImplementation(() => {
+      throw new Error('The client is closed');
+    });
+    await expect(fromNodeRedis(closing).quit()).rejects.toThrow('close failed');
+  });
+
+  it('keeps a throwing onError inside the error listener', () => {
+    const raw = nodeRedisFake();
+    fromNodeRedis(raw, {
+      onError: () => {
+        throw new Error('handler failed');
+      },
+    });
+    const listener = raw.on.mock.calls[0][1] as (error: unknown) => void;
+    expect(() => listener(new Error('event'))).not.toThrow();
+  });
+
   it('adapts pub/sub listener order and keeps a private message registry', async () => {
     const raw = nodeRedisFake();
     const adapter = fromNodeRedis(raw);

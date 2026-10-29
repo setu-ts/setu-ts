@@ -393,6 +393,21 @@ function providerCallArguments(source: string, bare: string, symbol: string): re
 }
 
 /**
+ * Whether a configuration imports the node-redis helper, in either quote style;
+ * comments are masked so a commented-out import does not count.
+ *
+ * @param source - The configuration source
+ * @returns `true` when the helper is imported
+ */
+function importsNodeRedisHelper(source: string): boolean {
+  const visible = maskComments(source) ?? source;
+  return (
+    visible.includes(`from '${NODE_REDIS_IMPORT.from}'`) ||
+    visible.includes(`from "${NODE_REDIS_IMPORT.from}"`)
+  );
+}
+
+/**
  * Names the node-redis helper's import when the configuration does not have it.
  *
  * Every guidance line for the node-redis arm calls `nodeRedisClient(...)`; a
@@ -409,8 +424,7 @@ function printNodeRedisImportNote(
   log: (line: string) => void,
 ): void {
   if (!clients.includes('redis')) return;
-  const visible = source === undefined ? '' : (maskComments(source) ?? source);
-  if (visible.includes(`from '${NODE_REDIS_IMPORT.from}'`)) return;
+  if (source !== undefined && importsNodeRedisHelper(source)) return;
   log(`  Import ${NODE_REDIS_FACTORY} from '${NODE_REDIS_IMPORT.from}' for it.`);
 }
 
@@ -1065,12 +1079,10 @@ function factoryCallsProvider(source: string, bare: string, symbol: string): boo
  *   collide (the caller then prints guidance instead of writing)
  */
 function withNodeRedisImport(original: string, wired: string): string | undefined {
-  const visible = maskComments(original) ?? original;
-  const imported =
-    visible.includes(`from '${NODE_REDIS_IMPORT.from}'`) ||
-    visible.includes(`from "${NODE_REDIS_IMPORT.from}"`);
-  if (imported) return wired;
-  if (referencesIdentifier(visible, NODE_REDIS_FACTORY)) return undefined;
+  if (importsNodeRedisHelper(original)) return wired;
+  if (referencesIdentifier(maskComments(original) ?? original, NODE_REDIS_FACTORY)) {
+    return undefined;
+  }
   return `${NODE_REDIS_IMPORT_LINE}\n${wired}`;
 }
 

@@ -88,13 +88,31 @@ class RedisAdapter {
   #connecting: Promise<void> | undefined;
   #quitting: Promise<void> | undefined;
   #ended = false;
+  /**
+   * ONE dispatcher for every subscription: node-redis keeps a channel's
+   * listeners in a Set, so re-subscribing a channel with the same function is a
+   * no-op, as a repeated ioredis SUBSCRIBE is. A fresh closure per call would
+   * deliver every message once per subscribe.
+   */
+  readonly #dispatch = (message: string, channel: string): void => {
+    for (const listener of this.#listeners) listener(channel, message);
+  };
 
   constructor(client: NodeRedisClientLike, options: NodeRedisAdapterOptions) {
     this.#timeoutMs = options.commandTimeoutMs === undefined ? 15_000 : options.commandTimeoutMs;
     const refusal = deadlineRangeError('commandTimeoutMs', this.#timeoutMs);
     if (refusal !== null) throw refusal;
     this.#client = client;
-    client.on('error', (error: unknown) => options.onError?.(error));
+    // node-redis rethrows an unlistened 'error' event, so a listener is always
+    // attached; a throwing onError must not throw out of the client's emit.
+    client.on('error', (error: unknown) => {
+      try {
+        options.onError?.(error);
+      } catch {
+        // The application's handler failed; the error still surfaces through
+        // the rejected command and health.
+      }
+    });
   }
 
   get status(): string {
@@ -141,7 +159,7 @@ class RedisAdapter {
     this.#quitting = this.#bound(async () => {
       await this.#client.close();
     }).catch((error: unknown) => {
-      this.#client.destroy();
+      this.#destroy();
       if (!(error instanceof Error && error.message === 'Command timed out')) throw error;
     });
     return this.#quitting;
@@ -149,15 +167,26 @@ class RedisAdapter {
 
   disconnect(): void {
     this.#ended = true;
-    this.#client.destroy();
+    this.#destroy();
+  }
+
+  /**
+   * Destroys the client, best effort: node-redis 5 throws `ClientClosedError`
+   * from `destroy()` on a client that is already closed (6 returns), and the
+   * backplane's close path calls `disconnect()` after `quit()`.
+   */
+  #destroy(): void {
+    try {
+      this.#client.destroy();
+    } catch {
+      // Already closed: nothing left to tear down.
+    }
   }
 
   subscribe(channel: string): Promise<unknown> {
     return this.#bound(async () => {
       await this.connect();
-      return this.#client.subscribe(channel, (message, receivedChannel) => {
-        for (const listener of this.#listeners) listener(receivedChannel, message);
-      });
+      return this.#client.subscribe(channel, this.#dispatch);
     });
   }
 

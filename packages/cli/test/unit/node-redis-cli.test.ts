@@ -10,6 +10,7 @@ import { transportSpec } from '../../src/workspace/transport.ts';
 import { withClientDependencies, CLIENT_RANGES } from '../../src/templates/client-dependencies.ts';
 import { resolveHost } from '../../src/templates/project-files.ts';
 import { MINIMAL_HOST } from '../../src/templates/minimal.ts';
+import { nodeRedisClientCall } from '../../src/templates/node-redis.ts';
 
 function harness() {
   const fs = createFakeFs();
@@ -29,6 +30,22 @@ function harness() {
 }
 
 describe('node-redis CLI', () => {
+  it('renders the client call in the layout each project formatter keeps', () => {
+    // Short single-line read: one line.
+    expect(nodeRedisClientCall("process.env.REDIS_URL ?? 'redis://127.0.0.1:6379'")).toBe(
+      "nodeRedisClient(process.env.REDIS_URL ?? 'redis://127.0.0.1:6379')",
+    );
+    // A Deno read continues at 10 for a property at 8: the argument moves one level in.
+    expect(
+      nodeRedisClientCall("Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'"),
+    ).toBe(
+      "nodeRedisClient(\n          Deno.env.get('REDIS_URL') ??\n            'redis://127.0.0.1:6379',\n        )",
+    );
+    // A single-line read too wide for column 10 after `client: ` wraps as deno fmt does.
+    const read = "config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' })";
+    expect(nodeRedisClientCall(read)).toBe(`nodeRedisClient(\n          ${read},\n        )`);
+  });
+
   it('keeps the node-redis configuration classifiable: setu check is clean and the helper is local', async () => {
     const h = harness();
     expect(
@@ -123,6 +140,52 @@ describe('node-redis CLI', () => {
       () => {},
     );
     expect(result.kind).toBe('cancelled');
+  });
+
+  it('recognises a double-quoted helper import: no second import and no import note', async () => {
+    const fs = createFakeFs();
+    const logs: string[] = [];
+    const run = (args: readonly string[]) =>
+      runCli(args, {
+        fs,
+        cwd: '/work',
+        now: () => 0,
+        log: (line) => logs.push(line),
+        error: (line) => logs.push(line),
+      });
+    expect(
+      await run([
+        'new',
+        'svc',
+        '--template',
+        'microservice',
+        '--broker',
+        'redis',
+        '--redis-client',
+        'node-redis',
+      ]),
+    ).toBe(0);
+    const path = '/work/svc/setu.config.ts';
+    const doubled = fs
+      .read(path)
+      .replace("from './src/node-redis.ts';", 'from "./src/node-redis.ts";');
+    await fs.writeFile(path, new TextEncoder().encode(doubled));
+    logs.length = 0;
+    expect(
+      await run([
+        'add',
+        'queue',
+        '--queue',
+        'redis',
+        '--redis-client',
+        'node-redis',
+        '--dir',
+        '/work/svc',
+      ]),
+    ).toBe(0);
+    const config = fs.read(path);
+    expect(config.match(/from ['"]\.\/src\/node-redis\.ts['"]/g)).toHaveLength(1);
+    expect(logs.join('\n')).not.toContain('Import nodeRedisClient');
   });
 
   it('keeps every ioredis variant byte-identical to captured develop output', async () => {
