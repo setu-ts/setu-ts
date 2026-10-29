@@ -2,6 +2,12 @@
 import type { CommandRunner } from './run-command.ts';
 import { joinPath } from './file-writer.ts';
 
+/** The first non-empty stderr line, bounded: a notice names the failure, not its trace. */
+function firstLine(text: string): string {
+  const line = text.split('\n').find((entry) => entry.trim() !== '') ?? '(no output)';
+  return line.trim().slice(0, 200);
+}
+
 function normalized(path: string): string {
   return `/${path.split('/').filter(Boolean).join('/')}`;
 }
@@ -81,7 +87,10 @@ export async function readPagePaths(
       }),
     ]);
     if (result.code !== 0)
-      return { ok: false, reason: `React Router exited ${result.code}: ${result.stderr.trim()}` };
+      return {
+        ok: false,
+        reason: `React Router exited ${result.code}: ${firstLine(result.stderr)}`,
+      };
     const tree: unknown = JSON.parse(result.stdout);
     const files = pages(tree);
     return { ok: true, paths: pagePaths(tree), files };

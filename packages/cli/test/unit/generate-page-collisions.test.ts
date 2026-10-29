@@ -52,11 +52,25 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
         expect(h.err.text()).toContain('app/routes/_app/products._index.tsx');
         expect(h.err.text()).toContain('/products and /products/:id would take precedence');
         expect(h.err.text()).toContain(
-          'setu g module api, then setu g route products --module api',
+          schematic === 'module'
+            ? "Choose another module name: a module's routes are mounted at /<module name>."
+            : `setu g module api, then setu g ${schematic} products --module api (which yields /api/products)`,
         );
       });
     }
   }
+  it('names the requested generator and name in its advice, never a fixed example', async () => {
+    const orders = [{ id: 'orders', path: 'orders', file: 'routes/_app/orders.tsx' }];
+    const h = harness(undefined, () =>
+      Promise.resolve({ code: 0, stdout: JSON.stringify(orders), stderr: '' }),
+    );
+    expect(await h.run(['g', 'controller', 'orders'])).toBe(1);
+    expect(h.err.text()).toContain('app/routes/_app/orders.tsx');
+    expect(h.err.text()).toContain(
+      'setu g module api, then setu g controller orders --module api (which yields /api/orders)',
+    );
+    expect(h.err.text()).not.toContain('products');
+  });
   it('allows /api/products in an existing api module', async () => {
     const h = harness();
     expect(await h.run(['g', 'module', 'api'])).toBe(0);
@@ -65,11 +79,12 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
   });
   it('continues with a notice naming the paths to inspect when the CLI fails', async () => {
     const h = harness(undefined, () =>
-      Promise.resolve({ code: 127, stdout: '', stderr: 'missing CLI' }),
+      Promise.resolve({ code: 127, stdout: '', stderr: '\nmissing CLI\n    at trace line\n' }),
     );
     expect(await h.run(['g', 'route', 'products'])).toBe(0);
     expect(h.err.text()).toContain('Notice: cannot check React Router pages');
-    expect(h.err.text()).toContain('missing CLI');
+    expect(h.err.text()).toContain('React Router exited 127: missing CLI)');
+    expect(h.err.text()).not.toContain('trace line');
     expect(h.err.text()).toContain('/products and /products/:id');
     expect(h.fs.writes.length).toBeGreaterThan(0);
   });

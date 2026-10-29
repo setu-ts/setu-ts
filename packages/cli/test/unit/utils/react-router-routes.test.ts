@@ -87,6 +87,7 @@ describe('readPagePaths', () => {
   });
   for (const [label, run] of [
     ['nonzero', () => Promise.resolve({ code: 127, stdout: '', stderr: 'missing executable' })],
+    ['nonzero without stderr', () => Promise.resolve({ code: 1, stdout: '', stderr: '  \n' })],
     ['invalid JSON', () => Promise.resolve({ code: 0, stdout: '{', stderr: '' })],
     ['invalid tree', () => Promise.resolve({ code: 0, stdout: '{}', stderr: '' })],
     ['rejection', () => Promise.reject(new Error('broken runner'))],
@@ -95,6 +96,16 @@ describe('readPagePaths', () => {
     it(`returns an advisory failure for ${label}`, async () =>
       expect((await readPagePaths('/app', run)).ok).toBe(false));
   }
+  it('names only the first stderr line, or says there was none', async () => {
+    for (const [stderr, reason] of [
+      ['\nboom\n    at frame 1\n', 'React Router exited 1: boom'],
+      ['  \n', 'React Router exited 1: (no output)'],
+    ] as const) {
+      expect(
+        await readPagePaths('/app', () => Promise.resolve({ code: 1, stdout: '', stderr })),
+      ).toEqual({ ok: false, reason });
+    }
+  });
   it('times out at 15 seconds and aborts the child', async () => {
     vi.useFakeTimers();
     try {

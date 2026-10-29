@@ -440,7 +440,9 @@ export async function runGenerateCommand(
           `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(page)} (${escapeName(pages.files.get(page)!)}).`,
         );
         deps.error(
-          'Choose another name, or place the route in a module: setu g module api, then setu g route products --module api (which yields /api/products).',
+          schematicName === 'module'
+            ? `Choose another module name: a module's routes are mounted at /<module name>.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module api, then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
         );
         return EXIT_ERROR;
       }
