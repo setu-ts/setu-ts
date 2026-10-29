@@ -464,6 +464,7 @@ describe('AuthSessionService — scoped grants under sign-in timing (M110b)', ()
 describe('AuthSessionService — session stamp (M124 §3.3)', () => {
   const digest = (value: string): string => createHash('sha256').update(value).digest('base64url');
 
+  /** A service recording `read`'s stamp, with an always-required MFA policy when `mfa` is set. */
   function build(read: SessionStamp, mfa = false, session = createFakeSession()) {
     const impl = new AuthSessionService({
       sessionService: createFakeSessionService(session),

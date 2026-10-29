@@ -252,6 +252,10 @@ describe('auth-session strategy', () => {
 describe('AuthSessionStrategy edge cases', () => {
   const request = { headers: new Headers() } as IRequest;
 
+  /**
+   * A strategy over a fake session holding `data`, with the stamp check when
+   * `sessionStamp` is given.
+   */
   function strategy(
     data: Record<string, unknown> | null,
     sessionStamp?: SessionStamp,

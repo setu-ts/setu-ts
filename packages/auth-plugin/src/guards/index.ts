@@ -114,6 +114,7 @@ function isNavigation(method: string, headers: Headers): boolean {
  *   or when the URL parser would normalize it to a different one
  */
 function compileSignInPage(signInPage: unknown): URL {
+  /** Throws the one refusal every invalid page gets. */
   const refuse = (): never => {
     throw new AuthPluginConfigurationError(
       `auth-plugin: requireAuth signInPage must be a same-origin absolute path, got '${String(

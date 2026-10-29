@@ -39,6 +39,11 @@ describe('session and account lifecycle (M124)', () => {
     await app.stop();
   });
 
+  /**
+   * Boots the password-only application over `users`: the session plugin with
+   * `session`, `refreshPrincipal` and `sessionStamp` reading the table, a login
+   * route, a password-change route and two guarded routes.
+   */
   async function boot(
     users: Map<string, User>,
     session: Partial<SessionPluginOptions>,
