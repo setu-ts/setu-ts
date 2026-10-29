@@ -690,7 +690,7 @@ here.
 - **Milestone 124** (`packages/auth-plugin` — password-only `signIn` with `providers: []`,
   `requireAuth({ signInPage })` redirecting browser navigations with a safe `returnTo` while APIs
   get 401, and `signIn.sessionStamp` ending every session of a user from a stamp on the user record;
-  V10-65, V10-66) — complete (PR pending).
+  V10-65, V10-66) — complete (PR #520).
 - **Next milestone** — M121 (full-stack members with a broker), then M122. M119i is also open.
 
 ## Verification (run before declaring any work done)

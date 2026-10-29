@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`).**
+- **Session and account lifecycle (M124, #520, 0.11.0, `@setu-ts/auth-plugin`).**
   `signIn: { providers: [] }` is accepted without `mfa` or `passkeys`, so a password-only
   application gets `refreshPrincipal`'s per-request re-check (V10-65). `requireAuth({ signInPage })`
   (`RequireAuthOptions`) answers an unauthenticated browser navigation with `302` to the sign-in
