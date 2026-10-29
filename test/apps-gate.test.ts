@@ -981,20 +981,21 @@ describe('M111b workflow lanes', () => {
     const source = await readFile('.github/workflows/ci.yml', 'utf8');
     const node = jobOf(source, 'node')!;
     expect(node).toContain('fail-fast: false');
-    expect(node).toContain('shard: [static, cli, messaging, packages, tooling]');
-    const runs = [...node.matchAll(/if: matrix\.shard == '(\w+)'\n {8}run: (.+)/g)].map((match) => [
-      match[1],
-      match[2],
-    ]);
+    expect(node).toContain('shard: [static, cli-1, cli-2, cli-3, messaging, packages, tooling]');
+    const runs = [...node.matchAll(/if: matrix\.shard == '([\w-]+)'\n {8}run: (.+)/g)].map(
+      (match) => [match[1], match[2]],
+    );
     expect(runs.filter(([, run]) => run!.startsWith('pnpm test:coverage'))).toEqual([
-      ['cli', 'pnpm test:coverage --no-tooling cli'],
+      ['cli-1', 'pnpm test:coverage --no-tooling cli --shard 1/3'],
+      ['cli-2', 'pnpm test:coverage --no-tooling cli --shard 2/3'],
+      ['cli-3', 'pnpm test:coverage --no-tooling cli --shard 3/3'],
       ['messaging', 'pnpm test:coverage --no-tooling messaging-plugin'],
       ['packages', 'pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin'],
     ]);
     expect(runs.filter(([, run]) => run === 'pnpm run test:tooling:coverage')).toEqual([
       ['tooling', 'pnpm run test:tooling:coverage'],
     ]);
-    // Every static gate is conditioned on the static shard, so none runs five times.
+    // Every static gate is conditioned on the static shard, so none runs seven times.
     for (const command of ['fmt:check', 'run lint', 'run check\n', 'check:docs', '--check\n']) {
       expect(node).toMatch(
         new RegExp(`if: matrix\\.shard == 'static'\\n {8}run: [^\\n]*${command}`),
@@ -1005,10 +1006,30 @@ describe('M111b workflow lanes', () => {
     const gate = source.slice(source.indexOf('\n  node-gate:'), source.indexOf('\n  deno-lane:'));
     expect(gate).toContain('name: Format / Lint / Check / Test\n');
     expect(gate).toContain('if: always() && (');
-    expect(gate).toContain('needs: node');
+    expect(gate).toContain('needs: [node, cli-coverage]');
     expect(gate).toContain('RESULT: ${{ needs.node.result }}');
     expect(gate).toContain('test "$RESULT" = success');
+    expect(gate).toContain('CLI_COVERAGE_RESULT: ${{ needs.cli-coverage.result }}');
+    expect(gate).toContain('test "$CLI_COVERAGE_RESULT" = success');
     expect(source.match(/name: Format \/ Lint \/ Check \/ Test\n/g)).toHaveLength(1);
+
+    const merge = jobOf(source, 'cli-coverage')!;
+    expect(merge).toContain('needs: node');
+    expect(merge).toContain('if: always() && (');
+    expect(merge).toContain('github.event.pull_request.head.repo.full_name == github.repository');
+    expect(merge).toContain('pattern: cli-blob-*');
+    expect(merge).toContain('merge-multiple: true');
+    expect(merge).toContain('test -f ".vitest-reports/cli/blob-$i.json"');
+    expect(merge).toContain('for i in 1 2 3; do');
+    expect(merge).toContain('pnpm test:coverage --no-tooling cli --merge');
+    expect(merge).not.toContain('services:');
+    for (const i of [1, 2, 3]) {
+      expect(node).toContain(`name: cli-blob-${i}`);
+      expect(node).toContain(`path: .vitest-reports/cli/blob-${i}.json`);
+    }
+    expect(node.match(/include-hidden-files: true/g)).toHaveLength(3);
+    expect(node.match(/if-no-files-found: error/g)).toHaveLength(3);
+    expect(node.match(/retention-days: 1\n/g)).toHaveLength(3);
 
     // Only pull-request runs are superseded; integration pushes never cancel.
     expect(source).toContain("cancel-in-progress: ${{ github.event_name == 'pull_request' }}");

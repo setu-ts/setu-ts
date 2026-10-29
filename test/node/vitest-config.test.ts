@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import config, {
   configurationFor,
   projectsFor,
@@ -7,6 +7,25 @@ import config, {
 import { NODE_EXCLUDED_TESTS } from '../../scripts/test-lanes.ts';
 
 describe('Vitest configuration', () => {
+  it('omits only thresholds for any nonempty shard marker and restores them for merge', () => {
+    const normal = configurationFor('packages/common');
+    try {
+      for (const marker of ['1', '0', 'anything']) {
+        vi.stubEnv('SETU_TEST_SHARD', marker);
+        const sharded = configurationFor('packages/common');
+        expect(sharded.test?.coverage).not.toHaveProperty('thresholds');
+        expect(sharded.test?.coverage).toEqual(
+          Object.fromEntries(
+            Object.entries(normal.test!.coverage!).filter(([key]) => key !== 'thresholds'),
+          ),
+        );
+      }
+      vi.stubEnv('SETU_TEST_SHARD', '');
+      expect(configurationFor('packages/common').test?.coverage).toEqual(normal.test?.coverage);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
   it('resolves source barrels and subpath exports', () => {
     for (const name of ['@setu-ts/common', '@setu-ts/runtime/worker', '@setu-ts/rest-starter']) {
       expect(sourceExport(name)).toMatch(/\/src\/.+\.ts$/);

@@ -1,10 +1,19 @@
 import { parse } from 'yaml';
 import { stripVTControlCharacters } from 'node:util';
 
-/** The five required CI shards. */
-export const SHARDS = ['static', 'cli', 'messaging', 'packages', 'tooling'] as const;
+/** The required CI matrix shards. */
+export const SHARDS = [
+  'static',
+  'cli-1',
+  'cli-2',
+  'cli-3',
+  'messaging',
+  'packages',
+  'tooling',
+] as const;
 /** A required shard or an explicitly requested extra job. */
-export type Shard = (typeof SHARDS)[number] | 'deno-lane' | 'compat' | 'node-build';
+export type Shard =
+  (typeof SHARDS)[number] | 'cli-coverage' | 'deno-lane' | 'compat' | 'node-build';
 /** Validated command-line selection. */
 export interface ILocalOptions {
   shards: Shard[];
@@ -22,16 +31,24 @@ export const SHARD_BUDGET_BYTES = 8 * 1024 ** 3;
 const SHARD_BUDGET_GIB = SHARD_BUDGET_BYTES / 1024 ** 3;
 
 /**
- * Extras that rewrite the worktree's shared install while they run. `node-build`
- * (`scripts/check-node-build.ts`) runs its own `pnpm install --frozen-lockfile` and `tsc -b`,
+ * Deferred jobs run alone after the shared shards. CLI coverage consumes all three
+ * completed blobs. `node-build` rewrites the worktree's shared install via
+ * `scripts/check-node-build.ts`, which runs `pnpm install --frozen-lockfile` and `tsc -b`,
  * which the workflow-step filter cannot see; run beside a test shard, it deleted vitest under
- * that shard mid-run. These run one at a time, only after every other job has finished.
+ * that shard mid-run. These run one at a time, after every shared shard has finished.
  */
-export const EXCLUSIVE_SHARDS: readonly Shard[] = ['node-build'];
+export const EXCLUSIVE_SHARDS: readonly Shard[] = ['cli-coverage', 'node-build'];
 
 /** The runner container's memory cap: tooling needs more and carries no backends. */
 export function runnerMemory(shard: Shard): string {
   return shard === 'tooling' ? '8g' : '6g';
+}
+/** Share this invocation's blob directory with every CLI runner; logs and coverage stay outside it. */
+export function cliReportMounts(directory: string, root: string, shard: Shard): string[] {
+  if (!shard.startsWith('cli-')) return [];
+  // Coverage is NOT mounted: a mount point cannot be removed, and Vitest empties
+  // its reports directory first (EBUSY). Each shard writes coverage-node/cli/shard-<i>.
+  return ['-v', `${directory}/vitest-reports:${root}/.vitest-reports`];
 }
 /** Standard validation remains available without this optional accelerator. */
 export const NORMAL_GATES =
@@ -83,8 +100,9 @@ export function availableMemory(meminfo: string, fallback: number): number {
 
 /**
  * Run at most n shards concurrently; each worker releases resources before taking another.
- * Shards in {@linkcode EXCLUSIVE_SHARDS} start only after every other shard has finished, one at
- * a time. Results keep the selection order. Exclusivity is isolation, not a dependency: a shard
+ * Shards in {@linkcode EXCLUSIVE_SHARDS} start only after every shared shard has finished, one at
+ * a time. Results keep the selection order. CLI merging depends on completed blobs;
+ * node-build's exclusivity is isolation, not a dependency: a shard
  * that finished with a nonzero exit code still lets an exclusive shard run, as CI's `node-build`
  * job (which has no `needs:`) runs whatever the test shards report. Only a rejected worker, which
  * may still hold resources, stops it.
@@ -97,7 +115,9 @@ export async function scheduleShards<T>(
   const results: T[] = new Array(shards.length);
   const indexes = shards.map((_, index) => index);
   const shared = indexes.filter((index) => !EXCLUSIVE_SHARDS.includes(shards[index]!));
-  const exclusive = indexes.filter((index) => EXCLUSIVE_SHARDS.includes(shards[index]!));
+  const exclusive = EXCLUSIVE_SHARDS.flatMap((shard) =>
+    indexes.filter((index) => shards[index] === shard),
+  );
   let next = 0;
   const workers = await Promise.allSettled(
     Array.from({ length: Math.min(parallel, shared.length) }, async () => {
@@ -168,6 +188,10 @@ export function parseOptions(args: readonly string[]): ILocalOptions {
       options.cpus = value;
     } else if (flag === '--shard' || flag === '--include') {
       const value = args[++i];
+      if (flag === '--shard' && value === 'cli') {
+        options.shards.push('cli-1', 'cli-2', 'cli-3');
+        continue;
+      }
       const allowed: readonly string[] =
         flag === '--shard' ? SHARDS : ['deno-lane', 'compat', 'node-build'];
       if (value === undefined || !allowed.includes(value))
@@ -177,6 +201,8 @@ export function parseOptions(args: readonly string[]): ILocalOptions {
   }
   if (options.shards.length === 0) options.shards.push(...SHARDS);
   options.shards = [...new Set([...options.shards, ...extras])];
+  if (['cli-1', 'cli-2', 'cli-3'].every((shard) => options.shards.includes(shard as Shard)))
+    options.shards.push('cli-coverage');
   return options;
 }
 
@@ -198,7 +224,7 @@ export function shardCommands(source: string, shard: Shard): ICommand[] {
     workflow.jobs[
       shard === 'compat'
         ? 'boundary-compatibility'
-        : shard === 'deno-lane' || shard === 'node-build'
+        : shard === 'deno-lane' || shard === 'node-build' || shard === 'cli-coverage'
           ? shard
           : 'node'
     ]!;
@@ -225,7 +251,13 @@ export function backendSpecs(shard: Shard): IBackend[] {
   ): IBackend => ({ name, image, ports, memory, args, env, probe });
   const redis = spec('redis', 'redis:7', [6379], ['redis-cli', 'ping']);
   if (shard === 'static') return [redis];
-  if (shard === 'tooling' || shard === 'deno-lane' || shard === 'compat' || shard === 'node-build')
+  if (
+    shard === 'tooling' ||
+    shard === 'deno-lane' ||
+    shard === 'compat' ||
+    shard === 'node-build' ||
+    shard === 'cli-coverage'
+  )
     return [];
   return [
     spec(
