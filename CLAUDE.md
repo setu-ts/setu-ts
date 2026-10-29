@@ -709,7 +709,7 @@ here.
   `diagnostics-plugin` + `cli` — node-redis as a supported Redis client: one `fromNodeRedis` adapter
   with its own command bound and RESP3 normalization, node-redis outage classification, a `redis`
   trace arm, and `--redis-client` scaffolds through a generated `src/node-redis.ts`) — complete (PR
-  pending).
+  #525).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing).
 
 ## Verification (run before declaring any work done)

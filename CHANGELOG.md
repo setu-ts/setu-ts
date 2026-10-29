@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, the Redis-backed
+- **node-redis as a supported Redis client (M117, #525, 0.11.0, `@setu-ts/common`, the Redis-backed
   plugins, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`).** `fromNodeRedis(client, options?)` wraps a
   node-redis (`redis` v5/v6) client so every Redis-backed plugin's `client` option takes it: cache,
   queue, Redis Streams messaging, the realtime backplane, the scheduler lock, idempotency and
@@ -225,11 +225,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, 0.11.0,
+- **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, #525, 0.11.0,
   `@setu-ts/scheduler-plugin`).** It declared `Promise<number | string | null>`, which one adapter
   serving the queue's and idempotency's scripts could not honestly satisfy; the lock ignores the
   result. Any client that satisfied the old type still does.
-- **`IRedisBackplaneClient` gains an optional `connect?()` (M117, 0.11.0,
+- **`IRedisBackplaneClient` gains an optional `connect?()` (M117, #525, 0.11.0,
   `@setu-ts/realtime-backplane-plugin`).** When the backplane starts it connects an injected client
   whose `status` is `'wait'`, so a lazily connecting client reports its real health from the start.
 
@@ -467,7 +467,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, 0.11.0,
+- **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, #525, 0.11.0,
   `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
   line however long its options were — a Redis connection read, a nested `options: { … }`, a seam
   merged with stray spaces — so a Deno project failed `deno fmt --check` after its first
