@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Local diagnostics on Node (M126, `@setu-ts/runtime`).** The explicitly activated diagnostics
+  connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http` server.
+  Request-target spellings are preserved, duplicate singleton lines are refused, parser errors
+  answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open connections.
+  Bun and Workers continue to refuse this transport.
+
 - **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
   Tailwind 4, neutral shadcn theme tokens, copied MIT Button/Card, a light/dark/system toggle and a
   fixed header/sidebar with scrolling content. `components.json` supports adding more components;

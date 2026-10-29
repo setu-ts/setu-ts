@@ -4,19 +4,23 @@
  * serves — WITHOUT ever printing the session ID/key or environment.
  */
 import { describe, expect, it } from 'vitest';
-import { denoBinary, run } from './node-helpers.ts';
+import { run } from './node-helpers.ts';
 
 describe('inspect-local-diagnostics demo', () => {
   it('runs the loopback consumer exercise end-to-end and leaks no credential', async () => {
-    const { code, stdout, stderr } = await run(denoBinary(), {
-      args: [
-        'run',
-        '--config=test/deno-lane/lane.config.json',
-        '--allow-read',
-        '--allow-env',
-        '--allow-net=127.0.0.1',
-        'scripts/inspect-local-diagnostics.ts',
-      ],
+    const args =
+      'Deno' in globalThis
+        ? [
+            'run',
+            '--config=test/deno-lane/lane.config.json',
+            '--allow-read',
+            '--allow-env',
+            '--allow-net=127.0.0.1',
+            'scripts/inspect-local-diagnostics.ts',
+          ]
+        : ['--import', './scripts/lib/source-register.ts', 'scripts/inspect-local-diagnostics.ts'];
+    const { code, stdout, stderr } = await run(process.execPath, {
+      args,
       stdin: 'null',
       stdout: 'piped',
       stderr: 'piped',
@@ -24,7 +28,7 @@ describe('inspect-local-diagnostics demo', () => {
     const output = new TextDecoder().decode(stdout);
     const errors = new TextDecoder().decode(stderr);
     expect(code).toEqual(0);
-    // The Deno listener prints its startup banner to stderr; that is the only
+    // The listener prints its startup banner to stderr; that is the only
     // line stderr may carry (it names the port, never a credential).
     const errorLines = errors
       .trim()

@@ -14,13 +14,25 @@ verified.
 ## Transport
 
 - A runtime-owned HTTP listener on IPv4 loopback (`127.0.0.1`) only, on a developer-chosen port in
-  `1024`–`65535`. Deno only in v1; every other platform refuses activation.
+  `1024`–`65535`. Deno and Node support v1; Bun, Workers and unknown platforms refuse activation.
 - Bounded polling only — no long polling, no SSE, no WebSockets, no redirects, no upgrades.
 - Zero-body policy: any `Transfer-Encoding`, any `Content-Length` other than absent or exactly `0`,
   and any comma inside the coalesced value of `Host`, `X-Setu-Session`, `X-Setu-Sequence`,
   `X-Setu-Instance`, or `X-Setu-Mac` is refused BEFORE framework mapping. (The comma proves a
-  duplicate header line; the fetch layer coalesces duplicates, so the raw-wire multiplicity is not
-  preservable and no claim is made that it is.)
+  duplicate header line on Deno, whose fetch layer coalesces duplicates. Node also checks the real
+  line multiplicity in `IncomingMessage.rawHeaders` before constructing headers.)
+- The protocol is identical on both runtimes for requests that reach it. The parser-refusal family
+  is a bare `400` with an empty body, without protocol headers or reflected request/error text.
+  Parser boundaries differ: Deno refuses duplicate `Host` lines in its parser; Node refuses
+  duplicate `Content-Length` lines and headers above 16 KiB there. Protocol framing and target
+  refusals instead carry `{"version":1,"error":"invalid-request"}` with the protocol's fixed
+  response headers. Transport headers such as `date`, `connection`, `keep-alive` and
+  `content-length` versus chunked framing are runtime-owned and need not match.
+- Node uses `node:http` directly, retaining the request-target as sent alongside a body-less native
+  request. Dot segments, backslashes, absolute-form and other target aliases are refused, never
+  normalized into a served operation. Its parser has a 16 KiB header limit, 5 s header timeout, 10 s
+  request timeout, 5 s keep-alive timeout and 1 s checking interval; the server permits at most 32
+  connections. Closing the listener stops acceptance and destroys active connections.
 
 ## Operations
 

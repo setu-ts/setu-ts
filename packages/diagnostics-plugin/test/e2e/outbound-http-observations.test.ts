@@ -92,9 +92,20 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       await expect(sdk.request({ method: 'GET', path: 'missing' })).rejects.toThrow();
       // Direct call with userinfo and a fragment in the URL.
       const withUserinfo = upstream.base.replace('http://', `http://user:${CANARY}@`);
-      const direct = await observed.fetch(`${withUserinfo}/boom#${CANARY}`);
-      expect(direct.status).toBe(503);
-      await direct.text();
+      // Measured: Deno's fetch sends a userinfo URL; Node's refuses to build the
+      // Request, so on Node the call is a failure whose message quotes the URL.
+      const acceptsUserinfo = 'Deno' in globalThis;
+      const direct = await observed.fetch(`${withUserinfo}/boom#${CANARY}`).then(
+        (answered) => answered,
+        (error: unknown) => error,
+      );
+      if (acceptsUserinfo) {
+        expect(direct).toBeInstanceOf(Response);
+        expect((direct as Response).status).toBe(503);
+        await (direct as Response).text();
+      } else {
+        expect(direct).toBeInstanceOf(TypeError);
+      }
       // A refused connection: a rejection whose message quotes the address.
       await expect(
         observed.fetch(`http://127.0.0.1:${await unusedPort()}/${CANARY}`),
@@ -126,13 +137,13 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       expect(snapshot.alias).toEqual('payments-api');
       expect(snapshot.coverage).toEqual('owned-instance');
       const record = snapshot.records[0]!;
-      // POST 200, GET 404, direct 503 (Deno's fetch accepts userinfo), refused, hung.
+      // POST 200, GET 404, direct (503 on Deno, a failure on Node), refused, hung.
       expect(record.started).toBe(5);
       expect(record.count).toBe(4);
-      expect(record.responses).toBe(3);
-      expect(record.failures).toBe(1);
+      expect(record.responses).toBe(acceptsUserinfo ? 3 : 2);
+      expect(record.failures).toBe(acceptsUserinfo ? 1 : 2);
       // The refusal settles last, and a failure leaves the class unchanged.
-      expect(record.lastStatusClass).toBe('5xx');
+      expect(record.lastStatusClass).toBe(acceptsUserinfo ? '5xx' : '4xx');
       expect(record.lastDurationMs).not.toBeNull();
 
       // --- Canaries absent everywhere ---------------------------------

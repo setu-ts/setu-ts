@@ -425,6 +425,30 @@ export function mapWebRequestToFrameworkRequest(
   );
 }
 
+/**
+ * Maps a body-less diagnostics request while retaining its original target.
+ * Unlike `Request.url` and `extractPath`, this path never resolves dot segments
+ * or backslashes. The protocol must be able to refuse those aliases itself.
+ *
+ * @param raw - Native request carrying the method and headers
+ * @param url - Absolute URL with the request-target concatenated verbatim
+ * @param peerAddress - Optional socket peer supplied by the runtime host
+ * @returns A guarded framework request whose URL retains the supplied spelling
+ * @internal
+ */
+export function mapWebRequestWithTarget(raw: Request, url: string, peerAddress?: string): IRequest {
+  const target = url.slice(url.indexOf('/', url.indexOf('://') + 3));
+  const end = target.search(/[?#]/);
+  return new FrameworkRequest(
+    raw,
+    raw.method.toUpperCase() as HttpMethod,
+    url,
+    end === -1 ? target : target.slice(0, end),
+    undefined,
+    peerAddress,
+  );
+}
+
 /** Normalizes socket peers without changing native IPv6 literals. */
 function normalizePeerAddress(address: string | undefined): string | undefined {
   if (address === '') return undefined;

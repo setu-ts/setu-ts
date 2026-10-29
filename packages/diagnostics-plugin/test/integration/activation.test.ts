@@ -1,6 +1,6 @@
 /**
  * Integration tests for activation over a REAL kernel application: no
- * plugin means no socket, missing diagnostics refuses startup, a non-Deno
+ * plugin means no socket, missing diagnostics refuses startup, an unsupported
  * runtime refuses before any bind, and an honest composition opens a
  * working signed endpoint.
  */
@@ -53,10 +53,10 @@ describe('Activation', () => {
     await expect(app.start()).rejects.toThrow(/not created with kernel diagnostics enabled/);
   });
 
-  it('refuses listen before any bind on a non-Deno runtime', async () => {
+  it('refuses listen before any bind on an unsupported runtime', async () => {
     const factory = await (async () => {
       const app = createApplication({
-        plugins: [RuntimePlugin({ platform: 'node' })],
+        plugins: [RuntimePlugin({ platform: 'cloudflare-workers' })],
       });
       await app.start();
       const factory = app.services.get<ILocalDiagnosticsListenerFactory>(

@@ -41,9 +41,11 @@ async function startApp(
         subtle === undefined
           ? undefined
           : {
-              platform: 'deno',
               adapters: {
-                deno: () => ({ ...createRuntimeServices({ platform: 'deno' }), subtle }),
+                [createRuntimeServices().platform()]: () => ({
+                  ...createRuntimeServices(),
+                  subtle,
+                }),
               },
             },
       ),
@@ -114,7 +116,7 @@ describe('Lifecycle', () => {
       const callReleased = new Promise<void>((resolve) => {
         releaseCall = resolve;
       });
-      const base = createRuntimeServices({ platform: 'deno' }).subtle;
+      const base = createRuntimeServices().subtle;
       const delayedSubtle = new Proxy(base, {
         get(target, property): unknown {
           if (property === operation) {

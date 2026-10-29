@@ -5134,8 +5134,9 @@ full burst. Sweeps use doubling thresholds starting at 64; drained and partially
 keep their limits.
 
 An authenticated local connector between a native devtool client and M98a's kernel diagnostics,
-served over a runtime-owned IPv4 loopback listener. Deno and bounded polling only; no browser UI, no
-application data, no control commands, and no environment fallback. Activation is explicit:
+served over a runtime-owned IPv4 loopback listener. Deno and Node, with bounded polling only; no
+browser UI, no application data, no control commands, and no environment fallback. Activation is
+explicit:
 `DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs?, maxSessionLifetimeMs? })` —
 an omitted or `false` `enabled`, an invalid port or credential, an unsupported runtime, or an
 application without M98a diagnostics refuses activation. `enabled` is typed as the LITERAL `true`,
@@ -5416,8 +5417,8 @@ has `outboundHttp: false` answers a frozen `unsupported` response without sendin
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
 (`LocalDiagnosticsListenerOptions { port, handler }` → `ILocalDiagnosticsListener.close()`), binding
-exactly one `127.0.0.1` listener on Deno and rejecting every `listen` on other platforms before any
-bind. The full wire specification lives in `docs/diagnostics-protocol.md`.
+exactly one `127.0.0.1` listener on Deno or Node and rejecting every `listen` on unsupported
+platforms before any bind. The full wire specification lives in `docs/diagnostics-protocol.md`.
 
 ## SecretsPlugin() (`@setu-ts/secrets-plugin`)
 
