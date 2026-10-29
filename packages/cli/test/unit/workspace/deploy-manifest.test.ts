@@ -187,10 +187,26 @@ describe('stampSecretVersion (re-audit N2)', () => {
       /^( {8}setu-ts\.dev\/secret-version: ''\n)/m,
       "$1        setu-ts.dev/secret-version: ''\n",
     );
+    // Spellings the stamp does not read, each carrying the flow-style slot (audit 7, A7-1).
+    const owner = /(kind: Deployment\nmetadata:\n {2})name: portal\n/;
+    const quotedName = flow.replace(owner, "$1name: 'portal'\n");
+    const commentedName = flow.replace(owner, '$1name: portal # web\n');
+    const quotedKind = flow.replace(
+      /kind: Deployment(\nmetadata:\n {2}name: portal\n)/,
+      'kind: "Deployment"$1',
+    );
+    const escapedKey = yaml.replace(
+      /^( {8})setu-ts\.dev\/secret-version(: '')/m,
+      '$1"setu-ts.dev\\/secret-version"$2',
+    );
     for (const [label, text] of [
       ['flow', flow],
       ['indent', shallow],
       ['twice', twice],
+      ['quoted name', quotedName],
+      ['commented name', commentedName],
+      ['quoted kind', quotedKind],
+      ['escaped key', escapedKey],
     ] as const) {
       expect(text, label).not.toBe(yaml);
       expect(unreadableSlot(text, 'portal'), label).toContain('that deploy cannot fill');

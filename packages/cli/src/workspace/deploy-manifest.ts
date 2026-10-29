@@ -153,7 +153,8 @@ export function stampSecretVersion(
 
 /**
  * Why a member's Deployment carries a `setu-ts.dev/secret-version` entry the stamp cannot fill —
- * flow style, a second slot, or not at the pod template's 8-space indent — or `undefined`.
+ * flow style, a second slot, not at the pod template's 8-space indent, or under a name, kind or key
+ * spelled in a form the stamp does not read — or `undefined`.
  *
  * Such an entry is worse than none: client-side apply resets the live annotation to it on every
  * deploy and the read-back then patches it back, rolling the member out twice each time (audit 6,
@@ -165,14 +166,16 @@ export function stampSecretVersion(
  */
 export function unreadableSlot(text: string, member: string): string | undefined {
   if (stampSecretVersion(text, member, '0').stamped) return undefined;
-  const own = new RegExp(`^  name:[ \\t]*${literal(member)}[ \\t]*$`, 'm');
+  // Deliberately looser than the stamp's own matching (audit 7, A7-1): a quoted or commented
+  // name, a quoted kind, and an escaped key (`setu-ts.dev\/secret-version`) are all YAML the
+  // stamp declines to read, so all of them must still be refused here.
+  const own = new RegExp(`^  name:[ \\t]*(['"]?)${literal(member)}\\1[ \\t]*(?:#[^\\n]*)?$`, 'm');
+  const deployment = /^kind:[ \t]*(['"]?)Deployment\1[ \t]*(?:#[^\n]*)?$/m;
   const mentions = text
     .split(/^---[ \t\f\v\r]*(?:#[^\n]*)?$/m)
     .some(
       (document) =>
-        /^kind:[ \t]*Deployment[ \t]*$/m.test(document) &&
-        own.test(document) &&
-        document.includes(SECRET_VERSION_ANNOTATION),
+        deployment.test(document) && own.test(document) && document.includes('secret-version'),
     );
   return mentions
     ? `k8s/members.yaml has a ${SECRET_VERSION_ANNOTATION} entry for ${member} that deploy cannot ` +
