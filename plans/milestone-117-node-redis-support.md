@@ -223,20 +223,27 @@ below are what the plan relies on):
     read unchanged); `setu generate app` and member `setu add` read it.
   - **Rendering.** The Redis `TransportSpec` arm gains node-redis renderings of `messagingArgs`,
     `queueArgs`, `cacheArgs`, `schedulerArgs` and `backplaneArgs`, each replacing `url: <conn>` with
-    `client: fromNodeRedis(createClient({ url: <conn> }))` — one client per plugin, because six
-    consumers `quit()` their client at shutdown and a shared client would be closed under the others
-    (§1). The backplane arm adds `subscriber: fromNodeRedis(createClient({ url: <conn> }))`. The
-    clients list becomes `['redis']` instead of `['ioredis']`, including `add.ts:1072`'s hardcoded
-    fallback. `CLIENT_RANGES` gains `redis: '6.x'` and `scripts/node-dependency-ranges.ts` gains
-    `redis: '6.x'` and `@opentelemetry/instrumentation-redis: '^0.69.0'`
-    (`client-dependencies.test.ts` holds the two tables equal); Deno import maps get
-    `npm:redis@6.x`.
-  - **Imports.** `ResolvedHost` gains
-    `externalImports: readonly { from: string; symbols: readonly string[] }[]`, rendered by
-    `configModule` after the `@setu-ts` imports and before project-local ones; the node-redis arm
-    adds `{ from: 'redis', symbols: ['createClient'] }` and a `packageImports` entry
-    `{ pkg: 'common', symbols: ['fromNodeRedis'] }` (merged into the existing `@setu-ts/common`
-    import). The full-stack factory lives in `setu.config.ts`, so the same imports serve it.
+    `client: nodeRedisClient(<conn>)` — one client per plugin, because six consumers `quit()` their
+    client at shutdown and a shared client would be closed under the others (§1). The backplane arm
+    adds `subscriber: nodeRedisClient(<conn>)`. The clients list becomes `['redis']` instead of
+    `['ioredis']`, including `add.ts:1072`'s hardcoded fallback. `CLIENT_RANGES` gains
+    `redis: '6.x'` and `scripts/node-dependency-ranges.ts` gains `redis: '6.x'` and
+    `@opentelemetry/instrumentation-redis: '^0.69.0'` (`client-dependencies.test.ts` holds the two
+    tables equal); Deno import maps get `npm:redis@6.x`.
+  - **Imports (amended during the run-3 takeover).** The client is built in a generated
+    project-local module `src/node-redis.ts` (`templates/node-redis.ts`), which imports
+    `fromNodeRedis` from `@setu-ts/common` and `createClient` from `redis` and exports
+    `nodeRedisClient(url)`; `setu.config.ts` imports it relatively. The first design put
+    `import { createClient } from 'redis'` in `setu.config.ts`, and the configuration classifier
+    (`devtool/sources.ts` `isRecognizedSpecifier`, audited) accepts only framework and relative
+    imports — measured: a fresh node-redis scaffold drew false `setu.W001` "config is
+    unclassifiable" warnings from its own `setu check`, and a second `setu add` stopped wiring
+    automatically. The classifier is left unchanged. `setu add` writes the module when it is missing
+    (on a real install, as the barrels are), inserts the relative import when the config lacks it,
+    falls back to guidance when `nodeRedisClient` is already bound some other way, and prints the
+    import line with any guidance that names the call. A member of a workspace whose manifest stores
+    an unknown `redisClient` is refused by `setu add` before the member check (`app-loader.ts`
+    `unknownWorkspaceRedisClient`), since an unreadable manifest otherwise reads as "not a member".
   - **Default unchanged.** Every `ioredis` output stays byte-identical: the existing snapshot/golden
     assertions for `--broker redis`, `--queue redis`, `--transport redis` and `setu add` pass
     untouched, and no new key appears in an ioredis workspace manifest.
