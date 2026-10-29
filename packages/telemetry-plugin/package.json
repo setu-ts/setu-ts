@@ -47,10 +47,10 @@
     "@opentelemetry/instrumentation-http": "^0.220.0",
     "@opentelemetry/instrumentation-ioredis": "^0.68.0",
     "@opentelemetry/instrumentation-kafkajs": "^0.29.0",
+    "@opentelemetry/instrumentation-redis": "^0.69.0",
     "@opentelemetry/instrumentation-undici": "^0.30.0",
     "@opentelemetry/resources": "^2.9.0",
-    "@opentelemetry/sdk-trace-base": "^2.9.0",
-    "@opentelemetry/instrumentation-redis": "^0.69.0"
+    "@opentelemetry/sdk-trace-base": "^2.9.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/api": {
@@ -74,6 +74,9 @@
     "@opentelemetry/instrumentation-kafkajs": {
       "optional": true
     },
+    "@opentelemetry/instrumentation-redis": {
+      "optional": true
+    },
     "@opentelemetry/instrumentation-undici": {
       "optional": true
     },
@@ -81,9 +84,6 @@
       "optional": true
     },
     "@opentelemetry/sdk-trace-base": {
-      "optional": true
-    },
-    "@opentelemetry/instrumentation-redis": {
       "optional": true
     }
   },
@@ -95,6 +95,7 @@
     "@opentelemetry/instrumentation-http": "^0.220.0",
     "@opentelemetry/instrumentation-ioredis": "^0.68.0",
     "@opentelemetry/instrumentation-kafkajs": "^0.29.0",
+    "@opentelemetry/instrumentation-redis": "^0.69.0",
     "@opentelemetry/instrumentation-undici": "^0.30.0",
     "@opentelemetry/resources": "^2.9.0",
     "@opentelemetry/sdk-trace-base": "^2.9.0",
@@ -102,9 +103,8 @@
     "@setu-ts/logger-plugin": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@types/node": "^24",
+    "redis": "6.x",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
-    "@opentelemetry/instrumentation-redis": "^0.69.0",
-    "redis": "6.x"
+    "vitest": "5.0.3"
   }
 }

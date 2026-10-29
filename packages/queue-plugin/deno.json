@@ -31,6 +31,7 @@
     "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
     "amqplib": "npm:amqplib@0.10.x",
     "ioredis": "npm:ioredis@5.x",
+    "redis": "npm:redis@6.x",
     "vitest": "npm:vitest@5.0.3"
   }
 }

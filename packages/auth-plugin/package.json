@@ -1,7 +1,7 @@
 {
   "name": "@setu-ts/auth-plugin",
   "version": "0.10.0",
-  "description": "JWT via Web Crypto, API keys, refresh tokens, RBAC, and rate limiting \u2014 zero npm dependencies",
+  "description": "JWT via Web Crypto, API keys, refresh tokens, RBAC, and rate limiting — zero npm dependencies",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/setu-ts/setu-ts.git",
@@ -66,9 +66,9 @@
     "@simplewebauthn/server": "14.0.3",
     "@types/node": "^24",
     "ioredis": "5.x",
+    "redis": "6.x",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
-    "xml-crypto": "^6",
-    "redis": "6.x"
+    "xml-crypto": "^6"
   }
 }

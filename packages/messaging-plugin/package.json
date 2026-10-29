@@ -91,8 +91,8 @@
     "kafkajs": "2.x",
     "mongodb": "^6.21.0",
     "nats": "2.x",
+    "redis": "6.x",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
-    "redis": "6.x"
+    "vitest": "5.0.3"
   }
 }

@@ -12,7 +12,7 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
-### node-redis as a supported Redis client (M117, 0.11.0)
+### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)
 
 Nothing changes for an application on ioredis: every plugin still loads ioredis lazily when no
 client is injected, and scaffolds still default to it. To move a plugin to node-redis, install

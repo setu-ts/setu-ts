@@ -73,8 +73,8 @@
     "@types/node": "^24",
     "amqplib": "0.10.x",
     "ioredis": "5.x",
+    "redis": "6.x",
     "typescript": "6.0.3",
-    "vitest": "5.0.3",
-    "redis": "6.x"
+    "vitest": "5.0.3"
   }
 }
