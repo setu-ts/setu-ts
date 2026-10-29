@@ -24,12 +24,13 @@ want them: for npm, `"test": "npm run test --workspaces --if-present"`,
 
 Generated Deployments now read a `<member>-env` Secret through `envFrom`, and generated Compose
 services read the member's own `.env` through an optional `env_file` and name their image
-`<member>:dev`. Existing `k8s/members.yaml` and `docker/compose.yaml` pick these up the next time
-`setu generate app` (or `setu workspace ports --reallocate`) regenerates them. Until then,
-`setu workspace deploy` refuses a member whose Deployment does not read its Secret and prints the
-four `envFrom` lines to add — which matters for a full-stack member, because nothing else sets its
-`SESSION_SECRET`. Put each member's values in `k8s/secrets/<member>/.env`; the root `.env` ignore
-rule already covers that path in older roots.
+`<member>:dev`. That optional `env_file` form needs Docker Compose 2.24.0 or later. Existing
+`k8s/members.yaml` and `docker/compose.yaml` pick these up the next time `setu generate app` (or
+`setu workspace ports --reallocate`) regenerates them. Until then, `setu workspace deploy` refuses a
+member whose Deployment does not read its Secret and prints the four `envFrom` lines to add — which
+matters for a full-stack member, because nothing else sets its `SESSION_SECRET`. Put each member's
+values in `k8s/secrets/<member>/.env`; the root `.env` ignore rule already covers that path in older
+roots.
 
 `parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
 internal to `@setu-ts/config-plugin`, whose own surface is unchanged.

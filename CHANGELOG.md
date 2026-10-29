@@ -17,8 +17,9 @@ All notable changes to this project are documented here. The format follows
   New roots get `build` and `deploy` scripts, and `test` on npm and Bun (Deno:
   `deno task --recursive test`, since a recursive root task would call itself). Generated
   Deployments read the Secret through `envFrom`, and Compose services read each member's `.env` — a
-  full-stack member's `SESSION_SECRET` was set by neither. `parseEnv` moves from config-plugin into
-  `@setu-ts/common`. See [deployment](docs/deployment.md#build-test-and-deploy-from-the-root) and
+  full-stack member's `SESSION_SECRET` was set by neither. The optional `env_file` needs Docker
+  Compose 2.24.0 or later. `parseEnv` moves from config-plugin into `@setu-ts/common`. See
+  [deployment](docs/deployment.md#build-test-and-deploy-from-the-root) and
   [upgrading](docs/upgrading.md#workspace-build-test-and-deploy-from-the-root-m122-0110-setu-tscli-setu-tscommon).
 
 - **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated

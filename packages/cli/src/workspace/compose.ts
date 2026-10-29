@@ -465,6 +465,7 @@ ${dependsOn
     # redirect a sibling host. Compose follows a link here, and \`setu check\` refuses
     # a linked member .env; on a branch you did not write, also review its docker/
     # changes before \`compose up\`, since this file itself can name any host file.
+    # \`required: false\` needs Docker Compose 2.24.0 or later.
     env_file:
       - path: ../${MEMBERS_DIR}/${name}/.env
         required: false${environmentBlock}${dependsBlock}
