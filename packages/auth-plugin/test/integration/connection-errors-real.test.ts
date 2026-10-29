@@ -9,7 +9,6 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { Redis } from 'ioredis';
 import { createConnectionErrorReporter } from '@setu-ts/common';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { RedisRateLimitStore } from '../../src/index.ts';
@@ -20,66 +19,80 @@ import {
   REDIS_URL,
   redisUrl,
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
+import {
+  REDIS_CLIENTS,
+  redisOptions,
+  injectedRedis,
+} from '../../../common/test/fixtures/redis-clients.ts';
 
-const SOURCE = 'app: rate limit store';
+describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
+  const SOURCE = 'app: rate limit store';
 
-describe('REAL Redis rate-limit store: connection errors', () => {
-  it(
-    'route to the supplied reporter, de-duplicated, and never to the console',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const logger = new RecordingLogger();
-      let store: RedisRateLimitStore | undefined;
-      await expectOutageRoutedToLogger({
-        logger,
-        source: SOURCE,
-        start: async () => {
-          store = new RedisRateLimitStore({
-            url: redisUrl(),
-            runtime: createRuntimeServices(),
-            keyPrefix: `conn-errors-${crypto.randomUUID()}:`,
-            connectionErrorReporter: createConnectionErrorReporter({
-              source: SOURCE,
-              logger: () => logger,
-            }),
-          });
-          // The client is built on first use.
-          await store.increment('probe', 60_000);
-        },
-        stop: async () => {
-          // QUIT against a server that just restarted may still be reconnecting;
-          // the store is discarded either way.
-          await store?.disconnect().catch(() => undefined);
-        },
-      });
-    },
-  );
-
-  it(
-    'attaches no listener to an injected client',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const client = new Redis(redisUrl(), { lazyConnect: true });
-      const before = client.listenerCount('error');
-      const store = new RedisRateLimitStore({
-        client: client as unknown as IRateLimitRedisClient,
-        runtime: createRuntimeServices(),
-        keyPrefix: `conn-errors-${crypto.randomUUID()}:`,
-        connectionErrorReporter: createConnectionErrorReporter({
+  describe('REAL Redis rate-limit store: connection errors', () => {
+    it(
+      'route to the supplied reporter, de-duplicated, and never to the console',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const logger = new RecordingLogger();
+        let store: RedisRateLimitStore | undefined;
+        await expectOutageRoutedToLogger({
+          logger,
           source: SOURCE,
-          logger: () => new RecordingLogger(),
-        }),
-      });
-      try {
-        await store.increment('probe', 60_000);
-        expect(client.listenerCount('error')).toBe(before);
-      } finally {
-        await store.disconnect();
-      }
-    },
-  );
+          start: async () => {
+            store = new RedisRateLimitStore({
+              ...redisOptions(
+                redisVariant,
+                redisUrl(),
+                15000,
+                createConnectionErrorReporter({ source: SOURCE, logger: () => logger }),
+              ),
+              runtime: createRuntimeServices(),
+              keyPrefix: `conn-errors-${crypto.randomUUID()}:`,
+              connectionErrorReporter: createConnectionErrorReporter({
+                source: SOURCE,
+                logger: () => logger,
+              }),
+            });
+            // The client is built on first use.
+            await store.increment('probe', 60_000);
+          },
+          stop: async () => {
+            // QUIT against a server that just restarted may still be reconnecting;
+            // the store is discarded either way.
+            await store?.disconnect().catch(() => undefined);
+          },
+        });
+      },
+    );
+
+    it(
+      'attaches no listener to an injected client',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const handle = injectedRedis(redisVariant, redisUrl());
+        const client = handle.client;
+        const before = handle.listenerCount();
+        const store = new RedisRateLimitStore({
+          client: client as unknown as IRateLimitRedisClient,
+          runtime: createRuntimeServices(),
+          keyPrefix: `conn-errors-${crypto.randomUUID()}:`,
+          connectionErrorReporter: createConnectionErrorReporter({
+            source: SOURCE,
+            logger: () => new RecordingLogger(),
+          }),
+        });
+        try {
+          expect((await store.increment('probe', 60_000)).count).toBe(1);
+          expect((await store.increment('probe', 60_000)).count).toBe(2);
+          expect(handle.listenerCount()).toBe(before);
+        } finally {
+          await store.disconnect();
+        }
+      },
+    );
+  });
 });

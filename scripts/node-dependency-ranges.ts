@@ -75,6 +75,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'drizzle-orm': '0.45.2',
   graphql: '^16',
   ioredis: '5.x',
+  redis: '6.x',
   kafkajs: '2.x',
   mongodb: '^6.21.0',
   nats: '2.x',

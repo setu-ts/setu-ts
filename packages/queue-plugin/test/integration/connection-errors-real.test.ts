@@ -8,7 +8,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { Redis } from 'ioredis';
+import { createConnectionErrorReporter } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -21,59 +21,78 @@ import {
   REDIS_URL,
   redisUrl,
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
+import {
+  REDIS_CLIENTS,
+  redisOptions,
+  injectedRedis,
+} from '../../../common/test/fixtures/redis-clients.ts';
 
-describe('REAL Redis queue adapter: connection errors', () => {
-  it(
-    'route to the logger, de-duplicated, and never to the console',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const logger = new RecordingLogger();
-      let app: IKernelApplication | undefined;
-      await expectOutageRoutedToLogger({
-        logger,
-        source: 'queue-plugin: redis adapter',
-        start: async () => {
-          app = createApplication({
-            plugins: [
-              RuntimePlugin(),
-              loggerPlugin(logger),
-              QueuePlugin({ adapter: 'redis', url: redisUrl() }),
-            ],
-          });
+describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
+  describe('REAL Redis queue adapter: connection errors', () => {
+    it(
+      'route to the logger, de-duplicated, and never to the console',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const logger = new RecordingLogger();
+        let app: IKernelApplication | undefined;
+        await expectOutageRoutedToLogger({
+          logger,
+          source: 'queue-plugin: redis adapter',
+          start: async () => {
+            app = createApplication({
+              plugins: [
+                RuntimePlugin(),
+                loggerPlugin(logger),
+                QueuePlugin({
+                  adapter: 'redis',
+                  ...redisOptions(
+                    redisVariant,
+                    redisUrl(),
+                    15000,
+                    createConnectionErrorReporter({
+                      source: 'queue-plugin: redis adapter',
+                      logger: () => logger,
+                    }),
+                  ),
+                }),
+              ],
+            });
+            await app.start();
+          },
+          stop: async () => {
+            await app?.stop();
+          },
+        });
+      },
+    );
+
+    it(
+      'attaches no listener to an injected client',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const handle = injectedRedis(redisVariant, redisUrl());
+        const client = handle.client;
+        const injected = client as unknown as NonNullable<QueuePluginOptions['client']>;
+        const before = handle.listenerCount();
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin(),
+            loggerPlugin(new RecordingLogger()),
+            QueuePlugin({ adapter: 'redis', client: injected }),
+          ],
+        });
+        try {
           await app.start();
-        },
-        stop: async () => {
-          await app?.stop();
-        },
-      });
-    },
-  );
-
-  it(
-    'attaches no listener to an injected client',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const client = new Redis(redisUrl(), { lazyConnect: true });
-      const injected = client as unknown as NonNullable<QueuePluginOptions['client']>;
-      const before = client.listenerCount('error');
-      const app = createApplication({
-        plugins: [
-          RuntimePlugin(),
-          loggerPlugin(new RecordingLogger()),
-          QueuePlugin({ adapter: 'redis', client: injected }),
-        ],
-      });
-      try {
-        await app.start();
-        expect(client.listenerCount('error')).toBe(before);
-      } finally {
-        await app.stop();
-        client.disconnect();
-      }
-    },
-  );
+          expect(handle.listenerCount()).toBe(before);
+        } finally {
+          await app.stop();
+          handle.disconnect();
+        }
+      },
+    );
+  });
 });

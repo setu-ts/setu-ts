@@ -726,3 +726,10 @@ export type {
   ReconnectMode,
   ReconnectSupervisorOptions,
 } from './reconnect/reconnect-supervisor.ts';
+
+export { fromNodeRedis } from './redis/node-redis-adapter.ts';
+export type {
+  NodeRedisClientLike,
+  NodeRedisAdapterOptions,
+  NodeRedisAdapter,
+} from './redis/node-redis-adapter.ts';
