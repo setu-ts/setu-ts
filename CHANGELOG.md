@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Workspace build, test and deploy (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`).**
+- **Workspace build, test and deploy (M122, #522, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`).**
   `setu workspace build` builds one image per member, tagged with the commit.
   `setu workspace deploy` builds, loads into a `kind-*` cluster or pushes to `--registry`, applies
   one Secret per member from `k8s/secrets/<member>/.env` (names from `.env.example`; server-side,

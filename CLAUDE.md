@@ -704,7 +704,7 @@ here.
   kind load or registry push, one server-side Secret per member from `k8s/secrets/<member>/.env`,
   the Secret version stamped into each pod template and patched where not current, root
   `test`/`build`/`deploy` scripts, Compose `env_file`, `parseEnv` in common, and
-  `check:deploy --workspace` on kind; V10-60) — complete (PR pending).
+  `check:deploy --workspace` on kind; V10-60) — complete (PR #522).
 - **Next milestone** — M119i (documentation that does not match the code, or is missing). M117 is
   also open.
 
