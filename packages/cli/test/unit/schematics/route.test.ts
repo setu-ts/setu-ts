@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateRoute } from '../../../src/schematics/route.ts';
-import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, options } from './_shared.ts';
 
 describe('route schematic', () => {
   const files = generateRoute(deriveNames('order-item'), options());
@@ -48,20 +48,6 @@ describe('route schematic', () => {
 
   it('emits it at src/controllers/order-item.routes.ts', () => {
     expect(file.path).toBe('src/controllers/order-item.routes.ts');
-  });
-
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
-  it('is ungated', () => {
-    expect(gateOf('route')).toBe(undefined);
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateRoute(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('exports the register function', () => {

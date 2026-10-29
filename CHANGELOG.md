@@ -24,6 +24,20 @@ All notable changes to this project are documented here. The format follows
   [Using node-redis](packages/common/README.md#using-node-redis-0110) and
   [upgrading](docs/upgrading.md#node-redis-as-a-supported-redis-client-m117-0110).
 
+- **Workspace build, test and deploy (M122, #522, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`).**
+  `setu workspace build` builds one image per member, tagged with the commit.
+  `setu workspace deploy` builds, loads into a `kind-*` cluster or pushes to `--registry`, applies
+  one Secret per member from `k8s/secrets/<member>/.env` (names from `.env.example`; server-side,
+  base64 `data:`), applies `k8s/members.yaml` with the namespace and images filled in, and waits for
+  every rollout; it refuses first, naming every missing variable, and `--dry-run` shows the plan.
+  New roots get `build` and `deploy` scripts, and `test` on npm and Bun (Deno:
+  `deno task --recursive test`, since a recursive root task would call itself). Generated
+  Deployments read the Secret through `envFrom`, and Compose services read each member's `.env` — a
+  full-stack member's `SESSION_SECRET` was set by neither. The optional `env_file` needs Docker
+  Compose 2.24.0 or later. `parseEnv` moves from config-plugin into `@setu-ts/common`. See
+  [deployment](docs/deployment.md#build-test-and-deploy-from-the-root) and
+  [upgrading](docs/upgrading.md#workspace-build-test-and-deploy-from-the-root-m122-0110-setu-tscli-setu-tscommon).
+
 - **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated
   diagnostics connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http`
   server. Request-target spellings are preserved, duplicate singleton lines are refused, parser

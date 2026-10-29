@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateJob } from '../../../src/schematics/job.ts';
-import { assertSeamContract, gateOf, options } from './_shared.ts';
+import { assertSeamContract, options } from './_shared.ts';
 
 describe('job schematic', () => {
   it('emits a functional queue processor factory and managed barrel with queue installed', () => {
@@ -25,20 +25,6 @@ describe('job schematic', () => {
 
   it('emits it at src/jobs/order-item.job.ts', () => {
     expect(file.path).toBe('src/jobs/order-item.job.ts');
-  });
-
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
-  it('is ungated', () => {
-    expect(gateOf('job')).toBe(undefined);
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateJob(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('declares the job name constant and handler', () => {

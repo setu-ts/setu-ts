@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseEnv } from '../../src/parsers/env-parser.ts';
+import { parseEnv } from '../../src/env-file.ts';
 
 describe('parseEnv', () => {
   it('parses comments, blank lines, CRLF, export, and duplicate keys', () => {

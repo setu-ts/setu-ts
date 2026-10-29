@@ -107,6 +107,33 @@ describe('the process boundary of packages/cli/src', () => {
     expect(output.lines).not.toEqual([]);
   });
 
+  it("hands the host's command runner to the workspace commands, and the Node host has one", async () => {
+    const hostWith = (
+      errors: ReturnType<typeof createRecorder>,
+      withRunner: boolean,
+    ): MainProcess => ({
+      args: ['workspace', 'build', '--dir', '/ws'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: () => {},
+      error: errors.sink,
+      portAvailable: () => Promise.resolve(true),
+      ...(withRunner
+        ? { runCommand: () => Promise.resolve({ code: 0, stdout: '', stderr: '' }) }
+        : {}),
+    });
+    // No workspace at /ws, so the command stops before running anything — but it reaches the
+    // manifest check only once it has a runner.
+    const withRunner = createRecorder();
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, hostWith(withRunner, true))).toBe(1);
+    expect(withRunner.text()).toContain('not a Setu workspace');
+    const without = createRecorder();
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, hostWith(without, false))).toBe(1);
+    expect(without.text()).toContain('cannot run docker');
+    expect(typeof nodeProcess(() => {}).runCommand).toBe('function');
+  });
+
   it('builds a Node adapter whose port probe reports bind success and refusal', async () => {
     const originalLog = console.log;
     const originalError = console.error;

@@ -8,6 +8,7 @@
 ## Table of Contents
 
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
+- [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
 
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
@@ -339,6 +340,26 @@ Call `start()` to attach listeners, `fault()` to mark an outage and start drive-
 `recovered()` to clear a fault, and `stop()` to cancel scheduled attempts and dispose listeners.
 `faulted` reports the current fault window. A stopped supervisor is terminal; construct a new
 instance to start another lifecycle.
+
+## Dotenv parser (`@setu-ts/common`)
+
+Since 0.11.0, common exports `parseEnv(content: string): Readonly<Record<string, string>>`, the
+strict dotenv parser `ConfigPlugin` loads `.env` files with. It moved from config-plugin, where it
+was internal, so that `setu workspace deploy` builds a member's Kubernetes Secret from exactly the
+values the application would read from the same file.
+
+Blank lines and `#` comment lines are ignored. An entry may start with `export `. A value may be
+unquoted (a trailing ` # comment` is dropped), double-quoted (escape sequences decoded) or
+single-quoted (taken literally). An empty value is the empty string, and a duplicate key keeps its
+last value. A line without `=`, an invalid key, or an unterminated quote throws an `Error` naming
+the line number.
+
+```ts
+import { parseEnv } from '@setu-ts/common';
+
+parseEnv('export A="x y"\nB=plain # note\nEMPTY=\n');
+// { A: 'x y', B: 'plain', EMPTY: '' }
+```
 
 ## RuntimePlugin() (`@setu-ts/runtime`)
 

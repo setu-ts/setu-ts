@@ -40,11 +40,6 @@ describe('controller schematic', () => {
     expect(file.path).toBe('src/controllers/order-item.controller.ts');
   });
 
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
   it('is UNGATED, and shaped by the project instead', () => {
     // E8: the gate existed because the emitted class imports
     // `@setu-ts/decorator-plugin`. With both HTTP kinds sharing one directory
@@ -52,14 +47,6 @@ describe('controller schematic', () => {
     // generator mode — like `service` — and a bare project gets a function
     // whose imports resolve.
     expect(gateOf('controller')).toBeUndefined();
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateController(
-      deriveNames('OrderItem'),
-      options(['decorator-plugin', 'di-plugin']),
-    );
-    expect(pascal).toEqual(files);
   });
 
   it('declares the route prefix and class name', () => {

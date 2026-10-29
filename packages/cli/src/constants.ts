@@ -86,6 +86,14 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'depends-on',
   'scope',
   'name',
+  // `setu workspace build|deploy` (M122).
+  'tag',
+  'registry',
+  'context',
+  'namespace',
+  'timeout',
+  'build-arg',
+  'network',
 ]);
 
 /**

@@ -383,6 +383,8 @@ describe('help text agrees with the inventory', () => {
     ['sync', ['sync', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
+    ['workspace build', ['workspace', 'build', '--help']],
+    ['workspace deploy', ['workspace', 'deploy', '--help']],
   ];
 
   for (const [label, argv] of gateCases) {

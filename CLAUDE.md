@@ -699,12 +699,18 @@ here.
   `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
   connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
   #521).
+- **Milestone 122** (`packages/cli` + `packages/common` — `setu workspace build` and
+  `setu workspace deploy` reading `setu.workspace.json` at run time: images tagged with the commit,
+  kind load or registry push, one server-side Secret per member from `k8s/secrets/<member>/.env`,
+  the Secret version stamped into each pod template and patched where not current, root
+  `test`/`build`/`deploy` scripts, Compose `env_file`, `parseEnv` in common, and
+  `check:deploy --workspace` on kind; V10-60) — complete (PR #522).
 - **Milestone 117** (`common` + the seven Redis-backed plugins + `telemetry-plugin` +
   `diagnostics-plugin` + `cli` — node-redis as a supported Redis client: one `fromNodeRedis` adapter
   with its own command bound and RESP3 normalization, node-redis outage classification, a `redis`
   trace arm, and `--redis-client` scaffolds through a generated `src/node-redis.ts`) — complete (PR
   pending).
-- **Next milestone** — M122 (workspace operations from the root). M119i is also open.
+- **Next milestone** — M119i (documentation that does not match the code, or is missing).
 
 ## Verification (run before declaring any work done)
 

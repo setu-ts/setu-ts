@@ -733,3 +733,5 @@ export type {
   NodeRedisAdapterOptions,
   NodeRedisAdapter,
 } from './redis/node-redis-adapter.ts';
+/** Strict dotenv parser shared by config loading and workspace deploy (M122). */
+export { parseEnv } from './env-file.ts';

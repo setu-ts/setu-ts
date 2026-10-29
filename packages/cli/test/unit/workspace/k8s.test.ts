@@ -127,6 +127,34 @@ describe('workspaceK8sFiles', () => {
     expect(yaml).toContain('- name: ORDERS_HOST');
   });
 
+  // M122: the member's own variables reach the pod from its Secret, after the generated env so
+  // the explicit entries keep precedence.
+  it('reads every member Secret through envFrom, after the generated env', () => {
+    const yaml = objectsFor(
+      [
+        { name: 'orders', port: 3000 },
+        { name: 'portal', port: 3001 },
+      ],
+      'redis',
+    );
+    for (const name of ['orders', 'portal']) {
+      expect(yaml).toContain(
+        `          envFrom:\n            - secretRef:\n                name: ${name}-env\n                optional: true\n`,
+      );
+    }
+    expect(yaml.indexOf('- name: REDIS_URL')).toBeLessThan(yaml.indexOf('envFrom:'));
+    expect(yaml).toContain('`setu workspace deploy` builds this member and replaces this line');
+  });
+
+  it('gives every pod template an empty Secret-version slot for deploy to fill (re-audit N2)', () => {
+    const yaml = objectsFor([
+      { name: 'orders', port: 3000 },
+      { name: 'portal', port: 3001 },
+    ]);
+    expect(yaml.match(/^ {8}setu-ts\.dev\/secret-version: ''$/gm)).toHaveLength(2);
+    expect(yaml).toMatch(/template:\n {4}metadata:\n {6}annotations:\n/);
+  });
+
   it('carries the transport connection variable too', () => {
     const yaml = objectsFor([{ name: 'orders', port: 3000 }], 'redis');
     expect(yaml).toContain('- name: REDIS_URL');
@@ -145,6 +173,9 @@ describe('workspaceK8sFiles', () => {
     expect(readme).toContain('An Ingress');
     expect(readme).toContain('backing service');
     expect(readme).toContain('envsubst');
+    expect(readme).toContain('workspace deploy --dry-run');
+    expect(readme).toContain('k8s/secrets/<member>/.env');
+    expect(readme).toContain('Sealed Secrets');
   });
 
   it('names both commands that record probe support, and its limit', () => {

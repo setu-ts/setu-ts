@@ -33,6 +33,7 @@ import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
 import type { AppLoader } from './app-loader.ts';
 import type { PortProbe } from './workspace/port-probe.ts';
+import type { CommandRunner } from './utils/run-command.ts';
 import {
   dispatchPluginCommand,
   type PluginCommandDependencies,
@@ -79,6 +80,8 @@ export interface CliDependencies {
   readonly loadApp?: AppLoader;
   /** Checks whether a workspace port can bind before the CLI assigns it. */
   readonly portAvailable?: PortProbe;
+  /** Runs `docker`, `kind`, `kubectl` and `git` for `setu workspace build|deploy` (M122). */
+  readonly runCommand?: CommandRunner;
   /**
    * Asks the questions `setu new` already accepts as flags.
    *
@@ -118,6 +121,8 @@ function printHelp(log: (message: string) => void): void {
   log(`  adopt                          Convert this project into a workspace`);
   log(`  devtool enable [member]        Enable the local diagnostics connector`);
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
+  log(`  workspace build                 Build every member's container image`);
+  log(`  workspace deploy                Build, ship and roll out every member to Kubernetes`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');
@@ -306,6 +311,8 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+          ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
+          now: deps.now,
         });
 
       case 'commands':
