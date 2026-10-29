@@ -7,6 +7,7 @@ import {
   backendArgs,
   backendSpecs,
   ciEnvironment,
+  cliReportMounts,
   containerArgs,
   containerName,
   shardLabel,
@@ -27,6 +28,21 @@ import {
 const workflow = readFileSync('.github/workflows/ci.yml', 'utf8');
 
 describe('local CI plan', () => {
+  it('shares blobs only within the invocation and isolates each CLI coverage writer', () => {
+    for (const shard of ['cli-1', 'cli-2', 'cli-3'] as const)
+      expect(cliReportMounts('/work/.tmp/run', '/work', shard)).toEqual([
+        '-v',
+        '/work/.tmp/run/vitest-reports:/work/.vitest-reports',
+      ]);
+    expect(cliReportMounts('/work/.tmp/run', '/work', 'cli-coverage')).toEqual([
+      '-v',
+      '/work/.tmp/run/vitest-reports:/work/.vitest-reports',
+    ]);
+    expect(cliReportMounts('/work/.tmp/run', '/work', 'packages')).toEqual([]);
+    expect(cliReportMounts('/work/.tmp/other', '/work', 'cli-coverage')[1]).not.toBe(
+      cliReportMounts('/work/.tmp/run', '/work', 'cli-coverage')[1],
+    );
+  });
   it('sizes 16 GiB / 8-thread and 8 GiB / 4-thread hosts conservatively', () => {
     expect(chooseParallelism(16 * 1024 ** 3, 8)).toBe(2);
     expect(chooseParallelism(8 * 1024 ** 3, 4)).toBe(1);
@@ -93,25 +109,25 @@ describe('local CI plan', () => {
   it('runs node-build alone, after every other shard has finished', async () => {
     // node-build runs its own pnpm install and tsc -b on the shared worktree; beside a test
     // shard it deleted vitest under that shard (run f6b66a35).
-    expect(EXCLUSIVE_SHARDS).toEqual(['node-build']);
+    expect(EXCLUSIVE_SHARDS).toEqual(['cli-coverage', 'node-build']);
     const events: string[] = [];
     let active = 0;
     const results = await scheduleShards(
-      ['node-build', 'static', 'cli', 'deno-lane'],
+      ['node-build', 'static', 'cli-1', 'deno-lane'],
       5,
       async (shard) => {
         events.push(`start ${shard} active=${active}`);
         active++;
-        await new Promise((resolve) => setTimeout(resolve, shard === 'cli' ? 20 : 5));
+        await new Promise((resolve) => setTimeout(resolve, shard === 'cli-1' ? 20 : 5));
         active--;
         events.push(`end ${shard}`);
         return shard;
       },
     );
-    expect(results).toEqual(['node-build', 'static', 'cli', 'deno-lane']);
+    expect(results).toEqual(['node-build', 'static', 'cli-1', 'deno-lane']);
     const start = events.indexOf('start node-build active=0');
     expect(start).toBe(events.length - 2);
-    for (const shard of ['static', 'cli', 'deno-lane'])
+    for (const shard of ['static', 'cli-1', 'deno-lane'])
       expect(events.indexOf(`end ${shard}`)).toBeLessThan(start);
     expect(await scheduleShards(['node-build'], 3, (shard) => Promise.resolve(shard))).toEqual([
       'node-build',
@@ -131,6 +147,33 @@ describe('local CI plan', () => {
     expect(started).toEqual(['static']);
   });
 
+  it('merges only after all three CLI shards finish, including failed shards', async () => {
+    const finished: string[] = [];
+    const results = await scheduleShards(
+      ['cli-coverage', 'cli-1', 'cli-2', 'cli-3'],
+      3,
+      async (shard) => {
+        if (shard === 'cli-coverage') expect(finished.sort()).toEqual(['cli-1', 'cli-2', 'cli-3']);
+        else {
+          await new Promise((resolve) => setTimeout(resolve, shard === 'cli-2' ? 20 : 5));
+          finished.push(shard);
+        }
+        return { shard, code: shard === 'cli-2' ? 1 : 0 };
+      },
+    );
+    expect(results[0]).toEqual({ shard: 'cli-coverage', code: 0 });
+    expect(results[2]!.code).toBe(1);
+  });
+
+  it('keeps node-build last even when selected before the CLI merge', async () => {
+    const started: string[] = [];
+    await scheduleShards(['node-build', 'cli-coverage', 'cli-1'], 3, (shard) => {
+      started.push(shard);
+      return Promise.resolve();
+    });
+    expect(started).toEqual(['cli-1', 'cli-coverage', 'node-build']);
+  });
+
   it('still runs an exclusive shard after a shared shard exits nonzero, as CI does', async () => {
     const started: string[] = [];
     const results = await scheduleShards(['static', 'node-build'], 2, (shard) => {
@@ -148,7 +191,7 @@ describe('local CI plan', () => {
     expect(runnerMemory('tooling')).toBe('8g');
     for (const shard of [
       'static',
-      'cli',
+      'cli-1',
       'messaging',
       'packages',
       'deno-lane',
@@ -178,24 +221,17 @@ describe('local CI plan', () => {
     ])
       expect(() => parseOptions(args)).toThrow();
   });
-  it('defaults to five shards and validates repeatable selections and extras', () => {
-    expect(parseOptions([])).toEqual({ shards: [...SHARDS], keep: false });
+  it('defaults to seven shards plus merge and expands the whole CLI alias', () => {
+    expect(parseOptions([])).toEqual({ shards: [...SHARDS, 'cli-coverage'], keep: false });
     expect(
-      parseOptions([
-        '--keep',
-        '--shard',
-        'cli',
-        '--shard',
-        'cli',
-        '--include',
-        'compat',
-        '--include',
-        'deno-lane',
-        '--include',
-        'node-build',
-      ]),
-    ).toEqual({ shards: ['cli', 'compat', 'deno-lane', 'node-build'], keep: true });
-    expect(parseOptions(['--include', 'compat']).shards).toEqual([...SHARDS, 'compat']);
+      parseOptions(['--shard', 'cli', '--shard', 'cli', '--include', 'compat', '--keep']),
+    ).toEqual({ shards: ['cli-1', 'cli-2', 'cli-3', 'compat', 'cli-coverage'], keep: true });
+    expect(parseOptions(['--include', 'compat']).shards).toEqual([
+      ...SHARDS,
+      'compat',
+      'cli-coverage',
+    ]);
+    expect(parseOptions(['--shard', 'cli-2']).shards).toEqual(['cli-2']);
     for (const args of [
       ['--wat'],
       ['--shard'],
@@ -234,11 +270,11 @@ describe('local CI plan', () => {
     });
     for (const shard of SHARDS)
       expect(ciEnvironment(workflow, shard)).toEqual(ciEnvironment(workflow));
-    for (const shard of ['compat', 'deno-lane', 'node-build'] as const)
+    for (const shard of ['compat', 'deno-lane', 'node-build', 'cli-coverage'] as const)
       expect(ciEnvironment(workflow, shard)).toEqual({});
   });
 
-  it('mirrors all five shards and optional job commands, including step environments', () => {
+  it('mirrors all seven shards and optional job commands, including step environments', () => {
     expect(shardCommands(workflow, 'static')).toEqual([
       { run: 'pnpm run fmt:check', env: {} },
       { run: 'pnpm run lint', env: {} },
@@ -250,8 +286,15 @@ describe('local CI plan', () => {
       },
       { run: 'node scripts/codemods/std-to-vitest.ts --check', env: {} },
     ]);
-    expect(shardCommands(workflow, 'cli')).toEqual([
-      { run: 'pnpm test:coverage --no-tooling cli', env: {} },
+    for (const [index, shard] of ['cli-1', 'cli-2', 'cli-3'].entries())
+      expect(shardCommands(workflow, shard as 'cli-1' | 'cli-2' | 'cli-3')).toEqual([
+        { run: `pnpm test:coverage --no-tooling cli --shard ${index + 1}/3`, env: {} },
+      ]);
+    expect(shardCommands(workflow, 'cli-coverage')).toEqual([
+      {
+        run: 'for i in 1 2 3; do\n  test -f ".vitest-reports/cli/blob-$i.json"\ndone\npnpm test:coverage --no-tooling cli --merge\n',
+        env: {},
+      },
     ]);
     expect(shardCommands(workflow, 'messaging')).toEqual([
       { run: 'pnpm test:coverage --no-tooling messaging-plugin', env: {} },
@@ -291,7 +334,7 @@ describe('local CI plan', () => {
       full.length - Object.keys(ci.jobs.node.services).length,
     );
     expect(full).toHaveLength(13);
-    expect(backendSpecs('cli')).toEqual(full);
+    expect(backendSpecs('cli-1')).toEqual(full);
     expect(backendSpecs('messaging')).toEqual(full);
     for (const [name, service] of Object.entries(ci.jobs.node.services))
       expect(full.find((spec) => spec.name === name)?.image).toBe(service.image);
@@ -300,7 +343,7 @@ describe('local CI plan', () => {
     for (const shard of [...SHARDS, 'compat', 'deno-lane', 'node-build'] as const)
       expect(() => assertUniquePorts(backendSpecs(shard))).not.toThrow();
     expect(backendSpecs('static').map((spec) => spec.name)).toEqual(['redis']);
-    for (const shard of ['tooling', 'compat', 'deno-lane', 'node-build'] as const)
+    for (const shard of ['tooling', 'compat', 'deno-lane', 'node-build', 'cli-coverage'] as const)
       expect(backendSpecs(shard)).toEqual([]);
     expect(full.find((spec) => spec.name === 'keycloak')!.args).toContain(
       '--http-management-port=9100',
@@ -312,24 +355,24 @@ describe('local CI plan', () => {
   });
 
   it('labels every served port, joins only its own namespace, and publishes nothing', () => {
-    expect(containerName('one', 'cli', 'net')).toBe('setu-ci-one-cli-net');
-    expect(shardLabel('one', 'cli')).toBe('one-cli');
-    expect(shardLabel('two', 'cli')).not.toBe(shardLabel('one', 'cli'));
-    expect(containerArgs('one', 'cli', 'runner', '6g')).toEqual([
+    expect(containerName('one', 'cli-1', 'net')).toBe('setu-ci-one-cli-1-net');
+    expect(shardLabel('one', 'cli-1')).toBe('one-cli-1');
+    expect(shardLabel('two', 'cli-1')).not.toBe(shardLabel('one', 'cli-1'));
+    expect(containerArgs('one', 'cli-1', 'runner', '6g')).toEqual([
       'run',
       '-d',
       '--name',
-      'setu-ci-one-cli-runner',
+      'setu-ci-one-cli-1-runner',
       '--label',
       'setu.ci.run=one',
       '--label',
-      'setu.ci.shard=one-cli',
+      'setu.ci.shard=one-cli-1',
       '--label',
       'setu.ci.role=runner',
       '--memory',
       '6g',
     ]);
-    expect(containerArgs('one', 'cli', 'runner', '6g', '0-3,6').slice(-2)).toEqual([
+    expect(containerArgs('one', 'cli-1', 'runner', '6g', '0-3,6').slice(-2)).toEqual([
       '--cpuset-cpus',
       '0-3,6',
     ]);

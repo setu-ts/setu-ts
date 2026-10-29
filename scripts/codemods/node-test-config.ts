@@ -126,7 +126,9 @@ export function configurationFor(member: string) {
         reportOnFailure: true,
         reporter: ['text', 'json-summary', 'json'],
         reportsDirectory: `coverage-node/${member.split('/').pop()}`,
-        thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 },
+        ...(process.env.SETU_TEST_SHARD
+          ? {}
+          : { thresholds: { perFile: true, branches: 90, functions: 90, lines: 90 } }),
       },
     },
   });

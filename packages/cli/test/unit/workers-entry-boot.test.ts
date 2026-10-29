@@ -15,7 +15,8 @@ import * as nodeFs from 'node:fs/promises';
  *
  * @module
  */
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { MockInstance } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
@@ -105,6 +106,21 @@ interface WorkerModule {
 
 /** Every directory `loadEntry` created, removed when the suite ends. */
 const tempDirs: string[] = [];
+let errorSpy: MockInstance<typeof console.error>;
+let expectedFailedBoots = 0;
+beforeEach(() => {
+  expectedFailedBoots = 0;
+  errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+afterEach(() => {
+  try {
+    expect(errorSpy).toHaveBeenCalledTimes(expectedFailedBoots);
+    for (const call of errorSpy.mock.calls)
+      expect(call[0]).toBe('setu: application failed to start');
+  } finally {
+    errorSpy.mockRestore();
+  }
+});
 
 /**
  * Writes the emitted entry beside a fake `setu.config.ts` and imports it.
@@ -247,6 +263,7 @@ describe('generated Workers entry keeps one app per binding environment', () => 
   });
 
   it('keeps the working app while the new env keeps failing to start', async () => {
+    expectedFailedBoots = 120;
     const { worker, log } = await loadEntry();
     const good = { NAME: 'good' };
     await body(worker, good);
@@ -284,6 +301,7 @@ describe('generated Workers entry keeps one app per binding environment', () => 
   });
 
   it('retries a failed boot instead of caching the failure', async () => {
+    expectedFailedBoots = 2;
     const { worker, log } = await loadEntry();
     const failing = { NAME: 'bad', FAIL: true };
     expect((await worker.fetch(request(), failing)).status).toBe(503);
@@ -293,6 +311,7 @@ describe('generated Workers entry keeps one app per binding environment', () => 
   });
 
   it('keeps a newer application when an older boot fails late', async () => {
+    expectedFailedBoots = 1;
     const { worker, log } = await loadEntry();
     // The old env's boot is still in flight when the bindings change.
     const stale = worker.fetch(request(), { NAME: 'stale', FAIL_LATER: true });
@@ -306,6 +325,7 @@ describe('generated Workers entry keeps one app per binding environment', () => 
   });
 
   it('ignores a late failure from a boot that was evicted and replaced', async () => {
+    expectedFailedBoots = 1;
     const { worker, log } = await loadEntry();
     // Mutable on purpose: the SAME env object fails its first boot late and
     // starts cleanly the second time.
