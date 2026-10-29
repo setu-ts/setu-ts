@@ -17,7 +17,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { getCsrfToken, getSession, SessionPlugin } from '@setu-ts/session-plugin';
 
 import { AuthPlugin, MemoryPasskeyStore, requireAuth } from '../../src/index.ts';
-import type { IPasskeyStore, PasskeyOptions } from '../../src/index.ts';
+import type { IPasskeyStore, PasskeyOptions, SignInConfig } from '../../src/index.ts';
 import { AUTH_SESSION_KEY } from '../../src/sign-in/auth-session-service.ts';
 
 /** Base URL for `app.fetch` requests (no socket). */
@@ -49,6 +49,8 @@ export interface BuildPasskeyOptions {
   readonly plugins?: readonly IPlugin[];
   /** The principal `resolvePrincipal` returns; `null` refuses every sign-in. */
   readonly principal?: { readonly id: string; readonly roles?: readonly string[] } | null;
+  /** The per-request re-checks of the sign-in arm (M124). */
+  readonly signIn?: Pick<SignInConfig, 'refreshPrincipal' | 'sessionStamp'>;
 }
 
 /** A single-cookie jar tracking the session cookie across `app.fetch` calls. */
@@ -124,6 +126,7 @@ export async function buildPasskeyApp(options: BuildPasskeyOptions = {}): Promis
           providers: [],
           passkeys,
           ...(mfaRequired === undefined ? {} : { mfa: { required: mfaRequired } }),
+          ...options.signIn,
         },
       }),
       ...(options.plugins ?? []),

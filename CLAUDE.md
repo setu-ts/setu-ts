@@ -691,6 +691,10 @@ here.
   the starter's `messaging`/`queue` options, `setu add messaging`/`queue` reading the workspace
   transport and taking `--broker`/`--queue`, `setu add react-router` refused outside full-stack;
   V10-51, V10-52) — complete (PR #519).
+- **Milestone 124** (`packages/auth-plugin` — password-only `signIn` with `providers: []`,
+  `requireAuth({ signInPage })` redirecting browser navigations with a safe `returnTo` while APIs
+  get 401, and `signIn.sessionStamp` ending every session of a user from a stamp on the user record;
+  V10-65, V10-66) — complete (PR #520).
 - **Next milestone** — M122 (workspace operations from the root). M119i is also open.
 
 ## Verification (run before declaring any work done)

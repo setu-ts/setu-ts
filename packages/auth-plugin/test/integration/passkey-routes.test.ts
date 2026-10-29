@@ -62,6 +62,52 @@ describe('passkey routes', () => {
     expect(verified.credentialId).toBe(toBase64Url(authenticator.credentialId));
   });
 
+  describe('a session the re-checks have ended cannot enrol (M124 audit F1)', () => {
+    it('refuses both register routes once the session stamp changes, so no fresh session is minted', async () => {
+      let stamp = 'v1';
+      const { app } = await buildPasskeyApp({ signIn: { sessionStamp: () => stamp } });
+      const stolen = new CookieJar();
+      await stolen.postJson(app, '/password-login', {});
+      const before = await stolen.postJson(app, REGISTER_OPTIONS, {});
+      expect(before.status).toBe(200);
+      const options = await before.json();
+      // "Sign out everywhere" between the two register calls.
+      stamp = 'v2';
+      const refusedOptions = await stolen.postJson(app, REGISTER_OPTIONS, {});
+      expect(refusedOptions.status).toBe(401);
+      expect(await refusedOptions.json()).toEqual({
+        error: 'Unauthorized',
+        detail: 'sign-in-required',
+      });
+      const authenticator = await VirtualAuthenticator.create('ES256');
+      const body = await authenticator.registrationResult({
+        challenge: options.challenge,
+        rpId: options.rp.id,
+        origin: ORIGIN,
+      });
+      const refusedVerify = await stolen.postJson(app, REGISTER_VERIFY, body);
+      expect(refusedVerify.status).toBe(401);
+      await refusedVerify.body?.cancel();
+      expect((await stolen.fetch(app, '/me')).status).toBe(401);
+    });
+
+    it('refuses register/options once refreshPrincipal revokes the principal', async () => {
+      let active = true;
+      const { app } = await buildPasskeyApp({
+        signIn: { refreshPrincipal: (stored) => (active ? stored : null) },
+      });
+      const jar = new CookieJar();
+      await jar.postJson(app, '/password-login', {});
+      const allowed = await jar.postJson(app, REGISTER_OPTIONS, {});
+      expect(allowed.status).toBe(200);
+      await allowed.body?.cancel();
+      active = false;
+      const refused = await jar.postJson(app, REGISTER_OPTIONS, {});
+      expect(refused.status).toBe(401);
+      await refused.body?.cancel();
+    });
+  });
+
   it('refuses register/options for an anonymous caller', async () => {
     const { app } = await buildPasskeyApp();
     const jar = new CookieJar();
@@ -263,7 +309,8 @@ describe('passkey routes', () => {
     expect((await jar.postJson(app, REGISTER_OPTIONS, {})).status).toBe(200);
     expect(seen).toEqual([
       {
-        principal: { id: 'alice', roles: ['user'] },
+        // The re-checked principal (M124 audit F1), as ctx.request.user carries it.
+        principal: { id: 'alice', roles: ['user'], claims: { amr: ['pwd'] } },
         methods: ['pwd'],
         credentialCount: 0,
       },

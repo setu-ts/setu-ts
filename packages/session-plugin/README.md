@@ -56,6 +56,12 @@ The cookie strategy's trade-off is real and worth stating plainly: a stolen cook
 it expires, because nothing server-side is consulted. If you need to log a specific user out right
 now, use a store.
 
+**Ending every session of one user** — after a password change, or from a "sign out everywhere"
+button — needs neither strategy's revocation. `@setu-ts/auth-plugin`'s `signIn.sessionStamp` records
+a digest of a stamp kept on your user record and compares it on every request, so bumping the stamp
+ends all of that user's sessions on the cookie strategy too. See the auth plugin's
+[Ending every session of a user](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#ending-every-session-of-a-user).
+
 Sessions also use whole-payload snapshot commits. Two overlapping requests that each change session
 state can therefore lose one change on both the cookie and store strategies; a store improves
 revocation, not concurrent-write merging. Keep writes to one session in one request, and keep state
