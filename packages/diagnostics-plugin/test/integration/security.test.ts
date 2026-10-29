@@ -305,6 +305,27 @@ describe('Security — hostile raw requests over a real socket', () => {
     await app.stop();
   });
 
+  it('refuses a request signed for the canonical target but sent as an alias of it', async () => {
+    // The MAC covers the canonical target. A runtime that normalized the
+    // request-target before the connector saw it (node-server, or any web
+    // Request) would turn each alias into a correctly signed `/v1/status`
+    // and serve it; the connector must see the target as sent (M126 §3.2).
+    const { app, port } = await startApp();
+    const key = await importTestKey(crypto.subtle);
+    const aliases = ['/v1/./status', '/x/../v1/status', '/v1\\status'];
+    for (const [index, alias] of aliases.entries()) {
+      const mac = await signForPort(crypto.subtle, key, port, '/v1/status', index + 1);
+      const refused = await rawRequest(port, signedRaw(port, alias, index + 1, mac));
+      expect(refused.status, alias).toEqual(400);
+      expect(refused.body, alias).toEqual('{"version":1,"error":"invalid-request"}');
+    }
+    // Positive control: the same signing, sent canonically, is served.
+    const next = aliases.length + 1;
+    const mac = await signForPort(crypto.subtle, key, port, '/v1/status', next);
+    expect((await rawRequest(port, signedRaw(port, '/v1/status', next, mac))).status).toEqual(200);
+    await app.stop();
+  });
+
   it('serves no canary from a hostile provider result and keeps allowed metadata', async () => {
     // This is covered in depth at the handler level (canary absence with
     // allowed metadata visible); over the real socket we prove the
