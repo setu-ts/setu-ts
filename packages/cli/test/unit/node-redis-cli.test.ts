@@ -67,11 +67,14 @@ describe('node-redis CLI', () => {
     expect(config).toContain("import { nodeRedisClient } from './src/node-redis.ts';");
     expect(config).toContain("import { DEVTOOL_SOURCES } from './src/devtool/diagnostics.ts';");
     const helper = h.fs.read('/work/svc/src/node-redis.ts');
-    expect(helper).toContain("import { createClient } from 'redis';");
     expect(helper).toContain(
       "import { fromNodeRedis, type NodeRedisAdapter } from '@setu-ts/common';",
     );
-    expect(helper).toContain('return fromNodeRedis(createClient({ url }));');
+    // `redis` loads on the first connect, after TelemetryPlugin registers its
+    // instrumentation: a static import would load it with the configuration.
+    expect(helper).not.toMatch(/from ['"]redis['"]/);
+    expect(helper).toContain("const { createClient } = await import('redis');");
+    expect(helper).toContain('return createClient({ url });');
     const out: string[] = [];
     const check = await runCli(['check', '--dir', '/work/svc'], {
       fs: h.fs,
@@ -254,7 +257,7 @@ describe('node-redis CLI', () => {
       expect(config.match(/nodeRedisClient\(/g)).toHaveLength(2);
       expect(config).not.toMatch(/from ['"]redis['"]/);
       expect(config.match(/from ['"]\.\/src\/node-redis\.ts['"]/g)).toHaveLength(1);
-      expect(h.fs.read('/work/svc/src/node-redis.ts')).toContain("from 'redis'");
+      expect(h.fs.read('/work/svc/src/node-redis.ts')).toContain("import('redis')");
       expect(config.match(/from ['"]@setu-ts\/common['"]/g)).toHaveLength(1);
       const manifest = h.fs.read(`/work/svc/${runtime === 'deno' ? 'deno.json' : 'package.json'}`);
       expect(manifest).toContain(runtime === 'deno' ? 'npm:redis@6.x' : '"redis": "6.x"');
@@ -295,7 +298,7 @@ describe('node-redis CLI', () => {
       expect(config.match(/nodeRedisClient\(/g)).toHaveLength(6);
       expect(config).not.toMatch(/from ['"]redis['"]/);
       expect(config.match(/from ['"]\.\/src\/node-redis\.ts['"]/g)).toHaveLength(1);
-      expect(h.fs.read('/work/ws/apps/svc/src/node-redis.ts')).toContain("from 'redis'");
+      expect(h.fs.read('/work/ws/apps/svc/src/node-redis.ts')).toContain("import('redis')");
       expect(config.match(/from ['"]@setu-ts\/common['"]/g)).toHaveLength(1);
       const manifest = h.fs.read(
         `/work/ws/apps/svc/${runtime === 'deno' ? 'deno.json' : 'package.json'}`,
@@ -327,7 +330,7 @@ describe('node-redis CLI', () => {
       expect(h.fs.read('/work/svc/setu.config.ts')).toContain(
         "import { nodeRedisClient } from './src/node-redis.ts';",
       );
-      expect(h.fs.read('/work/svc/src/node-redis.ts')).toContain("from 'redis'");
+      expect(h.fs.read('/work/svc/src/node-redis.ts')).toContain("import('redis')");
     },
   );
 

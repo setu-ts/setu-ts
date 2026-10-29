@@ -40,6 +40,17 @@ export type NodeRedisClientLike = {
 };
 
 /**
+ * Creates the node-redis client when {@link fromNodeRedis}'s adapter first connects.
+ *
+ * Passing a factory that imports `redis` inside it defers loading node-redis
+ * until the first command: an OpenTelemetry instrumentation patches
+ * `@redis/client` as Node loads it, so a client created at module load, before
+ * `TelemetryPlugin` registers, is never traced.
+ * @since 0.11.0
+ */
+export type NodeRedisClientFactory = () => NodeRedisClientLike | Promise<NodeRedisClientLike>;
+
+/**
  * Bounds and error reporting for {@link fromNodeRedis}.
  * @since 0.11.0
  */
@@ -62,7 +73,8 @@ export type NodeRedisAdapter = RedisAdapter;
  * Each call is bounded independently; a timed-out command may still run on Redis.
  * The bound must exceed a streams consumer's blocking read duration.
  *
- * @param client - An application-created single-node client (RESP3 or RESP2)
+ * @param client - An application-created single-node client (RESP3 or RESP2), or a
+ * factory that creates one on the first connect (see {@link NodeRedisClientFactory})
  * @param options - Command bound and optional client error callback
  * @returns One adapter; use a separate wrapped duplicate for pub/sub
  * @throws {RangeError} If commandTimeoutMs is outside the finite timer range
@@ -71,20 +83,28 @@ export type NodeRedisAdapter = RedisAdapter;
  * const client = fromNodeRedis(createClient({ url }), { commandTimeoutMs: 1000 });
  * await client.set('key', 'value', 'EX', 60);
  * await client.quit();
+ *
+ * // Loaded on first use, so an instrumentation registered by then traces it.
+ * const traced = fromNodeRedis(async () => (await import('redis')).createClient({ url }));
  * ```
  * @since 0.11.0
  */
 export function fromNodeRedis(
-  client: NodeRedisClientLike,
+  client: NodeRedisClientLike | NodeRedisClientFactory,
   options: NodeRedisAdapterOptions = {},
 ): NodeRedisAdapter {
   return new RedisAdapter(client, options);
 }
 
 class RedisAdapter {
-  readonly #client: NodeRedisClientLike;
+  #client: NodeRedisClientLike | undefined;
+  readonly #factory: NodeRedisClientFactory | undefined;
+  #creating: Promise<NodeRedisClientLike> | undefined;
+  readonly #onError: ((error: unknown) => void) | undefined;
   readonly #timeoutMs: number;
   readonly #listeners = new Set<MessageListener>();
+  /** Emitter listeners registered before a factory's client exists. */
+  readonly #pending: (readonly [string, MessageListener])[] = [];
   #connecting: Promise<void> | undefined;
   #quitting: Promise<void> | undefined;
   #ended = false;
@@ -98,27 +118,54 @@ class RedisAdapter {
     for (const listener of this.#listeners) listener(channel, message);
   };
 
-  constructor(client: NodeRedisClientLike, options: NodeRedisAdapterOptions) {
+  constructor(
+    client: NodeRedisClientLike | NodeRedisClientFactory,
+    options: NodeRedisAdapterOptions,
+  ) {
     this.#timeoutMs = options.commandTimeoutMs === undefined ? 15_000 : options.commandTimeoutMs;
     const refusal = deadlineRangeError('commandTimeoutMs', this.#timeoutMs);
     if (refusal !== null) throw refusal;
+    this.#onError = options.onError;
+    if (typeof client === 'function') this.#factory = client;
+    else this.#adopt(client);
+  }
+
+  /** Takes a created client: its error listener, then any listener registered before it existed. */
+  #adopt(client: NodeRedisClientLike): NodeRedisClientLike {
     this.#client = client;
     // node-redis rethrows an unlistened 'error' event, so a listener is always
     // attached; a throwing onError must not throw out of the client's emit.
     client.on('error', (error: unknown) => {
       try {
-        options.onError?.(error);
+        this.#onError?.(error);
       } catch {
         // The application's handler failed; the error still surfaces through
         // the rejected command and health.
       }
     });
+    for (const [event, listener] of this.#pending.splice(0)) client.on(event, listener);
+    return client;
+  }
+
+  /** The client, created by the factory on first need; a failed creation is retried next time. */
+  #obtain(): Promise<NodeRedisClientLike> {
+    if (this.#client !== undefined) return Promise.resolve(this.#client);
+    this.#creating ??= Promise.resolve()
+      .then(() => this.#factory!())
+      .then(
+        (client) => this.#adopt(client),
+        (error: unknown) => {
+          this.#creating = undefined;
+          throw error;
+        },
+      );
+    return this.#creating;
   }
 
   get status(): string {
     if (this.#ended) return 'end';
-    if (this.#client.isReady) return 'ready';
-    return this.#client.isOpen || this.#connecting !== undefined ? 'connecting' : 'wait';
+    if (this.#client?.isReady === true) return 'ready';
+    return this.#client?.isOpen === true || this.#connecting !== undefined ? 'connecting' : 'wait';
   }
 
   #bound<T>(run: () => Promise<T>): Promise<T> {
@@ -131,9 +178,14 @@ class RedisAdapter {
   connect(): Promise<void> {
     if (this.#ended) return Promise.reject(new Error('The client is closed'));
     if (this.#connecting !== undefined) return this.#connecting;
-    if (this.#client.isOpen) return Promise.resolve();
+    if (this.#client?.isOpen === true) return Promise.resolve();
     this.#connecting = this.#bound(async () => {
-      await this.#client.connect();
+      // `run` starts a microtask later, and a factory awaits its import: a quit()
+      // in between must not open a socket.
+      if (this.#ended) throw new Error('The client is closed');
+      const client = await this.#obtain();
+      if (this.#ended) throw new Error('The client is closed');
+      await client.connect();
     }).finally(() => {
       this.#connecting = undefined;
     });
@@ -146,7 +198,7 @@ class RedisAdapter {
       const flattened = args.flatMap((arg) =>
         arg === undefined ? [] : typeof arg === 'object' ? arg.map(String) : [String(arg)],
       );
-      const reply = await this.#client.sendCommand([command, ...flattened]);
+      const reply = await this.#client!.sendCommand([command, ...flattened]);
       // Facade return types describe Redis's command contract, as for ioredis.
       return normalizeResp3(reply, command) as T;
     });
@@ -155,8 +207,12 @@ class RedisAdapter {
   quit(): Promise<void> {
     if (this.#quitting !== undefined) return this.#quitting;
     this.#ended = true;
-    if (!this.#client.isOpen) return Promise.resolve();
+    const connecting = this.#connecting;
     this.#quitting = this.#bound(async () => {
+      // A connect already in flight settles first, so the socket it opens is the
+      // one closed here; its failure is not the quit's.
+      if (connecting !== undefined) await connecting.catch(() => undefined);
+      if (this.#client?.isOpen !== true) return;
       await this.#client.close();
     }).catch((error: unknown) => {
       this.#destroy();
@@ -177,7 +233,7 @@ class RedisAdapter {
    */
   #destroy(): void {
     try {
-      this.#client.destroy();
+      this.#client?.destroy();
     } catch {
       // Already closed: nothing left to tear down.
     }
@@ -186,25 +242,30 @@ class RedisAdapter {
   subscribe(channel: string): Promise<unknown> {
     return this.#bound(async () => {
       await this.connect();
-      return this.#client.subscribe(channel, this.#dispatch);
+      return this.#client!.subscribe(channel, this.#dispatch);
     });
   }
 
   unsubscribe(channel: string): Promise<unknown> {
     return this.#bound(async () => {
       await this.connect();
-      return this.#client.unsubscribe(channel);
+      return this.#client!.unsubscribe(channel);
     });
   }
 
   on(event: string, listener: MessageListener): void {
     if (event === 'message') this.#listeners.add(listener);
-    else this.#client.on(event, listener);
+    else if (this.#client !== undefined) this.#client.on(event, listener);
+    else this.#pending.push([event, listener]);
   }
 
   off(event: string, listener: MessageListener): void {
     if (event === 'message') this.#listeners.delete(listener);
-    else this.#client.off(event, listener);
+    else if (this.#client !== undefined) this.#client.off(event, listener);
+    else {
+      const index = this.#pending.findIndex(([e, l]) => e === event && l === listener);
+      if (index >= 0) this.#pending.splice(index, 1);
+    }
   }
 
   /** Sends GET with ioredis positional arguments. */

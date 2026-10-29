@@ -706,6 +706,7 @@ package fits the plugin architecture.
 | `NextFunction`                        | type      |
 | `NodeRedisAdapter`                    | type      |
 | `NodeRedisAdapterOptions`             | type      |
+| `NodeRedisClientFactory`              | type      |
 | `NodeRedisClientLike`                 | type      |
 | `Option`                              | type      |
 | `OrderDirection`                      | type      |
@@ -829,6 +830,13 @@ idempotency and the auth rate-limit store.
 - **An `'error'` listener is always attached**, because node-redis rethrows an unlistened `'error'`
   event and would crash the process. `onError(error)` receives each event; without it the listener
   stays silent and failures surface through the rejected commands and health.
+- **Traces: pass a factory.** OpenTelemetry's `redis` instrumentation patches node-redis as Node
+  loads it, and `TelemetryPlugin` registers it when the application starts — after a configuration
+  that imports `redis` has already loaded it, so those commands record no spans. Pass a factory
+  instead of a client and `redis` loads on the first connect:
+  `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`. The factory runs once
+  (a failure is retried on the next connect), and `on`/`off` listeners registered before it wait for
+  the client. A `setu new --redis-client node-redis` project does this in `src/node-redis.ts`.
 - **RESP3.** node-redis 6 speaks RESP3 by default, where some replies are maps. The adapter turns
   map replies back into the RESP2 shapes the plugins read, so either protocol works.
 - **Closing.** `quit()` closes the client (falling back to `destroy()` when that exceeds the bound)

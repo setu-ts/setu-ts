@@ -120,7 +120,7 @@ its own client never triggers the lazy import at all — see
 client in `fromNodeRedis` from `@setu-ts/common` and pass it as the plugin's `client` (the backplane
 takes `client` and `subscriber`). `ioredis` is then never loaded, and `redis` is your application's
 own dependency, which no Setu-TS package declares. Traces come from `instrumentations.redis` in
-`telemetry-plugin`. See
+`telemetry-plugin`, on Node only. See
 [Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110)
 and `setu new --redis-client node-redis` in [the CLI guide](./cli.md#choosing-the-redis-client).
 

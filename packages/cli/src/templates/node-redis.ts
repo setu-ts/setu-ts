@@ -82,9 +82,12 @@ export function nodeRedisModuleFile(): GeneratedFile {
  * \`fromNodeRedis\` bounds every command (15 s by default) and keeps an
  * \`'error'\` listener attached, without which node-redis would crash the process
  * on a connection error.
+ *
+ * \`redis\` is imported when a plugin first connects, not when this module loads:
+ * OpenTelemetry's \`redis\` instrumentation patches node-redis as it loads, and
+ * TelemetryPlugin registers it only after this configuration has been imported.
  */
 import { fromNodeRedis, type NodeRedisAdapter } from '@setu-ts/common';
-import { createClient } from 'redis';
 
 /**
  * Builds one bounded node-redis client for one plugin.
@@ -93,7 +96,10 @@ import { createClient } from 'redis';
  * @returns The adapter the plugin's \`client\` option takes
  */
 export function ${NODE_REDIS_FACTORY}(url: string): NodeRedisAdapter {
-  return fromNodeRedis(createClient({ url }));
+  return fromNodeRedis(async () => {
+    const { createClient } = await import('redis');
+    return createClient({ url });
+  });
 }
 `,
   };

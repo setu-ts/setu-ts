@@ -19,9 +19,14 @@ client is injected, and scaffolds still default to it. To move a plugin to node-
 `redis` (v5 or v6) and pass `fromNodeRedis(createClient({ url }))` as its `client` — one client per
 plugin, two for the realtime backplane. A plugin's own `commandTimeoutMs` does not apply to an
 injected client; set the adapter's (`fromNodeRedis(client, { commandTimeoutMs })`, default 15 s),
-and keep it above the Redis Streams broker's `blockSizeMs`. The idempotency store never closes an
-injected client, so close it at shutdown. For traces, add `instrumentations.redis` and install
-`@opentelemetry/instrumentation-redis` `^0.69.0`.
+and keep it above the Redis Streams broker's `blockSizeMs`, which must be positive: `0` blocks
+indefinitely, so a read the adapter had abandoned would stay open and could still take a message.
+The idempotency store never closes an injected client, so close it at shutdown. For traces on Node,
+add `instrumentations.redis`, install `@opentelemetry/instrumentation-redis` `^0.69.0`, and pass
+`fromNodeRedis` a factory that imports `redis`
+(`async () => (await import('redis')).createClient({ url })`): a `redis` loaded before the
+application starts records no spans. Like every auto-instrumentation it is Node-only, so on Deno and
+Bun it reports `unsupported platform` and records no spans.
 
 A custom client implementing `IRedisLockClient` keeps compiling: `eval` now returns
 `Promise<unknown>`. A custom `IRedisBackplaneClient` that exposes `connect()` and reports `status`

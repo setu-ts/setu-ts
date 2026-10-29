@@ -203,11 +203,12 @@ memory. Changing an existing value is a manual edit.
 Redis arms use ioredis by default. `--redis-client node-redis` (on `setu new` with `--broker redis`,
 `--queue redis` or `--transport redis`, and on `setu add` with a Redis selection) scaffolds
 [node-redis](https://www.npmjs.com/package/redis) instead: the project depends on `redis` rather
-than `ioredis`, and a generated `src/node-redis.ts` exports `nodeRedisClient(url)`, which wraps
-`createClient({ url })` in `fromNodeRedis` from `@setu-ts/common`. Each Redis-backed plugin gets its
-own client, because each closes its client at shutdown; the realtime backplane gets two.
-`setu.config.ts` imports the helper rather than `redis` itself, so `setu check` and later `setu add`
-runs keep reading the configuration.
+than `ioredis`, and a generated `src/node-redis.ts` exports `nodeRedisClient(url)`, which passes
+`fromNodeRedis` from `@setu-ts/common` a factory that imports `redis` and calls
+`createClient({ url })` on the first connect, so the telemetry plugin's `redis` instrumentation is
+in place before node-redis loads. Each Redis-backed plugin gets its own client, because each closes
+its client at shutdown; the realtime backplane gets two. `setu.config.ts` imports the helper rather
+than `redis` itself, so `setu check` and later `setu add` runs keep reading the configuration.
 
 ```bash
 setu new svc --template microservice --broker redis --queue redis --redis-client node-redis

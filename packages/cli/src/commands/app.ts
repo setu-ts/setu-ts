@@ -417,6 +417,18 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
             `this backend for one service, scaffold it outside the workspace with ` +
             `\`${PROGRAM_NAME} new <name> --template microservice --${flag} <value>\`.`,
         );
+      } else if (flag === 'redis-client') {
+        // Its own text: the generic suggestion has no `--transport redis`, and a
+        // --redis-client with no Redis arm is refused.
+        deps.error(
+          '--redis-client is a workspace-wide choice, not a per-member one: members share the ' +
+            'Redis client the workspace records.',
+        );
+        deps.error(
+          `Set it when you create the workspace: ` +
+            `\`${PROGRAM_NAME} new <name> --workspace --transport redis --redis-client <value>\`. ` +
+            `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
+        );
       } else {
         deps.error(
           `--${flag} is a workspace-wide choice, not a per-member one: members can only talk ` +

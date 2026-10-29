@@ -195,6 +195,63 @@ describe('fromNodeRedis', () => {
     await expect(adapter.ping()).rejects.toThrow('The client is closed');
   });
 
+  it('never opens a socket for a connect queued in the same tick as quit()', async () => {
+    const raw = nodeRedisFake();
+    const adapter = fromNodeRedis(raw);
+    const connecting = adapter.connect();
+    const quitting = adapter.quit();
+    await expect(connecting).rejects.toThrow('The client is closed');
+    await quitting;
+    expect(raw.connect).not.toHaveBeenCalled();
+    expect(raw.isOpen).toBe(false);
+    expect(adapter.status).toBe('end');
+  });
+
+  it('closes the socket a connect in flight opens once quit() has begun', async () => {
+    const raw = nodeRedisFake();
+    let open!: () => void;
+    raw.connect.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          open = () => {
+            raw.isOpen = true;
+            raw.isReady = true;
+            resolve();
+          };
+        }),
+    );
+    const adapter = fromNodeRedis(raw);
+    const connecting = adapter.connect();
+    await vi.waitFor(() => expect(raw.connect).toHaveBeenCalledTimes(1));
+    const quitting = adapter.quit();
+    await Promise.resolve();
+    expect(raw.close).not.toHaveBeenCalled();
+    open();
+    await connecting;
+    await quitting;
+    expect(raw.close).toHaveBeenCalledTimes(1);
+    expect(raw.isOpen).toBe(false);
+  });
+
+  it('quits after a failed connect in flight without surfacing its error', async () => {
+    const raw = nodeRedisFake();
+    let fail!: () => void;
+    raw.connect.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          fail = () => reject(new Error('Connection timeout'));
+        }),
+    );
+    const adapter = fromNodeRedis(raw);
+    const connecting = adapter.connect().catch((error: unknown) => error);
+    await vi.waitFor(() => expect(raw.connect).toHaveBeenCalledTimes(1));
+    const quitting = adapter.quit();
+    fail();
+    await quitting;
+    expect(await connecting).toEqual(new Error('Connection timeout'));
+    expect(raw.close).not.toHaveBeenCalled();
+  });
+
   it('coalesces close and destroys a connection whose close times out', async () => {
     vi.useFakeTimers();
     const raw = nodeRedisFake();
@@ -322,5 +379,89 @@ describe('fromNodeRedis', () => {
     expect(raw.on).toHaveBeenLastCalledWith('ready', first);
     expect(raw.off).toHaveBeenLastCalledWith('ready', first);
     expect(raw.on).toHaveBeenCalledTimes(2);
+  });
+
+  describe('with a client factory', () => {
+    it('creates the client on the first connect, once, and attaches its error listener', async () => {
+      const raw = nodeRedisFake();
+      const factory = vi.fn(() => Promise.resolve(raw));
+      const onError = vi.fn();
+      const adapter = fromNodeRedis(factory, { onError });
+      expect(factory).not.toHaveBeenCalled();
+      expect(adapter.status).toBe('wait');
+      await Promise.all([adapter.ping(), adapter.get('k')]);
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(raw.connect).toHaveBeenCalledTimes(1);
+      expect(adapter.status).toBe('ready');
+      const listener = raw.on.mock.calls.find(([event]) => event === 'error')![1] as (
+        error: unknown,
+      ) => void;
+      listener(new Error('boom'));
+      expect(onError).toHaveBeenCalledWith(new Error('boom'));
+    });
+
+    it('accepts a factory that returns the client synchronously', async () => {
+      const raw = nodeRedisFake();
+      expect(await fromNodeRedis(() => raw).ping()).toBe('OK');
+    });
+
+    it('holds emitter listeners until the client exists, honouring off()', async () => {
+      const raw = nodeRedisFake();
+      const adapter = fromNodeRedis(() => raw);
+      const kept = vi.fn();
+      const dropped = vi.fn();
+      adapter.on('ready', kept);
+      adapter.on('end', dropped);
+      adapter.off('end', dropped);
+      adapter.off('never-added', dropped);
+      await adapter.connect();
+      expect(raw.on).toHaveBeenCalledWith('ready', kept);
+      expect(raw.on).not.toHaveBeenCalledWith('end', dropped);
+      adapter.off('ready', kept);
+      expect(raw.off).toHaveBeenCalledWith('ready', kept);
+    });
+
+    it('retries a factory that failed', async () => {
+      const raw = nodeRedisFake();
+      const factory = vi
+        .fn<() => Promise<typeof raw>>()
+        .mockRejectedValueOnce(new Error("Cannot find package 'redis'"))
+        .mockResolvedValue(raw);
+      const adapter = fromNodeRedis(factory);
+      await expect(adapter.connect()).rejects.toThrow("Cannot find package 'redis'");
+      await adapter.connect();
+      expect(factory).toHaveBeenCalledTimes(2);
+      expect(adapter.status).toBe('ready');
+    });
+
+    it('opens nothing when quit() lands while the factory is still loading', async () => {
+      const raw = nodeRedisFake();
+      let load!: (client: typeof raw) => void;
+      const adapter = fromNodeRedis(
+        () =>
+          new Promise<typeof raw>((resolve) => {
+            load = resolve;
+          }),
+      );
+      const connecting = adapter.connect();
+      await vi.waitFor(() => expect(load).toBeTypeOf('function'));
+      const quitting = adapter.quit();
+      load(raw);
+      await expect(connecting).rejects.toThrow('The client is closed');
+      await quitting;
+      expect(raw.connect).not.toHaveBeenCalled();
+      expect(raw.close).not.toHaveBeenCalled();
+    });
+
+    it('quits and disconnects cleanly when no client was ever created', async () => {
+      const factory = vi.fn(() => nodeRedisFake());
+      const quitted = fromNodeRedis(factory);
+      await quitted.quit();
+      expect(quitted.status).toBe('end');
+      const dropped = fromNodeRedis(factory);
+      dropped.disconnect();
+      expect(dropped.status).toBe('end');
+      expect(factory).not.toHaveBeenCalled();
+    });
   });
 });

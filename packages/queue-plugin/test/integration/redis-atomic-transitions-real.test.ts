@@ -102,6 +102,8 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
       } finally {
         await real.del(`queue:${name}:ready`, `queue:${name}:processing`, `queue:${name}:jobs`);
         await queue.disconnect();
+        // On the node-redis variants `real` only inspects; the queue closed its own client.
+        if (targetClient !== real) real.disconnect();
       }
     });
   });

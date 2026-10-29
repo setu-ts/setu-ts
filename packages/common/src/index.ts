@@ -730,6 +730,7 @@ export type {
 export { fromNodeRedis } from './redis/node-redis-adapter.ts';
 export type {
   NodeRedisClientLike,
+  NodeRedisClientFactory,
   NodeRedisAdapterOptions,
   NodeRedisAdapter,
 } from './redis/node-redis-adapter.ts';

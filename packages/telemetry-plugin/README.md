@@ -96,7 +96,10 @@ instrumentation is a documented **no-op, never a throw**, so one codebase deploy
 `@setu-ts/common`: a `SET` sent through the adapter is recorded as a `redis-SET` span with
 `db.system.name` `redis`. Enable `ioredis`, `redis` or both to match the clients the application
 uses. node-redis 6 can also report OpenTelemetry metrics itself (`OpenTelemetry.init`); spans need
-this arm.
+this arm. The instrumentation patches node-redis as Node loads it, and this plugin registers it when
+the application starts, so `redis` must not be loaded before then: build the client through a
+factory, `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`, as a
+`--redis-client node-redis` scaffold does. A `redis` imported at module load records no spans.
 
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 

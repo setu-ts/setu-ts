@@ -216,7 +216,9 @@ injected client gets no listener: it belongs to the caller.
 `{ broker: 'redis-streams', client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
 `@setu-ts/common`, `createClient` from `redis`, installed in your application). The broker's
 blocking read (`XREADGROUP … BLOCK blockSizeMs`, default 100 ms) shares that connection, as it does
-with ioredis, so keep the adapter's `commandTimeoutMs` above `blockSizeMs`. See
+with ioredis, so keep the adapter's `commandTimeoutMs` above `blockSizeMs`, and keep `blockSizeMs`
+positive: `0` blocks indefinitely, and a read the adapter abandoned would stay open and could still
+take a message. See
 [Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
 
 ### RabbitMQ durability
