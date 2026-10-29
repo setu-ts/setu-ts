@@ -467,6 +467,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, 0.11.0,
+  `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
+  line however long its options were — a Redis connection read, a nested `options: { … }`, a seam
+  merged with stray spaces — so a Deno project failed `deno fmt --check` after its first
+  `setu add messaging --broker redis`, `queue --queue redis`, or Redis-backed add in a workspace
+  member. The call is now laid out for the generated 100-column width, breaking only what does not
+  fit. npm targets were already formatted by Prettier and are unchanged.
+
 - **Route matching with Hono's `TrieRouter` (#518, 0.11.0, `@setu-ts/kernel`).** The kernel now
   matches routes with Hono's `TrieRouter` instead of `LinearRouter`, which re-parsed every route
   pattern on every request (13-20% of request CPU on Bun). `TrieRouter` returns the same full

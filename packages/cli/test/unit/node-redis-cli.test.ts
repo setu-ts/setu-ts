@@ -189,7 +189,26 @@ describe('node-redis CLI', () => {
   });
 
   it('keeps every ioredis variant byte-identical to captured develop output', async () => {
-    expect(await redisDefaultOutputs()).toEqual(baseline);
+    // Except the one deliberate change: `setu add` on Deno wrote its call on one
+    // line, which the project's own `deno fmt --check` refused; it is laid out now.
+    const read = "url: Deno.env.get('REDIS_URL') ??\n          'redis://127.0.0.1:6379'";
+    const joined = "url: Deno.env.get('REDIS_URL') ?? 'redis://127.0.0.1:6379'";
+    const relaid: Record<string, readonly [string, string]> = {
+      'deno/add-messaging/work/app/setu.config.ts': [
+        `      MessagingPlugin({ broker: 'redis-streams', ${read} }),\n`,
+        `      MessagingPlugin({\n        broker: 'redis-streams',\n        ${joined},\n      }),\n`,
+      ],
+      'deno/add-queue/work/app/setu.config.ts': [
+        `      QueuePlugin({  processors: [...QUEUE_PROCESSORS] ,  adapter: 'redis', ${read}  }),\n`,
+        `      QueuePlugin({\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'redis',\n        ${joined},\n      }),\n`,
+      ],
+    };
+    const expected: Record<string, string> = { ...baseline };
+    for (const [path, [before, after]] of Object.entries(relaid)) {
+      expect(expected[path]).toContain(before);
+      expected[path] = expected[path]!.replace(before, after);
+    }
+    expect(await redisDefaultOutputs()).toEqual(expected);
   });
 
   it.each([

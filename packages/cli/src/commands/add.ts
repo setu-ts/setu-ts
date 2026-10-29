@@ -59,6 +59,7 @@ import { composingStarter } from '../utils/starter-arms.ts';
 import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
+import { renderPluginCall } from '../utils/render-call.ts';
 import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
 import { transportSpec, renderConnection, type TransportSpec } from '../workspace/transport.ts';
@@ -277,6 +278,17 @@ export interface AddSeam {
   readonly imports: readonly { readonly symbols: readonly string[]; readonly from: string }[];
   /** The seam barrels, rendered empty, for a project that has none yet. */
   readonly files: readonly GeneratedFile[];
+}
+
+/**
+ * The members of a CLI-authored object literal, without its braces, edge
+ * whitespace or trailing comma — so two of them join with one `, `.
+ *
+ * @param literal - An object literal such as `{ adapter: 'redis' }`
+ * @returns Its members, e.g. `adapter: 'redis'`
+ */
+function objectBody(literal: string): string {
+  return literal.trim().slice(1, -1).trim().replace(/,$/, '').trim();
 }
 
 /**
@@ -1041,10 +1053,16 @@ export function withPluginWiring(
   const insertion = anchorMatch.index + scope!.start + prefix.length;
   const lineStart = withImport.lastIndexOf('\n', insertion - 1) + 1;
   const before = withImport.slice(lineStart, insertion);
-  // On its own line the new call takes a line of its own at the same indentation;
-  // inline it joins the array where it stands.
-  const separator = before.trim() === '' ? `\n${before}` : ' ';
-  return `${withImport.slice(0, insertion)}${factory}(${args ?? seam?.args ?? ''}),${separator}${withImport.slice(insertion)}`;
+  // On its own line the new call takes a line of its own at the same indentation,
+  // laid out for the width the project formats at (Deno has no formatter in the
+  // CLI; an npm target's Prettier pass agrees); inline it joins the array where it
+  // stands.
+  const ownLine = before.trim() === '';
+  const callArgs = args ?? seam?.args ?? '';
+  const call = ownLine
+    ? renderPluginCall(factory, callArgs, before.length)
+    : `${factory}(${callArgs})`;
+  return `${withImport.slice(0, insertion)}${call},${ownLine ? `\n${before}` : ' '}${withImport.slice(insertion)}`;
 }
 
 /**
@@ -1510,7 +1528,7 @@ export async function runAddCommand(
           args:
             artifactSeam === undefined
               ? transportArgs
-              : `{ ${artifactSeam.args.trim().slice(1, -1)}, ${transportArgs.slice(1, -1)} }`,
+              : `{ ${objectBody(artifactSeam.args)}, ${objectBody(transportArgs)} }`,
           imports: artifactSeam?.imports ?? [],
           files: artifactSeam?.files ?? [],
         };
