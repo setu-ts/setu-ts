@@ -37,6 +37,16 @@ export interface ToolchainProseRules {
 export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
   allowlist: [
     {
+      path: 'docs/deployment.md',
+      category: 'deno-target',
+      reason: 'Gives the root test command of a generated Deno workspace (M122).',
+    },
+    {
+      path: 'scripts/check-deploy.ts',
+      category: 'deno-target',
+      reason: "Proves a generated Deno workspace's root test task runs each member once (M122).",
+    },
+    {
       path: 'packages/cli/src/commands/add-view.ts',
       category: 'deno-target',
       reason: 'Emits CSS build and watch tasks for supported Deno view projects.',

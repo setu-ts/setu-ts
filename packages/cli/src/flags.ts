@@ -251,6 +251,22 @@ const WORKSPACE_PORTS: ICommandFlagSpec = spec(
   { fixed: 2, taken: 0, noun: 'no arguments beyond ports' },
 );
 
+/** `setu workspace build` (M122): every member's image. */
+const WORKSPACE_BUILD: ICommandFlagSpec = spec(
+  'workspace build',
+  ['dir', 'tag', 'registry', 'build-arg', 'network', 'dry-run'],
+  [],
+  { fixed: 2, taken: 0, noun: 'no arguments beyond build' },
+);
+
+/** `setu workspace deploy` (M122): build, ship, apply and roll out every member. */
+const WORKSPACE_DEPLOY: ICommandFlagSpec = spec(
+  'workspace deploy',
+  ['dir', 'context', 'namespace', 'registry', 'tag', 'timeout', 'build-arg', 'network', 'dry-run'],
+  [],
+  { fixed: 2, taken: 0, noun: 'no arguments beyond deploy' },
+);
+
 /**
  * `setu workspace` with a subcommand other than `ports`: the command itself
  * refuses every subcommand but `ports` with its usage line, so there is no
@@ -321,7 +337,10 @@ export function commandFlagsFor(
     case 'adopt':
       return ADOPT;
     case 'workspace':
-      return subcommand === 'ports' ? WORKSPACE_PORTS : WORKSPACE;
+      if (subcommand === 'ports') return WORKSPACE_PORTS;
+      if (subcommand === 'build') return WORKSPACE_BUILD;
+      if (subcommand === 'deploy') return WORKSPACE_DEPLOY;
+      return WORKSPACE;
     case 'commands':
       return COMMANDS;
     case 'help':
@@ -352,6 +371,8 @@ export const DOCUMENTED_FLAGS: ReadonlyMap<string, readonly string[]> = new Map(
   [ADOPT.label, ADOPT.documented],
   [DEVTOOL_ENABLE.label, DEVTOOL_ENABLE.documented],
   [WORKSPACE_PORTS.label, WORKSPACE_PORTS.documented],
+  [WORKSPACE_BUILD.label, WORKSPACE_BUILD.documented],
+  [WORKSPACE_DEPLOY.label, WORKSPACE_DEPLOY.documented],
 ]);
 
 /**

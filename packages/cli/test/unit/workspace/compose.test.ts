@@ -293,6 +293,22 @@ describe('workspaceContainerFiles', () => {
       expect(compose.indexOf('  billing:')).toBeLessThan(compose.indexOf('  orders:'));
     });
 
+    // M122: the member's gitignored .env reaches its container when it exists, and the image is
+    // named as the Kubernetes manifest's comment builds it.
+    it('reads each member .env optionally, before its generated environment', () => {
+      const compose = contentsOf(
+        workspaceContainerFiles(
+          manifestOf([{ name: 'portal', port: 3001 }], 'redis'),
+          transportSpec('redis'),
+        ),
+        COMPOSE_FILE,
+      );
+      expect(compose).toContain('    image: portal:dev\n    build:');
+      expect(compose).toContain(
+        '    env_file:\n      - path: ../apps/portal/.env\n        required: false\n    environment:',
+      );
+    });
+
     it('adds no backing service for a transport that needs none', () => {
       for (const name of ['http', 'grpc', 'memory'] as const) {
         const compose = contentsOf(
@@ -302,7 +318,10 @@ describe('workspaceContainerFiles', () => {
           ),
           COMPOSE_FILE,
         );
-        expect(compose).not.toContain('image:');
+        // The member's own `image: orders:dev` (M122) is the only image named.
+        expect([...compose.matchAll(/^\s*image: (.+)$/gm)].map((m) => m[1])).toEqual([
+          'orders:dev',
+        ]);
         expect(compose).not.toContain('depends_on:');
       }
     });

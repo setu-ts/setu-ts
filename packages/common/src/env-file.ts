@@ -1,6 +1,12 @@
 /**
  * Strict dotenv-style environment file parser.
  *
+ * Shared, so every reader of a dotenv file means the same thing by it: the
+ * config plugin loading `.env`, and `setu workspace deploy` turning an operator
+ * file into a Kubernetes Secret (M122). `kubectl create secret --from-env-file`
+ * keeps quote characters as part of a value, so it is not one of them. Moved
+ * unchanged from config-plugin, where it was internal.
+ *
  * @module
  */
 
@@ -14,7 +20,7 @@
  * @param content - Raw dotenv file content
  * @returns Parsed key-value pairs
  * @throws {Error} If an entry, key, or quoted value is malformed
- * @since 0.1.0
+ * @since 0.11.0
  */
 export function parseEnv(content: string): Readonly<Record<string, string>> {
   const values: Record<string, string> = {};

@@ -102,6 +102,14 @@ describe('parseModes', () => {
     expect(() => parseModes(['--write'])).toThrow(/selects no check/);
   });
 
+  it('runs the M122 workspace deploy only when named, never by default', () => {
+    expect(parseModes([]).workspace).toBe(false);
+    const modes = parseModes(['--cluster', '--workspace']);
+    expect(modes.workspace).toBe(true);
+    expect(modes.cluster).toBe(true);
+    expect(modes.generated).toBe(false);
+  });
+
   it('accepts --write as a modifier alongside --render', () => {
     const modes = parseModes(['--render', '--write']);
     expect(modes.render).toBe(true);

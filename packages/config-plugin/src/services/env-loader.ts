@@ -3,11 +3,10 @@
  *
  * @module
  */
-import type { IFileSystem, IRuntimeServices } from '@setu-ts/common';
+import { parseEnv, type IFileSystem, type IRuntimeServices } from '@setu-ts/common';
 
 import type { EnvSourceObservation } from '../diagnostics/provenance.ts';
 import { MAX_OVERRIDDEN_ALIASES } from '../diagnostics/provenance.ts';
-import { parseEnv } from '../parsers/env-parser.ts';
 
 /** Internal options for environment loading. */
 export interface EnvLoaderOptions {

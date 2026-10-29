@@ -476,6 +476,58 @@ workspace root, the base image tag is pinned, the user is numeric, the grace per
 the generated entry handles `SIGTERM`, and the start writes no lockfile — so the generated
 manifest's own read-only root filesystem cannot crash it.
 
+### Build, test and deploy from the root
+
+Since 0.11.0 the CLI runs these across every member, reading `setu.workspace.json` each time:
+
+```bash
+npm test                                    # every member's tests (Deno: deno task --recursive test)
+setu workspace build                        # one image per member, tagged with the commit
+setu workspace deploy --dry-run             # every check and the plan; nothing changes
+setu workspace deploy                       # build, ship, apply k8s/, wait for each rollout
+```
+
+`deploy` loads the images into a `kind-<cluster>` context's cluster, or pushes them to `--registry`
+for any other context. It applies the namespace (`--namespace`, default the workspace directory
+name), one Secret per member, and `k8s/members.yaml` as it is on disk with the namespace and each
+member's image filled in, then waits for `kubectl rollout status` (`--timeout`, default `120s`).
+
+**Member secrets.** A member's variables are the names its committed `.env.example` declares — a
+full-stack member's `SESSION_SECRET` and `TRUSTED_PROXIES`, for instance — less those the generated
+manifest already sets. Their values go in `k8s/secrets/<member>/.env`, which the root's `.env`
+ignore rule and the generated `.dockerignore` keep out of git and out of every image. Deploy refuses
+before building, naming every missing variable, and refuses a values file git tracks. It applies
+each Secret with `kubectl apply --server-side --force-conflicts` from stdin (it owns `<member>-env`,
+including one first made by hand), values base64-encoded under `data:`: measured on kind, a
+client-side apply stores every value in plaintext in the `last-applied-configuration` annotation,
+and `stringData` under a server-side apply keeps keys the file has dropped. Each generated
+Deployment reads `<member>-env` through `envFrom`, after its explicit `env:` entries, which keep
+precedence. envFrom is read when a container starts, so deploy writes each Secret's
+`resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
+changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
+keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
+keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
+member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
+is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
+deploy that failed part-way — so the cluster's state, not the run's history, decides what rolls out.
+Deploy reads the values files, `.env.example` and `k8s/members.yaml` only as regular files inside
+the workspace, never through a symbolic link: a branch that replaced `k8s/secrets/<member>` with a
+link could otherwise load any dotenv file on the host into a pod its code runs in.
+
+For production, keep the values in a secret manager —
+[Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or
+[External Secrets](https://external-secrets.io/) — and have it create the same `<member>-env`
+Secret; the Deployments read it unchanged. The generated Compose stack reads each member's own
+`.env` through an optional `env_file`, so local values apply there too; the optional form
+(`required: false`) needs Docker Compose 2.24.0 or later. Compose follows a symbolic link there, so
+`setu check` refuses a linked member `.env`; it does not check `docker/compose.yaml` itself, which a
+branch can edit to name any host file — review a branch's `docker/` changes before running
+`docker compose up` on it.
+
+A registry other than npm pins its tarball URLs in the lockfile: pass
+`--build-arg NPM_CONFIG_REGISTRY=<url>` (and `--network host` for one on `localhost`), with its
+token in the `NPMRC` build secret rather than in a build argument.
+
 ### The default Node workspace image
 
 `build` type-checks DI tokens; graph validation happens at boot, so run `npm test` before building
@@ -667,6 +719,7 @@ pnpm run check:deploy               # render drift + image builds + compose + ge
 pnpm run check:deploy --render      # just the manifest/chart drift check
 pnpm run check:deploy --cluster     # real kind cluster: apply, roll out, serve, check RBAC
 pnpm run check:deploy --generated   # scaffold a workspace, build ITS image, serve it air-gapped
+pnpm run check:deploy --workspace   # scaffold a workspace, root test, setu workspace deploy to kind
 pnpm run deploy:render              # regenerate k8s/manifests/ from the chart
 ```
 

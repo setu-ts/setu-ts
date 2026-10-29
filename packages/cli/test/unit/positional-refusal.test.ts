@@ -307,10 +307,10 @@ describe('valid arities still succeed', () => {
     expect(h.out.text()).toContain('db:migrate');
   });
 
-  it('help takes no positionals and still prints usage', async () => {
+  it('help refuses a positional rather than ignoring it', async () => {
     const h = harness();
-    expect(await h.run(['help'])).toBe(0);
-    expect(h.out.text()).toContain('Usage:');
+    expect(await h.run(['help', 'extra'])).toBe(2);
+    expect(h.err.text()).toContain('setu help takes no arguments; got 1.');
   });
 
   it('a plugin command still receives every positional verbatim', async () => {

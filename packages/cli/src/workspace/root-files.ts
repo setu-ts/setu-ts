@@ -8,7 +8,7 @@
  * @module
  */
 
-import { cliInvocation } from '../templates/project-files.ts';
+import { cliCommand, cliInvocation } from '../templates/project-files.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import {
   MEMBERS_DIR,
@@ -75,7 +75,15 @@ export function workspaceRootFiles(
           contents: `${JSON.stringify(
             {
               workspace: globs,
-              tasks: { dev: profile.runAll },
+              // No `test` task: Deno's recursion includes the root, so a root `test` running it
+              // would call itself without end (measured, M122). `deno task --recursive test`
+              // from the root is the command, as the README says.
+              tasks: {
+                dev: profile.runAll,
+                ...(profile.rootTestTask ? { test: profile.testAll } : {}),
+                build: cliCommand(profile.runtime, 'workspace build'),
+                deploy: cliCommand(profile.runtime, 'workspace deploy'),
+              },
               // Root-only, and inherited by every member: a member declaring them
               // is redundant at best and refused at worst.
               ...rootManifestSettings(),
@@ -100,7 +108,12 @@ export function workspaceRootFiles(
               // Globs relative to the root, without the `./` Deno's take — npm
               // matches them as written.
               workspaces: globs.map((glob) => glob.replace(/^\.\//, '')),
-              scripts: { dev: profile.runAll },
+              scripts: {
+                dev: profile.runAll,
+                ...(profile.rootTestTask ? { test: profile.testAll } : {}),
+                build: cliCommand(profile.runtime, 'workspace build'),
+                deploy: cliCommand(profile.runtime, 'workspace deploy'),
+              },
               // Scarf (pulled in by a member's `swagger-ui-dist`) reads its
               // opt-out from the package.json at npm's INIT_CWD — this root —
               // and ignores a member's own setting (M113f audit R2-F6).
@@ -184,16 +197,29 @@ That builds every member and starts the ${transport.name} service they share.`
 The transport is a property of the whole workspace, recorded in \`${WORKSPACE_MANIFEST}\`, because
 members can only meet on a bus they share. Every service added later inherits it.
 
-## Build and start a member
+## Test, build and deploy
 
-Run development with the root dev command above. For production, enter the member directory:
+\`\`\`bash
+${profile.testFromRoot}     # every member's and library's tests
+${profile.runScript('build')}    # one container image per member, tagged with the current commit
+${profile.runScript('deploy')}   # build, ship to the cluster, apply k8s/, wait for every rollout
+\`\`\`
+
+${wrapProse(
+  "Deploy loads the images into a `kind-*` context's cluster, or pushes them to `--registry` for any " +
+    "other context. A member's variables are the names its `.env.example` declares; put their values " +
+    'in `k8s/secrets/<member>/.env`, which git ignores and no image copies. See ' +
+    '`k8s/README.md` for every flag, and run deploy with `--dry-run` to see the plan first.',
+)}
+
+## Build and start one member
 
 \`\`\`bash
 cd apps/orders
 ${profile.runtime === 'node' ? 'npm run build\nnpm start' : profile.runtime === 'bun' ? 'bun run start' : 'deno task start'}
 \`\`\`
 
-${wrapProse('Full-stack Bun members also run `bun run build` before starting. Node builds inline shared libraries and keep npm dependencies external. The root does not build all members.')}
+${wrapProse('Full-stack Bun members also run `bun run build` before starting. Node builds inline shared libraries and keep npm dependencies external.')}
 `;
 
   return [
@@ -219,14 +245,17 @@ ${wrapProse('Full-stack Bun members also run `bun run build` before starting. No
       path: '.gitignore',
       contents:
         profile.manifestKind === 'deno'
-          ? 'node_modules/\ncoverage/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n'
+          ? 'node_modules/\ncoverage/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\nk8s/secrets/\n'
           : // Both locations: Bun installs into each MEMBER's node_modules as well as
             // the root, measured — an ignore listing only the root would commit them.
             // `.react-router/` is unanchored, so it covers a full-stack member's
             // typegen directory as well as the root's. The dotenv rules are
             // unanchored too, so they cover each member's own `.env`.
             'node_modules/\napps/*/node_modules/\nlibs/*/node_modules/\ncoverage/\n' +
-            'apps/*/dist/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n',
+            'apps/*/dist/\napps/*/build/\n.react-router/\n.env\n.env.*\n!.env.example\n' +
+            // Operator values for `setu workspace deploy`; each file is named `.env`, so the rule
+            // above already covers it in an older root (M122).
+            'k8s/secrets/\n',
     },
   ];
 }

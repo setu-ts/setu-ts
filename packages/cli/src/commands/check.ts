@@ -12,6 +12,7 @@ import {
 import { readWorkspaceManifest, WORKSPACE_MANIFEST } from '../workspace/manifest.ts';
 import { EXIT_ERROR, EXIT_OK } from '../constants.ts';
 import { escapeName } from '../utils/names.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { diagnoseProject } from '../diagnostics/diagnose.ts';
 import { readSilence } from '../diagnostics/silence.ts';
@@ -24,6 +25,46 @@ export interface ICheckDependencies {
   readonly log: (line: string) => void;
   readonly error: (line: string) => void;
   readonly interrupt?: AbortSignal;
+}
+
+/** A thrown value's message. */
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/**
+ * Why a member's `.env` is unsafe for the generated Compose `env_file`, or `undefined` when it is
+ * absent or a regular file inside the workspace.
+ *
+ * @param fs - The CLI's filesystem
+ * @param root - The workspace root
+ * @param path - `apps/<member>/.env`
+ * @returns The refusal, or `undefined`
+ */
+export async function memberEnvProblem(
+  fs: IFileSystem,
+  root: string,
+  path: string,
+): Promise<string | undefined> {
+  try {
+    await assertInsideProject(fs, root, path);
+  } catch (cause) {
+    // Always a PathEscapesProjectError naming the link or what could not be resolved.
+    return (
+      `${messageOf(cause)} docker compose would follow it ` +
+      "into this member's container through the generated env_file."
+    );
+  }
+  let stat;
+  try {
+    stat = await fs.stat(path);
+  } catch (cause) {
+    if (isMissingPath(cause)) return undefined;
+    return `${escapeName(path)} cannot be inspected: ${messageOf(cause)}`;
+  }
+  return stat.isFile
+    ? undefined
+    : `${escapeName(path)} is not a regular file; replace it with one.`;
 }
 
 /** Resolves one project or every member, preserving manifest order and output prefixes. */
@@ -79,6 +120,14 @@ export async function forEachProject(
       );
       code = Math.max(code, EXIT_ERROR);
       continue;
+    }
+    // The generated Compose file reads `apps/<member>/.env` through `env_file`, and Compose follows
+    // a link. A branch committing that file as a link to a host file would put the file's variables
+    // into its own container (M122 re-audit N4); the CLI cannot stop Compose, so `check` refuses it.
+    const envProblem = await memberEnvProblem(deps.fs, dir, joinPath(memberDir, '.env'));
+    if (envProblem !== undefined) {
+      memberDeps.error(envProblem);
+      code = Math.max(code, EXIT_ERROR);
     }
     const detected = await detectProject(deps.fs, memberDir);
     if (detected.kind !== 'project') {

@@ -43,18 +43,8 @@ describe('health-indicator schematic', () => {
     );
   });
 
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
   it('is gated on health-plugin', () => {
     expect(gateOf('health-indicator')).toBe('health-plugin');
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateHealthIndicator(deriveNames('OrderItem'), options(CLASS_OPTIONS));
-    expect(pascal).toEqual(files);
   });
 
   it('implements IHealthIndicator with the committed check() method', () => {

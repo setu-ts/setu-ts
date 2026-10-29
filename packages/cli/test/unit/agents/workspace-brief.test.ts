@@ -54,6 +54,10 @@ describe('workspace briefs', () => {
       'redis://localhost:6379',
       'apps/billing/AGENTS.md',
       'npm run dev',
+      'npm test',
+      'npm run build',
+      'npm run deploy',
+      'k8s/secrets/<member>/.env',
     ])
       expect(text).toContain(value);
     expect(text).not.toContain('## Installed');

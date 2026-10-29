@@ -703,7 +703,9 @@ jobs:
       # kind-action already created the cluster, so the gate reuses it.
       # KEEP_CLUSTER stops the gate deleting a cluster the action owns.
       - name: Cluster end-to-end
-        run: pnpm run check:deploy --cluster
+        # --workspace (M122) runs first: a scaffolded workspace's root test, then
+        # `setu workspace deploy` into this cluster.
+        run: pnpm run check:deploy --cluster --workspace
         env:
           KEEP_CLUSTER: '1'
 
