@@ -193,8 +193,12 @@ below are what the plan relies on):
   in `database-instrumentation.ts` does `await import('@opentelemetry/instrumentation-redis')`
   inside its `try` (M113d rule) and builds `RedisInstrumentation`, throwing
   `OptionalDependencyUnavailableError` when absent; registry and plugin list as for `ioredis`.
-  `@opentelemetry/instrumentation-redis` `^0.69.0` is an OPTIONAL peer and a dev dependency (0.69.0
-  is the first release declaring `redis <7`, E6).
+  (Amended after Codex run 2:) the diagnostics wire vocabulary restates these kinds, so
+  `TraceInstrumentationKind` (`packages/common/src/services/diagnostics.ts:1020`) and the
+  `INSTRUMENTATION` allowlist (`packages/diagnostics-plugin/src/protocol/trace-protocol.ts:49`) also
+  gain `'redis'` — additive; without it the plugin's enabled-kinds report fails to type-check and a
+  trace batch naming `redis` would be refused. `@opentelemetry/instrumentation-redis` `^0.69.0` is
+  an OPTIONAL peer and a dev dependency (0.69.0 is the first release declaring `redis <7`, E6).
 - **Why:** maintainer decision 2026-10-29; node-redis's own telemetry is metrics only (E6).
 - **Test home:** registry unit tests mirroring the `ioredis` ones; one guarded real-span test: a
   `fromNodeRedis`-driven `SET` against real Redis produces a `redis`-named span through an in-memory
@@ -307,6 +311,7 @@ and pattern). Ships in minor 0.11.0.
 | `packages/realtime-backplane-plugin/src/interfaces/index.ts`, `src/transports/redis-backplane.ts`                                                                                                                    | `connect?` on `IRedisBackplaneClient`; `#open` connects an injected `'wait'` client (§3.4, amended) |
 | `packages/scheduler-plugin/src/interfaces/index.ts`                                                                                                                                                                  | C4: `IRedisLockClient.eval` returns `Promise<unknown>`                                              |
 | `scripts/node-dependency-ranges.ts`                                                                                                                                                                                  | `redis` and `@opentelemetry/instrumentation-redis` ranges (§3.8)                                    |
+| `packages/common/src/services/diagnostics.ts`, `packages/diagnostics-plugin/src/protocol/trace-protocol.ts`                                                                                                          | `'redis'` in `TraceInstrumentationKind` and the trace-protocol allowlist (§3.7, amended)            |
 | `packages/{cache,queue,messaging,realtime-backplane,scheduler,idempotency,auth}-plugin/package.json`                                                                                                                 | `redis` dev dependency for the real-Redis suites                                                    |
 | READMEs (common, the seven consumers, telemetry, cli), `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, the messaging/caching/realtime guides under `docs/`, `ROADMAP.md`, `CLAUDE.md` status, `plans/archive/` | docs (§2), status flip and plan archive in this PR                                                  |
 
@@ -325,6 +330,7 @@ and pattern). Ships in minor 0.11.0.
 | `packages/scheduler-plugin/test/unit/*` (existing lock tests)                                                                                                         | `interfaces/index.ts` (C4)                                    | unchanged behaviour with the widened `eval` type                                                                                                                                                             |
 | `packages/cli/test/unit/templates/client-dependencies.test.ts` (extended)                                                                                             | `client-dependencies.ts`, `scripts/node-dependency-ranges.ts` | `redis` present and equal in both tables                                                                                                                                                                     |
 | `packages/telemetry-plugin/test/unit/instrumentation-registry.test.ts` (extended), `test/integration/redis-span-real.test.ts` (guarded)                               | telemetry arm                                                 | loader success/absence; dispatch; one real `redis` span from an adapter-driven command                                                                                                                       |
+| `packages/diagnostics-plugin/test/unit/*trace-protocol*` (extended)                                                                                                   | `trace-protocol.ts`                                           | a batch whose instrumentations include `redis` is accepted                                                                                                                                                   |
 | `packages/cli/test/unit/{flags,broker-flags,new-interactive,commands/add,workspace/manifest,workspace/transport,full-stack-template,plugin-args}.test.ts` (extended)  | CLI files in §5                                               | flag acceptance/refusals; prompt only after a Redis choice; node-redis literals per plugin as data; `externalImports` order; manifest `redisClient` parse/write; ioredis output unchanged                    |
 | `packages/cli/test/e2e/{broker-scaffold,full-stack-broker,workspace-mesh}-e2e.test.ts` (extended, guarded)                                                            | generated projects                                            | node-redis variant installs, type-checks, boots on real Redis, endpoints answer as for ioredis                                                                                                               |
 
