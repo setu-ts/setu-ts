@@ -21,7 +21,6 @@ import {
 
 /** The Node server surface used by the diagnostics listener. @internal */
 export interface NodeListenerServer {
-  maxConnections: number;
   maxRequestsPerSocket: number | null;
   listen(port: number, hostname: string): unknown;
   once(event: 'listening', listener: () => void): unknown;
@@ -35,6 +34,11 @@ export interface NodeListenerServer {
   on(
     event: 'connect' | 'upgrade',
     listener: (request: IncomingMessage, socket: Socket) => void,
+  ): unknown;
+  on(event: 'connection', listener: (socket: Socket) => void): unknown;
+  on(
+    event: 'checkContinue' | 'checkExpectation',
+    listener: (request: IncomingMessage, response: ServerResponse) => void,
   ): unknown;
   address(): AddressInfo | string | null;
   close(callback: (error?: Error) => void): unknown;
@@ -50,7 +54,11 @@ export interface NodeListenerHost {
   writeStderr?: (message: string) => void;
 }
 
-/** Explicit parser, timeout and connection budgets for the private server. @internal */
+/**
+ * Explicit parser and timeout budgets; maxConnections is the listener-owned
+ * oldest-idle eviction cap, never assigned to Node's server.maxConnections.
+ * @internal
+ */
 export const NODE_LISTENER_SERVER_OPTIONS: Readonly<{
   requireHostHeader: boolean;
   insecureHTTPParser: boolean;
@@ -170,10 +178,52 @@ export class NodeLocalDiagnosticsListenerFactory implements ILocalDiagnosticsLis
       throw new Error(INVALID_PORT_ERROR);
     }
     if (this.#active !== null) throw new Error(LISTENER_ALREADY_ACTIVE_ERROR);
-    const server = this.#host.createServer(NODE_LISTENER_SERVER_OPTIONS, (request, response) => {
+    // Map insertion order is idle recency; a count protects pipelined responses
+    // from becoming evictable while any response is still being served.
+    const sockets = new Map<Socket, number>();
+    const handleRequest = (request: IncomingMessage, response: ServerResponse): void => {
+      const socket = request.socket;
+      const busy = sockets.get(socket);
+      if (busy !== undefined) {
+        sockets.set(socket, busy + 1);
+        const completed = (): void => {
+          response.removeListener('finish', completed);
+          response.removeListener('close', completed);
+          const pending = sockets.get(socket);
+          // The peer may have closed before this response completed.
+          if (pending === undefined) return;
+          sockets.delete(socket);
+          sockets.set(socket, pending - 1);
+        };
+        response.once('finish', completed);
+        response.once('close', completed);
+      }
       void this.#handle(request, response, options);
+    };
+    const server = this.#host.createServer(NODE_LISTENER_SERVER_OPTIONS, handleRequest);
+    server.on('connection', (socket) => {
+      if (sockets.size >= NODE_LISTENER_SERVER_OPTIONS.maxConnections) {
+        let oldestIdle: Socket | undefined;
+        for (const [candidate, busy] of sockets) {
+          if (busy === 0) {
+            oldestIdle = candidate;
+            break;
+          }
+        }
+        if (oldestIdle === undefined) {
+          socket.destroy();
+          return;
+        }
+        sockets.delete(oldestIdle);
+        oldestIdle.destroy();
+      }
+      sockets.set(socket, 0);
+      socket.once('close', () => sockets.delete(socket));
     });
-    server.maxConnections = NODE_LISTENER_SERVER_OPTIONS.maxConnections;
+    // Suppress Node's automatic interim 100 and 417 replies: both Expect
+    // events take exactly the same framing, mapping and response path.
+    server.on('checkContinue', handleRequest);
+    server.on('checkExpectation', handleRequest);
     server.maxRequestsPerSocket = NODE_LISTENER_SERVER_OPTIONS.maxRequestsPerSocket;
     // Node dispatches these outside the request callback and detaches their
     // parsers. Refuse them explicitly and close even a peer that never sends EOF.

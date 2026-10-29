@@ -77,6 +77,16 @@ class FakeResponse extends EventEmitter {
   }
 }
 
+/** A socket whose lifecycle can be driven without binding a real listener. */
+class FakeSocket extends EventEmitter {
+  readonly remoteAddress = '127.0.0.1';
+  destroyed = false;
+  destroy(): void {
+    this.destroyed = true;
+    this.emit('close');
+  }
+}
+
 function fixture(server = new FakeServer()) {
   let handler: (request: IncomingMessage, response: ServerResponse) => void;
   let created: ServerOptions | undefined;
@@ -97,6 +107,17 @@ function fixture(server = new FakeServer()) {
     host,
     factory: new NodeLocalDiagnosticsListenerFactory(host),
     options: () => created,
+    dispatch(socket: FakeSocket, response = new FakeResponse()): FakeResponse {
+      const request = {
+        url: '/v1/status',
+        method: 'GET',
+        rawHeaders: ['Host', '127.0.0.1:4919'],
+        headers: { host: '127.0.0.1:4919' },
+        socket,
+      } as unknown as IncomingMessage;
+      handler(request, response as unknown as ServerResponse);
+      return response;
+    },
     async request(
       url: string | undefined = '/v1/status',
       rawHeaders: string[] = ['Host', '127.0.0.1:4919'],
@@ -155,7 +176,7 @@ describe('Node local diagnostics listener lifecycle', () => {
       maxRequestsPerSocket: 0,
       maxConnections: 32,
     });
-    expect(f.server.maxConnections).toBe(32);
+    expect(f.server.maxConnections).toBe(0); // Admission is listener-owned, never Node's hard cap.
     expect(f.server.maxRequestsPerSocket).toBe(0);
     expect(f.server.binds).toEqual([[4919, '127.0.0.1']]);
     expect(f.server.listenerCount('error')).toBe(0);
@@ -302,6 +323,184 @@ describe('Node local diagnostics listener lifecycle', () => {
     const factory = createLocalDiagnosticsListenerFactory('node', undefined, f.host);
     await (await factory.listen(options)).close();
   });
+});
+
+describe('Node diagnostics socket admission', () => {
+  /** Drives connection arrival in a defined order, independent of any OS scheduler. */
+  function arrive(server: FakeServer, count = 1): FakeSocket[] {
+    return Array.from({ length: count }, () => {
+      const socket = new FakeSocket();
+      server.emit('connection', socket);
+      return socket;
+    });
+  }
+
+  it('evicts idle sockets in arrival order and admits each newcomer', async () => {
+    const f = fixture();
+    await f.factory.listen(options);
+    try {
+      const original = arrive(f.server, 32);
+      const [first] = arrive(f.server);
+      expect(original.map((socket) => socket.destroyed)).toEqual([true, ...Array(31).fill(false)]);
+      const [second] = arrive(f.server);
+      expect(original.map((socket) => socket.destroyed)).toEqual([
+        true,
+        true,
+        ...Array(30).fill(false),
+      ]);
+      expect(first!.destroyed).toBe(false);
+      expect(second!.destroyed).toBe(false);
+    } finally {
+      await f.factory.closeActive();
+    }
+  });
+
+  it('never evicts a busy socket even when it is the oldest', async () => {
+    const f = fixture();
+    await f.factory.listen(options);
+    try {
+      const sockets = arrive(f.server, 32);
+      const response = f.dispatch(sockets[0]!);
+      arrive(f.server);
+      expect(sockets[0]!.destroyed).toBe(false);
+      expect(sockets[1]!.destroyed).toBe(true);
+      await response.done.promise;
+      response.emit('finish');
+    } finally {
+      await f.factory.closeActive();
+    }
+  });
+
+  it('destroys the newcomer only when all 32 sockets are busy', async () => {
+    const f = fixture();
+    await f.factory.listen(options);
+    try {
+      const sockets = arrive(f.server, 32);
+      const responses = sockets.map((socket) => f.dispatch(socket));
+      const [extra] = arrive(f.server);
+      expect(extra!.destroyed).toBe(true);
+      expect(sockets.every((socket) => !socket.destroyed)).toBe(true);
+      await Promise.all(responses.map((response) => response.done.promise));
+      for (const response of responses) response.emit('finish');
+      const [retry] = arrive(f.server);
+      expect(retry!.destroyed).toBe(false);
+      expect(sockets[0]!.destroyed).toBe(true);
+    } finally {
+      await f.factory.closeActive();
+    }
+  });
+
+  for (const event of ['finish', 'close'] as const) {
+    it(`moves a socket to the back exactly once on response ${event}`, async () => {
+      const f = fixture();
+      await f.factory.listen(options);
+      try {
+        const sockets = arrive(f.server, 32);
+        const response = f.dispatch(sockets[0]!);
+        await response.done.promise;
+        response.emit(event);
+        // A second response lifecycle event must not decrement busy state twice.
+        response.emit(event === 'finish' ? 'close' : 'finish');
+        expect(response.listenerCount('finish')).toBe(0);
+        expect(response.listenerCount('close')).toBe(0);
+        arrive(f.server);
+        expect(sockets[0]!.destroyed).toBe(false);
+        expect(sockets[1]!.destroyed).toBe(true);
+      } finally {
+        await f.factory.closeActive();
+      }
+    });
+  }
+
+  it('keeps a pipelined socket busy until every response has finished or closed', async () => {
+    const f = fixture();
+    await f.factory.listen(options);
+    try {
+      const sockets = arrive(f.server, 32);
+      const first = f.dispatch(sockets[0]!);
+      const second = f.dispatch(sockets[0]!);
+      await Promise.all([first.done.promise, second.done.promise]);
+      first.emit('finish');
+      first.emit('close');
+      arrive(f.server);
+      expect(sockets[0]!.destroyed).toBe(false);
+      expect(sockets[1]!.destroyed).toBe(true);
+      second.emit('close');
+      arrive(f.server);
+      expect(sockets[0]!.destroyed).toBe(false);
+      expect(sockets[2]!.destroyed).toBe(true);
+    } finally {
+      await f.factory.closeActive();
+    }
+  });
+
+  it('removes a closed socket and never resurrects it when its response later completes', async () => {
+    const f = fixture();
+    await f.factory.listen(options);
+    try {
+      const sockets = arrive(f.server, 32);
+      const response = f.dispatch(sockets[0]!);
+      sockets[0]!.destroy();
+      await response.done.promise;
+      response.emit('finish');
+      const [replacement] = arrive(f.server);
+      expect(replacement!.destroyed).toBe(false);
+      expect(sockets.slice(1).every((socket) => !socket.destroyed)).toBe(true);
+      arrive(f.server);
+      expect(sockets[1]!.destroyed).toBe(true);
+    } finally {
+      await f.factory.closeActive();
+    }
+  });
+
+  for (const [event, expectation] of [
+    ['checkContinue', '100-continue'],
+    ['checkExpectation', 'CANARY-token'],
+  ] as const) {
+    it(`routes ${event} through ordinary mapping, busy tracking and protocol refusals`, async () => {
+      const f = fixture();
+      const seen: IRequest[] = [];
+      await f.factory.listen({
+        ...options,
+        handler: (request) => {
+          seen.push(request);
+          return diagnosticsResponse();
+        },
+      });
+      try {
+        expect(f.server.listenerCount(event)).toBe(1);
+        const sockets = arrive(f.server, 32);
+        const request = {
+          url: '/v1/status',
+          method: 'GET',
+          socket: sockets[0],
+          rawHeaders: ['Host', '127.0.0.1:4919', 'Expect', expectation],
+          headers: { host: '127.0.0.1:4919' },
+        } as unknown as IncomingMessage;
+        const response = new FakeResponse();
+        f.server.emit(event, request, response);
+        arrive(f.server);
+        expect(sockets[0]!.destroyed).toBe(false);
+        expect(sockets[1]!.destroyed).toBe(true);
+        await response.done.promise;
+        expect(response.status).toBe(200);
+        expect(seen[0]!.headers.get('expect')).toBe(expectation);
+        expect(new TextDecoder().decode(response.bytes)).toBe('served');
+        response.emit('finish');
+        const refused = new FakeResponse();
+        f.server.emit(event, { ...request, url: '*' }, refused);
+        await refused.done.promise;
+        expect(refused.status).toBe(400);
+        expect(new TextDecoder().decode(refused.bytes)).toBe(
+          '{"version":1,"error":"invalid-request"}',
+        );
+        expect(seen).toHaveLength(1);
+        refused.emit('close');
+      } finally {
+        await f.factory.closeActive();
+      }
+    });
+  }
 });
 
 describe('Node local diagnostics request mapping table', () => {

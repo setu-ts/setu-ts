@@ -159,10 +159,15 @@ reason.
 
 The M126 Node transport adds raw singleton-line checks and retains the original request-target
 beside the native request. Its bind address is checked after listening; an unexpected address is
-closed and rejected. The private server caps connections at 32, headers at 16 KiB, header time at 5
-s and request time at 10 s, with a 1 s checking interval. Parser failures share one fixed empty
-`400`, and close destroys active connections. These transport obligations supplement the protocol
-bounds below; they do not claim that the two runtimes' parsers accept identical inputs.
+closed and rejected. At its 32-socket budget, the private server admits a newcomer by destroying the
+oldest non-busy socket, including held partial requests and idle keep-alive sockets. Busy sockets
+remain protected until all their responses finish or close, when they move to the back; only an
+all-busy budget refuses the newcomer. This preserves a bound without letting 32 idle sockets lock
+out the paired client. Headers remain bounded at 16 KiB, header time at 5 s and request time at 10
+s, with a 1 s checking interval. Parser failures share one fixed empty `400`, Expect requests take
+the ordinary handler path without interim `100 Continue` or native `417`, and close destroys active
+connections. These transport obligations supplement the protocol bounds below; they do not claim
+that the two runtimes' parsers accept identical inputs.
 
 The audit drives each of these at the real surface — the RuntimePlugin listener on a real loopback
 socket, the real connector and the real native client — with a positive control beside every

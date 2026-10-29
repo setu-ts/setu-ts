@@ -17,12 +17,26 @@ interface ConformanceRow {
   node: Outcome;
 }
 
-// Expectations come from plan §1a and §3.2–§3.3. They await an outside-sandbox
+// Expectations come from plan §1a, §3.2–§3.3 and §3.14. They await an outside-sandbox
 // run on both runtimes; a discrepancy is investigated, never copied into this table.
 const rows: readonly ConformanceRow[] = [
   {
     name: 'canonical request',
     request: (p) => `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${p}\r\nConnection: close\r\n\r\n`,
+    deno: 'served',
+    node: 'served',
+  },
+  {
+    name: 'Expect: 100-continue',
+    request: (p) =>
+      `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${p}\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n`,
+    deno: 'served',
+    node: 'served',
+  },
+  {
+    name: 'Expect: CANARY-token',
+    request: (p) =>
+      `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${p}\r\nExpect: CANARY-token\r\nConnection: close\r\n\r\n`,
     deno: 'served',
     node: 'served',
   },
@@ -160,6 +174,8 @@ describe('Local diagnostics transport conformance — plan §1a', () => {
                 : 'unexpected-response';
         expect(measured, `Conformance discrepancy on ${runtime}: ${row.name}`).toBe(expected);
         expect(response.raw).not.toContain('CANARY');
+        expect(response.raw).not.toContain('100 Continue');
+        expect(response.raw).not.toContain('417');
         if (expected === 'served') {
           expect(response.status).toBe(200);
           expect(response.body).toBe('served');

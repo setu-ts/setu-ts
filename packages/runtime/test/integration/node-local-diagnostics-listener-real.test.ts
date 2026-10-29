@@ -38,6 +38,39 @@ async function start() {
   return { port, factory, listener };
 }
 
+/** Counts usable server sockets after synchronous connection admission has run. */
+function countedConnections() {
+  const sockets = new Set<Socket>();
+  const arrivals: Socket[] = [];
+  const full = Promise.withResolvers<void>();
+  let peak = 0;
+  const open = (): number => [...sockets].filter((socket) => !socket.destroyed).length;
+  const sample = (): void => {
+    peak = Math.max(peak, open());
+  };
+  const host: NodeListenerHost = {
+    createServer(options, handler) {
+      const server = createServer(options, handler);
+      server.on('connection', (socket) => {
+        sockets.add(socket);
+        arrivals.push(socket);
+        socket.once('close', () => {
+          sockets.delete(socket);
+          sample();
+        });
+        // destroy() closes a socket synchronously; its close event follows later.
+        // Observe after the listener's admission callback, excluding destroyed
+        // sockets awaiting close, rather than counting them as still open.
+        queueMicrotask(sample);
+        if (arrivals.length === 32) full.resolve();
+      });
+      return server;
+    },
+    writeStderr() {},
+  };
+  return { host, arrivals, full: full.promise, open, peak: () => peak };
+}
+
 describe('Node diagnostics listener — real sockets', () => {
   it('binds only IPv4 loopback and exposes exactly close', async () => {
     let address: unknown;
@@ -247,20 +280,10 @@ describe('Node diagnostics listener — real sockets', () => {
     }
   });
 
-  it('closes a 33rd connection without accepting it into the server', async () => {
+  it('evicts the oldest idle socket and serves the 33rd connection without exceeding 32 open sockets', async () => {
     const port = await unusedPort();
-    const full = Promise.withResolvers<void>();
-    let accepted = 0;
-    const factory = new NodeLocalDiagnosticsListenerFactory({
-      createServer(options, handler) {
-        const server = createServer(options, handler);
-        server.on('connection', () => {
-          accepted++;
-          if (accepted === 32) full.resolve();
-        });
-        return server;
-      },
-    });
+    const counted = countedConnections();
+    const factory = new NodeLocalDiagnosticsListenerFactory(counted.host);
     const listener = await factory.listen({
       port,
       handler: () => diagnosticsResponse(),
@@ -268,25 +291,87 @@ describe('Node diagnostics listener — real sockets', () => {
     });
     const sockets: Socket[] = [];
     try {
-      sockets.push(...(await Promise.all(Array.from({ length: 32 }, () => connected(port)))));
-      await full.promise;
-      const extra = createConnection({ host: '127.0.0.1', port });
-      sockets.push(extra);
-      await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          extra.destroy();
-          reject(new Error('33rd connection remained open'));
-        }, 1_000);
-        extra.once('error', () => {}); // A reset is a valid refusal of this extra connection.
-        extra.once('close', () => {
-          clearTimeout(timer);
-          resolve();
-        });
-      });
-      expect(accepted).toBe(32);
+      for (let index = 0; index < 32; index++) {
+        const socket = await connected(port);
+        socket.resume();
+        sockets.push(socket);
+      }
+      await counted.full;
+      expect(counted.open()).toBe(32);
+      const oldestClosed = new Promise<void>((resolve) =>
+        sockets[0]!.once('close', () => resolve()),
+      );
+      const served = await exchangeDiagnosticsWire(
+        port,
+        `GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nConnection: close\r\n\r\n`,
+      );
+      await oldestClosed;
+      expect(served.status).toBe(200);
+      expect(served.body).toBe('served');
+      expect(sockets[0]!.destroyed).toBe(true);
+      expect(sockets.slice(1).every((socket) => !socket.destroyed)).toBe(true);
+      expect(counted.arrivals).toHaveLength(33);
+      expect(counted.peak()).toBe(32);
     } finally {
       await listener.close();
       for (const socket of sockets) socket.destroy();
+    }
+  });
+
+  it('serves eight consecutive real-client snapshots through DiagnosticsPlugin while 32 partial requests are held', async () => {
+    const counted = countedConnections();
+    const factory = new NodeLocalDiagnosticsListenerFactory(counted.host);
+    const port = await unusedPort();
+    const sessionId = 'a'.repeat(32);
+    const sessionKey = new Uint8Array(32).map((_, index) => index);
+    const app = createApplication({
+      diagnostics: {},
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'flood-counted-local-listener',
+          version: '1.0.0',
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER, factory, {
+              override: true,
+            });
+            ctx.lifecycle.onClose(() => factory.closeActive());
+          },
+        },
+        DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs: 30_000 }),
+      ],
+    });
+    const client = createDiagnosticsClient({
+      endpoint: `http://127.0.0.1:${port}`,
+      sessionId,
+      sessionKey,
+      subtle: crypto.subtle,
+      fetch,
+      timing: { setTimeout, clearTimeout },
+    });
+    const held: Socket[] = [];
+    try {
+      await app.start();
+      for (let index = 0; index < 32; index++) {
+        const socket = await connected(port);
+        socket.resume();
+        socket.write(`GET /v1/status HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n`);
+        held.push(socket);
+      }
+      await counted.full;
+      expect(counted.open()).toBe(32);
+      for (let index = 0; index < 8; index++) {
+        expect((await client.snapshot()).state, `snapshot ${index + 1} of 8`).toBe('running');
+      }
+      expect(counted.arrivals.length).toBeGreaterThan(32);
+      expect(counted.arrivals[0]!.destroyed).toBe(true);
+      expect(counted.peak()).toBe(32);
+      expect(counted.open()).toBeLessThanOrEqual(32);
+    } finally {
+      client.close();
+      for (const socket of held) socket.destroy();
+      await app.stop();
+      await factory.closeActive();
     }
   });
 

@@ -11,7 +11,8 @@ All notable changes to this project are documented here. The format follows
 - **Local diagnostics on Node (M126, `@setu-ts/runtime`).** The explicitly activated diagnostics
   connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http` server.
   Request-target spellings are preserved, duplicate singleton lines are refused, parser errors
-  answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open connections.
+  answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open connections;
+  the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary request path.
   Bun and Workers continue to refuse this transport.
 
 - **Styled app shells and views (M123, #517, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds include
