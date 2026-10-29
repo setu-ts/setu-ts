@@ -200,12 +200,13 @@ rolls out; or `build-<UTC timestamp>` outside git). `--registry <prefix>` names 
   to `kubectl rollout restart`. `--force-conflicts` takes over keys another writer set in
   `<member>-env`; keys only that writer owns are left in place, so remove them by hand (or delete
   the Secret once) when moving an existing Secret to deploy. Compose follows a symbolic link at
-  `apps/<member>/.env`, so `setu check` refuses one — run it before `docker compose up` on a branch
-  you did not write. Values files, `.env.example` and `k8s/members.yaml` are read only as regular
-  files of at most 1 MiB inside the workspace — never through a symbolic link — and a values file is
-  refused when git cannot confirm it is uncommitted (a missing `git` included; outside a repository
-  there is nothing to commit). kubectl's message for a failed Secret apply is never printed, because
-  it can quote the values.
+  `apps/<member>/.env`, so `setu check` refuses one. That is the only part of Compose it checks: a
+  branch can also edit `docker/compose.yaml` to name any host file, so review a branch's `docker/`
+  changes before running `docker compose up` on it. Values files, `.env.example` and
+  `k8s/members.yaml` are read only as regular files of at most 1 MiB inside the workspace — never
+  through a symbolic link — and a values file is refused when git cannot confirm it is uncommitted
+  (a missing `git` included; outside a repository there is nothing to commit). kubectl's message for
+  a failed Secret apply is never printed, because it can quote the values.
 - **Where images go.** The context is `--context` or the current one. A `kind-<cluster>` context
   loads each image into that cluster; any other context needs `--registry`, and the images are
   pushed there.

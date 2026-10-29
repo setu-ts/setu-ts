@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { spawn } from 'node:child_process';
 
-import { COMMAND_NOT_FOUND, createCommandRunner } from '../../../src/utils/run-command.ts';
+import {
+  childEnvironment,
+  COMMAND_NOT_FOUND,
+  createCommandRunner,
+} from '../../../src/utils/run-command.ts';
 
 const run = createCommandRunner();
 const node = process.execPath;
@@ -46,6 +50,24 @@ describe('createCommandRunner (real children)', () => {
       { cwd: process.cwd(), env: { LC_ALL: 'C' } },
     );
     expect(result.stdout).toBe('C:path');
+  });
+
+  it('removes inherited variables by prefix before adding env', async () => {
+    process.env['GIT_DIR_M122_PROBE'] = '/elsewhere';
+    try {
+      const result = await run(
+        node,
+        [
+          '-e',
+          "process.stdout.write(`${process.env.GIT_DIR_M122_PROBE ?? 'gone'}:${process.env.LC_ALL}`)",
+        ],
+        { cwd: process.cwd(), env: { LC_ALL: 'C' }, unsetPrefixes: ['GIT_'] },
+      );
+      expect(result.stdout).toBe('gone:C');
+    } finally {
+      delete process.env['GIT_DIR_M122_PROBE'];
+    }
+    expect(childEnvironment({ cwd: '/' })).toBeUndefined();
   });
 
   it('streams to the terminal instead of capturing', async () => {

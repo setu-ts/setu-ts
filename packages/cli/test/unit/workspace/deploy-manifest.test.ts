@@ -117,6 +117,38 @@ describe('stampSecretVersion (re-audit N2)', () => {
     expect(again.text.match(/secret-version: '4[23]'/g)).toEqual(["secret-version: '43'"]);
   });
 
+  it('splits on commented separators and refuses ambiguity (audit 3, L2)', () => {
+    const commented = yaml.replace(/^---$/gm, '--- # next object');
+    const stamped = stampSecretVersion(commented, 'portal', '42');
+    expect(stamped.stamped).toBe(true);
+    expect(stamped.text.match(/secret-version: '42'/g)).toHaveLength(1);
+    expect(stamped.text.match(/^--- # next object$/gm)).toHaveLength(
+      commented.match(/^--- # next object$/gm)!.length,
+    );
+    const portal = stamped.text
+      .split(/^---.*$/m)
+      .find((doc) => doc.includes('kind: Deployment') && /^ {2}name: portal$/m.test(doc));
+    expect(portal).toContain("secret-version: '42'");
+
+    // A decoy Deployment with the same name: two owners, so no stamp and the caller falls back.
+    const decoy = `apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: portal\n  namespace: other\nspec:\n  template:\n    metadata:\n      annotations:\n        setu-ts.dev/secret-version: ''\n---\n${yaml}`;
+    expect(stampSecretVersion(decoy, 'portal', '42')).toEqual({ text: decoy, stamped: false });
+
+    // A second slot in the same document (the Deployment's own metadata): ambiguous, refused.
+    const twice = yaml.replace(
+      /(kind: Deployment\nmetadata:\n {2}name: portal\n)/,
+      "$1  annotations:\n        setu-ts.dev/secret-version: ''\n",
+    );
+    expect(stampSecretVersion(twice, 'portal', '42').stamped).toBe(false);
+
+    // A slot at the wrong indent is not the pod template's.
+    const shallow = yaml.replace(
+      /^ {8}setu-ts\.dev\/secret-version/gm,
+      '      setu-ts.dev/secret-version',
+    );
+    expect(stampSecretVersion(shallow, 'portal', '42').stamped).toBe(false);
+  });
+
   it('reports a manifest without the slot, and a member it does not contain', () => {
     const old = yaml.replace(/^ +setu-ts\.dev\/secret-version: ''\n/gm, '');
     expect(stampSecretVersion(old, 'portal', '1')).toEqual({ text: old, stamped: false });

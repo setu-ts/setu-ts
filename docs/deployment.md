@@ -516,7 +516,10 @@ For production, keep the values in a secret manager —
 [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or
 [External Secrets](https://external-secrets.io/) — and have it create the same `<member>-env`
 Secret; the Deployments read it unchanged. The generated Compose stack reads each member's own
-`.env` through an optional `env_file`, so local values apply there too.
+`.env` through an optional `env_file`, so local values apply there too. Compose follows a symbolic
+link there, so `setu check` refuses a linked member `.env`; it does not check `docker/compose.yaml`
+itself, which a branch can edit to name any host file — review a branch's `docker/` changes before
+running `docker compose up` on it.
 
 A registry other than npm pins its tarball URLs in the lockfile: pass
 `--build-arg NPM_CONFIG_REGISTRY=<url>` (and `--network host` for one on `localhost`), with its

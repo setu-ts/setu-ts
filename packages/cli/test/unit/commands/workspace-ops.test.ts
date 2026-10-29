@@ -21,6 +21,7 @@ interface ICall {
   readonly input?: string;
   readonly stream?: boolean;
   readonly env?: Readonly<Record<string, string>>;
+  readonly unsetPrefixes?: readonly string[];
 }
 
 type Responder = (call: ICall) => Partial<RunCommandResult> | undefined;
@@ -91,6 +92,7 @@ function harness(
       ...(opts.input === undefined ? {} : { input: opts.input }),
       ...(opts.stream === undefined ? {} : { stream: opts.stream }),
       ...(opts.env === undefined ? {} : { env: opts.env }),
+      ...(opts.unsetPrefixes === undefined ? {} : { unsetPrefixes: opts.unsetPrefixes }),
     };
     calls.push(call);
     const custom = options.respond?.(call);
@@ -616,6 +618,17 @@ describe('setu workspace deploy', () => {
     }
   });
 
+  it('refuses a resourceVersion it cannot stamp safely (audit 3, L3)', async () => {
+    for (const version of ['', "1'\n        evil.example/x: 'y"]) {
+      const h = harness({
+        respond: (c) => (c.args.includes('--server-side') ? { stdout: version } : undefined),
+      });
+      expect(await h.run(['deploy']), JSON.stringify(version)).toBe(1);
+      expect(h.err.join('\n')).toContain('unexpected resourceVersion for Secret portal-env');
+      expect(h.calls.some((c) => c.input?.includes('kind: Deployment') === true)).toBe(false);
+    }
+  });
+
   it('reports a failed Secret read', async () => {
     const h = harness({
       respond: (c) =>
@@ -647,6 +660,8 @@ describe('setu workspace deploy', () => {
       (c) => c.args[0] === 'ls-files' || c.args[1] === '--is-inside-work-tree',
     )) {
       expect(call.env).toEqual({ LC_ALL: 'C' });
+      // Inherited GIT_DIR, GIT_INDEX_FILE and the like would aim git at another repository.
+      expect(call.unsetPrefixes).toEqual(['GIT_']);
     }
 
     const noGit = harness({
@@ -667,6 +682,11 @@ describe('setu workspace deploy', () => {
         'git could not inspect this workspace (exit 129',
       ],
       [{ code: 0, stdout: 'false\n' }, 'git does not report a work tree here ("false")'],
+      // GIT_DIR's own failure names that directory, not the parent search (audit 3, L1).
+      [
+        { code: 128, stderr: "fatal: not a git repository: '/nonexistent'\n" },
+        'git could not inspect this workspace (exit 128',
+      ],
     ] as const) {
       const h = harness({
         respond: (c) => (c.args[1] === '--is-inside-work-tree' ? answer : undefined),

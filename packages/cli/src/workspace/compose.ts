@@ -462,8 +462,9 @@ ${dependsOn
       - '${port}:${port}'
     # The member's own variables (SESSION_SECRET, …) from its gitignored .env,
     # when it has one. The environment: entries below win over it, so it cannot
-    # redirect a sibling host. Compose follows a link here: on a branch you did not
-    # write, run \`setu check\` (it refuses a linked .env) before \`compose up\`.
+    # redirect a sibling host. Compose follows a link here, and \`setu check\` refuses
+    # a linked member .env; on a branch you did not write, also review its docker/
+    # changes before \`compose up\`, since this file itself can name any host file.
     env_file:
       - path: ../${MEMBERS_DIR}/${name}/.env
         required: false${environmentBlock}${dependsBlock}

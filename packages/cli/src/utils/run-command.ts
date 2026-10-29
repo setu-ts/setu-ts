@@ -27,6 +27,29 @@ export interface RunCommandOptions {
   readonly stream?: boolean;
   /** Variables set for the child on top of this process's environment (`LC_ALL=C` for git). */
   readonly env?: Readonly<Record<string, string>>;
+  /**
+   * Prefixes of inherited variables removed before the child starts. `GIT_` for the
+   * committed-values check: an inherited `GIT_DIR`, `GIT_INDEX_FILE` or
+   * `GIT_CEILING_DIRECTORIES` makes git answer about a different repository (M122 audit 3, L1).
+   */
+  readonly unsetPrefixes?: readonly string[];
+}
+
+/**
+ * The child's environment: this process's, minus any variable with a removed prefix, plus `env`.
+ *
+ * @param options - The command's options
+ * @returns The environment to pass, or `undefined` to inherit it unchanged
+ */
+export function childEnvironment(
+  options: RunCommandOptions,
+): Readonly<Record<string, string | undefined>> | undefined {
+  if (options.env === undefined && options.unsetPrefixes === undefined) return undefined;
+  const prefixes = options.unsetPrefixes ?? [];
+  const inherited = Object.entries(process.env).filter(
+    ([name]) => !prefixes.some((prefix) => name.startsWith(prefix)),
+  );
+  return { ...Object.fromEntries(inherited), ...options.env };
 }
 
 /** What one command produced. */
@@ -63,7 +86,7 @@ export function createCommandRunner(spawnImpl: typeof spawn = spawn): CommandRun
     new Promise((resolve) => {
       const child = spawnImpl(command, [...args], {
         cwd: options.cwd,
-        ...(options.env === undefined ? {} : { env: { ...process.env, ...options.env } }),
+        ...(childEnvironment(options) === undefined ? {} : { env: childEnvironment(options) }),
         stdio: [
           options.input === undefined ? 'ignore' : 'pipe',
           options.stream === true ? 'inherit' : 'pipe',

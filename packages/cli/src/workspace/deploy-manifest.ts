@@ -96,31 +96,49 @@ export function readsMemberSecret(text: string, member: string): boolean {
 /**
  * Writes a member's Secret version into its Deployment's pod-template annotation.
  *
- * Only inside that member's own Deployment document (`kind: Deployment` with `metadata.name` equal
- * to the member), so another member's annotation is never touched. A `members.yaml` written before
- * the annotation existed has no slot; the caller falls back to `kubectl rollout restart`.
+ * Strict, because a misplaced stamp is silent: the rotation would never roll out (audit 3, L2).
+ * The document separator may carry a comment (`--- # x`); exactly one document must be a
+ * Deployment whose top-level `metadata.name` is the member, and it must hold exactly one slot at
+ * the pod template's annotation indent (8 spaces, as generated). Anything else — no slot, two
+ * owning documents, two slots — is reported as not stamped, and the caller falls back to
+ * `kubectl rollout restart`.
  *
  * @param text - The manifest being applied
  * @param member - The member
- * @param version - The Secret's `resourceVersion`
- * @returns The manifest with the slot filled, and whether the slot was found
+ * @param version - The Secret's `resourceVersion`, already validated
+ * @returns The manifest with the slot filled, and whether exactly one slot was filled
  */
 export function stampSecretVersion(
   text: string,
   member: string,
   version: string,
 ): { readonly text: string; readonly stamped: boolean } {
-  const documents = text.split(/^---[ \t]*$/m);
-  const slot = new RegExp(`^([ \\t]*${literal(SECRET_VERSION_ANNOTATION)}:[ \\t]*).*$`, 'm');
+  const separator = /^---(?:[ \t]+#[^\n]*)?[ \t]*$/gm;
+  const pieces: string[] = [];
+  const separators: string[] = [];
+  let last = 0;
+  for (const match of text.matchAll(separator)) {
+    pieces.push(text.slice(last, match.index));
+    separators.push(match[0]);
+    last = match.index + match[0].length;
+  }
+  pieces.push(text.slice(last));
   const own = new RegExp(`^  name:[ \\t]*${literal(member)}[ \\t]*$`, 'm');
-  let stamped = false;
-  const next = documents.map((document) => {
-    if (stamped || !/^kind:[ \t]*Deployment[ \t]*$/m.test(document) || !own.test(document)) {
-      return document;
-    }
-    if (!slot.test(document)) return document;
-    stamped = true;
-    return document.replace(slot, (_line, lead: string) => `${lead}'${version}'`);
-  });
-  return { text: next.join('---'), stamped };
+  const slot = new RegExp(`^( {8}${literal(SECRET_VERSION_ANNOTATION)}:[ \\t]*).*$`, 'gm');
+  const owners = pieces
+    .map((document, index) => ({ document, index }))
+    .filter(
+      ({ document }) => /^kind:[ \t]*Deployment[ \t]*$/m.test(document) && own.test(document),
+    );
+  if (owners.length !== 1) return { text, stamped: false };
+  const owner = owners[0]!;
+  if ([...owner.document.matchAll(slot)].length !== 1) return { text, stamped: false };
+  pieces[owner.index] = owner.document.replace(
+    slot,
+    (_line, lead: string) => `${lead}'${version}'`,
+  );
+  return {
+    text: pieces.map((piece, index) => piece + (separators[index] ?? '')).join(''),
+    stamped: true,
+  };
 }

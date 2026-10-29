@@ -79,6 +79,9 @@ const DNS_LABEL = /^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$/;
 const REGISTRY_PREFIX =
   /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?(:[0-9]+)?(\/[a-z0-9]+([._-][a-z0-9]+)*)*\/?$/;
 
+/** A `resourceVersion` as the API server writes one: opaque, but never empty or punctuated. */
+const RESOURCE_VERSION = /^[0-9A-Za-z._-]{1,64}$/;
+
 /** A Kubernetes label value. */
 const LABEL_VALUE = /^[A-Za-z0-9]([-A-Za-z0-9_.]{0,61}[A-Za-z0-9])?$/;
 
@@ -411,7 +414,8 @@ const GIT_ENV = { LC_ALL: 'C' } as const;
 /**
  * Whether a values file is committed, failing closed (M122 audit F2, re-audit N1). The deploy
  * continues only for a work tree whose `git ls-files` says "not tracked", or for a directory git
- * itself calls "not a git repository". Every other answer refuses: a missing `git`, a repository
+ * itself calls "not a git repository" while searching the parent directories. git runs with every
+ * inherited `GIT_*` variable removed (audit 3, L1). Every other answer refuses: a missing `git`, a repository
  * git declines to read (dubious ownership, `safe.bareRepository`), `GIT_DIR` pointing elsewhere, or
  * `false` from inside a bare repository's directory — each of which made the old "any non-zero exit
  * means no repository" rule deploy a committed file.
@@ -422,13 +426,20 @@ async function trackedByGit(
   workspace: IWorkspace,
   valuesPath: string,
 ): Promise<string | undefined> {
-  const options = { cwd: workspace.dir, env: GIT_ENV };
+  const options = { cwd: workspace.dir, env: GIT_ENV, unsetPrefixes: ['GIT_'] };
   const inside = await workspace.run('git', ['rev-parse', '--is-inside-work-tree'], options);
   if (inside.code === COMMAND_NOT_FOUND) {
     return `git is not installed or not on PATH, so ${valuesPath} cannot be checked for being committed.`;
   }
   if (inside.code !== 0) {
-    if (/not a git repository/.test(inside.stderr)) return undefined;
+    // Only git's own discovery failure: with GIT_DIR set, the message names that directory instead.
+    if (
+      /not a git repository \(or any (of the parent directories|parent up to mount point)/.test(
+        inside.stderr,
+      )
+    ) {
+      return undefined;
+    }
     const reason = inside.stderr.trim().split('\n')[0] ?? '';
     return `git could not inspect this workspace (exit ${inside.code}: ${reason}), so ${valuesPath} cannot be checked for being committed.`;
   }
@@ -813,6 +824,14 @@ export async function runWorkspaceDeploy(
       deps,
     );
     if (after === undefined) return EXIT_ERROR;
+    // Validated before it goes into YAML: an empty or quoted value would stamp nothing, or write
+    // into the pod template (audit 3, L3).
+    if (!RESOURCE_VERSION.test(after.trim())) {
+      deps.error(
+        `kubectl returned an unexpected resourceVersion for Secret ${name}; nothing more was applied.`,
+      );
+      return EXIT_ERROR;
+    }
     const stamp = stampSecretVersion(manifest, secret.member, after.trim());
     manifest = stamp.text;
     if (!stamp.stamped && after.trim() !== before) fallback.push(secret.member);

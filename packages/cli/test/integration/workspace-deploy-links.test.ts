@@ -18,7 +18,7 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { parseArgs } from '../../src/args.ts';
 import { runWorkspaceCommand } from '../../src/commands/workspace.ts';
 import { runCheckCommand } from '../../src/commands/check.ts';
-import type { CommandRunner } from '../../src/utils/run-command.ts';
+import { createCommandRunner, type CommandRunner } from '../../src/utils/run-command.ts';
 import { workspaceK8sFiles } from '../../src/workspace/k8s.ts';
 import {
   renderWorkspaceManifest,
@@ -82,6 +82,9 @@ async function deploy() {
     if (line === 'kubectl config current-context') {
       return Promise.resolve({ code: 0, stdout: 'kind-dev\n', stderr: '' });
     }
+    // A Secret apply answers with its resourceVersion, as the API server does.
+    if (args.includes('--server-side'))
+      return Promise.resolve({ code: 0, stdout: '1', stderr: '' });
     return Promise.resolve({ code: 0, stdout: '', stderr: '' });
   };
   const code = await runWorkspaceCommand(parseArgs(['deploy', '--namespace', 'shop']), {
@@ -194,5 +197,53 @@ describe('setu check refuses a member .env that Compose would follow (re-audit N
     const directory = await check();
     expect(directory.code).toBe(1);
     expect(directory.err).toContain('apps/portal/.env is not a regular file');
+  });
+});
+
+describe('the committed-values check ignores inherited GIT_* variables (audit 3, L1)', () => {
+  it('refuses a committed values file even with GIT_DIR and GIT_INDEX_FILE aimed elsewhere', async () => {
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, stdio: 'pipe' });
+    git('init', '-q');
+    git('config', 'user.email', 'm122@example.test');
+    git('config', 'user.name', 'm122');
+    await nodeFs.mkdir(`${root}/k8s/secrets/portal`, { recursive: true });
+    await nodeFs.writeFile(`${root}/k8s/secrets/portal/.env`, 'SESSION_SECRET=committed\n');
+    git('add', '-A');
+    git('commit', '-qm', 'committed values');
+    const real = createCommandRunner();
+    const runner: CommandRunner = (command, args, options) => {
+      if (command === 'git') return real(command, args, options);
+      if (args.join(' ') === 'config current-context') {
+        return Promise.resolve({ code: 0, stdout: 'kind-dev\n', stderr: '' });
+      }
+      return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+    };
+    const saved = { dir: process.env['GIT_DIR'], index: process.env['GIT_INDEX_FILE'] };
+    process.env['GIT_DIR'] = '/nonexistent-m122';
+    process.env['GIT_INDEX_FILE'] = `${outside}/empty-index`;
+    const err: string[] = [];
+    try {
+      const code = await runWorkspaceCommand(
+        parseArgs(['deploy', '--namespace', 'shop', '--tag', 'v1']),
+        {
+          fs,
+          cwd: root,
+          log: () => {},
+          error: (m) => err.push(m),
+          now: () => 0,
+          runCommand: runner,
+        },
+      );
+      expect(code).toBe(1);
+      expect(err.join('\n')).toContain('k8s/secrets/portal/.env is tracked by git');
+    } finally {
+      for (const [name, value] of [
+        ['GIT_DIR', saved.dir],
+        ['GIT_INDEX_FILE', saved.index],
+      ] as const) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
   });
 });
