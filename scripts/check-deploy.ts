@@ -1505,9 +1505,9 @@ async function checkWorkspace(clusterModeFollows: boolean): Promise<CheckOutcome
       return 'failed';
     }
     // The stamp alone rolls portal out: kubectl's read-back of the pod template must show it, so
-    // the restart fallback never runs here (audit 4, A4-1 — a misread read-back would restart on
-    // every deploy).
-    if (redeployed.stdout.includes('restarted deployment/')) {
+    // the patch path never runs here (audit 4, A4-1 — a misread read-back would patch on every
+    // deploy).
+    if (redeployed.stdout.includes('rolled out deployment/')) {
       console.error(
         `  ✗ deploy fell back to a restart although the stamp applied\n${redeployed.stdout}`,
       );

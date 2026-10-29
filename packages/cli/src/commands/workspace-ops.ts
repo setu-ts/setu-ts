@@ -631,37 +631,6 @@ function templateVersion(json: string): string | undefined {
   }
 }
 
-/** Reads a Secret's resourceVersion, or `''` when it does not exist yet. */
-async function secretVersion(
-  workspace: IWorkspace,
-  context: string,
-  namespace: string,
-  name: string,
-  deps: WorkspaceOpsDependencies,
-): Promise<string | undefined> {
-  const result = await workspace.run(
-    'kubectl',
-    [
-      '--context',
-      context,
-      '-n',
-      namespace,
-      'get',
-      'secret',
-      name,
-      '--ignore-not-found',
-      '-o',
-      'jsonpath={.metadata.resourceVersion}',
-    ],
-    { cwd: workspace.dir },
-  );
-  if (result.code !== 0) {
-    reportFailure(deps, 'kubectl', `Reading Secret ${name}`, result.code, result.stderr);
-    return undefined;
-  }
-  return result.stdout.trim();
-}
-
 /** Parses the options only deploy reads. */
 function deployOptions(
   args: ParsedArgs,
@@ -788,7 +757,7 @@ export async function runWorkspaceDeploy(
     }
     deps.log(`  would apply: ${MEMBERS_FILE} with the namespace and images filled in`);
     deps.log(
-      "  would roll out: each member whose Secret version changes (its pod template's setu-ts.dev/secret-version)",
+      "  would roll out: each member whose pod template does not carry its Secret's current version",
     );
     for (const member of images.keys()) {
       deps.log(`  would wait: rollout of deployment/${member} (timeout ${deploy.timeout})`);
@@ -822,18 +791,13 @@ export async function runWorkspaceDeploy(
   }
   // A Secret whose contents changed reaches running pods only through a new rollout: `envFrom` is
   // read at container start, and a rotation on a clean tree keeps both the tag and the manifest
-  // (M122 audit F1). Each member's Secret resourceVersion — which reveals nothing about the values
-  // — is written into its pod template, so a changed Secret changes the template and Kubernetes
-  // rolls out by itself; a deploy re-run after failing part-way still sees the difference
-  // (re-audit N2). A members.yaml from before that annotation existed has no slot: those members
-  // fall back to comparing versions and `kubectl rollout restart`.
+  // (audit F1). Each member's Secret resourceVersion — which reveals nothing about the values — is
+  // written into its pod template's `setu-ts.dev/secret-version` annotation in the manifest
+  // applied, so a changed Secret changes the template and Kubernetes rolls out (re-audit N2).
   let manifest = prepared.text;
-  const fallback: string[] = [];
-  const stamped = new Map<string, string>();
+  const versions = new Map<string, { readonly version: string; readonly stamped: boolean }>();
   for (const secret of secrets) {
     const name = memberSecretName(secret.member);
-    const before = await secretVersion(workspace, ctx, deploy.namespace, name, deps);
-    if (before === undefined) return EXIT_ERROR;
     const after = await applyManifest(
       workspace,
       ctx,
@@ -845,8 +809,8 @@ export async function runWorkspaceDeploy(
       deps,
     );
     if (after === undefined) return EXIT_ERROR;
-    // Validated before it goes into YAML: an empty or quoted value would stamp nothing, or write
-    // into the pod template (audit 3, L3).
+    // Validated before it goes into YAML or a patch: an empty or quoted value would stamp nothing,
+    // or write into the pod template (audit 3, L3).
     if (!RESOURCE_VERSION.test(after.trim())) {
       deps.error(
         `kubectl returned an unexpected resourceVersion for Secret ${name}; nothing more was applied.`,
@@ -855,31 +819,17 @@ export async function runWorkspaceDeploy(
     }
     const stamp = stampSecretVersion(manifest, secret.member, after.trim());
     manifest = stamp.text;
-    if (stamp.stamped) stamped.set(secret.member, after.trim());
-    else if (after.trim() !== before) fallback.push(secret.member);
-  }
-  let existing: ReadonlySet<string> = new Set();
-  if (fallback.length > 0) {
-    const listed = await workspace.run(
-      'kubectl',
-      ['--context', ctx, '-n', deploy.namespace, 'get', 'deployments', '-o', 'name'],
-      { cwd: workspace.dir },
-    );
-    if (listed.code !== 0) {
-      reportFailure(deps, 'kubectl', 'Listing Deployments', listed.code, listed.stderr);
-      return EXIT_ERROR;
-    }
-    existing = new Set(listed.stdout.split('\n').map((line) => line.trim().split('/').pop() ?? ''));
+    versions.set(secret.member, { version: after.trim(), stamped: stamp.stamped });
   }
   if ((await applyManifest(workspace, ctx, { manifest, what: MEMBERS_FILE }, deps)) === undefined) {
     return EXIT_ERROR;
   }
-  // The stamp is a text edit, so the cluster is asked what it now holds (audit 4, A4-1). A stamped
-  // member whose applied pod template does not carry its Secret version — a hand-edited file the
-  // text match misread — is restarted rather than left on the old value. A pre-annotation manifest
-  // restarts a changed member only when its Deployment already existed: a new one reads the Secret.
-  const restart = fallback.filter((name) => existing.has(name));
-  for (const [member, version] of stamped) {
+  // Then the cluster decides, never this run's history (audit 5, A5-1): each member's applied pod
+  // template is read back, and one that does not carry its Secret's current version — a manifest
+  // with no slot, a stamp the text match misplaced, an earlier deploy that failed part-way — gets
+  // it with `kubectl patch`, which rolls the pods. Comparing against the cluster's state makes a
+  // re-run after any failure converge; a template already current is left alone.
+  for (const [member, { version, stamped }] of versions) {
     const read = await workspace.run(
       'kubectl',
       [
@@ -898,25 +848,41 @@ export async function runWorkspaceDeploy(
       reportFailure(deps, 'kubectl', `Reading deployment/${member}`, read.code, read.stderr);
       return EXIT_ERROR;
     }
-    if (templateVersion(read.stdout) !== version) restart.push(member);
-  }
-  for (const member of restart) {
-    const restarted = await workspace.run(
+    if (templateVersion(read.stdout) === version) continue;
+    const patch = JSON.stringify({
+      spec: { template: { metadata: { annotations: { [SECRET_VERSION_ANNOTATION]: version } } } },
+    });
+    const patched = await workspace.run(
       'kubectl',
-      ['--context', ctx, '-n', deploy.namespace, 'rollout', 'restart', `deployment/${member}`],
+      [
+        '--context',
+        ctx,
+        '-n',
+        deploy.namespace,
+        'patch',
+        `deployment/${member}`,
+        '--type=merge',
+        '-p',
+        patch,
+      ],
       { cwd: workspace.dir },
     );
-    if (restarted.code !== 0) {
+    if (patched.code !== 0) {
       reportFailure(
         deps,
         'kubectl',
-        `Restarting ${member} for its changed Secret`,
-        restarted.code,
-        restarted.stderr,
+        `Rolling ${member} out for its Secret`,
+        patched.code,
+        patched.stderr,
       );
       return EXIT_ERROR;
     }
-    deps.log(`  restarted deployment/${member}: its Secret changed`);
+    // Accurate per case (audit 5, A5-2): the file has no slot, or its slot did not take effect.
+    deps.log(
+      stamped
+        ? `  rolled out deployment/${member}: the applied pod template did not carry ${SECRET_VERSION_ANNOTATION} as k8s/members.yaml sets it (check that annotation, or an admission policy changing it)`
+        : `  rolled out deployment/${member} for its Secret: k8s/members.yaml has no ${SECRET_VERSION_ANNOTATION} slot (setu generate app regenerates the file with one)`,
+    );
   }
 
   for (const member of images.keys()) {

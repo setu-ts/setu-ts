@@ -506,11 +506,13 @@ precedence. envFrom is read when a container starts, so deploy writes each Secre
 `resourceVersion` into its member's pod-template annotation (`setu-ts.dev/secret-version`): a
 changed Secret changes the template and Kubernetes rolls the member out — a rotation on a clean tree
 keeps the tag and the manifest and would otherwise leave the old value live, and the annotation
-keeps a re-run after a partial failure from losing the rollout. A `members.yaml` from before the
-annotation falls back to `kubectl rollout restart`. Deploy reads the values files, `.env.example`
-and `k8s/members.yaml` only as regular files inside the workspace, never through a symbolic link: a
-branch that replaced `k8s/secrets/<member>` with a link could otherwise load any dotenv file on the
-host into a pod its code runs in.
+keeps a re-run after a partial failure from losing the rollout. After the apply, deploy reads each
+member's pod template back from the cluster and sets the annotation with `kubectl patch` wherever it
+is not current — a `members.yaml` from before the annotation, a hand-edited one, or an earlier
+deploy that failed part-way — so the cluster's state, not the run's history, decides what rolls out.
+Deploy reads the values files, `.env.example` and `k8s/members.yaml` only as regular files inside
+the workspace, never through a symbolic link: a branch that replaced `k8s/secrets/<member>` with a
+link could otherwise load any dotenv file on the host into a pod its code runs in.
 
 For production, keep the values in a secret manager —
 [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets) or

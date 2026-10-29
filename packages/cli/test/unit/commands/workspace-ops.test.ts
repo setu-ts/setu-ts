@@ -83,6 +83,8 @@ function harness(
     ),
   );
   const calls: ICall[] = [];
+  /** Each Deployment's live pod-template `setu-ts.dev/secret-version`, across runs. */
+  const cluster = new Map<string, string>();
   const out: string[] = [];
   const err: string[] = [];
   const runner: CommandRunner = (command, args, opts) => {
@@ -96,6 +98,25 @@ function harness(
     };
     calls.push(call);
     const custom = options.respond?.(call);
+    if (custom === undefined || (custom.code ?? 0) === 0) {
+      if (call.input?.includes('kind: Deployment') === true) {
+        for (const doc of call.input.split(/^---$/m)) {
+          const name = /^ {2}name: (\S+)$/m.exec(doc)?.[1];
+          const slot = /^ {8}setu-ts\.dev\/secret-version: '([^']*)'$/m.exec(doc);
+          if (doc.includes('kind: Deployment') && name !== undefined && slot !== null)
+            cluster.set(name, slot[1]!);
+        }
+      }
+      if (args.includes('patch')) {
+        const member = args
+          .find((arg) => arg.startsWith('deployment/'))!
+          .slice('deployment/'.length);
+        const body = JSON.parse(args[args.indexOf('-p') + 1]!) as {
+          spec: { template: { metadata: { annotations: Record<string, string> } } };
+        };
+        cluster.set(member, body.spec.template.metadata.annotations['setu-ts.dev/secret-version']!);
+      }
+    }
     const fallback = (): Partial<RunCommandResult> => {
       const line = `${command} ${args.join(' ')}`;
       if (line === 'git rev-parse --short HEAD') return { stdout: 'abc1234\n' };
@@ -107,22 +128,17 @@ function harness(
       if (args.includes('get') && args.includes('secret')) return { stdout: '' };
       if (args.includes('--server-side')) return { stdout: '1' };
       if (args.includes('deployments')) return { stdout: '' };
-      // Like the cluster: a Deployment's pod template carries what the last members.yaml apply
-      // stamped into that member's document.
+      // Like the cluster: each Deployment's pod-template annotation is what the last members.yaml
+      // apply set in a slot, or what a later patch set; a document without the slot leaves it.
       if (args.includes('jsonpath={.spec.template.metadata.annotations}')) {
         const member = args
           .find((arg) => arg.startsWith('deployment/'))!
           .slice('deployment/'.length);
-        const applied = [...calls]
-          .reverse()
-          .find((c) => c.input?.includes('kind: Deployment') === true);
-        const doc = applied?.input
-          ?.split(/^---$/m)
-          .find(
-            (d) => d.includes('kind: Deployment') && new RegExp(`^  name: ${member}$`, 'm').test(d),
-          );
-        const version = /setu-ts\.dev\/secret-version: '([^']*)'/.exec(doc ?? '')?.[1] ?? '';
-        return { stdout: JSON.stringify({ 'setu-ts.dev/secret-version': version }) };
+        const version = cluster.get(member);
+        return {
+          stdout:
+            version === undefined ? '' : JSON.stringify({ 'setu-ts.dev/secret-version': version }),
+        };
       }
       return {};
     };
@@ -344,7 +360,6 @@ describe('setu workspace deploy', () => {
       'kind load docker-image orders:abc1234 --name dev',
       'kind load docker-image portal:abc1234 --name dev',
       'kubectl --context kind-dev apply -f -',
-      'kubectl --context kind-dev -n ws get secret portal-env --ignore-not-found -o jsonpath={.metadata.resourceVersion}',
       'kubectl --context kind-dev apply --server-side --field-manager=setu --force-conflicts -o jsonpath={.metadata.resourceVersion} -f -',
       'kubectl --context kind-dev apply -f -',
       'kubectl --context kind-dev -n ws get deployment/portal -o jsonpath={.spec.template.metadata.annotations}',
@@ -554,102 +569,63 @@ describe('setu workspace deploy', () => {
     expect(unset.err.join('\n')).toContain('Pass --context <name>');
   });
 
-  it('rolls a member out by stamping its Secret version, idempotent across retries (F1, N2)', async () => {
-    const versions = (after: string) =>
-      harness({
-        respond: (c) => {
-          if (c.args.includes('get') && c.args.includes('secret')) return { stdout: '41' };
-          if (c.args.includes('--server-side')) return { stdout: after };
-          return undefined;
-        },
-      });
-    const changed = versions('42');
-    expect(await changed.run(['deploy'])).toBe(0);
-    const applied = changed.calls.filter((c) => c.input?.includes('kind: Deployment') === true);
+  it('rolls a member out through its stamped template, and only when the version changes (F1, N2)', async () => {
+    let version = '42';
+    const h = harness({
+      respond: (c) => (c.args.includes('--server-side') ? { stdout: version } : undefined),
+    });
+    expect(await h.run(['deploy'])).toBe(0);
+    const applied = h.calls.filter((c) => c.input?.includes('kind: Deployment') === true);
     expect(applied[0]?.input).toContain("setu-ts.dev/secret-version: '42'");
-    // The template changes, so Kubernetes rolls out by itself: no explicit restart and no listing.
-    expect(
-      changed.calls.some((c) => c.args.includes('restart') || c.args.includes('deployments')),
-    ).toBe(false);
-
-    // A re-run after a failure part-way (version already 42) still writes 42; if the earlier apply
-    // never landed, the template still changes.
-    const rerun = versions('42');
-    expect(await rerun.run(['deploy'])).toBe(0);
-    expect(
-      rerun.calls.find((c) => c.input?.includes('kind: Deployment') === true)?.input,
-    ).toContain("setu-ts.dev/secret-version: '42'");
+    // The stamp took effect, so nothing is patched or restarted.
+    expect(h.calls.some((c) => c.args.includes('patch') || c.args.includes('restart'))).toBe(false);
+    // A rotation changes the stamp the next apply writes; still no patch.
+    version = '43';
+    expect(await h.run(['deploy'])).toBe(0);
+    const reapplied = h.calls.filter((c) => c.input?.includes('kind: Deployment') === true);
+    expect(reapplied.at(-1)?.input).toContain("setu-ts.dev/secret-version: '43'");
+    expect(h.calls.some((c) => c.args.includes('patch'))).toBe(false);
   });
 
-  it('falls back to rollout restart for a members.yaml without the version slot', async () => {
-    const base = harness();
-    const old = base.fs
+  /** members.yaml as written before the version slot existed. */
+  function slotless(h: ReturnType<typeof harness>): string {
+    return h.fs
       .read('/ws/k8s/members.yaml')
       .replace(/^ +# Set by `setu workspace deploy`.*\n/gm, '')
       .replace(/^ +setu-ts\.dev\/secret-version: ''\n/gm, '');
-    const rotate = (before: string, after: string, deployments: string) =>
-      harness({
-        files: { '/ws/k8s/members.yaml': old },
-        respond: (c) => {
-          if (c.args.includes('get') && c.args.includes('secret')) return { stdout: before };
-          if (c.args.includes('--server-side')) return { stdout: after };
-          if (c.args.includes('deployments')) return { stdout: deployments };
-          return undefined;
-        },
-      });
-    const changed = rotate('41', '42', 'deployment.apps/orders\ndeployment.apps/portal\n');
-    expect(await changed.run(['deploy'])).toBe(0);
-    const lines = changed.calls.map(changed.line);
-    const restart = 'kubectl --context kind-dev -n ws rollout restart deployment/portal';
-    expect(lines).toContain(restart);
-    expect(lines.indexOf(restart)).toBeLessThan(
-      lines.indexOf(
-        'kubectl --context kind-dev -n ws rollout status deployment/portal --timeout=120s',
-      ),
+  }
+
+  it('patches a template with no slot, and converges after a failed run (audit 5, A5-1)', async () => {
+    const old = slotless(harness());
+    let failMembers = true;
+    const h = harness({
+      files: { '/ws/k8s/members.yaml': old },
+      respond: (c) => {
+        if (c.args.includes('--server-side')) return { stdout: '7' };
+        if (failMembers && c.input?.includes('kind: Deployment') === true)
+          return { code: 1, stderr: 'denied\n' };
+        return undefined;
+      },
+    });
+    // The members.yaml apply fails after the Secret was rotated: nothing is patched.
+    expect(await h.run(['deploy'])).toBe(1);
+    expect(h.calls.some((c) => c.args.includes('patch'))).toBe(false);
+    // The re-run sees the template lacking the version and patches it — whatever this run saw.
+    failMembers = false;
+    expect(await h.run(['deploy'])).toBe(0);
+    const patches = h.calls.filter((c) => c.args.includes('patch'));
+    expect(patches.map(h.line)).toEqual([
+      'kubectl --context kind-dev -n ws patch deployment/portal --type=merge -p {"spec":{"template":{"metadata":{"annotations":{"setu-ts.dev/secret-version":"7"}}}}}',
+    ]);
+    expect(h.out.join('\n')).toContain(
+      'rolled out deployment/portal for its Secret: k8s/members.yaml has no setu-ts.dev/secret-version slot',
     );
-    expect(lines.some((line) => line.includes('restart deployment/orders'))).toBe(false);
-    expect(changed.out.join('\n')).toContain('restarted deployment/portal: its Secret changed');
-
-    const same = rotate('42', '42', 'deployment.apps/portal\n');
-    expect(await same.run(['deploy'])).toBe(0);
-    expect(same.calls.some((c) => c.args.includes('restart'))).toBe(false);
-
-    // A Deployment this apply creates already reads the new Secret: no restart.
-    const first = rotate('', '7', '');
-    expect(await first.run(['deploy'])).toBe(0);
-    expect(first.calls.some((c) => c.args.includes('restart'))).toBe(false);
-
-    for (const [match, label] of [
-      [(c: ICall) => c.args.includes('deployments'), 'Listing Deployments'],
-      [(c: ICall) => c.args.includes('restart'), 'Restarting portal for its changed Secret'],
-    ] as const) {
-      const h = harness({
-        files: { '/ws/k8s/members.yaml': old },
-        respond: (c) => {
-          if (match(c)) return { code: 1, stderr: 'nope\n' };
-          if (c.args.includes('get') && c.args.includes('secret')) return { stdout: '1' };
-          if (c.args.includes('--server-side')) return { stdout: '2' };
-          if (c.args.includes('deployments')) return { stdout: 'deployment.apps/portal\n' };
-          return undefined;
-        },
-      });
-      expect(await h.run(['deploy']), label).toBe(1);
-      expect(h.err.join('\n')).toContain(`${label} failed (exit 1).`);
-    }
+    // Current now: a third run patches nothing.
+    expect(await h.run(['deploy'])).toBe(0);
+    expect(h.calls.filter((c) => c.args.includes('patch'))).toHaveLength(1);
   });
 
-  it('refuses a resourceVersion it cannot stamp safely (audit 3, L3)', async () => {
-    for (const version of ['', "1'\n        evil.example/x: 'y"]) {
-      const h = harness({
-        respond: (c) => (c.args.includes('--server-side') ? { stdout: version } : undefined),
-      });
-      expect(await h.run(['deploy']), JSON.stringify(version)).toBe(1);
-      expect(h.err.join('\n')).toContain('unexpected resourceVersion for Secret portal-env');
-      expect(h.calls.some((c) => c.input?.includes('kind: Deployment') === true)).toBe(false);
-    }
-  });
-
-  it('restarts a member whose applied template does not carry its stamp (audit 4, A4-1)', async () => {
+  it('patches a stamped member whose applied template lost its version, saying why (A4-1, A5-2)', async () => {
     for (const answer of [
       JSON.stringify({ 'setu-ts.dev/secret-version': '0' }),
       '',
@@ -663,39 +639,39 @@ describe('setu workspace deploy', () => {
             : undefined,
       });
       expect(await h.run(['deploy']), answer).toBe(0);
-      expect(h.calls.map(h.line)).toContain(
-        'kubectl --context kind-dev -n ws rollout restart deployment/portal',
+      expect(
+        h.calls.some((c) => c.args.includes('patch') && c.args.includes('deployment/portal')),
+      ).toBe(true);
+      expect(h.out.join('\n')).toContain(
+        'rolled out deployment/portal: the applied pod template did not carry setu-ts.dev/secret-version as k8s/members.yaml sets it',
       );
+      expect(h.out.join('\n')).not.toContain('its Secret changed');
     }
-    // A matching stamp needs no restart, and only stamped members are read back.
+    // Only members with a Secret are read back.
     const ok = harness();
     expect(await ok.run(['deploy'])).toBe(0);
-    expect(ok.calls.some((c) => c.args.includes('restart'))).toBe(false);
     expect(
       ok.calls
         .filter((c) => c.args.includes('jsonpath={.spec.template.metadata.annotations}'))
         .map((c) => c.args.find((a) => a.startsWith('deployment/'))),
     ).toEqual(['deployment/portal']);
+  });
 
-    const failed = harness({
+  it('fails closed when the read-back or the patch fails', async () => {
+    const read = harness({
       respond: (c) =>
         c.args.includes('jsonpath={.spec.template.metadata.annotations}')
           ? { code: 1, stderr: 'nope\n' }
           : undefined,
     });
-    expect(await failed.run(['deploy'])).toBe(1);
-    expect(failed.err.join('\n')).toContain('Reading deployment/portal failed (exit 1).');
-  });
-
-  it('reports a failed Secret read', async () => {
-    const h = harness({
-      respond: (c) =>
-        c.args.includes('get') && c.args.includes('secret')
-          ? { code: 1, stderr: 'nope\n' }
-          : undefined,
+    expect(await read.run(['deploy'])).toBe(1);
+    expect(read.err.join('\n')).toContain('Reading deployment/portal failed (exit 1).');
+    const patch = harness({
+      files: { '/ws/k8s/members.yaml': slotless(harness()) },
+      respond: (c) => (c.args.includes('patch') ? { code: 1, stderr: 'nope\n' } : undefined),
     });
-    expect(await h.run(['deploy'])).toBe(1);
-    expect(h.err.join('\n')).toContain('Reading Secret portal-env failed (exit 1).');
+    expect(await patch.run(['deploy'])).toBe(1);
+    expect(patch.err.join('\n')).toContain('Rolling portal out for its Secret failed (exit 1).');
   });
 
   it('checks a values file against git failing closed (audit F2)', async () => {
@@ -779,7 +755,9 @@ describe('setu workspace deploy', () => {
     expect(text).toContain('would run: kind load docker-image portal:abc1234 --name dev');
     expect(text).toContain('Secret portal-env with TRUSTED_PROXIES, SESSION_SECRET');
     expect(text).toContain('would wait: rollout of deployment/portal (timeout 120s)');
-    expect(text).toContain('would roll out: each member whose Secret version changes');
+    expect(text).toContain(
+      "would roll out: each member whose pod template does not carry its Secret's current version",
+    );
     expect(text).not.toContain(SECRET);
 
     const pushed = harness({

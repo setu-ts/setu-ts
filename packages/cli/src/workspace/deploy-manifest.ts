@@ -101,8 +101,8 @@ export function readsMemberSecret(text: string, member: string): boolean {
  * split by kubectl's rule (a comment may follow `---`); exactly one document must be a
  * Deployment whose top-level `metadata.name` is the member, and it must hold exactly one slot at
  * the pod template's annotation indent (8 spaces, as generated). Anything else — no slot, two
- * owning documents, two slots — is reported as not stamped, and the caller falls back to
- * `kubectl rollout restart`.
+ * owning documents, two slots — is reported as not stamped; deploy then sets
+ * the annotation with `kubectl patch` after reading the applied template back.
  *
  * @param text - The manifest being applied
  * @param member - The member
