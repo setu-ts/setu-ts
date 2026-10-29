@@ -375,9 +375,19 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         }
 
         const mfa = compiledSignIn.mfa;
+        // One check object serves the service (records) and the strategy
+        // (compares), so both digest the stamp the same way.
+        const sessionStamp =
+          compiledSignIn.sessionStamp === null
+            ? null
+            : { read: compiledSignIn.sessionStamp, subtle: runtime.subtle };
         const authSessionService = new AuthSessionService({
           sessionService,
           now: () => runtime.now(),
+          ...(sessionStamp === null ? {} : { sessionStamp }),
+          ...(compiledSignIn.refreshPrincipal === null
+            ? {}
+            : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
           ...(scoped === null || compiledScoped?.timing.kind !== 'sign-in'
             ? {}
             : {
@@ -417,6 +427,7 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
             ...(compiledSignIn.refreshPrincipal === null
               ? {}
               : { refreshPrincipal: compiledSignIn.refreshPrincipal }),
+            ...(sessionStamp === null ? {} : { sessionStamp }),
           }),
         );
 
