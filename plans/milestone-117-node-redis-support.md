@@ -77,15 +77,17 @@ below are what the plan relies on):
   `packages/*/src` imports `redis`, and `common` gains no dependency. `NodeRedisAdapter` is one
   class instance implementing the UNION of the seven facades' members with ioredis call shapes:
   `get set del exists ping scan zadd zrangebyscore zrem hset hget hdel zcard expire eval xadd xgroup xreadgroup xpending xclaim xinfo xack call publish subscribe unsubscribe on off incr pexpire pttl connect quit disconnect`
-  and a `status` getter. Every command method is `this.#command([NAME, ...args.map(String)])`:
-  arguments become strings exactly as ioredis's `call` would send them, so the server sees
-  byte-identical commands. The methods take rest arguments typed loosely enough
-  (`...args: (string | number)[]`) that the instance is assignable to every facade. Each method
-  declares the return type its facade(s) declare (`del` → `Promise<number>`, `ping` →
-  `Promise<string>`, `xpending` → the facade's tuple array, …; where facades differ the narrowest,
-  and `eval` → `Promise<unknown>` after C4). One compile-time assertion per facade proves
-  assignability, and one against the REAL `redis` types proves a `createClient()` client (default
-  and `RESP: 2` generics) is a `NodeRedisClientLike` (§6).
+  and a `status` getter. Every command method is `this.#command([NAME, ...flatten(args)])`, where an
+  argument is `string | number | undefined | readonly (string | number)[]`: `undefined` is dropped
+  and an array is spread one level (ioredis's own argument rule, which the facades rely on:
+  `set(k, v, ttlMode?, ttlSeconds?)`, `scan(…, matchValue?)`,
+  `xadd(…, data: string | string[], …)`), and numbers become strings, so the server sees the
+  commands ioredis would send. (Amended after Codex run 1: `(string | number)[]` could not accept
+  the facades' optional and array arguments.) Each method declares the return type its facade(s)
+  declare (`del` → `Promise<number>`, `ping` → `Promise<string>`, `xpending` → the facade's tuple
+  array, …; where facades differ the narrowest, and `eval` → `Promise<unknown>` after C4). One
+  compile-time assertion per facade proves assignability, and one against the REAL `redis` types
+  proves a `createClient()` client (default and `RESP: 2` generics) is a `NodeRedisClientLike` (§6).
 - **Why:** all seven facades already take ioredis's shapes, and E2 shows raw `sendCommand` returns
   ioredis's replies for every command they send; one implementation keeps the timeout, RESP3,
   lifecycle and error-listener rules in one place (maintainer decision 2026-10-29).
@@ -143,6 +145,14 @@ below are what the plan relies on):
   node-redis rethrows an unlistened `'error'` event and would crash the process; failures still
   surface through the rejected commands and health. The adapter never removes listeners the user
   attached.
+- **Backplane start (amended after Codex run 1).** The adapter stays lazy — it must never open a
+  socket when `setu.config.ts` is merely imported for command discovery — so an injected publisher
+  that has run no command stays `'wait'`, and the backplane's health (which pings only a `'ready'`
+  client) reported `down`. `IRedisBackplaneClient` gains an optional `connect?(): Promise<unknown>`,
+  and the backplane's `#open` (`redis-backplane.ts:189`) awaits `connect()` on each injected client
+  whose `status === 'wait'` before subscribing. A non-lazy ioredis client is never `'wait'`, so its
+  path is unchanged; a lazy ioredis client now connects at start, which the subscriber's `SUBSCRIBE`
+  already required.
 - **Why:** six consumers call `quit()` on their client and two call `connect()` (§1 ownership row);
   node-redis does not auto-connect and its `connect()` throws on an open client.
 - **Test home:** unit (connect memo; already-open client; quit twice; quit on never-connected;
@@ -243,13 +253,17 @@ below are what the plan relies on):
   nothing is weakened for node-redis. Specifically: messaging redelivery/inbox/outbox/outage and the
   M75 header conformance; backplane cross-instance delivery and outage; queue atomic transitions,
   lease and prefix; cache, scheduler, auth and idempotency read-back and outage. The outage tests
-  assert `503` (and the `down` health indicator) under `docker pause` and `docker stop` for both
-  clients. `redis` `^6` and `ioredis` are dev dependencies of each package whose tests import them;
-  no `src` file imports `redis` or `ioredis` for this. CI already sets `REDIS_URL` for these jobs.
-  The CLI's guarded e2es (`broker-scaffold-e2e`, `full-stack-broker-e2e`, `workspace-mesh-e2e`) gain
-  a node-redis variant for every runtime its ioredis variant covers, which installs, type-checks,
-  boots against real Redis with the generated task's own permissions (E8) and requests the endpoints
-  the ioredis variant requests (health `up`, a message round-trip where that variant has one).
+  keep each suite's EXISTING assertions for every client (amended after Codex run 1: a suite whose
+  app registers no error handler answers the kernel's default `500` for both clients; what it proves
+  is the classified store error, the failure counter and the `down` health indicator, and those hold
+  for node-redis exactly as for ioredis). The Redis inbox/outbox scenarios also need
+  `OUTBOX_POSTGRES_URL` and run with it during verification. `redis` `^6` and `ioredis` are dev
+  dependencies of each package whose tests import them; no `src` file imports `redis` or `ioredis`
+  for this. CI already sets `REDIS_URL` for these jobs. The CLI's guarded e2es
+  (`broker-scaffold-e2e`, `full-stack-broker-e2e`, `workspace-mesh-e2e`) gain a node-redis variant
+  for every runtime its ioredis variant covers, which installs, type-checks, boots against real
+  Redis with the generated task's own permissions (E8) and requests the endpoints the ioredis
+  variant requests (health `up`, a message round-trip where that variant has one).
 - **Why:** ROADMAP deliverable; M75's lesson — a fake's reply nesting hid a dead delivery path.
 - **Test home:** the suites named above.
 
@@ -280,20 +294,21 @@ and pattern). Ships in minor 0.11.0.
 
 ## 5. Implementation files
 
-| File                                                                                                                                                                                                                 | Purpose                                                                                      |
-| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `packages/common/src/redis/node-redis-adapter.ts` (new)                                                                                                                                                              | `fromNodeRedis`, the adapter class, option validation, the command bound, lifecycle          |
-| `packages/common/src/redis/resp3.ts` (new)                                                                                                                                                                           | internal: map-reply normalization (§3.2); NOT exported from `src/index.ts`                   |
-| `packages/common/src/errors/connection-fault.ts`                                                                                                                                                                     | E4 messages and the socket-timeout pattern (§3.6)                                            |
-| `packages/common/src/index.ts`                                                                                                                                                                                       | export `fromNodeRedis`, `NodeRedisClientLike`, `NodeRedisAdapterOptions`, `NodeRedisAdapter` |
-| `packages/telemetry-plugin/src/interfaces/index.ts`, `instrumentation/database-instrumentation.ts`, `instrumentation/instrumentation-registry.ts`, `plugin/telemetry-plugin.ts`, `package.json`                      | the `redis` arm (§3.7); optional peer + dev dependency                                       |
-| `packages/cli/src/flags.ts`, `commands/new.ts`, `commands/new-interactive.ts`, `commands/add.ts`, `commands/app.ts`                                                                                                  | `--redis-client` flag, refusals, prompt, member reads (§3.8)                                 |
-| `packages/cli/src/workspace/transport.ts`, `workspace/manifest.ts`                                                                                                                                                   | node-redis renderings of the Redis arm; `redisClient` field                                  |
-| `packages/cli/src/templates/broker.ts`, `templates/client-dependencies.ts`, `templates/project-files.ts`, `templates/registry.ts`                                                                                    | rendering selection, `redis` range, `externalImports`                                        |
-| `packages/scheduler-plugin/src/interfaces/index.ts`                                                                                                                                                                  | C4: `IRedisLockClient.eval` returns `Promise<unknown>`                                       |
-| `scripts/node-dependency-ranges.ts`                                                                                                                                                                                  | `redis` and `@opentelemetry/instrumentation-redis` ranges (§3.8)                             |
-| `packages/{cache,queue,messaging,realtime-backplane,scheduler,idempotency,auth}-plugin/package.json`                                                                                                                 | `redis` dev dependency for the real-Redis suites                                             |
-| READMEs (common, the seven consumers, telemetry, cli), `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, the messaging/caching/realtime guides under `docs/`, `ROADMAP.md`, `CLAUDE.md` status, `plans/archive/` | docs (§2), status flip and plan archive in this PR                                           |
+| File                                                                                                                                                                                                                 | Purpose                                                                                             |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `packages/common/src/redis/node-redis-adapter.ts` (new)                                                                                                                                                              | `fromNodeRedis`, the adapter class, option validation, the command bound, lifecycle                 |
+| `packages/common/src/redis/resp3.ts` (new)                                                                                                                                                                           | internal: map-reply normalization (§3.2); NOT exported from `src/index.ts`                          |
+| `packages/common/src/errors/connection-fault.ts`                                                                                                                                                                     | E4 messages and the socket-timeout pattern (§3.6)                                                   |
+| `packages/common/src/index.ts`                                                                                                                                                                                       | export `fromNodeRedis`, `NodeRedisClientLike`, `NodeRedisAdapterOptions`, `NodeRedisAdapter`        |
+| `packages/telemetry-plugin/src/interfaces/index.ts`, `instrumentation/database-instrumentation.ts`, `instrumentation/instrumentation-registry.ts`, `plugin/telemetry-plugin.ts`, `package.json`                      | the `redis` arm (§3.7); optional peer + dev dependency                                              |
+| `packages/cli/src/flags.ts`, `commands/new.ts`, `commands/new-interactive.ts`, `commands/add.ts`, `commands/app.ts`                                                                                                  | `--redis-client` flag, refusals, prompt, member reads (§3.8)                                        |
+| `packages/cli/src/workspace/transport.ts`, `workspace/manifest.ts`                                                                                                                                                   | node-redis renderings of the Redis arm; `redisClient` field                                         |
+| `packages/cli/src/templates/broker.ts`, `templates/client-dependencies.ts`, `templates/project-files.ts`, `templates/registry.ts`                                                                                    | rendering selection, `redis` range, `externalImports`                                               |
+| `packages/realtime-backplane-plugin/src/interfaces/index.ts`, `src/transports/redis-backplane.ts`                                                                                                                    | `connect?` on `IRedisBackplaneClient`; `#open` connects an injected `'wait'` client (§3.4, amended) |
+| `packages/scheduler-plugin/src/interfaces/index.ts`                                                                                                                                                                  | C4: `IRedisLockClient.eval` returns `Promise<unknown>`                                              |
+| `scripts/node-dependency-ranges.ts`                                                                                                                                                                                  | `redis` and `@opentelemetry/instrumentation-redis` ranges (§3.8)                                    |
+| `packages/{cache,queue,messaging,realtime-backplane,scheduler,idempotency,auth}-plugin/package.json`                                                                                                                 | `redis` dev dependency for the real-Redis suites                                                    |
+| READMEs (common, the seven consumers, telemetry, cli), `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, the messaging/caching/realtime guides under `docs/`, `ROADMAP.md`, `CLAUDE.md` status, `plans/archive/` | docs (§2), status flip and plan archive in this PR                                                  |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -306,6 +321,7 @@ and pattern). Ships in minor 0.11.0.
 | `packages/common/test/integration/node-redis-adapter-real.test.ts` (guarded `REDIS_URL`)                                                                              | adapter against real Redis                                    | every translated command's reply under RESP3 and RESP2 equals ioredis's for the same command                                                                                                                 |
 | `packages/{cache,queue,messaging,realtime-backplane,scheduler,auth}-plugin/test/integration/*-real.test.ts`, `idempotency-plugin/test/integration/redis-real.test.ts` | the consumers through the adapter                             | the §3.9 two-client tables; reads-back; outage `503` + health `down`                                                                                                                                         |
 | `packages/{each consumer}/test/unit/node-redis-assignable.test.ts`                                                                                                    | type-level                                                    | `const c: <Facade> = fromNodeRedis(fake)` compiles for each of the seven facades                                                                                                                             |
+| `packages/realtime-backplane-plugin/test/unit/redis-backplane.test.ts` (extended)                                                                                     | `transports/redis-backplane.ts`                               | an injected `'wait'` client is connected once at open; a `'ready'` or connect-less client is not; a connect rejection fails open and leaves injected clients as they arrived                                 |
 | `packages/scheduler-plugin/test/unit/*` (existing lock tests)                                                                                                         | `interfaces/index.ts` (C4)                                    | unchanged behaviour with the widened `eval` type                                                                                                                                                             |
 | `packages/cli/test/unit/templates/client-dependencies.test.ts` (extended)                                                                                             | `client-dependencies.ts`, `scripts/node-dependency-ranges.ts` | `redis` present and equal in both tables                                                                                                                                                                     |
 | `packages/telemetry-plugin/test/unit/instrumentation-registry.test.ts` (extended), `test/integration/redis-span-real.test.ts` (guarded)                               | telemetry arm                                                 | loader success/absence; dispatch; one real `redis` span from an adapter-driven command                                                                                                                       |
