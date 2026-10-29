@@ -253,6 +253,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
       case 'g':
         return await runGenerateCommand(rest, {
           fs: deps.fs,
+          ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
           cwd: deps.cwd,
           now: deps.now,
           log: deps.log,

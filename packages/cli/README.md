@@ -285,25 +285,25 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                                                                     | Requires                               |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                                            | —                                      |
-| `module`           | `src/modules/<name>/` — index, service, routes (functional) or controller and module (class-based), schemas (with `validation-plugin`), test and e2e test | —                                      |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                                                                    | — (functional or class-based)          |
-| `service`          | `src/services/<name>.service.ts`                                                                                                                          | —                                      |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                                                                        | —                                      |
-| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                                          | `validation-plugin`                    |
-| `sse`              | `src/controllers/<name>.controller.ts`, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed                 | `sse-plugin`                           |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                                     | `websocket-plugin`                     |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                                     | —                                      |
-| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`; functional + queue wires `QueuePlugin({ processors })`                        | `queue-plugin` in class-based projects |
-| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                                                                           | `auth-plugin`                          |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                                          | `health-plugin`                        |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                                            | `metrics-plugin`                       |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                                        | `cqrs-plugin`                          |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                                            | `cqrs-plugin`                          |
-| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                                          | `events-plugin`                        |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                                                                    | `database-plugin`, `common`            |
+| Schematic          | Emits                                                                                                                                                     | Requires                                                       |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                                            | —                                                              |
+| `module`           | `src/modules/<name>/` — index, service, routes (functional) or controller and module (class-based), schemas (with `validation-plugin`), test and e2e test | —                                                              |
+| `controller`       | `src/controllers/<name>.controller.ts`                                                                                                                    | — (functional or class-based)                                  |
+| `service`          | `src/services/<name>.service.ts`                                                                                                                          | —                                                              |
+| `route`            | `src/controllers/<name>.routes.ts`                                                                                                                        | —                                                              |
+| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                                          | `validation-plugin`                                            |
+| `sse`              | `src/controllers/<name>.controller.ts`, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed                 | `sse-plugin`                                                   |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                                     | `websocket-plugin`                                             |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                                     | —                                                              |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`; functional + queue wires `QueuePlugin({ processors })`                        | `queue-plugin` in class-based or queue-owning starter projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                                                                           | `auth-plugin`                                                  |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                                          | `health-plugin`                                                |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                                            | `metrics-plugin`                                               |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                                        | `cqrs-plugin`                                                  |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                                            | `cqrs-plugin`                                                  |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                                          | `events-plugin`                                                |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                                                                    | `database-plugin`, `common`                                    |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -312,6 +312,24 @@ A decorator barrel is a registration list. When `setu.config.ts` does not refere
 `setu generate` prints the exact line to add — inline `DecoratorPlugin({ <key>: [...<EXPORT>] })`,
 or the `decorators: { <key>: [...<EXPORT>] }` arm of the starter that composes the application. A
 mention in a comment or a string does not count as wired.
+
+In a generated full-stack configuration, `setu add events`, `setu add cqrs` and `setu add queue`
+install the package, create its managed barrel and wire that barrel into the starter's `events`,
+`cqrs` or `queue` arm. The starter already registers those plugins. Queue processors and a selected
+`--queue redis` backend are merged in either add order. Existing properties, spreads, non-literal
+arms and unfamiliar callback shapes are preserved; the CLI prints manual guidance when it cannot
+safely edit them. A job in a starter that owns the queue requires `setu add queue` first; otherwise
+generation refuses before writing and explains that the starter already runs the queue. Functional
+jobs outside a queue-owning starter remain ungated.
+
+Generating a route, controller or module checks React Router's resolved page tree with the project's
+installed `react-router routes --json`. A kernel group that would take precedence over an existing
+page is refused, naming the page file. For example, `setu g route products` conflicts with the
+scaffold's `/products` page. Use another name, or run `setu g module api` followed by
+`setu g route products --module api` to serve `/api/products`. If the local route-tree command is
+unavailable or takes over 15 seconds, generation continues with a notice naming the paths to check
+by hand. This executes the project's route configuration. `setu check` remains a file-reading wiring
+gate: it does not execute React Router or detect a page added after a kernel route.
 
 ### Plugin awareness
 
@@ -669,11 +687,12 @@ Full-stack accepts `new --broker redis --queue redis`, and workspace full-stack 
 `messaging` / `queue` options from their workspace transport. Standalone projects can use
 `setu add messaging --broker redis` or `setu add queue --queue redis`; members use the workspace
 transport and refuse per-member flags. The selected client is installed in runtime dependencies or
-Deno imports. An absent generated full-stack option is inserted; existing values and unfamiliar
-configs receive the exact property to configure manually. With no transport the starter uses memory.
-`add` preserves dotenv files and existing Compose files, prints the connection variable and local
-default, and creates broker Compose files only when the project has none. When `docker/compose.yaml`
-exists without the selected broker's service, it prints the service block to add.
+Deno imports. An absent generated full-stack option is inserted; missing queue transport properties
+can merge with its processors. Existing values and unfamiliar configs receive the exact property to
+configure manually. With no transport the starter uses memory. `add` preserves dotenv files and
+existing Compose files, prints the connection variable and local default, and creates broker Compose
+files only when the project has none. When `docker/compose.yaml` exists without the selected
+broker's service, it prints the service block to add.
 
 `setu add react-router` refuses projects without a full-stack factory or existing ReactRouterPlugin.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a

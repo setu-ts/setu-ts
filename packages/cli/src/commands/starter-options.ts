@@ -130,7 +130,10 @@ function walkTopLevel(object: IReturnedObject, visit: (at: number, depth: number
  * @param key - Starter option to read
  * @returns The property's value text, or undefined when absent or the shape is uncertain
  */
-export function starterOptionValue(source: string, key: 'messaging' | 'queue'): string | undefined {
+export function starterOptionValue(
+  source: string,
+  key: 'messaging' | 'queue' | 'events' | 'cqrs',
+): string | undefined {
   const object = returnedObject(source) ?? callObject(source);
   if (object === undefined) return undefined;
   const property = new RegExp(`^(['"]?)${key}\\1\\s*:`);
@@ -161,7 +164,7 @@ export function starterOptionValue(source: string, key: 'messaging' | 'queue'): 
  */
 export function withStarterOption(
   source: string,
-  key: 'messaging' | 'queue',
+  key: 'messaging' | 'queue' | 'events' | 'cqrs',
   literal: string,
 ): string | undefined {
   const object = returnedObject(source);
@@ -182,4 +185,106 @@ export function withStarterOption(
   const indent = /^ */.exec(source.slice(lineStart))![0].length + 2;
   const value = reindentLiteral(literal, LITERAL_DEPTH, indent);
   return `${source.slice(0, returned)}\n${' '.repeat(indent)}${key}: ${value},${source.slice(returned)}`;
+}
+
+/** Splits a located literal with the existing masked top-level walker. */
+function literalEntries(
+  object: IReturnedObject,
+): readonly { key: string; start: number; end: number }[] | undefined {
+  const boundaries = [object.start];
+  walkTopLevel(object, (at, depth) => {
+    if (depth === 0 && object.code[at] === ',') boundaries.push(at + 1);
+  });
+  boundaries.push(object.end + 1);
+  const entries: { key: string; start: number; end: number }[] = [];
+  for (let i = 0; i < boundaries.length - 1; i++) {
+    const start = boundaries[i]!;
+    const end = boundaries[i + 1]! - 1;
+    const text = object.visible.slice(start, end);
+    if (text.trim() === '') continue;
+    const match = /^\s*(?:([A-Za-z_$][\w$]*)|'([^']+)'|"([^"]+)")\s*:\s*/.exec(text);
+    if (match === null) return undefined;
+    const key = match[1] ?? match[2] ?? match[3]!;
+    if (entries.some((entry) => entry.key === key)) return undefined;
+    entries.push({ key, start: start + match[0].length, end });
+  }
+  return entries;
+}
+
+/** Reads entries of a CLI-authored options literal using the shared masked walker. */
+export function starterLiteralEntries(
+  literal: string,
+): readonly (readonly [string, string])[] | undefined {
+  const code = maskSourceCode(literal);
+  const visible = maskComments(literal);
+  if (
+    code === undefined ||
+    visible === undefined ||
+    !code.startsWith('{') ||
+    closingBrace(code, 1) !== code.length - 1
+  )
+    return undefined;
+  const entries = literalEntries({ code, visible, start: 1, end: code.length - 1 });
+  return entries?.map(({ key, start, end }) => [key, literal.slice(start, end).trim()] as const);
+}
+
+/**
+ * Adds one absent property to a starter arm without replacing developer-owned values.
+ * @param source - Configuration source
+ * @param key - Starter arm
+ * @param property - Property to add
+ * @param value - Source expression for its value
+ * @returns Edited source, or undefined for an existing property or uncertain shape
+ */
+export function withStarterArmEntry(
+  source: string,
+  key: 'events' | 'cqrs' | 'queue' | 'messaging',
+  property: string,
+  value: string,
+): string | undefined {
+  const object = returnedObject(source);
+  if (object === undefined) return undefined;
+  const entries = literalEntries(object);
+  if (entries === undefined) return undefined;
+  const arm = entries.find((entry) => entry.key === key);
+  if (arm === undefined) return withStarterOption(source, key, `{ ${property}: ${value} }`);
+  if (object.code[arm.start] !== '{') return undefined;
+  const end = closingBrace(object.code, arm.start + 1);
+  if (end === undefined || source.slice(end + 1, arm.end).trim() !== '') return undefined;
+  const inner = { ...object, start: arm.start + 1, end };
+  const properties = literalEntries(inner);
+  if (properties === undefined || properties.some((entry) => entry.key === property))
+    return undefined;
+  const lineStart = source.lastIndexOf('\n', arm.start) + 1;
+  const indent = /^ */.exec(source.slice(lineStart))![0].length + 2;
+  const rendered = reindentLiteral(value, 10, indent);
+  const padding = ' '.repeat(indent);
+  let body = source.slice(inner.start, end).trimEnd();
+  if (!body.includes('\n')) {
+    // Expanding a single-line arm must split its top-level properties, not nested commas.
+    const starts = [inner.start];
+    walkTopLevel(inner, (at, depth) => {
+      if (depth === 0 && object.code[at] === ',') starts.push(at + 1);
+    });
+    starts.push(end + 1);
+    body = starts
+      .slice(0, -1)
+      .map((start, index) => {
+        const stop = starts[index + 1]! - 1;
+        const text = source.slice(start, stop).trim();
+        if (text === '') return '';
+        const comma = object.visible.slice(start, stop).trim() === '' ? '' : ',';
+        return `\n${padding}${text}${comma}`;
+      })
+      .join('');
+  } else if (properties.length > 0) {
+    // Add a missing trailing comma before any end-of-line comment.
+    let last = end - 1;
+    while (last >= inner.start && object.visible[last]!.trim() === '') last--;
+    if (object.code[last] !== ',') {
+      const relative = last + 1 - inner.start;
+      body = `${body.slice(0, relative)},${body.slice(relative)}`;
+    }
+  }
+  return `${source.slice(0, inner.start)}${body}\n${padding}${property}: ${rendered},\n${' '.repeat(indent - 2)}${source.slice(end)}`;
 }

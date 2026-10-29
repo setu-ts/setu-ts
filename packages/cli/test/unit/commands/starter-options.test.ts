@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { starterOptionValue, withStarterOption } from '../../../src/commands/starter-options.ts';
+import {
+  starterOptionValue,
+  withStarterOption,
+  withStarterArmEntry,
+  starterLiteralEntries,
+} from '../../../src/commands/starter-options.ts';
 import { FULL_STACK_TEMPLATE } from '../../../src/templates/full-stack.ts';
 import { projectFiles, resolveHost } from '../../../src/templates/project-files.ts';
 
@@ -129,5 +134,103 @@ describe('starterOptionValue', () => {
   });
   it('reads nothing from an unclassified shape', () => {
     expect(starterOptionValue('export const createApp = () => ({});', 'queue')).toBeUndefined();
+  });
+});
+
+describe('withStarterArmEntry', () => {
+  it('inserts an absent arm and appends an absent property on its own line', () => {
+    const first = withStarterArmEntry(config, 'events', 'handlers', 'EVENT_HANDLERS')!;
+    expect(first).toContain('events: { handlers: EVENT_HANDLERS }');
+    const second = withStarterArmEntry(first, 'events', 'async', 'true')!;
+    expect(second).toContain(
+      'events: {\n          handlers: EVENT_HANDLERS,\n          async: true,\n        }',
+    );
+    expect(starterOptionValue(first, 'events')).toBe('{ handlers: EVENT_HANDLERS }');
+    expect(withStarterArmEntry(first, 'events', 'handlers', 'OTHER')).toBeUndefined();
+  });
+  for (const [label, before, after] of [
+    [
+      'single-line with nested commas',
+      "        queue: { custom: { labels: ['x', 'y'] }, enabled: true },",
+      "        queue: {\n          custom: { labels: ['x', 'y'] },\n          enabled: true,\n          processors: [...QUEUE_PROCESSORS],\n        },",
+    ],
+    [
+      'multi-line with trailing comma',
+      '        queue: {\n          enabled: true,\n        },',
+      '        queue: {\n          enabled: true,\n          processors: [...QUEUE_PROCESSORS],\n        },',
+    ],
+    [
+      'multi-line without trailing comma',
+      '        queue: {\n          enabled: true\n        },',
+      '        queue: {\n          enabled: true,\n          processors: [...QUEUE_PROCESSORS],\n        },',
+    ],
+    [
+      'multi-line ending in a comment',
+      '        queue: {\n          enabled: true // preserve\n        },',
+      '        queue: {\n          enabled: true, // preserve\n          processors: [...QUEUE_PROCESSORS],\n        },',
+    ],
+    [
+      'empty arm',
+      '        queue: {},',
+      '        queue: {\n          processors: [...QUEUE_PROCESSORS],\n        },',
+    ],
+  ]) {
+    it(`appends a property with exact output: ${label}`, () => {
+      const source = config.replace('      return {\n', `      return {\n${before}\n`);
+      const expected = config.replace('      return {\n', `      return {\n${after}\n`);
+      expect(withStarterArmEntry(source, 'queue', 'processors', '[...QUEUE_PROCESSORS]')).toBe(
+        expected,
+      );
+    });
+  }
+  it('accepts a quoted key and preserves nested properties, strings and comments', () => {
+    const source = config.replace(
+      'return {',
+      "return {\n        'queue': { other: { processors: [] }, text: '}', /* } */ },",
+    );
+    expect(withStarterArmEntry(source, 'queue', 'processors', '[...QUEUE_PROCESSORS]')).toContain(
+      'processors: [...QUEUE_PROCESSORS]',
+    );
+  });
+  for (const arm of [
+    'queueOptions',
+    'makeQueue()',
+    '{ ...options }',
+    '{ processors: [] }',
+    "{ 'processors': [] }",
+    '{ [key]: [] }',
+    '{ get value() {} }',
+    '{ value: 1, value: 2 }',
+    '{} as Options',
+  ]) {
+    it(`fails closed for ${arm}`, () => {
+      const source = config.replace('return {', `return {\n        queue: ${arm},`);
+      expect(
+        withStarterArmEntry(source, 'queue', 'processors', '[...QUEUE_PROCESSORS]'),
+      ).toBeUndefined();
+    });
+  }
+  it('refuses spreads, uncertain callbacks, duplicate arms and nested mentions of an absent arm', () => {
+    for (const source of [
+      'broken',
+      config.replace('return {', 'return { ...other,'),
+      config.replace('return {', 'return { queue: {}, queue: {},'),
+      config.replace('return {', 'return { note: { events: true },'),
+    ]) {
+      expect(withStarterArmEntry(source, 'events', 'handlers', 'EVENT_HANDLERS')).toBeUndefined();
+    }
+  });
+  it('uses the same walker to split transport literals', () => {
+    expect(
+      starterLiteralEntries(
+        "{ adapter: 'redis', connection: { url: 'x,y' }, processors: [...VALUES], }",
+      ),
+    ).toEqual([
+      ['adapter', "'redis'"],
+      ['connection', "{ url: 'x,y' }"],
+      ['processors', '[...VALUES]'],
+    ]);
+    for (const literal of ['x', '{', '{} trailing', '{ ...options }', '{ x: 1, x: 2 }', '/regex/'])
+      expect(starterLiteralEntries(literal)).toBeUndefined();
   });
 });
