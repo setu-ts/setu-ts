@@ -173,11 +173,6 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
-      path: 'packages/cli/src/commands/devtool.ts',
-      category: 'deno-target',
-      reason: 'Commands emitted for or exercised against supported Deno projects.',
-    },
-    {
       path: 'packages/cli/src/commands/new.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
@@ -266,6 +261,16 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       path: 'packages/cli/test/fixtures/capture-template-baseline.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
+    },
+    {
+      path: 'packages/cli/test/fixtures/dev-entry-0.10.0-member.txt',
+      category: 'fixture',
+      reason: 'Exact pre-M126 Deno output captured before changing the renderer.',
+    },
+    {
+      path: 'packages/cli/test/fixtures/dev-entry-0.10.0-standalone.txt',
+      category: 'fixture',
+      reason: 'Exact pre-M126 Deno output captured before changing the renderer.',
     },
     {
       path: 'packages/cli/test/fixtures/dev-entry-0.8.0-member.txt',

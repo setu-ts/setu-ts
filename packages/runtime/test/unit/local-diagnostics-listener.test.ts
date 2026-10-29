@@ -6,8 +6,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { IRequest, IResponse } from '@setu-ts/common';
+import type { IHttpAdapter, IRequest, IResponse, IRuntimeServices } from '@setu-ts/common';
 import { CAPABILITIES } from '@setu-ts/common';
+import { NodeLocalDiagnosticsListenerFactory } from '../../src/diagnostics/node-local-diagnostics-listener.ts';
+import { DenoLocalDiagnosticsListenerFactory } from '../../src/diagnostics/deno-local-diagnostics-listener.ts';
 import {
   createLocalDiagnosticsListenerFactory,
   INVALID_PORT_ERROR,
@@ -66,8 +68,17 @@ function echoHandler(request: IRequest): IResponse {
 }
 
 describe('Local diagnostics listener — platform gate', () => {
-  it('refuses every listen on non-Deno platforms before any bind', async () => {
-    for (const platform of ['node', 'bun', 'cloudflare-workers'] as const) {
+  it('dispatches Deno and Node and refuses unsupported platforms before any bind', async () => {
+    expect(createLocalDiagnosticsListenerFactory('node')).toBeInstanceOf(
+      NodeLocalDiagnosticsListenerFactory,
+    );
+    expect(createLocalDiagnosticsListenerFactory('deno')).toBeInstanceOf(
+      DenoLocalDiagnosticsListenerFactory,
+    );
+    expect(UNSUPPORTED_TRANSPORT_ERROR).toBe(
+      'Local diagnostics listener: this runtime has no supported local transport. Only Deno and Node are supported in this version.',
+    );
+    for (const platform of ['bun', 'cloudflare-workers'] as const) {
       const factory = createLocalDiagnosticsListenerFactory(platform);
       await expect(factory.listen({ port: 4919, handler: echoHandler })).rejects.toThrow(
         UNSUPPORTED_TRANSPORT_ERROR,
@@ -79,6 +90,19 @@ describe('Local diagnostics listener — platform gate', () => {
 });
 
 describe('Local diagnostics listener — Deno factory', () => {
+  it('preserves a host bind failure and leaves the slot free for retry', async () => {
+    const { host } = fakeHost();
+    const serve = host.serve;
+    const error = new Error('synthetic bind refusal');
+    host.serve = () => {
+      throw error;
+    };
+    const factory = createLocalDiagnosticsListenerFactory('deno', host);
+    await expect(factory.listen({ port: 4919, handler: echoHandler })).rejects.toBe(error);
+    host.serve = serve;
+    await (await factory.listen({ port: 4919, handler: echoHandler })).close();
+  });
+
   it('binds exactly 127.0.0.1 and permits one active listener', async () => {
     const { host, calls, servers } = fakeHost();
     const factory = createLocalDiagnosticsListenerFactory('deno', host);
@@ -214,6 +238,52 @@ describe('Local diagnostics listener — native framing', () => {
 });
 
 describe('RuntimePlugin — provider registration', () => {
+  it('keeps automatic platform detection and body limits when registering the factory', async () => {
+    const { RuntimePlugin } = await import('../../src/plugin/runtime-plugin.ts');
+    expect(RuntimePlugin().provides).toContain(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER);
+    let cap: number | undefined;
+    const adapter: IHttpAdapter = {
+      setHandler() {},
+      fetch: () => Promise.resolve(new Response('unused')),
+      listen: () => Promise.reject(new Error('This registration test must not bind')),
+      close: () => Promise.resolve(),
+    };
+    const registered = new Map<string, unknown>();
+    const factory = (options?: { maxBodyBytes?: number }): IHttpAdapter => {
+      cap = options?.maxBodyBytes;
+      return adapter;
+    };
+    RuntimePlugin({
+      maxBodyBytes: 7,
+      httpAdapters: { node: factory, deno: factory, bun: factory, 'cloudflare-workers': factory },
+    }).register({
+      services: { register: (token: string, value: unknown) => registered.set(token, value) },
+      lifecycle: { onClose() {} },
+    } as never);
+    expect(cap).toBe(7);
+    expect(registered.get(CAPABILITIES.HTTP_ADAPTER)).toBe(adapter);
+    expect(registered.has(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER)).toBe(true);
+  });
+
+  it('still forwards the supplied Workers environment without enabling its listener', async () => {
+    const { RuntimePlugin } = await import('../../src/plugin/runtime-plugin.ts');
+    const registered = new Map<string, unknown>();
+    RuntimePlugin({ platform: 'cloudflare-workers', env: { PROOF: 'kept', BINDING: {} } }).register(
+      {
+        services: { register: (token: string, value: unknown) => registered.set(token, value) },
+        lifecycle: { onClose() {} },
+      } as never,
+    );
+    const runtime = registered.get(CAPABILITIES.RUNTIME) as IRuntimeServices;
+    expect(runtime.env).toEqual({ PROOF: 'kept' });
+    const factory = registered.get(CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER) as ReturnType<
+      typeof createLocalDiagnosticsListenerFactory
+    >;
+    await expect(factory.listen({ port: 4919, handler: echoHandler })).rejects.toThrow(
+      UNSUPPORTED_TRANSPORT_ERROR,
+    );
+  });
+
   it('registers the factory under the token and provides it', async () => {
     const { RuntimePlugin } = await import('../../src/plugin/runtime-plugin.ts');
     const plugin = RuntimePlugin({ platform: 'node' });

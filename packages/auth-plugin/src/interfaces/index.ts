@@ -92,6 +92,10 @@ export interface SessionAuthOptions {
   /**
    * Maps an opened session to the principal it carries. Return `null` when
    * the session holds no identity — the strategy chain then continues.
+   *
+   * Synchronous and session-only, so it cannot re-check the account on each
+   * request. For that, record the principal through `signIn: { providers: [] }`
+   * and configure `refreshPrincipal` and `sessionStamp`.
    */
   readonly toPrincipal: (view: SessionView) => IPrincipal | null;
 }
@@ -609,6 +613,45 @@ export type RefreshPrincipal = (
 ) => IPrincipal | null | Promise<IPrincipal | null>;
 
 /**
+ * Reads a user's current session stamp. The application keeps the stamp on its
+ * user record — a `sessionVersion` counter, or a prefix of the password hash —
+ * and changes it to end every session that user holds.
+ *
+ * `IAuthSessionService.signIn` records a SHA-256 digest of the value; every
+ * request compares the digest of the current value with it in constant time. A
+ * different value, a throw, or anything other than a string or `null` makes the
+ * request anonymous. `null` means the user has no stamp, and matches only a
+ * session recorded with none.
+ *
+ * Called with the principal the request resolved — the session snapshot, or
+ * what {@linkcode RefreshPrincipal} returned — so a `refreshPrincipal` that
+ * loads the user can put the stamp in a claim and this callback can read it
+ * back without a second load.
+ *
+ * @since 0.11.0
+ */
+export type SessionStamp = (principal: IPrincipal) => string | null | Promise<string | null>;
+
+/**
+ * Options for `requireAuth`.
+ *
+ * @since 0.11.0
+ */
+export interface RequireAuthOptions {
+  /**
+   * Where an unauthenticated browser navigation is sent: a same-origin absolute
+   * path, refused when the guard is built otherwise. A `GET` or `HEAD` that is
+   * not `X-Requested-With: XMLHttpRequest`, and that carries
+   * `Sec-Fetch-Mode: navigate` (or, without that header, an `Accept` naming
+   * `text/html` or `application/xhtml+xml`), is answered `302` here with a
+   * `returnTo` query parameter holding the requested path. Every other request
+   * keeps the 401 Problem Details answer. A request for this page's own path is
+   * always answered 401, so a guarded sign-in page cannot loop.
+   */
+  readonly signInPage?: string;
+}
+
+/**
  * MFA policy for sign-in (plan §3.1, §4.1).
  *
  * @since 0.8.0
@@ -722,11 +765,11 @@ export interface SignInConfig {
   /** Route prefix. Defaults to `/auth`. */
   readonly basePath?: string;
   /**
-   * The providers to offer. At least one — unless `mfa` is set, when an empty
-   * list configures a password-only sign-in: the application records its own
-   * principal through `IAuthSessionService.signIn`, and `signIn` supplies the
-   * auth-session capability, the pending second-factor state and the logout
-   * route.
+   * The providers to offer. An empty list configures a password-only sign-in:
+   * the application records its own principal through
+   * `IAuthSessionService.signIn`, and `signIn` supplies the auth-session
+   * capability, the per-request `refreshPrincipal` and `sessionStamp` checks,
+   * the pending second-factor state when `mfa` is set, and the logout route.
    */
   readonly providers: readonly SignInProvider[];
   /**
@@ -736,6 +779,15 @@ export interface SignInConfig {
    * the snapshot is used and stays in force until sign-out.
    */
   refreshPrincipal?: RefreshPrincipal;
+  /**
+   * Reads the user's current session stamp. Recorded at sign-in and compared on
+   * every request; changing the stamp on the user record ends every session
+   * the user holds. Absent, no stamp is recorded or compared. See
+   * {@linkcode SessionStamp}.
+   *
+   * @since 0.11.0
+   */
+  readonly sessionStamp?: SessionStamp;
   /**
    * MFA policy: decides when a second factor is required at sign-in. Absent
    * means no second factor is ever required.

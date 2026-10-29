@@ -37,7 +37,7 @@ import { encodeBase64Url } from '../utils/base64url.ts';
 import { ID_TOKEN_SESSION_KEY, RP_PROVIDER_SESSION_KEY } from './auth-session-service.ts';
 import { addPending, takePending } from './pending-state.ts';
 import { createPkcePair } from './pkce.ts';
-import { safeReturnTo } from './return-to.ts';
+import { RETURN_TO_QUERY_PARAM, safeReturnTo } from './return-to.ts';
 import { authorizationUrl, exchangeCode, fetchUserInfo } from './token-exchange.ts';
 import { createStateChangeReporter } from '../issuers/failure-reporter.ts';
 import type { StateChangeReporter } from '../issuers/failure-reporter.ts';
@@ -48,8 +48,7 @@ const ENTROPY_BYTES = 32;
 /** Wall-clock budget for one provider round trip (discovery, token, userinfo). */
 export const PROVIDER_TIMEOUT_MS = 10_000;
 
-/** The query parameter carrying the post-sign-in target at the login route. */
-export const RETURN_TO_QUERY_PARAM = 'returnTo';
+export { RETURN_TO_QUERY_PARAM } from './return-to.ts';
 
 /**
  * The fixed `?error=` codes a callback failure redirects with.

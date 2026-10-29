@@ -124,6 +124,17 @@ describe('real Node protocol helpers', () => {
       }
     }
   });
+  it('rejects a failed HTTP bind without disturbing the active listener', async () => {
+    const server = await serveHttp({}, () => new Response('occupant'));
+    try {
+      await expect(
+        serveHttp({ port: server.addr.port }, () => new Response('conflict')),
+      ).rejects.toMatchObject({ code: 'EADDRINUSE' });
+      expect(await (await fetch(`http://127.0.0.1:${server.addr.port}/`)).text()).toBe('occupant');
+    } finally {
+      await server.shutdown();
+    }
+  });
   it('honors cwd, stdin, environment, and AbortSignal on real children', async () => {
     const directory = await tempDir({ prefix: 'child-' });
     try {

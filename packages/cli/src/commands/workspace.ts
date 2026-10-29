@@ -105,10 +105,13 @@ function managedFiles(manifest: WorkspaceManifest): readonly GeneratedFile[] {
       .filter((member) => member.devtoolPort !== undefined)
       .map((member) => ({
         path: joinPath(MEMBERS_DIR, member.name, DEVTOOL_ENTRY_MODULE),
-        contents: renderDevEntry({
-          devtoolPort: member.devtoolPort!,
-          port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
-        }),
+        contents: renderDevEntry(
+          {
+            devtoolPort: member.devtoolPort!,
+            port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
+          },
+          manifest.runtime,
+        ),
       })),
     ...manifest.members.map((member) => ({
       path: joinPath('apps', member.name, DISCOVERY_MODULE),

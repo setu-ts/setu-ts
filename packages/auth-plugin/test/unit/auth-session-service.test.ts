@@ -10,6 +10,7 @@
  * that.
  */
 
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AuthMethod, IAuthSessionService, IPrincipal } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
@@ -18,14 +19,17 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { getSession, SessionPlugin } from '@setu-ts/session-plugin';
 import {
   asPendingPromotion,
+  asVerifiedSessionRead,
   AUTH_SESSION_KEY,
   AuthSessionService,
   DEFAULT_PENDING_TTL_MS,
   ID_TOKEN_SESSION_KEY,
   PENDING_MFA_SESSION_KEY,
   RP_PROVIDER_SESSION_KEY,
+  parseAuthSessionRecord,
   SCOPED_GRANTS_SESSION_KEY,
 } from '../../src/sign-in/auth-session-service.ts';
+import type { SessionStamp } from '../../src/interfaces/index.ts';
 import { createFakeSession, createFakeSessionService } from '../fixtures/fake-session.ts';
 
 const PRINCIPAL: IPrincipal = { id: 'u1', roles: ['admin'] };
@@ -454,6 +458,163 @@ describe('AuthSessionService — scoped grants under sign-in timing (M110b)', ()
     expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
     expect(session.get(SCOPED_GRANTS_SESSION_KEY)).toBeUndefined();
     expect(impl.storedGrants(CTX, PRINCIPAL)).toBeNull();
+  });
+});
+
+describe('AuthSessionService — session stamp (M124 §3.3)', () => {
+  const digest = (value: string): string => createHash('sha256').update(value).digest('base64url');
+
+  /** A service recording `read`'s stamp, with an always-required MFA policy when `mfa` is set. */
+  function build(read: SessionStamp, mfa = false, session = createFakeSession()) {
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      sessionStamp: { read, subtle: crypto.subtle },
+      ...(mfa ? { mfa: { required: () => true } } : {}),
+    });
+    return { impl, session };
+  }
+
+  it('records the SHA-256 digest of the stamp, never the stamp itself', async () => {
+    const seen: IPrincipal[] = [];
+    const { impl, session } = build((principal) => {
+      seen.push(principal);
+      return '$2b$12$secretsaltvalue';
+    });
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(session.get(AUTH_SESSION_KEY)).toEqual({
+      principal: PRINCIPAL,
+      methods: ['pwd'],
+      at: NOW,
+      stamp: digest('$2b$12$secretsaltvalue'),
+    });
+    expect(JSON.stringify(session.get(AUTH_SESSION_KEY))).not.toContain('secretsalt');
+    expect(seen).toEqual([PRINCIPAL]);
+  });
+
+  it('records null when the user has no stamp, and awaits an async reader', async () => {
+    const { impl, session } = build(() => Promise.resolve(null));
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(session.get<Record<string, unknown>>(AUTH_SESSION_KEY)?.stamp).toBeNull();
+  });
+
+  it('reads the stamp before any write: a throwing or malformed reader records nothing', async () => {
+    for (const read of [
+      () => {
+        throw new Error('user store down');
+      },
+      () => 7 as unknown as string,
+    ]) {
+      const { impl, session } = build(read);
+      await expect(impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] })).rejects.toThrow(
+        /user store down|must return a string or null, got number/,
+      );
+      expect(session.mutations).toEqual([]);
+      expect(session.id).toBe('session-1');
+    }
+  });
+
+  it('carries the digest through the pending record; promotion copies it without reading again', async () => {
+    let reads = 0;
+    const { impl, session } = build(() => {
+      reads += 1;
+      return 'v1';
+    }, true);
+    expect(await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] })).toEqual({
+      status: 'second-factor-required',
+    });
+    expect(session.get<Record<string, unknown>>(PENDING_MFA_SESSION_KEY)?.stamp).toBe(digest('v1'));
+    // The pending view handed to callers does not expose the digest.
+    expect(impl.pending(CTX)).toEqual({ principal: PRINCIPAL, methods: ['pwd'], at: NOW });
+    expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
+    expect(session.get(AUTH_SESSION_KEY)).toEqual({
+      principal: PRINCIPAL,
+      methods: ['pwd', 'otp'],
+      at: NOW,
+      stamp: digest('v1'),
+    });
+    expect(reads).toBe(1);
+  });
+
+  it('promotes a pending record without a usable stamp as null', () => {
+    const { impl, session } = build(() => 'v1', true);
+    for (const stamp of [undefined, 42]) {
+      session.set(PENDING_MFA_SESSION_KEY, {
+        principal: PRINCIPAL,
+        methods: ['pwd'],
+        at: NOW,
+        stamp,
+      });
+      expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
+      expect(session.get<Record<string, unknown>>(AUTH_SESSION_KEY)?.stamp).toBeNull();
+    }
+  });
+
+  it('writes no stamp field when sessionStamp is not configured', async () => {
+    const plain = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(plain),
+      now: () => NOW,
+      mfa: { required: () => true },
+    });
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(plain.get<Record<string, unknown>>(PENDING_MFA_SESSION_KEY)).not.toHaveProperty('stamp');
+    expect(asPendingPromotion(impl)?.promotePending(CTX, 'otp')).toBe('signed-in');
+    expect(plain.get<Record<string, unknown>>(AUTH_SESSION_KEY)).not.toHaveProperty('stamp');
+  });
+
+  it('verifiedCurrent applies refreshPrincipal and the stamp, as the strategy does (audit F1)', async () => {
+    let stamp: string | null = 'v1';
+    let active = true;
+    const session = createFakeSession();
+    const impl = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+      sessionStamp: { read: () => stamp, subtle: crypto.subtle },
+      refreshPrincipal: (stored) => (active ? { ...stored, roles: ['fresh'] } : null),
+    });
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    await impl.signIn(CTX, PRINCIPAL, { methods: ['pwd'] });
+    expect(await impl.verifiedCurrent(CTX)).toEqual({
+      id: 'u1',
+      roles: ['fresh'],
+      claims: { amr: ['pwd'] },
+    });
+    stamp = 'v2';
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    // `current` is the snapshot, by contract: it still answers.
+    expect(impl.current(CTX)).toEqual(PRINCIPAL);
+    stamp = 'v1';
+    active = false;
+    expect(await impl.verifiedCurrent(CTX)).toBeNull();
+    // A service built with neither re-check reads the snapshot with amr.
+    const plain = new AuthSessionService({
+      sessionService: createFakeSessionService(session),
+      now: () => NOW,
+    });
+    expect((await plain.verifiedCurrent(CTX))?.claims).toEqual({ amr: ['pwd'] });
+  });
+
+  it('narrows only the plugin service to the verified read', () => {
+    const { impl } = build(() => null);
+    expect(asVerifiedSessionRead(impl)).toBe(impl);
+    const opaque: IAuthSessionService = {
+      signIn: () => Promise.resolve({ status: 'signed-in' }),
+      current: () => null,
+      pending: () => null,
+      signOut: () => undefined,
+    };
+    expect(asVerifiedSessionRead(opaque)).toBeNull();
+  });
+
+  it('parses a record stamp: absent or null is null, a string is kept, anything else is malformed', () => {
+    const base = { principal: PRINCIPAL, methods: ['pwd'], at: NOW };
+    expect(parseAuthSessionRecord(base)?.stamp).toBeNull();
+    expect(parseAuthSessionRecord({ ...base, stamp: null })?.stamp).toBeNull();
+    expect(parseAuthSessionRecord({ ...base, stamp: 'abc' })?.stamp).toBe('abc');
+    for (const stamp of [7, {}, ['abc'], false]) {
+      expect(parseAuthSessionRecord({ ...base, stamp }), String(stamp)).toBeNull();
+    }
   });
 });
 

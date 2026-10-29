@@ -47,6 +47,7 @@ import {
   renderDevtoolSources,
   withDevtoolSourceWiring,
 } from '../devtool/sources.ts';
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { devEntryPort, isDevEntry, renderDevEntry } from '../devtool/dev-entry.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
@@ -112,6 +113,27 @@ interface PlannedWrite {
   readonly contents: string;
   /** True when the file does not exist yet — the dry-run wording differs. */
   readonly creating: boolean;
+}
+
+/** Reads only the target project's npm manifest and plans its conservative merge. */
+async function planNodeManifestWrite(
+  fs: IFileSystem,
+  dir: string,
+  planned: PlannedWrite[],
+): Promise<string | undefined> {
+  const path = joinPath(dir, 'package.json');
+  let source: string;
+  try {
+    source = new TextDecoder().decode(await fs.readFile(path));
+  } catch (cause) {
+    if (isMissingPath(cause))
+      return `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`;
+    return `Cannot read ${escapeName(path)} — this is not a readable Setu-TS project: ${escapeName(describeCause(cause))}`;
+  }
+  const plan = planNodeDevtool(source, path);
+  if (!plan.ok) return plan.message;
+  if (plan.contents !== undefined) planned.push({ path, contents: plan.contents, creating: false });
+  return undefined;
 }
 
 /**
@@ -494,97 +516,103 @@ async function enableInWorkspace(
   const handles: DenoJsonHandle[] = [];
   const planned: PlannedWrite[] = [];
 
-  const memberRead = await readWritableDenoManifest(deps.fs, joinPath(dir, memberRoot));
-  if (memberRead.kind === 'missing') {
-    return reportInapplicable(
-      deps,
-      `No deno.json in ${escapeName(joinPath(memberRoot))} — this is not a Setu-TS project member.`,
-    );
-  }
-  if (memberRead.kind === 'refused') {
-    deps.error(memberRead.message);
-    return EXIT_ERROR;
-  }
-  const memberHandle = memberRead.handle;
-  const pinRefusal = frameworkPinRefusal(memberHandle);
-  if (pinRefusal !== undefined) return reportInapplicable(deps, pinRefusal);
-  const memberManifestPath = memberHandle.path;
-  handles.push(memberHandle);
-
-  const start = memberHandle.tasks['start'];
-  if (start === undefined) {
-    return reportInapplicable(
-      deps,
-      `The member has no "start" task in ${escapeName(
-        memberManifestPath,
-      )}; the devtool derives the` + ` \`dev\` task from it, and there is nothing to derive from.`,
-    );
-  }
-  const devTask = deriveDevTask(start);
-  if (devTask === undefined) {
-    return reportInapplicable(
-      deps,
-      `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${escapeName(start)}\n` +
-        `The devtool requires a start task that runs main.ts directly, so the two tasks` +
-        ` differ only in the entry module. Change the entry, then run this again.`,
-    );
-  }
-  const devRefusal = mergeTask(memberHandle, 'dev', devTask);
-  if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
-  const checkRefusal = mergeTask(
-    memberHandle,
-    'check',
-    devtoolCheckTask(),
-    `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
-  );
-  if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
-  // The entry imports the diagnostics plugin, so the MEMBER's import map must
-  // pin it — the root map is untouched: the root has no development entry of
-  // its own.
-  const importRefusal = mergeImport(memberHandle, DEVTOOL_IMPORT);
-  if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
-
-  // The root `dev` task is a MODIFICATION of an existing string, not an added
-  // key, and `managedFiles` contains no deno.json — so this command is the
-  // only place it can happen. Three outcomes: unmodified CLI output is
-  // widened; already widened is a no-op; anything else is the developer's edit
-  // and refuses with its current value.
-  const rootRead = await readWritableDenoManifest(deps.fs, dir);
-  if (rootRead.kind === 'missing') {
-    return reportInapplicable(
-      deps,
-      `No deno.json in ${escapeName(
-        dir,
-      )}: a Deno workspace root declares one, and the root \`dev\`` +
-        ` task's grant must be widened in place for the devtool to run.`,
-    );
-  }
-  if (rootRead.kind === 'refused') {
-    deps.error(rootRead.message);
-    return EXIT_ERROR;
-  }
-  const rootHandle = rootRead.handle;
-  const rootPins = frameworkPinRefusal(rootHandle);
-  if (rootPins !== undefined) return reportInapplicable(deps, rootPins);
-  const rootManifestPath = rootHandle.path;
-  handles.push(rootHandle);
-  const expectedRunAll = workspaceProfile('deno').runAll;
-  const currentRunAll = rootHandle.tasks['dev'];
-  if (currentRunAll === expectedRunAll) {
-    // Already widened — a workspace created after the grant existed.
-  } else if (currentRunAll === LEGACY_DENO_RUN_ALL) {
-    // Mutated only; planManifestWrites renders it once, after every merge has
-    // succeeded.
-    rootHandle.tasks['dev'] = expectedRunAll;
+  if (manifest.runtime === 'node') {
+    const refusal = await planNodeManifestWrite(deps.fs, joinPath(dir, memberRoot), planned);
+    if (refusal !== undefined) return reportInapplicable(deps, refusal);
   } else {
-    return reportInapplicable(
-      deps,
-      `Refusing to replace the existing "dev" task in ${escapeName(rootManifestPath)}:\n` +
-        `  current: ${currentRunAll === undefined ? '(none)' : escapeName(currentRunAll)}\n` +
-        `  would write: ${escapeName(expectedRunAll)}\n` +
-        `A task you wrote is yours to change; update it to match, or remove it, and run this again.`,
+    const memberRead = await readWritableDenoManifest(deps.fs, joinPath(dir, memberRoot));
+    if (memberRead.kind === 'missing') {
+      return reportInapplicable(
+        deps,
+        `No deno.json in ${escapeName(joinPath(memberRoot))} — this is not a Setu-TS project member.`,
+      );
+    }
+    if (memberRead.kind === 'refused') {
+      deps.error(memberRead.message);
+      return EXIT_ERROR;
+    }
+    const memberHandle = memberRead.handle;
+    const pinRefusal = frameworkPinRefusal(memberHandle);
+    if (pinRefusal !== undefined) return reportInapplicable(deps, pinRefusal);
+    const memberManifestPath = memberHandle.path;
+    handles.push(memberHandle);
+
+    const start = memberHandle.tasks['start'];
+    if (start === undefined) {
+      return reportInapplicable(
+        deps,
+        `The member has no "start" task in ${escapeName(
+          memberManifestPath,
+        )}; the devtool derives the` +
+          ` \`dev\` task from it, and there is nothing to derive from.`,
+      );
+    }
+    const devTask = deriveDevTask(start);
+    if (devTask === undefined) {
+      return reportInapplicable(
+        deps,
+        `Cannot derive a "dev" task from the current "start" task:\n` +
+          `  ${escapeName(start)}\n` +
+          `The devtool requires a start task that runs main.ts directly, so the two tasks` +
+          ` differ only in the entry module. Change the entry, then run this again.`,
+      );
+    }
+    const devRefusal = mergeTask(memberHandle, 'dev', devTask);
+    if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
+    const checkRefusal = mergeTask(
+      memberHandle,
+      'check',
+      devtoolCheckTask(),
+      `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
     );
+    if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
+    // The entry imports the diagnostics plugin, so the MEMBER's import map must
+    // pin it — the root map is untouched: the root has no development entry of
+    // its own.
+    const importRefusal = mergeImport(memberHandle, DEVTOOL_IMPORT);
+    if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
+
+    // The root `dev` task is a MODIFICATION of an existing string, not an added
+    // key, and `managedFiles` contains no deno.json — so this command is the
+    // only place it can happen. Three outcomes: unmodified CLI output is
+    // widened; already widened is a no-op; anything else is the developer's edit
+    // and refuses with its current value.
+    const rootRead = await readWritableDenoManifest(deps.fs, dir);
+    if (rootRead.kind === 'missing') {
+      return reportInapplicable(
+        deps,
+        `No deno.json in ${escapeName(
+          dir,
+        )}: a Deno workspace root declares one, and the root \`dev\`` +
+          ` task's grant must be widened in place for the devtool to run.`,
+      );
+    }
+    if (rootRead.kind === 'refused') {
+      deps.error(rootRead.message);
+      return EXIT_ERROR;
+    }
+    const rootHandle = rootRead.handle;
+    const rootPins = frameworkPinRefusal(rootHandle);
+    if (rootPins !== undefined) return reportInapplicable(deps, rootPins);
+    const rootManifestPath = rootHandle.path;
+    handles.push(rootHandle);
+    const expectedRunAll = workspaceProfile('deno').runAll;
+    const currentRunAll = rootHandle.tasks['dev'];
+    if (currentRunAll === expectedRunAll) {
+      // Already widened — a workspace created after the grant existed.
+    } else if (currentRunAll === LEGACY_DENO_RUN_ALL) {
+      // Mutated only; planManifestWrites renders it once, after every merge has
+      // succeeded.
+      rootHandle.tasks['dev'] = expectedRunAll;
+    } else {
+      return reportInapplicable(
+        deps,
+        `Refusing to replace the existing "dev" task in ${escapeName(rootManifestPath)}:\n` +
+          `  current: ${currentRunAll === undefined ? '(none)' : escapeName(currentRunAll)}\n` +
+          `  would write: ${escapeName(expectedRunAll)}\n` +
+          `A task you wrote is yours to change; update it to match, or remove it, and run this again.`,
+      );
+    }
   }
 
   // The root `dev` task is only half the handoff: the SCRIPT it runs has to
@@ -592,7 +620,7 @@ async function enableInWorkspace(
   // before the devtool carries the old runner, which nothing regenerates —
   // widening the task above while leaving that script stale is a command that
   // reports success and leaves the connector unreachable.
-  const runner = devtoolDevRunner();
+  const runner = devtoolDevRunner(manifest.runtime);
   const runnerPath = joinPath(dir, runner.path);
   let existingRunner: string | undefined;
   try {
@@ -620,10 +648,13 @@ async function enableInWorkspace(
   if (typeof devtoolPort === 'string') return reportInapplicable(deps, devtoolPort);
 
   const entryPath = joinPath(dir, memberRoot, DEVTOOL_ENTRY_MODULE);
-  const entry = renderDevEntry({
-    devtoolPort,
-    port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
-  });
+  const entry = renderDevEntry(
+    {
+      devtoolPort,
+      port: { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER },
+    },
+    manifest.runtime,
+  );
   let existingEntry: string | undefined;
   try {
     existingEntry = new TextDecoder().decode(await deps.fs.readFile(entryPath));
@@ -726,13 +757,16 @@ async function enableInWorkspace(
       ` 127.0.0.1:${devtoolPort} while the member runs.`,
   );
   deps.log('Next, from the workspace root:');
-  deps.log(`  SETU_DEVTOOL_MEMBER=${escapeName(member.name)} deno task dev`);
+  if (manifest.runtime === 'node') deps.log('  npm install');
+  deps.log(
+    `  SETU_DEVTOOL_MEMBER=${escapeName(member.name)} ${workspaceProfile(manifest.runtime).runScript('dev')}`,
+  );
   deps.log('The launcher supplies the session credentials through the environment.');
   return EXIT_OK;
 }
 
 /**
- * Enables the devtool on a standalone Deno project.
+ * Enables the devtool on a standalone Deno or Node project.
  *
  * @param dir - The project directory (absolute)
  * @param memberName - The `enable` subcommand's member positional
@@ -756,40 +790,35 @@ async function enableStandalone(
     return EXIT_USAGE;
   }
 
-  const manifestRead = await readWritableDenoManifest(deps.fs, dir);
-  if (manifestRead.kind === 'missing') {
-    // No Deno manifest: an npm project is the wrong runtime, while a directory
-    // with no manifest at all is not a project — the runtime detector would read
-    // that as Node and report the runtime, which names the wrong problem.
-    try {
-      if (await isPresent(deps.fs, joinPath(dir, 'package.json'))) {
-        // Never Deno without a Deno manifest, so this always refuses.
-        const runtime = await detectTargetRuntime(deps.fs, dir);
-        return reportInapplicable(deps, devtoolRuntimeRefusal(runtime, 'enable')!);
-      }
-    } catch (cause) {
-      return reportInapplicable(deps, escapeName(describeCause(cause)));
-    }
-    return reportInapplicable(
-      deps,
-      `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
-    );
-  }
+  let runtime;
   try {
-    const refusal = devtoolRuntimeRefusal(await detectTargetRuntime(deps.fs, dir), 'enable');
-    if (refusal !== undefined) return reportInapplicable(deps, refusal);
+    runtime = await detectTargetRuntime(deps.fs, dir);
   } catch (cause) {
     return reportInapplicable(deps, escapeName(describeCause(cause)));
   }
-
-  if (manifestRead.kind === 'refused') {
-    deps.error(manifestRead.message);
-    return EXIT_ERROR;
+  const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'enable');
+  if (runtimeRefusal !== undefined) return reportInapplicable(deps, runtimeRefusal);
+  const planned: PlannedWrite[] = [];
+  let handle: DenoJsonHandle | undefined;
+  if (runtime === 'node') {
+    const refusal = await planNodeManifestWrite(deps.fs, dir, planned);
+    if (refusal !== undefined) return reportInapplicable(deps, refusal);
+  } else {
+    const manifestRead = await readWritableDenoManifest(deps.fs, dir);
+    if (manifestRead.kind === 'missing') {
+      return reportInapplicable(
+        deps,
+        `No deno.json or package.json in ${escapeName(dir)} — this is not a Setu-TS project.`,
+      );
+    }
+    if (manifestRead.kind === 'refused') {
+      deps.error(manifestRead.message);
+      return EXIT_ERROR;
+    }
+    handle = manifestRead.handle;
+    const pins = frameworkPinRefusal(handle);
+    if (pins !== undefined) return reportInapplicable(deps, pins);
   }
-  const handle = manifestRead.handle;
-  const pins = frameworkPinRefusal(handle);
-  if (pins !== undefined) return reportInapplicable(deps, pins);
-  const manifestPath = handle.path;
 
   const configPath = joinPath(dir, CONFIG_MODULE);
   let configSource: string;
@@ -807,37 +836,38 @@ async function enableStandalone(
   const legacy = factoryRefusal(configSource);
   if (legacy !== undefined) return reportInapplicable(deps, legacy);
 
-  const start = handle.tasks['start'];
-  if (start === undefined) {
-    return reportInapplicable(
-      deps,
-      `This project has no "start" task in ${escapeName(manifestPath)}; the devtool derives the` +
-        ` \`dev\` task from it, and there is nothing to derive from.`,
-    );
-  }
-  const devTask = deriveDevTask(start);
-  if (devTask === undefined) {
-    return reportInapplicable(
-      deps,
-      `Cannot derive a "dev" task from the current "start" task:\n` +
-        `  ${escapeName(start)}\n` +
-        `The devtool requires a start task that runs main.ts directly, so the two tasks` +
-        ` differ only in the entry module. Change the entry, then run this again.`,
-    );
-  }
+  if (handle !== undefined) {
+    const start = handle.tasks['start'];
+    if (start === undefined) {
+      return reportInapplicable(
+        deps,
+        `This project has no "start" task in ${escapeName(handle.path)}; the devtool derives the` +
+          ` \`dev\` task from it, and there is nothing to derive from.`,
+      );
+    }
+    const devTask = deriveDevTask(start);
+    if (devTask === undefined) {
+      return reportInapplicable(
+        deps,
+        `Cannot derive a "dev" task from the current "start" task:\n` +
+          `  ${escapeName(start)}\n` +
+          `The devtool requires a start task that runs main.ts directly, so the two tasks` +
+          ` differ only in the entry module. Change the entry, then run this again.`,
+      );
+    }
 
-  const planned: PlannedWrite[] = [];
-  const devRefusal = mergeTask(handle, 'dev', devTask);
-  if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
-  const checkRefusal = mergeTask(
-    handle,
-    'check',
-    devtoolCheckTask(),
-    `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
-  );
-  if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
-  const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
-  if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
+    const devRefusal = mergeTask(handle, 'dev', devTask);
+    if (devRefusal !== undefined) return reportInapplicable(deps, devRefusal);
+    const checkRefusal = mergeTask(
+      handle,
+      'check',
+      devtoolCheckTask(),
+      `deno check main.ts setu.config.ts && ${cliCheckCommand('deno')}`,
+    );
+    if (checkRefusal !== undefined) return reportInapplicable(deps, checkRefusal);
+    const importRefusal = mergeImport(handle, DEVTOOL_IMPORT);
+    if (importRefusal !== undefined) return reportInapplicable(deps, importRefusal);
+  }
 
   const entryPath = joinPath(dir, DEVTOOL_ENTRY_MODULE);
   let existingEntry: string | undefined;
@@ -860,7 +890,7 @@ async function enableStandalone(
             ' The file is yours once written — review it, remove it, and run this again.',
     );
   }
-  const entry = renderDevEntry({ devtoolPort });
+  const entry = renderDevEntry({ devtoolPort }, runtime);
   if (existingEntry !== undefined && !isDevEntry(existingEntry, devtoolPort, false)) {
     return reportInapplicable(
       deps,
@@ -869,7 +899,7 @@ async function enableStandalone(
     );
   }
 
-  planManifestWrites(planned, [handle]);
+  if (handle !== undefined) planManifestWrites(planned, [handle]);
   await planSourceWrites(deps, dir, configPath, configSource, planned);
   // An accepted older rendering (the 0.8.0 entry) is rewritten to the current one.
   if (existingEntry !== entry) {
@@ -916,7 +946,8 @@ async function enableStandalone(
     `Enabled the devtool: the connector listens on 127.0.0.1:${devtoolPort} while the project runs.`,
   );
   deps.log('Next:');
-  deps.log('  deno task dev');
+  if (runtime === 'node') deps.log('  npm install');
+  deps.log(`  ${workspaceProfile(runtime).runScript('dev')}`);
   deps.log('The launcher supplies the session credentials through the environment.');
   return EXIT_OK;
 }
@@ -1010,24 +1041,6 @@ function frameworkPinRefusal(handle: DenoJsonHandle): string | undefined {
       .join('\n') +
     `\nThe devtool entry imports types that exist only at ${VERSION}; upgrade the project first (see docs/upgrading.md), then run this again.`
   );
-}
-
-/**
- * Whether a path exists. Only a missing path is absent; any other failure is
- * thrown, so an unreadable manifest is reported rather than read as absence.
- *
- * @param fs - The filesystem to probe
- * @param path - The absolute path
- * @returns True when it exists
- */
-async function isPresent(fs: IFileSystem, path: string): Promise<boolean> {
-  try {
-    await fs.stat(path);
-    return true;
-  } catch (cause) {
-    if (isMissingPath(cause)) return false;
-    throw cause;
-  }
 }
 
 /** A thrown value's message, or its string form. */

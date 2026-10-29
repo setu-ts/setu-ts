@@ -8,6 +8,31 @@ import { listTemplates } from '../../src/templates/registry.ts';
 import { detectTargetRuntime } from '../../src/utils/runtime-detector.ts';
 import type { PortProbe } from '../../src/workspace/port-probe.ts';
 
+describe('Node standalone devtool scaffold', () => {
+  it('writes the development entry, script and development-only pin with exact dry-run parity', async () => {
+    const dry = harness();
+    const real = harness();
+    expect(await dry.run(['shop', '--devtool', '--dry-run'])).toBe(0);
+    expect(dry.fs.writes).toEqual([]);
+    expect(await real.run(['shop', '--devtool']), real.err.text()).toBe(0);
+    const manifest = JSON.parse(real.fs.read('/work/shop/package.json'));
+    expect(manifest.scripts.dev).toBe('tsx main.dev.ts');
+    expect(manifest.scripts.check).toBe('tsc --noEmit && setu check');
+    expect(manifest.devDependencies['@setu-ts/diagnostics-plugin']).toBe(`^${VERSION}`);
+    expect(manifest.dependencies['@setu-ts/diagnostics-plugin']).toBeUndefined();
+    expect(real.fs.read('/work/shop/main.dev.ts')).not.toMatch(/Deno\.|process\./);
+    // The runnable next step needs no credentials; `dev` is named as the launcher's.
+    expect(real.out.text()).toContain('npm install && npm run start:dev');
+    expect(real.out.text()).toContain(
+      'With the devtool, the launcher runs `npm run dev` and supplies the session credentials',
+    );
+    const planned = dry.out.lines
+      .filter((line) => line.startsWith('would create '))
+      .map((line) => line.slice('would create '.length));
+    expect(planned.sort()).toEqual([...real.fs.writes].sort());
+  });
+});
+
 interface Harness {
   readonly fs: FakeFs;
   readonly out: ReturnType<typeof createRecorder>;

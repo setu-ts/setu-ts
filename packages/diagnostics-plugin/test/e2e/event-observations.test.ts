@@ -28,6 +28,7 @@ import { requestMacFields, signFields } from '../../src/security/authentication.
 import { PLUGIN_ERRORS } from '../../src/plugin/diagnostics-plugin.ts';
 import { MAX_EVENT_SOURCES } from '../../src/protocol/event-protocol.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 const PAYLOAD_CANARY = 'event-payload-canary-SYNTHETIC-0001';
 const EVENT_ID_CANARY = 'event-id-canary-SYNTHETIC-0002';
@@ -44,15 +45,8 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 async function startEventApplication() {
-  const connectorPort = freePort();
+  const connectorPort = await unusedPort();
   const handled: string[] = [];
   const app = createApplication({
     plugins: [
@@ -186,7 +180,7 @@ describe('Event observations e2e (M98j canary)', () => {
   });
 
   it('answers an unsupported event response when no events plugin is present', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -219,7 +213,7 @@ describe('Event observations e2e (M98j canary)', () => {
   });
 
   it('answers a disabled source when EventsPlugin has no diagnostics option', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -257,11 +251,13 @@ describe('Event observations e2e (M98j canary)', () => {
 
 /** Sends one RAW request over a fresh TCP connection. */
 async function rawRequest(port: number, raw: string): Promise<{ status: number; body: string }> {
-  const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+  const connection = await connect({ port, hostname: '127.0.0.1' });
   await connection.write(new TextEncoder().encode(raw));
-  const response = await connection.readable.getReader().read();
-  await connection.close();
-  const text = new TextDecoder().decode(response.value);
+  const buffer = new Uint8Array(64 * 1024);
+  const count = await connection.read(buffer);
+  connection.close();
+  if (count === null) throw new Error('no response');
+  const text = new TextDecoder().decode(buffer.subarray(0, count));
   const [head, ...rest] = text.split('\r\n\r\n');
   return { status: Number.parseInt(head.split('\r\n')[0].split(' ')[1], 10), body: rest.join('') };
 }
@@ -378,13 +374,13 @@ describe('DiagnosticsPlugin — event source bound (M98j)', () => {
     };
   }
 
-  function boot(count: number) {
+  async function boot(count: number) {
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
         DiagnosticsPlugin({
           enabled: true,
-          port: freePort(),
+          port: await unusedPort(),
           sessionId: TEST_SESSION_ID,
           sessionKey: TEST_KEY_BYTES,
         }),
@@ -396,13 +392,13 @@ describe('DiagnosticsPlugin — event source bound (M98j)', () => {
   }
 
   it('starts with exactly 16 sources', async () => {
-    const { app, started } = boot(MAX_EVENT_SOURCES);
+    const { app, started } = await boot(MAX_EVENT_SOURCES);
     await started;
     await app.stop();
   });
 
   it('refuses a 17th source with a fixed, value-free configuration error', async () => {
-    const { app, started } = boot(MAX_EVENT_SOURCES + 1);
+    const { app, started } = await boot(MAX_EVENT_SOURCES + 1);
     await expect(started).rejects.toThrow(PLUGIN_ERRORS.tooManyEventSources);
     await app.stop().catch(() => {});
   });

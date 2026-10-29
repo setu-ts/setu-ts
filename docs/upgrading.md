@@ -34,6 +34,22 @@ rule already covers that path in older roots.
 `parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
 internal to `@setu-ts/config-plugin`, whose own surface is unchanged.
 
+### Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`)
+
+Nothing breaks. Three things change what an existing application can rely on:
+
+- **`signIn: { providers: [] }` no longer throws** when neither `mfa` nor `passkeys` is set. An
+  application that worked around the refusal with `AuthPlugin({ session: { toPrincipal } })` and its
+  own session key can move to `IAuthSessionService.signIn` to get `refreshPrincipal`, `amr` and
+  session-id rotation at sign-in.
+- **Adding `signIn.sessionStamp` to a running application ends every session whose user already has
+  a stamp**: those sessions were recorded without one, and a recorded "no stamp" matches only a user
+  whose stamp is still `null`. Deploy it when a one-time sign-out is acceptable, or return `null`
+  until every session has been renewed.
+- **`requireAuth()` without options is unchanged.** With `signInPage`, an anonymous `fetch()` still
+  gets `401`; only a page navigation is redirected. A route guarded by a role or permission guard
+  alone keeps answering `401`; put `requireAuth({ signInPage })` first to redirect it.
+
 ### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
 
 Full-stack projects now accept `new --broker` / `--queue`, and full-stack workspace members receive

@@ -7,10 +7,49 @@
 import {
   mapSnapshotToWebResponse,
   mapWebRequestToFrameworkRequest,
+  mapWebRequestWithTarget,
 } from '../../src/adapters/shared/fetch-mapping.ts';
 import { describe, expect, it } from 'vitest';
 import type { FormBody, IRequest, ResponseSnapshot } from '@setu-ts/common';
 import { UnsupportedFormEncodingError } from '@setu-ts/common';
+
+describe('fetch-mapping original diagnostics targets', () => {
+  for (const [target, path] of [
+    ['/v1/status', '/v1/status'],
+    ['/v1/./status', '/v1/./status'],
+    ['/x/../v1/status', '/x/../v1/status'],
+    ['/v1\\status', '/v1\\status'],
+    ['/v1/status?', '/v1/status'],
+    ['/v1/status#secret', '/v1/status'],
+    ['/v1/status?after=0#fragment', '/v1/status'],
+  ]) {
+    it(`retains ${target} beside the native request and keeps the identity guard`, () => {
+      const raw = new Request('http://irrelevant.example/normalized', {
+        headers: { 'x-proof': 'kept' },
+      });
+      const url = `http://127.0.0.1:4919${target}`;
+      const mapped = mapWebRequestWithTarget(raw, url, '::ffff:127.0.0.1');
+      expect(mapped.url).toBe(url);
+      expect(mapped.path).toBe(path);
+      expect(mapped.raw).toBe(raw);
+      expect(mapped.headers.get('x-proof')).toBe('kept');
+      expect(mapped.ip).toBe('127.0.0.1');
+      mapped.user = { id: 'first' };
+      expect(() => {
+        mapped.user = { id: 'second' };
+      }).toThrow();
+      expect(mapped.user?.id).toBe('first');
+      expect(Object.getPrototypeOf(mapped)).toBe(
+        Object.getPrototypeOf(mapWebRequestToFrameworkRequest(raw)),
+      );
+    });
+  }
+  it('also maps a target without a peer', () => {
+    expect(
+      mapWebRequestWithTarget(new Request('http://unused/'), 'http://127.0.0.1:4919/').ip,
+    ).toBeUndefined();
+  });
+});
 
 describe('fetch-mapping socket peers', () => {
   it('keeps one request shape with and without a peer', () => {

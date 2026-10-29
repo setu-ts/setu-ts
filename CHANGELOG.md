@@ -21,6 +21,29 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/common`. See [deployment](docs/deployment.md#build-test-and-deploy-from-the-root) and
   [upgrading](docs/upgrading.md#workspace-build-test-and-deploy-from-the-root-m122-0110-setu-tscli-setu-tscommon).
 
+- **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated
+  diagnostics connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http`
+  server. Request-target spellings are preserved, duplicate singleton lines are refused, parser
+  errors answer a fixed empty `400`, bind conflicts reject startup, and shutdown destroys open
+  connections; the server evicts oldest-idle sockets at 32 and routes Expect through the ordinary
+  request path. Bun and Workers continue to refuse this transport.
+
+- **Session and account lifecycle (M124, #520, 0.11.0, `@setu-ts/auth-plugin`).**
+  `signIn: { providers: [] }` is accepted without `mfa` or `passkeys`, so a password-only
+  application gets `refreshPrincipal`'s per-request re-check (V10-65). `requireAuth({ signInPage })`
+  (`RequireAuthOptions`) answers an unauthenticated browser navigation with `302` to the sign-in
+  page carrying `returnTo`, and every other request with the existing `401`; both answers append
+  `Accept`, `Sec-Fetch-Mode` and `X-Requested-With` to `Vary` (V10-66). `signIn.sessionStamp`
+  (`SessionStamp`) reads a stamp from the application's user record: its SHA-256 digest is recorded
+  at sign-in and compared on every request in constant time, so changing the stamp ends every
+  session of that user on both session strategies; passkey registration admits a session only
+  through the same re-checks, so an ended session cannot enrol a credential and mint a new one (its
+  `mayRegister` policy now receives that re-checked principal, carrying `claims.amr`).
+  `IAuthSessionService.current()` stays the un-re-checked snapshot — authorize from
+  `ctx.request.user`. `safeReturnTo` is exported for an application's own login handler. See
+  [ending every session of a user](packages/auth-plugin/README.md#ending-every-session-of-a-user)
+  and [upgrading](docs/upgrading.md#session-and-account-lifecycle-m124-0110-setu-tsauth-plugin).
+
 - **Full-stack broker configuration (M121, #519, 0.11.0, `@setu-ts/cli`).** Full-stack scaffolds and
   workspace members render messaging and queue transport options with config-backed connection reads
   and the selected clients. `setu add messaging` / `queue` reads workspace transports and accepts
@@ -184,6 +207,12 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
+  support Node projects and workspace members. Development entries read credentials and exit through
+  runtime services; older CLI-owned entries remain recognized and can be upgraded. Node uses
+  `tsx main.dev.ts`, keeps the diagnostics dependency development-only, and forwards a workspace
+  session only to its selected member within the launcher process group.
 
 - **`redactRecord()` returns a snapshot (#513, 0.11.0, `@setu-ts/common`).** Every plain object and
   array it walks is now copied, unclassified subtrees included, instead of being returned by

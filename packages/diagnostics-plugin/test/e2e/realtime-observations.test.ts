@@ -36,6 +36,7 @@ import { MemoryBackplane, RealtimeBackplanePlugin } from '@setu-ts/realtime-back
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { requestMacFields, signFields } from '../../src/security/authentication.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 const FRAME_CANARY = 'ws-frame-canary-SYNTHETIC-0001';
 const QUERY_CANARY = 'ws-query-canary-SYNTHETIC-0002';
@@ -56,13 +57,6 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 function waitFor<T>(register: (resolve: (value: T) => void) => void): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('timed out')), 5000);
@@ -74,8 +68,8 @@ function waitFor<T>(register: (resolve: (value: T) => void) => void): Promise<T>
 }
 
 async function startRealtimeApplication(bus: string) {
-  const connectorPort = freePort();
-  const httpPort = freePort();
+  const connectorPort = await unusedPort();
+  const httpPort = await unusedPort();
   const app = createApplication({
     plugins: [
       RuntimePlugin(),
@@ -269,7 +263,7 @@ describe('Realtime observations e2e (M98l canary)', () => {
   });
 
   it('answers disabled sources, never reading a gauge, when no plugin opted in', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -307,7 +301,7 @@ describe('Realtime observations e2e (M98l canary)', () => {
   });
 
   it('answers unsupported when no realtime plugin is registered', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -334,11 +328,13 @@ describe('Realtime observations e2e (M98l canary)', () => {
 
 /** Sends one RAW request over a fresh TCP connection. */
 async function rawRequest(port: number, raw: string): Promise<{ status: number; body: string }> {
-  const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+  const connection = await connect({ port, hostname: '127.0.0.1' });
   await connection.write(new TextEncoder().encode(raw));
-  const response = await connection.readable.getReader().read();
-  await connection.close();
-  const text = new TextDecoder().decode(response.value);
+  const buffer = new Uint8Array(64 * 1024);
+  const count = await connection.read(buffer);
+  connection.close();
+  if (count === null) throw new Error('no response');
+  const text = new TextDecoder().decode(buffer.subarray(0, count));
   const [head, ...rest] = text.split('\r\n\r\n');
   return { status: Number.parseInt(head.split('\r\n')[0].split(' ')[1], 10), body: rest.join('') };
 }

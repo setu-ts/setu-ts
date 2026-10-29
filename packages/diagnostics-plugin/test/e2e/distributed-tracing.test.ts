@@ -28,6 +28,7 @@ import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsClient } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const NAME_CANARY = 'POST /secret-path-CANARY-0001';
 const ATTRIBUTE_CANARY = 'attribute-canary-CANARY-0002';
@@ -42,13 +43,6 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 interface App {
   app: Awaited<ReturnType<typeof createApplication>>;
   client: IDiagnosticsClient;
@@ -58,7 +52,7 @@ interface App {
 }
 
 async function startTracingApplication(serviceAlias: string): Promise<App> {
-  const connectorPort = freePort();
+  const connectorPort = await unusedPort();
   const frames: string[] = [];
   const app = createApplication({
     plugins: [
@@ -169,7 +163,7 @@ describe('Distributed tracing observations (M98g) — end to end', () => {
     // through TelemetryService, whose setStatus/kind mapping must reach the
     // real OTel span in the shape OTel reads — otherwise the diagnostic
     // processor drops every span that set a status (every HTTP server span).
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),

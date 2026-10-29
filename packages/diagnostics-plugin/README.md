@@ -2,8 +2,8 @@
 
 The authenticated **local diagnostics connector** (M98b): connects a native devtool client to the
 kernel diagnostics (M98a) over a separate, runtime-owned authenticated IPv4 loopback HTTP listener.
-Deno and bounded polling only. No browser UI, no application-data reads, no application-control
-commands, and authentication is independent of any devtool subscription.
+Deno and Node, with bounded polling only. No browser UI, no application-data reads, no
+application-control commands, and authentication is independent of any devtool subscription.
 
 ## Trust model — read this first
 

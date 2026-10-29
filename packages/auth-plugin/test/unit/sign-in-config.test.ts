@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { compileSignIn, DEFAULT_SIGN_IN_BASE_PATH } from '../../src/sign-in/config.ts';
 import { MemoryPasskeyStore } from '../../src/stores/passkey-store.ts';
 import type { OAuth2Provider, OidcProvider, SignInConfig } from '../../src/interfaces/index.ts';
+import type { IPrincipal } from '@setu-ts/common';
 
 const oidc = (overrides: Partial<OidcProvider> = {}): OidcProvider => ({
   kind: 'oidc',
@@ -92,9 +93,22 @@ describe('compileSignIn', () => {
     expect(refusal(config([oidc(), oidc()]))).toContain('duplicates another provider name');
   });
 
-  it('refuses an empty provider list and an unknown kind', () => {
-    expect(refusal(config([]))).toContain('at least one provider');
-    // With mfa it is a password-only sign-in, not a mistake.
+  it('accepts an empty provider list as a password-only sign-in and refuses an unknown kind', () => {
+    // M124 §3.1: an empty list without mfa or passkeys is a password-only
+    // sign-in — the application calls IAuthSessionService.signIn itself.
+    const plain = compileSignIn(config([]));
+    expect(plain.providers).toEqual([]);
+    expect(plain.samlProviders).toEqual([]);
+    expect(plain.mfa).toBeNull();
+    expect(plain.passkeys).toBeNull();
+    expect(plain.logoutPath).toBe('/auth/logout');
+    // A non-array list is still a mistake.
+    for (const providers of [undefined, null, 'acme', { length: 0 }]) {
+      expect(refusal({ providers } as unknown as SignInConfig), String(providers)).toContain(
+        'signIn.providers must be an array',
+      );
+    }
+    // With mfa it is a password-only sign-in with a second factor.
     const passwordOnly = compileSignIn({ providers: [], mfa: { required: () => true } });
     expect(passwordOnly.providers).toEqual([]);
     expect(passwordOnly.mfa).not.toBeNull();
@@ -112,13 +126,34 @@ describe('compileSignIn', () => {
     expect(passkeyOnly.providers).toEqual([]);
     expect(passkeyOnly.mfa).toBeNull();
     expect(passkeyOnly.passkeys).not.toBeNull();
-    // A null `passkeys` from an untyped caller is no sign-in method at all.
-    expect(refusal({ providers: [], passkeys: null } as unknown as SignInConfig)).toContain(
-      'at least one provider',
-    );
+    // A null `passkeys` from an untyped caller is read as absent.
+    expect(
+      compileSignIn({ providers: [], passkeys: null } as unknown as SignInConfig).passkeys,
+    ).toBeNull();
     expect(refusal(config([{ ...oidc(), kind: 'ldap' } as unknown as OidcProvider]))).toContain(
       "must be 'oidc', 'oauth2' or 'saml'",
     );
+  });
+
+  it('carries refreshPrincipal and sessionStamp, and refuses a non-function either', () => {
+    const refreshPrincipal = (principal: IPrincipal): IPrincipal => principal;
+    const sessionStamp = (): string => 'v1';
+    const compiled = compileSignIn({ providers: [], refreshPrincipal, sessionStamp });
+    expect(compiled.refreshPrincipal).toBe(refreshPrincipal);
+    expect(compiled.sessionStamp).toBe(sessionStamp);
+    const absent = compileSignIn({ providers: [] });
+    expect(absent.refreshPrincipal).toBeNull();
+    expect(absent.sessionStamp).toBeNull();
+    for (const value of ['v1', 1, null, {}]) {
+      expect(
+        refusal({ providers: [], refreshPrincipal: value } as unknown as SignInConfig),
+        String(value),
+      ).toContain('signIn.refreshPrincipal must be a function');
+      expect(
+        refusal({ providers: [], sessionStamp: value } as unknown as SignInConfig),
+        String(value),
+      ).toContain('signIn.sessionStamp must be a function');
+    }
   });
 
   it('refuses a redirectUri that does not end with the provider callback path', () => {

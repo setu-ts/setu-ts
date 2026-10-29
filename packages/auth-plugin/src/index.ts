@@ -48,6 +48,7 @@ export type {
   SamlModule,
   SamlProfile,
   SamlProvider,
+  SessionStamp,
   SignInConfig,
   SignInProvider,
   SignInProviderBase,
@@ -69,6 +70,8 @@ export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 
 // Guards
 export { requireAuth } from './guards/index.ts';
+export type { RequireAuthOptions } from './interfaces/index.ts';
+export { safeReturnTo } from './sign-in/return-to.ts';
 export { requireRole } from './guards/index.ts';
 export { requirePermission } from './guards/index.ts';
 export { requireAnyRole } from './guards/index.ts';
