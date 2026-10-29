@@ -1385,6 +1385,11 @@ over your logger) and the `'error'` events of the client it builds are logged �
 `warn`, repeats at `debug`, recovery at `info` — rather than printed by `ioredis` to `console.error`
 on every reconnect attempt. An injected `client` never gets a listener.
 
+To back the store with node-redis, pass
+`new RedisRateLimitStore({ client: fromNodeRedis(createClient({ url })) })` (`fromNodeRedis` from
+`@setu-ts/common`, `createClient` from `redis`). See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 The default key resolves in this order: the authenticated principal, the client IP published by
 `ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
 `'anonymous'` bucket — shared by every caller for whom none of the three resolved.

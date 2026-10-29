@@ -699,6 +699,11 @@ here.
   `node:http` keeping the request-target as sent, raw singleton-line and fixed parser refusals,
   connector suites on both lanes; `--devtool` on Node projects and workspace members) — complete (PR
   #521).
+- **Milestone 117** (`common` + the seven Redis-backed plugins + `telemetry-plugin` +
+  `diagnostics-plugin` + `cli` — node-redis as a supported Redis client: one `fromNodeRedis` adapter
+  with its own command bound and RESP3 normalization, node-redis outage classification, a `redis`
+  trace arm, and `--redis-client` scaffolds through a generated `src/node-redis.ts`) — complete (PR
+  pending).
 - **Next milestone** — M122 (workspace operations from the root). M119i is also open.
 
 ## Verification (run before declaring any work done)

@@ -16,6 +16,7 @@
     "types": ["node", "deno"],
     "paths": {
       "@setu-ts/common": ["../../../packages/common/src/index.ts"],
+      "redis": ["../../../packages/common/node_modules/redis/dist/index.d.ts"],
       "@setu-ts/kernel": ["../../../packages/kernel/src/index.ts"],
       "@setu-ts/runtime": ["../../../packages/runtime/src/index.ts"],
       "@setu-ts/exceptions": ["../../../packages/exceptions/src/index.ts"],

@@ -38,6 +38,12 @@ npm install ioredis
 
 Without it, startup fails with `OptionalDependencyUnavailableError` naming `ioredis`.
 
+To use node-redis instead, inject it through the client arm —
+`{ type: 'redis', namespace, client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
+`@setu-ts/common`, `createClient` from `redis`) — and `ioredis` is not needed. The store never
+closes an injected client: call its `quit()` when your application stops. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 ## Usage
 
 ```typescript

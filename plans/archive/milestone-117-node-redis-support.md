@@ -1,6 +1,6 @@
 # Milestone 117 — node-redis as a supported Redis client (`@setu-ts/common` + 7 Redis consumers + `@setu-ts/telemetry-plugin` + `@setu-ts/cli`)
 
-> **Status:** Planning. Branch: `feat/m117-node-redis-support`. `main` and `develop` are protected —
+> **Status:** Complete. Branch: `feat/m117-node-redis-support`. `main` and `develop` are protected —
 > all work (implementation + fixes) stays on this one branch until it merges via a single PR.
 
 ## 0. Objective & scope

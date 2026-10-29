@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, the Redis-backed
+  plugins, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`).** `fromNodeRedis(client, options?)` wraps a
+  node-redis (`redis` v5/v6) client so every Redis-backed plugin's `client` option takes it: cache,
+  queue, Redis Streams messaging, the realtime backplane, the scheduler lock, idempotency and
+  `RedisRateLimitStore`. The adapter (`NodeRedisAdapter`, typed over `NodeRedisClientLike`, options
+  `NodeRedisAdapterOptions`) bounds each command with its own `commandTimeoutMs` (default 15 s),
+  because node-redis does not bound a written command; connects lazily; keeps an `'error'` listener
+  attached; and turns RESP3 map replies back into RESP2 shapes. No package depends on `redis`;
+  ioredis stays the default. `isConnectionFault` recognizes node-redis's outage errors, so they
+  answer `503` as ioredis outages do. `instrumentations.redis` traces node-redis through
+  `@opentelemetry/instrumentation-redis` (`^0.69.0`, optional peer). `setu new`/`setu add` take
+  `--redis-client ioredis|node-redis`; a node-redis project wires each plugin through a generated
+  `src/node-redis.ts`, and a workspace records `redisClient`. See
+  [Using node-redis](packages/common/README.md#using-node-redis-0110) and
+  [upgrading](docs/upgrading.md#node-redis-as-a-supported-redis-client-m117-0110).
+
 - **Local diagnostics on Node (M126, #521, `@setu-ts/runtime`).** The explicitly activated
   diagnostics connector can bind on Node as well as Deno, using a private IPv4-loopback `node:http`
   server. Request-target spellings are preserved, duplicate singleton lines are refused, parser
@@ -194,6 +210,14 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, 0.11.0,
+  `@setu-ts/scheduler-plugin`).** It declared `Promise<number | string | null>`, which one adapter
+  serving the queue's and idempotency's scripts could not honestly satisfy; the lock ignores the
+  result. Any client that satisfied the old type still does.
+- **`IRedisBackplaneClient` gains an optional `connect?()` (M117, 0.11.0,
+  `@setu-ts/realtime-backplane-plugin`).** When the backplane starts it connects an injected client
+  whose `status` is `'wait'`, so a lazily connecting client reports its real health from the start.
 
 - **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
   support Node projects and workspace members. Development entries read credentials and exit through

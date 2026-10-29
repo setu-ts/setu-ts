@@ -12,6 +12,21 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### node-redis as a supported Redis client (M117, 0.11.0)
+
+Nothing changes for an application on ioredis: every plugin still loads ioredis lazily when no
+client is injected, and scaffolds still default to it. To move a plugin to node-redis, install
+`redis` (v5 or v6) and pass `fromNodeRedis(createClient({ url }))` as its `client` — one client per
+plugin, two for the realtime backplane. A plugin's own `commandTimeoutMs` does not apply to an
+injected client; set the adapter's (`fromNodeRedis(client, { commandTimeoutMs })`, default 15 s),
+and keep it above the Redis Streams broker's `blockSizeMs`. The idempotency store never closes an
+injected client, so close it at shutdown. For traces, add `instrumentations.redis` and install
+`@opentelemetry/instrumentation-redis` `^0.69.0`.
+
+A custom client implementing `IRedisLockClient` keeps compiling: `eval` now returns
+`Promise<unknown>`. A custom `IRedisBackplaneClient` that exposes `connect()` and reports `status`
+`'wait'` is now connected when the backplane starts.
+
 ### Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`)
 
 Nothing breaks. Three things change what an existing application can rely on:

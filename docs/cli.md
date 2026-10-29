@@ -198,6 +198,28 @@ created for a standalone selection; existing Compose and dotenv files are preser
 prints the connection variable and local default. Without a selection the full-stack starter uses
 memory. Changing an existing value is a manual edit.
 
+#### Choosing the Redis client
+
+Redis arms use ioredis by default. `--redis-client node-redis` (on `setu new` with `--broker redis`,
+`--queue redis` or `--transport redis`, and on `setu add` with a Redis selection) scaffolds
+[node-redis](https://www.npmjs.com/package/redis) instead: the project depends on `redis` rather
+than `ioredis`, and a generated `src/node-redis.ts` exports `nodeRedisClient(url)`, which wraps
+`createClient({ url })` in `fromNodeRedis` from `@setu-ts/common`. Each Redis-backed plugin gets its
+own client, because each closes its client at shutdown; the realtime backplane gets two.
+`setu.config.ts` imports the helper rather than `redis` itself, so `setu check` and later `setu add`
+runs keep reading the configuration.
+
+```bash
+setu new svc --template microservice --broker redis --queue redis --redis-client node-redis
+setu new acme --workspace --transport redis --redis-client node-redis
+```
+
+A workspace records the choice as `redisClient: 'node-redis'` in its manifest (no key means
+ioredis), and `generate app` and `setu add` in its members follow it; they refuse their own
+`--redis-client`, as they refuse `--broker`, and an unknown stored value is refused by name. The
+flag is also refused without a Redis arm and on Cloudflare Workers. The interactive `setu new` asks
+for the client after a Redis broker or queue is chosen.
+
 `setu add react-router` refuses a project without a full-stack factory or existing
 ReactRouterPlugin: create one with `setu new <name> --template full-stack`, or in a workspace with
 `setu generate app <name> --template full-stack`.
