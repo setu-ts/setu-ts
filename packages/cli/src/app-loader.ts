@@ -218,6 +218,31 @@ export async function installSearchDirs(fs: IFileSystem, dir: string): Promise<s
 }
 
 /**
+ * The unknown `redisClient` the nearest workspace manifest above `dir` stores, if any.
+ *
+ * {@linkcode installSearchDirs} reads an unreadable manifest as "not a member", so a
+ * member of a workspace whose `redisClient` is unknown would otherwise be handled
+ * as a standalone project and quietly receive the ioredis default (M117 §3.8).
+ *
+ * @param fs - The file system
+ * @param dir - The project directory
+ * @returns The stored value, or `undefined` when no manifest above names an unknown one
+ */
+export async function unknownWorkspaceRedisClient(
+  fs: IFileSystem,
+  dir: string,
+): Promise<string | undefined> {
+  for (let current: string | undefined = dir; current !== undefined; current = parentDir(current)) {
+    if (!(await exists(fs, joinPath(current, WORKSPACE_MANIFEST)))) continue;
+    const read = await readWorkspaceManifest(fs, current);
+    return !read.ok && read.problem.kind === 'unknown-redis-client'
+      ? read.problem.redisClient
+      : undefined;
+  }
+  return undefined;
+}
+
+/**
  * Why a Deno project's config cannot be imported by this Node CLI, if it can't.
  *
  * The CLI imports `setu.config.ts` through Node resolution, which cannot read a

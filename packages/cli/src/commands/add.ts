@@ -43,6 +43,7 @@ import {
   brokerComposeFiles,
   missingComposeServices,
   readArmFlag,
+  redisClientRefusal,
   standaloneOverlayRefusal,
   starterOptionLiteral,
 } from '../templates/broker.ts';
@@ -58,11 +59,18 @@ import { composingStarter } from '../utils/starter-arms.ts';
 import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { hostSeamSpecs } from '../seams/registry.ts';
 import { seamFiles, seamLocalImports, withPluginOptionSeams } from '../templates/seam.ts';
-import { installSearchDirs } from '../app-loader.ts';
+import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
 import { transportSpec, renderConnection, type TransportSpec } from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
+import {
+  NODE_REDIS_FACTORY,
+  NODE_REDIS_IMPORT,
+  NODE_REDIS_IMPORT_LINE,
+  NODE_REDIS_MODULE_PATH,
+  nodeRedisModuleFile,
+} from '../templates/node-redis.ts';
 import {
   callArguments,
   callsIdentifier,
@@ -382,6 +390,28 @@ function providerCallArguments(source: string, bare: string, symbol: string): re
     }
   }
   return found;
+}
+
+/**
+ * Names the node-redis helper's import when the configuration does not have it.
+ *
+ * Every guidance line for the node-redis arm calls `nodeRedisClient(...)`; a
+ * configuration this run did not wire has no import of it, and without this line
+ * the printed call would not compile.
+ *
+ * @param source - The configuration, if readable
+ * @param clients - The client packages the selected transport installs
+ * @param log - Where guidance goes
+ */
+function printNodeRedisImportNote(
+  source: string | undefined,
+  clients: readonly string[],
+  log: (line: string) => void,
+): void {
+  if (!clients.includes('redis')) return;
+  const visible = source === undefined ? '' : (maskComments(source) ?? source);
+  if (visible.includes(`from '${NODE_REDIS_IMPORT.from}'`)) return;
+  log(`  Import ${NODE_REDIS_FACTORY} from '${NODE_REDIS_IMPORT.from}' for it.`);
 }
 
 /** Explains the registration site without rewriting starter-owned composition. */
@@ -1024,6 +1054,26 @@ function factoryCallsProvider(source: string, bare: string, symbol: string): boo
   );
 }
 
+/**
+ * Imports the project-local node-redis helper into a configuration the node-redis
+ * arm just wired (see `templates/node-redis.ts` for why it is not a `redis` import).
+ *
+ * @param original - The configuration before the wiring
+ * @param wired - The configuration after the wiring
+ * @returns The wired configuration importing the helper once, or `undefined` when
+ *   `nodeRedisClient` is already bound some other way and declaring it again would
+ *   collide (the caller then prints guidance instead of writing)
+ */
+function withNodeRedisImport(original: string, wired: string): string | undefined {
+  const visible = maskComments(original) ?? original;
+  const imported =
+    visible.includes(`from '${NODE_REDIS_IMPORT.from}'`) ||
+    visible.includes(`from "${NODE_REDIS_IMPORT.from}"`);
+  if (imported) return wired;
+  if (referencesIdentifier(visible, NODE_REDIS_FACTORY)) return undefined;
+  return `${NODE_REDIS_IMPORT_LINE}\n${wired}`;
+}
+
 /** Reads transport options only for a listed workspace member. */
 async function workspaceAddArgs(
   deps: AddCommandDependencies,
@@ -1035,7 +1085,7 @@ async function workspaceAddArgs(
   if (dirs.length === 1) return undefined;
   const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
   if (!read.ok) return undefined;
-  const transport = transportSpec(read.manifest.transport);
+  const transport = transportSpec(read.manifest.transport, read.manifest.redisClient);
   return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl);
 }
 
@@ -1069,7 +1119,7 @@ function transportAddArgs(
         ? (transport.messagingClients ?? [])
         : bare === 'queue-plugin'
           ? (transport.queueClients ?? [])
-          : ['ioredis'],
+          : [transport.redisClient === 'node-redis' ? 'redis' : 'ioredis'],
   };
 }
 
@@ -1207,6 +1257,13 @@ export async function runAddCommand(
   const createOnlyPaths = new Set<string>();
   let found = false;
   let alreadyPresent = false;
+  const unknownRedisClient = await unknownWorkspaceRedisClient(deps.fs, dir);
+  if (unknownRedisClient !== undefined) {
+    deps.error(
+      `Workspace names unknown redisClient "${escapeName(unknownRedisClient)}". Expected node-redis, or omit it for ioredis.`,
+    );
+    return EXIT_ERROR;
+  }
   const searchDirs = await installSearchDirs(deps.fs, dir);
   const configPath = joinPath(dir, 'setu.config.ts');
   let initialConfig: string | undefined;
@@ -1230,6 +1287,21 @@ export async function runAddCommand(
     return EXIT_ERROR;
   }
   let selected: TransportSpec | undefined;
+  if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
+    deps.error(
+      '--redis-client cannot apply inside a workspace member: members share the workspace --transport and redisClient.',
+    );
+    return EXIT_USAGE;
+  }
+  const redisRefusal = redisClientRefusal(
+    args,
+    runtime,
+    args.flags['broker'] === 'redis' || args.flags['queue'] === 'redis',
+  );
+  if (redisRefusal !== undefined) {
+    deps.error(redisRefusal);
+    return EXIT_USAGE;
+  }
   for (const flag of ['broker', 'queue'] as const) {
     if (args.flags[flag] === undefined) continue;
     const expected = flag === 'broker' ? 'messaging-plugin' : 'queue-plugin';
@@ -1452,8 +1524,12 @@ export async function runAddCommand(
             seam,
             transportArgs === undefined ? undefined : seam?.args,
           );
-    if (wired !== undefined) edits.push({ path: configPath, contents: wired });
-    configSource = wired ?? config;
+    const imported =
+      wired !== undefined && transport?.clients.includes('redis')
+        ? withNodeRedisImport(config, wired)
+        : wired;
+    if (imported !== undefined) edits.push({ path: configPath, contents: imported });
+    configSource = imported ?? config;
   } catch {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
@@ -1466,6 +1542,18 @@ export async function runAddCommand(
   // still wires it, and that import must resolve. A re-add that edits nothing
   // writes nothing.
   const configWired = edits.some((edit) => edit.path === configPath);
+  // The node-redis arm's call needs the project-local helper whether this run wired
+  // it or prints it as guidance (as the barrels above are written for guidance that
+  // names them); an existing file is the user's.
+  if ((installing || configWired) && transport?.clients.includes('redis')) {
+    const path = joinPath(dir, NODE_REDIS_MODULE_PATH);
+    try {
+      await deps.fs.readFile(path);
+    } catch {
+      const file = nodeRedisModuleFile();
+      edits.push({ path, contents: file.contents });
+    }
+  }
   for (const file of installing || configWired ? (seam?.files ?? []) : []) {
     const path = joinPath(dir, file.path);
     try {
@@ -1599,8 +1687,10 @@ export async function runAddCommand(
   if (edits.length === 0 && alreadyPresent) {
     deps.log(`${specifier} is already installed in ${escapeName(dir)}.`);
     for (const line of seamGapLines(configSource, bare, seam)) deps.log(line);
-    if (bare === 'messaging-plugin' || bare === 'queue-plugin')
+    if (bare === 'messaging-plugin' || bare === 'queue-plugin') {
       printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+      printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
+    }
     if (args.flags['dry-run'] !== true) await reportAgentsHint(deps, dir, runtime);
     return EXIT_OK;
   }
@@ -1663,6 +1753,7 @@ export async function runAddCommand(
     transportArgs !== undefined &&
     (bare === 'messaging-plugin' || bare === 'queue-plugin');
   if (!transportWritten) printWiringNote(configSource, bare, deps.log, seam, transportArgs);
+  printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass
@@ -1801,6 +1892,7 @@ function printAddHelp(log: (message: string) => void): void {
   log("that added it — so a project's framework packages stay on one version.");
   log('');
   log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
+  log('Redis arms: --redis-client <ioredis|node-redis> (default ioredis).');
   log('Workspace members use their workspace transport; existing configuration is preserved.');
   log('');
   log('Available:');

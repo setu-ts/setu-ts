@@ -75,6 +75,7 @@ describe('resolveNewChoices', () => {
       'Code style?',
       'Message broker?',
       'Job queue?',
+      'Redis client?',
       'Logger?',
     ]);
     expect(args.flags['runtime']).toBe('deno');
@@ -155,6 +156,7 @@ describe('resolveNewChoices', () => {
       'Code style?',
       'Message broker?',
       'Job queue?',
+      'Redis client?',
       'Logger?',
     ]);
     expect(args.flags['runtime']).toBeUndefined();
@@ -201,7 +203,13 @@ describe('resolveNewChoices', () => {
       ['svc', '--template', 'microservice', '--style', 'class-based'],
       ['deno', 'redis', 'redis'],
     );
-    expect(questions).toEqual(['Runtime?', 'Message broker?', 'Job queue?', 'Logger?']);
+    expect(questions).toEqual([
+      'Runtime?',
+      'Message broker?',
+      'Job queue?',
+      'Redis client?',
+      'Logger?',
+    ]);
     expect(args.flags['broker']).toBe('redis');
     expect(args.flags['queue']).toBe('redis');
   });

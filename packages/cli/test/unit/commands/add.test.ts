@@ -808,6 +808,21 @@ describe('setu add — optional peers in a Setu workspace (M119f)', () => {
     expect(dependencies(h, '/app/ws/package.json')['ioredis']).toBe(CLIENT_RANGES['ioredis']);
   });
 
+  it('places manifest-selected node-redis in root and member dependencies too', async () => {
+    const h = await workspace();
+    const manifest = JSON.parse(h.read('/app/ws/setu.workspace.json')) as Record<string, unknown>;
+    await put(
+      h,
+      '/app/ws/setu.workspace.json',
+      JSON.stringify({ ...manifest, transport: 'redis', redisClient: 'node-redis' }),
+    );
+    expect(await h.run(['cache', '--dir', '/app/ws/apps/api'])).toBe(0);
+    for (const path of ['/app/ws/package.json', '/app/ws/apps/api/package.json']) {
+      expect(dependencies(h, path)['redis']).toBe(CLIENT_RANGES['redis']);
+      expect(dependencies(h, path)['ioredis']).toBeUndefined();
+    }
+  });
+
   it('reports both paths in dry-run and writes nothing', async () => {
     const h = await workspace();
     const writes = h.fs.writes.length;

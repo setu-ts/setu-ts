@@ -33,6 +33,13 @@ describe('CLIENT_RANGES', () => {
 describe('withClientDependencies', () => {
   const host = resolveHost(getTemplate('microservice')!, 'node');
 
+  it('declares node-redis at the framework range for npm and Deno', () => {
+    expect(CLIENT_RANGES['redis']).toBe(EXTERNAL_RANGES['redis']);
+    const out = withClientDependencies(host, ['redis']);
+    expect(out.extraDependencies['redis']).toBe('6.x');
+    expect(out.extraImports['redis']).toBe('npm:redis@6.x');
+  });
+
   it('returns the host itself when nothing is selected', () => {
     expect(withClientDependencies(host, [])).toBe(host);
   });

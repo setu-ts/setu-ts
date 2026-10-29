@@ -187,6 +187,12 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
+  if (problem.kind === 'unknown-redis-client') {
+    error(
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names unknown redisClient "${escapeName(problem.redisClient)}". Expected node-redis, or omit it for ioredis.`,
+    );
+    return EXIT_ERROR;
+  }
   if (problem.kind === 'unknown-transport') {
     error(
       `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${escapeName(
@@ -399,7 +405,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // reach each other expressible in one flag. The standalone broker flags get
   // the same refusal with their own reason — they configure ONE project, and a
   // member inherits whatever the workspace already recorded.
-  for (const flag of ['transport', 'transport-url', 'broker', 'queue'] as const) {
+  for (const flag of ['transport', 'transport-url', 'broker', 'queue', 'redis-client'] as const) {
     if (args.flags[flag] !== undefined) {
       if (flag === 'broker' || flag === 'queue') {
         deps.error(
@@ -715,7 +721,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     name,
     next,
     args,
-    transportSpec(next.transport),
+    transportSpec(next.transport, next.redisClient),
     profile,
     rootManifest,
     rootGitignore,
