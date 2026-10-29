@@ -27,6 +27,7 @@ import {
   bootAndProbe,
   denoCheck,
   unusedPort,
+  unusedPortRange,
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
@@ -100,7 +101,8 @@ describe('workspace scaffolding — end to end', () => {
     root = await tempDir({ prefix: 'setu-ws-' });
     out = [];
     err = [];
-    base = await unusedPort();
+    // Every member's port, not just the first: see unusedPortRange.
+    base = await unusedPortRange(4);
   });
 
   afterEach(async () => {

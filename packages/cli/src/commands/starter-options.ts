@@ -1,5 +1,6 @@
 /** Conservative edits to the full-stack callback shape emitted by this CLI. @module */
 import {
+  callArguments,
   callsIdentifier,
   maskComments,
   maskSourceCode,
@@ -84,6 +85,27 @@ function returnedObject(source: string): IReturnedObject | undefined {
 }
 
 /**
+ * Finds the object literal passed as the first argument of the starter's single call.
+ *
+ * Read-only: it lets guidance report an option a hand-written `createMicroserviceApp({ … })`
+ * already sets (PR #519 review). Edits stay on {@linkcode returnedObject}, the generated shape.
+ * @param source - Developer-owned configuration
+ * @returns The object, or undefined when there is not exactly one such call
+ */
+function callObject(source: string): IReturnedObject | undefined {
+  const code = maskSourceCode(source);
+  const visible = maskComments(source);
+  const symbol = composingStarter(source)?.symbol;
+  if (code === undefined || visible === undefined || symbol === undefined) return undefined;
+  if (callArguments(code, symbol).length !== 1) return undefined;
+  const calls = [...code.matchAll(new RegExp(`(?<![\\w$.])${symbol}\\s*\\(\\s*\\{`, 'g'))];
+  if (calls.length !== 1) return undefined;
+  const start = calls[0]!.index + calls[0]![0].length;
+  const end = closingBrace(code, start);
+  return end === undefined ? undefined : { code, visible, start, end };
+}
+
+/**
  * Calls `visit` for each top-level position of the returned object, with its nesting depth.
  * @param object - The located object
  * @param visit - Receives the index and the depth relative to the object (0 = its properties)
@@ -99,16 +121,17 @@ function walkTopLevel(object: IReturnedObject, visit: (at: number, depth: number
 }
 
 /**
- * Reads the source text of a top-level property of the generated returned object.
+ * Reads the source text of a top-level property of the starter's options object.
  *
- * The same callback analysis {@linkcode withStarterOption} edits through, so guidance and
- * edits agree on what the starter is configured with (PR #519 review). The key may be quoted.
+ * The generated callback is read with the same analysis {@linkcode withStarterOption} edits
+ * through, so guidance and edits agree (PR #519 review); otherwise the object passed to the
+ * starter's single call, such as `createMicroserviceApp({ … })`. The key may be quoted.
  * @param source - Developer-owned configuration
  * @param key - Starter option to read
  * @returns The property's value text, or undefined when absent or the shape is uncertain
  */
 export function starterOptionValue(source: string, key: 'messaging' | 'queue'): string | undefined {
-  const object = returnedObject(source);
+  const object = returnedObject(source) ?? callObject(source);
   if (object === undefined) return undefined;
   const property = new RegExp(`^(['"]?)${key}\\1\\s*:`);
   let valueStart: number | undefined;

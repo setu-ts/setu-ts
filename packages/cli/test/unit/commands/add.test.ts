@@ -91,7 +91,8 @@ export function createApp(): IKernelApplication {
     expect(h.read('/app/shop/docker/compose.yaml')).toBe(compose);
     const out = h.out.join('\n');
     expect(out).toContain('docker/compose.yaml exists and has no rabbitmq service');
-    expect(out).toContain('  rabbitmq:');
+    // Printed at the file's own two-space service depth, so it pastes as a sibling.
+    expect(h.out).toContain('  rabbitmq:');
 
     h.out.length = 0;
     expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/shop'])).toBe(0);
@@ -310,6 +311,20 @@ export function createApp(): IKernelApplication {
       if (pkg === 'rest') expect(out).not.toContain('messaging: {');
     });
   }
+  // PR #519 review: an option a hand-written createMicroserviceApp call already sets is
+  // read and reported, not printed as if it were absent.
+  it('reports an existing createMicroserviceApp messaging option', async () => {
+    const options = "{ broker: 'redis-streams', options: { url: 'redis://cache:6379' } }";
+    const source = `import { createMicroserviceApp } from '@setu-ts/microservice-starter';\nexport async function createApp() { return createMicroserviceApp({ name: 'x', messaging: ${options} }); }\n`;
+    const h = harness({ '/app/package.json': '{}', '/app/setu.config.ts': source });
+    expect(await h.run(['messaging', '--broker', 'nats'])).toBe(0);
+    expect(h.read('/app/setu.config.ts')).toBe(source);
+    const out = h.out.join('\n');
+    expect(out).toContain(
+      'The existing messaging option was preserved; to use this transport, set:',
+    );
+    expect(out).not.toContain('In setu.config.ts: messaging:');
+  });
   it('refuses react-router before writing and accepts a full-stack project', async () => {
     const h = harness({ '/app/package.json': '{}' });
     expect(await h.run(['react-router'])).toBe(1);

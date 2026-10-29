@@ -347,6 +347,14 @@ describe('the transport note carried by both overlay arms', () => {
   });
 });
 
+/** Shifts every non-blank line of a Compose block right by `by` spaces. */
+function reindented(block: string, by: number): string {
+  return block
+    .split('\n')
+    .map((line) => (line === '' ? '' : ' '.repeat(by) + line))
+    .join('\n');
+}
+
 describe('missingComposeServices (PR #519 review)', () => {
   for (const spec of listTransports().filter((arm) => arm.compose !== undefined)) {
     it(`reports ${spec.name} as missing from a file without it, and nothing once present`, () => {
@@ -396,6 +404,17 @@ describe('missingComposeServices (PR #519 review)', () => {
     ]) {
       expect(missingComposeServices(file, redis), JSON.stringify(file)).toBeUndefined();
     }
+    // Quoted keys name the same service.
+    for (const file of [
+      'services:\n  "redis":\n    image: x\n',
+      "services:\n  'redis':\n    image: x\n",
+    ]) {
+      expect(missingComposeServices(file, redis), file).toBeUndefined();
+    }
+    // The block comes back at the file's own service depth.
+    const deep = missingComposeServices('services:\n    other:\n        image: x\n', redis)!;
+    expect(deep.split('\n')[0]).toBe('    redis:');
+    expect(deep).toBe(reindented(redis.compose!.services.replace(/\n$/, ''), 2));
     // An anchored service sets the depth, so a nested `redis:` under it is not a service.
     const anchored = 'services:\n  web: &web\n    redis:\n      image: x\n';
     expect(missingComposeServices(anchored, redis)).toBeDefined();

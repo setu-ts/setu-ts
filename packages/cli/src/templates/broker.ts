@@ -239,14 +239,17 @@ export function missingComposeServices(existing: string, spec: TransportSpec): s
   const tail = section === null ? '' : text.slice(section.index + section[0].length);
   const services = tail.slice(0, /^[^\s#]/m.exec(tail)?.index ?? tail.length);
   // A service is a key at the section's shallowest key indentation, whatever it is.
-  const keys = [...services.matchAll(/^( +)([\w.-]+):(?=[ \t]|$)/gm)].map((match) => ({
-    depth: match[1]!.length,
-    name: match[2]!,
-  }));
-  const depth = Math.min(...keys.map((key) => key.depth));
+  // Quoted keys (`"redis":`, `'redis':`) name the same service as bare ones.
+  const keys = [
+    ...services.matchAll(/^( +)(?:"([\w.-]+)"|'([\w.-]+)'|([\w.-]+)):(?=[ \t]|$)/gm),
+  ].map((match) => ({ depth: match[1]!.length, name: (match[2] ?? match[3] ?? match[4])! }));
+  const depth = keys.length === 0 ? 2 : Math.min(...keys.map((key) => key.depth));
   const declared = new Set(keys.filter((key) => key.depth === depth).map((key) => key.name));
   const missing = entries.filter((entry) => entry.name !== undefined && !declared.has(entry.name));
-  return missing.length === 0 ? undefined : missing.map((entry) => entry.text).join('\n');
+  if (missing.length === 0) return undefined;
+  // At the file's own service indentation, so the block pastes as a sibling, not nested.
+  const printed = missing.map((entry) => entry.text).join('\n');
+  return reindentLiteral(`\n${printed}`, 2, depth).slice(1);
 }
 
 /**

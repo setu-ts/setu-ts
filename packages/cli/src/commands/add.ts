@@ -1502,7 +1502,8 @@ export async function runAddCommand(
       deps.log(
         `  ${BROKER_COMPOSE_FILE} exists and has no ${selected.name} service; add this under services: and keep the rest:`,
       );
-      for (const line of missing.split('\n')) deps.log(`  ${line}`);
+      // Unprefixed: the block is printed at the file's own indentation, ready to paste.
+      for (const line of missing.split('\n')) deps.log(line);
     }
   }
 

@@ -23,7 +23,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
-import { bootAndProbe, unusedPort, useWorkspacePackages } from '../fixtures/generated-project.ts';
+import {
+  bootAndProbe,
+  unusedPortRange,
+  useWorkspacePackages,
+} from '../fixtures/generated-project.ts';
 import { WORKSPACE_MANIFEST } from '../../src/workspace/manifest.ts';
 import { DISCOVERY_MODULE } from '../../src/workspace/discovery-module.ts';
 
@@ -171,6 +175,88 @@ setTimeout(async () => {
 }, 6000);
 `;
 
+/** A spawned peer, as {@linkcode spawnProcess} returns it. */
+type Peer = ReturnType<typeof spawnProcess>;
+
+/** A peer whose output is drained while it runs. */
+interface IWatchedPeer {
+  readonly server: Peer;
+  /** Everything the peer has written to stdout and stderr so far. */
+  readonly output: () => string;
+  /** The exit code once the peer has exited. */
+  readonly exited: () => number | undefined;
+  /** Settles when both streams have ended. */
+  readonly drained: Promise<unknown>;
+}
+
+/**
+ * Starts draining a peer's stdout and stderr. A pipe nobody reads fills and stalls
+ * the peer before it binds, and the text is what a "never bound" failure needs.
+ * @param server - The spawned peer
+ * @returns The watched peer
+ */
+function watchPeer(server: Peer): IWatchedPeer {
+  let output = '';
+  let code: number | undefined;
+  const decoder = new TextDecoder();
+  const pump = async (stream: ReadableStream<Uint8Array> | null): Promise<void> => {
+    if (stream === null) return;
+    for await (const chunk of stream) output += decoder.decode(chunk, { stream: true });
+  };
+  void server.status.then((status) => {
+    code = status.code;
+  });
+  return {
+    server,
+    output: () => output,
+    exited: () => code,
+    drained: Promise.all([pump(server.stdout), pump(server.stderr)]),
+  };
+}
+
+/** How long a cold peer may take to bind on a loaded CI runner. */
+const BIND_DEADLINE_MS = 60_000;
+
+/** Room for two peer binds plus the probe's own boot, past the 30 s default. */
+const MESH_TIMEOUT_MS = 180_000;
+
+/**
+ * Waits until a peer answers on `url`, failing at once if it exits first.
+ * @param peer - The watched peer
+ * @param name - The member, for the failure message
+ * @param url - The address it binds
+ */
+async function waitForBind(peer: IWatchedPeer, name: string, url: string): Promise<void> {
+  const deadline = performance.now() + BIND_DEADLINE_MS;
+  while (peer.exited() === undefined && performance.now() < deadline) {
+    try {
+      const response = await fetch(url);
+      await response.body?.cancel();
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+  }
+  const state = peer.exited() === undefined ? 'still running' : `exited ${peer.exited()}`;
+  expect.fail(`${name} never bound ${url} (${state}):\n${peer.output().slice(-4000)}`);
+}
+
+/**
+ * Stops a peer and waits for its streams to end.
+ * @param peer - The watched peer
+ */
+async function stopPeer(peer: IWatchedPeer): Promise<void> {
+  // Guarded: a peer that failed to bind has ALREADY exited, and killing an exited
+  // child throws out of the `finally`, replacing the failure that names the peer.
+  try {
+    peer.server.kill();
+  } catch {
+    // Already gone; its status and streams still need draining below.
+  }
+  await peer.server.status;
+  await peer.drained;
+}
+
 describe('a three-service workspace — end to end', () => {
   let root: string;
   let base: number;
@@ -187,7 +273,8 @@ describe('a three-service workspace — end to end', () => {
 
   beforeEach(async () => {
     root = await tempDir({ prefix: 'setu-mesh-' });
-    base = await unusedPort();
+    // Every member's port, not just the first: see unusedPortRange.
+    base = await unusedPortRange(3);
     log.length = 0;
   });
 
@@ -284,109 +371,87 @@ describe('a three-service workspace — end to end', () => {
     expect(code).toBe(0);
   });
 
-  it('has one service call BOTH its peers over HTTP', async () => {
-    const ws = await mesh('http');
-    await useWorkspace(ws);
+  it(
+    'has one service call BOTH its peers over HTTP',
+    async () => {
+      const ws = await mesh('http');
+      await useWorkspace(ws);
 
-    const servers = ['billing', 'shipping'].map((member) =>
-      spawnProcess(denoBinary(), {
-        args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
-        cwd: `${ws}/apps/${member}`,
-        stdout: 'piped',
-        stderr: 'piped',
-      }),
-    );
+      const peers = ['billing', 'shipping'].map((member) =>
+        watchPeer(
+          spawnProcess(denoBinary(), {
+            args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
+            cwd: `${ws}/apps/${member}`,
+            stdout: 'piped',
+            stderr: 'piped',
+          }),
+        ),
+      );
 
-    try {
-      // Wait for both peers to BIND before probing. They were spawned and probed
-      // immediately, so under load the orders service fetched a port nothing was
-      // listening on yet and the assertion reported an empty body — a race in
-      // the test, not in the generated code. Observed intermittently in the full
-      // suite and never in isolation, which is the signature.
-      for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
-        const url = `http://127.0.0.1:${base + index + 1}/`;
-        let ready = false;
-        for (let attempt = 0; attempt < 100 && !ready; attempt++) {
-          try {
-            const response = await fetch(url);
-            await response.body?.cancel();
-            ready = true;
-          } catch {
-            await new Promise((resolve) => setTimeout(resolve, 100));
-          }
+      try {
+        // Wait for both peers to BIND before probing: under load the orders service
+        // otherwise fetched a port nothing was listening on yet.
+        for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+          await waitForBind(peers[index]!, peer, `http://127.0.0.1:${base + index + 1}/`);
         }
-        expect(ready, `${peer} never bound ${url}`).toBe(true);
-      }
 
-      const result = (await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE)) as Record<
-        string,
-        { url: string; status: number; body: string }
-      >;
-      for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
-        expect(result[peer]?.url).toBe(`http://127.0.0.1:${base + index + 1}/`);
-        expect(result[peer]?.status).toBe(200);
-        expect(String(result[peer]?.body)).toContain('Hello, World!');
-      }
-      expect(result['self']).toEqual([]);
-    } finally {
-      for (const server of servers) {
-        // Guarded: a peer that failed to bind has ALREADY exited, and killing an
-        // exited child throws `TypeError: Child process has already terminated`
-        // out of the `finally` — replacing the assertion failure that would have
-        // said which peer never came up. Under full-suite load this test binds
-        // real sockets against a busy machine, so that path is reachable.
-        try {
-          server.kill();
-        } catch {
-          // Already gone; its status and streams still need draining below.
+        const result = (await bootAndProbe(`${ws}/apps/orders`, MESH_PROBE)) as Record<
+          string,
+          { url: string; status: number; body: string }
+        >;
+        for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+          expect(result[peer]?.url).toBe(`http://127.0.0.1:${base + index + 1}/`);
+          expect(result[peer]?.status).toBe(200);
+          expect(String(result[peer]?.body)).toContain('Hello, World!');
         }
-        await server.status;
-        await server.stdout!.cancel();
-        await server.stderr!.cancel();
+        expect(result['self']).toEqual([]);
+      } finally {
+        for (const peer of peers) await stopPeer(peer);
       }
-    }
-  });
+    },
+    MESH_TIMEOUT_MS,
+  );
 
-  it('has one service call BOTH its peers over gRPC', async () => {
-    const ws = await mesh('grpc');
-    await useWorkspace(ws);
+  it(
+    'has one service call BOTH its peers over gRPC',
+    async () => {
+      const ws = await mesh('grpc');
+      await useWorkspace(ws);
 
-    const servers = ['billing', 'shipping'].map((member) =>
-      spawnProcess(denoBinary(), {
-        args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
-        cwd: `${ws}/apps/${member}`,
-        stdout: 'piped',
-        stderr: 'piped',
-      }),
-    );
+      const peers = ['billing', 'shipping'].map((member) =>
+        watchPeer(
+          spawnProcess(denoBinary(), {
+            args: ['run', '-A', '--node-modules-dir=none', `${ws}/apps/${member}/main.ts`],
+            cwd: `${ws}/apps/${member}`,
+            stdout: 'piped',
+            stderr: 'piped',
+          }),
+        ),
+      );
 
-    try {
-      const result = (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
-        string,
-        { status: number; body: string }
-      >;
-      for (const peer of ['billing', 'shipping'] as const) {
-        expect(result[peer]?.status).toBe(200);
-        // The decoded RPC body, not merely a 200 — a fallthrough Hono 404 or an
-        // empty body would otherwise read as success.
-        expect(String(result[peer]?.body)).toContain('SERVING');
-      }
-    } finally {
-      for (const server of servers) {
-        // A peer can exit while the probe is resolving; killing an already
-        // terminated process throws, but its status and streams still need
-        // draining before this test can finish.
-        try {
-          server.kill();
-        } catch {
-          // Already gone.
+      try {
+        // The same bind wait as the HTTP mesh: a probe sent before a peer listens
+        // reads as status 0.
+        for (const [index, peer] of (['billing', 'shipping'] as const).entries()) {
+          await waitForBind(peers[index]!, peer, `http://127.0.0.1:${base + index + 1}/`);
         }
-        await server.status;
-        await server.stdout!.cancel();
-        await server.stderr!.cancel();
+
+        const result = (await bootAndProbe(`${ws}/apps/orders`, GRPC_PROBE)) as Record<
+          string,
+          { status: number; body: string }
+        >;
+        for (const peer of ['billing', 'shipping'] as const) {
+          expect(result[peer]?.status).toBe(200);
+          // The decoded RPC body, not merely a 200 — a fallthrough Hono 404 or an
+          // empty body would otherwise read as success.
+          expect(String(result[peer]?.body)).toContain('SERVING');
+        }
+      } finally {
+        for (const peer of peers) await stopPeer(peer);
       }
-    }
-  });
+    },
+    MESH_TIMEOUT_MS,
+  );
 
   // The transport that actually leaves the process. Guarded on a live Redis and
   // reported when absent, never silently skipped as a pass.
