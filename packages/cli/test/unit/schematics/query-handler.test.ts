@@ -44,18 +44,8 @@ describe('query-handler schematic', () => {
     expect(file.path).toBe('src/cqrs/order-item.query-handler.ts');
   });
 
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
   it('is gated on cqrs-plugin', () => {
     expect(gateOf('query-handler')).toBe('cqrs-plugin');
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateQueryHandler(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('declares the query and its handler', () => {

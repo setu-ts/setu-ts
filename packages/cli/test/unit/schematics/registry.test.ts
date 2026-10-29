@@ -59,6 +59,27 @@ describe('schematic registry', () => {
     }
   });
 
+  // Contract checks every schematic shares, as one table rather than a copy per schematic file:
+  // a new schematic is covered by registering it.
+  it('every registered factory emits non-empty files ending in a newline', () => {
+    for (const { name } of listSchematics()) {
+      for (const file of getSchematic(name)!.factory(deriveNames('order-item'), options())) {
+        expect(file.contents.length, `${name}: ${file.path}`).toBeGreaterThan(0);
+        expect(file.contents.endsWith('\n'), `${name}: ${file.path}`).toBe(true);
+      }
+    }
+  });
+
+  it('every registered factory derives identical output from any casing of the same name', () => {
+    for (const { name } of listSchematics()) {
+      const factory = getSchematic(name)!.factory;
+      const kebab = factory(deriveNames('order-item'), options());
+      for (const spelling of ['OrderItem', 'orderItem', 'order_item']) {
+        expect(factory(deriveNames(spelling), options()), `${name}: ${spelling}`).toEqual(kebab);
+      }
+    }
+  });
+
   it('every registered factory produces at least one file', () => {
     for (const { name } of listSchematics()) {
       const files = getSchematic(name)!.factory(deriveNames('order-item'), options());
