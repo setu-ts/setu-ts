@@ -881,9 +881,6 @@ importers:
       '@types/node':
         specifier: ^24
         version: 24.19.2
-      redis:
-        specifier: 6.x
-        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
