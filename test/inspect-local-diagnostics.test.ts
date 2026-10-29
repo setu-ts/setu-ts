@@ -4,10 +4,11 @@
  * serves — WITHOUT ever printing the session ID/key or environment.
  */
 import { describe, expect, it } from 'vitest';
+import { denoBinary, run } from './node-helpers.ts';
 
 describe('inspect-local-diagnostics demo', () => {
   it('runs the loopback consumer exercise end-to-end and leaks no credential', async () => {
-    const command = new Deno.Command(Deno.execPath(), {
+    const { code, stdout, stderr } = await run(denoBinary(), {
       args: [
         'run',
         '--config=test/deno-lane/lane.config.json',
@@ -16,14 +17,14 @@ describe('inspect-local-diagnostics demo', () => {
         '--allow-net=127.0.0.1',
         'scripts/inspect-local-diagnostics.ts',
       ],
+      stdin: 'null',
       stdout: 'piped',
       stderr: 'piped',
     });
-    const { code, stdout, stderr } = await command.output();
     const output = new TextDecoder().decode(stdout);
     const errors = new TextDecoder().decode(stderr);
     expect(code).toEqual(0);
-    // Deno.serve prints its startup banner to stderr; that is the only
+    // The Deno listener prints its startup banner to stderr; that is the only
     // line stderr may carry (it names the port, never a credential).
     const errorLines = errors
       .trim()

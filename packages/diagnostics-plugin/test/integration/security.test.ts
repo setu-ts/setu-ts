@@ -12,6 +12,7 @@ import { RuntimePlugin } from '../../../runtime/src/index.ts';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { requestMacFields, signFields } from '../../src/security/authentication.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 /**
  * Signs an honest request against the ACTUAL bound port (the MAC covers
@@ -52,9 +53,7 @@ async function startApp(options?: {
   port: number;
   plugin: { revoke(): Promise<void> };
 }> {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
+  const port = await unusedPort();
   const plugin = DiagnosticsPlugin({
     enabled: true,
     port,
@@ -97,14 +96,15 @@ async function rawRequest(
   port: number,
   raw: string,
 ): Promise<{ status: number; headers: Headers; body: string }> {
-  const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+  const connection = await connect({ port, hostname: '127.0.0.1' });
   await connection.write(new TextEncoder().encode(raw));
-  const response = await connection.readable.getReader().read();
-  await connection.close();
-  if (response.value === undefined) {
+  const buffer = new Uint8Array(64 * 1024);
+  const count = await connection.read(buffer);
+  connection.close();
+  if (count === null) {
     throw new Error('no response');
   }
-  const text = new TextDecoder().decode(response.value);
+  const text = new TextDecoder().decode(buffer.subarray(0, count));
   const [head, ...rest] = text.split('\r\n\r\n');
   const lines = head.split('\r\n');
   const status = Number.parseInt(lines[0].split(' ')[1], 10);

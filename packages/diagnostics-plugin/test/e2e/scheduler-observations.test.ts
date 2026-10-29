@@ -21,6 +21,7 @@ import { SchedulerPlugin } from '@setu-ts/scheduler-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY_NAME = 'canary-job-SYNTHETIC';
 const CANARY_DATA = 'canary-payload-SYNTHETIC';
@@ -40,17 +41,9 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-/** Reserves a free loopback port. */
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 describe('Scheduler observations e2e (M98k canary)', () => {
   it('serves approved counters end to end while every canary stays absent', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -94,7 +87,7 @@ describe('Scheduler observations e2e (M98k canary)', () => {
       ],
       diagnostics: {},
     });
-    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     try {
       // One imperative, UNOBSERVED job: its name is a canary and its fire
       // must appear nowhere.
@@ -175,7 +168,7 @@ describe('Scheduler observations e2e (M98k canary)', () => {
     // lateness is always k + 0.5 ms. The wire accepts only integer counters:
     // unrounded, that one record turned the WHOLE source collection-failed,
     // hiding the unrelated recurring job beside it.
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -199,7 +192,7 @@ describe('Scheduler observations e2e (M98k canary)', () => {
       ],
       diagnostics: {},
     });
-    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     try {
       await new Promise((resolve) => setTimeout(resolve, 120));
       const client = createDiagnosticsClient({

@@ -11,6 +11,7 @@ import { createRuntimeServices, RuntimePlugin } from '../../../runtime/src/index
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import type { IDiagnosticsPlugin } from '../../src/interfaces/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 /**
  * Starts one application with the connector on a free port.
@@ -26,9 +27,7 @@ async function startApp(
   port: number;
   plugin: IDiagnosticsPlugin;
 }> {
-  const listener = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
+  const port = await unusedPort();
   const plugin = DiagnosticsPlugin({
     enabled: true,
     port,
@@ -155,9 +154,7 @@ describe('Lifecycle', () => {
   }
 
   it('a failed parent startup closes an already-open listener', async () => {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const port = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const port = await unusedPort();
     const plugin = DiagnosticsPlugin({
       enabled: true,
       port,
@@ -187,7 +184,7 @@ describe('Lifecycle', () => {
     // The close hook fired on the failed-startup path: the port is free.
     let refused = false;
     try {
-      const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+      const connection = await connect({ port, hostname: '127.0.0.1' });
       await connection.close();
     } catch {
       refused = true;
@@ -205,7 +202,7 @@ describe('Lifecycle', () => {
     // After shutdown the listener socket is gone: a connect refuses.
     let refused = false;
     try {
-      const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+      const connection = await connect({ port, hostname: '127.0.0.1' });
       await connection.close();
     } catch {
       refused = true;

@@ -23,6 +23,7 @@ import { createClient, createObservedFetch } from '@setu-ts/sdk';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { serveHttp, unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY = 'canary-SYNTHETIC';
 
@@ -34,17 +35,10 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 /** A loopback upstream: `/ok` 200, `/missing` 404, `/boom` 503, `/hang` never answers. */
-function startUpstream() {
+async function startUpstream() {
   const hangs: (() => void)[] = [];
-  const server = Deno.serve({ port: 0, hostname: '127.0.0.1', onListen() {} }, (request) => {
+  const server = await serveHttp({ port: 0, hostname: '127.0.0.1', onListen() {} }, (request) => {
     const path = new URL(request.url).pathname;
     if (path.endsWith('/hang')) {
       return new Promise<Response>((resolve) => hangs.push(() => resolve(new Response('late'))));
@@ -55,7 +49,7 @@ function startUpstream() {
       headers: { 'set-cookie': `session=${CANARY}`, 'x-secret': CANARY },
     });
   });
-  const port = (server.addr as Deno.NetAddr).port;
+  const port = server.addr.port;
   return {
     base: `http://127.0.0.1:${port}`,
     releaseHangs: () => hangs.splice(0).forEach((release) => release()),
@@ -67,8 +61,8 @@ function startUpstream() {
 
 describe('Outbound HTTP observations e2e (M98n canary)', () => {
   it('serves approved counters end to end while every canary stays absent', async () => {
-    const upstream = startUpstream();
-    const connectorPort = freePort();
+    const upstream = await startUpstream();
+    const connectorPort = await unusedPort();
     const observed = createObservedFetch({ alias: 'payments-api' });
     const app = createApplication({
       plugins: [
@@ -83,7 +77,7 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       ],
       diagnostics: {},
     });
-    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     // Declared outside the try so a failing assertion still releases the hung
     // upstream call in `finally` — otherwise the test never ends.
     let hung: Promise<Response> | undefined;
@@ -102,7 +96,9 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       expect(direct.status).toBe(503);
       await direct.text();
       // A refused connection: a rejection whose message quotes the address.
-      await expect(observed.fetch(`http://127.0.0.1:${freePort()}/${CANARY}`)).rejects.toThrow();
+      await expect(
+        observed.fetch(`http://127.0.0.1:${await unusedPort()}/${CANARY}`),
+      ).rejects.toThrow();
       // A hung call stays in flight.
       hung = observed.fetch(`${upstream.base}/hang`);
 
@@ -154,7 +150,7 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
   });
 
   it('builds no helper, plugin or source without the devtool parameter (O13)', async () => {
-    const upstream = startUpstream();
+    const upstream = await startUpstream();
     function createApp(
       _env?: Readonly<Record<string, unknown>>,
       devtool?: { plugins?: readonly IPlugin[]; diagnostics?: KernelDiagnosticsOptions },
@@ -181,7 +177,7 @@ describe('Outbound HTTP observations e2e (M98n canary)', () => {
       expect(production.app.services.has(CAPABILITIES.OUTBOUND_HTTP_DIAGNOSTICS)).toBe(false);
       await production.app.stop();
 
-      const connectorPort = freePort();
+      const connectorPort = await unusedPort();
       const dev = createApp(undefined, {
         plugins: [
           DiagnosticsPlugin({
