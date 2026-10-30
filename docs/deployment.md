@@ -42,9 +42,9 @@ peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded
 application where possible.
 
 Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address; numeric ports are
-stripped from IPv4 and bracketed IPv6 entries. Bare IPv6 is always an address. An invalid entry
-stops resolution with `CLIENT_IP_STATE_KEY` set to `undefined`, never the socket peer, and leaves
-the origin as the URL origin.
+stripped from IPv4 and bracketed IPv6 entries. An unbracketed IPv6 entry never carries a port. An
+invalid entry stops resolution with `CLIENT_IP_STATE_KEY` set to `undefined`, never the socket peer,
+and leaves the origin as the URL origin.
 
 The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
 `X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when

@@ -245,9 +245,9 @@ their header-only selection and do not check the peer; prefer `trustedProxies` f
 addresses.
 
 Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address. Numeric ports are
-stripped from IPv4 and bracketed IPv6 entries; bare IPv6 is always an address. An invalid entry is a
-boundary: resolution stops with `CLIENT_IP_STATE_KEY` set to `undefined`, without falling back to
-the socket peer, and the origin stays the URL origin.
+stripped from IPv4 and bracketed IPv6 entries; an unbracketed IPv6 entry never carries a port. An
+invalid entry is a boundary: resolution stops with `CLIENT_IP_STATE_KEY` set to `undefined`, without
+falling back to the socket peer, and the origin stays the URL origin.
 
 `forwardedHeader: 'forwarded'` reads only RFC 7239 `Forwarded`, including quoted IPv6 addresses and
 ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-*` only. A malformed
