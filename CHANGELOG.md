@@ -468,7 +468,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
-- **Validate forwarded client addresses (0.11.0, `@setu-ts/http-security-plugin`).** IP security
+- **Validate forwarded client addresses (#529, 0.11.0, `@setu-ts/http-security-plugin`).** IP security
   validates every examined `X-Forwarded-For` or custom `ipHeader` entry and strips numeric ports
   from IPv4 and bracketed IPv6 addresses. An invalid entry stops resolution with no client or
   forwarded origin, rather than publishing arbitrary text or falling back to the socket peer. Both
