@@ -283,8 +283,12 @@ export async function diagnoseProject(
       )),
     );
   }
-  if (layout === 'mixed')
-    findings.push({ kind: 'mixed-layout', files: await flatArtifactFiles(fs, dir) });
+  if (layout === 'mixed') {
+    // Reported by generate too: it is why a top-level generator now refuses.
+    const mixed: Finding = { kind: 'mixed-layout', files: await flatArtifactFiles(fs, dir) };
+    findings.push(mixed);
+    generateFindings.push(mixed);
+  }
   findings.push(...duplicates, ...(await unresolvedImports(fs, dir, modules.names, mode, config)));
   const starter = composingStarter(config);
   return {

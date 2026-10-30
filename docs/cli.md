@@ -310,13 +310,14 @@ registration site either: it is the shapes file a feature imports —
 [Controllers and domain modules](#controllers-and-domain-modules) says where shapes live and what
 `--module` does with them.
 
-`--module <name>` is the feature-scoped form of the four schematics a feature owns — `service`,
-`route`, `controller` and `schema`: it places the file inside the named module rather than the
-top-level folder, and every other schematic refuses the flag because it is app-wide. In functional
-mode a module-scoped `route` or `controller` regenerates the module's CLI-owned `index.ts` to
-register it; a module-scoped `service` or `schema` is a file for the module's own code to import and
-registers nothing. A class-based module is extended by a printed `@Module` line rather than an
-edited one. See
+`--module <name>` is the feature-scoped form of the five schematics a feature owns — `controller`,
+`route`, `service`, `sse` and `schema`: it places the file inside the named module rather than the
+top-level folder, and every other schematic refuses the flag because it is app-wide. Once a project
+has modules the first four require it. A function controller is registered by regenerating the
+module's CLI-owned `index.ts`; in a class-based module a class controller or service is added to the
+`controllers` or `providers` array of `<module>.module.ts` when that array is a plain literal, and
+otherwise the line to add is printed. A functional `service` or a `schema` is a file for the
+module's own code to import and registers nothing. See
 [`--module`: place a file inside a feature](#--module-place-a-file-inside-a-feature).
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
@@ -538,8 +539,10 @@ re-emits `test/support/server.ts`, so a project scaffolded earlier gains it).
   is installed).
 
 The tasks split the two: `test` runs every `*.test.ts` except `*.e2e.test.ts`; `test:e2e` runs only
-`*.e2e.test.ts` over real HTTP. The `rest` template's sample now lives at `src/modules/greeting/`,
-so a new project's first files are exactly what `g module` produces.
+`*.e2e.test.ts` over real HTTP. The `rest` template's sample is
+`src/controllers/greeting.controller.ts` and `src/services/greeting.service.ts`, where
+`g controller` and `g service` write in a new project; the first `g module` moves it into the module
+while it is untouched.
 
 ### Form bodies validate with the same schema
 

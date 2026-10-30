@@ -16,7 +16,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'generate',
     packages: [],
     applies: () => true,
-    text: 'Generate with setu generate, then edit; follow its printed guidance. Never edit CLI-owned index.ts files. Routes live only in *.controller.ts, in src/controllers/ (services in src/services/); after the first setu g module, only in src/modules/<name>/ (--module). Moved one? setu sync.',
+    text: 'Generate with setu generate, then edit; follow its printed guidance. Never edit CLI-owned index.ts files. Kernel routes live only in *.controller.ts, in src/controllers/ (services in src/services/); after the first setu g module, only in src/modules/<name>/ (--module). Moved one? setu sync.',
   },
   {
     id: 'services',

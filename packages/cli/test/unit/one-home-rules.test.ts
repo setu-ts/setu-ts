@@ -105,6 +105,22 @@ describe('setu add view placement', () => {
     );
   });
 
+  it('says when the config never calls the registrar the views controller joins', async () => {
+    const h = await project('functional', false);
+    const config = h.fs.read('/app/setu.config.ts');
+    await h.fs.writeFile(
+      '/app/setu.config.ts',
+      encode(config.replace('  registerGeneratedRoutes(app.router, app.services);\n', '')),
+    );
+    expect(await h.run(['add', 'view'])).toBe(0);
+    expect(h.out.text()).toContain(
+      'setu.config.ts does not call registerGeneratedRoutes; add registerGeneratedRoutes(app.router, app.services); so /ui is registered.',
+    );
+    const wired = await project('functional', false);
+    expect(await wired.run(['add', 'view'])).toBe(0);
+    expect(wired.out.text()).not.toContain('does not call registerGeneratedRoutes');
+  });
+
   it('refuses a placement that breaks the rule, writing nothing', async () => {
     const cases: readonly (readonly [boolean, readonly string[], number, string])[] = [
       [
@@ -148,6 +164,11 @@ describe('setu check, generate and sync on the one-home findings', () => {
     expect(await h.run(['check'])).toBe(1);
     expect(h.err.text()).toContain(
       'error setu.E014: This project has modules and also keeps controllers or services outside them: src/controllers/stray.controller.ts.',
+    );
+    // generate says so too, beside its own refusal.
+    expect(await h.run(['g', 'controller', 'other'])).toBe(2);
+    expect(h.err.text()).toContain(
+      'This project has modules and also keeps controllers or services outside them: src/controllers/stray.controller.ts.\n',
     );
   });
 

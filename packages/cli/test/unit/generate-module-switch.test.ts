@@ -419,6 +419,27 @@ describe('the first setu g module', () => {
     );
   });
 
+  it('rewrites .js specifiers to moved files, and refuses an import it cannot map', async () => {
+    const h = scaffold(host('functional'), {
+      'src/shared/uses-js.ts':
+        "import { registerGreetingRoutes } from '../controllers/greeting.controller.js';\nexport const r = registerGreetingRoutes;\n",
+    });
+    expect(await h.run(['module', 'shipment', '--adopt-controllers'])).toBe(0);
+    expect(h.fs.read('/app/src/shared/uses-js.ts')).toContain(
+      "from '../modules/shipment/greeting.controller.js'",
+    );
+
+    const broken = scaffold(host('functional'), {
+      'src/shared/stale.ts': "export * from '../controllers/gone.controller.ts';\n",
+    });
+    const writes = broken.fs.writes.length;
+    expect(await broken.run(['module', 'shipment', '--adopt-controllers'])).toBe(1);
+    expect(broken.err.text()).toContain(
+      'src/shared/stale.ts imports ../controllers/gone.controller.ts, which does not name a file the first module moves. Nothing was changed.',
+    );
+    expect(broken.fs.writes.length).toBe(writes);
+  });
+
   it('refuses to adopt a class whose name the new module already binds', async () => {
     // `setu g module` refuses this earlier, as a name conflict; the planner refuses
     // on its own too, so a caller that skips that check still cannot drop a class.

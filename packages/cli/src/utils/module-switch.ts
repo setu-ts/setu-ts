@@ -146,6 +146,37 @@ function dirname(path: string): string {
   return at < 0 ? '' : path.slice(0, at);
 }
 
+/** The spellings a relative specifier may use for a TypeScript file: [written, source]. */
+const SPECIFIER_FORMS: readonly (readonly [written: string, source: string])[] = [
+  ['', ''],
+  ['', '.ts'],
+  ['', '.tsx'],
+  ['', '/index.ts'],
+  ['.js', '.ts'],
+  ['.jsx', '.tsx'],
+  ['.mjs', '.mts'],
+];
+
+/**
+ * Where a specifier's target goes, written the way the specifier wrote it.
+ *
+ * @param moved - Old path → new path
+ * @param target - The specifier resolved against its importer, project-relative
+ * @returns The new target in the specifier's own form, or undefined when it names no moved file
+ */
+function movedSpecifierTarget(
+  moved: ReadonlyMap<string, string>,
+  target: string,
+): string | undefined {
+  for (const [written, source] of SPECIFIER_FORMS) {
+    if (!target.endsWith(written)) continue;
+    const stem = target.slice(0, target.length - written.length);
+    const to = moved.get(`${stem}${source}`);
+    if (to !== undefined) return `${to.slice(0, to.length - source.length)}${written}`;
+  }
+  return undefined;
+}
+
 /**
  * The relative specifier from one directory to a project path.
  *
@@ -319,16 +350,19 @@ export async function planModuleSwitch(input: IModuleSwitchInput): Promise<Modul
             'Import the files it re-exports directly, then run this command again.',
           ],
         };
-      // An extensionless or directory specifier keeps its form.
-      const match = ['', '.ts', '.tsx', '/index.ts'].find((suffix) =>
-        moved.has(`${target}${suffix}`),
-      );
-      if (match === undefined && from === path) continue;
-      const destination =
-        match === undefined
-          ? target
-          : moved.get(`${target}${match}`)!.slice(0, match === '' ? undefined : -match.length);
-      const value = relativeSpecifier(dirname(from), destination);
+      // Each form keeps its spelling: extensionless, directory, or a `.js`
+      // specifier naming its TypeScript source.
+      const destination = movedSpecifierTarget(moved, target);
+      if (destination === undefined && FLAT_DIRS.some((home) => target.startsWith(`${home}/`)))
+        return {
+          kind: 'refused',
+          lines: [
+            `${escapeName(path)} imports ${escapeName(span.value)}, which does not name a file the first module moves. Nothing was changed.`,
+            `Fix that import, then run this command again.`,
+          ],
+        };
+      if (destination === undefined && from === path) continue;
+      const value = relativeSpecifier(dirname(from), destination ?? target);
       if (value !== span.value) edits.push({ span, value });
     }
     let contents = source;

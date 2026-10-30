@@ -23,8 +23,9 @@ result and exit rather than servers: `cqrs` and `microservices`.
 
 ## How every example is laid out
 
-Each example has the layout `setu new` scaffolds, so the shape to copy is the shape the CLI gives
-you:
+Each example has the layout of a project after its first `setu g module`, so the shape to copy is
+the shape the CLI gives you. A new project starts flat, with its controllers in `src/controllers/`
+and its services in `src/services/`; the first module moves them into `src/modules/<feature>/`:
 
 ```text
 apps/<name>/

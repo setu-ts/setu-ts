@@ -1887,6 +1887,17 @@ export async function runAddCommand(
       if (file.path === 'setu.config.ts') configSource = file.contents;
     }
     for (const line of plan.notes) deps.log(escapeName(line));
+    // The page reaches the router only through the barrel or module index, so a
+    // config that never calls its registrar leaves /ui unregistered.
+    const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
+    if (
+      plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)) &&
+      configSource !== undefined &&
+      !callsIdentifier(maskSourceCode(configSource) ?? '', registrar)
+    )
+      deps.log(
+        `setu.config.ts does not call ${registrar}; add ${registrar}(app.router, app.services); so /ui is registered.`,
+      );
   }
 
   if (edits.length === 0 && alreadyPresent) {
