@@ -68,7 +68,6 @@ export const DOCS_NAV: DocsNavGroup[] = [
     label: 'Operations',
     items: [
       { slug: 'releasing', label: 'Release runbook' },
-      { slug: 'code-review-audit', label: 'Code review audit' },
       { slug: 'react-router-dev', label: 'React Router dev' },
     ],
   },
