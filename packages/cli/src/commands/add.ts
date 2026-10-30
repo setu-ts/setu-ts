@@ -1889,15 +1889,25 @@ export async function runAddCommand(
     for (const line of plan.notes) deps.log(escapeName(line));
     // The page reaches the router only through the barrel or module index, so a
     // config that never calls its registrar leaves /ui unregistered.
+    // Read inside the generated factory when it is recognized, so a call in some
+    // other function does not count; the full-stack async factory is read whole.
     const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
+    const factory = configSource === undefined ? undefined : factoryScope(configSource);
+    const body =
+      factory === undefined
+        ? (maskSourceCode(configSource ?? '') ?? '')
+        : factory.code.slice(factory.start, factory.end);
     if (
       plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)) &&
       configSource !== undefined &&
-      !callsIdentifier(maskSourceCode(configSource) ?? '', registrar)
-    )
+      !callsIdentifier(body, registrar)
+    ) {
+      deps.log(`setu.config.ts does not call ${registrar}, so /ui is not registered; add:`);
       deps.log(
-        `setu.config.ts does not call ${registrar}; add ${registrar}(app.router, app.services); so /ui is registered.`,
+        `  import { ${registrar} } from './${module === undefined ? 'src/controllers' : 'src/modules'}/index.ts';`,
       );
+      deps.log(`  ${registrar}(app.router, app.services);`);
+    }
   }
 
   if (edits.length === 0 && alreadyPresent) {

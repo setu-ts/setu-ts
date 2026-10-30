@@ -25,7 +25,9 @@ result and exit rather than servers: `cqrs` and `microservices`.
 
 Each example has the layout of a project after its first `setu g module`, so the shape to copy is
 the shape the CLI gives you. A new project starts flat, with its controllers in `src/controllers/`
-and its services in `src/services/`; the first module moves them into `src/modules/<feature>/`:
+and its services in `src/services/`. The first `setu g module` moves the scaffold's untouched
+greeting example into `src/modules/<feature>/` by itself; controllers or services you have written
+or changed there need `--adopt-controllers`, or it refuses and lists them:
 
 ```text
 apps/<name>/

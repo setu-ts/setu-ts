@@ -114,8 +114,23 @@ describe('setu add view placement', () => {
     );
     expect(await h.run(['add', 'view'])).toBe(0);
     expect(h.out.text()).toContain(
-      'setu.config.ts does not call registerGeneratedRoutes; add registerGeneratedRoutes(app.router, app.services); so /ui is registered.',
+      [
+        'setu.config.ts does not call registerGeneratedRoutes, so /ui is not registered; add:',
+        "  import { registerGeneratedRoutes } from './src/controllers/index.ts';",
+        '  registerGeneratedRoutes(app.router, app.services);',
+      ].join('\n'),
     );
+    // A call outside the factory registers nothing on the app.
+    const elsewhere = await project('functional', false);
+    const original = elsewhere.fs.read('/app/setu.config.ts');
+    await elsewhere.fs.writeFile(
+      '/app/setu.config.ts',
+      encode(
+        `${original.replace('  registerGeneratedRoutes(app.router, app.services);\n', '')}\nexport function unused(app: IKernelApplication): void {\n  registerGeneratedRoutes(app.router, app.services);\n}\n`,
+      ),
+    );
+    expect(await elsewhere.run(['add', 'view'])).toBe(0);
+    expect(elsewhere.out.text()).toContain('setu.config.ts does not call registerGeneratedRoutes');
     const wired = await project('functional', false);
     expect(await wired.run(['add', 'view'])).toBe(0);
     expect(wired.out.text()).not.toContain('does not call registerGeneratedRoutes');
