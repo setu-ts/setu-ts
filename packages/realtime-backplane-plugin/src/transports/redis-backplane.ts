@@ -196,6 +196,11 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
+      for (const client of [publisher, subscriber]) {
+        if (client.status === 'wait' && typeof client.connect === 'function') {
+          await client.connect();
+        }
+      }
     } else {
       const module = this.#options.module ?? (await loadRedisModule());
       const url = this.#options.url as string;

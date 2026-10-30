@@ -727,5 +727,12 @@ export type {
   ReconnectSupervisorOptions,
 } from './reconnect/reconnect-supervisor.ts';
 
+export { fromNodeRedis } from './redis/node-redis-adapter.ts';
+export type {
+  NodeRedisClientLike,
+  NodeRedisClientFactory,
+  NodeRedisAdapterOptions,
+  NodeRedisAdapter,
+} from './redis/node-redis-adapter.ts';
 /** Strict dotenv parser shared by config loading and workspace deploy (M122). */
 export { parseEnv } from './env-file.ts';

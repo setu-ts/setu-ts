@@ -25,6 +25,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
   bootAndProbe,
+  denoCheck,
   unusedPortRange,
   useWorkspacePackages,
 } from '../fixtures/generated-project.ts';
@@ -289,10 +290,15 @@ describe('a three-service workspace — end to end', () => {
    * @param template - The template every member uses
    * @returns The workspace root
    */
-  async function mesh(transport: string, template = 'microservice'): Promise<string> {
+  async function mesh(
+    transport: string,
+    template = 'microservice',
+    redisClient?: 'node-redis',
+  ): Promise<string> {
     expect(
       await run([
         'new',
+        ...(redisClient === undefined ? [] : ['--redis-client', redisClient]),
         '--runtime',
         'deno',
         'acme',
@@ -455,6 +461,101 @@ describe('a three-service workspace — end to end', () => {
 
   // The transport that actually leaves the process. Guarded on a live Redis and
   // reported when absent, never silently skipped as a pass.
+  it(
+    'node-redis on deno installs and checks a workspace then delivers between members with generated permissions',
+    { skip: REDIS_URL === undefined, timeout: MESH_TIMEOUT_MS },
+    async () => {
+      const ws = await mesh('redis', 'microservice', 'node-redis');
+      await useWorkspace(ws);
+      const installed = await runProcess(denoBinary(), {
+        args: ['install', '--node-modules-dir=none'],
+        cwd: ws,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      expect(installed.code, new TextDecoder().decode(installed.stderr)).toBe(0);
+      const checked = await denoCheck(
+        `${ws}/apps/orders`,
+        MEMBERS.flatMap((member) => [
+          `${ws}/apps/${member}/main.ts`,
+          `${ws}/apps/${member}/setu.config.ts`,
+        ]),
+      );
+      expect(checked.code, checked.stderr).toBe(0);
+      const permissionFlags = async (project: string): Promise<string[]> => {
+        const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
+          tasks: { start: string };
+        };
+        return manifest.tasks.start
+          .replace(/^deno run\s+/, '')
+          .replace(/\s+\S+\.ts$/, '')
+          .split(/\s+/)
+          .filter((flag) => flag.startsWith('--'));
+      };
+      const billing = `${ws}/apps/billing`;
+      const orders = `${ws}/apps/orders`;
+      const healthProbe = `const health = await app.fetch(new Request('http://local/health'));
+if (health.status !== 200 || (await health.json()).checks.messaging.status !== 'up') throw new Error('Redis health is not up');`;
+      await nodeFs.writeFile(
+        `${billing}/subscriber.ts`,
+        BROKER_SUBSCRIBE_PROBE.replace('await app.start();', `await app.start();\n${healthProbe}`),
+      );
+      await nodeFs.writeFile(
+        `${orders}/publisher.ts`,
+        BROKER_PUBLISH_PROBE.replace('await app.start();', `await app.start();\n${healthProbe}`),
+      );
+      const subscriber = watchPeer(
+        spawnProcess(denoBinary(), {
+          args: [
+            'run',
+            ...(await permissionFlags(billing)),
+            '--node-modules-dir=none',
+            'subscriber.ts',
+          ],
+          cwd: billing,
+          stdout: 'piped',
+          stderr: 'piped',
+        }),
+      );
+      try {
+        const deadline = performance.now() + 30_000;
+        while (
+          !subscriber.output().includes('SUBSCRIBER_READY') &&
+          subscriber.exited() === undefined &&
+          performance.now() < deadline
+        )
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(subscriber.output()).toContain('SUBSCRIBER_READY');
+        const published = await runProcess(denoBinary(), {
+          args: [
+            'run',
+            ...(await permissionFlags(orders)),
+            '--node-modules-dir=none',
+            'publisher.ts',
+          ],
+          cwd: orders,
+          stdout: 'piped',
+          stderr: 'piped',
+        });
+        expect(published.code, new TextDecoder().decode(published.stderr)).toBe(0);
+        expect(new TextDecoder().decode(published.stdout)).toContain('"published":true');
+        await subscriber.server.status;
+        await subscriber.drained;
+        const line = subscriber
+          .output()
+          .split('\n')
+          .find((entry) => entry.startsWith('__PROBE_RESULT__'));
+        expect(line, subscriber.output()).toBeDefined();
+        expect(JSON.parse(line!.slice('__PROBE_RESULT__'.length)).received).toContainEqual({
+          id: 42,
+          from: 'orders',
+        });
+      } finally {
+        await stopPeer(subscriber);
+      }
+    },
+  );
+
   it('delivers a message from one service to another over the redis broker', async (context) => {
     if (REDIS_URL === undefined || !(await redisReachable(REDIS_URL))) {
       context.skip('Redis backend opt-in (REDIS_URL) is absent or unavailable');

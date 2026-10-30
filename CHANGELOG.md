@@ -8,6 +8,23 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **node-redis as a supported Redis client (M117, #525, 0.11.0, `@setu-ts/common`, the Redis-backed
+  plugins, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`).** `fromNodeRedis(client, options?)` wraps a
+  node-redis (`redis` v5/v6) client so every Redis-backed plugin's `client` option takes it: cache,
+  queue, Redis Streams messaging, the realtime backplane, the scheduler lock, idempotency and
+  `RedisRateLimitStore`. The adapter (`NodeRedisAdapter`, typed over `NodeRedisClientLike`, options
+  `NodeRedisAdapterOptions`) bounds each command with its own `commandTimeoutMs` (default 15 s),
+  because node-redis does not bound a written command; connects lazily; keeps an `'error'` listener
+  attached; and turns RESP3 map replies back into RESP2 shapes. No package depends on `redis`;
+  ioredis stays the default. `isConnectionFault` recognizes node-redis's outage errors, so they
+  answer `503` as ioredis outages do. `instrumentations.redis` traces node-redis through
+  `@opentelemetry/instrumentation-redis` (`^0.69.0`, optional peer) on Node; `fromNodeRedis` also
+  takes a `NodeRedisClientFactory`, so `redis` can load on the first connect, after the
+  instrumentation is registered. `setu new`/`setu add` take `--redis-client ioredis|node-redis`; a
+  node-redis project wires each plugin through a generated `src/node-redis.ts`, and a workspace
+  records `redisClient`. See [Using node-redis](packages/common/README.md#using-node-redis-0110) and
+  [upgrading](docs/upgrading.md#node-redis-as-a-supported-redis-client-m117-0110-setu-tscommon-setu-tstelemetry-plugin-setu-tscli).
+
 - **Workspace build, test and deploy (M122, #522, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`).**
   `setu workspace build` builds one image per member, tagged with the commit.
   `setu workspace deploy` builds, loads into a `kind-*` cluster or pushes to `--registry`, applies
@@ -208,6 +225,14 @@ All notable changes to this project are documented here. The format follows
   write through a symlinked workspace member, never to authorize one.
 
 ### Changed
+
+- **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, #525, 0.11.0,
+  `@setu-ts/scheduler-plugin`).** It declared `Promise<number | string | null>`, which one adapter
+  serving the queue's and idempotency's scripts could not honestly satisfy; the lock ignores the
+  result. Any client that satisfied the old type still does.
+- **`IRedisBackplaneClient` gains an optional `connect?()` (M117, #525, 0.11.0,
+  `@setu-ts/realtime-backplane-plugin`).** When the backplane starts it connects an injected client
+  whose `status` is `'wait'`, so a lazily connecting client reports its real health from the start.
 
 - **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
   support Node projects and workspace members. Development entries read credentials and exit through
@@ -463,6 +488,14 @@ All notable changes to this project are documented here. The format follows
   values are read once per observation, for both the series key and the stored labels.
 
 ### Fixed
+
+- **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, #525, 0.11.0,
+  `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
+  line however long its options were — a Redis connection read, a nested `options: { … }`, a seam
+  merged with stray spaces — so a Deno project failed `deno fmt --check` after its first
+  `setu add messaging --broker redis`, `queue --queue redis`, or Redis-backed add in a workspace
+  member. The call is now laid out for the generated 100-column width, breaking only what does not
+  fit. npm targets were already formatted by Prettier and are unchanged.
 
 - **Full-stack generator wiring and page collisions (#524, 0.11.0, `@setu-ts/cli`).** Route,
   controller and module generation refuses kernel routes that would shadow existing React Router

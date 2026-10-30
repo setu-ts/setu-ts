@@ -130,6 +130,7 @@ const NEW: ICommandFlagSpec = spec(
     'devtool-port',
     'transport',
     'transport-url',
+    'redis-client',
     'broker',
     'queue',
     'logger',
@@ -181,10 +182,10 @@ const GENERATE_APP: ICommandFlagSpec = spec(
     'dir',
     'dry-run',
   ],
-  // Read ONLY to be refused with their own guidance: the four transport flags
+  // Read ONLY to be refused with their own guidance: the transport/client flags
   // name the workspace-wide alternative, `--runtime` names the workspace's own
   // toolchain when it disagrees, and `--di` goes through `resolveTemplateChoice`.
-  ['transport', 'transport-url', 'broker', 'queue', 'runtime', 'di'],
+  ['transport', 'transport-url', 'broker', 'queue', 'redis-client', 'runtime', 'di'],
   { fixed: 2, taken: 1, noun: 'one member name' },
 );
 
@@ -202,7 +203,14 @@ const GENERATE_LIBRARY: ICommandFlagSpec = spec(
  * package; got 3. Run it once per package.`), and this check must not preempt
  * that message with a second way of saying the same thing.
  */
-const ADD: ICommandFlagSpec = spec('add', ['dir', 'dry-run', 'broker', 'queue', 'module']);
+const ADD: ICommandFlagSpec = spec('add', [
+  'dir',
+  'dry-run',
+  'broker',
+  'queue',
+  'redis-client',
+  'module',
+]);
 
 /** Opt-in agent brief creation and read-only freshness checking. */
 const AGENTS: ICommandFlagSpec = spec('agents', ['check', 'strict', 'dir', 'dry-run'], [], {

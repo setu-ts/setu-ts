@@ -28,6 +28,7 @@ import type { EnvVariable } from './registry.ts';
 import { BROKER_COMPOSE_FILE, type ResolvedHost } from './project-files.ts';
 import { reindentLiteral, rewritePluginArgs, wrapPluginArgs } from './plugin-args.ts';
 import { withClientDependencies } from './client-dependencies.ts';
+import { NODE_REDIS_IMPORT, NODE_REDIS_MODULE_PATH, nodeRedisModuleFile } from './node-redis.ts';
 
 /** The package whose wiring a broker arm rewrites. */
 const MESSAGING_PACKAGE = 'messaging-plugin';
@@ -36,7 +37,7 @@ const MESSAGING_PACKAGE = 'messaging-plugin';
 const QUEUE_PACKAGE = 'queue-plugin';
 
 /**
- * Carries a transport's operational note onto the host, once.
+ * Adds the selected client's imports and the transport's operational note once.
  *
  * Both overlays read the same `connection.note`, and a transport with both arms
  * (redis, rabbitmq) applies both, so an append without the guard would print the
@@ -44,9 +45,21 @@ const QUEUE_PACKAGE = 'queue-plugin';
  *
  * @param host - The host the arm rewrote
  * @param spec - The selected transport
- * @returns The host with the note appended, or unchanged when there is none
+ * @returns The host with the imports and note needed by its transport
  */
 function withTransportNote(host: ResolvedHost, spec: TransportSpec): ResolvedHost {
+  if (spec.redisClient === 'node-redis') {
+    // The client module, not a `redis` import here: see templates/node-redis.ts.
+    host = {
+      ...host,
+      localImports: host.localImports.some((entry) => entry.from === NODE_REDIS_IMPORT.from)
+        ? host.localImports
+        : [...host.localImports, NODE_REDIS_IMPORT],
+      files: host.files.some((file) => file.path === NODE_REDIS_MODULE_PATH)
+        ? host.files
+        : [...host.files, nodeRedisModuleFile()],
+    };
+  }
   const note = spec.connection?.note;
   if (note === undefined) return host;
   const notes = host.transportNotes ?? [];
@@ -364,7 +377,10 @@ export function readArmFlag(
     return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
   }
 
-  const spec = getTransport(raw);
+  const spec = getTransport(
+    raw,
+    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis',
+  );
   const hasArm =
     spec !== undefined &&
     (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
@@ -383,4 +399,21 @@ export function readArmFlag(
     };
   }
   return { ok: true, spec };
+}
+
+/** Validates an explicit Redis client choice before rendering any files. @since 0.11.0 */
+export function redisClientRefusal(
+  args: ParsedArgs,
+  runtime: TargetRuntime,
+  redisSelected: boolean,
+): string | undefined {
+  const raw = args.flags['redis-client'];
+  if (raw === undefined) return undefined;
+  if (raw !== 'ioredis' && raw !== 'node-redis')
+    return `Unknown --redis-client "${escapeName(String(raw))}". Expected ioredis | node-redis.`;
+  if (runtime === 'cloudflare-workers')
+    return '--redis-client cannot apply on Cloudflare Workers; select deno, node or bun.';
+  if (!redisSelected)
+    return '--redis-client requires a Redis arm: --broker redis, --queue redis or --transport redis.';
+  return undefined;
 }

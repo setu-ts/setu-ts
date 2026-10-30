@@ -84,6 +84,40 @@ async function denoRun(
 }
 
 describe('a --broker redis --queue redis scaffold', () => {
+  it(
+    'node-redis on deno installs, checks and boots with generated permissions and Redis health up',
+    { skip: !REDIS_AVAILABLE, timeout: 180_000 },
+    async () => {
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'svc',
+          '--template',
+          'microservice',
+          '--broker',
+          'redis',
+          '--queue',
+          'redis',
+          '--redis-client',
+          'node-redis',
+        ]),
+      ).toBe(0);
+      const project = `${root}/svc`;
+      await useWorkspacePackages(project);
+      const installed = await denoRun(project, ['install', '--node-modules-dir=none']);
+      expect(installed.code, installed.output).toBe(0);
+      const checked = await denoCheck(project, await collectSources(project));
+      expect(checked.code, checked.stderr).toBe(0);
+      const outcome = await bootWithGeneratedPermissions(project, ['/health']);
+      expect(outcome.statuses['/health'], outcome.output).toBe(200);
+      expect(JSON.parse(outcome.bodies['/health']!)).toMatchObject({
+        checks: { messaging: { status: 'up' }, queue: { status: 'up' } },
+      });
+    },
+  );
+
   it('renders a config that differs from the default one', async () => {
     await run(['new', '--runtime', 'deno', 'plain', '--template', 'microservice']);
     expect(

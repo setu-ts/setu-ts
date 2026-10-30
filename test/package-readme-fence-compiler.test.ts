@@ -94,7 +94,9 @@ const READMES: Readonly<Record<string, number>> = {
   'packages/session-plugin/README.md': 12,
   'packages/audit-plugin/README.md': 4,
   // M101h: +1 for the Redaction policy-shape example.
-  'packages/common/README.md': 3,
+  // M117: +1 for the node-redis example; `redis` resolves through the snippet tsconfig to the
+  // devDependency `common` already carries, so the fence checks against node-redis's own types.
+  'packages/common/README.md': 4,
   // M92: +1 for the @Render example.
   // M99d: +1 for the Non-HTTP ingress example (the `ingress` option the README
   // previously documented nowhere).

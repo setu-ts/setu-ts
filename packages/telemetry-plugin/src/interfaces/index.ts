@@ -41,7 +41,7 @@ export type SpanProcessorKind = 'simple' | 'batch';
  *
  * @since 0.2.0
  */
-export type InstrumentationKind = 'http' | 'fetch' | 'ioredis' | 'amqplib' | 'kafkajs';
+export type InstrumentationKind = 'http' | 'fetch' | 'ioredis' | 'redis' | 'amqplib' | 'kafkajs';
 
 /**
  * Sampling configuration.
@@ -260,6 +260,8 @@ export interface InstrumentationsConfig {
   readonly fetch?: true | InstrumentationConfig;
   /** ioredis via @opentelemetry/instrumentation-ioredis. Node-only; no-op elsewhere. */
   readonly ioredis?: true | InstrumentationConfig;
+  /** node-redis via @opentelemetry/instrumentation-redis. Node-only; no-op elsewhere. @since 0.11.0 */
+  readonly redis?: true | InstrumentationConfig;
   /** amqplib via @opentelemetry/instrumentation-amqplib. Node-only; no-op elsewhere. */
   readonly amqplib?: true | InstrumentationConfig;
   /** kafkajs via @opentelemetry/instrumentation-kafkajs. Node-only; no-op elsewhere. */

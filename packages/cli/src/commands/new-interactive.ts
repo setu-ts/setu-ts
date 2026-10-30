@@ -211,6 +211,15 @@ export async function resolveNewChoices(
       )
         return { kind: 'cancelled' };
     }
+    if (flags['broker'] === 'redis' || flags['queue'] === 'redis') {
+      if (
+        !(await ask('redis-client', 'Redis client?', [
+          { value: 'ioredis', label: 'ioredis' },
+          { value: 'node-redis', label: 'node-redis' },
+        ]))
+      )
+        return { kind: 'cancelled' };
+    }
     if (hasLogger(host)) {
       const choices =
         runtime === 'cloudflare-workers' ? ['console'] : [defaultLogger(runtime), 'console'];

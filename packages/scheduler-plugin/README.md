@@ -156,6 +156,12 @@ error of an outage at `warn`, identical repeats at `debug`, the recovery at `inf
 `ioredis` printing every reconnect failure to `console.error`. An injected client gets no listener:
 it belongs to the caller.
 
+**node-redis.** To use node-redis instead of ioredis, pass
+`distributedLock: { enabled: true, storage: 'redis', client: fromNodeRedis(createClient({ url })) }`
+(`fromNodeRedis` from `@setu-ts/common`, `createClient` from `redis`, installed in your
+application). See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 Behaviours run inside that lock. A replica that does not acquire it runs neither the behaviour chain
 nor the job handler; a behaviour throw follows the job's existing retry policy. With no behaviours,
 the handler receives its original job directly and no chain is allocated.

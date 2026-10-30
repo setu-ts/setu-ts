@@ -717,6 +717,9 @@ importers:
       ioredis:
         specifier: 5.x
         version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -754,6 +757,9 @@ importers:
       ioredis:
         specifier: 5.x
         version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -924,6 +930,12 @@ importers:
       '@types/node':
         specifier: ^24
         version: 24.19.2
+      ioredis:
+        specifier: 5.x
+        version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1464,6 +1476,9 @@ importers:
       pg:
         specifier: ^8.0.0
         version: 8.23.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1694,6 +1709,9 @@ importers:
       nats:
         specifier: 2.x
         version: 2.29.3
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1870,6 +1888,9 @@ importers:
       ioredis:
         specifier: 5.x
         version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -1932,6 +1953,9 @@ importers:
       ioredis:
         specifier: 5.x
         version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -2025,6 +2049,9 @@ importers:
       ioredis:
         specifier: 5.x
         version: 5.11.1
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -2477,6 +2504,9 @@ importers:
       '@opentelemetry/instrumentation-kafkajs':
         specifier: ^0.29.0
         version: 0.29.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/instrumentation-redis':
+        specifier: ^0.69.0
+        version: 0.69.0(@opentelemetry/api@1.10.0)
       '@opentelemetry/instrumentation-undici':
         specifier: ^0.30.0
         version: 0.30.0(@opentelemetry/api@1.10.0)
@@ -2498,6 +2528,9 @@ importers:
       '@types/node':
         specifier: ^24
         version: 24.19.2
+      redis:
+        specifier: 6.x
+        version: 6.3.0(@opentelemetry/api@1.10.0)
       typescript:
         specifier: 6.0.3
         version: 6.0.3
@@ -3387,6 +3420,10 @@ packages:
     resolution: {integrity: sha512-CmVa4ImJ+ynfrPMNaAXHET6Bhb44SwzmfyVJFq9ni2jgXJR/l7C6gfVFddNmHP+ZOkP9cf4f9DBe68qVLTHc9w==}
     engines: {node: '>=8.0.0'}
 
+  '@opentelemetry/api-logs@0.221.0':
+    resolution: {integrity: sha512-OlanaW1vv7ufTqQ3/fPLI4arGt5ZoM+P8abOMki6uEYnpRazepSWDwDnnw+la7kE26SHVC18//SMccrDvLKOXQ==}
+    engines: {node: '>=8.0.0'}
+
   '@opentelemetry/api@1.10.0':
     resolution: {integrity: sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ==}
     engines: {node: '>=8.0.0'}
@@ -3449,6 +3486,12 @@ packages:
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
 
+  '@opentelemetry/instrumentation-redis@0.69.0':
+    resolution: {integrity: sha512-lyCIEW89cYhMwaUSMBzsKHdwH2wOoqmuwXOARJneo9UL55govLIUCbYYAJ457oM8kdKADymlY4+SUW0DKQeIHw==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
   '@opentelemetry/instrumentation-undici@0.30.0':
     resolution: {integrity: sha512-VgxMzeR14uPEVqEC5b55m4KijEe+gQAgJ4jjWCE7h5i2Q76nS4y7OWDk8V+XkD4zK9bbJyWEK+a2DqtGP/fCuw==}
     engines: {node: ^18.19.0 || >=20.6.0}
@@ -3457,6 +3500,12 @@ packages:
 
   '@opentelemetry/instrumentation@0.220.0':
     resolution: {integrity: sha512-xQx3E2WxP1mDvKzxLxX+CTCtNLa560YJZ3087qYHerl2YmiKpv7AH+dAy7vmx+eVrZ5BwhfWUAVoKOoxCNHcpw==}
+    engines: {node: ^18.19.0 || >=20.6.0}
+    peerDependencies:
+      '@opentelemetry/api': ^1.3.0
+
+  '@opentelemetry/instrumentation@0.221.0':
+    resolution: {integrity: sha512-cCk80Z/iRDf/5gfsKMB4f74LqVA5yKETB/9ojPzVW/6/f70iu89nJvGxsFCxx4XfSohaOofkU19kiYm84AiAlw==}
     engines: {node: ^18.19.0 || >=20.6.0}
     peerDependencies:
       '@opentelemetry/api': ^1.3.0
@@ -3707,6 +3756,42 @@ packages:
     peerDependenciesMeta:
       typescript:
         optional: true
+
+  '@redis/bloom@6.3.0':
+    resolution: {integrity: sha512-NQ5poYpZr0jv6zazN1cy6JY5kIipKFZ3R9GTL4kOUTX3a9YAfY29U8bsE4lWhVQEM+G4V0BXVC57mubIdDijeA==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.3.0
+
+  '@redis/client@6.3.0':
+    resolution: {integrity: sha512-fHrjwGCBvAANGi+TuRuwKi83sIOzgHr8eh+Uf48w3fSX7Hhrz174NrWqfJhAC2vnN0d/tfaZpdr6+o6JC3QHwg==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@node-rs/xxhash': ^1.1.0
+      '@opentelemetry/api': '>=1 <2'
+    peerDependenciesMeta:
+      '@node-rs/xxhash':
+        optional: true
+      '@opentelemetry/api':
+        optional: true
+
+  '@redis/json@6.3.0':
+    resolution: {integrity: sha512-yt6vRfPBXtW/3qm53cF81TSQpLMjWdW4/2E9WQ2GgbvsKkuCKCFQIcMiKlil1ZMnezK+IQuS795xKU5psbaegw==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.3.0
+
+  '@redis/search@6.3.0':
+    resolution: {integrity: sha512-RPXAZmKjZZG7Tm7m1w9keFdXzbL91PiSHQBfQRe9xwW40jNsTRbG0FwhIz4QlHPU4gKDAsCy8IQHj4yZl4H9rw==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.3.0
+
+  '@redis/time-series@6.3.0':
+    resolution: {integrity: sha512-+fJOB8mN1z5WRakCJNh5lVdz1KqvHGSOistsKeitD24QsCtPwyRQXWC0iq6T/i/ubLE/YcguZqPm8F598MKk4A==}
+    engines: {node: '>= 20.0.0'}
+    peerDependencies:
+      '@redis/client': ^6.3.0
 
   '@remix-run/node-fetch-server@0.14.2':
     resolution: {integrity: sha512-1cpM/f5i1ka/9CUMBwZXZp7Bn92x8VQjzg+F4eEe88DlVdNHkAKrf/vvbZoYgdkfy2bWHtGC6LQGLmojEqOF4Q==}
@@ -5579,6 +5664,10 @@ packages:
     resolution: {integrity: sha512-DJnGAeenTdpMEH6uAJRK/uiyEIH9WVsUmoLwzudwGJUwZPp80PDBWPHXSAGNPwNvIXAbe7MSUB1zQFugFml66A==}
     engines: {node: '>=4'}
 
+  redis@6.3.0:
+    resolution: {integrity: sha512-XFQbPie1lGpKeUZ8ySYY43yLnQy/iIQtHNvIr/1XdaABpb96rUSdm3Mfl+98FEVbv9ZJIzINMno5s0Nh8E5LEw==}
+    engines: {node: '>= 20.0.0'}
+
   reflect-metadata@0.2.2:
     resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
@@ -7192,6 +7281,10 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.10.0
 
+  '@opentelemetry/api-logs@0.221.0':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+
   '@opentelemetry/api@1.10.0': {}
 
   '@opentelemetry/api@1.9.1': {}
@@ -7265,6 +7358,15 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
+  '@opentelemetry/instrumentation-redis@0.69.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/instrumentation': 0.221.0(@opentelemetry/api@1.10.0)
+      '@opentelemetry/redis-common': 0.38.3
+      '@opentelemetry/semantic-conventions': 1.43.0
+    transitivePeerDependencies:
+      - supports-color
+
   '@opentelemetry/instrumentation-undici@0.30.0(@opentelemetry/api@1.10.0)':
     dependencies:
       '@opentelemetry/api': 1.10.0
@@ -7278,6 +7380,15 @@ snapshots:
     dependencies:
       '@opentelemetry/api': 1.10.0
       '@opentelemetry/api-logs': 0.220.0
+      import-in-the-middle: 3.5.3
+      require-in-the-middle: 8.0.1
+    transitivePeerDependencies:
+      - supports-color
+
+  '@opentelemetry/instrumentation@0.221.0(@opentelemetry/api@1.10.0)':
+    dependencies:
+      '@opentelemetry/api': 1.10.0
+      '@opentelemetry/api-logs': 0.221.0
       import-in-the-middle: 3.5.3
       require-in-the-middle: 8.0.1
     transitivePeerDependencies:
@@ -7579,6 +7690,26 @@ snapshots:
       react-router: 8.5.0(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
     optionalDependencies:
       typescript: 5.9.3
+
+  '@redis/bloom@6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))':
+    dependencies:
+      '@redis/client': 6.3.0(@opentelemetry/api@1.10.0)
+
+  '@redis/client@6.3.0(@opentelemetry/api@1.10.0)':
+    optionalDependencies:
+      '@opentelemetry/api': 1.10.0
+
+  '@redis/json@6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))':
+    dependencies:
+      '@redis/client': 6.3.0(@opentelemetry/api@1.10.0)
+
+  '@redis/search@6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))':
+    dependencies:
+      '@redis/client': 6.3.0(@opentelemetry/api@1.10.0)
+
+  '@redis/time-series@6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))':
+    dependencies:
+      '@redis/client': 6.3.0(@opentelemetry/api@1.10.0)
 
   '@remix-run/node-fetch-server@0.14.2': {}
 
@@ -9376,6 +9507,17 @@ snapshots:
   redis-parser@3.0.0:
     dependencies:
       redis-errors: 1.2.0
+
+  redis@6.3.0(@opentelemetry/api@1.10.0):
+    dependencies:
+      '@redis/bloom': 6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))
+      '@redis/client': 6.3.0(@opentelemetry/api@1.10.0)
+      '@redis/json': 6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))
+      '@redis/search': 6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))
+      '@redis/time-series': 6.3.0(@redis/client@6.3.0(@opentelemetry/api@1.10.0))
+    transitivePeerDependencies:
+      - '@node-rs/xxhash'
+      - '@opentelemetry/api'
 
   reflect-metadata@0.2.2: {}
 

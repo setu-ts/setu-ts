@@ -256,6 +256,17 @@ describe('runAppCommand', () => {
       });
     }
 
+    // Its suggestion must be a command the CLI accepts: --redis-client needs a Redis arm.
+    it('refuses --redis-client on a member, suggesting a workspace with a Redis transport', async () => {
+      const h = harness([]);
+      expect(await h.run(['app', 'orders', '--redis-client', 'node-redis'])).toBe(2);
+      expect(h.err.text()).toContain('workspace-wide choice');
+      expect(h.err.text()).toContain(
+        'new <name> --workspace --transport redis --redis-client <value>',
+      );
+      expect(h.fs.writes).toEqual([]);
+    });
+
     it('refuses an unknown template through the shared selector', async () => {
       const h = harness([]);
       expect(await h.run(['app', 'orders', '--template', 'nope'])).toBe(2);
