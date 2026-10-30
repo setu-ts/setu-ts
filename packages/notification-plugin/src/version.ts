@@ -10,4 +10,4 @@
  * @module
  */
 
-export const VERSION: string = '0.10.0';
+export const VERSION: string = '0.11.0';

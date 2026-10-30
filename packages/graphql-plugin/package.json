@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/graphql-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "GraphQL over HTTP with subscriptions on WebSocket and SSE, batching, and persisted queries",
   "repository": {
     "type": "git",

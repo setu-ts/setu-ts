@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/service-discovery-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Service discovery over static config, Consul, Kubernetes, or DNS-SRV, with balancing and ejection",
   "repository": {
     "type": "git",

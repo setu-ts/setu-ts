@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/auth-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "JWT via Web Crypto, API keys, refresh tokens, RBAC, and rate limiting — zero npm dependencies",
   "repository": {
     "type": "git",

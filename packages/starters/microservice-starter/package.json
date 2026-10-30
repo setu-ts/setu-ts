@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/microservice-starter",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "createMicroserviceApp — REST plus messaging, queues, resilience, and telemetry",
   "repository": {
     "type": "git",

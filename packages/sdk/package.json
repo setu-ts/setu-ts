@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/sdk",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Portable HTTP client with retry, circuit breaker, rate limiting, and OpenAPI codegen",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/localization-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Localization: message catalogues, request locale resolution, a formatter shared with the browser",
   "repository": {
     "type": "git",

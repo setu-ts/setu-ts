@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/health-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Health, liveness, and readiness probes with pluggable indicators",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/di-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Optional dependency injection with singleton, scoped, and transient lifecycles",
   "repository": {
     "type": "git",

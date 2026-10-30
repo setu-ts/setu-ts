@@ -282,6 +282,8 @@ non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/
 `true`). `exclude` is only for a separately-mounted non-browser protocol surface such as
 Connect/gRPC — never use it for an application form route.
 
+<!-- version:history -->
+
 **A bearer API beside forms needs no exclusion** (M113e). A request carrying
 `Authorization: Bearer <token>` skips form CSRF when a bearer (header-credential) strategy
 authenticated it AND it restored no session — the session is new — so a JWT- or

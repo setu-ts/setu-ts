@@ -126,6 +126,8 @@ cancels oversized bodies to enforce the read bound.
 
 ### Reporting a failed WebSocket handshake
 
+<!-- version:history -->
+
 `HttpAdapterOptions` accepts `reportError?: (record: Readonly<Record<string, unknown>>) => void`
 (`@since 0.10.0`). `RuntimePlugin` supplies one resolved at CALL time: the registered logger's
 `error`, else `IRuntimeServices.reportError`, and a throwing logger never fails the report. The Node

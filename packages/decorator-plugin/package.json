@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/decorator-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Optional NestJS-style decorators and reflection, without reflect-metadata",
   "repository": {
     "type": "git",

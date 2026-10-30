@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/kernel",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Capability-token plugin kernel: service registry, middleware pipeline, router",
   "repository": {
     "type": "git",

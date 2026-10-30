@@ -756,6 +756,8 @@ handlers arrive through the ingress barrel. Manifest updates preserve existing k
 frontend projects update imports without adding unused framework dependencies to their frontend
 package.json.
 
+<!-- version:history -->
+
 On a `cloudflare-workers` project, `setu add cloudflare` prints the registration that reads the
 platform sink — `CloudflarePlugin({ env, ...(waitUntil ? { waitUntil } : {}) })` — because the
 generated entry passes `waitUntil` to `createApp` as its second parameter (M113d §3.8). The factory

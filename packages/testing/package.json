@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/testing",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Test app factory, mock plugins, and request injection for Setu-TS",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/telemetry-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "OpenTelemetry tracing with W3C propagation and optional auto-instrumentation",
   "repository": {
     "type": "git",

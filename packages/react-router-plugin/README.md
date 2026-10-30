@@ -47,6 +47,8 @@ await app.start({ port: 3000 });
 
 ## Options
 
+<!-- version:history -->
+
 | Option               | Type       | Default      | Description                                                                                                                                                                                                                                                               |
 | -------------------- | ---------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `serverBuildPath`    | `string`   | —            | Path to the compiled `ServerBuild`. Exactly one of `serverBuildPath`/`serverBuild` is supplied (a union `type` since 0.10.0). Correct for the socket targets; on Cloudflare Workers supply `serverBuild` — a bundled Worker cannot resolve `new URL(…, import.meta.url)`. |
