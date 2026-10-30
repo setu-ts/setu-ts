@@ -35,6 +35,10 @@ it('checks emitted routes and rejects missing routes and rendered reading left o
   expect(await checkBuiltLinks(dist)).toBe(2);
   await writeFile(`${dist}/index.html`, '<a href="/packages/missing/">Missing</a>');
   await expect(checkBuiltLinks(dist)).rejects.toThrow('missing internal target');
+  await writeFile(`${dist}/index.html`, '<h2 id="here">Here</h2><a href="#here">ok</a>');
+  expect(await checkBuiltLinks(dist)).toBe(2);
+  await writeFile(`${dist}/index.html`, '<a href="#nowhere">Dead</a>');
+  await expect(checkBuiltLinks(dist)).rejects.toThrow('missing in-page target #nowhere');
   await writeFile(
     `${dist}/index.html`,
     '<a href="https://github.com/setu-ts/setu-ts/blob/main/packages/kernel/README.md">Reading</a>',

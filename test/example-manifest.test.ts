@@ -46,9 +46,15 @@ describe('example manifest', () => {
       await writeFile(`${root}/apps/${app}/package.json`, '{}');
       await writeFile(`${root}/apps/${app}/dist/output.js`, 'ignored');
     }
+    await writeFile(`${root}/apps/minimal/logo.bin`, new Uint8Array([0xff, 0xfe, 0x00]));
     expect((await run('git', ['add', '.'], { cwd: root })).code).toBe(0);
     const manifest = await collectExampleManifest(root);
-    expect(manifest['minimal']).toEqual({ files: ['main.ts', 'package.json'], smokeHelper: true });
+    expect(manifest['minimal']).toEqual({
+      files: ['logo.bin', 'main.ts', 'package.json'],
+      binary: ['logo.bin'],
+      smokeHelper: true,
+    });
+    expect(manifest['rest-api']?.binary).toEqual([]);
     expect(manifest['rest-api']?.smokeHelper).toBe(false);
     await mkdir(`${root}/packages/cli/src/examples`, { recursive: true });
     await writeExampleManifest(root);

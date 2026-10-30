@@ -4,6 +4,7 @@ import {
   extractTableOfContents,
   extractTitle,
   resolvedMdToRoute,
+  retargetMissingFragments,
   rewriteDocsHtml,
   rewriteHref,
 } from '../src/lib/docs-links.ts';
@@ -126,5 +127,17 @@ describe('extractTableOfContents', () => {
 
   it('skips headings without a generated anchor', () => {
     expect(extractTableOfContents('<h2>Missing anchor</h2>')).toEqual([]);
+  });
+});
+
+describe('retargetMissingFragments', () => {
+  it('keeps fragments present on the page and sends the rest to the full document', () => {
+    const html =
+      '<h2 id="here">Here</h2><a href="#here">a</a><a href="#elsewhere">b</a>' +
+      '<a href=\'#caf%C3%A9\'>c</a><h3 id="café">C</h3>';
+    expect(retargetMissingFragments(html, '/public-api/')).toBe(
+      '<h2 id="here">Here</h2><a href="#here">a</a><a href="/public-api/#elsewhere">b</a>' +
+        '<a href=\'#caf%C3%A9\'>c</a><h3 id="café">C</h3>',
+    );
   });
 });

@@ -18,7 +18,16 @@ export async function checkBuiltLinks(dist) {
   await walk(dist);
   const failures = [];
   for (const file of files) {
-    for (const href of htmlLinks(await readFile(file, 'utf8'))) {
+    const html = await readFile(file, 'utf8');
+    // In-page fragments must name an element on the page. TypeDoc's generated pages are its own.
+    if (!file.startsWith(resolve(dist, 'api'))) {
+      const ids = new Set([...html.matchAll(/\sid=(["'])(.*?)\1/g)].map((match) => match[2]));
+      for (const href of htmlLinks(html)) {
+        if (href.startsWith('#') && href.length > 1 && !ids.has(decodeURIComponent(href.slice(1))))
+          failures.push(`${file}: missing in-page target ${href}`);
+      }
+    }
+    for (const href of htmlLinks(html)) {
       if (/^https:\/\/github\.com\/setu-ts\/setu-ts\/(blob|tree)\/main\//.test(href)) {
         const rewritten = rewriteHref(href, '', EXAMPLE_FILES);
         if (rewritten.startsWith('/'))

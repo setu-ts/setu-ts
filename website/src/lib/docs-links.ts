@@ -106,6 +106,22 @@ export function rewriteDocsHtml(
   );
 }
 
+/**
+ * Sends an in-page `#fragment` link to `route` when the page has no element with that id.
+ * A page assembled from part of a document (a package page's slice of PUBLIC_API.md) keeps
+ * links to sections it does not include; those sections live on the full document's route.
+ */
+export function retargetMissingFragments(html: string, route: string): string {
+  const ids = new Set([...html.matchAll(/\sid=(["'])(.*?)\1/g)].map((match) => match[2]));
+  return html.replace(
+    /(<a\b[^>]*\shref=)(["'])#(.*?)\2/gi,
+    (match, before: string, quote: string, fragment: string) =>
+      ids.has(decodeURIComponent(fragment))
+        ? match
+        : `${before}${quote}${route}#${fragment}${quote}`,
+  );
+}
+
 /** Decode the HTML entities emitted by the Markdown renderer into metadata text. */
 function decodeHtmlEntities(html: string): string {
   const namedEntities: Readonly<Record<string, string>> = {

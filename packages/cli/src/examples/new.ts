@@ -119,7 +119,7 @@ export async function runExampleNew(
           deps.interrupt === undefined ? {} : { signal: deps.interrupt },
         );
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        if (path.endsWith('.br')) {
+        if (EXAMPLE_MANIFEST[example].binary.includes(path)) {
           file = { path, contents: '', bytes: new Uint8Array(await response.arrayBuffer()) };
         } else {
           let contents = await response.text();
