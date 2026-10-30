@@ -16,7 +16,9 @@ import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
  * (see src/lib/docs-links.ts).
  */
 const docs = defineCollection({
-  loader: glob({ pattern: '*.md', base: '../docs' }),
+  // `releasing.md` is the maintainers' release runbook — kept in the repository for
+  // the release process, never published on the site.
+  loader: glob({ pattern: ['*.md', '!releasing.md'], base: '../docs' }),
   schema: z.object({
     title: z.string().optional(),
   }),
