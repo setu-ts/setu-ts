@@ -30,6 +30,33 @@ setu new my-app --template class-based         # decorators and a DI container
 setu new my-app --dry-run                      # print the plan, write nothing
 ```
 
+### Start from an example
+
+```bash
+setu new my-app --example rest-api
+cd my-app && npm install && npm start
+npm run smoke
+setu new my-app --example rest-api --dry-run
+```
+
+This downloads the example from GitHub at `v<CLI version>`, rewrites workspace dependencies to the
+CLI's framework range, and writes a standalone Node project. All downloads finish before writing; a
+failed download leaves the target untouched and names a template alternative. Dry-run lists the
+manifest's output paths without fetching anything. Existing file collisions are refused through the
+same writer used by template scaffolds.
+
+Choose `minimal`, `rest-api`, `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`,
+`worker-pool`, `graphql-demo`, `grpc`, `microservices` or `realtime`. Unknown names list those
+choices; excluded names explain the repository dependency and an alternative. `full-stack` uses
+`--template full-stack`; `compiled-binary`, `cloudflare`, `realtime-clients` and
+`plugin-development` need repository scripts or source.
+
+Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
+`--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,
+`--transport-url`, `--port`, `--depends-on` and `--di` are refused with `--example`.
+`--runtime node` is accepted; other runtimes are refused. `--dir`, `--agents` and `--dry-run` remain
+available. See [Examples](./examples.md) for the learning path and prerequisites.
+
 ### Templates
 
 | Template       | Plugins it registers                                                                                                     |

@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Start a project from an example (`@setu-ts/cli`).** `setu new <name> --example <app>` (also
+  `npm create @setu-ts <name> -- --example <app>`) downloads an offered example from the CLI's
+  GitHub release tag and rewrites it into a standalone Node project. Dry-run fetches nothing; failed
+  downloads write nothing. See [Examples](docs/examples.md#before-you-start).
+
 - **node-redis as a supported Redis client (M117, #525, 0.11.0, `@setu-ts/common`, the Redis-backed
   plugins, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`).** `fromNodeRedis(client, options?)` wraps a
   node-redis (`redis` v5/v6) client so every Redis-backed plugin's `client` option takes it: cache,

@@ -6,6 +6,22 @@ connect each file to the behavior it implements.
 
 ## Before you start
 
+To start a project from an example without cloning the repository:
+
+```bash
+npm create @setu-ts my-app -- --example rest-api
+cd my-app && npm install && npm start
+npm run smoke
+```
+
+`--example` creates a standalone Node project, fetching the example from the GitHub release tag
+matching the CLI version. GitHub must be reachable when scaffolding; `--dry-run` only lists paths
+and fetches nothing. Offered examples are `minimal`, `rest-api`, `database`, `di-decorators`,
+`cqrs`, `multi-tenant`, `static-site`, `worker-pool`, `graphql-demo`, `grpc`, `microservices` and
+`realtime`. The Redis-backed smoke checks can exit `77` when Redis is unavailable. For `full-stack`,
+use `--template full-stack`; the other excluded examples need repository scripts or source. See
+[the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
+
 Install Node 24, then clone and prepare the repository:
 
 ```bash
@@ -16,7 +32,7 @@ pnpm install
 ```
 
 The repository pins pnpm through `packageManager`. These examples run from repository source;
-outside the repository, start with `npm create @setu-ts`.
+outside the repository, use the `--example` command above or a `--template` scaffold.
 
 ## Running an example
 

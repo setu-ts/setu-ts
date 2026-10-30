@@ -93,6 +93,8 @@ export interface CliDependencies {
   readonly ask?: Prompter;
   /** Cooperative interruption signal supplied by the process boundary. */
   readonly interrupt?: AbortSignal;
+  /** Downloads version-tagged example files; defaults to globalThis.fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -247,6 +249,7 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
           ...(deps.ask === undefined ? {} : { ask: deps.ask }),
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+          ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
         });
 
       case 'generate':

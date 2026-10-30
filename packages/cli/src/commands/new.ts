@@ -93,6 +93,7 @@ import {
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { runAgentsCommand } from './agents.ts';
+import { runExampleNew } from '../examples/new.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -120,6 +121,8 @@ export interface NewDependencies {
   readonly ask?: Prompter;
   /** Cooperative interruption signal checked at prompts and writes. */
   readonly interrupt?: AbortSignal;
+  /** Downloads example files; defaults to globalThis.fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -619,6 +622,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log('');
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+    deps.log('  --example <app>     Start a standalone Node project from a runnable example');
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
@@ -663,6 +667,8 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.error(usage);
     return EXIT_USAGE;
   }
+
+  if (args.flags['example'] !== undefined) return runExampleNew(rawName, args, deps);
 
   const workspace = args.flags['workspace'] === true;
 

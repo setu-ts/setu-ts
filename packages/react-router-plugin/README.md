@@ -179,3 +179,8 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#reactrouterplugin-setu-tsreact-router-plugin).
+
+## Trademarks
+
+React Router is a trademark of Shopify Inc. Setu-TS is independent and is not affiliated with or
+endorsed by Shopify or the React Router project.

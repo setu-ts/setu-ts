@@ -10,55 +10,49 @@ import {
 
 describe('rewriteHref', () => {
   it('maps a sibling guide link from the hub to its route', () => {
-    expect(rewriteHref('./getting-started.md', 'README')).toBe('/docs/getting-started/');
+    expect(rewriteHref('./getting-started.md', 'docs')).toBe('/docs/getting-started/');
   });
 
   it('maps the hub link from a guide back to /docs/', () => {
-    expect(rewriteHref('./README.md', 'getting-started')).toBe('/docs/');
+    expect(rewriteHref('./README.md', 'docs')).toBe('/docs/');
   });
 
   it('maps the hub link without the ./ prefix too', () => {
-    expect(rewriteHref('README.md', 'cli')).toBe('/docs/');
+    expect(rewriteHref('README.md', 'docs')).toBe('/docs/');
   });
 
   it('maps a root-level README link to the landing page', () => {
-    expect(rewriteHref('../README.md', 'getting-started')).toBe('/');
+    expect(rewriteHref('../README.md', 'docs')).toBe('/');
   });
 
   it('preserves anchors on site routes', () => {
-    expect(rewriteHref('./cli.md#scaffolding-projects', 'README')).toBe(
+    expect(rewriteHref('./cli.md#scaffolding-projects', 'docs')).toBe(
       '/docs/cli/#scaffolding-projects',
     );
   });
 
-  it('falls back to GitHub blobs for root-level docs', () => {
-    expect(rewriteHref('../ARCHITECTURE.md', 'plugin-architecture')).toBe(
-      'https://github.com/setu-ts/setu-ts/blob/main/ARCHITECTURE.md',
-    );
-    expect(rewriteHref('../CHANGELOG.md#v060', 'upgrading')).toBe(
-      'https://github.com/setu-ts/setu-ts/blob/main/CHANGELOG.md#v060',
-    );
+  it('routes root-level reading locally', () => {
+    expect(rewriteHref('../ARCHITECTURE.md', 'docs')).toBe('/architecture/');
+    expect(rewriteHref('../CHANGELOG.md#v060', 'docs')).toBe('/changelog/#v060');
   });
 
-  it('falls back to GitHub trees for non-Markdown repository paths', () => {
-    expect(rewriteHref('../apps/full-stack', 'examples')).toBe(
-      'https://github.com/setu-ts/setu-ts/tree/main/apps/full-stack',
-    );
+  it('routes app directories locally', () => {
+    expect(rewriteHref('../apps/full-stack', 'docs')).toBe('/examples/full-stack/');
   });
 
   it('routes grafted API reference links to the public API tree', () => {
-    expect(rewriteHref('./api/', 'README')).toBe('/api/');
-    expect(rewriteHref('./api/modules/common_src.html#IPlugin', 'plugins')).toBe(
+    expect(rewriteHref('./api/', 'docs')).toBe('/api/');
+    expect(rewriteHref('./api/modules/common_src.html#IPlugin', 'docs')).toBe(
       '/api/modules/common_src.html#IPlugin',
     );
   });
 
   it('leaves hashes, absolute URLs, and site-absolute paths untouched', () => {
-    expect(rewriteHref('#section', 'cli')).toBe('#section');
-    expect(rewriteHref('https://jsr.io/@setu-ts', 'cli')).toBe('https://jsr.io/@setu-ts');
-    expect(rewriteHref('http://localhost:3000', 'cli')).toBe('http://localhost:3000');
-    expect(rewriteHref('mailto:x@example.com', 'cli')).toBe('mailto:x@example.com');
-    expect(rewriteHref('/docs/cli/', 'cli')).toBe('/docs/cli/');
+    expect(rewriteHref('#section', 'docs')).toBe('#section');
+    expect(rewriteHref('https://jsr.io/@setu-ts', 'docs')).toBe('https://jsr.io/@setu-ts');
+    expect(rewriteHref('http://localhost:3000', 'docs')).toBe('http://localhost:3000');
+    expect(rewriteHref('mailto:x@example.com', 'docs')).toBe('mailto:x@example.com');
+    expect(rewriteHref('/docs/cli/', 'docs')).toBe('/docs/cli/');
   });
 });
 
@@ -75,8 +69,8 @@ describe('resolvedMdToRoute', () => {
     expect(resolvedMdToRoute('/README.md')).toBe('/');
   });
 
-  it('returns the resolved path unchanged for unrendered root docs', () => {
-    expect(resolvedMdToRoute('/ARCHITECTURE.md')).toBe('/ARCHITECTURE.md');
+  it('routes the architecture reference locally', () => {
+    expect(resolvedMdToRoute('/ARCHITECTURE.md')).toBe('/architecture/');
   });
 });
 
@@ -84,7 +78,7 @@ describe('rewriteDocsHtml', () => {
   it('rewrites doc links and leaves everything else alone', () => {
     const html =
       '<p>Read <a href="./cli.md">the CLI guide</a> and <a href="https://jsr.io">jsr.io</a>.</p>';
-    const out = rewriteDocsHtml(html, 'README');
+    const out = rewriteDocsHtml(html, 'docs');
     expect(out).toBe(
       '<p>Read <a href="/docs/cli/">the CLI guide</a> and <a href="https://jsr.io">jsr.io</a>.</p>',
     );

@@ -12,11 +12,16 @@ scaffolder:
 
 ```bash
 npm create @setu-ts my-app -- --template rest
+npm create @setu-ts demo -- --example rest-api
 ```
 
 The project targets Node by default; pass `--runtime deno`, `--runtime bun` or
 `--runtime cloudflare-workers` for another target. See the
 [CLI README](https://github.com/setu-ts/setu-ts/tree/main/packages/cli) for every template and flag.
+
+`--example` downloads a standalone Node example from the GitHub tag matching the CLI version. Run
+`cd demo && npm install && npm start`, then `npm run smoke`; see
+[the examples](https://setu-ts.dev/docs/examples/) for the offered names and prerequisites.
 
 ## Exports
 

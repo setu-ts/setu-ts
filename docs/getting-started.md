@@ -30,8 +30,13 @@ After `cd my-app`, a Bun target runs `bun install && bun run start:dev`; a Deno 
 `deno task start:dev`; Workers runs `npm install && npx wrangler dev`. Use the development entry
 while editing. For a Node production run, use `npm run build && npm start`.
 
-The generated project's README lists its commands. See the [CLI guide](./cli.md) for templates and
-code generation.
+To start from a runnable example instead, use `npm create @setu-ts my-app -- --example rest-api`,
+then `cd my-app && npm install && npm start`. `npm run smoke` runs that example's proof. This
+creates a standalone Node project and downloads from GitHub at the CLI's release tag; see
+[Examples](./examples.md#before-you-start).
+
+The template-generated project's README lists its commands. See the [CLI guide](./cli.md) for
+templates and code generation.
 
 **Build it by hand** if you want to see every moving part. The rest of this guide does that — it is
 three packages and about ten lines of code.

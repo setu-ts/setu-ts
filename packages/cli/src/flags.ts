@@ -121,6 +121,7 @@ const NEW: ICommandFlagSpec = spec(
   'new',
   [
     'template',
+    'example',
     'style',
     'runtime',
     'env-file',
