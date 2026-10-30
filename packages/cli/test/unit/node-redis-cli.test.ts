@@ -30,6 +30,11 @@ function harness() {
   };
 }
 
+const VERSION_PIN = new RegExp(
+  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)0\.10\.0`,
+  'g',
+);
+
 describe('node-redis CLI', () => {
   it('renders the client call in the layout each project formatter keeps', () => {
     // Short single-line read: one line.
@@ -212,10 +217,9 @@ describe('node-redis CLI', () => {
     const expected: Record<string, string> = Object.fromEntries(
       Object.entries(baseline).map(([path, text]) => [
         path,
-        text.replace(
-          /(@setu-ts\/[a-z0-9-]+@\^?|"@setu-ts\/[a-z0-9-]+": "\^?)0\.10\.0/g,
-          `$1${VERSION}`,
-        ),
+        // Built from a string with \x22 for the double quote: the manifest generator's
+        // import scanner misreads a quote inside a regex literal as a string opening.
+        text.replace(VERSION_PIN, `$1${VERSION}`),
       ]),
     );
     for (const [path, [before, after]] of Object.entries(relaid)) {
