@@ -9,7 +9,8 @@
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/messaging-plugin": "workspace:^",
-    "@setu-ts/service-discovery-plugin": "workspace:^"
+    "@setu-ts/service-discovery-plugin": "workspace:^",
+    "ioredis": "5.x"
   },
   "devDependencies": {},
   "scripts": {
