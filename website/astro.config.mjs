@@ -14,4 +14,7 @@ export default defineConfig({
   site: 'https://setu-ts.dev',
   publicDir: '../assets',
   integrations: [sitemap()],
+  // One examples landing page: the learning-path guide. The old index rendered
+  // apps/README.md, which is written for contributors to the workspace.
+  redirects: { '/examples': '/docs/examples/' },
 });

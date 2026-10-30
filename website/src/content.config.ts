@@ -33,7 +33,6 @@ const repository = defineCollection({
         `${directory}/AGENT_CARD.md`,
       ]),
       'apps/*/README.md',
-      'apps/README.md',
       'CHANGELOG.md',
       'ARCHITECTURE.md',
       'PUBLIC_API.md',

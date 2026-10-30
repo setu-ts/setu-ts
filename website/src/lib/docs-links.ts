@@ -48,7 +48,8 @@ export function rewriteHref(
   if (path === '') return href;
   const joined = normalizeJoined(github ? '' : sourceDirectory, path);
   if (joined === '/README.md') return withAnchor('/', anchor);
-  if (joined === '/apps' || joined === '/apps/README.md') return withAnchor('/examples/', anchor);
+  if (joined === '/apps' || joined === '/apps/README.md')
+    return withAnchor('/docs/examples/', anchor);
   const rootRoutes: Readonly<Record<string, string>> = {
     '/CHANGELOG.md': '/changelog/',
     '/ARCHITECTURE.md': '/architecture/',
