@@ -38,12 +38,7 @@
  */
 
 import type { SeamSpec } from './seam-spec.ts';
-import {
-  CONTROLLERS_SEAM,
-  FUNCTIONAL_CONTROLLERS_SEAM,
-  FUNCTIONAL_ROUTES_SEAM,
-  ROUTES_SEAM,
-} from './http.ts';
+import { CONTROLLERS_SEAM, FUNCTIONAL_CONTROLLERS_SEAM } from './http.ts';
 import { COMMAND_HANDLER_SEAM, QUERY_HANDLER_SEAM } from './cqrs.ts';
 import { EVENTS_SEAM } from './events.ts';
 import { INGRESS_SEAM } from './ingress.ts';
@@ -66,7 +61,6 @@ import { generatorMode } from '../utils/generator-mode.ts';
 const SEAM_REGISTRY: ReadonlyMap<string, SeamSpec> = new Map<string, SeamSpec>([
   [CONTROLLERS_SEAM.schematic, CONTROLLERS_SEAM],
   [SERVICES_SEAM.schematic, SERVICES_SEAM],
-  [ROUTES_SEAM.schematic, ROUTES_SEAM],
   [MIDDLEWARE_SEAM.schematic, MIDDLEWARE_SEAM],
   [PLUGINS_SEAM.schematic, PLUGINS_SEAM],
   [HEALTH_SEAM.schematic, HEALTH_SEAM],
@@ -98,7 +92,7 @@ export function listSeamSpecs(): readonly SeamSpec[] {
  *
  * Applied by both accessors below, because each of these families has a real
  * registration site in BOTH modes — `registerGeneratedRoutes(app.router)` for
- * the HTTP pair, `HealthPlugin({ indicators })` for health — so the host
+ * the controller family, `HealthPlugin({ indicators })` for health — so the host
  * scaffolds the barrel either way and only the artifact shape differs.
  *
  * @param specs - The registry's specs
@@ -109,7 +103,6 @@ function withHostShapes(specs: readonly SeamSpec[], mode: GeneratorMode): readon
   if (mode === 'class-based') return specs;
   const functional = new Map<string, SeamSpec>([
     [FUNCTIONAL_CONTROLLERS_SEAM.schematic, FUNCTIONAL_CONTROLLERS_SEAM],
-    [FUNCTIONAL_ROUTES_SEAM.schematic, FUNCTIONAL_ROUTES_SEAM],
     // `health-indicator` is here rather than in the scan-only set because its
     // barrel IS imported by `setu.config.ts` — the shape has to be right at
     // scaffold time, not only when an artifact is admitted (A2).

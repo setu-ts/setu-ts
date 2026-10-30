@@ -2,21 +2,21 @@ import { describe, expect, it } from 'vitest';
 
 import { getTemplate } from '../../src/templates/registry.ts';
 import { renderModuleBarrel } from '../../src/schematics/module-barrel.ts';
-import { withModuleSeam } from '../../src/templates/module-seam.ts';
+import { withDecoratorSeams } from '../../src/templates/module-seam.ts';
 import { DI_WIRING } from '../../src/templates/di.ts';
 
 describe('module generation styles', () => {
-  it('keeps the module barrel and decorator registration in the class-based template', () => {
+  it('starts the class-based template flat: no module barrel and no MODULES wiring', () => {
+    // The first `setu g module` writes src/modules/index.ts and switches the config.
     const template = getTemplate('class-based')!;
     const paths = (template.files ?? []).map((file) => file.path);
-    expect(paths).toContain('src/modules/index.ts');
-    expect(template.localImports).toContainEqual({
-      symbols: ['MODULES'],
-      from: './src/modules/index.ts',
-    });
-    expect(template.plugins.find((plugin) => plugin.pkg === 'decorator-plugin')?.args).toContain(
-      '...MODULES',
+    expect(paths).not.toContain('src/modules/index.ts');
+    expect(template.localImports ?? []).not.toContainEqual(
+      expect.objectContaining({ from: './src/modules/index.ts' }),
     );
+    expect(
+      template.plugins.find((plugin) => plugin.pkg === 'decorator-plugin')?.args,
+    ).not.toContain('MODULES');
   });
 
   it('keeps functional templates free of class module wiring', () => {
@@ -32,22 +32,20 @@ describe('module generation styles', () => {
   });
 
   it('rewrites only the decorator wiring and wraps long module registration', () => {
-    const wiring = withModuleSeam(
+    const wiring = withDecoratorSeams(
       [DI_WIRING, { pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }],
       ['AController', 'BController', 'CController', 'DController'],
       ['AService', 'BService', 'CService', 'DService'],
     );
 
     expect(wiring[0]).toBe(DI_WIRING);
-    expect(wiring[1].args).toContain('...MODULES');
+    expect(wiring[1].args).not.toContain('MODULES');
     expect(wiring[1].args).toContain('\n        controllers:');
   });
 
   it('keeps the empty class aggregate registration on one line', () => {
-    const [wiring] = withModuleSeam([{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }]);
+    const [wiring] = withDecoratorSeams([{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin' }]);
 
-    expect(wiring.args).toBe(
-      '{ controllers: [], services: [], ingress: [], modules: [...MODULES] }',
-    );
+    expect(wiring.args).toBe('{ controllers: [], services: [], ingress: [] }');
   });
 });

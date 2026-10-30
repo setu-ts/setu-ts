@@ -351,7 +351,7 @@ describe('setu generate, with seams', () => {
   });
 
   describe('the collision refusal', () => {
-    it('refuses a service whose token a module already claims, and writes nothing', async () => {
+    it('refuses a top-level service once modules exist, and writes nothing', async () => {
       const h = harness({
         ...WIRED,
         '/app/src/modules/widget/widget.controller.ts': 'export class WidgetController {}',
@@ -359,20 +359,22 @@ describe('setu generate, with seams', () => {
         '/app/src/modules/widget/widget.service.ts': 'export class WidgetService {}',
       });
 
-      expect(await h.run(['service', 'widget'])).toBe(1);
+      // Once a project has modules, a top-level service cannot exist at all.
+      expect(await h.run(['service', 'widget'])).toBe(2);
 
-      expect(h.err.lines.join('\n')).toContain("the injection token 'widget-service'");
-      expect(h.err.lines.join('\n')).toContain('module of the same name');
+      expect(h.err.lines.join('\n')).toContain('This project uses modules; pass --module <name>');
       expect(h.fs.writes).toEqual([]);
     });
 
-    it('refuses a route whose path a controller already mounts', async () => {
+    it('refuses a module whose path a controller already mounts', async () => {
       const h = harness({
         ...WIRED,
         '/app/src/controllers/widget.controller.ts': 'export class WidgetController {}',
       });
 
-      expect(await h.run(['route', 'widget'])).toBe(1);
+      // A route of the same name is the same controller file; a module of the
+      // same name mounts the same path.
+      expect(await h.run(['module', 'widget'])).toBe(1);
 
       expect(h.err.lines.join('\n')).toContain('the HTTP path /widget');
       expect(h.fs.writes).toEqual([]);
@@ -385,7 +387,7 @@ describe('setu generate, with seams', () => {
         '/app/src/controllers/widget.controller.ts': 'export class WidgetController {}',
       });
 
-      expect(await h.run(['route', 'widget', '--dry-run'])).toBe(1);
+      expect(await h.run(['module', 'widget', '--dry-run'])).toBe(1);
 
       expect(h.out.lines).toEqual([]);
     });

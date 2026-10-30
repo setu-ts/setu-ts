@@ -14,15 +14,17 @@ import type { IFileSystem } from '@setu-ts/common';
 
 import type { SeamArtifacts, SeamSpec } from '../seams/seam-spec.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
-import { deriveNames, isKebabIdentifier } from './names.ts';
+import { escapeName, hasControlCharacter, isKebabIdentifier } from './names.ts';
 import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
 import { isMissingPath } from './filesystem-errors.ts';
+import { artifactNames } from './artifact-path.ts';
+import { walkArtifactFiles, type IUnreadableDirectory } from './artifact-walk.ts';
 
 /**
  * A file the barrel is claiming that the CLI did not generate.
  *
  * The seam scanner admits any file matching a family's suffix and exports, so a
- * hand-written `src/controllers/admin.routes.ts` becomes the CLI's on the next
+ * hand-written `src/controllers/admin.controller.ts` becomes the CLI's on the next
  * unrelated `setu generate`. That was survivable while a duplicate route merely
  * overwrote; since M68 refuses one, an adopted file that is ALSO wired by hand stops
  * the application booting, and the error names the developer's file rather than the
@@ -102,13 +104,15 @@ export interface UnreadableArtifact {
   /** The path, relative to the project root. */
   readonly path: string;
   /** Why it could not be read. */
-  readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
+  readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable' | IUnreadableDirectory['reason'];
 }
 
 /** One family's scan result. */
 export interface ArtifactScan {
   /** The admitted artifact names, sorted. */
   readonly names: readonly string[];
+  /** Paths admitted by the family's alternative export shape, when present. */
+  readonly alternativeNames?: readonly string[];
   /** Candidates matching the suffix that were rejected, in listing order. */
   readonly skipped: readonly SkippedArtifact[];
   /** Admitted candidates the existing barrel did not already name. */
@@ -197,7 +201,7 @@ function mentionsSymbol(source: string, symbol: string): boolean {
  *
  * 1. its name ends in the spec's suffix, with a non-empty remainder;
  * 2. it is a FILE — a directory cannot be imported;
- * 3. it EXPORTS every symbol the barrel will import from it.
+ * 3. it EXPORTS every symbol of a supported shape the barrel can import.
  *
  * The third is the one that is easy to leave out, and leaving it out was a defect. The
  * suffix says what a file claims to be; only its exports say what the barrel can name.
@@ -216,8 +220,9 @@ function mentionsSymbol(source: string, symbol: string): boolean {
  * regenerated barrel could differ byte-for-byte between two machines holding exactly the
  * same artifacts, turning a no-op regeneration into a diff.
  *
- * A missing or unreadable directory yields an empty result rather than throwing — a
- * project that has never generated this family is the common case, not an error.
+ * A missing root yields an empty result. Unreadable, linked or over-depth
+ * directories are reported so callers can preserve an incomplete barrel. Names
+ * retain their paths relative to the family root; symbols use the base filename.
  *
  * @param fs - The filesystem to read through
  * @param dir - The project's root directory (absolute)
@@ -226,6 +231,7 @@ function mentionsSymbol(source: string, symbol: string): boolean {
  *   {@linkcode scanArtifacts} so it is read once rather than once per family
  * @returns The admitted names, the rejected candidates, the newly-claimed files and
  *   the hand-registered ones
+ * @throws {DuplicateArtifactNameError} When two admitted paths share a base name
  */
 export async function readArtifactNames(
   fs: IFileSystem,
@@ -235,27 +241,30 @@ export async function readArtifactNames(
 ): Promise<ArtifactScan> {
   const root = joinPath(dir, spec.dir);
 
-  let entries: readonly string[];
-  try {
-    entries = await fs.readdir(root);
-  } catch {
-    // The directory does not exist yet, or is unreadable: no artifacts to list.
-    return { names: [], skipped: [], adopted: [], manual: [], unreadable: [] };
-  }
+  const walk = await walkArtifactFiles(fs, dir, spec.dir);
+  const entries = walk.files;
 
   const barrelSource = await readTextOrEmpty(fs, joinPath(dir, spec.barrel));
   const decoder = new TextDecoder();
   const names: string[] = [];
+  const alternativeNames: string[] = [];
+  const byBase = new Map<string, string>();
   const skipped: SkippedArtifact[] = [];
   const adopted: AdoptedArtifact[] = [];
   const manual: ManuallyWiredArtifact[] = [];
-  const unreadable: UnreadableArtifact[] = [];
+  const unreadable: UnreadableArtifact[] = [...walk.unreadable];
 
   for (const entry of entries) {
     if (!entry.endsWith(spec.suffix)) continue;
     const name = entry.slice(0, -spec.suffix.length);
     if (name === '') continue;
-    if (!isKebabIdentifier(name)) {
+    // Only the filename supplies identifiers. Folder names may contain spaces,
+    // capitals or underscores, but must remain safe in a single-quoted import.
+    if (
+      !isKebabIdentifier(name.slice(name.lastIndexOf('/') + 1)) ||
+      name.includes("'") ||
+      hasControlCharacter(name)
+    ) {
       skipped.push({ path: joinPath(spec.dir, entry), missing: [], invalidName: true });
       continue;
     }
@@ -285,13 +294,34 @@ export async function readArtifactNames(
       continue;
     }
 
-    const symbols = spec.importSymbols(deriveNames(name));
+    let symbols = spec.importSymbols(artifactNames(name));
     const relative = joinPath(spec.dir, entry);
     const missing = symbols.filter((symbol) => !exportsSymbol(source, symbol));
-    if (missing.length > 0) {
-      skipped.push({ path: relative, missing });
+    const alternative = spec.alternative?.importSymbols(artifactNames(name));
+    const useAlternative =
+      missing.length > 0 &&
+      alternative !== undefined &&
+      alternative.every((symbol) => exportsSymbol(source, symbol));
+    if (useAlternative) symbols = alternative;
+    if (missing.length > 0 && !useAlternative) {
+      skipped.push({
+        path: relative,
+        missing:
+          alternative === undefined
+            ? missing
+            : [`${missing.join(', ')} or ${alternative.join(', ')}`],
+      });
       continue;
     }
+
+    const base = artifactNames(name).kebab;
+    const previous = byBase.get(base);
+    if (previous !== undefined)
+      throw new DuplicateArtifactNameError(spec.schematic, [
+        joinPath(spec.dir, `${previous}${spec.suffix}`),
+        joinPath(spec.dir, `${name}${spec.suffix}`),
+      ]);
+    byBase.set(base, name);
 
     // Registered by hand already: listing it in the barrel too would register it
     // twice, which the kernel refuses at boot. The developer's wiring wins — it is
@@ -315,14 +345,38 @@ export async function readArtifactNames(
     // never writes that barrel, the claim repeated on every generate.
     if (
       spec.exports.length > 0 &&
+      (useAlternative || spec.alternative?.onlyShapeInBarrel !== true) &&
       !symbols.some((symbol) => mentionsSymbol(barrelSource, symbol))
     ) {
       adopted.push({ path: relative, barrel: spec.barrel });
     }
     names.push(name);
+    if (useAlternative) alternativeNames.push(name);
   }
 
-  return { names: names.sort(), skipped, adopted, manual, unreadable };
+  return {
+    names: names.sort(),
+    skipped,
+    adopted,
+    manual,
+    unreadable,
+    ...(alternativeNames.length === 0 ? {} : { alternativeNames: alternativeNames.sort() }),
+  };
+}
+
+/** Refuses ambiguous bindings instead of silently aliasing duplicate base names. */
+export class DuplicateArtifactNameError extends Error {
+  readonly family: string;
+  readonly paths: readonly string[];
+
+  constructor(family: string, paths: readonly string[]) {
+    super(
+      `Duplicate ${escapeName(family)} base name: ${paths.map(escapeName).join(', ')}. Rename one file before generating or syncing.`,
+    );
+    this.name = 'DuplicateArtifactNameError';
+    this.family = family;
+    this.paths = paths;
+  }
 }
 
 /**
@@ -330,7 +384,7 @@ export async function readArtifactNames(
  *
  * Unconditional, like `detectPlugins` and `readModuleNames`: branching on the
  * schematic name here would put a second dispatch beside the seam registry, and the
- * cost is one `readdir` per family against paths that usually do not exist.
+ * cost is one bounded walk per family against paths that usually do not exist.
  *
  * Families sharing a directory (`command-handler` and `query-handler` both live in
  * `src/cqrs/`) are still scanned once each, because they are told apart by suffix
@@ -358,6 +412,8 @@ export async function scanArtifacts(
   for (const spec of specs) {
     const scan = await readArtifactNames(fs, dir, spec, wiring);
     artifacts[spec.schematic] = scan.names;
+    if (spec.alternative !== undefined && scan.alternativeNames !== undefined)
+      artifacts[spec.alternative.artifactsKey] = scan.alternativeNames;
     skipped.push(...scan.skipped);
     adopted.push(...scan.adopted);
     manual.push(...scan.manual);

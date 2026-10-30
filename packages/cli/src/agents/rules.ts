@@ -16,7 +16,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'generate',
     packages: [],
     applies: () => true,
-    text: 'Generate first with setu generate, then edit the generated artifact. The generator wires supported registrations; follow any registration guidance it prints (including class-based module membership). Never edit CLI-owned src/*/index.ts barrels: generation rewrites them.',
+    text: 'Generate with setu generate, then edit; follow its printed guidance. Never edit CLI-owned index.ts files. Kernel routes live only in *.controller.ts, in src/controllers/ (services in src/services/); after the first setu g module, only in src/modules/<name>/ (--module). Moved one? setu sync.',
   },
   {
     id: 'services',
@@ -35,7 +35,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'functional',
     packages: [],
     applies: (f) => f.style === 'functional',
-    text: 'Routes use router.get or a `RouteDefinition` with middleware and handler. Return ctx.response.json(value); status(code) chains. `MiddlewareFunction` receives (ctx, next); await next() to continue, or write a response and return to refuse. Feature modules live under src/modules/<name>/; schemas belong in <name>.schemas.ts. With validation, bind once (const body = validateBody(S)), use body as middleware, read body.value(ctx).',
+    text: 'Routes use router.get or a `RouteDefinition` with middleware and handler. Return ctx.response.json(value); status(code) chains. `MiddlewareFunction` receives (ctx, next); await next() to continue, or write a response and return to refuse. Schemas belong in <name>.schemas.ts. With validation, bind once (const body = validateBody(S)), use body as middleware, read body.value(ctx).',
   },
   {
     id: 'class-based',

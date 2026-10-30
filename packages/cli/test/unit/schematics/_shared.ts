@@ -23,7 +23,9 @@ import { deriveNames } from '../../../src/utils/names.ts';
  * @returns Its seam, or undefined when the family has no registration site
  */
 export function seamSpecFor(schematic: string): SeamSpec | undefined {
-  return listSeamSpecs().find((spec) => spec.schematic === schematic);
+  return listSeamSpecs().find(
+    (spec) => spec.schematic === (schematic === 'route' ? 'controller' : schematic),
+  );
 }
 
 /** A fixed clock so timestamped output is deterministic. */
@@ -123,19 +125,18 @@ export function assertSeamContract(
   expect(existing.length).toBeGreaterThanOrEqual(2);
   expect([...existing]).not.toEqual([...existing].sort());
 
-  const files = factory(names, options(plugins, [], { [schematic]: existing }));
+  const key = schematic === 'route' ? 'controller' : schematic;
+  const artifacts = (values: readonly string[]) => ({ [key]: values });
+  const files = factory(names, options(plugins, [], artifacts(existing)));
 
   // Exactly one managed file, and it is the barrel.
   expect(files.filter((f) => f.managed === true).map((f) => f.path)).toEqual([spec.barrel]);
 
   // The generated name appears once even when the scan already reported it.
-  const withDuplicate = factory(
-    names,
-    options(plugins, [], { [schematic]: [...existing, names.kebab] }),
-  );
+  const withDuplicate = factory(names, options(plugins, [], artifacts([...existing, names.kebab])));
   expect(barrelOf(withDuplicate, schematic).contents).toBe(barrelOf(files, schematic).contents);
 
   // Byte-identical across reordered input: the barrel sorts before rendering.
-  const reversed = factory(names, options(plugins, [], { [schematic]: [...existing].reverse() }));
+  const reversed = factory(names, options(plugins, [], artifacts([...existing].reverse())));
   expect(barrelOf(reversed, schematic).contents).toBe(barrelOf(files, schematic).contents);
 }

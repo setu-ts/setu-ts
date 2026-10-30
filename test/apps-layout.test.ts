@@ -59,7 +59,8 @@ async function scaffold(parent: string, style: 'functional' | 'class-based'): Pr
     ]),
   );
   const project = join(parent, style);
-  await cli(['generate', 'module', GENERATED_FEATURE, '--dir', project]);
+  // The first module takes the scaffold's greeting example with it.
+  await cli(['generate', 'module', GENERATED_FEATURE, '--dir', project, '--adopt-controllers']);
   return project;
 }
 
@@ -203,6 +204,13 @@ const RULES = {
     return smoke.includes(`from '${layout.testRunner}'`)
       ? []
       : [`smoke.ts does not use ${layout.testRunner}`];
+  },
+
+  /** Routes are declared in controllers: no `src/**\/*.routes.ts` beside them. */
+  controllers(app) {
+    return [...app.keys()]
+      .filter((path) => path.startsWith('src/') && path.endsWith('.routes.ts'))
+      .map((path) => `${path} registers routes outside a controller (name it *.controller.ts)`);
   },
 
   /** Every file in a feature folder is its index or is named after the feature. */
@@ -381,16 +389,26 @@ describe('each layout rule can fail', () => {
     );
   });
 
+  it('controllers: refuses a routes file beside the controllers', () => {
+    expect(
+      RULES.controllers(app({ 'src/modules/news/news.routes.ts': '', 'app/routes.ts': '' })),
+    ).toEqual([
+      'src/modules/news/news.routes.ts registers routes outside a controller (name it *.controller.ts)',
+    ]);
+  });
+
   it('featureFiles: refuses a file not named after its feature', () => {
-    expect(RULES.featureFiles(app({ 'src/modules/news/platform.routes.ts': '' }))).toHaveLength(1);
+    expect(RULES.featureFiles(app({ 'src/modules/news/platform.controller.ts': '' }))).toHaveLength(
+      1,
+    );
   });
 
   it('moduleIndex: refuses a feature the index does not import the generated way', () => {
     const files = {
       'setu.config.ts': 'registerModules(app.router);',
       'src/modules/index.ts':
-        "import { registerNewsRoutes } from './news/news.routes.ts';\nexport function registerModules() {}",
-      'src/modules/news/news.routes.ts': '',
+        "import { registerNewsRoutes } from './news/news.controller.ts';\nexport function registerModules() {}",
+      'src/modules/news/news.controller.ts': '',
     };
     expect(RULES.moduleIndex(app(files), layout)).toEqual([
       'src/modules/index.ts does not import ./news/index.ts',
@@ -398,7 +416,7 @@ describe('each layout rule can fail', () => {
   });
 
   it('moduleIndex: refuses feature folders with no module index', () => {
-    expect(RULES.moduleIndex(app({ 'src/modules/news/news.routes.ts': '' }), layout)).toEqual([
+    expect(RULES.moduleIndex(app({ 'src/modules/news/news.controller.ts': '' }), layout)).toEqual([
       'has feature folders but no src/modules/index.ts',
     ]);
   });

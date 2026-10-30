@@ -53,7 +53,9 @@ it(
       expect(await cli(['check', '--dir', project]), output.join('\n')).toBe(0);
       expect(await cli(['g', 'route', 'products', '--dir', project]), output.join('\n')).toBe(1);
       expect(output.join('\n')).toContain('app/routes/_app/products._index.tsx');
-      await expect(nodeFs.stat(`${project}/src/controllers/products.routes.ts`)).rejects.toThrow();
+      await expect(
+        nodeFs.stat(`${project}/src/controllers/products.controller.ts`),
+      ).rejects.toThrow();
       // Developer edits stay in artifact modules. Barrels and configuration remain CLI-authored.
       for (const [path, before, after] of [
         [

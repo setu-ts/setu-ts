@@ -23,14 +23,17 @@ result and exit rather than servers: `cqrs` and `microservices`.
 
 ## How every example is laid out
 
-Each example has the layout `setu new` scaffolds, so the shape to copy is the shape the CLI gives
-you:
+Each example has the layout of a project after its first `setu g module`, so the shape to copy is
+the shape the CLI gives you. A new project starts flat, with its controllers in `src/controllers/`
+and its services in `src/services/`. The first `setu g module` moves the scaffold's untouched
+greeting example into `src/modules/<feature>/` by itself; controllers or services you have written
+or changed there need `--adopt-controllers`, or it refuses and lists them:
 
 ```text
 apps/<name>/
   setu.config.ts          createApp(): the plugin composition, without starting it
   main.ts                 starts createApp() on a port and stops it cleanly on SIGTERM
-  src/modules/<feature>/  one folder per feature: <feature>.routes.ts, .service.ts, .schemas.ts
+  src/modules/<feature>/  one folder per feature: <feature>.controller.ts, .service.ts, .schemas.ts
   smoke.ts                proves the example's claim with node:test against createApp()
 ```
 

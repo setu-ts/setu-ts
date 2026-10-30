@@ -5,12 +5,14 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { DuplicateArtifactNameError } from './utils/artifact-scanner.ts';
 import { parseArgs } from './args.ts';
 import { escapeName, escapeTerminalControls, hasControlCharacter } from './utils/names.ts';
 import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
+  EXIT_ERROR,
   EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
@@ -331,6 +333,10 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
         return await dispatchPluginCommand(command, rest, pluginCommandDeps(deps));
     }
   } catch (cause) {
+    if (cause instanceof DuplicateArtifactNameError) {
+      deps.error(cause.message);
+      return EXIT_ERROR;
+    }
     if (cause instanceof InterruptedError) {
       deps.error('Interrupted; the files this run wrote were removed.');
       return EXIT_INTERRUPTED;

@@ -4,7 +4,7 @@ import * as nodeFs from 'node:fs/promises';
  * A hand-written module in a seam directory (M70g — register rows X4-4 and F2).
  *
  * The seam scanner admits any file matching a family's suffix and exports, so a
- * developer's own `src/controllers/admin.routes.ts` — written and wired by hand from
+ * developer's own `src/controllers/admin.controller.ts` — written and wired by hand from
  * `setu.config.ts` — was swept into the CLI-owned barrel by an UNRELATED
  * `setu generate route report`. Since M68 refuses a duplicate `METHOD path`, the
  * application then failed to boot, and the error named the developer's module and
@@ -78,7 +78,7 @@ describe('a hand-written module in a seam directory', () => {
 
     // The developer's own module, registered from their own config — the exact
     // arrangement X4-4 reported.
-    await nodeFs.writeFile(`${project}/src/controllers/admin.routes.ts`, HAND_WRITTEN);
+    await nodeFs.writeFile(`${project}/src/controllers/admin.controller.ts`, HAND_WRITTEN);
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
     await nodeFs.writeFile(
       `${project}/setu.config.ts`,
@@ -86,7 +86,7 @@ describe('a hand-written module in a seam directory', () => {
         .replace(
           "import { registerGeneratedRoutes } from './src/controllers/index.ts';",
           "import { registerGeneratedRoutes } from './src/controllers/index.ts';\n" +
-            "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';",
+            "import { registerAdminRoutes } from './src/controllers/admin.controller.ts';",
         )
         .replace(
           'registerGeneratedRoutes(app.router, app.services);',
@@ -101,7 +101,7 @@ describe('a hand-written module in a seam directory', () => {
     expect(barrel).toContain('registerReportRoutes');
     expect(barrel).not.toContain('registerAdminRoutes');
     const report = err.join('\n');
-    expect(report).toContain('src/controllers/admin.routes.ts');
+    expect(report).toContain('src/controllers/admin.controller.ts');
     expect(report).toContain('setu.config.ts');
 
     await useWorkspacePackages(project);

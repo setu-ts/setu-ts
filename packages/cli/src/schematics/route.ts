@@ -1,69 +1,26 @@
 /**
- * Route schematic — the imperative escape hatch, in both generator modes.
+ * Route schematic: `setu g route` always writes a function controller.
  *
- * Since M70h this writes into `src/controllers/` alongside the controllers
- * rather than into a parallel `src/routes/` directory. The `.routes.ts` suffix
- * is what distinguishes it, which is the right altitude: it needed a
- * distinguishing NAME, never its own directory.
+ * A function controller exports `register<Pascal>Routes(router, services)` and
+ * can express what `@Controller` cannot, such as a wildcard, a proxy or a route
+ * table built in a loop. It lives in the one controller family, so it shares the
+ * `.controller.ts` suffix and the barrel with class controllers.
  *
  * @module
  */
-
 import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.ts';
-import { FUNCTIONAL_ROUTES_SEAM, HTTP_SEAM_DIR, ROUTES_SEAM } from '../seams/http.ts';
-import { seamNames } from '../seams/seam-spec.ts';
-import { generatorMode } from '../utils/generator-mode.ts';
-import { renderHttpModule } from './http-module.ts';
-import { renderFunctionalModuleIndex } from '../seams/modules.ts';
-import { deriveNames } from '../utils/names.ts';
+import { generateController } from './controller.ts';
 
 /**
- * Generates a route module and regenerates the shared HTTP barrel.
+ * Generates a function controller and regenerates the barrel or module index.
  *
  * @param names - Naming forms derived from the user's input
  * @param options - Supplies the artifacts already present, for the barrel
- * @returns The route module at `src/controllers/<kebab>.routes.ts`, plus the
- *   managed `src/controllers/index.ts` barrel
+ * @returns The controller file plus its managed registration file
  */
 export function generateRoute(
   names: DerivedNames,
   options: SchematicOptions,
 ): readonly GeneratedFile[] {
-  if (options.targetModule !== undefined) {
-    const dir = `src/modules/${options.targetModule}`;
-    return [
-      {
-        path: `${dir}/${names.kebab}.routes.ts`,
-        contents: renderHttpModule(names, 'routes', options.targetModule),
-      },
-      {
-        path: `${dir}/index.ts`,
-        managed: true,
-        contents: renderFunctionalModuleIndex(deriveNames(options.targetModule), {
-          controller: seamNames(options.moduleArtifacts, 'controller'),
-          route: seamNames(options.moduleArtifacts, 'route', names.kebab),
-        }),
-      },
-    ];
-  }
-  const seam =
-    generatorMode(options.plugins) === 'class-based' ? ROUTES_SEAM : FUNCTIONAL_ROUTES_SEAM;
-
-  return [
-    {
-      path: `${HTTP_SEAM_DIR}/${names.kebab}.routes.ts`,
-      contents: renderHttpModule(names, 'routes'),
-    },
-    {
-      path: seam.barrel,
-      // Both kinds, for the reason the controller schematic gives: one barrel
-      // carries the whole directory, so rendering it from one list would drop
-      // the other kind.
-      contents: seam.renderBarrel({
-        controller: seamNames(options.artifacts, 'controller'),
-        route: seamNames(options.artifacts, 'route', names.kebab),
-      }),
-      managed: true,
-    },
-  ];
+  return generateController(names, options, 'function');
 }

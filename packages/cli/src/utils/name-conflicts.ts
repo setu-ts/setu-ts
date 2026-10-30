@@ -1,43 +1,27 @@
 /**
  * Detection of generated artifacts that cannot coexist under one name.
  *
- * This check exists BECAUSE the artifacts are now wired. Before the seams, two
- * artifacts sharing a name were two inert files; nothing registered either, so nothing
- * collided. Registering them makes two collisions real, and both were observed against
- * a booted application rather than reasoned about:
+ * The check exists because generated artifacts are wired. Three collisions were
+ * observed against a booted application:
  *
  * - **DI token.** `setu g service widget` and `setu g module widget` both emit
- *   `@Injectable({ token: 'widget-service' })`. `DecoratorPlugin.registerService` skips
- *   a token already present, so the FIRST wins — and since the standalone barrel is
- *   spread before the module barrel, the module's controller received the standalone
- *   service and answered `500` (`this.widgets.list is not a function`) on every request.
- * - **HTTP path.** `route`, `controller` and `module` all mount `/<name>`. The kernel's
- *   router keys its entry map on `${method} ${path}`, so a duplicate OVERWRITES rather
- *   than throwing: one of the two artifacts is silently unreachable.
+ *   `@Injectable({ token: 'widget-service' })`. `DecoratorPlugin` keeps the first
+ *   token it sees, so the module's controller received the wrong service and
+ *   answered `500`.
+ * - **HTTP path.** A controller (class or function) and a module both mount
+ *   `/<name>`, so one of them is unreachable or startup fails on the duplicate.
+ *   `g route` and `g sse` write into the controller family, so a second file of
+ *   one name is refused by the overwrite guard before this check runs.
+ * - **Plugin claim.** A generated health indicator whose name an installed plugin
+ *   already registers makes `app.start()` throw, so it is looked up in
+ *   `plugin-claims.ts` (register row A1).
  *
- *   Since E8 this group has a second, LOUDER failure, in the mode the check used to skip
- *   entirely. `src/routes/` merged into `src/controllers/`, so a functional `route` and a
- *   functional `controller` share one directory and one barrel while both exporting
- *   `register<Pascal>Routes` — the barrel imports that name from two files and the
- *   generated project does not compile (`TS2300`, twice). Measured against a real
- *   scaffold: both commands reported success.
- *
- * A third collision has a different shape: a generated health indicator against a name
- * an INSTALLED PLUGIN already claims. `HealthService.registerIndicator` throws on a
- * duplicate name, so `setu g health-indicator database` in a project with
- * `DatabasePlugin` produced a project that type-checked and then died at `app.start()`
- * (register row A1). The other party is a plugin rather than another generated file, so
- * it is looked up in `plugin-claims.ts` rather than in the scan.
- *
- * Refusing beats warning for all three. A silent 500, a silently-dropped route and a
- * boot failure are all worse than a command that will not run, and the fix is always the
- * same — pick a different name — so there is nothing the developer loses by being told
- * now.
+ * Refusing beats warning: the fix is always to pick another name.
  *
  * @module
  */
-
 import type { SeamArtifacts } from '../seams/seam-spec.ts';
+import { artifactNames } from './artifact-path.ts';
 import { findPluginIndicatorClaim } from './plugin-claims.ts';
 
 /** One reason two artifacts cannot share a name, and the artifacts that share it. */
@@ -48,19 +32,7 @@ interface ConflictGroup {
   readonly resource: (kebab: string) => string;
   /** What goes wrong if both are generated anyway. */
   readonly consequence: string;
-  /**
-   * Whether this collision only exists in a decorator project.
-   *
-   * Per-group rather than per-call, and that distinction is the fix for a real
-   * defect: the check used to return early for any project without
-   * `decorator-plugin`, on the reasoning that a functional `module` shares a
-   * FILENAME with a same-named `route` and the ordinary overwrite refusal
-   * catches it. That was true while `route` wrote to `src/routes/` and
-   * `controller` was gated — and E8 ended both. A functional `route` and a
-   * functional `controller` now land in ONE directory under different
-   * filenames while exporting the SAME `register<Pascal>Routes` symbol into
-   * ONE barrel, so nothing caught them.
-   */
+  /** Whether this resource exists only in a decorator project. */
   readonly requiresDecorators: boolean;
 }
 
@@ -72,15 +44,11 @@ interface ConflictGroup {
  */
 const CONFLICT_GROUPS: readonly ConflictGroup[] = [
   {
-    schematics: ['route', 'controller', 'module'],
+    schematics: ['controller', 'module'],
     resource: (kebab) => `the HTTP path /${kebab}`,
     consequence:
-      'they mount the same path, and in a functional project they also export the same ' +
-      'symbol into one barrel — so the project would not compile, and if it did, one of ' +
-      'the two routes would be silently unreachable',
-    // Every generator mode. In a decorator project the two register the same
-    // `METHOD path`; in a functional one the merged `src/controllers/` barrel
-    // imports `register<Pascal>Routes` from both files, which is TS2300.
+      'they mount the same HTTP path, so one controller would be unreachable or application startup would fail',
+    // Class controllers and function controllers both declare HTTP paths.
     requiresDecorators: false,
   },
   {
@@ -146,20 +114,19 @@ export function findNameConflict(
   modules: readonly string[],
   module?: string,
 ): NameConflict | undefined {
-  if (module !== undefined) {
-    const other =
-      schematic === 'route' ? 'controller' : schematic === 'controller' ? 'route' : undefined;
-    if (other !== undefined && (artifacts[other] ?? []).includes(kebab)) {
-      return {
-        claimedBy: `the ${other} of the same name`,
-        resource: `the HTTP path /${module}/${kebab}`,
-        consequence:
-          'they export the same registrar into one module index, so the project would not compile',
-        remedy: `remove the existing ${other}`,
-      };
-    }
-    return undefined;
-  }
+  const family = ['route', 'sse'].includes(schematic) ? 'controller' : schematic;
+  const requested = schematic === 'route' ? 'controller' : schematic;
+  const nested = (artifacts[family] ?? []).find(
+    (path) => path !== kebab && artifactNames(path).kebab === kebab,
+  );
+  if (nested !== undefined)
+    return {
+      claimedBy: `the ${family} at ${nested}`,
+      resource: `the generated binding for ${kebab}`,
+      consequence: 'each artifact in a family must have a unique base name',
+      remedy: `rename or remove ${nested}`,
+    };
+  if (module !== undefined) return undefined;
   const decorated = plugins.has('decorator-plugin');
 
   // A1: the other claimant is a plugin, not a generated artifact, so it is reported
@@ -180,13 +147,13 @@ export function findNameConflict(
 
   for (const group of CONFLICT_GROUPS) {
     if (group.requiresDecorators && !decorated) continue;
-    if (!group.schematics.includes(schematic)) continue;
+    if (!group.schematics.includes(requested)) continue;
     for (const other of group.schematics) {
-      if (other === schematic) continue;
+      if (other === requested) continue;
       // Modules are scanned separately from the flat families, because a module is a
-      // directory that must hold two specific files rather than one suffixed file.
+      // directory admitted by its declaration rather than one controller file.
       const present = other === 'module' ? modules : (artifacts[other] ?? []);
-      if (present.includes(kebab)) {
+      if (present.some((path) => artifactNames(path).kebab === kebab)) {
         return {
           claimedBy: `the ${other} of the same name`,
           resource: group.resource(kebab),

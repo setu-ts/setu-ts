@@ -294,6 +294,27 @@ All notable changes to this project are documented here. The format follows
   Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1 refuse legacy and cross-entity
   cursors; restart pagination once on upgrade.
 
+- **BREAKING — one place for routes: controllers (#526, 0.11.0, `@setu-ts/cli`).** Every file that
+  registers routes is a controller, `<name>.controller.ts`: a class controller (`@Controller`) or a
+  function controller (`register<Pascal>Routes`), told apart by its exports. The `.routes.ts` suffix
+  is gone, and `setu g route` writes a function controller. A project keeps controllers and services
+  in one place: `src/controllers/` and `src/services/` until the first `setu g module`, then only
+  `src/modules/<name>/`. New projects start flat (the `rest` greeting example is in
+  `src/controllers/`), and no longer scaffold `src/modules/index.ts`. The first `g module` removes
+  the flat barrels and rewrites `setu.config.ts`'s registration lines; with flat controllers or
+  services present it refuses, and `--adopt-controllers` moves them into the module, rewriting
+  imports and keeping URLs, all or nothing; the scaffold's untouched greeting example moves without
+  the flag. Once a project has modules, `controller`, `route`, `service`, `sse` and `setu add view`
+  require `--module`. Subfolders are scanned (up to 8 deep; linked directories are reported, never
+  followed), and `setu sync` relocates moved files. A class-based module's `index.ts` is now
+  CLI-managed and registers its function controllers, so a modular class-based config also calls
+  `registerModules(app.router, app.services)`; `g controller` and `g service` add their class to a
+  plain `@Module` array literal. `setu add view` writes `views.controller.ts` instead of
+  `src/views/routes.ts` and the `registerViewRoutes` call. `setu check` adds `setu.E014`
+  (controllers or services outside modules), `setu.E015` (an import in a CLI-written file that does
+  not resolve) and `setu.E016` (two controllers with one base name). There is no migration for
+  existing projects. See [the CLI guide](docs/cli.md#controllers-and-domain-modules).
+
 - **BREAKING — Zod 3 support removed (#496, 0.11.0, `@setu-ts/openapi-plugin`,
   `@setu-ts/validation-plugin`, `@setu-ts/decorator-plugin`).** The supported range is now
   `zod >=4.6.6 <5`; validation still duck-types `safeParse` but is tested with Zod 4 only. OpenAPI

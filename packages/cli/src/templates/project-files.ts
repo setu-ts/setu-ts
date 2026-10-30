@@ -42,7 +42,6 @@ import {
   renderTestServer,
   renderAppE2e,
 } from '../schematics/test-harness.ts';
-import { renderFunctionalModuleBarrel, REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
 import { frameworkSpecifier } from './framework-specifier.ts';
 import {
   NPM_TOOLING_DEV_DEPENDENCIES,
@@ -204,16 +203,9 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
     (s) => s.requiresPlugin === undefined || !swap?.removePackages.includes(s.requiresPlugin),
   );
   const swapped = swap === undefined ? host.plugins : applyRuntimeSwap(host.plugins, swap);
-  const functional = !swapped.some((plugin) => plugin.pkg === 'decorator-plugin');
+  // A project starts flat: `setu g module` writes `src/modules/` and switches
+  // the config's registration lines when the first module is generated.
   const setupCalls = [...(host.setupCalls ?? []), ...seamSetupCalls(seams)];
-  if (functional) {
-    const afterRoutes = setupCalls.findIndex((call) => call.startsWith('registerGeneratedRoutes('));
-    setupCalls.splice(
-      afterRoutes < 0 ? setupCalls.length : afterRoutes + 1,
-      0,
-      `${REGISTER_MODULES_EXPORT}(app.router, app.services);`,
-    );
-  }
   // Workers receive configuration exclusively through their request bindings.
   // Leaving an env-file path in the manifest would make ConfigPlugin require a
   // filesystem that the Workers runtime deliberately does not provide. Nor can
@@ -231,26 +223,12 @@ export function resolveHost(host: TemplateHost, runtime: TargetRuntime): Resolve
       entryReExports: swap?.entryReExports ?? [],
       wranglerToml: swap?.wranglerToml ?? '',
       middleware: host.middleware,
-      localImports: [
-        ...(host.localImports ?? []),
-        ...seamLocalImports(seams),
-        ...(functional
-          ? [{ symbols: [REGISTER_MODULES_EXPORT], from: './src/modules/index.ts' }]
-          : []),
-      ],
+      localImports: [...(host.localImports ?? []), ...seamLocalImports(seams)],
       packageImports: host.packageImports ?? [],
       files: [
         ...(host.filesForRuntime?.(runtime) ?? host.files ?? []),
         ...seamFiles(seams, host.seamArtifacts ?? {}),
         ...(swap?.files ?? []),
-        ...(functional
-          ? [
-              {
-                path: 'src/modules/index.ts',
-                contents: renderFunctionalModuleBarrel(host.seamArtifacts?.['modules'] ?? []),
-              },
-            ]
-          : []),
       ],
       pluginSpreads: [...(host.pluginSpreads ?? []), ...seamPluginSpreads(seams)],
       setupCalls,

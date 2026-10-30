@@ -20,7 +20,9 @@ describe('read-only project facts', () => {
     expect(facts.runtime).toBe('node');
     expect(facts.commands).toEqual(['start', 'check', 'test']);
     expect(facts.directories).toEqual(['src/modules', 'src/shared']);
-    expect(facts.seams).toContain('src/controllers');
+    // The project has modules, so its controllers live there, not in src/controllers/.
+    expect(facts.seams).not.toContain('src/controllers');
+    expect(facts.seams).toContain('src/middleware');
     expect(facts.schematics).toContain('controller');
     expect(fs.writes).toEqual([]);
   });

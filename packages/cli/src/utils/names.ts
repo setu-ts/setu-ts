@@ -91,7 +91,7 @@ export function isKebabIdentifier(name: string): boolean {
  * string literals (`@Injectable({ token: '<kebab>-service' })`), and the
  * commands join the kebab into a filesystem path — a workspace member
  * (`generate app`, `adopt`), a library, or an artifact file name
- * (`src/controllers/<kebab>.routes.ts`). `setu new` joins the kebab into a path
+ * (`src/controllers/<kebab>.controller.ts`). `setu new` joins the kebab into a path
  * and a manifest and never into an identifier, so it runs
  * {@linkcode isPathSegmentSafe} alone — a project may be called `3d-shop`.
  *

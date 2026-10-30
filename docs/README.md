@@ -55,7 +55,7 @@ building production-ready applications with our plugin-first, runtime-independen
 - [CLI Guide](./cli.md)
   - Scaffolding projects: templates, runtimes, and the functional/class-based choice
   - Generating code: the schematics and where each one is wired
-  - Domain modules
+  - Controllers and domain modules: one place for routes, and the first `setu g module`
   - Monorepo workspaces and service discovery
 
 ## Plugin Reference
