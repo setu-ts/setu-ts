@@ -22,6 +22,9 @@ const { stdout } = await promisify(execFile)('git', ['ls-files', '-z'], {
 export const TRACKED_FILES = stdout.split('\0').filter(Boolean);
 
 /** Package metadata from the release allowlist and each package's own manifest. */
+/** The package groups, in the order the packages index and sidebar list them. */
+export const PACKAGE_GROUPS = ['Core', 'Plugins', 'Starters', 'Tools'] as const;
+
 export const PACKAGES = PUBLISHED_PACKAGES.map((directory) => {
   const manifest = JSON.parse(readSource(`${directory}/package.json`)) as {
     name: string;
@@ -41,6 +44,15 @@ export const PACKAGES = PUBLISHED_PACKAGES.map((directory) => {
           : 'Core',
   };
 });
+
+/** The packages sidebar: every published package under its group, by short name. */
+export const PACKAGE_NAVIGATION = PACKAGE_GROUPS.map((group) => ({
+  label: group,
+  items: PACKAGES.filter((pkg) => pkg.group === group).map((pkg) => ({
+    label: pkg.name.replace(/^@setu-ts\//, ''),
+    href: `/packages/${pkg.slug}/`,
+  })),
+}));
 
 /** The canonical app READMEs determine the example routes. */
 export const APPS = TRACKED_FILES.filter((file) => /^apps\/[^/]+\/README\.md$/.test(file)).map(

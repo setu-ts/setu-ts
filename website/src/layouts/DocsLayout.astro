@@ -1,7 +1,16 @@
 ---
 import Base from './Base.astro';
 import DocsNavigation from '../components/DocsNavigation.astro';
+import SectionNavigation, {
+  type SectionNavigationGroup,
+} from '../components/SectionNavigation.astro';
 import type { TableOfContentsItem } from '../lib/docs-links';
+
+/** One step of the breadcrumb trail above the page title; the page itself is not a step. */
+export interface Breadcrumb {
+  label: string;
+  href: string;
+}
 
 interface Props {
   title: string;
@@ -10,9 +19,15 @@ interface Props {
   source?: string;
   /** Headings in the rendered article, for in-page navigation. */
   tableOfContents?: TableOfContentsItem[];
+  /** Where the page sits, for the trail above the title. Omitted on guides. */
+  breadcrumbs?: Breadcrumb[];
+  /** Replaces the guides sidebar with this section's own pages (examples, packages). */
+  section?: SectionNavigationGroup[];
 }
 
-const { title, description, source, tableOfContents = [] } = Astro.props;
+const { title, description, source, tableOfContents = [], breadcrumbs = [], section } =
+  Astro.props;
+const pageLabel = title.replace(/ — Setu-TS$/, '');
 const currentPath = Astro.url.pathname.replace(/\/$/, '') || '/docs';
 const sourceFile = source?.toLowerCase() === 'readme' ? 'README' : source;
 const editUrl = source
@@ -23,7 +38,13 @@ const editUrl = source
 <Base title={title} description={description}>
   <div class="docs-shell">
     <aside class="docs-sidebar">
-      <DocsNavigation currentPath={currentPath} />
+      {
+        section ? (
+          <SectionNavigation groups={section} currentPath={currentPath} />
+        ) : (
+          <DocsNavigation currentPath={currentPath} />
+        )
+      }
     </aside>
     <div class="docs-content">
       <div class="docs-mobile-controls">
@@ -43,7 +64,13 @@ const editUrl = source
             </svg>
             Menu
           </summary>
+          {
+        section ? (
+          <SectionNavigation groups={section} currentPath={currentPath} />
+        ) : (
           <DocsNavigation currentPath={currentPath} />
+        )
+      }
         </details>
         {
           tableOfContents.length > 0 && (
@@ -70,6 +97,20 @@ const editUrl = source
           <a class="edit-page" href={editUrl}>
             Edit this page on GitHub
           </a>
+        )
+      }
+      {
+        breadcrumbs.length > 0 && (
+          <nav class="breadcrumbs" aria-label="Breadcrumb">
+            <ol>
+              {breadcrumbs.map((crumb) => (
+                <li>
+                  <a href={crumb.href}>{crumb.label}</a>
+                </li>
+              ))}
+              <li aria-current="page">{pageLabel}</li>
+            </ol>
+          </nav>
         )
       }
       <slot />

@@ -842,6 +842,53 @@ kbd {
   min-width: 0;
 }
 
+.breadcrumbs {
+  margin: 1.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.breadcrumbs li + li::before {
+  content: '›';
+  margin-right: 0.35rem;
+}
+
+.breadcrumbs [aria-current='page'] {
+  color: var(--fg);
+}
+
+.try-it {
+  margin: 1rem 0 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+  background: var(--accent-soft);
+}
+
+.try-it-title {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+
+.try-it pre {
+  margin: 0.6rem 0;
+}
+
+.try-it-note {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .edit-page {
   font-size: 0.85rem;
   color: var(--muted);

@@ -1,0 +1,40 @@
+---
+/**
+ * Sidebar for a section outside the guides (examples, packages): the same two
+ * top links as the docs sidebar, then the section's own pages with the current
+ * one marked, so a reader can see where they are and move sideways.
+ */
+export interface SectionNavigationGroup {
+  label: string;
+  items: { label: string; href: string }[];
+}
+
+interface Props {
+  groups: SectionNavigationGroup[];
+  currentPath: string;
+}
+
+const { groups, currentPath } = Astro.props;
+const current = (href: string) => currentPath === href.replace(/\/$/, '');
+---
+
+<nav class="docs-navigation" aria-label="Section">
+  <h2><a href="/docs/">Documentation</a></h2>
+  <h2><a href="/packages/">Packages</a></h2>
+  {
+    groups.map((group) => (
+      <>
+        <h2>{group.label}</h2>
+        <ul>
+          {group.items.map((item) => (
+            <li>
+              <a href={item.href} aria-current={current(item.href) ? 'page' : undefined}>
+                {item.label}
+              </a>
+            </li>
+          ))}
+        </ul>
+      </>
+    ))
+  }
+</nav>
