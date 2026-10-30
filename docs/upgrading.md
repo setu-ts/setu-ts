@@ -2,7 +2,7 @@
 
 The CHANGELOG answers "what changed in the framework"; this guide answers "what must I change in
 **my** project". A release that demands reader action adds an entry here, version by version — that
-is a release step ([releasing.md](./releasing.md)), not a memory exercise.
+is a release step, not a memory exercise.
 
 Each heading names the release that **shipped** the change, so an upgrade spanning several releases
 is the union of every section between the version you are on and the one you are moving to.
