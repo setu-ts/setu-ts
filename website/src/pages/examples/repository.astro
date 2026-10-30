@@ -1,0 +1,18 @@
+---
+import { getEntry } from 'astro:content';
+import RepositoryArticle from '../../components/RepositoryArticle.astro';
+import { EXAMPLE_NAVIGATION } from '../../lib/repository';
+
+// apps/README.md: how the examples run inside a clone of the repository. It is reference
+// for contributors, so it has its own page rather than being the examples landing page.
+const entry = await getEntry('repository', 'apps/README.md');
+if (!entry?.rendered) throw new Error('Missing apps/README.md');
+---
+
+<RepositoryArticle
+  html={entry.rendered.html}
+  directory="apps"
+  title="Running the examples in the repository"
+  breadcrumbs={[{ label: 'Examples', href: '/docs/examples/' }]}
+  section={EXAMPLE_NAVIGATION}
+/>

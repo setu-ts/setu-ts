@@ -1,7 +1,7 @@
 ---
 import { getCollection } from 'astro:content';
 import RepositoryArticle from '../../components/RepositoryArticle.astro';
-import { PACKAGES, publicApiSections, EXAMPLE_FILES } from '../../lib/repository';
+import { PACKAGES, PACKAGE_NAVIGATION, publicApiSections, EXAMPLE_FILES } from '../../lib/repository';
 import { retargetMissingFragments, rewriteDocsHtml } from '../../lib/docs-links';
 export async function getStaticPaths() {
   const entries = await getCollection('repository');
@@ -11,11 +11,20 @@ export async function getStaticPaths() {
   ]);
 }
 const { pkg, entry, card } = Astro.props;
+
 if (!entry?.rendered) throw new Error(`No rendered content for ${pkg.directory}`);
 const reference = (await getCollection('repository')).find((candidate) => candidate.id === 'PUBLIC_API.md');
 const api = card ? '' : publicApiSections(reference!.rendered!.html, pkg.name);
 const apiHtml = api ? '<h2>API reference</h2>' + rewriteDocsHtml(api, '', EXAMPLE_FILES) : '';
 ---
-<RepositoryArticle html={retargetMissingFragments(entry.rendered.html + apiHtml, '/public-api/')} directory={pkg.directory}>
+<RepositoryArticle
+  html={retargetMissingFragments(entry.rendered.html + apiHtml, '/public-api/')}
+  directory={pkg.directory}
+  breadcrumbs={[
+    { label: 'Packages', href: '/packages/' },
+    ...(card ? [{ label: pkg.name, href: `/packages/${pkg.slug}/` }] : []),
+  ]}
+  section={PACKAGE_NAVIGATION}
+>
   {!card && <p>{pkg.card && <><a href={`/packages/${pkg.slug}/agent-card/`}>Agent card</a> · </>}<a href="/api/">TypeDoc API reference</a></p>}
 </RepositoryArticle>
