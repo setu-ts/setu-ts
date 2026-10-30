@@ -468,6 +468,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Validate forwarded client addresses (`@setu-ts/http-security-plugin`).** IP security validates
+  every examined `X-Forwarded-For` or custom `ipHeader` entry and strips numeric ports from IPv4 and
+  bracketed IPv6 addresses. An invalid entry stops resolution with no client or forwarded origin,
+  rather than publishing arbitrary text or falling back to the socket peer. Both header families
+  share one address validator and canonical IPv6 form.
+
 - **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, #525, 0.11.0,
   `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
   line however long its options were — a Redis connection read, a nested `options: { … }`, a seam

@@ -41,6 +41,11 @@ peer publishes a forwarded origin. Configure the proxy to overwrite `X-Forwarded
 `X-Forwarded-Host` rather than pass a client's copy through, and restrict direct access to the
 application where possible.
 
+Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address; numeric ports are
+stripped from IPv4 and bracketed IPv6 entries. Bare IPv6 is always an address. An invalid entry
+stops resolution with `CLIENT_IP_STATE_KEY` set to `undefined`, never the socket peer, and leaves
+the origin as the URL origin.
+
 The default `forwardedHeader: 'x-forwarded'` uses `X-Forwarded-For`, the leftmost
 `X-Forwarded-Proto`, and the leftmost `X-Forwarded-Host`. Choose `forwardedHeader: 'forwarded'` when
 your proxy writes RFC 7239 `Forwarded`; this reads only that family and conflicts with `ipHeader`.

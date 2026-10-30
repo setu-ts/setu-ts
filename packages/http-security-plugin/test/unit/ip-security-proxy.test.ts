@@ -152,10 +152,10 @@ describe('proxy peer and public origin (M113n)', () => {
         )
       ).ip,
     ).toBe('7.7.7.7');
-    // A malformed mapped form is compared literally and trusts nothing.
+    // A malformed mapped header entry is a boundary, so no client is resolved.
     expect(
       (await inspect({ 'X-Forwarded-For': '7.7.7.7, ::ffff:10.2.3.999' }, {}, '10.1.2.3')).ip,
-    ).toBe('::ffff:10.2.3.999');
+    ).toBeUndefined();
   });
   // M113n audit round 3: a browser Origin never carries the default port.
   it('drops the scheme default port from a forwarded host', async () => {
@@ -445,16 +445,17 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
 
     it('a malformed CIDR falls back to a literal string comparison', async () => {
       // A wrong numeric expansion would silently TRUST an untrusted hop, so an
-      // unparseable block matches only its own literal text.
-      expect(await resolve('1.2.3.4, 10.0.0.1/99', { trustedProxies: ['10.0.0.1/99'] })).toBe(
-        '1.2.3.4',
-      );
+      // unparseable block matches only its own literal text. Such text in the
+      // header is now an invalid-address boundary before any comparison.
+      expect(
+        await resolve('1.2.3.4, 10.0.0.1/99', { trustedProxies: ['10.0.0.1/99'] }),
+      ).toBeUndefined();
       // A width of three or more digits is a legitimate IPv6 form (`/128`) as
       // far as the digit guard is concerned, so it is NOT refused — it falls to
       // the literal comparison, which trusts nothing.
-      expect(await resolve('1.2.3.4, 10.0.0.0/999', { trustedProxies: ['10.0.0.0/999'] })).toBe(
-        '1.2.3.4',
-      );
+      expect(
+        await resolve('1.2.3.4, 10.0.0.0/999', { trustedProxies: ['10.0.0.0/999'] }),
+      ).toBeUndefined();
       expect(await resolve('1.2.3.4, 10.0.0.7', { trustedProxies: ['10.0.0.0/999'] })).toBe(
         '10.0.0.7',
       );
@@ -488,18 +489,18 @@ describe('ipSecurityMiddleware proxy resolution (X32-3)', () => {
     });
 
     it('an octet above 255 is not a valid address and never matches a CIDR', async () => {
-      expect(await resolve('1.2.3.4, 10.0.0.300', { trustedProxies: ['10.0.0.0/8'] })).toBe(
-        '10.0.0.300',
-      );
+      expect(
+        await resolve('1.2.3.4, 10.0.0.300', { trustedProxies: ['10.0.0.0/8'] }),
+      ).toBeUndefined();
     });
 
     it('a padded or short dotted-quad is not treated as IPv4', async () => {
       // `Number(' 1')` is 1 and `Number('')` is 0, so the digits are checked
       // explicitly rather than inferred from the conversion.
-      expect(await resolve('1.2.3.4, 10.0.0', { trustedProxies: ['10.0.0.0/8'] })).toBe('10.0.0');
-      expect(await resolve('1.2.3.4, 10.0.0.0001', { trustedProxies: ['10.0.0.0/8'] })).toBe(
-        '10.0.0.0001',
-      );
+      expect(await resolve('1.2.3.4, 10.0.0', { trustedProxies: ['10.0.0.0/8'] })).toBeUndefined();
+      expect(
+        await resolve('1.2.3.4, 10.0.0.0001', { trustedProxies: ['10.0.0.0/8'] }),
+      ).toBeUndefined();
     });
 
     it('an empty trustedProxies list trusts nothing, so the rightmost wins', async () => {

@@ -1,4 +1,5 @@
 /** Bounded RFC 7239 parsing. Internal to HTTP security. @module */
+import { parseIpLiteral } from './normalize-ip.ts';
 
 /** One proxy-written element; an absent IP is an unresolvable hop. */
 export interface IForwardedElement {
@@ -233,20 +234,8 @@ function parseNode(node: string): string | null | undefined {
   const address = match[1]!;
   if (/^(unknown|_[A-Za-z0-9._-]+)$/i.test(address)) return undefined;
   if (address.startsWith('[')) {
-    // Only IPv6 characters inside the brackets: the URL parser would otherwise
-    // accept userinfo such as `[x@[::1]` and return text that is no address
-    // (M119d audit L1).
-    if (!/^\[[0-9A-Fa-f:.]+\]$/.test(address)) return null;
-    try {
-      const url = new URL(`http://${address}`);
-      return url.hostname.startsWith('[') ? address.slice(1, -1) : null;
-    } catch {
-      return null;
-    }
+    const literal = address.slice(1, -1);
+    return literal.includes(':') ? parseIpLiteral(literal) : null;
   }
-  const parts = address.split('.');
-  return parts.length === 4 &&
-    parts.every((part) => /^(0|[1-9][0-9]{0,2})$/.test(part) && Number(part) <= 255)
-    ? address
-    : null;
+  return parseIpLiteral(address);
 }
