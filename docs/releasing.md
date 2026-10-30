@@ -245,17 +245,17 @@ git push origin v0.9.0
 like ci.yml's `node` job: static checks, three CLI shards, messaging, the other packages, the Deno
 lane, tooling, and the release checks that verify the tag and upload `resolved-set.json`.
 `cli-coverage` merges the three CLI shards' reports and enforces the per-file bar. Sharded, the
-gates take about as long as PR CI rather than the ~75 minutes one job took for `v0.11.0`, and a
-failed shard can be re-run alone. `publish` needs every shard and `cli-coverage`, names environment
-`npm`, and alone holds `id-token: write` (plus `contents: read`). It checks out without credentials,
-installs with `--ignore-scripts`, builds, packs and publishes with scripts disabled, and runs no
-tests. It uses OIDC alone; there is no npm token. `release` needs publish, holds `contents: write`,
-downloads the resolved-set artifact and creates the GitHub Release. Both `publish` and `release` run
-only for a pushed `v*` tag. A manual `workflow_dispatch` is always a rehearsal: it runs the gates
-and then the publisher's dry run INSIDE the gates job, which cannot request an OIDC token, and
-neither later job runs. Every action in the workflow is pinned to a full commit SHA, with its
-version in a comment; update a pin by resolving the new tag to its commit, never by switching back
-to a tag.
+gates should take about as long as PR CI rather than the ~75 minutes one job took for `v0.11.0`, and
+a failed shard can be re-run alone. `publish` needs every shard and `cli-coverage`, names
+environment `npm`, and alone holds `id-token: write` (plus `contents: read`). It checks out without
+credentials, installs with `--ignore-scripts`, builds, packs and publishes with scripts disabled,
+and runs no tests. It uses OIDC alone; there is no npm token. `release` needs publish, holds
+`contents: write`, downloads the resolved-set artifact and creates the GitHub Release. Both
+`publish` and `release` run only for a pushed `v*` tag. A manual `workflow_dispatch` is always a
+rehearsal: it runs the gates and then the publisher's dry run INSIDE the gates job, which cannot
+request an OIDC token, and neither later job runs. Every action in the workflow is pinned to a full
+commit SHA, with its version in a comment; update a pin by resolving the new tag to its commit,
+never by switching back to a tag.
 
 The publisher requires npm ≥11.5.1 and adds `--provenance` on GitHub Actions. A local dry run cannot
 establish OIDC or live provenance; the first tag run supplies that proof. Back-merge `main` into
