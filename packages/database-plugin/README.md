@@ -11,7 +11,7 @@ is rebuilt from its code, because PostgreSQL's message quotes the rejected input
 unchanged. Two limits: an error from a query built through `getDrizzleDatabase(...)`, or a raw
 driver call, never passes through the service and is logged as the driver wrote it; and the scrub
 walks at most five causes, so a value nested deeper survives. It is not a general log-redaction
-policy.
+policy, and request paths logged by the request logger are outside it.
 
 Four adapters ship: `MemoryAdapter` (zero-dependency default), `PrismaAdapter`, `DrizzleAdapter`,
 and `MongoAdapter` (the native `mongodb` driver). The application owns the optional ORM and driver
@@ -99,7 +99,7 @@ import { describeError } from '@setu-ts/common';
 import { createDrizzleDatabase, DatabasePlugin } from '@setu-ts/database-plugin';
 
 const pool = new Pool({ connectionString: process.env['DATABASE_URL']! });
-pool.on('error', (error) => logger.warn('Database pool error', { error: describeError(error) }));
+pool.on('error', (error: Error) => logger.warn('Database pool error', { error: describeError(error) }));
 const database = drizzle(pool);
 const plugin = DatabasePlugin({
   type: 'drizzle',
@@ -772,11 +772,15 @@ rollback boundary without falsely exposing the complete outer database:
 
 ```typescript
 import { eq } from 'drizzle-orm';
+import { integer, pgTable, text } from 'drizzle-orm/pg-core';
 import {
   createDrizzleDatabase,
   getDrizzleDatabase,
   getDrizzleTransaction,
 } from '@setu-ts/database-plugin';
+
+const users = pgTable('users', { id: text('id'), teamId: integer('team_id') });
+const teams = pgTable('teams', { id: integer('id'), name: text('name') });
 
 const drizzleDatabase = createDrizzleDatabase(drizzleDb, (database, work) =>
   database.transaction(work),

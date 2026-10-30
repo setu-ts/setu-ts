@@ -25,6 +25,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -35,7 +36,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated health indicator. */
 export const HEALTH_INDICATORS_EXPORT = 'HEALTH_INDICATORS';
@@ -118,7 +118,7 @@ function renderHealthBarrel(classBased: boolean): (artifacts: SeamArtifacts) => 
     // Bare factory references, not `new`: the factory is the single construction
     // site, and it lives in the developer-owned artifact module, so a dependency
     // wired into it survives the next `setu generate`.
-    const entries = names.map((name) => factory(deriveNames(name)));
+    const entries = names.map((name) => factory(artifactNames(name)));
 
     return assembleSeamBarrel(header, imports, [
       `/** Every generated health indicator, for \`HealthPlugin({ indicators })\`. */\n` +

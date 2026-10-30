@@ -8,3 +8,5 @@ pnpm --dir apps/minimal run smoke
 ```
 
 The smoke check proves `GET /` returns `200` with a JSON greeting without opening a socket.
+
+Read the [example deep dive](../../docs/examples.md#minimal) for the concept and source walkthrough.

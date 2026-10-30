@@ -79,6 +79,16 @@ function contentsOf(path: string): string {
 }
 
 describe('full-stack template | registration', () => {
+  it('explains shared module identity without the retired JSR rationale', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const files = projectFiles('app', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime));
+      for (const path of ['vite.config.ts', 'dev.ts']) {
+        const source = files.find((file) => file.path === path)!.contents;
+        expect(source).not.toContain('JSR');
+        expect(source).toContain('identity');
+      }
+    }
+  });
   it('is reachable by name', () => {
     expect(getTemplate('full-stack')).toBe(FULL_STACK_TEMPLATE);
   });
@@ -217,9 +227,8 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
   });
 
   it('imports framework VALUES only from server-only modules', () => {
-    // The client bundle inlines what it imports and cannot resolve a JSR
-    // specifier, so a framework value import outside a `.server.ts` module
-    // fails the build outright. Server-only modules may import them, because
+    // The client bundle inlines its imports; keep server framework values in
+    // `.server.ts` modules. Server-only modules may import them, because
     // the server build treats framework packages as external — which is also
     // what keeps context keys identical across that boundary. Type imports are
     // erased and are fine anywhere.
@@ -469,7 +478,7 @@ describe('full-stack template | manifest contributions', () => {
   it('reads declared library identities and documents the server-only boundary', () => {
     const vite = contentsOf('vite.config.ts');
     expect(vite).toContain("new URL('../../libs/', import.meta.url)");
-    expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc'])");
+    expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc', 'package.json'])");
     expect(vite).toContain('workspaceLibraries.push(manifest.name)');
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
     expect(typeof render === 'string' ? render : render('cli')).toContain(
@@ -482,7 +491,7 @@ describe('full-stack vite.config.ts | executed', () => {
   // PR #415 review: a library named only in deno.jsonc, and an exported subpath
   // of a declared package, must both stay external to the SSR build. Executes the
   // emitted file against stub `vite` modules so the predicate is run, not read.
-  it('externalizes deno.jsonc libraries and exported subpaths, and nothing else', async () => {
+  it('externalizes deno.json, deno.jsonc and package.json libraries and exported subpaths, and nothing else', async () => {
     const root = await tempDir({ prefix: 'setu-vite-config-' });
     try {
       const app = `${root}/apps/web`;
@@ -515,6 +524,8 @@ describe('full-stack vite.config.ts | executed', () => {
       await library('both', 'deno.json', '{ "name": "@custom/json-wins" }');
       await library('both', 'deno.jsonc', '{ "name": "@custom/jsonc-loses" }');
       await library('broken', 'deno.jsonc', '{ "name": ');
+      // A Node or Bun workspace library declares its name in package.json.
+      await library('npm', 'package.json', '{ "name": "@custom/npm-lib" }');
       const ids = [
         '@setu-ts/common',
         '@setu-ts/common/sub',
@@ -526,6 +537,8 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/json-wins',
         '@custom/jsonc-loses',
         '@custom/plainer',
+        '@custom/npm-lib',
+        '@custom/npm-lib/sub',
         'react',
       ];
       await nodeFs.writeFile(
@@ -551,6 +564,8 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/jsonc',
         '@custom/jsonc/deep/path',
         '@custom/json-wins',
+        '@custom/npm-lib',
+        '@custom/npm-lib/sub',
       ]);
     } finally {
       await nodeFs.rm(root, { recursive: true });

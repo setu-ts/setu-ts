@@ -13,3 +13,6 @@ pnpm --dir apps/microservices run smoke
 ```bash
 REDIS_URL=redis://127.0.0.1:6379 pnpm --dir apps/microservices run smoke
 ```
+
+Read the [example deep dive](../../docs/examples.md#microservices) for the concept and source
+walkthrough.

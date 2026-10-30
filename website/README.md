@@ -1,7 +1,6 @@
 # Setu-TS website
 
-The public website, rendered from the repository's canonical documentation. This is an **out-of-band
-repository workstream** — not a framework milestone — living on the `chore/website` branch.
+The public website, rendered from the repository's canonical documentation.
 
 ## Isolation boundary (read before editing)
 
@@ -12,10 +11,11 @@ repository workstream** — not a framework milestone — living on the `chore/w
 - The repository root Prettier and ESLint configs cover this directory (generated `dist/` and
   `.astro/` output excepted); the site adds its own gates (build-time dead-link check, Lighthouse
   assertions).
-- `../docs/` is the **sole canonical documentation source** and a read-only input: nothing in this
-  directory may copy, edit, or reformat it. Pages render the files in place via the content loader
-  in `src/content.config.ts`, and repository-relative links are rewritten at render time by
-  `src/lib/docs-links.ts`.
+- Guides in `../docs/`, published package READMEs and agent cards, app READMEs, `CHANGELOG.md`,
+  `ARCHITECTURE.md` and `PUBLIC_API.md` are read-only inputs. The content loader in
+  `src/content.config.ts` renders them in place. Example pages also read the guide's ordered source
+  listings from tracked app files; nothing is copied into the website source tree.
+  `src/lib/docs-links.ts` rewrites repository links to these routes at render time.
 - `../assets/` is the single brand-asset source. `astro.config.mjs` points `publicDir` at it, so the
   logos and favicon are copied into the build output without a second copy existing in the
   repository.
@@ -36,8 +36,8 @@ The graft step fails on purpose when it is missing; CI regenerates it from HEAD 
 build, so the shipped site can never carry stale API docs.
 
 Search is local and static. The build runs Pagefind **after** the API graft, producing
-`dist/pagefind/`; the header search box therefore covers the rendered guides and API reference
-without a search service, credentials, or runtime backend.
+`dist/pagefind/`; the header search box therefore covers the rendered guides and API reference and
+the package and example pages without a search service, credentials, or runtime backend.
 
 CI runs `.github/workflows/website.yml`: build with link validation, unit tests, and Lighthouse
 assertions (performance/accessibility/best-practices/SEO ≥ 0.9) over the built output.

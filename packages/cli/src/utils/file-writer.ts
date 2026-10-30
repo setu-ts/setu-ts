@@ -68,6 +68,8 @@ export interface GeneratedFile {
   readonly path: string;
   /** The file contents. */
   readonly contents: string;
+  /** Exact binary contents, when present; used instead of the text contents. */
+  readonly bytes?: Uint8Array;
   /**
    * Marks a file the CLI owns outright and regenerates, exempting it from the
    * overwrite refusal in {@linkcode findExisting}.
@@ -514,7 +516,11 @@ export async function classifyFiles(
   const outcomes: WriteOutcome[] = [];
   for (const file of files) {
     outcomes.push(
-      outcomeFor(file.path, await previousBytes(fs, file.path), encoder.encode(file.contents)),
+      outcomeFor(
+        file.path,
+        await previousBytes(fs, file.path),
+        file.bytes ?? encoder.encode(file.contents),
+      ),
     );
   }
   return outcomes;
@@ -615,7 +621,7 @@ export async function writeFiles(
     for (const file of files) {
       throwIfInterrupted(options.signal);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
-      const bytes = encoder.encode(file.contents);
+      const bytes = file.bytes ?? encoder.encode(file.contents);
       let before: Uint8Array | undefined;
       if (fs.writeRegularFile !== undefined) {
         try {

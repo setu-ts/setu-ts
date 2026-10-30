@@ -442,9 +442,11 @@ observe.
 
 Run `setu add view` in a generated REST project. It adds `hono`, the hono JSX compiler options,
 Tailwind 4's standalone CLI, neutral shadcn theme tokens in `src/views/styles.css`, and an example
-`/ui` page in `src/views/home.tsx`. The layout keeps the header and sidebar fixed while the content
-scrolls. It reads the stored light/dark/system preference before paint; its toggle follows the
-system preference while in system mode.
+`/ui` page in `src/views/home.tsx`, served by a function controller like any other route:
+`src/controllers/views.controller.ts`, or `src/modules/<module>/views.controller.ts` with
+`--module <module>`, which a project with modules requires. The layout keeps the header and sidebar
+fixed while the content scrolls. It reads the stored light/dark/system preference before paint; its
+toggle follows the system preference while in system mode.
 
 The command writes only absent pieces. Existing files, dependency pins, JSX choices and CSS scripts
 are preserved and named in its output. When `setu.config.ts` is not a recognized generated factory,
@@ -472,7 +474,7 @@ The early theme script and the view toggle are static inline scripts. An applica
 must allow them by hash or nonce; no CSP is configured by default. Storage values are compared
 against literals, never inserted into markup. With JavaScript disabled the page renders light.
 
-On Cloudflare Workers, `setu add view` adds `hono`, JSX options and the example view files, and
-prints the `ViewPlugin()` and `registerViewRoutes(app.router);` registrations. It does not add
-Tailwind, a stylesheet link, CSS tasks or `StaticPlugin`: Workers has no filesystem for that plugin.
-Serve CSS through Wrangler static assets and add the stylesheet link yourself.
+On Cloudflare Workers, `setu add view` adds `hono`, JSX options, the example view files and their
+controller, and prints the `ViewPlugin()` registration. It does not add Tailwind, a stylesheet link,
+CSS tasks or `StaticPlugin`: Workers has no filesystem for that plugin. Serve CSS through Wrangler
+static assets and add the stylesheet link yourself.

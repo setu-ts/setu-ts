@@ -51,4 +51,11 @@ export const CHECK_FINDINGS: readonly Finding[] = [
   { kind: 'silence-unmatched', entry: '"setu.E003"' },
   { kind: 'config-unreadable', path: 'setu.config.ts', reason: 'not-a-file' },
   { kind: 'artifact-unreadable', path: 'src/controllers/huge.controller.ts', reason: 'too-large' },
+  { kind: 'mixed-layout', files: ['src/controllers/orders.controller.ts'] },
+  { kind: 'unresolved-import', path: 'src/modules/index.ts', specifier: './gone/index.ts' },
+  {
+    kind: 'duplicate-name',
+    family: 'controller',
+    paths: ['src/controllers/a/orders.controller.ts', 'src/controllers/b/orders.controller.ts'],
+  },
 ];

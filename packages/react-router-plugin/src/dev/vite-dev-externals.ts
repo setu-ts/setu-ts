@@ -116,21 +116,19 @@ function builtinPatterns(packages: readonly string[], resolve: (s: string) => st
 }
 
 /**
- * Creates a Vite plugin for React Router development mode under Deno.
+ * Creates a Vite plugin for React Router development mode.
  *
- * Vite's development SSR runner resolves imports through `node_modules`. On
- * Deno a framework package is a JSR import in `deno.json`, so a route module
- * importing `@setu-ts/react-router-plugin` fails with `Cannot find module`. And
- * Vite would load a package mapped to a local path itself, which makes a
- * second copy of it: the context keys `contextKeyFor()` returns are matched by
- * identity, so the copy a loader reads would stop matching the copy
- * `setu.config.ts` sets. This plugin resolves each listed package with the
- * runtime's own resolver and marks the result as a runtime built-in, so the
- * runner imports it natively and shares the instance the server already holds.
+ * Keep framework packages and workspace libraries resolved by the server
+ * runtime, so route modules and the entry share one module instance. The context
+ * keys `contextKeyFor()` returns match by identity: a second copy would read
+ * different keys from those `setu.config.ts` sets. This plugin resolves each
+ * listed package with the runtime's own resolver and marks the result as a
+ * runtime built-in, so the runner imports it natively and shares the instance
+ * the server already holds.
  *
  * Pass it to `vite.createServer({ plugins: [...] })` from the development
- * entry, which is where `import.meta.resolve` reads `deno.json`; inside
- * `vite.config.ts` that function is Vite's, not Deno's.
+ * entry, where `import.meta.resolve` is the server runtime's resolver; inside
+ * `vite.config.ts` that function is Vite's.
  *
  * @example
  * ```typescript

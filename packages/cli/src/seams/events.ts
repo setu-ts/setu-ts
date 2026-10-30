@@ -2,7 +2,7 @@
  * The domain-event-handler seam.
  *
  * `EventsPluginOptions` carried only `async` and `errorHandler`, so a generated
- * handler's only site was an imperative `subscribeHandler(bus, type, handler)` call
+ * handler's only site was an explicit `subscribeHandler(bus, type, handler)` call
  * that application code had no phase to make. The plugin gains a `handlers` option
  * as a pure addition, and registers each entry through that same exported
  * `subscribeHandler` — one implementation behind two entry points.
@@ -16,6 +16,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -27,7 +28,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated event handler with its event type. */
 export const EVENT_HANDLERS_EXPORT = 'EVENT_HANDLERS';
@@ -68,7 +68,7 @@ function renderEventsBarrel(artifacts: SeamArtifacts): string {
   // barrel writes no `new` anywhere, and the factory is the single construction
   // site, in the developer-owned artifact module.
   const entries = names.map((name) => {
-    const n = deriveNames(name);
+    const n = artifactNames(name);
     return renderRegistrationEntry([
       `type: ${n.screaming}_EVENT`,
       `handler: create${n.pascal}EventHandler`,

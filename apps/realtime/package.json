@@ -9,7 +9,8 @@
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/realtime-backplane-plugin": "workspace:^",
-    "@setu-ts/sse-plugin": "workspace:^"
+    "@setu-ts/sse-plugin": "workspace:^",
+    "ioredis": "5.x"
   },
   "devDependencies": {},
   "scripts": {

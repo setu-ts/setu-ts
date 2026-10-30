@@ -1,5 +1,6 @@
 import { defineCollection, z } from 'astro:content';
 import { glob } from 'astro/loaders';
+import { PUBLISHED_PACKAGES } from '../../scripts/release-packages.ts';
 
 /**
  * The canonical documentation, rendered IN PLACE.
@@ -21,4 +22,23 @@ const docs = defineCollection({
   }),
 });
 
-export const collections = { docs };
+const repository = defineCollection({
+  loader: glob({
+    base: '..',
+    pattern: [
+      ...PUBLISHED_PACKAGES.flatMap((directory) => [
+        `${directory}/README.md`,
+        `${directory}/AGENT_CARD.md`,
+      ]),
+      'apps/*/README.md',
+      'apps/README.md',
+      'CHANGELOG.md',
+      'ARCHITECTURE.md',
+      'PUBLIC_API.md',
+    ],
+    generateId: ({ entry }) => entry,
+  }),
+  schema: z.object({ title: z.string().optional() }),
+});
+
+export const collections = { docs, repository };

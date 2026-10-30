@@ -12,7 +12,7 @@ off) and configures this for you (M119c). Use a configured base URL for security
 such as password resets. See
 [deployment behind a reverse proxy](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#behind-a-reverse-proxy).
 
-React SSR and file-based routing, by embedding **React Router v7 framework mode** as a plugin over a
+React SSR and file-based routing, by embedding **React Router 8 framework mode** as a plugin over a
 kernel catch-all handler. Registers an `SsrService` under `CAPABILITIES.SSR` (`'ssr'`).
 
 Your React routes and your API routes live in one application, on one port, sharing the same plugin
@@ -64,10 +64,12 @@ as a module: supply `serverBuild` (the generated full-stack Workers entry does t
 
 ## Toolchain note
 
-This is the **one** place the Deno-only backend toolchain makes an exception. Your frontend is built
-with **Vite on the Node/npm toolchain**, outside the Deno workspace. Vite is an app-level,
-build-time `devDependency` — it is never imported by this plugin and never appears in any
-JSR-published package's dependency graph.
+The frontend builds with **Vite on the Node/npm toolchain**. Vite is an app-level, build-time
+`devDependency`; this plugin never imports it. Keep framework packages and workspace libraries
+external, resolved by the server runtime, so route modules and the entry share one module instance:
+context keys from `contextKeyFor()` match by identity. In development, `viteDevExternals` supplies
+that guarantee; see
+[the development guide](https://github.com/setu-ts/setu-ts/blob/main/docs/react-router-dev.md).
 
 ## Loader context
 
@@ -177,3 +179,8 @@ drifts.
 
 Every export and option is documented in
 [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md#reactrouterplugin-setu-tsreact-router-plugin).
+
+## Trademarks
+
+React Router is a trademark of Shopify Inc. Setu-TS is independent and is not affiliated with or
+endorsed by Shopify or the React Router project.

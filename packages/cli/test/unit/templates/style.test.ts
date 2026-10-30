@@ -73,8 +73,8 @@ describe('composeHost', () => {
       const paths = host.files?.map((file) => file.path) ?? [];
       expect(paths).toContain('src/services/greeting.service.ts');
       expect(paths).toContain('src/controllers/greeting.controller.ts');
-      // The module barrel seam is present for a class-based host.
-      expect(paths).toContain('src/modules/index.ts');
+      // A new project starts flat: the first `setu g module` writes the module barrel.
+      expect(paths).not.toContain('src/modules/index.ts');
     });
 
     it('does not carry the functional showcase', () => {
@@ -96,11 +96,9 @@ describe('composeHost', () => {
 
     it('emits the functional showcase', () => {
       const paths = host.files?.map((file) => file.path) ?? [];
-      expect(paths).toContain('src/modules/greeting/greeting.service.ts');
-      expect(paths).toContain('src/modules/greeting/greeting.routes.ts');
-      const service = host.files?.find(
-        (f) => f.path === 'src/modules/greeting/greeting.service.ts',
-      );
+      expect(paths).toContain('src/services/greeting.service.ts');
+      expect(paths).toContain('src/controllers/greeting.controller.ts');
+      const service = host.files?.find((f) => f.path === 'src/services/greeting.service.ts');
       // The functional service is a plain function, not a decorated class.
       expect(service?.contents).not.toContain('@Injectable');
     });

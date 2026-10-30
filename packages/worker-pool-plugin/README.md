@@ -177,6 +177,11 @@ CPU. That timed-out CPU-bound-thread measurement was taken on Deno only. Treat a
 correctness bound rather than a resource bound for CPU-bound code that can loop, and have long tasks
 check a deadline and return.
 
+**Overshoot:** a slot is released to the budget before its thread has exited, and the next waiter
+spawns at once, so at a hand-over the terminated thread and its replacement can briefly be alive
+together. Measured on Node 24 with 20 ms sampling and `maxWorkers: 3`: a cold first burst peaked at
+6 threads in 3 of 3 runs, one burst above the bound for about 0.7 s.
+
 <!-- version:history -->
 
 At a hand-over, the terminated thread and its replacement can briefly be alive together: OS threads
@@ -255,7 +260,7 @@ if `CAPABILITIES.METRICS` does.
 
 | Metric                              | Type    | Labels                 | Meaning                           |
 | ----------------------------------- | ------- | ---------------------- | --------------------------------- |
-| `worker_pool_workers`               | gauge   | `task_module`          | Worker threads alive              |
+| `worker_pool_workers`               | gauge   | `task_module`          | Worker slots alive                |
 | `worker_pool_busy_workers`          | gauge   | `task_module`          | Workers executing a task          |
 | `worker_pool_queued_tasks`          | gauge   | `task_module`          | Tasks waiting in the queue        |
 | `worker_pool_tasks_completed_total` | counter | `task_module`          | Tasks that completed successfully |

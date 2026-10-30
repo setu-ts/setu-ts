@@ -13,11 +13,11 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import { assembleSeamBarrel, renderSeamImports, seamHeader, seamNames } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated middleware with its pipeline position. */
 export const GENERATED_MIDDLEWARE_EXPORT = 'GENERATED_MIDDLEWARE';
@@ -68,7 +68,7 @@ function renderMiddlewareBarrel(artifacts: SeamArtifacts): string {
     .join('\n\n');
 
   const entries = names.map((name) => {
-    const n = deriveNames(name);
+    const n = artifactNames(name);
     return `{\n    name: '${n.kebab}',\n    priority: ${middlewarePriorityExport(
       n.screaming,
     )},\n    middleware: ${n.camel}Middleware(),\n  }`;

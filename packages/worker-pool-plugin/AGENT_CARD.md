@@ -1,6 +1,6 @@
 # @setu-ts/worker-pool-plugin — run CPU work on threads
 
-**Add it:** `setu add worker-pool` installs it and inserts `WorkerPoolPlugin()` into a recognized
+**Add it:** `setu add worker-pool` adds it and inserts `WorkerPoolPlugin()` into a recognized
 functional `setu.config.ts`. It provides `CAPABILITIES.WORKER_POOL` (`IWorkerPool`).
 
 ## Submit an existing task from a route

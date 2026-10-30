@@ -12,8 +12,7 @@ describe('functional module registration', () => {
     expect(registerModuleSymbol(deriveNames('invoices'))).toBe('registerInvoicesModule');
     expect(REGISTER_MODULES_EXPORT).toBe('registerModules');
     const source = renderFunctionalModuleIndex(deriveNames('invoices'), {
-      route: ['summary', 'invoices'],
-      controller: ['billing'],
+      controller: ['billing', 'summary', 'invoices'],
     });
     const calls = [...source.matchAll(/ {2}(register\w+)\(router, services\);/g)].map((m) => m[1]);
     expect(calls).toEqual([

@@ -16,7 +16,13 @@ import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
 
 ```typescript
 import { CqrsPlugin } from '@setu-ts/cqrs-plugin';
-import { CAPABILITIES, type ICqrsFacade, type IPipelineBehavior } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  type CqrsCommand,
+  type CqrsQuery,
+  type ICqrsFacade,
+  type IPipelineBehavior,
+} from '@setu-ts/common';
 
 const timing: IPipelineBehavior = {
   async handle(request, next) {
@@ -31,11 +37,15 @@ app.register(CqrsPlugin({ behaviors: [timing] }));
 
 const cqrs = app.services.get<ICqrsFacade>(CAPABILITIES.CQRS);
 
-cqrs.commandBus.register(CreateUserCommand, createUserHandler);
-cqrs.queryBus.register(GetUserQuery, getUserHandler);
+cqrs.commandBus.register('CreateUser', {
+  handle: (command: CqrsCommand<{ email: string }>) => ({ id: '123', name: 'Ada' }),
+});
+cqrs.queryBus.register('GetUser', {
+  handle: (query: CqrsQuery<{ id: string }>) => ({ id: query.data.id, name: 'Ada' }),
+});
 
-await cqrs.commandBus.execute(new CreateUserCommand({ email: 'ada@example.com' }));
-const user = await cqrs.queryBus.execute<User>(new GetUserQuery({ id: '123' }));
+await cqrs.commandBus.execute({ type: 'CreateUser', data: { email: 'ada@example.com' } });
+const user = await cqrs.queryBus.execute<User>({ type: 'GetUser', data: { id: '123' } });
 ```
 
 ## Options

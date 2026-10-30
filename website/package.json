@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "ASTRO_TELEMETRY_DISABLED=1 astro dev",
-    "build": "cd .. && node scripts/generate-api-docs.ts && cd website && ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/graft.mjs && pagefind --site dist",
+    "build": "cd .. && node scripts/generate-api-docs.ts && cd website && ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/graft.mjs && pagefind --site dist && node scripts/check-links.mjs",
     "preview": "astro preview",
     "test": "vitest run"
   },

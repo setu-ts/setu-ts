@@ -47,6 +47,16 @@ It loads a project's TypeScript — `setu.config.ts` for plugin commands, a cust
 
 ## Scaffolding a project
 
+`setu new my-app --example rest-api` downloads a runnable example from the GitHub tag matching this
+CLI's version and creates a standalone Node project. Run `cd my-app && npm install`, then
+`npm run smoke` (the example's proof, which exits), then `npm start` (which serves until stopped).
+`--dry-run` lists paths without fetching; downloads all finish before writing. Examples keep their
+own composition and refuse composition flags such as `--template` and `--workspace`; only
+`--runtime node` is accepted. See
+[the example options](https://setu-ts.dev/docs/cli/#start-from-an-example) and
+[walkthroughs](https://setu-ts.dev/docs/examples/). The template scaffolds below generate their own
+project structure.
+
 ```bash
 setu new my-app                                  # Node, minimal (runtime plugin only)
 setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
@@ -285,25 +295,25 @@ setu generate service user-profile
 setu g service user-profile        # `g` is an alias, `n` aliases `new`
 ```
 
-| Schematic          | Emits                                                                                                                                                     | Requires                                                       |
-| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                                            | —                                                              |
-| `module`           | `src/modules/<name>/` — index, service, routes (functional) or controller and module (class-based), schemas (with `validation-plugin`), test and e2e test | —                                                              |
-| `controller`       | `src/controllers/<name>.controller.ts`                                                                                                                    | — (functional or class-based)                                  |
-| `service`          | `src/services/<name>.service.ts`                                                                                                                          | —                                                              |
-| `route`            | `src/controllers/<name>.routes.ts`                                                                                                                        | —                                                              |
-| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                                          | `validation-plugin`                                            |
-| `sse`              | `src/controllers/<name>.controller.ts`, plus an application-local React hook only when `react-router-plugin` and `sdk` are both installed                 | `sse-plugin`                                                   |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                                     | `websocket-plugin`                                             |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                                     | —                                                              |
-| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`; functional + queue wires `QueuePlugin({ processors })`                        | `queue-plugin` in class-based or queue-owning starter projects |
-| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                                                                           | `auth-plugin`                                                  |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                                          | `health-plugin`                                                |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                                            | `metrics-plugin`                                               |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                                        | `cqrs-plugin`                                                  |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                                            | `cqrs-plugin`                                                  |
-| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                                          | `events-plugin`                                                |
-| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                                                                    | `database-plugin`, `common`                                    |
+| Schematic          | Emits                                                                                                                                                                                                   | Requires                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                                                                                          | —                                                              |
+| `module`           | `src/modules/<name>/` — `<name>.controller.ts`, service, CLI-owned `index.ts`, `<name>.module.ts` (class-based), schemas (with `validation-plugin`), tests                                              | —                                                              |
+| `controller`       | `src/controllers/<name>.controller.ts`; with modules, `src/modules/<module>/<name>.controller.ts` (`--module` required)                                                                                 | — (functional or class-based)                                  |
+| `service`          | `src/services/<name>.service.ts`; with modules, `src/modules/<module>/<name>.service.ts` (`--module` required)                                                                                          | —                                                              |
+| `route`            | a function controller: `src/controllers/<name>.controller.ts`; with modules, `src/modules/<module>/<name>.controller.ts` (`--module` required)                                                          | —                                                              |
+| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                                                                                        | `validation-plugin`                                            |
+| `sse`              | `src/controllers/<name>.controller.ts`; with modules, `src/modules/<module>/<name>.controller.ts` (`--module` required); plus a React hook only when `react-router-plugin` and `sdk` are both installed | `sse-plugin`                                                   |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                                                                                   | `websocket-plugin`                                             |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                                                                                   | —                                                              |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`; functional + queue wires `QueuePlugin({ processors })`                                                                      | `queue-plugin` in class-based or queue-owning starter projects |
+| `guard`            | `src/guards/<name>.guard.ts` — delegates to `requirePermission`                                                                                                                                         | `auth-plugin`                                                  |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                                                                                        | `health-plugin`                                                |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                                                                                          | `metrics-plugin`                                               |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                                                                                      | `cqrs-plugin`                                                  |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                                                                                          | `cqrs-plugin`                                                  |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                                                                                        | `events-plugin`                                                |
+| `migration`        | `src/migrations/<timestamp>-<name>.ts`                                                                                                                                                                  | `database-plugin`, `common`                                    |
 
 The name's casing does not matter — `user-profile`, `UserProfile`, `userProfile`, and `user_profile`
 all produce identical output.
@@ -325,7 +335,8 @@ jobs outside a queue-owning starter remain ungated.
 Generating a route, controller or module checks React Router's resolved page tree with the project's
 installed `react-router routes --json`. A kernel group that would take precedence over an existing
 page is refused, naming the page file. For example, `setu g route products` conflicts with the
-scaffold's `/products` page. Use another name, or run `setu g module api` followed by
+scaffold's `/products` page. Use another name, or run `setu g module api` (with
+`--adopt-controllers` when the project already has controllers) followed by
 `setu g route products --module api` to serve `/api/products`. If the local route-tree command is
 unavailable or takes over 15 seconds, generation continues with a notice naming the paths to check
 by hand. This executes the project's route configuration. `setu check` remains a file-reading wiring
@@ -345,6 +356,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--dry-run`             | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--dir <path>`          | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `--runtime <target>`    | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--example <app>`       | `new` only: download an offered example as a standalone Node project at the CLI release tag. Dry-run fetches nothing. Refuses template, workspace and composition overrides.                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--template <name>`     | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--env-file <path>`     | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--broker <name>`       | `new` and `add messaging`: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers and templates registering no messaging. Full-stack receives starter options through config reads; `add` preserves existing options, creates only missing Compose files, and leaves dotenv unchanged. |
@@ -353,7 +365,8 @@ install, and `setu generate --help` lists only what is available here.
 | `--logger <name>`       | `new`, `generate app`: `console` or `pino` for templates with logging. Defaults to `pino` on Node, Deno and Bun, `console` on Cloudflare Workers. Adds `pino` at `10.x` only when chosen (the same range in Deno's import map). Pino on Workers, minimal hosts and workspace roots refuse the flag by name. `--dry-run` reports the choice. Since 0.11.0.                                                                                                                                                                                                                  |
 | `--yes`, `-y`           | `new` only: take every default and ask nothing. A no-op when no prompter is present.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--depends-on <name>`   | `generate app`: repeat for prerequisites; root `dev` waits for their `/ready` endpoints.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `--module <name>`       | `generate`: place a `service`, `route`, `controller` or `schema` inside the named feature module. Functional: the file lands in `src/modules/<name>/` and the module's `index.ts` is regenerated; a module-scoped route or controller mounts at `/<module>/<name>`. Class-based: the file is written and the `@Module({ providers \| controllers })` line to add is printed — the declaration is never edited; a module-scoped service takes the token `<module>-<name>-service`. `route --module` is functional-only, and the app-wide schematics refuse the flag.        |
+| `--module <name>`       | `generate`: place a `controller`, `route`, `service`, `sse` or `schema` in the named feature module (required for the first four once the project has modules; refused while it has none); `add view`: place the views controller there. See [Controllers and modules](#controllers-and-modules).                                                                                                                                                                                                                                                                          |
+| `--adopt-controllers`   | `generate module`, first module only: move the flat controllers and services into it, rewriting imports and keeping URLs.                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `--config <path>`       | Load the app from this module instead of `./setu.config.ts`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--help`, `-h`          | Prints usage.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `--version`, `-v`       | Prints the version.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -443,35 +456,64 @@ retains the entry's recorded port, including while the connector runs. `--devtoo
 explicitly. `ports --reallocate` updates an untouched CLI entry along with the manifest; an edited
 entry refuses the whole operation before writing. Production images exclude the entry and remove the
 development connector pin before installing the remaining import map. See the
-[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-image-is-the-members-only-dependency-source-at-runtime)
+[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-deno-image-is-the-members-only-dependency-source-at-runtime)
 for the complete build sequence and JSONC support.
 
-## Generated modules
+## Controllers and modules
 
-`setu generate module <name>` is the aggregate schematic, and its shape follows the project's style.
+Routes are declared in one kind of file: a **controller**, `<name>.controller.ts`. It takes one of
+two shapes, read from its exports:
 
-**Functional** (the default): the whole feature lives in one folder — `src/modules/<name>/` holds
-`<name>.routes.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`, `PATCH /<name>/:id`),
-`<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a repository),
-`<name>.schemas.ts` (only when `validation-plugin` is installed), a CLI-owned `index.ts` that
-exports only `register<Pascal>Module(router, services?)`, and — on socket targets — `<name>.test.ts`
-and `<name>.e2e.test.ts`. Nothing is written under `src/controllers/` any more. The CLI-owned
-`src/modules/index.ts` exports `registerModules(router, services?)`, and a functional
-`setu.config.ts` calls `registerModules(app.router, app.services);` right after
-`registerGeneratedRoutes(...)`; in a project scaffolded before that call existed, `g module` prints
-the import line and the call to add.
+- a **class controller** exports a decorated `<Pascal>Controller` (class-based projects);
+- a **function controller** exports `register<Pascal>Routes(router, services?)`, which can also
+  register what a decorator cannot: a wildcard, a proxy, or a route table built in a loop.
 
-**Class-based**: the module keeps `<name>.controller.ts`, `<name>.service.ts`, `<name>.module.ts`
-(yours; never rewritten) and the `MODULES` barrel, and gains `<name>.schemas.ts` and the two tests.
+`setu g controller` writes the project's default shape, and `setu g route` always writes a function
+controller. There is no separate routes file.
 
-`--module <name>` places a `service`, `route` (functional only), `controller` or `schema` inside an
-existing module. Functional: the file is written in the module folder and the module's `index.ts` is
-regenerated; a module-scoped route or controller mounts at `/<module>/<name>`, and a static path
-such as `/invoices/summary` outranks `GET /invoices/:id`, so an `id` equal to `summary` is
-unreachable through `/:id`. Class-based: the file is written and the CLI prints the line to add to
-`@Module({ providers | controllers })` in `<module>.module.ts`; it never edits the declaration, and
-a module-scoped service is registered under the token `<module>-<name>-service`. Every other
-schematic is app-wide and refuses the flag.
+A project keeps its controllers and services in **one place**:
+
+- **Flat** (every new project): `src/controllers/` and `src/services/`, wired through their
+  CLI-owned `index.ts` barrels. The `rest` template's greeting example lives there.
+- **Modular**: `src/modules/<name>/`, one folder per feature. There is no `src/controllers/`,
+  `src/services/` or root module; `setu.config.ts` registers `src/modules/index.ts` alone.
+
+Subfolders are allowed in both (`src/controllers/admin/users.controller.ts`,
+`src/modules/billing/controllers/invoices.controller.ts`). After moving a file, run `setu sync`: it
+rewrites the barrels and module indexes from the files' locations and, in a class-based module,
+re-points the declaration's imports. Two controllers with one base name would bind one symbol, so
+they are refused (`setu.E016`).
+
+**The first `setu g module <name>` switches the project to modules.** With only empty barrels in the
+flat homes, it removes them and rewrites the registration lines of `setu.config.ts`. With
+controllers or services there, it refuses and lists them; `--adopt-controllers` moves them into the
+new module instead, keeping subfolders and URL paths, and rewrites every relative import into or out
+of the moved files. The scaffold's own greeting example, if untouched, moves in without the flag;
+once you edit it or add files beside it, the flag is needed. Every move and edit is planned first
+and applied in one transaction: an import it cannot read exactly (a relative `require`, an
+`import()` of a computed path) refuses the whole switch. A config the CLI cannot edit exactly is
+left alone, with the lines to change printed. From then on `controller`, `route`, `service` and
+`sse` require `--module <name>`, and `setu add view` does too; a flat project refuses `--module`.
+`setu check` reports controllers or services left outside modules (`setu.E014`) and imports in
+CLI-written files that no longer resolve (`setu.E015`).
+
+A module holds `<name>.controller.ts` (`GET /<name>`, `GET /<name>/:id`, `POST /<name>`,
+`PATCH /<name>/:id`), `<name>.service.ts` (an in-memory `Map` the JSDoc says to replace with a
+repository), `<name>.schemas.ts` (only when `validation-plugin` is installed), a CLI-owned
+`index.ts` exporting `register<Pascal>Module(router, services?)`, and — on socket targets —
+`<name>.test.ts` and `<name>.e2e.test.ts`. A class-based module adds `<name>.module.ts`, its
+`@Module` declaration. The CLI-owned `src/modules/index.ts` exports
+`registerModules(router, services?)`, which every modular config calls, and in class-based projects
+also `MODULES` for `DecoratorPlugin({ modules })`.
+
+`--module <name>` writes into an existing module. A module-scoped controller mounts at
+`/<module>/<name>`, and a static path such as `/invoices/summary` outranks `GET /invoices/:id`, so
+an `id` equal to `summary` is unreachable through `/:id`. The module's `index.ts` registers its
+function controllers. In a class-based module, a generated class controller or service is added to
+the `controllers` or `providers` array of `<module>.module.ts`, as the NestJS CLI does, when that
+array is a plain literal; otherwise the declaration is left alone and the line to add is printed. A
+module-scoped service is registered under the token `<module>.<name>-service`. Every other schematic
+is app-wide and refuses the flag.
 
 `setu generate schema <name>` (requires `validation-plugin`) writes
 `src/shared/schemas/<name>.schemas.ts` — or `src/modules/<module>/<name>.schemas.ts` with `--module`
@@ -486,16 +528,18 @@ a live backend needs one in the test too (substitute it with `createTestApp`'s `
 `test` runs every `*.test.ts` except `*.e2e.test.ts`; `test:e2e` runs only `*.e2e.test.ts` over real
 HTTP.
 
-The `rest` template's sample lives at `src/modules/greeting/`, so a new project's first files are
-exactly what `g module` produces.
+The `rest` template's sample is `src/controllers/greeting.controller.ts` and
+`src/services/greeting.service.ts`, exactly where `g controller` and `g service` write in a new
+project.
 
 ## Realtime starting points
 
-`setu generate sse <name>` writes an SSE controller under `src/controllers/`. When the project
-already has both `@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also
-writes an application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add
-the SDK with `setu add sdk` before generating the hook. React belongs to the consuming application,
-never a published Setu package.
+`setu generate sse <name>` writes an SSE controller under `src/controllers/`, or into a module with
+`--module`, where it is served at `/<module>/sse/<name>`. When the project already has both
+`@setu-ts/react-router-plugin` (and therefore React) and `@setu-ts/sdk`, it also writes an
+application-local `src/hooks/use-<name>.ts` React hook that imports `createSseClient`. Add the SDK
+with `setu add sdk` before generating the hook. React belongs to the consuming application, never a
+published Setu package.
 
 `setu generate ws-route <name>` writes a WebSocket plugin under `src/plugins/`. It registers an
 exact `/ws/<name>` route, joins the requested room, and broadcasts to other members.
@@ -534,6 +578,9 @@ setu db:migrate up 3   # positionals after the name reach the handler
 
 ```typescript
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
+
+// Your migration runner, invoked with the first positional (or `latest`).
+const migrate = (target: string): Promise<void> => Promise.resolve();
 
 export const MigrationsPlugin: IPlugin = {
   name: 'migrations',
@@ -720,13 +767,14 @@ command points at
 ### Styled server-rendered views
 
 `setu add view` adds `hono`, hono JSX compiler options, Tailwind 4's CLI and neutral shadcn tokens,
-view files for `/ui`, CSS build/watch scripts, and `StaticPlugin` serving `build/assets/app.css`. A
-`build` or `start:dev` script it creates or prefixes runs CSS first (one that already called `css`
-is left as it was); run `npm run css:watch`, `bun run css:watch` or `deno task css:watch` separately
-while editing. Existing files, pins and settings are preserved and reported; an unfamiliar config
-receives manual registration instructions. `--dry-run` lists all planned changes and writes nothing.
-Workers gets dependencies, JSX and example view files only; CSS there belongs to Wrangler static
-assets. See
+view files, a function controller serving `/ui` (`src/controllers/views.controller.ts`, or
+`src/modules/<module>/views.controller.ts` with `--module`, which a project with modules requires),
+CSS build/watch scripts, and `StaticPlugin` serving `build/assets/app.css`. A `build` or `start:dev`
+script it creates or prefixes runs CSS first (one that already called `css` is left as it was); run
+`npm run css:watch`, `bun run css:watch` or `deno task css:watch` separately while editing. Existing
+files, pins and settings are preserved and reported; an unfamiliar config receives manual
+registration instructions. `--dry-run` lists all planned changes and writes nothing. Workers gets
+dependencies, JSX and example view files only; CSS there belongs to Wrangler static assets. See
 [the MVC guide](https://github.com/setu-ts/setu-ts/blob/main/docs/mvc.md#styling-server-rendered-views).
 
 The full-stack template includes Tailwind through Vite, copied shadcn Button/Card, a fixed app shell

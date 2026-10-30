@@ -15,7 +15,7 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
-describe('functional module hosts and generated test tasks', () => {
+describe('functional hosts and generated test tasks', () => {
   it('emits the TLS proxy setting and warns about universal trust (M119c)', () => {
     const files = [
       ...projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node')),
@@ -41,17 +41,18 @@ describe('functional module hosts and generated test tasks', () => {
   });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
-      it(`wires modules and splits unit/e2e tasks for ${name} on ${target}`, () => {
+      it(`starts flat and splits unit/e2e tasks for ${name} on ${target}`, () => {
         const host = resolveHost(name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!, target);
         const files = [...projectFiles('svc', target, host)];
         const config = contentsOf(files, 'setu.config.ts');
-        expect(config).toContain("import { registerModules } from './src/modules/index.ts'");
-        expect(config).toMatch(
-          /registerGeneratedRoutes\(app.router, app.services\);\s+registerModules\(app.router, app.services\);/,
+        // A new project starts flat: the first `setu g module` writes the module
+        // barrel and switches these lines.
+        expect(config).toContain(
+          "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
         );
-        expect(contentsOf(files, 'src/modules/index.ts')).toContain(
-          'export function registerModules',
-        );
+        expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
+        expect(config).not.toContain('registerModules');
+        expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
         // V10-23: every target, Workers included, emits socket test support and
         // the app-level e2e smoke test. Workers boots the real Worker on workerd
         // through the same `startTestServer()`.
@@ -101,17 +102,13 @@ describe('functional module hosts and generated test tasks', () => {
         expect(test).not.toContain('inject');
         if (name === 'rest') {
           expect(test).toContain('/greetings');
-          expect(contentsOf(files, 'src/modules/index.ts')).toContain('registerGreetingModule');
-          expect(contentsOf(files, 'src/modules/greeting/greeting.routes.ts')).toContain(
-            "from './greeting.service.ts'",
+          // The greeting example is a flat function controller and its service.
+          expect(files.some((file) => file.path.startsWith('src/modules/'))).toBe(false);
+          expect(contentsOf(files, 'src/controllers/greeting.controller.ts')).toContain(
+            "from '../services/greeting.service.ts'",
           );
+          expect(contentsOf(files, 'src/controllers/index.ts')).toContain('registerGreetingRoutes');
           expect(files.some((file) => file.path.endsWith('greeting.schemas.ts'))).toBe(false);
-          for (const suffix of ['test.ts', 'e2e.test.ts']) {
-            const greetingTest = contentsOf(files, `src/modules/greeting/greeting.${suffix}`);
-            expect(greetingTest).toContain('Hello, world!');
-            expect(greetingTest).toContain('Hello, ada!');
-            expect(greetingTest).not.toContain("method: 'POST'");
-          }
         }
       });
     }
@@ -186,13 +183,11 @@ describe('resolveHost', () => {
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
       'deno',
     );
-    expect(resolved.localImports).toEqual([
-      { symbols: ['registerModules'], from: './src/modules/index.ts' },
-    ]);
+    expect(resolved.localImports).toEqual([]);
     expect(resolved.packageImports).toEqual([]);
-    expect(resolved.files.map((file) => file.path)).toEqual(['src/modules/index.ts']);
+    expect(resolved.files.map((file) => file.path)).toEqual([]);
     expect(resolved.pluginSpreads).toEqual([]);
-    expect(resolved.setupCalls).toEqual(['registerModules(app.router, app.services);']);
+    expect(resolved.setupCalls).toEqual([]);
     expect(resolved.appFactory).toBeUndefined();
     expect(resolved.manifest).toBeUndefined();
   });

@@ -1,8 +1,7 @@
 # @setu-ts/graphql-plugin — queries and mutations over HTTP
 
-**Add it:** `setu add graphql` installs the package and prints the registration for
-`setu.config.ts`; install `graphql` too. `GraphqlPlugin` provides `CAPABILITIES.GRAPHQL`
-(`IGraphqlService`).
+**Add it:** `setu add graphql` adds the package and prints the registration for `setu.config.ts`;
+install `graphql` too. `GraphqlPlugin` provides `CAPABILITIES.GRAPHQL` (`IGraphqlService`).
 
 ## Serve a schema with application services
 

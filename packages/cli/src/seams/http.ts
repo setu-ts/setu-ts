@@ -1,43 +1,14 @@
 /**
- * The HTTP seam — one directory for everything that answers a request.
+ * One controller family, one `.controller.ts` suffix, two export shapes.
  *
- * Before M70h a project had TWO directories producing HTTP endpoints,
- * `src/routes/` and `src/controllers/`, wired by mechanisms that never
- * referenced each other: `registerGeneratedRoutes(app.router)` and
- * `DecoratorPlugin({ controllers })`. The naming borrowed from two precedents
- * whose relationships are different from that one — in ASP.NET and NestJS a
- * controller IS the routing layer, and in Rails and Laravel a routes file MAPS
- * to controllers — so neither reading predicted what this framework did.
- *
- * The split also created a collision surface that had to be mitigated rather
- * than removed: generating a route and a controller under one name claims the
- * same HTTP path, and M60 added a refusal for it. And a hand-written module in
- * `src/routes/` was silently adopted into the CLI-owned barrel, which since
- * M68's duplicate-route refusal stops the application booting (F2/X4-4).
- *
- * So there is now ONE directory, `src/controllers`, and ONE barrel that carries
- * both exports. This is not a new mechanism: it is exactly the pattern
- * `seams/services.ts` already ships, where two `SeamSpec`s share a directory and
- * a barrel and are selected by generator mode. {@linkcode SeamSpec.renderBarrel}
- * takes the full {@linkcode SeamArtifacts} record rather than one name list
- * precisely "so a shared barrel can read both of its kinds".
- *
- * Three kinds share it:
- *
- * | Spec                          | Suffix           | Mode        | Emits                        |
- * | ----------------------------- | ---------------- | ----------- | ---------------------------- |
- * | {@linkcode CONTROLLERS_SEAM}  | `.controller.ts` | class-based | an `@Controller` class       |
- * | {@linkcode FUNCTIONAL_CONTROLLERS_SEAM} | `.controller.ts` | functional | `registerXRoutes(router)` |
- * | {@linkcode ROUTES_SEAM}       | `.routes.ts`     | both        | the imperative escape hatch  |
- *
- * `.routes.ts` survives in BOTH modes and is not redundant: `@Controller` has no
- * wildcard decorator and cannot compute routes in a loop, so a proxy registering
- * five methods across `/api/auth/*` patterns from a data table can only be a
- * route module. The suffix names that at the filename level, which is the right
- * altitude — it needed a distinguishing name, never its own directory.
+ * A class controller exports a decorated `<Pascal>Controller`. A function
+ * controller exports `register<Pascal>Routes(router, services)` and can express
+ * wildcards, proxies and route tables computed in a loop. `g controller` chooses
+ * the project default; `g route` always writes a function controller.
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -48,13 +19,12 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 import type { GeneratorMode } from '../utils/generator-mode.ts';
 
 /** Barrel export naming every generated `@Controller` class. */
 export const APP_CONTROLLERS_EXPORT = 'APP_CONTROLLERS';
 
-/** Barrel export that registers every generated route-shaped module. */
+/** Barrel export that registers every generated function controller. */
 export const REGISTER_ROUTES_EXPORT = 'registerGeneratedRoutes';
 
 /** The one directory everything answering HTTP is generated into. */
@@ -73,44 +43,55 @@ export function controllerClassSymbol(names: DerivedNames): string {
   return `${names.pascal}Controller`;
 }
 
-/**
- * The symbol a route-shaped module exports — a functional controller as well as
- * a `.routes.ts` escape hatch, because both register imperatively on a router.
- *
- * Owned here rather than in the schematics, for the reason
- * {@linkcode SeamSpec.importSymbols} gives: the renderer that names a symbol and
- * the scanner that admits a file by it must read ONE definition. M60 shipped a
- * defect precisely because those two had drifted.
- *
- * @param names - The artifact's derived naming forms
- * @returns The exported function's name
- */
+/** The export a function controller provides. */
 export function routeRegistrarSymbol(names: DerivedNames): string {
   return `register${names.pascal}Routes`;
+}
+
+/** Function-controller paths within the single controller family. */
+export const FUNCTION_CONTROLLER_ARTIFACTS: string = 'controller-functions';
+
+/** Splits one admitted controller family by the exports its files provide. */
+export function controllerShapes(
+  artifacts: SeamArtifacts,
+  mode: GeneratorMode,
+): { readonly classes: readonly string[]; readonly functions: readonly string[] } {
+  const all = seamNames(artifacts, 'controller');
+  if (mode === 'functional') return { classes: [], functions: all };
+  const functions = seamNames(artifacts, FUNCTION_CONTROLLER_ARTIFACTS);
+  return { classes: all.filter((name) => !functions.includes(name)), functions };
+}
+
+/** Adds a newly generated controller before its file is visible to the scanner. */
+export function withControllerArtifact(
+  artifacts: SeamArtifacts | undefined,
+  name: string,
+  shape: 'class' | 'function',
+): SeamArtifacts {
+  return {
+    ...artifacts,
+    controller: seamNames(artifacts, 'controller', name),
+    [FUNCTION_CONTROLLER_ARTIFACTS]: seamNames(
+      artifacts,
+      FUNCTION_CONTROLLER_ARTIFACTS,
+      shape === 'function' ? name : undefined,
+    ),
+  };
 }
 
 /**
  * Renders `src/controllers/index.ts` for a generator mode.
  *
- * Reads BOTH artifact kinds, which is the whole point of the merge: whichever
- * schematic triggered the regeneration, the barrel it writes carries every
- * module in the directory.
+ * Every regeneration preserves both class controllers and function controllers,
+ * regardless of which shape the current command writes.
  *
  * @param mode - The project's generator mode, which decides the controller shape
  * @returns A barrel renderer for that mode
  */
 function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => string {
   return (artifacts: SeamArtifacts): string => {
-    const controllers = seamNames(artifacts, 'controller');
-    const routes = seamNames(artifacts, 'route');
+    const { classes: controllers, functions: registrars } = controllerShapes(artifacts, mode);
     const classBased = mode === 'class-based';
-
-    // In functional mode a `.controller.ts` registers imperatively, exactly like
-    // a `.routes.ts` — so both feed the registrar and the class array is absent.
-    const registrars = [
-      ...(classBased ? [] : controllers.map((name) => ({ name, suffix: '.controller.ts' }))),
-      ...routes.map((name) => ({ name, suffix: '.routes.ts' })),
-    ];
 
     const wiring = [
       ...(classBased
@@ -138,11 +119,11 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
             ),
           ]
         : []),
-      ...registrars.map((entry) =>
+      ...registrars.map((name) =>
         renderSeamImports(
-          [entry.name],
+          [name],
           (names) => [routeRegistrarSymbol(names)],
-          (kebab) => `./${kebab}${entry.suffix}`,
+          (kebab) => `./${kebab}.controller.ts`,
         ),
       ),
     ]
@@ -166,7 +147,7 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
               `type GeneratedRouteRegistrar = (router: IRouterApi, services?: IServiceRegistry) => void;\n\n` +
               `const GENERATED_ROUTE_REGISTRARS: readonly GeneratedRouteRegistrar[] = [\n` +
               registrars
-                .map((entry) => `  ${routeRegistrarSymbol(deriveNames(entry.name))},`)
+                .map((name) => `  ${routeRegistrarSymbol(artifactNames(name))},`)
                 .join('\n') +
               `\n];`,
           ]
@@ -177,12 +158,12 @@ function renderHttpBarrel(mode: GeneratorMode): (artifacts: SeamArtifacts) => st
               renderExportedArray(
                 APP_CONTROLLERS_EXPORT,
                 'Constructor',
-                controllers.map((name) => controllerClassSymbol(deriveNames(name))),
+                controllers.map((name) => controllerClassSymbol(artifactNames(name))),
               ),
           ]
         : []),
       `/**\n` +
-        ` * Registers every generated route-shaped module.\n` +
+        ` * Registers every generated function controller.\n` +
         ` *\n` +
         ` * @param router - The router to register on, normally \`app.router\`\n` +
         ` * @param services - The service registry, normally \`app.services\`. Optional so a\n *   setu.config.ts written before this parameter existed still compiles.\n` +
@@ -213,6 +194,10 @@ export const CONTROLLERS_SEAM: SeamSpec = {
   dir: HTTP_SEAM_DIR,
   suffix: '.controller.ts',
   importSymbols: (names) => [controllerClassSymbol(names)],
+  alternative: {
+    artifactsKey: FUNCTION_CONTROLLER_ARTIFACTS,
+    importSymbols: (names) => [routeRegistrarSymbol(names)],
+  },
   barrel: HTTP_SEAM_BARREL,
   exports: [APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT],
   requiresPlugin: 'decorator-plugin',
@@ -224,28 +209,6 @@ export const FUNCTIONAL_CONTROLLERS_SEAM: SeamSpec = {
   schematic: 'controller',
   dir: HTTP_SEAM_DIR,
   suffix: '.controller.ts',
-  importSymbols: (names) => [routeRegistrarSymbol(names)],
-  barrel: HTTP_SEAM_BARREL,
-  exports: [REGISTER_ROUTES_EXPORT],
-  renderBarrel: renderHttpBarrel('functional'),
-};
-
-/** The imperative escape hatch, in a class-based project. */
-export const ROUTES_SEAM: SeamSpec = {
-  schematic: 'route',
-  dir: HTTP_SEAM_DIR,
-  suffix: '.routes.ts',
-  importSymbols: (names) => [routeRegistrarSymbol(names)],
-  barrel: HTTP_SEAM_BARREL,
-  exports: [APP_CONTROLLERS_EXPORT, REGISTER_ROUTES_EXPORT],
-  renderBarrel: renderHttpBarrel('class-based'),
-};
-
-/** The imperative escape hatch, in a functional project. */
-export const FUNCTIONAL_ROUTES_SEAM: SeamSpec = {
-  schematic: 'route',
-  dir: HTTP_SEAM_DIR,
-  suffix: '.routes.ts',
   importSymbols: (names) => [routeRegistrarSymbol(names)],
   barrel: HTTP_SEAM_BARREL,
   exports: [REGISTER_ROUTES_EXPORT],

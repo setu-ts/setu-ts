@@ -77,6 +77,22 @@ describe('workspace briefs', () => {
       'URL variable: none. Endpoint override: transport default',
     );
   });
+  it.each(['node', 'deno'] as const)(
+    'names development and production member entries for %s',
+    (runtime) => {
+      const runner = runtime === 'deno' ? 'deno task' : 'npm run';
+      const text = renderWorkspaceRoot({ ...manifest, runtime }, '1');
+      expect(text).toContain(
+        `cd apps/<member> && ${runner} start:dev\` — the member's development loop`,
+      );
+      expect(text).toContain(`cd apps/<member> && ${runner} start\` — production entry`);
+      expect(text).toContain(
+        runtime === 'deno'
+          ? `${runner} dev\` — every member's \`start\` task (no file watching), in dependency order`
+          : `${runner} dev\` — every member's \`start:dev\` loop, in dependency order`,
+      );
+    },
+  );
   it('names root card paths in member rules and package rows while standalone paths stay local', () => {
     const facts = agentFacts({ installed: new Set(['common']) });
     expect(renderBrief(facts, true)).toContain(

@@ -38,7 +38,6 @@ const fs: IFileSystem = runtime.fs!;
 const ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
   ['route', 'widget-route'],
   ['route', 'gadget-route'],
-  ['module', 'widget-mod'],
   ['middleware', 'widget'],
   ['plugin', 'widget'],
   ['plugin', 'gadget'],
@@ -56,6 +55,13 @@ const ARTIFACTS: readonly (readonly [schematic: string, name: string])[] = [
  * registration site, so generating it here would add a file no probe could read
  * through.
  */
+/**
+ * The module, generated LAST: the first module takes every flat controller and
+ * service with it (`--adopt-controllers`), so the probe also proves that adopted
+ * artifacts keep their URLs and registrations.
+ */
+const ADOPTING_MODULE: readonly string[] = ['module', 'widget-mod', '--adopt-controllers'];
+
 const CLASS_BASED_ONLY: readonly (readonly [schematic: string, name: string])[] = [
   ['controller', 'widget-ctl'],
   ['service', 'widget-svc'],
@@ -474,7 +480,7 @@ try {
     expect(result['route']).toEqual({ status: 200, body: '{"items":[]}' });
     // E8's headline: a DECORATOR-FREE project can generate a controller, and it
     // serves. The same barrel call registers it, because in this mode a
-    // `.controller.ts` registers imperatively exactly as a `.routes.ts` does.
+    // Function controllers register their own routes through the controllers barrel.
     expect(result['controller']).toEqual({ status: 200, body: '{"items":[]}' });
     // The generated middleware was added at its own declared priority, and ran.
     expect(result['middlewareHeader']).toBe('true');
@@ -514,10 +520,14 @@ try {
           CAPABILITY_INJECTING_SERVICE,
         );
       }
+      expect(await run(['g', ...ADOPTING_MODULE, '--dir', project])).toBe(0);
 
       if (!classBased) {
         expect(
-          await nodeFs.readFile(`${project}/src/modules/widget-mod/widget-mod.routes.ts`, 'utf8'),
+          await nodeFs.readFile(
+            `${project}/src/modules/widget-mod/widget-mod.controller.ts`,
+            'utf8',
+          ),
         ).toContain('registerWidgetModRoutes');
         expect(await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8')).toContain(
           'registerWidgetModModule',
@@ -604,6 +614,7 @@ try {
       `${project}/src/services/gadget-svc.service.ts`,
       CAPABILITY_INJECTING_SERVICE,
     );
+    expect(await run(['g', ...ADOPTING_MODULE, '--dir', project])).toBe(0);
     // The event and job handlers are rewritten to record their deliveries, as the
     // scratch probe did — a publish that reaches nothing would be indistinguishable
     // from one that does.
@@ -818,20 +829,20 @@ await app.stop();
     it('refuses each colliding pair, and writes nothing', async () => {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
       const project = `${root}/shop`;
-      expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
+      expect(await run(['g', 'service', 'widget', '--dir', project])).toBe(0);
       expect(await run(['g', 'controller', 'gizmo', '--dir', project])).toBe(0);
 
-      // A service would claim the module's injection token.
+      // A module would claim the service's injection token.
       err = [];
-      expect(await run(['g', 'service', 'widget', '--dir', project])).toBe(1);
+      expect(await run(['g', 'module', 'widget', '--dir', project, '--adopt-controllers'])).toBe(1);
       expect(err.join('\n')).toContain("the injection token 'widget-service'");
-      await expect(nodeFs.stat(`${project}/src/services/widget.service.ts`)).rejects.toThrow();
+      await expect(nodeFs.stat(`${project}/src/modules/widget`)).rejects.toThrow();
 
-      // A route would claim the controller's HTTP path.
+      // A module would claim the controller's HTTP path.
       err = [];
-      expect(await run(['g', 'route', 'gizmo', '--dir', project])).toBe(1);
+      expect(await run(['g', 'module', 'gizmo', '--dir', project, '--adopt-controllers'])).toBe(1);
       expect(err.join('\n')).toContain('the HTTP path /gizmo');
-      await expect(nodeFs.stat(`${project}/src/routes/gizmo.routes.ts`)).rejects.toThrow();
+      await expect(nodeFs.stat(`${project}/src/modules/gizmo`)).rejects.toThrow();
 
       // A free name still works, so the guard is not blanket.
       expect(await run(['g', 'service', 'unrelated', '--dir', project])).toBe(0);

@@ -150,7 +150,18 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
     {
       path: 'docs/upgrading.md',
       category: 'legacy-pin',
-      reason: 'Recognizes or explains migration of pre-0.9 JSR pins.',
+      reason:
+        'Recognizes or explains migration of pre-0.9 JSR pins; names a third-party npm ' +
+        'package whose deno.json import keeps the required npm: prefix.',
+      allowNpmRef: true,
+    },
+    {
+      path: 'packages/openapi-plugin/README.md',
+      category: 'deno-target',
+      reason:
+        'Names swagger-ui-dist, a third-party npm package whose deno.json import keeps the ' +
+        'required npm: prefix.',
+      allowNpmRef: true,
     },
     {
       path: 'packages/cli/README.md',

@@ -9,7 +9,7 @@
  * shape here, so neither requires decorators.
  *
  * Before this module that route landed UNWIRED: the schematic wrote
- * `src/routes/<name>.routes.ts` and a `src/routes/index.ts` barrel exporting
+ * `src/controllers/<name>.controller.ts` and a `src/controllers/index.ts` barrel exporting
  * (both since merged into `src/controllers/` by E8)
  * `registerGeneratedRoutes`, while the generated `setu.config.ts` never called
  * it. The decorator-free path therefore needed a hand edit that the three

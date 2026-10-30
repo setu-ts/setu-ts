@@ -19,3 +19,6 @@ the checks CI runs.
 Create a local KV namespace and replace the placeholder id before using this in a real account. The
 smoke task starts local Wrangler, reads and writes KV, and invokes the scheduled handler; it skips
 only when Wrangler is unavailable.
+
+Read the [example deep dive](../../docs/examples.md#cloudflare) for the concept and source
+walkthrough.

@@ -15352,7 +15352,9 @@ with a 503 status hint (the M89b mechanism).
 ### Milestone 119i: Documentation That Does Not Match the Code, or Is Missing
 
 **Package(s):** docs of `openapi-plugin`, `service-discovery-plugin`, `logger-plugin`,
-`react-router-plugin`, `worker-pool-plugin`; the agent cards; `docs/`; CHANGELOG
+`react-router-plugin`, `worker-pool-plugin`; `packages/cli` (agents); the agent cards, including
+`auth-plugin` and `full-stack-starter`; `docs/`, including the React Router development,
+getting-started, custom-plugins and examples guides; the website homepage; CHANGELOG
 
 - **Upgrade guide (`docs/upgrading.md`, `0.10.0` section)** — V10-15 (where `swagger-ui-dist` goes
   on Deno: the workspace ROOT `deno.json`), V10-16 (the Workers full-stack repair never says to set
@@ -15374,6 +15376,11 @@ with a 503 status hint (the M89b mechanism).
   worker-pool README understates the thread overshoot: cold Node bursts reach 6 threads at bound 3,
   once for ~0.7 s).
 
+- **Folded scope (2026-10-30)** — development commands and current full-stack/messaging rules in
+  agent briefs; M124 auth and M121 starter cards; scaffold-first development and getting-started
+  guides, npm plugin publishing, a teaching path through the examples with app README pointers, and
+  a homepage create command and current package count.
+
 **Recurrence:** V10-12 is the second README outside the fence gate found by a smoke run (M70k, M86);
 the letter adds every package README with a compilable fence to the gate, and a check that
 `docs/upgrading.md` and the CHANGELOG link only headings that exist.
@@ -15382,7 +15389,7 @@ the letter adds every package README with a compilable fence to the gate, and a 
 
 - [ ] M119a–M119i, each closing its rows on a published re-run
 - [ ] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
-- [ ] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
+- [x] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
 
 ---
 
@@ -16363,7 +16370,7 @@ patch by construction and gains nothing new here.
 | 119f      | ✅     | telemetry + optional-peer packages + packaging — optional peers in an npm workspace                                                                                                                                                                                                       |
 | 119g      | ✅     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
 | 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
-| 119i      | ⬜     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 119i      | ✅     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
 | 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
 | 121       | ✅     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
 | 122       | ✅     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |

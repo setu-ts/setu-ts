@@ -8,6 +8,7 @@ export function agentFacts(overrides: Partial<ProjectFacts> = {}): ProjectFacts 
     style: 'functional',
     installed: new Set(['common', 'runtime']),
     commands: ['start', 'check', 'test'],
+    commandBodies: {},
     schematics: ['route', 'service'],
     seams: ['src/controllers'],
     directories: [],

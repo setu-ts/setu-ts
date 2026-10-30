@@ -10,8 +10,8 @@ it('returns typed scanner findings, legacy notices and raw generator inputs with
     '/app/src/controllers/bad.controller.ts': '',
     '/app/src/controllers/Bad.controller.ts': '',
     '/app/src/controllers/manual.controller.ts': 'export function registerManualRoutes() {}',
-    '/app/src/modules/Bad/Bad.routes.ts': '',
-    '/app/src/modules/missing/missing.routes.ts': '',
+    '/app/src/modules/Bad/Bad.controller.ts': '',
+    '/app/src/modules/missing/missing.controller.ts': '',
     '/app/src/routes/old.routes.ts': '',
     '/app/setu.config.ts': 'registerManualRoutes(app.router); registerGeneratedRoutes(app.router);',
   });
@@ -32,7 +32,7 @@ it('returns typed scanner findings, legacy notices and raw generator inputs with
 it('opens the capped config only once across every family and module scan', async () => {
   const fs = createFakeFs({
     '/app/setu.config.ts': 'registerModules;',
-    '/app/src/modules/orders/orders.routes.ts': 'export function registerOrdersRoutes() {}',
+    '/app/src/modules/orders/orders.controller.ts': 'export function registerOrdersRoutes() {}',
     '/app/src/modules/orders/index.ts': 'export function registerOrdersModule() {}',
   });
   let reads = 0;
@@ -69,9 +69,9 @@ it('diagnoses inactive and internally broken functional modules, including a tar
     path: 'src/modules/orders/broken.controller.ts',
     missing: ['registerBrokenRoutes'],
   });
-  expect(result.moduleArtifacts.get('orders')).toEqual({ controller: [], route: ['orders'] });
+  expect(result.moduleArtifacts.get('orders')).toEqual({ controller: ['orders'] });
   const target = await diagnoseProject(fs, '/app', new Set(), { module: 'orders' });
-  expect(target.artifacts).toEqual({ controller: [], route: ['orders'] });
+  expect(target.artifacts).toEqual({ controller: ['orders'] });
   expect(target.findings.filter((f) => f.kind === 'artifact-skipped')).toHaveLength(1);
 });
 

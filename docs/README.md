@@ -55,7 +55,7 @@ building production-ready applications with our plugin-first, runtime-independen
 - [CLI Guide](./cli.md)
   - Scaffolding projects: templates, runtimes, and the functional/class-based choice
   - Generating code: the schematics and where each one is wired
-  - Domain modules
+  - Controllers and domain modules: one place for routes, and the first `setu g module`
   - Monorepo workspaces and service discovery
 
 ## Plugin Reference
@@ -109,6 +109,9 @@ building production-ready applications with our plugin-first, runtime-independen
   - Cloudflare Workers deployment
   - Streaming and SSE
   - Runtime-specific resources
+- [Serverless: AWS Lambda and Azure Functions](./serverless.md)
+  - Lambda Web Functions, classic Lambda and Azure Functions recipes
+  - Queue and timer handlers over a booted application
 
 ## API Reference
 

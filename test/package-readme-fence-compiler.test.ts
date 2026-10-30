@@ -13,10 +13,11 @@
  * milestone is responsible for, using the SAME engine rather than a second
  * classifier that could disagree with it.
  *
- * Deliberately not all 40+ package READMEs: that surfaces a large pre-existing
- * backlog which belongs to M70n's documentation sweep, and mixing it in here
- * would bury a milestone's own changes. The list is the set a milestone
- * rewrote and therefore owns.
+ * M119i gated the last eight READMEs (cli, cloudflare, cqrs, database,
+ * notification, openapi, secrets, service-discovery) and deleted the UNGATED
+ * exemption, so the list is now EVERY package README: the coverage assertion
+ * below requires it to equal every package README on disk, and a new
+ * package cannot ship an unchecked README without failing it.
  *
  * M70i (X6-2/X7-1) folded `grpc-plugin` and `graphql-plugin` into THIS list
  * rather than shipping the separate `test/readme-fence-compiler.test.ts` it had
@@ -123,8 +124,8 @@ const READMES: Readonly<Record<string, number>> = {
   // compiled — the list only ever grew when a milestone happened to touch a
   // README, so `kernel`, `runtime`, `sdk`, `exceptions` and `testing` sat
   // unchecked. These are the ones that compiled clean once the harness stopped
-  // producing false failures of its own; the nine still outstanding are named
-  // in the ungated-coverage assertion below so the gap cannot be forgotten.
+  // producing false failures of its own. M119i gated the last eight and
+  // deleted the ungated list, so this record is now every package README.
   'packages/cache-plugin/README.md': 2,
   // M101h: the events README is born gated — installation, usage, the
   // aggregate-local recorder and the new dispatch-diagnostics example.
@@ -153,6 +154,17 @@ const READMES: Readonly<Record<string, number>> = {
   // M111d: the npm create entry. Shell lines only, so it is gated at zero —
   // a TypeScript fence added later is then visible here rather than unchecked.
   'packages/create/README.md': 0,
+  // M119i: the last eight ungated READMEs move into the gated set with their
+  // pinned counts; the UNGATED exemption is deleted, so this record is now
+  // every package README on disk.
+  'packages/cli/README.md': 4,
+  'packages/cloudflare-plugin/README.md': 9,
+  'packages/cqrs-plugin/README.md': 2,
+  'packages/database-plugin/README.md': 17,
+  'packages/notification-plugin/README.md': 3,
+  'packages/openapi-plugin/README.md': 6,
+  'packages/secrets-plugin/README.md': 6,
+  'packages/service-discovery-plugin/README.md': 6,
 };
 
 /** Reads every fence the engine would compile from one README. */
@@ -166,34 +178,6 @@ async function compilableFences(readme: string) {
         classified.kind === 'compile-complete' || classified.kind === 'compile-fragment',
     );
 }
-
-/**
- * Package READMEs whose fences are NOT yet compiled, and why the list exists.
- *
- * Half the package READMEs were in neither list before v0.6.0 — the gated set
- * only ever grew when a milestone happened to touch a README, so `kernel`,
- * `runtime`, `sdk`, `exceptions` and `testing` had never had a single example
- * type-checked. That is how `mail-plugin` shipped a `subject` field its own
- * `MailTemplate` does not have, `di-plugin` documented `register(Class, …)`
- * against a `register(token: string, …)` signature, and `exceptions` told
- * readers to use `ctx.request.params` — the exact mistake M34's drift gate
- * caught in generated code.
- *
- * Each entry here is a KNOWN GAP, not an exemption: the assertion below
- * requires every package README to be in exactly one of the two lists, so a
- * new package cannot be silently uncovered and an entry cannot be dropped
- * from the gated set without becoming visible here.
- */
-const UNGATED: readonly string[] = [
-  'packages/cli/README.md',
-  'packages/cloudflare-plugin/README.md',
-  'packages/cqrs-plugin/README.md',
-  'packages/database-plugin/README.md',
-  'packages/notification-plugin/README.md',
-  'packages/openapi-plugin/README.md',
-  'packages/secrets-plugin/README.md',
-  'packages/service-discovery-plugin/README.md',
-];
 
 /** Every package README on disk, so neither list can drift from reality. */
 async function everyPackageReadme(): Promise<string[]> {
@@ -223,13 +207,13 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // Pin the SIZE of the target list too: without this, deleting an entry
     // shrinks both sides of the equality below and the gate passes vacuously
     // (negative control §6.7 of the M70n plan).
-    expect(Object.keys(READMES)).toHaveLength(44);
+    expect(Object.keys(READMES)).toHaveLength(52);
 
-    // And pin the COVERAGE: every package README is gated or explicitly named
-    // as a known gap. Half of them were in neither before v0.6.0, which is how
-    // three READMEs shipped examples that could not compile.
+    // And pin the COVERAGE: the gated set is every package README on disk —
+    // M119i deleted the known-gap list, so a new package cannot ship an
+    // unchecked README without failing this.
     const onDisk = await everyPackageReadme();
-    const accounted = [...Object.keys(READMES), ...UNGATED].sort();
+    const accounted = [...Object.keys(READMES)].sort();
     expect(accounted).toEqual(onDisk);
 
     const counts: Record<string, number> = {};
@@ -246,7 +230,7 @@ describe('package README fences compile (X8-8, X6-2/X7-1)', () => {
     // `createTestApp` example was checked by nothing. Cheaper to keep code out
     // of callouts than to teach every consumer of the scanner about them.
     const offenders: string[] = [];
-    for (const readme of [...Object.keys(READMES), ...UNGATED]) {
+    for (const readme of Object.keys(READMES)) {
       const source = await readFile(readme, 'utf8');
       if (/^>\s*```/m.test(source)) offenders.push(readme);
     }

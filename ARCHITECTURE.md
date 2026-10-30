@@ -1641,7 +1641,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 
 | Aspect               | Detail                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | React Router v7 framework-mode SSR embedded as a plugin                                                                                 |
+| **Purpose**          | React Router 8 framework-mode SSR embedded as a plugin                                                                                |
 | **Responsibilities** | File-based routing; SSR via `loadRequestHandler`; static asset serving over `runtime.fs` with symlink-safe containment                  |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `ReactRouterPlugin()`; `SsrService`                                                                                                     |

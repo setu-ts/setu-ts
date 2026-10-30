@@ -45,7 +45,8 @@ async function verify(project: string, member = false): Promise<readonly string[
       .map(([name]) => name),
   );
   expect(text).toContain(installed.has('decorator-plugin') ? 'TC39 decorators' : 'router.get');
-  if (installed.has('messaging-plugin')) expect(text).toContain('versioned topics');
+  if (installed.has('messaging-plugin'))
+    expect(text).toContain('versioned integration-event topics');
   expect(before).toContain('@setu-ts/cache-plugin');
   expect(text.split('## Not installed')[1]).not.toContain('`cache`');
   const missing: string[] = [];

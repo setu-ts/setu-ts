@@ -13,6 +13,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -23,7 +24,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated metric definition. */
 export const CUSTOM_METRICS_EXPORT = 'CUSTOM_METRICS';
@@ -71,7 +71,7 @@ function renderMetricsBarrel(artifacts: SeamArtifacts): string {
     .filter((line) => line !== '')
     .join('\n\n');
 
-  const entries = names.map((name) => metricConfigExport(deriveNames(name).screaming));
+  const entries = names.map((name) => metricConfigExport(artifactNames(name).screaming));
 
   return assembleSeamBarrel(header, imports, [
     `/** Every generated metric definition, for \`MetricsPlugin({ customMetrics })\`. */\n` +

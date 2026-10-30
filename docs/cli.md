@@ -30,6 +30,34 @@ setu new my-app --template class-based         # decorators and a DI container
 setu new my-app --dry-run                      # print the plan, write nothing
 ```
 
+### Start from an example
+
+```bash
+setu new my-app --example rest-api
+cd my-app && npm install
+npm run smoke                                  # the example's own proof; exits when done
+npm start                                      # serves until stopped
+setu new my-app --example rest-api --dry-run
+```
+
+This downloads the example from GitHub at `v<CLI version>`, rewrites workspace dependencies to the
+CLI's framework range, and writes a standalone Node project. All downloads finish before writing; a
+failed download leaves the target untouched and names a template alternative. Dry-run lists the
+manifest's output paths without fetching anything. Existing file collisions are refused through the
+same writer used by template scaffolds.
+
+Choose `minimal`, `rest-api`, `database`, `di-decorators`, `cqrs`, `multi-tenant`, `static-site`,
+`worker-pool`, `graphql-demo`, `grpc`, `microservices` or `realtime`. Unknown names list those
+choices; excluded names explain the repository dependency and an alternative. `full-stack` uses
+`--template full-stack`; `compiled-binary`, `cloudflare`, `realtime-clients` and
+`plugin-development` need repository scripts or source.
+
+Examples keep their own composition: `--template`, `--workspace`, `--style`, `--broker`, `--queue`,
+`--redis-client`, `--devtool`, `--devtool-port`, `--logger`, `--env-file`, `--transport`,
+`--transport-url`, `--port`, `--depends-on` and `--di` are refused with `--example`.
+`--runtime node` is accepted; other runtimes are refused. `--dir`, `--agents` and `--dry-run` remain
+available. See [Examples](./examples.md) for the learning path and prerequisites.
+
 ### Templates
 
 | Template       | Plugins it registers                                                                                                     |
@@ -307,18 +335,21 @@ require queue and use the ingress barrel. Nothing in the framework reads migrati
 functional `service` is a plain exported function, which has no registration site;
 `src/services/index.ts` re-exports it for convenience and registers nothing. A `schema` file has no
 registration site either: it is the shapes file a feature imports —
-[Domain modules](#domain-modules) says where shapes live and what `--module` does with them.
+[Controllers and domain modules](#controllers-and-domain-modules) says where shapes live and what
+`--module` does with them.
 
-`--module <name>` is the feature-scoped form of the four schematics a feature owns — `service`,
-`route`, `controller` and `schema`: it places the file inside the named module rather than the
-top-level folder, and every other schematic refuses the flag because it is app-wide. In functional
-mode a module-scoped `route` or `controller` regenerates the module's CLI-owned `index.ts` to
-register it; a module-scoped `service` or `schema` is a file for the module's own code to import and
-registers nothing. A class-based module is extended by a printed `@Module` line rather than an
-edited one. See [Domain modules — `--module`](#--module-place-a-file-inside-a-feature).
+`--module <name>` is the feature-scoped form of the five schematics a feature owns — `controller`,
+`route`, `service`, `sse` and `schema`: it places the file inside the named module rather than the
+top-level folder, and every other schematic refuses the flag because it is app-wide. Once a project
+has modules the first four require it. A function controller is registered by regenerating the
+module's CLI-owned `index.ts`; in a class-based module a class controller or service is added to the
+`controllers` or `providers` array of `<module>.module.ts` when that array is a plain literal, and
+otherwise the line to add is printed. A functional `service` or a `schema` is a file for the
+module's own code to import and registers nothing. See
+[`--module`: place a file inside a feature](#--module-place-a-file-inside-a-feature).
 
 A schematic gated on a plugin refuses rather than emitting source whose own import cannot resolve,
-and names the `setu add` command that installs it:
+and names the `setu add` command that adds it:
 
 ```
 The "guard" schematic requires @setu-ts/auth-plugin, which is not installed in /path/to/app.
@@ -380,64 +411,86 @@ setu generate custom my-schematic order-item
 `SchematicOptions` carries the target project's `runtime`, its detected `plugins`, and — for the
 schematics that render a barrel — the `modules` and `artifacts` already present.
 
-## Domain modules
+## Controllers and domain modules
 
-`setu generate module` is the aggregate schematic, and its output follows the project's style.
+Routes are declared in one kind of file, a **controller**: `<name>.controller.ts`. Its exports
+decide its shape:
+
+- a **class controller** exports a decorated `<Pascal>Controller` (class-based projects);
+- a **function controller** exports `register<Pascal>Routes(router, services?)`. It also covers what
+  a decorator cannot express: a wildcard, a proxy, or a route table built in a loop.
+
+`setu g controller` writes the project's default shape, and `setu g route` always writes a function
+controller.
+
+### One place for controllers and services
+
+A project keeps its controllers and services in one place, never two:
+
+| Layout              | Controllers and services                      | `setu.config.ts` registers                                                                      |
+| ------------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| flat (new projects) | `src/controllers/`, `src/services/`           | `src/controllers/index.ts` (and, class-based, `src/services/index.ts`)                          |
+| modular             | `src/modules/<name>/`, one folder per feature | `src/modules/index.ts`: `registerModules(app.router, app.services)`, plus `MODULES` class-based |
+
+There is no root module, and no `controllers/` folder is generated inside a module. Subfolders work
+in both layouts (`src/controllers/admin/users.controller.ts`,
+`src/modules/billing/controllers/invoices.controller.ts`). After moving a file, run `setu sync`: it
+rewrites the barrels and module indexes from where the files are, and in a class-based module
+re-points the declaration's imports. Two controllers with the same base name would bind one symbol,
+so they are refused (`setu.E016`).
+
+### The first module
 
 ```bash
-setu g module orders
+setu g module shipment
+setu g module shipment --adopt-controllers
 ```
 
-In a **functional** project (the default style) the whole feature lives in one folder, and nothing
-is written under `src/controllers/` any more:
+The first `setu g module` switches the project from flat to modular:
+
+- **Nothing but empty barrels in the flat homes:** it removes them and rewrites the registration
+  lines of `setu.config.ts`.
+- **Only the scaffold's greeting example, untouched:** it moves the example into the new module, as
+  `--adopt-controllers` would. Formatting changes do not count as edits.
+- **Any other controllers or services there:** it refuses and lists them.
+- **`--adopt-controllers`:** it moves every file under `src/controllers/` and `src/services/` into
+  the new module, keeping subfolders, and rewrites every relative import into or out of the moved
+  files. The adopted controllers keep their URL paths. In a class-based project their classes join
+  the module's `@Module` declaration; function controllers join its `index.ts`.
+
+Every move and edit is planned before anything is written and applied in one transaction. An import
+it cannot read exactly (a relative `require`, an `import()` of a computed path, a file that imports
+a flat barrel) refuses the whole switch. A config whose registration lines are not the generated
+ones is left alone, with the lines to change printed. `setu check` reports controllers or services
+left outside modules once modules exist (`setu.E014`), and imports in CLI-written files that no
+longer resolve (`setu.E015`).
+
+### A generated module
 
 ```
 src/modules/orders/
-├── index.ts                      # CLI-owned, regenerated; exports registerOrdersModule(router, services?)
-├── orders.routes.ts              # registerOrdersRoutes — GET /orders, GET /orders/:id, POST /orders (201), PATCH /orders/:id
+├── index.ts                      # CLI-owned; exports registerOrdersModule(router, services?)
+├── orders.controller.ts          # GET /orders, GET /orders/:id, POST /orders (201), PATCH /orders/:id
 ├── orders.service.ts             # an in-memory Map keyed by id; the JSDoc says to replace it with a repository
+├── orders.module.ts              # class-based only: @Module({ controllers, providers })
 ├── orders.schemas.ts             # only when @setu-ts/validation-plugin is installed
 ├── orders.test.ts                # in-process contract test
 └── orders.e2e.test.ts            # real-HTTP contract test (socket targets only)
-src/modules/index.ts              # CLI-owned; exports registerModules(router, services?)
+src/modules/index.ts              # CLI-owned; registerModules(router, services?), and MODULES class-based
 ```
 
-The module's `index.ts` is CLI-owned and regenerated by every `setu generate … --module orders`; it
-exports exactly one symbol, `registerOrdersModule(router, services?)`, which calls every registrar
-in the folder — it re-exports nothing, not even the service. `src/modules/index.ts` is the
-activation barrel: it exports `registerModules(router, services?)`, and every functional scaffold's
-`setu.config.ts` calls `registerModules(app.router, app.services);` right after
-`registerGeneratedRoutes(...)`, so the module serves requests with no edit to `setu.config.ts`. In a
-project scaffolded before that call existed, `setu g module` prints the import line and the call to
-add. The generated service is an in-memory `Map` that the developer replaces with a repository, and
-a request for a missing id answers `404`.
+The module's `index.ts` is CLI-owned and regenerated by every `setu generate … --module orders` and
+by `setu sync`. It exports `register<Pascal>Module(router, services?)`, which registers the module's
+function controllers: every controller in a functional module, and in a class-based module only the
+function controllers, because the class controllers are listed by the `@Module` declaration (which
+it re-exports). The generated service is an in-memory `Map` that the developer replaces with a
+repository, and a request for a missing id answers `404`.
 
-In a **class-based** project the module keeps its decorated shape and gains the schemas file and the
-two tests, while `src/modules/index.ts` stays the `MODULES` barrel the scaffolded `setu.config.ts`
-passes to `DecoratorPlugin({ modules })`:
-
-```
-src/modules/
-├── index.ts                      # managed: MODULES (the active @Module classes)
-└── orders/
-    ├── index.ts
-    ├── orders.module.ts          # @Module({ controllers, providers }) — yours; never rewritten
-    ├── orders.controller.ts      # @Controller, injecting the service by token
-    ├── orders.service.ts         # @Injectable
-    ├── orders.schemas.ts         # only when @setu-ts/validation-plugin is installed
-    ├── orders.test.ts
-    └── orders.e2e.test.ts        # socket targets only
-```
-
-The managed barrel also exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, deprecated, so a config
-written before `@Module` declarations keeps working.
+The managed class-based barrel also exports `MODULE_CONTROLLERS` and `MODULE_SERVICES`, deprecated,
+so a config written before `@Module` declarations keeps working.
 
 Tests are emitted on the socket targets (Node, Deno, Bun) only; a Cloudflare Workers module carries
 none, and a Workers project's `test` task permits an empty suite.
-
-The schematic is **ungated**: it works in every project shape, including one scaffolded with no
-template at all. Which of the two shapes you get is decided by whether `@setu-ts/decorator-plugin`
-is installed.
 
 ### `--module`: place a file inside a feature
 
@@ -446,28 +499,27 @@ setu g service pricing --module invoices
 setu g route summary --module invoices
 ```
 
-`--module <name>` accepts `service`, `route`, `controller` and `schema` only, and `<name>` must be a
-module the project already has; every other schematic is app-wide and refuses the flag, naming its
-top-level folder.
+`--module <name>` accepts `controller`, `route`, `service`, `sse` and `schema`, and `<name>` must be
+a module the project already has. The first four require it once the project has modules, and a flat
+project refuses it. Every other schematic is app-wide and refuses the flag, naming its top-level
+folder.
 
-- **Functional:** the file is written into `src/modules/<module>/`. A route or controller is
-  registered by regenerating the module's CLI-owned `index.ts` to call it; a service or schema has
-  no registrar and is imported by the module's own code. A module-scoped route or controller mounts
-  at `/<module>/<name>` — a static path such as `GET /invoices/summary` outranks
+- The file is written into `src/modules/<module>/`, and a controller is registered by regenerating
+  the module's `index.ts` (a function controller) or by adding it to the module's declaration (a
+  class controller). A module-scoped controller mounts at `/<module>/<name>` (an SSE controller at
+  `/<module>/sse/<name>`); a static path such as `GET /invoices/summary` outranks
   `GET /invoices/:id`, so an `id` equal to `summary` is unreachable through `/:id`.
-- **Class-based:** the file is written and the CLI prints the line to add to
-  `@Module({ providers | controllers })` in `src/modules/<module>/<module>.module.ts`; it never
-  edits the module declaration. A module-scoped service is registered under the token
-  `<module>-<name>-service`.
-- `route --module` is **functional-only**: a class-based module has no imperative registration
-  point, and the refusal names top-level `g route` instead.
+- **Class-based:** a class controller or service is added to the `controllers` or `providers` array
+  of `<module>.module.ts`, as the NestJS CLI does, when that array is a plain literal. Anything else
+  is left unchanged and the line to add is printed. A module-scoped service is registered under the
+  token `<module>.<name>-service`.
 
 ### `src/shared/` and the one rule
 
 One rule covers the whole layout: **a file that belongs to one feature goes in the feature; an
 app-wide file goes in its top-level folder.** The app-wide kinds — `middleware`, `plugin`,
 `health-indicator`, `metric`, `migration`, `guard`, `command-handler`, `query-handler`,
-`event-handler`, `job`, `ws-route`, `sse` — stay top-level, which is why they refuse `--module`.
+`event-handler`, `job`, `ws-route` — stay top-level, which is why they refuse `--module`.
 
 `src/shared/` is the home for code several modules use — helpers, request-scoped dependency access,
 shared types, and `src/shared/schemas/` for shared shapes. It needs no wiring (no barrel lists it)
@@ -515,8 +567,10 @@ re-emits `test/support/server.ts`, so a project scaffolded earlier gains it).
   is installed).
 
 The tasks split the two: `test` runs every `*.test.ts` except `*.e2e.test.ts`; `test:e2e` runs only
-`*.e2e.test.ts` over real HTTP. The `rest` template's sample now lives at `src/modules/greeting/`,
-so a new project's first files are exactly what `g module` produces.
+`*.e2e.test.ts` over real HTTP. The `rest` template's sample is
+`src/controllers/greeting.controller.ts` and `src/services/greeting.service.ts`, where
+`g controller` and `g service` write in a new project; the first `g module` moves it into the module
+while it is untouched.
 
 ### Form bodies validate with the same schema
 
@@ -652,19 +706,19 @@ setu agents --dry-run            # print what the real run would do
 setu agents --dir ./services/orders
 ```
 
-The framework section covers a not-in-your-training-data warning, Rule 0 (read the package's card
-before using a symbol this file and the project's code do not show, and treat anything documented in
-neither as nonexistent), the project's commands, the schematics available for its plugin set,
-numbered rules, the project map, the installed packages with their `CAPABILITIES` keys and card
-paths, and the packages it could add but has not.
+The framework section covers a warning not to guess its APIs from other frameworks, Rule 0 (read the
+package's card before using a symbol this file and the project's code do not show, and treat
+anything documented in neither as nonexistent), the project's commands (each production, development
+and debug entry glossed), the schematics available for its plugin set, numbered rules, the project
+map, the installed packages with their `CAPABILITIES` keys and card paths, and the packages it could
+add but has not.
 
 ### What it writes
 
 Only the framework section is owned by the CLI. It sits between `<!-- setu-agents:begin -->` and
-`<!-- setu-agents:end -->`, and the line after `begin` reads "Generated by `setu agents` from this
-project's manifests. Edits between these markers are overwritten." Everything outside the markers is
-never read for content and never modified, so a developer-owned preamble or notes survive a rewrite
-byte for byte.
+`<!-- setu-agents:end -->`, and the line after `begin` reads "`setu agents` reads manifests and
+overwrites these markers' contents." Everything outside the markers is never read for content and
+never modified, so a developer-owned preamble or notes survive a rewrite byte for byte.
 
 | The file on disk            | What `setu agents` does                                                       |
 | --------------------------- | ----------------------------------------------------------------------------- |

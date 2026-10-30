@@ -62,6 +62,9 @@ it('renders each stable id with its severity and strict counts', () => {
     'Silence entry "setu.E003" matched no finding.',
     'Cannot read setu.config.ts: not-a-file, so its wiring cannot be checked.',
     'Cannot read src/controllers/huge.controller.ts: too-large, so whether it is wired cannot be checked.',
+    'This project has modules and also keeps controllers or services outside them: src/controllers/orders.controller.ts.',
+    'src/modules/index.ts imports ./gone/index.ts, which does not exist.',
+    'Two controller files share a base name and would bind one symbol: src/controllers/a/orders.controller.ts, src/controllers/b/orders.controller.ts.',
   ];
   for (const [index, finding] of CHECK_FINDINGS.entries()) {
     for (const strict of [false, true]) {

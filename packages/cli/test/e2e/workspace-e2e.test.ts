@@ -840,9 +840,11 @@ try {
   // so functional module output has to work inside one too.
   it('generates a functional module inside a member', async () => {
     const ws = await twoMembers();
-    expect(await run(['g', 'module', 'invoice', '--dir', `${ws}/apps/billing`])).toBe(0);
     expect(
-      (await nodeFs.stat(`${ws}/apps/billing/src/modules/invoice/invoice.routes.ts`)).isFile(),
+      await run(['g', 'module', 'invoice', '--dir', `${ws}/apps/billing`, '--adopt-controllers']),
+    ).toBe(0);
+    expect(
+      (await nodeFs.stat(`${ws}/apps/billing/src/modules/invoice/invoice.controller.ts`)).isFile(),
     ).toBe(true);
   });
 

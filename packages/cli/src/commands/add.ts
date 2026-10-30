@@ -15,10 +15,19 @@
  * @module
  */
 
-import { planViewSetup } from './add-view.ts';
+import { planViewSetup, VIEWS_CONTROLLER } from './add-view.ts';
+import { diagnoseProject } from '../diagnostics/diagnose.ts';
+import {
+  CONTROLLERS_SEAM,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+  HTTP_SEAM_DIR,
+  withControllerArtifact,
+} from '../seams/http.ts';
+import { renderModuleIndex } from '../seams/modules.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
+import { afterLastImport } from '../utils/import-placement.ts';
 import type { IFileSystem } from '@setu-ts/common';
-import { escapeName } from '../utils/names.ts';
+import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
   EXIT_ERROR,
@@ -1081,7 +1090,6 @@ function barrelImportPlan(
 ): { text: string; at: number } | undefined {
   const visible = maskComments(source);
   if (visible === undefined) return undefined;
-  const without = maskImportDeclarations(visible);
   const missing: string[] = [];
   for (const item of imports) {
     const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
@@ -1105,25 +1113,8 @@ function barrelImportPlan(
       missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
     }
   }
-  let at = 0;
-  for (let i = 0; i < visible.length; i++) if (visible[i] !== without[i]) at = i + 1;
-  // maskImportDeclarations blanks only the clause through `from`, not its specifier.
-  // Finish that statement before choosing the end of its line as the insertion point.
-  if (at > 0) {
-    const specifier = /^[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[ \t]*;?/.exec(
-      visible.slice(at),
-    );
-    if (specifier === null) return undefined;
-    at += specifier[0].length;
-    const lineEnd = source.indexOf('\n', at);
-    at = lineEnd < 0 ? source.length : lineEnd;
-  }
-  // Side-effect imports carry no `from` clause, but can still be the last import.
-  for (const match of visible.matchAll(
-    /^[ \t]*import[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[^\r\n]*/gm,
-  )) {
-    at = Math.max(at, match.index + match[0].length);
-  }
+  const at = afterLastImport(source, visible);
+  if (at === undefined) return undefined;
   return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
 }
 
@@ -1382,6 +1373,18 @@ export async function runAddCommand(
     deps.error(
       `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
     );
+    return EXIT_USAGE;
+  }
+  const moduleFlag = args.flags['module'];
+  if (moduleFlag !== undefined && bare !== 'view-plugin') {
+    deps.error('--module applies only to `setu add view`, which writes a controller.');
+    return EXIT_USAGE;
+  }
+  if (
+    moduleFlag !== undefined &&
+    (typeof moduleFlag !== 'string' || !isKebabIdentifier(moduleFlag))
+  ) {
+    deps.error('Option --module requires a valid module name.');
     return EXIT_USAGE;
   }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
@@ -1787,6 +1790,50 @@ export async function runAddCommand(
   }
 
   if (bare === 'view-plugin') {
+    // The example page is a controller, so it follows the controller rule: a
+    // flat project keeps it in src/controllers/, a modular one in a module.
+    const diagnosis = await diagnoseProject(deps.fs, dir, await detectPlugins(deps.fs, dir));
+    const module = typeof moduleFlag === 'string' ? moduleFlag : undefined;
+    if (module !== undefined && diagnosis.modules.length === 0) {
+      deps.error(
+        `This project has no modules; drop --module, or run \`${cliInvocation(runtime)} g module ${escapeName(module)}\` first.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (module === undefined && diagnosis.layout !== 'flat') {
+      deps.error(
+        `This project uses modules; pass --module <name> to place the views controller (existing: ${diagnosis.modules.map(escapeName).join(', ')}).`,
+      );
+      return EXIT_USAGE;
+    }
+    if (module !== undefined && !diagnosis.modules.includes(module)) {
+      deps.error(
+        `Unknown module "${escapeName(module)}". Admitted modules: ${diagnosis.modules.map(escapeName).join(', ')}.`,
+      );
+      return EXIT_ERROR;
+    }
+    const views = VIEWS_CONTROLLER.slice(0, -'.controller.ts'.length);
+    const controllerDir = module === undefined ? HTTP_SEAM_DIR : `src/modules/${module}`;
+    const registration =
+      module === undefined
+        ? {
+            path: (diagnosis.mode === 'class-based'
+              ? CONTROLLERS_SEAM
+              : FUNCTIONAL_CONTROLLERS_SEAM
+            ).barrel,
+            contents: (diagnosis.mode === 'class-based'
+              ? CONTROLLERS_SEAM
+              : FUNCTIONAL_CONTROLLERS_SEAM
+            ).renderBarrel(withControllerArtifact(diagnosis.artifacts, views, 'function')),
+          }
+        : {
+            path: `${controllerDir}/index.ts`,
+            contents: renderModuleIndex(
+              diagnosis.mode,
+              deriveNames(module),
+              withControllerArtifact(diagnosis.moduleArtifacts.get(module), views, 'function'),
+            ),
+          };
     const existing = new Map<string, string>();
     for (const path of [
       'package.json',
@@ -1798,7 +1845,7 @@ export async function runAddCommand(
       'src/views/styles.css',
       'src/views/layout.tsx',
       'src/views/home.tsx',
-      'src/views/routes.ts',
+      `${controllerDir}/${VIEWS_CONTROLLER}`,
     ]) {
       const fullPath = joinPath(dir, path);
       const pending = edits.find((edit) => edit.path === fullPath);
@@ -1828,6 +1875,8 @@ export async function runAddCommand(
           factoryCallsProvider(configSource, 'view-plugin', 'ViewPlugin')),
       wireStatic: (source, args) =>
         configRetargeted ? undefined : withPluginWiring(source, 'static-plugin', undefined, args),
+      controllerDir,
+      registration,
     });
     for (const file of plan.files) createOnlyPaths.add(joinPath(dir, file.path));
     for (const file of [...plan.files, ...plan.manifestEdits, ...plan.configEdits]) {
@@ -1838,6 +1887,10 @@ export async function runAddCommand(
       if (file.path === 'setu.config.ts') configSource = file.contents;
     }
     for (const line of plan.notes) deps.log(escapeName(line));
+    // The page reaches the router only through the barrel or module index, so the
+    // config must import that registrar from it and call it in the factory.
+    if (plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)))
+      for (const line of viewRegistrationAdvice(configSource, module)) deps.log(line);
   }
 
   if (edits.length === 0 && alreadyPresent) {
@@ -2048,7 +2101,7 @@ function printPermissionNote(specifier: string, log: (message: string) => void):
  * @param log - Output sink
  */
 function printAddHelp(log: (message: string) => void): void {
-  log(`Usage: ${PROGRAM_NAME} add <plugin> [--dir <path>] [--dry-run]`);
+  log(`Usage: ${PROGRAM_NAME} add <plugin> [--dir <path>] [--dry-run] [--module <name>]`);
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");
@@ -2056,6 +2109,8 @@ function printAddHelp(log: (message: string) => void): void {
   log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
   log('Redis arms: --redis-client <ioredis|node-redis> (default ioredis).');
   log('Workspace members use their workspace transport; existing configuration is preserved.');
+  log('add view writes its page controller to src/controllers/, or with --module <name> into');
+  log('that module; a project with modules requires --module.');
   log('');
   log('Available:');
   for (const name of addableNames()) {
@@ -2065,4 +2120,66 @@ function printAddHelp(log: (message: string) => void): void {
   log('The full specifier works too, so `add auth` and `add @setu-ts/auth-plugin`');
   log('are the same command. This writes the manifest and does not install for');
   log("you; it prints the project's install command (deno, npm or bun) to run.");
+}
+
+/**
+ * The lines `setu add view` prints when the config may not register the views
+ * controller: it must import the registrar from the barrel or module index the
+ * controller joined, and call it inside the generated factory.
+ *
+ * @param config - The current `setu.config.ts`, or undefined when the project has none
+ * @param module - The module the controller joined, or undefined for a flat project
+ * @returns Nothing when the registration is in place, otherwise the guidance
+ */
+export function viewRegistrationAdvice(
+  config: string | undefined,
+  module: string | undefined,
+): string[] {
+  const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
+  const specifier = `./${module === undefined ? 'src/controllers' : 'src/modules'}/index.ts`;
+  const call = `  ${registrar}(app.router, app.services);`;
+  const importLine = `  import { ${registrar} } from '${specifier}';`;
+  if (config === undefined)
+    return [
+      'No setu.config.ts: where the application is composed, register /ui with:',
+      importLine,
+      call,
+    ];
+  const visible = maskComments(config);
+  const factory = factoryScope(config);
+  // undefined when the config cannot be classified: the call cannot be verified.
+  const body =
+    factory === undefined ? maskSourceCode(config) : factory.code.slice(factory.start, factory.end);
+  // Every import of the registrar, with the local name it is bound to.
+  const bindings = [
+    ...(visible ?? '').matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2/g),
+  ].flatMap((match) =>
+    match[1]!.split(',').flatMap((entry) => {
+      const [name, local] = entry.trim().split(/\s+as\s+/);
+      return name === registrar ? [{ source: match[3]!, local: local ?? name }] : [];
+    }),
+  );
+  const sources = bindings.map((binding) => binding.source);
+  const imported = sources.includes(specifier);
+  // An aliased import is called by its local name.
+  const local = bindings.find((binding) => binding.source === specifier)?.local ?? registrar;
+  if (visible === undefined || body === undefined)
+    return [
+      `Cannot verify that setu.config.ts calls ${registrar}, which registers /ui; it needs:`,
+      importLine,
+      call,
+    ];
+  const elsewhere = sources.find((source) => source !== specifier);
+  if (!imported && elsewhere !== undefined)
+    return [
+      `setu.config.ts imports ${registrar} from ${escapeName(elsewhere)}, but /ui is registered through ${specifier}; import it from there:`,
+      importLine,
+      ...(callsIdentifier(body, local) ? [] : [call]),
+    ];
+  if (callsIdentifier(body, local)) return [];
+  return [
+    `setu.config.ts does not call ${registrar}, so /ui is not registered; add:`,
+    ...(imported ? [] : [importLine]),
+    call,
+  ];
 }

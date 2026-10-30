@@ -271,8 +271,10 @@ describe('a scaffolded npm project runs its own scripts', () => {
         expect(await run(['new', 'shop', ...args])).toBe(0);
         const project = `${root}/shop`;
         for (const artifact of [
-          ['module', 'widget'],
-          ['service', 'billing'],
+          // The first module takes the greeting example with it; from then on
+          // services live in a module.
+          ['module', 'widget', '--adopt-controllers'],
+          ['service', 'billing', '--module', 'widget'],
           ['middleware', 'audit'],
         ]) {
           expect(await run(['generate', ...artifact, '--dir', project]), artifact.join(' ')).toBe(

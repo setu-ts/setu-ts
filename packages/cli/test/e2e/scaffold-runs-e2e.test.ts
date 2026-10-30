@@ -126,25 +126,21 @@ for (const target of ['deno', 'bun'] as const) {
         const args = target === 'deno' ? ['task', 'check'] : ['run', 'check'];
         const fresh = await runIn(project, target, args, overlay);
         expect(fresh.code, fresh.output).toBe(0);
-        const path = `${project}/src/modules/greeting/index.ts`;
+        const path = `${project}/src/controllers/index.ts`;
         const source = await nodeFs.readFile(path, 'utf8');
         const removed = source.replace(
-          /import\s+\{[^}]*\}\s+from\s*[\x27\x22]\.\/greeting\.routes\.ts[\x27\x22];?/,
+          /import\s+\{[^}]*\}\s+from\s*[\x27\x22]\.\/greeting\.controller\.ts[\x27\x22];?/,
           '',
         );
         expect(removed).not.toBe(source);
         // Keep the barrel type-correct so the wiring gate is the failing half.
-        await nodeFs.writeFile(
-          path,
-          removed.replace(
-            /registerGreetingRoutes\(router, services\);/,
-            'void router;\n  void services;',
-          ),
-        );
+        const emptied = removed.replace(/\[\s*registerGreetingRoutes,?\s*\]/, '[]');
+        expect(emptied).not.toBe(removed);
+        await nodeFs.writeFile(path, emptied);
         const broken = await runIn(project, target, args, overlay);
         expect(broken.code, broken.output).not.toBe(0);
         expect(broken.output).toContain('setu.E003');
-        expect(broken.output).toContain('greeting.routes.ts');
+        expect(broken.output).toContain('greeting.controller.ts');
       } finally {
         await overlay.close();
       }
@@ -1406,7 +1402,7 @@ describe('styled scaffolds (M123)', () => {
             'check',
             'src/views/home.tsx',
             'src/views/layout.tsx',
-            'src/views/routes.ts',
+            'src/controllers/views.controller.ts',
           ]);
           expect(views.code, views.output).toBe(0);
         }

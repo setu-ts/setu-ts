@@ -1,6 +1,6 @@
 # @setu-ts/testing — exercise applications and middleware
 
-**Add it:** `setu add testing` installs a dev dependency; it registers no plugin and provides no
+**Add it:** `setu add testing` adds a dev dependency; it registers no plugin and provides no
 capability.
 
 ## Test the scaffold's real composition

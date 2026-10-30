@@ -1,15 +1,9 @@
 /**
- * Link rewriting for the in-place rendered `docs/` pages.
- *
- * The canonical guides use repository-relative links (`./getting-started.md`,
- * `../README.md`, `../apps/full-stack`, …). The docs stay untouched; this module
- * rewrites those links to site routes (or GitHub fallbacks) at render time, so the
- * rendered pages navigate correctly without a single byte of `docs/` changing.
- *
- * Pure string functions — unit-tested in test/docs-links.test.ts.
+ * Resolves canonical repository links against each source file's directory.
+ * Rendered reading stays on the site; unrendered source retains its GitHub target.
  */
 
-/** The public repository, used as the fallback target for anything outside `docs/`. */
+/** The public repository used for source links. */
 export const GITHUB_BASE = 'https://github.com/setu-ts/setu-ts';
 
 function stripAnchor(href: string): { path: string; anchor: string } {
@@ -32,83 +26,100 @@ function githubTree(path: string): string {
   return `${GITHUB_BASE}/tree/main${path}`;
 }
 
-/**
- * Map a repository-relative `.md` target (already resolved against the repository
- * root, with a leading slash) to a site route.
- */
+/** Stable anchor for a file displayed on an example page. */
+export function fileAnchor(path: string): string {
+  return `file-${path
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/-$/, '')
+    .toLowerCase()}`;
+}
+
+/** Rewrites repository links relative to the source files directory. */
+export function rewriteHref(
+  href: string,
+  sourceDirectory: string,
+  exampleFiles: Readonly<Record<string, readonly string[]>> = {},
+): string {
+  let target = href;
+  const github = /^https:\/\/github\.com\/setu-ts\/setu-ts\/(?:blob|tree)\/main\/(.*)$/.exec(href);
+  if (github) target = github[1];
+  else if (/^(?:[a-z][a-z0-9+.-]*:|#|\/)/i.test(href)) return href;
+  const { path, anchor } = stripAnchor(target);
+  if (path === '') return href;
+  const joined = normalizeJoined(github ? '' : sourceDirectory, path);
+  if (joined === '/README.md') return withAnchor('/', anchor);
+  if (joined === '/apps' || joined === '/apps/README.md') return withAnchor('/examples/', anchor);
+  const rootRoutes: Readonly<Record<string, string>> = {
+    '/CHANGELOG.md': '/changelog/',
+    '/ARCHITECTURE.md': '/architecture/',
+    '/PUBLIC_API.md': '/public-api/',
+  };
+  if (Object.hasOwn(rootRoutes, joined)) return withAnchor(rootRoutes[joined], anchor);
+  if (joined === '/docs/api' || joined.startsWith('/docs/api/'))
+    return withAnchor(joined.slice(5) + (path.endsWith('/') ? '/' : ''), anchor);
+  if (/^\/docs\/[^/]+\.mdx?$/.test(joined)) return withAnchor(resolvedMdToRoute(joined), anchor);
+  if (joined === '/packages' || joined === '/packages/starters') return '/packages/';
+  const pkg = /^\/packages\/(?:starters\/)?([^/]+)(?:\/(README\.md|AGENT_CARD\.md))?$/.exec(joined);
+  if (pkg)
+    return withAnchor(
+      `/packages/${pkg[1]}/${pkg[2] === 'AGENT_CARD.md' ? 'agent-card/' : ''}`,
+      anchor,
+    );
+  const app = /^\/apps\/([^/]+)(?:\/(.*))?$/.exec(joined);
+  if (app) {
+    if (!app[2] || app[2] === 'README.md') return withAnchor(`/examples/${app[1]}/`, anchor);
+    const shown = exampleFiles[app[1]]?.find(
+      (file) => file === app[2] || file.startsWith(`${app[2]}/`),
+    );
+    if (shown) return `/examples/${app[1]}/#${fileAnchor(shown)}`;
+  }
+  return /\.[a-z0-9]+$/i.test(joined)
+    ? githubBlob(joined, anchor)
+    : withAnchor(githubTree(joined), anchor);
+}
+
+/** Maps a resolved guide Markdown path to its site route. */
 export function resolvedMdToRoute(resolved: string): string {
-  if (resolved === '/docs/README.md' || resolved === '/docs/README') {
-    return '/docs/';
-  }
-  if (resolved.startsWith('/docs/')) {
-    return `/docs/${resolved.slice('/docs/'.length).replace(/\.md$/, '')}/`;
-  }
-  if (resolved === '/README.md') {
-    return '/';
-  }
-  // Root-level docs and anything unrendered fall through to GitHub. Callers decide
-  // blob-vs-tree for non-.md targets; this function is only called for .md paths.
-  return resolved;
+  if (/^\/docs\/README(?:\.md)?$/i.test(resolved)) return '/docs/';
+  if (resolved.startsWith('/docs/')) return `/docs/${resolved.slice(6).replace(/\.mdx?$/, '')}/`;
+  if (resolved === '/README.md') return '/';
+  const roots: Readonly<Record<string, string>> = {
+    '/ARCHITECTURE.md': '/architecture/',
+    '/PUBLIC_API.md': '/public-api/',
+    '/CHANGELOG.md': '/changelog/',
+  };
+  return roots[resolved] ?? resolved;
+}
+
+/** Rewrites rendered Markdown without changing its canonical source. */
+export function rewriteDocsHtml(
+  html: string,
+  sourceDirectory: string,
+  exampleFiles: Readonly<Record<string, readonly string[]>> = {},
+): string {
+  return html.replace(
+    /(<(?:a|link|area)\b[^>]*\shref=)(["'])(.*?)\2/gi,
+    (match, before: string, quote: string, href: string) => {
+      const rewritten = rewriteHref(href, sourceDirectory, exampleFiles);
+      return rewritten === href ? match : `${before}${quote}${rewritten}${quote}`;
+    },
+  );
 }
 
 /**
- * Rewrite one `href` found in the rendered HTML of `docs/<sourceName>.md`.
- * Returns the input unchanged when no rewrite applies (hashes, absolute URLs,
- * site-absolute paths).
+ * Sends an in-page `#fragment` link to `route` when the page has no element with that id.
+ * A page assembled from part of a document (a package page's slice of PUBLIC_API.md) keeps
+ * links to sections it does not include; those sections live on the full document's route.
  */
-export function rewriteHref(href: string, _sourceName: string): string {
-  if (
-    href.startsWith('#') ||
-    href.startsWith('http://') ||
-    href.startsWith('https://') ||
-    href.startsWith('mailto:') ||
-    href.startsWith('/')
-  ) {
-    return href;
-  }
-
-  const { path, anchor } = stripAnchor(href);
-  if (path === '') {
-    return href;
-  }
-
-  // The source file is always docs/<sourceName>.md (the hub is docs/README.md), so
-  // every relative link resolves against the /docs directory.
-  const joined = normalizeJoined('/docs', path);
-  const isMd = joined.endsWith('.md') || joined.endsWith('.mdx');
-
-  if (isMd) {
-    // Root-level README renders as the landing page; guides under /docs/ get routes;
-    // every other root-level doc (ARCHITECTURE, PUBLIC_API, CHANGELOG, …) is browsable
-    // on GitHub and must NOT be mistaken for a site route — both forms start with '/'.
-    if (joined === '/README.md') {
-      return withAnchor('/', anchor);
-    }
-    if (joined.startsWith('/docs/')) {
-      return withAnchor(resolvedMdToRoute(joined.replace(/\.mdx$/, '.md')), anchor);
-    }
-    return githubBlob(joined, anchor);
-  }
-
-  // API reference pages are generated under docs/api/ before the build and then
-  // grafted into the public /api/ subtree. They are part of this site, unlike
-  // ordinary non-Markdown repository files.
-  if (joined === '/docs/api' || joined.startsWith('/docs/api/')) {
-    const route = joined.slice('/docs'.length);
-    return withAnchor(path.endsWith('/') ? `${route}/` : route, anchor);
-  }
-
-  // Non-Markdown repository targets (examples, docker/, k8s/, fixtures, …) are
-  // browsable on GitHub, which redirects blob <-> tree for directories.
-  return githubTree(joined);
-}
-
-/** Rewrite every relative href in a rendered docs page. */
-export function rewriteDocsHtml(html: string, sourceName: string): string {
-  return html.replace(/href="([^"]*)"/g, (match, href: string) => {
-    const rewritten = rewriteHref(href, sourceName);
-    return rewritten === href ? match : `href="${rewritten}"`;
-  });
+export function retargetMissingFragments(html: string, route: string): string {
+  const ids = new Set([...html.matchAll(/\sid=(["'])(.*?)\1/g)].map((match) => match[2]));
+  return html.replace(
+    /(<a\b[^>]*\shref=)(["'])#(.*?)\2/gi,
+    (match, before: string, quote: string, fragment: string) =>
+      ids.has(decodeURIComponent(fragment))
+        ? match
+        : `${before}${quote}${route}#${fragment}${quote}`,
+  );
 }
 
 /** Decode the HTML entities emitted by the Markdown renderer into metadata text. */

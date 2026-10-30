@@ -3,7 +3,11 @@ import type { DerivedNames, GeneratedFile, SchematicOptions } from './registry.t
 import { generatorMode } from '../utils/generator-mode.ts';
 import { MODULES_DIR } from '../utils/module-scanner.ts';
 import { renderModuleBarrel } from './module-barrel.ts';
-import { renderFunctionalModuleBarrel, renderFunctionalModuleIndex } from '../seams/modules.ts';
+import {
+  renderClassModuleIndex,
+  renderFunctionalModuleBarrel,
+  renderFunctionalModuleIndex,
+} from '../seams/modules.ts';
 import { moduleService, moduleRoutes, moduleSchemas, moduleController } from './module-files.ts';
 import { renderModuleTest, renderModuleE2e, renderTestServer } from './test-harness.ts';
 
@@ -16,21 +20,16 @@ import { ${names.pascal}Service } from './${names.kebab}.service.ts';
 /**
  * The ${names.kebab} module.
  *
- * Add controllers and providers here. The CLI never rewrites this declaration;
- * importing another module activates its controllers and providers too.
+ * \`setu g controller … --module ${names.kebab}\` and \`setu g service … --module ${names.kebab}\`
+ * append to these arrays while they are plain array literals; anything else is
+ * left as you wrote it. Importing another module activates its controllers and
+ * providers too.
  */
 @Module({
   controllers: [${names.pascal}Controller],
   providers: [${names.pascal}Service],
 })
 export class ${names.pascal}Module {}
-`;
-}
-
-function classIndex(names: DerivedNames): string {
-  return `export { ${names.pascal}Controller } from './${names.kebab}.controller.ts';
-export { ${names.pascal}Module } from './${names.kebab}.module.ts';
-export { ${names.pascal}Service } from './${names.kebab}.service.ts';
 `;
 }
 
@@ -52,7 +51,7 @@ export function generateModule(
       contents: moduleService(names, validation, classBased),
     },
     {
-      path: `${dir}/${names.kebab}.${classBased ? 'controller' : 'routes'}.ts`,
+      path: `${dir}/${names.kebab}.controller.ts`,
       contents: classBased
         ? moduleController(names, validation, exceptions)
         : moduleRoutes(names, validation, exceptions),
@@ -63,9 +62,9 @@ export function generateModule(
     {
       path: `${dir}/index.ts`,
       contents: classBased
-        ? classIndex(names)
-        : renderFunctionalModuleIndex(names, { route: [names.kebab] }),
-      ...(classBased ? {} : { managed: true }),
+        ? renderClassModuleIndex(names, { controller: [names.kebab] })
+        : renderFunctionalModuleIndex(names, { controller: [names.kebab] }),
+      managed: true,
     },
     {
       path: `${MODULES_DIR}/index.ts`,

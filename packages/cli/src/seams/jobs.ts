@@ -1,4 +1,5 @@
 /** Functional queue processors, built from the application's service registry. */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -9,7 +10,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export consumed by `QueuePlugin({ processors })`. */
 export const QUEUE_PROCESSORS_EXPORT = 'QUEUE_PROCESSORS';
@@ -34,7 +34,7 @@ function renderJobsBarrel(artifacts: SeamArtifacts): string {
       renderExportedArray(
         QUEUE_PROCESSORS_EXPORT,
         'QueueProcessorEntry',
-        names.map((name) => `create${deriveNames(name).pascal}JobProcessor`),
+        names.map((name) => `create${artifactNames(name).pascal}JobProcessor`),
       ),
     ],
   );

@@ -89,6 +89,11 @@ function lines(finding: Finding): readonly string[] {
         '  Restore a regular, classifiable barrel under 1 MiB, then run `setu sync`.',
       ];
     case 'artifact-unreadable':
+      if (['unsafe-directory', 'depth-limit', 'unreadable-directory'].includes(f.reason))
+        return [
+          `Skipped directory ${escapeName(f.path)}: ${f.reason === 'unsafe-directory' ? 'its path cannot be verified without following a link inside the project' : f.reason === 'depth-limit' ? 'it exceeds the scan limit of 8 subdirectories' : 'it cannot be read'}.`,
+          '  Restore an ordinary readable directory within the scan limit; `setu sync` preserves its barrel until then.',
+        ];
       return [
         `Cannot read ${escapeName(f.path)}: ${f.reason}, so whether it is wired cannot be checked.`,
         '  Restore a regular, readable file under 1 MiB; `setu sync` will not rewrite its barrel until then.',
@@ -105,6 +110,21 @@ function lines(finding: Finding): readonly string[] {
       ];
     case 'check-config-invalid':
       return [`Invalid ${escapeName(f.path)}: ${escapeName(f.entry)}. Nothing was silenced.`];
+    case 'mixed-layout':
+      return [
+        `This project has modules and also keeps controllers or services outside them: ${escapeName(f.files.join(', '))}.`,
+        '  A project keeps them in one place: move them into a module, then run `setu sync`.',
+      ];
+    case 'unresolved-import':
+      return [
+        `${escapeName(f.path)} imports ${escapeName(f.specifier)}, which does not exist.`,
+        '  Run `setu sync` to rewrite it from the files present, or restore the file.',
+      ];
+    case 'duplicate-name':
+      return [
+        `Two ${escapeName(f.family)} files share a base name and would bind one symbol: ${escapeName(f.paths.join(', '))}.`,
+        '  Rename one of them.',
+      ];
     case 'silence-unmatched':
       return [
         `Silence entry ${escapeName(f.entry)} matched no finding.`,
@@ -131,9 +151,11 @@ export function renderGenerateFindings(
           'module-skipped',
           'artifact-invalid',
           'artifact-skipped',
+          'artifact-unreadable',
           'manual-registration',
           'legacy-layout',
           'legacy-registrar',
+          'mixed-layout',
         ].includes(finding.kind)
       )
         for (const line of lines(finding)) error(line);
@@ -182,4 +204,27 @@ export function renderCheckFindings(
     for (const line of rendered.slice(1)) error(line);
   }
   return { errors, warnings };
+}
+
+/**
+ * Prints the duplicate-name refusal a writing command stops on, in the words the
+ * scan used before it became a finding.
+ *
+ * @param diagnosis - The project's diagnosis
+ * @param error - The command's error channel
+ * @returns True when a duplicate was found and the command must stop
+ */
+export function refuseDuplicateNames(
+  diagnosis: ProjectDiagnosis,
+  error: (line: string) => void,
+): boolean {
+  let found = false;
+  for (const finding of diagnosis.findings)
+    if (finding.kind === 'duplicate-name') {
+      found = true;
+      error(
+        `Duplicate ${escapeName(finding.family)} base name: ${finding.paths.map(escapeName).join(', ')}. Rename one file before generating or syncing.`,
+      );
+    }
+  return found;
 }

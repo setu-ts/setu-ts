@@ -55,4 +55,7 @@ await app.start({ port: 3000 });
 
 - `featureFlags`, `notifications`, `multiTenancy`, `reactRouter` and `static` are gated arms.
 - REST and microservice options pass through; omitted always-on arms use plugin defaults.
+- The microservice tier's `messaging` and `queue` pick the broker and queue backend;
+  `setu add messaging --broker <name>` and `setu add queue --queue <name>` write them into a
+  generated `setu.config.ts`.
 - `buildFullStackPlugins` returns only the plugins, without error middleware.

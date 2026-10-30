@@ -1,7 +1,7 @@
 # @setu-ts/scheduler-plugin — timed and recurring background jobs
 
-**Add it:** `setu add scheduler` installs it and wires `SchedulerPlugin()` in a recognized
-functional config. It provides `CAPABILITIES.SCHEDULER` (`IScheduler`).
+**Add it:** `setu add scheduler` adds it and wires `SchedulerPlugin()` in a recognized functional
+config. It provides `CAPABILITIES.SCHEDULER` (`IScheduler`).
 
 ## Send a nightly report
 

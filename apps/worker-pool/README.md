@@ -15,3 +15,6 @@ control, and the budget reported through `/health`.
 
 Wait for the task promise to settle before reading shared memory. A timeout kills the worker and may
 leave a partial write; concurrent access requires an Atomics protocol.
+
+Read the [example deep dive](../../docs/examples.md#worker-pool) for the concept and source
+walkthrough.

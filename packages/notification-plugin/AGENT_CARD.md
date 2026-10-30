@@ -1,6 +1,6 @@
 # @setu-ts/notification-plugin — fan out notifications across channels
 
-**Add it:** `setu add notification` installs it and prints the registration for `setu.config.ts`;
+**Add it:** `setu add notification` adds it and prints the registration for `setu.config.ts`;
 configure `NotificationPlugin({ channels: { email: { provider: 'mail' } } })` with mail already
 registered. It provides `CAPABILITIES.NOTIFICATION` (`INotifier`).
 

@@ -1,7 +1,7 @@
 # @setu-ts/events-plugin — in-process domain events
 
-**Add it:** `setu add events` installs it and wires `EventsPlugin()` in a recognized functional
-config. It provides `CAPABILITIES.EVENTS` (`IEventBus`).
+**Add it:** `setu add events` adds it and wires `EventsPlugin()` in a recognized functional config.
+It provides `CAPABILITIES.EVENTS` (`IEventBus`).
 
 ## Publish a domain fact from a route
 
