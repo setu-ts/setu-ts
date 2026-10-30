@@ -1,5 +1,7 @@
 # Serverless: AWS Lambda and Azure Functions
 
+<!-- version:history -->
+
 Setu-TS has no Lambda or Azure Functions adapter package, and these recipes do not need one. A Setu
 application already answers web-standard requests through `app.fetch(request)`, and `app.start()`
 without a port boots it without opening a socket. Each recipe below is the glue between that and one

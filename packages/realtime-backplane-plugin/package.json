@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/realtime-backplane-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Cross-replica fan-out so WebSocket rooms and SSE channels reach every instance",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/rest-starter",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "createRestApp — a pre-wired REST plugin set with per-plugin option arms",
   "repository": {
     "type": "git",

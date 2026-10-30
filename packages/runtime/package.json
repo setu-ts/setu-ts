@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/runtime",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Runtime services and HTTP adapters for Node.js, Deno, Bun, and Cloudflare Workers",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/metrics-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Prometheus counters, gauges, histograms, and summaries with built-in HTTP metrics",
   "repository": {
     "type": "git",

@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/events-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "In-process domain event bus with typed handlers",
   "repository": {
     "type": "git",

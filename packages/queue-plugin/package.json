@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/queue-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Background jobs over memory, Redis, or RabbitMQ, with retries and cron scheduling",
   "repository": {
     "type": "git",

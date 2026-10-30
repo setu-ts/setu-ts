@@ -2,7 +2,7 @@
 
 The CHANGELOG answers "what changed in the framework"; this guide answers "what must I change in
 **my** project". A release that demands reader action adds an entry here, version by version — that
-is a release step ([releasing.md](./releasing.md)), not a memory exercise.
+is a release step, not a memory exercise.
 
 Each heading names the release that **shipped** the change, so an upgrade spanning several releases
 is the union of every section between the version you are on and the one you are moving to.
@@ -10,7 +10,7 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
-## Unreleased
+## 0.11.0
 
 ### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)
 
@@ -494,7 +494,11 @@ application without `DiPlugin` is unaffected.
 - **Shutdown and streamed responses.** A streamed response whose request used a scope stays
   in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
 
+<!-- version:history -->
+
 ## 0.10.0
+
+<!-- version:history -->
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)
 
@@ -517,6 +521,8 @@ floor, it does not enforce it. The fixes are in Node itself, so no Setu-TS code 
   reaches the Brotli decoder flaw (CVE-2026-111497, rated High, out-of-bounds write) through any
   outbound call: the SDK client, OIDC discovery and key-set fetches, Consul and Kubernetes
   discovery, Vault, and the SendGrid, Twilio, FCM and Slack providers.
+
+<!-- version:history -->
 
 ### Declared `@ApiOperation` ids and descriptions (0.10.0)
 
@@ -546,6 +552,8 @@ Check SDK names as well: declared `getUsers` beside undeclared `GET /users` (der
 valid OpenAPI, but `generateOpenApiClient` refuses it with `Duplicate operation name` because both
 sanitize to `getUsers`. Choose ids with distinct sanitized TypeScript names.
 
+<!-- version:history -->
+
 ### Environment secrets fall back to config (V9-77, 0.10.0, `@setu-ts/secrets-plugin`)
 
 When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in
@@ -571,6 +579,8 @@ environment. Only string config values qualify. On Workers, config normally cont
 bindings as `runtime.env` and adds no keys; an injected `ConfigPlugin({ instance })` or another
 `IConfig` provider can supply additional keys. `envFilePath` requires filesystem support.
 
+<!-- version:history -->
+
 ### Declare JSON media types on validated bodies (M114, 0.10.0, `@setu-ts/validation-plugin`)
 
 Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes
@@ -583,6 +593,8 @@ instead of 400; `{ forms: true }` still opts that validator into form bodies. Ro
 `ctx.request.json()` directly are unchanged. Replacement `IValidationService` implementations own
 their media-type handling. Cookie-authenticated routes still need `csrfMiddleware` or
 `csrfFormMiddleware`.
+
+<!-- version:history -->
 
 ### Refresh generated output for M114 (0.10.0, `@setu-ts/cli`, `@setu-ts/validation-plugin`)
 
@@ -630,6 +642,8 @@ call to add.
   `validation-plugin` and added by `setu add validation` on every runtime; `setu g module` and
   `setu g schema` print the runtime's install command in a project that lacks it.
 
+<!-- version:history -->
+
 ### Refresh generated output for M113h (0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
 
 New scaffolds emit the corrected output; an existing project keeps working, and these steps are what
@@ -655,6 +669,8 @@ adopts the fixes.
   record stays "unknown", so its Kubernetes probes stay `tcpSocket` and its Prometheus annotations
   stay off until you set the fields.
 
+<!-- version:history -->
+
 ### Add a `create<Pascal>JobProcessor` export to existing job modules, and expect `--dry-run` to exit 1 on a collision (M113i, 0.10.0, `@setu-ts/cli`)
 
 **Standalone job modules in a functional project with `queue-plugin`.** `setu generate job` now
@@ -670,6 +686,8 @@ would refuse to overwrite and exits 1 when any exists, matching `setu adopt`; be
 `would create` for every file and exited 0 before the existing-file check ran. A script or CI step
 that ran a dry run over files that already exist and expected exit 0 must handle the new exit 1. A
 clean dry run still exits 0, printing the `would create` / `would update` / `unchanged` lines.
+
+<!-- version:history -->
 
 ### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
 
@@ -689,6 +707,8 @@ no executable entry block: call from code holding bindings or use `wrangler d1 m
 
 Discovery warm-cache outages now keep the indicator `up`. If you alerted on `degraded`, inspect
 `data.degraded` and `data.reachable` instead; `/ready` keeps serving warm replicas.
+
+<!-- version:history -->
 
 ### Review `IRequest.ip`, rate-limit buckets and loader URLs (M113n, 0.10.0, breaking)
 
@@ -931,6 +951,8 @@ import { waitUntil } from 'cloudflare:workers';
 return createApp(env, waitUntil);
 ```
 
+<!-- version:history -->
+
 A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
 rename it to `waitUntil` when you add the registration.
 
@@ -963,6 +985,8 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   production value with `npx wrangler secret put SESSION_SECRET`.
 
 ### Readiness and `RedisRateLimitStore` outage migration (M113b)
+
+<!-- version:history -->
 
 - **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
   previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
@@ -1006,6 +1030,8 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
   non-fatal.
 
+<!-- version:history -->
+
 ### `ReactRouterPluginOptions` is a union type (0.10.0, `@setu-ts/react-router-plugin`)
 
 `ReactRouterPluginOptions` changed from an `interface` to a union `type`
@@ -1014,11 +1040,15 @@ does `interface X extends ReactRouterPluginOptions` no longer compiles (TS2312);
 `type X = ReactRouterPluginOptions & { … }` instead. A caller passing `serverBuildPath` is
 unaffected.
 
+<!-- version:history -->
+
 ### The SDK generator prefixes operations named `client` or `encodeURIComponent` (0.10.0, `@setu-ts/sdk`)
 
 An operation whose method name is `client` or `encodeURIComponent` is emitted as `_client` or
 `_encodeURIComponent`; before, `client` was a duplicate identifier and `encodeURIComponent` shadowed
 the global every generated path calls. Callers of those operations change after regenerating.
+
+<!-- version:history -->
 
 ### `agents` is a built-in CLI command (0.10.0, `@setu-ts/cli`)
 

@@ -24,7 +24,7 @@ Enterprise architecture without the weight. Runtime freedom without the chaos.
 
 ---
 
-> [!IMPORTANT] **Status: `v0.10.0` publishes 52 packages to npm under `@setu-ts`.** Versions
+> [!IMPORTANT] **Status: `v0.11.0` publishes 52 packages to npm under `@setu-ts`.** Versions
 > published before the move to npm remain on JSR, and nothing new is published there.
 >
 > <!-- version:history -->
@@ -197,16 +197,16 @@ Every ✅ row is a package in this repository with 90%+ test coverage on branch,
 
 ```bash
 # Node (pnpm add / yarn add work the same way)
-npm install @setu-ts/kernel@^0.10.0 @setu-ts/runtime@^0.10.0
+npm install @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
 
 # Bun
-bun add @setu-ts/kernel@^0.10.0 @setu-ts/runtime@^0.10.0
+bun add @setu-ts/kernel@^0.11.0 @setu-ts/runtime@^0.11.0
 
 # Deno
-deno add npm:@setu-ts/kernel@^0.10.0 npm:@setu-ts/runtime@^0.10.0
+deno add npm:@setu-ts/kernel@^0.11.0 npm:@setu-ts/runtime@^0.11.0
 ```
 
-**The `@^0.10.0` is recommended, not required.** npm points `latest` at the current release, so a
+**The `@^0.11.0` is recommended, not required.** npm points `latest` at the current release, so a
 bare `npm install @setu-ts/kernel` resolves without a version. Pin anyway if you would rather meet
 the next breaking release as a deliberate upgrade than as a surprise — see
 [Versioning](#versioning). Earlier releases are on JSR only; see the
@@ -253,7 +253,7 @@ Setu-TS is pre-1.0, and the version number says exactly what that means:
 | **Minor** — `0.5` → `0.6`    | Breaking changes. Every one is listed in [CHANGELOG.md](CHANGELOG.md) with migration text. |
 | **Patch** — the third number | Fixes and additions only. Safe to take without reading anything.                           |
 
-Under semver a `^0.10.0` range means `>=0.10.0 <0.11.0`, so a caret pin absorbs patches and stops at
+Under semver a `^0.11.0` range means `>=0.11.0 <0.12.0`, so a caret pin absorbs patches and stops at
 the next breaking release. That is the intended way to depend on this project today.
 
 <!-- version:history -->
@@ -276,7 +276,7 @@ Node/Bun compatibility suites as release gates. Until then, read the CHANGELOG b
 ## Quick Example
 
 A small application — the kernel, a runtime, and a logger. Add the logger to the two packages
-installed above (`npm install @setu-ts/logger-plugin@^0.10.0`), save this as `main.ts`:
+installed above (`npm install @setu-ts/logger-plugin@^0.11.0`), save this as `main.ts`:
 
 ```typescript
 import { createApplication } from '@setu-ts/kernel';

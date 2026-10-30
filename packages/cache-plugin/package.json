@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/cache-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Cache over memory (LRU), Redis, or noop, with transparent response caching",
   "repository": {
     "type": "git",

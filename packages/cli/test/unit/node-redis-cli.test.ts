@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VERSION } from '../../src/version.ts';
 import baseline from '../fixtures/redis-develop-outputs.json' with { type: 'json' };
 import { redisDefaultOutputs } from '../fixtures/redis-default-outputs.ts';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
@@ -28,6 +29,11 @@ function harness() {
       }),
   };
 }
+
+const VERSION_PIN = new RegExp(
+  String.raw`(@setu-ts/[a-z0-9-]+@\^?|\x22@setu-ts/[a-z0-9-]+\x22: \x22\^?)0\.10\.0`,
+  'g',
+);
 
 describe('node-redis CLI', () => {
   it('renders the client call in the layout each project formatter keeps', () => {
@@ -206,7 +212,16 @@ describe('node-redis CLI', () => {
         `      QueuePlugin({\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'redis',\n        ${joined},\n      }),\n`,
       ],
     };
-    const expected: Record<string, string> = { ...baseline };
+    // The capture pins the framework at the release it was taken on; generated output
+    // pins the running CLI's version, so only that version token is normalized.
+    const expected: Record<string, string> = Object.fromEntries(
+      Object.entries(baseline).map(([path, text]) => [
+        path,
+        // Built from a string with \x22 for the double quote: the manifest generator's
+        // import scanner misreads a quote inside a regex literal as a string opening.
+        text.replace(VERSION_PIN, `$1${VERSION}`),
+      ]),
+    );
     for (const [path, [before, after]] of Object.entries(relaid)) {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);

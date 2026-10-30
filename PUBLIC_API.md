@@ -325,6 +325,8 @@ an injected multipart upload parse as an empty form.
 
 ## Shared reconnect supervisor (`@setu-ts/common`)
 
+<!-- version:history -->
+
 Since 0.10.0, common exports `ReconnectSupervisor`, `ReconnectSupervisorOptions`, `ReconnectMode`
 and `fullJitterDelay(attempt, initialMs, maxMs)`. Messaging's RabbitMQ, NATS and Kafka brokers and
 the RabbitMQ queue adapter share this implementation. Messaging does not re-export these symbols.
@@ -379,6 +381,8 @@ app.register(
 
 ### Deno shutdown
 
+<!-- version:history -->
+
 Since 0.10.0, Deno adapter `close()` waits for the first of `shutdown()` and a 1000 ms grace,
 catching a rejected shutdown. After the kernel's bounded drain, shutdown and close hooks can run
 while a request is still in flight. Register resource cleanup in lifecycle hooks.
@@ -405,6 +409,8 @@ cause and the wrong remedy. `@setu-ts/graphql-plugin`'s two HTTP transports answ
 serves the hint through `respondWithError`.
 
 ### Reporting a failed WebSocket handshake
+
+<!-- version:history -->
 
 `HttpAdapterOptions.reportError?: (record: Readonly<Record<string, unknown>>) => void`
 (`@since 0.10.0`) is a last-resort sink for a server-side Node handshake failure: `ws` is not
@@ -2578,6 +2584,8 @@ against a real server (SQLSTATE `40001` through Drizzle and Prisma's `P2034` ali
 reproducible against DynamoDB Local or the local emulator, and Cosmos's connect refusal is a startup
 failure that never reaches a client.
 
+<!-- version:history -->
+
 **A timed-out query answers `504 Gateway Timeout` (M113g, V9-33).** `DatabaseService` classifies
 node-postgres's `query_timeout` firing — the driver's `Query read timeout` rejection — as a new
 `timeout` kind and throws `DatabaseTimeoutError`, branded `504 Gateway Timeout` with the fixed
@@ -2856,6 +2864,8 @@ registered under the same name); it then SEALS the registry, so `define` after `
 scanned: a route added after `start()` and a guard added as global middleware — an unknown name
 there rejects per request (fail closed). A policy is identified by its NAME. See
 [Authorization](docs/authorization.md).
+
+<!-- version:history -->
 
 **Scoped RBAC (M110b).** `scopedRbac` (requires `rbac`) grants a catalogue role IN a scope — a
 `ScopeRef { type, id }` naming a tenant, organisation, team or region — rather than everywhere.
@@ -4624,6 +4634,8 @@ package README's "What `SameSite` does not separate".
 
 ### Notes
 
+<!-- version:history -->
+
 - **`ISessionService.fromHeaders(headers)` is the headers-only read for non-HTTP entry points.** It
   opens the session from a `Headers` object alone — a WebSocket `onOpen` handler, an auth strategy
   reading a cookie — and returns a read-only `SessionView` (`{ id, data }`) or `null`. It runs the
@@ -4775,6 +4787,8 @@ app.router.get('/api/health', (ctx) => {
 ```
 
 ### Options
+
+<!-- version:history -->
 
 | Option                | Type                                                         | Default        | Description                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -6122,6 +6136,7 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
 
 // ── Kafka ────────────────────────────────────────────────────────────────────────────
 interface KafkaMessagingOptions extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -6168,6 +6183,7 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
 interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -6201,6 +6217,7 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
 interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -7478,12 +7495,16 @@ prefix. Use a distinct prefix per application on a shared Redis. It must be a no
 most 128 characters with no control characters; invalid values throw `RangeError` at adapter or
 Redis plugin construction. The RabbitMQ-only `prefix` option does not configure Redis.
 
+<!-- version:history -->
+
 **RabbitMQ recovery (0.10.0).** Connection or channel faults drive automatic reconnect with
 full-jitter backoff through the common supervisor. Readiness reports down during the fault window.
 An injected connection receives only a new channel. Successful recovery clears local delivery
 bookkeeping and lazily re-declares queues. Unacked jobs return to the broker for at-least-once
 redelivery, possibly with the original attempt count. Disconnect stops scheduled retries and
 disposes listeners.
+
+<!-- version:history -->
 
 **Delivery claims (0.10.0).** RabbitMQ uses a fresh runtime UUID for each delivery. Redis 5+ uses
 atomic Lua scripts, server `TIME` for lease deadlines, the reserving replica's `nowMs` (the clock
@@ -9721,6 +9742,8 @@ app.register(
 
 ### Operation ids and descriptions
 
+<!-- version:history -->
+
 Optional `RouteSchema.operationId` and `RouteSchema.description` (since 0.10.0) carry programmatic
 declarations and `@ApiOperation({ operationId, description })` metadata. The id is used verbatim;
 without it, ids keep the derived method/path format (`GET /users/:id` → `get-users-by-id`). The
@@ -9732,6 +9755,8 @@ neither claim nor collide. `OpenApiGenerator.generate(routes)` throws `Operation
 (empty or whitespace-only) or duplicate declared ids. `OpenApiPlugin` performs the same route scan
 at bootstrap, failing `start()` without building or caching a document. A route added after
 bootstrap is checked when the document is first built; a failure then answers `500`.
+
+<!-- version:history -->
 
 `OperationIdError extends Error` is exported from `@setu-ts/openapi-plugin` (since 0.10.0). Its
 constructor is `(reason: 'duplicate' | 'blank', message: string)`; readonly `reason` names the
@@ -12551,6 +12576,8 @@ reaches `redactors[<string>]`):
 
 ### Values (runtime exports)
 
+<!-- version:history -->
+
 | Export                                                 | Kind                                                                                                                                                                                                                                                                                                                                                                                                                                      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CAPABILITIES`                                         | const                                                                                                                                                                                                                                                                                                                                                                                                                                     | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107), `INBOX: 'inbox'` (consumer inbox, `inbox.<name>` for a named messaging instance, M108)                                                                                                                                                                                                                                                                                                                                        |
@@ -12745,6 +12772,8 @@ documented live `snapshot.headers` view; snapshots with explicitly mutated or re
 that existing path unchanged.
 
 Contract notes:
+
+<!-- version:history -->
 
 - `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
   so every plugin may rely on it (ARCHITECTURE.md §7).
@@ -14327,7 +14356,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-npm install @setu-ts/sdk@^0.10.0
+npm install @setu-ts/sdk@^0.11.0
 ```
 
 ### createClient()

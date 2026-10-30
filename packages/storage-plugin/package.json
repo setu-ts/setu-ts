@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/storage-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Object storage over S3, B2, GCS, Azure Blob, local, or memory, with uploads",
   "repository": {
     "type": "git",

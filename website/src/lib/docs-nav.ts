@@ -32,7 +32,10 @@ export const DOCS_NAV: DocsNavGroup[] = [
   },
   {
     label: 'Tooling',
-    items: [{ slug: 'cli', label: 'CLI — setu' }],
+    items: [
+      { slug: 'cli', label: 'CLI — setu' },
+      { slug: 'react-router-dev', label: 'React Router dev mode' },
+    ],
   },
   {
     label: 'Plugin reference',
@@ -62,14 +65,6 @@ export const DOCS_NAV: DocsNavGroup[] = [
       { slug: 'serverless', label: 'Lambda & Azure Functions' },
       { slug: 'telemetry-collector-fanout', label: 'Telemetry fan-out' },
       { slug: 'messaging-emulators', label: 'Messaging emulators' },
-    ],
-  },
-  {
-    label: 'Operations',
-    items: [
-      { slug: 'releasing', label: 'Release runbook' },
-      { slug: 'code-review-audit', label: 'Code review audit' },
-      { slug: 'react-router-dev', label: 'React Router dev' },
     ],
   },
 ];

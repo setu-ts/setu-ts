@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/cloudflare-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Cloudflare bindings: KV, R2, D1, Queues, Cron, Cache API, and Durable Objects",
   "repository": {
     "type": "git",

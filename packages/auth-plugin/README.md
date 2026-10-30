@@ -279,6 +279,8 @@ app.router.get('/orgs/:orgId', {
 });
 ```
 
+<!-- version:history -->
+
 Several roles are any-of, several permissions all-of. A guard naming a permission or role outside
 the catalogue fails `app.start()`. Grant sources (`static`, `claims`, `custom` — including
 `createDatabaseGrantSource` from `@setu-ts/database-plugin`) are unioned, and **one failing source

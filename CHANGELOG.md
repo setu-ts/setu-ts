@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-30
+
 ### Added
 
 - **Start a project from an example (#528, `@setu-ts/cli`).** `setu new <name> --example <app>`

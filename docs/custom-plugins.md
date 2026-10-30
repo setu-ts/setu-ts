@@ -577,10 +577,10 @@ my-plugin/
   "files": ["dist"],
   "scripts": { "build": "tsc" },
   "peerDependencies": {
-    "@setu-ts/common": "^0.10.0"
+    "@setu-ts/common": "^0.11.0"
   },
   "devDependencies": {
-    "@setu-ts/common": "^0.10.0",
+    "@setu-ts/common": "^0.11.0",
     "typescript": "^6.0.3"
   }
 }

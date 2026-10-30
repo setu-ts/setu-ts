@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/http-security-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "CORS, security headers, CSRF, request-size limits, and IP rules",
   "repository": {
     "type": "git",

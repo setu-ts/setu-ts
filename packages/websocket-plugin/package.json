@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/websocket-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Full-duplex WebSocket on all four runtimes, with rooms, heartbeat, and limits",
   "repository": {
     "type": "git",

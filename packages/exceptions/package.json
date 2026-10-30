@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/exceptions",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Exception hierarchy, RFC 9457 Problem Details, and the error-handler middleware",
   "repository": {
     "type": "git",
