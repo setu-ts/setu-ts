@@ -13,7 +13,12 @@ const CALL = '  registerGeneratedRoutes(app.router, app.services);\n';
 
 describe('viewRegistrationAdvice', () => {
   it('says what to change for each way the registration can be missing', () => {
-    const cases: readonly (readonly [string, string, string | undefined, readonly string[]])[] = [
+    const cases: readonly (readonly [
+      string,
+      string | undefined,
+      string | undefined,
+      readonly string[],
+    ])[] = [
       ['a wired flat config', FLAT, undefined, []],
       ['a modular config', withModularRegistration(FLAT, 'functional')!, 'shop', []],
       [
@@ -67,7 +72,24 @@ describe('viewRegistrationAdvice', () => {
         ],
       ],
     ];
-    for (const [label, config, module, expected] of cases)
+    const aliased = FLAT.replace(
+      IMPORT,
+      "import { registerGeneratedRoutes as wireRoutes } from './src/controllers/index.ts';",
+    ).replace('  registerGeneratedRoutes(app.router', '  wireRoutes(app.router');
+    const more: typeof cases = [
+      ['an aliased import called by its local name', aliased, undefined, []],
+      [
+        'no setu.config.ts',
+        undefined,
+        'shop',
+        [
+          'No setu.config.ts: where the application is composed, register /ui with:',
+          "  import { registerModules } from './src/modules/index.ts';",
+          '  registerModules(app.router, app.services);',
+        ],
+      ],
+    ];
+    for (const [label, config, module, expected] of [...cases, ...more])
       expect(viewRegistrationAdvice(config, module), label).toEqual(expected);
   });
 });

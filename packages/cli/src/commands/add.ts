@@ -1889,10 +1889,7 @@ export async function runAddCommand(
     for (const line of plan.notes) deps.log(escapeName(line));
     // The page reaches the router only through the barrel or module index, so the
     // config must import that registrar from it and call it in the factory.
-    if (
-      plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)) &&
-      configSource !== undefined
-    )
+    if (plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)))
       for (const line of viewRegistrationAdvice(configSource, module)) deps.log(line);
   }
 
@@ -2130,26 +2127,42 @@ function printAddHelp(log: (message: string) => void): void {
  * controller: it must import the registrar from the barrel or module index the
  * controller joined, and call it inside the generated factory.
  *
- * @param config - The current `setu.config.ts`
+ * @param config - The current `setu.config.ts`, or undefined when the project has none
  * @param module - The module the controller joined, or undefined for a flat project
  * @returns Nothing when the registration is in place, otherwise the guidance
  */
-export function viewRegistrationAdvice(config: string, module: string | undefined): string[] {
+export function viewRegistrationAdvice(
+  config: string | undefined,
+  module: string | undefined,
+): string[] {
   const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
   const specifier = `./${module === undefined ? 'src/controllers' : 'src/modules'}/index.ts`;
+  const call = `  ${registrar}(app.router, app.services);`;
+  const importLine = `  import { ${registrar} } from '${specifier}';`;
+  if (config === undefined)
+    return [
+      'No setu.config.ts: where the application is composed, register /ui with:',
+      importLine,
+      call,
+    ];
   const visible = maskComments(config);
   const factory = factoryScope(config);
   // undefined when the config cannot be classified: the call cannot be verified.
   const body =
     factory === undefined ? maskSourceCode(config) : factory.code.slice(factory.start, factory.end);
-  const sources = [...(visible ?? '').matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2/g)]
-    .filter((match) =>
-      match[1]!.split(',').some((name) => name.trim().split(/\s+as\s+/)[0] === registrar),
-    )
-    .map((match) => match[3]!);
+  // Every import of the registrar, with the local name it is bound to.
+  const bindings = [
+    ...(visible ?? '').matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2/g),
+  ].flatMap((match) =>
+    match[1]!.split(',').flatMap((entry) => {
+      const [name, local] = entry.trim().split(/\s+as\s+/);
+      return name === registrar ? [{ source: match[3]!, local: local ?? name }] : [];
+    }),
+  );
+  const sources = bindings.map((binding) => binding.source);
   const imported = sources.includes(specifier);
-  const call = `  ${registrar}(app.router, app.services);`;
-  const importLine = `  import { ${registrar} } from '${specifier}';`;
+  // An aliased import is called by its local name.
+  const local = bindings.find((binding) => binding.source === specifier)?.local ?? registrar;
   if (visible === undefined || body === undefined)
     return [
       `Cannot verify that setu.config.ts calls ${registrar}, which registers /ui; it needs:`,
@@ -2161,9 +2174,9 @@ export function viewRegistrationAdvice(config: string, module: string | undefine
     return [
       `setu.config.ts imports ${registrar} from ${escapeName(elsewhere)}, but /ui is registered through ${specifier}; import it from there:`,
       importLine,
-      ...(callsIdentifier(body, registrar) ? [] : [call]),
+      ...(callsIdentifier(body, local) ? [] : [call]),
     ];
-  if (callsIdentifier(body, registrar)) return [];
+  if (callsIdentifier(body, local)) return [];
   return [
     `setu.config.ts does not call ${registrar}, so /ui is not registered; add:`,
     ...(imported ? [] : [importLine]),
