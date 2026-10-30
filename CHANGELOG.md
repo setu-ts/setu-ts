@@ -8,8 +8,8 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Start a project from an example (`@setu-ts/cli`).** `setu new <name> --example <app>` (also
-  `npm create @setu-ts <name> -- --example <app>`) downloads an offered example from the CLI's
+- **Start a project from an example (#528, `@setu-ts/cli`).** `setu new <name> --example <app>`
+  (also `npm create @setu-ts <name> -- --example <app>`) downloads an offered example from the CLI's
   GitHub release tag and rewrites it into a standalone Node project. Dry-run fetches nothing; failed
   downloads write nothing. See [Examples](docs/examples.md#before-you-start).
 
@@ -231,10 +231,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Agent brief development guidance (M119i, `@setu-ts/cli`).** Briefs list and gloss development
-  commands, distinguish Workers from socket full-stack development, and include messaging guidance
-  for starter compositions. Workspace roots name the member development entry and production start.
-  Existing projects re-run `setu agents`; `setu agents --check` reports their old briefs stale.
+- **Agent brief development guidance (M119i, #528, `@setu-ts/cli`).** Briefs list and gloss
+  development commands, distinguish Workers from socket full-stack development, and include
+  messaging guidance for starter compositions. Workspace roots name the member development entry and
+  production start. Existing projects re-run `setu agents`; `setu agents --check` reports their old
+  briefs stale.
 - **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, #525, 0.11.0,
   `@setu-ts/scheduler-plugin`).** It declared `Promise<number | string | null>`, which one adapter
   serving the queue's and idempotency's scripts could not honestly satisfy; the lock ignores the
@@ -575,8 +576,8 @@ All notable changes to this project are documented here. The format follows
   is now refused at boot (see the BREAKING entry above); the second registers as a class provider
   with optional `inject` entries.
 
-- **Documentation that matches the code (M119i).** The upgrade guide, guides, READMEs, agent cards
-  and `PUBLIC_API.md` now state what the code does: links into the released `0.10.0` sections
+- **Documentation that matches the code (M119i, #528).** The upgrade guide, guides, READMEs, agent
+  cards and `PUBLIC_API.md` now state what the code does: links into the released `0.10.0` sections
   (V10-7), generated Kubernetes probes (V10-8), `swagger-ui-dist` on Deno (V10-15), the Workers
   full-stack `allowJs` repair (V10-16), which 4xx paths log (V10-39), the module-scoped service
   token `<module>.<name>-service` (V10-38), three missing 0.10.0 upgrade entries (V10-46, V10-47,

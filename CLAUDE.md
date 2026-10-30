@@ -713,7 +713,7 @@ here.
 - **Milestone 119i** (docs + agent cards + `packages/cli` agent briefs + website — documentation
   that does not match the code, or is missing; V10-7…V10-57 rows plus the folded scope: development
   commands in briefs, scaffold-first guides, npm plugin publishing, example walkthroughs) — complete
-  (PR pending).
+  (PR #528).
 - **Next milestone** — none scheduled in ROADMAP.md.
 
 ## Verification (run before declaring any work done)
