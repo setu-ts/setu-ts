@@ -176,7 +176,7 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
  * 3. `ctx.request.ip` — the socket peer on Node, Deno and Bun (M113n), normalized
  *    from IPv4-mapped IPv6. Workers and plain fetch calls have no peer.
  * 4. `'anonymous'`.
- * A forwarded entry that is not an address resolves no client, so the key falls back to the socket peer.
+ * A forwarded entry that is not an address resolves no client, so the key falls back to the socket peer, or `'anonymous'` without one.
  *
  * **The `'anonymous'` fallback makes the limiter one GLOBAL counter** — `max`
  * requests per window across ALL callers, which both starves legitimate traffic
