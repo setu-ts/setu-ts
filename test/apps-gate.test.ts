@@ -866,15 +866,17 @@ describe('M111c npm workflow boundaries', () => {
     const text = await readFile('.github/workflows/release.yml', 'utf8');
     const jobs = '\n' + text.split('\njobs:\n')[1];
     expect(text.split('\njobs:\n')[0]).not.toContain('id-token: write');
-    expect([...jobs.matchAll(/^ {2}([a-z]+):$/gm)].map((m) => m[1])).toEqual([
+    expect([...jobs.matchAll(/^ {2}([a-z-]+):$/gm)].map((m) => m[1])).toEqual([
       'gates',
+      'cli-coverage',
       'publish',
       'release',
     ]);
     const publish = jobs.split('\n  publish:')[1].split('\n  release:')[0];
     expect(text.match(/id-token: write/g)).toHaveLength(1);
     for (const fragment of [
-      'needs: gates',
+      // Every gate shard and the merged CLI coverage, so no partial run publishes.
+      'needs: [gates, cli-coverage]',
       'environment: npm',
       'contents: read',
       'id-token: write',
@@ -904,7 +906,7 @@ describe('M111c npm workflow boundaries', () => {
     expect(text).not.toMatch(/dry_run|inputs\./);
     expect(publish).not.toContain('--dry-run');
     expect(gates).toMatch(
-      /if: github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
+      /if: matrix\.shard == 'release-checks' && github\.event_name == 'workflow_dispatch'\n\s+run: pnpm run release:publish --dry-run/,
     );
   });
   it('pins every action in the release workflow to a full commit SHA', () => {

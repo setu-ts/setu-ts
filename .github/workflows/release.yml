@@ -23,10 +23,20 @@ permissions: {}
 
 jobs:
   gates:
-    name: Release gates
+    # Sharded like ci.yml's `node` job: run as one job, these gates took about 75
+    # minutes on a tag (v0.11.0), and a flaky test cost the whole run again. Each
+    # shard runs the same backends and setup; `publish` needs every shard and the
+    # merged CLI coverage below.
+    name: Release gates (${{ matrix.shard }})
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    strategy:
+      # One failing shard must not cancel the others: the full picture is what
+      # saves a second tag run.
+      fail-fast: false
+      matrix:
+        shard: [static, cli-1, cli-2, cli-3, messaging, packages, deno-lane, tooling, release-checks]
     # The same backend environment as the `node` job in ci.yml, because the
     # gates below re-run that job's suite and it is not the same suite without
     # them. GitHub sets CI=true in EVERY workflow, so `test/apps-gate.test.ts`
@@ -382,62 +392,147 @@ jobs:
           exit 1
 
       - name: Format check
+        if: matrix.shard == 'static'
         run: pnpm run fmt:check
 
       - name: Lint
+        if: matrix.shard == 'static'
         run: pnpm run lint
 
       - name: Type check
+        if: matrix.shard == 'static'
         run: pnpm run check
 
       - name: Async assertion guard
+        if: matrix.shard == 'static'
         run: node scripts/codemods/std-to-vitest.ts --check
 
-      - name: Node package tests with coverage
-        run: pnpm test:coverage
+      # The shard split of ci.yml: `pnpm test:coverage` with no options also runs
+      # the tooling target, so each package shard passes `--no-tooling`, and the
+      # CLI's three shards are merged and held to the per-file bar by `cli-coverage`.
+      - name: Node package tests with coverage (cli-1)
+        if: matrix.shard == 'cli-1'
+        run: pnpm test:coverage --no-tooling cli --shard 1/3
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.shard == 'cli-1'
+        with:
+          name: cli-blob-1
+          path: .vitest-reports/cli/blob-1.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Node package tests with coverage (cli-2)
+        if: matrix.shard == 'cli-2'
+        run: pnpm test:coverage --no-tooling cli --shard 2/3
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.shard == 'cli-2'
+        with:
+          name: cli-blob-2
+          path: .vitest-reports/cli/blob-2.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Node package tests with coverage (cli-3)
+        if: matrix.shard == 'cli-3'
+        run: pnpm test:coverage --no-tooling cli --shard 3/3
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: matrix.shard == 'cli-3'
+        with:
+          name: cli-blob-3
+          path: .vitest-reports/cli/blob-3.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Node package tests with coverage (messaging-plugin)
+        if: matrix.shard == 'messaging'
+        run: pnpm test:coverage --no-tooling messaging-plugin
+
+      - name: Node package tests with coverage (all other members)
+        if: matrix.shard == 'packages'
+        run: pnpm test:coverage --no-tooling --skip cli --skip messaging-plugin
 
       - name: Deno runtime proofs with coverage
+        if: matrix.shard == 'deno-lane'
         run: pnpm run test:deno-lane
 
       - name: Root and script tests with coverage
+        if: matrix.shard == 'tooling'
         run: pnpm run test:tooling:coverage
 
       # ── Consistency ──────────────────────────────────────────────────────
       # The tag and the package versions must agree, or the release notes
       # would describe versions nobody can install.
       - name: Verify tag matches package versions
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: matrix.shard == 'release-checks' && startsWith(github.ref, 'refs/tags/v')
         run: pnpm run release:verify "${GITHUB_REF_NAME#v}"
 
       # Same sweep the PR job runs, on the tree being published. See ci.yml for
       # why manifest checks cannot see these sites.
       - name: Sweep for residual version references
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: matrix.shard == 'release-checks' && startsWith(github.ref, 'refs/tags/v')
         run: pnpm run check:versions "${GITHUB_REF_NAME#v}"
 
       # The artifact is generated before publishing, from the same committed
       # lockfile the frozen install consumed. It is attached below when the
       # GitHub Release object is created.
       - name: Generate resolved-set artifact
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: matrix.shard == 'release-checks' && startsWith(github.ref, 'refs/tags/v')
         run: pnpm run release:resolved-set "${GITHUB_REF_NAME#v}" "$RUNNER_TEMP/resolved-set.json"
 
       # A manual run rehearses the publisher here, where no OIDC token can be
       # requested, instead of in the publish job.
       - name: Rehearse the publisher (manual runs only)
-        if: github.event_name == 'workflow_dispatch'
+        if: matrix.shard == 'release-checks' && github.event_name == 'workflow_dispatch'
         run: pnpm run release:publish --dry-run
 
       - name: Upload resolved-set artifact
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: matrix.shard == 'release-checks' && startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: resolved-set
           path: ${{ runner.temp }}/resolved-set.json
           if-no-files-found: error
 
-  publish:
+  # The CLI's three shards each write a blob; this merges them and enforces the
+  # per-file coverage bar, as ci.yml's job of the same name does.
+  cli-coverage:
     needs: gates
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # Report merging reads local sources and needs no Git credential.
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          version: 12.11.2
+      - name: Frozen dependency install
+        run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: cli-blob-*
+          path: .vitest-reports/cli/
+          merge-multiple: true
+      - name: Require all CLI blobs and enforce merged coverage
+        run: |
+          for i in 1 2 3; do
+            test -f ".vitest-reports/cli/blob-$i.json"
+          done
+          pnpm test:coverage --no-tooling cli --merge
+
+  publish:
+    needs: [gates, cli-coverage]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     environment: npm
     runs-on: ubuntu-latest

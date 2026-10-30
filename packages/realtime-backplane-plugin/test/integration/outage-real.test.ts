@@ -209,6 +209,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
       'rejects, is recorded failed, and publishing recovers — silent and dropped connections',
       {
         skip: REDIS_URL === undefined,
+        // Three 30 s publish waits (baseline, after unpause, after restart), two
+        // 6 s outage settles and the container operations exceed the 30 s default.
+        timeout: 150_000,
       },
       async () => {
         const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
@@ -236,8 +239,16 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         const frame = { kind: 'ws-room' as const, origin: 'x', name: 'lobby', data: 'hi' };
         let paused = false;
         try {
-          await backplane.publish(frame);
-          expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 0 });
+          // The first command on a loaded runner can outlast the short command
+          // bound before anything is paused (seen once on CI as an unattributed
+          // `Command timed out`), so the baseline waits for one publish to land.
+          await waitTrue(
+            () => settleWithin(backplane.publish(frame), 3_000).then((r) => r === 'resolved'),
+            'baseline publish',
+            30_000,
+          );
+          const baseline = publishRecord(source!)!;
+          expect(baseline.succeeded).toBeGreaterThanOrEqual(1);
 
           // (1) SILENT: the socket stays open while the server answers nothing — a
           // paused or partitioned host that sends no reset. Before the command
@@ -247,7 +258,10 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           paused = true;
           const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
           expect(silent).toBe('rejected: Command timed out');
-          expect(publishRecord(source!)).toMatchObject({ succeeded: 1, failed: 1 });
+          expect(publishRecord(source!)).toMatchObject({
+            succeeded: baseline.succeeded,
+            failed: baseline.failed + 1,
+          });
           expect(publishRecord(source!)!.lastDurationMs).toBeGreaterThanOrEqual(
             COMMAND_TIMEOUT_MS - 50,
           );
