@@ -121,9 +121,11 @@ describe('template scaffolding — end to end', () => {
     err = [];
   });
 
+  // The full-stack case leaves an installed node_modules tree; removing it can take longer
+  // than the 30 s default hook timeout on a loaded machine.
   afterEach(async () => {
     await nodeFs.rm(root, { recursive: true });
-  });
+  }, 120_000);
 
   for (const template of listTemplates()) {
     it(`scaffolds a ${template.name} project whose files exist on disk`, async () => {
