@@ -18,6 +18,61 @@ const CANONICAL_MAPPED_IPV4 = /^::ffff:[0-9a-f]{1,4}:[0-9a-f]{1,4}$/;
 /** The characters an IPv6 literal (including an embedded dotted quad) may contain. */
 const IPV6_CHARS = /^[0-9A-Fa-f:.]{2,45}$/;
 
+const IPV4_PART = /^(0|[1-9][0-9]{0,2})$/;
+const PORT = /^[0-9]{1,5}$/;
+
+/**
+ * Validates a port-free IP literal using the same spellings for both header families.
+ * @param address - An IPv4 or unbracketed IPv6 address without a port
+ * @returns The normalized address, or `null` when invalid
+ * @internal
+ */
+export function parseIpLiteral(address: string): string | null {
+  if (address.includes(':')) {
+    if (!IPV6_CHARS.test(address)) return null;
+    try {
+      new URL(`http://[${address}]`);
+    } catch {
+      return null;
+    }
+  } else {
+    const parts = address.split('.');
+    if (parts.length !== 4 || !parts.every((part) => IPV4_PART.test(part) && Number(part) <= 255)) {
+      return null;
+    }
+  }
+  return normalizeIp(address);
+}
+
+/**
+ * Validates one forwarded address, stripping an optional numeric port.
+ * @param entry - An IPv4 or IPv6 entry; IPv6 ports require brackets
+ * @returns The normalized address without a port, or `null` when invalid
+ * @internal
+ */
+export function parseClientAddress(entry: string): string | null {
+  if (entry.startsWith('[')) {
+    const close = entry.indexOf(']');
+    if (close === -1) return null;
+    const address = entry.slice(1, close);
+    const suffix = entry.slice(close + 1);
+    if (!address.includes(':')) return null;
+    if (suffix !== '' && (!suffix.startsWith(':') || !isPort(suffix.slice(1)))) return null;
+    return parseIpLiteral(address);
+  }
+  const colon = entry.indexOf(':');
+  if (colon !== -1 && colon === entry.lastIndexOf(':')) {
+    if (!isPort(entry.slice(colon + 1))) return null;
+    return parseIpLiteral(entry.slice(0, colon));
+  }
+  return parseIpLiteral(entry);
+}
+
+/** Ports use ASCII decimal only, including zero, and fit an unsigned 16-bit value. */
+function isPort(value: string): boolean {
+  return PORT.test(value) && Number(value) <= 65535;
+}
+
 /**
  * Normalizes an address to the form IP security publishes and compares.
  *

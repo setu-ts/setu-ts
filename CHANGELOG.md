@@ -499,6 +499,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Validate forwarded client addresses (#529, 0.11.0, `@setu-ts/http-security-plugin`).** IP
+  security validates every examined `X-Forwarded-For` or custom `ipHeader` entry and strips numeric
+  ports from IPv4 and bracketed IPv6 addresses. An invalid entry stops resolution with no client or
+  forwarded origin, rather than publishing arbitrary text or falling back to the socket peer. Both
+  header families share one address validator and canonical IPv6 form.
+
 - **Full-stack workspace libraries on Node and Bun stay external (#528, `@setu-ts/cli`).** The
   generated `vite.config.ts` read a library's name only from `deno.json` or `deno.jsonc`, so a Node
   or Bun library (named in `package.json`) was bundled as a second copy whose module state the

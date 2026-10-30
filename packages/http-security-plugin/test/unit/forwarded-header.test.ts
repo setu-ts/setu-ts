@@ -45,7 +45,20 @@ describe('bounded Forwarded parser', () => {
       {},
       { proto: 'https' },
     ]);
-    expect(parseForwarded('for="[::ffff:192.0.2.1]";ext=""')).toEqual([{ ip: '::ffff:192.0.2.1' }]);
+    expect(parseForwarded('for="[::ffff:192.0.2.1]";ext=""')).toEqual([{ ip: '192.0.2.1' }]);
+  });
+  it('shares canonical address spellings while retaining the RFC node and port grammar', () => {
+    for (const [node, expected] of [
+      ['[2001:DB8:0::1]', '2001:db8::1'],
+      ['[::ffff:c000:201]:_opaque', '192.0.2.1'],
+      ['192.0.2.1:_opaque', '192.0.2.1'],
+      ['192.0.2.1:999999', '192.0.2.1'],
+    ] as const) {
+      expect(parseForwarded(`for="${node}"`), node).toEqual([{ ip: expected }]);
+    }
+    for (const node of ['[1.2.3.4]', '[fe80::1%eth0]', '[2001:::1]', '[g::1]']) {
+      expect(parseForwarded(`for="${node}"`), node).toEqual([MALFORMED]);
+    }
   });
   it('keeps a comma inside a quoted value in the strict pass', () => {
     // The recovery pass is NOT quote-aware, so this must never reach it: the
