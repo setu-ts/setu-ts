@@ -294,7 +294,7 @@ All notable changes to this project are documented here. The format follows
   Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1 refuse legacy and cross-entity
   cursors; restart pagination once on upgrade.
 
-- **BREAKING — one place for routes: controllers (0.11.0, `@setu-ts/cli`).** Every file that
+- **BREAKING — one place for routes: controllers (#526, 0.11.0, `@setu-ts/cli`).** Every file that
   registers routes is a controller, `<name>.controller.ts`: a class controller (`@Controller`) or a
   function controller (`register<Pascal>Routes`), told apart by its exports. The `.routes.ts` suffix
   is gone, and `setu g route` writes a function controller. A project keeps controllers and services
