@@ -209,6 +209,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
       'rejects, is recorded failed, and publishing recovers — silent and dropped connections',
       {
         skip: REDIS_URL === undefined,
+        // Three 30 s publish waits (baseline, after unpause, after restart), two
+        // 6 s outage settles and the container operations exceed the 30 s default.
+        timeout: 150_000,
       },
       async () => {
         const port = new URL(REDIS_URL!).port === '' ? 6379 : Number(new URL(REDIS_URL!).port);
