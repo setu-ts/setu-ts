@@ -15,3 +15,6 @@ The separate processes are what makes the check mean anything: run both replicas
 and the backplane's process-local `'memory'` transport delivers the message on its own, so the check
 passes without any cross-replica delivery. Swapping this example to `transport: 'memory'` must make
 `pnpm --dir apps/realtime run smoke` fail.
+
+Read the [example deep dive](../../docs/examples.md#realtime) for the concept and source
+walkthrough.

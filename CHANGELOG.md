@@ -209,6 +209,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Agent brief development guidance (M119i, `@setu-ts/cli`).** Briefs list and gloss development
+  commands, distinguish Workers from socket full-stack development, and include messaging guidance
+  for starter compositions. Workspace roots name the member development entry and production start.
+  Existing projects re-run `setu agents`; `setu agents --check` reports their old briefs stale.
+
 - **Node devtool scaffolding (M126, #521, `@setu-ts/cli`).** `--devtool` and `devtool enable` now
   support Node projects and workspace members. Development entries read credentials and exit through
   runtime services; older CLI-owned entries remain recognized and can be upgraded. Node uses
@@ -542,7 +547,10 @@ All notable changes to this project are documented here. The format follows
   path (V10-40), the agent cards' `setu add` wording (V10-43), React Router 8 (V10-56),
   unrepresentable Zod types (V10-57), the worker-pool overshoot (V9-29) and the resilience timeout.
   Every package README is now compiled by the fence gate, and absolute repository links and links to
-  a heading a release renames are checked.
+  a heading a release renames are checked. The folded documentation adds M124 auth and M121 starter
+  card guidance, scaffold-first development and getting-started paths, module-identity explanations,
+  npm plugin publishing, a learning path and source walkthroughs for every example with app README
+  pointers, and a homepage create command and current package count.
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
   `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing

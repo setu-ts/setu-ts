@@ -64,10 +64,12 @@ as a module: supply `serverBuild` (the generated full-stack Workers entry does t
 
 ## Toolchain note
 
-This is the **one** place the Deno-only backend toolchain makes an exception. Your frontend is built
-with **Vite on the Node/npm toolchain**, outside the Deno workspace. Vite is an app-level,
-build-time `devDependency` — it is never imported by this plugin and never appears in any
-JSR-published package's dependency graph.
+The frontend builds with **Vite on the Node/npm toolchain**. Vite is an app-level, build-time
+`devDependency`; this plugin never imports it. Keep framework packages and workspace libraries
+external, resolved by the server runtime, so route modules and the entry share one module instance:
+context keys from `contextKeyFor()` match by identity. In development, `viteDevExternals` supplies
+that guarantee; see
+[the development guide](https://github.com/setu-ts/setu-ts/blob/main/docs/react-router-dev.md).
 
 ## Loader context
 

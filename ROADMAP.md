@@ -15370,7 +15370,9 @@ with a 503 status hint (the M89b mechanism).
 ### Milestone 119i: Documentation That Does Not Match the Code, or Is Missing
 
 **Package(s):** docs of `openapi-plugin`, `service-discovery-plugin`, `logger-plugin`,
-`react-router-plugin`, `worker-pool-plugin`; the agent cards; `docs/`; CHANGELOG
+`react-router-plugin`, `worker-pool-plugin`; `packages/cli` (agents); the agent cards, including
+`auth-plugin` and `full-stack-starter`; `docs/`, including the React Router development,
+getting-started, custom-plugins and examples guides; the website homepage; CHANGELOG
 
 - **Upgrade guide (`docs/upgrading.md`, `0.10.0` section)** — V10-15 (where `swagger-ui-dist` goes
   on Deno: the workspace ROOT `deno.json`), V10-16 (the Workers full-stack repair never says to set
@@ -15391,6 +15393,11 @@ with a 503 status hint (the M89b mechanism).
   `x-setu-unrepresentable` with no warning at generation time), and the V9-29 remainder (the
   worker-pool README understates the thread overshoot: cold Node bursts reach 6 threads at bound 3,
   once for ~0.7 s).
+
+- **Folded scope (2026-10-30)** — development commands and current full-stack/messaging rules in
+  agent briefs; M124 auth and M121 starter cards; scaffold-first development and getting-started
+  guides, npm plugin publishing, a teaching path through the examples with app README pointers, and
+  a homepage create command and current package count.
 
 **Recurrence:** V10-12 is the second README outside the fence gate found by a smoke run (M70k, M86);
 the letter adds every package README with a compilable fence to the gate, and a check that

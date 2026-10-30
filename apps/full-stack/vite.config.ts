@@ -7,19 +7,12 @@ import { defineConfig } from 'vite';
  * and `main.ts` is the runtime.
  *
  * `resolve.tsconfigPaths` is what makes the `~/*` alias work at build time; the
- * same alias is declared in `deno.json` for Deno's type-checker and in
- * `tsconfig.json` for this one.
+ * same alias is declared in `tsconfig.json` for the type-checker.
  */
-// Framework packages are NOT bundled into the server build. Two reasons, both
-// load-bearing:
-//
-// 1. They are resolved by the SERVER runtime — here, through the `deno.json`
-//    import map, which points them at this workspace's source. This npm
-//    toolchain cannot resolve those paths at all.
-// 2. Bundling would inline a second copy of each package, and the context keys
-//    in app/lib/context-keys.server.ts are matched by identity: the copy
-//    setu.config.ts holds would stop matching the copy a loader reads, so
-//    every context value would silently fall back to its default.
+// Framework packages stay external, resolved here by tsx through this app's
+// tsconfig paths. Bundling would inline a second copy: the context keys in
+// app/lib/context-keys.server.ts match by identity, so loaders must share the
+// module instance setu.config.ts holds.
 const frameworkPackages = [
   '@setu-ts/common',
   '@setu-ts/database-plugin',

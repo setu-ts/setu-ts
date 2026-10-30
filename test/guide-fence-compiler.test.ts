@@ -53,12 +53,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // `app.start()` blocks collapsed into one, and a "Stopping Cleanly" fence
     // showing the portable signal handler was added.
     // M113l: Node and Bun test recipes beside Deno (+2 TS, +4 shell).
-    total: 26,
+    // M119i: the full-stack create recipe adds one shell fence.
+    total: 27,
     ts: 12,
     compile: 12,
     external: 0,
     pseudocode: 0,
-    skipped: 14,
+    skipped: 15,
   },
   'docs/programmatic-api.md': {
     total: 41,
@@ -71,12 +72,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
   'docs/custom-plugins.md': {
     // 23/20 until the cold-read pass: the sample README's outer fence closed
     // early, so its inner Usage block was counted as a top-level guide fence.
-    total: 22,
+    // M119i: npm publishing adds a tsconfig JSON fence.
+    total: 23,
     ts: 19,
     compile: 19,
     external: 0,
     pseudocode: 0,
-    skipped: 3,
+    skipped: 4,
   },
   'docs/cli.md': {
     // One more shell/tree fence than before M65: the domain-module section now
@@ -120,12 +122,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // the app's source. One compiled block remains: the factory/smoke shape
     // every example shares, taken from apps/minimal. Two more skipped blocks:
     // the layout tree and the worker-pool commands.
-    total: 20,
+    // M119i: repository setup adds one shell fence.
+    total: 21,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 19,
+    skipped: 20,
   },
   'docs/decorators.md': {
     // 28 at M76. Two blocks left the guide there: the `deno.json` "Enable
@@ -256,12 +259,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // Examples layout cleanup: +2 skipped fences in docs/examples.md.
   // M119h: +1 skipped text fence in docs/cli.md's `setu agents` section.
   // M118: +4 skipped fences in docs/cli.md's wiring-check section.
-  total: 305,
+  // M119i: setup, full-stack create and npm tsconfig add three non-TS fences.
+  total: 308,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 76,
+  skipped: 79,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

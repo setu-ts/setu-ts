@@ -2,8 +2,7 @@
  * The frontend build files and manifest contributions of the `full-stack`
  * template.
  *
- * The React Router build runs on the npm toolchain (Vite), which is the one
- * documented exception to this project's Deno-only toolchain: Vite is an
+ * The React Router build runs on the Node/npm toolchain (Vite). Vite is an
  * application-level, build-time `devDependency`, never imported by a plugin and
  * never part of a published package's dependency graph. It is emitted into the
  * scaffolded project and stops there.
@@ -46,8 +45,8 @@ export default {
  *
  * The externals list is derived from the packages the template declares rather
  * than written out again, so a package added to the template cannot be left out
- * of the build configuration — which would fail as a resolution error on Deno
- * and, worse, as a silent context-key mismatch everywhere else.
+ * of the build configuration and inlined as a second module instance whose
+ * context keys would not match the entry's.
  *
  * @param frameworkPackages - Bare `@setu-ts` package names
  * @returns The `vite.config.ts` contents
@@ -68,20 +67,13 @@ import { defineConfig } from 'vite';
  * \`resolve.tsconfigPaths\` is what makes the \`~/*\` alias work at build time;
  * the same alias is declared in tsconfig.json for the type-checker.
  */
-// Framework packages are NOT bundled into the server build. Two reasons, both
-// load-bearing:
-//
-// 1. They are resolved by the SERVER runtime — from the Deno import map, or
-//    from node_modules — and on Deno they are JSR specifiers that this npm
-//    toolchain cannot resolve at all.
-// 2. Bundling would inline a second copy of each package, and the context keys
-//    in app/lib/context-keys.server.ts are matched by identity: the copy
-//    setu.config.ts holds would stop matching the copy a loader reads, so
-//    every context value would silently fall back to its default.
+// Framework packages stay external, resolved by the server runtime. Bundling
+// would inline a second copy: context keys in app/lib/context-keys.server.ts
+// match by identity, so a loader must share the instance setu.config.ts holds.
 export const frameworkPackages = [${externals}
 ];
 
-// Workspace libraries are resolved by Deno at runtime, just like framework
+// Workspace libraries are resolved by the server runtime, just like framework
 // packages. Read each library's declared name: a custom scope is valid too.
 export const workspaceLibraries: string[] = [];
 try {
@@ -226,7 +218,7 @@ export function buildFullStackBuildFiles(
  * `devDependencies`.
  *
  * These are build-time and app-level. No framework package appears here — those
- * are resolved through JSR, from `deno.json` or from the `dependencies` the
+ * are resolved from `deno.json` or from the `dependencies` the
  * project already declares.
  */
 export const FULL_STACK_NPM_DEV_DEPENDENCIES: Readonly<Record<string, string>> = {
@@ -331,18 +323,16 @@ export const FULL_STACK_CHECK_TASK: Readonly<Record<string, string>> = {
 
 /**
  * The development entry a full-stack project carries on Deno, Node and Bun, run
- * by its `dev` task or script. One body for all three: it reaches the runtime
- * only through `createRuntimeServices`.
+ * by its start:dev script, and on Deno also by `dev`. One body for all three:
+ * it reaches the runtime only through `createRuntimeServices`.
  *
  * Runs Vite in-process, hands its server build to the SSR plugin through
  * `createApp`'s `ssr` parameter, and proxies Vite's client URLs (all under
  * `/__vite/`) through the application's port, so a route edit is served on the
  * next request with no restart. `viteDevExternals` keeps every `@setu-ts`
- * package and workspace library external, resolved by the runtime: on Deno, Vite
- * cannot resolve a JSR import, and loading one itself would make a second copy
- * whose context keys match nothing. On Node and Bun those packages are in
- * `node_modules`, which Vite externalises anyway, so the plugin changes nothing
- * there — verified both with and without it on Node.
+ * package and workspace library external, resolved by the server runtime, so a
+ * route module and this entry share one module instance. Context keys from
+ * `contextKeyFor()` match by identity; a second copy would read different keys.
  */
 export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: string } = {
   path: 'dev.ts',
@@ -361,7 +351,7 @@ import { frameworkPackages, workspaceLibraries } from './vite.config.ts';
  * owns the port, the plugins and every non-page route. Client URLs are
  * namespaced under \`/__vite/\` so one proxy route reaches Vite without
  * colliding with application routes. Production does not use this file: the
- * start task or script builds and runs \`main.ts\`.
+ * production entry runs the built output.
  */
 const BASE = '/__vite/';
 const runtime = createRuntimeServices();
@@ -378,7 +368,7 @@ const viteServer = await vite.createServer({
   server: { port: vitePort, strictPort: true },
   plugins: [viteDevExternals({
     packages: [...frameworkPackages, ...workspaceLibraries],
-    // The runtime's resolver, so a route shares the module instances this entry holds.
+    // Resolve with the runtime: routes share this entry's module and context-key identity.
     resolve: (specifier) => import.meta.resolve(specifier),
   })],
 });

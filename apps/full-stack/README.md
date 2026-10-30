@@ -85,3 +85,6 @@ end-to-end test pins it. This example runs on Node through `check:apps`.
 `setu.config.ts` falls back to a development secret so the example runs with no environment at all.
 A real deployment uses `config.getOrThrow<string>('SESSION_SECRET')` and refuses to boot without one
 — which is what the CLI scaffolds.
+
+Read the [example deep dive](../../docs/examples.md#full-stack) for the concept and source
+walkthrough.

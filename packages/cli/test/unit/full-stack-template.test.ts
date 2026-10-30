@@ -79,6 +79,16 @@ function contentsOf(path: string): string {
 }
 
 describe('full-stack template | registration', () => {
+  it('explains shared module identity without the retired JSR rationale', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const files = projectFiles('app', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime));
+      for (const path of ['vite.config.ts', 'dev.ts']) {
+        const source = files.find((file) => file.path === path)!.contents;
+        expect(source).not.toContain('JSR');
+        expect(source).toContain('identity');
+      }
+    }
+  });
   it('is reachable by name', () => {
     expect(getTemplate('full-stack')).toBe(FULL_STACK_TEMPLATE);
   });
@@ -217,9 +227,8 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
   });
 
   it('imports framework VALUES only from server-only modules', () => {
-    // The client bundle inlines what it imports and cannot resolve a JSR
-    // specifier, so a framework value import outside a `.server.ts` module
-    // fails the build outright. Server-only modules may import them, because
+    // The client bundle inlines its imports; keep server framework values in
+    // `.server.ts` modules. Server-only modules may import them, because
     // the server build treats framework packages as external — which is also
     // what keeps context keys identical across that boundary. Type imports are
     // erased and are fine anywhere.

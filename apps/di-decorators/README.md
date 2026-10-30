@@ -13,3 +13,6 @@ request scoping must create and carry that scope themselves.
 pnpm --dir apps/di-decorators run start
 pnpm --dir apps/di-decorators run smoke
 ```
+
+Read the [example deep dive](../../docs/examples.md#di-decorators) for the concept and source
+walkthrough.

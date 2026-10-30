@@ -7,4 +7,5 @@ it('landing page foregrounds that Setu-TS is built on Hono', async () => {
 
   expect(page).toContain('Built on Hono');
   expect(page).toContain("Hono's performance and runtime portability");
+  expect(page).toContain('npm create @setu-ts');
 });
