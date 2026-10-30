@@ -73,14 +73,14 @@ export class Summary extends MetricBase {
    * @param labels - Label values keyed by label name
    */
   observe(value: number, labels?: Readonly<Record<string, string>>): void {
-    this.validateLabels(labels);
-    const key = this.labelKey(labels);
+    const snapshot = this.snapshotLabels(labels);
+    const key = this.seriesKey(snapshot);
 
     // Initialize per-label-set storage
     if (!this.#data.has(key)) {
       const data: SummaryData = { samples: [], sum: 0, count: 0 };
-      if (labels) {
-        data.labels = { ...labels }; // Defensive shallow copy
+      if (snapshot) {
+        data.labels = snapshot;
       }
       this.#data.set(key, data);
     }

@@ -38,7 +38,7 @@ native launcher ──(fresh sessionId + sessionKey, child-process environment o
   composition reads IRuntimeServices.env ──▶ DiagnosticsPlugin({ enabled, port, sessionId, sessionKey })
   └─ non-extractable HMAC-SHA-256 key imported; raw copy zeroed
 
-native client ──GET + X-Setu-* headers──▶ Deno HTTP parser ──▶ runtime listener (127.0.0.1:<port>)
+native client ──GET + X-Setu-* headers──▶ Deno/Node HTTP parser ──▶ runtime listener (127.0.0.1:<port>)
   native pre-mapping refusal (body framing, comma in a singleton header)
   ──▶ connector: anonymous admission ─▶ grammar / Host / Origin / target checks
   ──▶ session-ID match ─▶ verify lane (subtle.verify over canonical request bytes)
@@ -135,7 +135,7 @@ it.
 | T10 | Request smuggling or header ambiguity past the connector's checks.                   | Zero-body policy and comma refusal in the singleton headers, both before framework mapping. The connector repeats semantic validation after mapping. No claim about raw-wire header multiplicity is made.                                                                                                                                                                                                  | Protocol §Transport                         |
 | T11 | The key leaks through the command line, a URL, a file, a log or a diagnostic record. | The launcher hands the pair over in the child environment only. The plugin reads no environment variable itself. The key is imported non-extractable and the raw copy zeroed. Supplied headers are never logged.                                                                                                                                                                                           | Plan §3.2; M98c for the scaffolded handoff  |
 | T12 | Data is released after revocation or expiry, from a request already in flight.       | Post-await gates re-check admissibility before signing and after signing; a response built across a revocation is discarded. `revoke()` is idempotent and closes the listener on every shutdown and failed-startup path.                                                                                                                                                                                   | Protocol §Revocation; Plan §3.4             |
-| T13 | A3 exposes the connector unintentionally.                                            | Explicit `enabled: true` with a port and pair; no environment auto-enable; loopback-only bind; Deno only, every other runtime refuses before binding; a port conflict fails closed; never mounted on the application's listener.                                                                                                                                                                           | Protocol §Transport; Plan §3.1              |
+| T13 | A3 exposes the connector unintentionally.                                            | Explicit `enabled: true` with a port and pair; no environment auto-enable; loopback-only bind; Deno and Node only, unsupported runtimes refuse before binding; a port conflict fails closed; never mounted on the application's listener.                                                                                                                                                                  | Protocol §Transport; Plan §3.1              |
 | T14 | A1 binds the port first and impersonates the connector.                              | The client never accepts a response it cannot verify, and a failed initial pairing is terminal. The server fails closed on the conflict. The result is a failed session, never forged data.                                                                                                                                                                                                                | Plan §3.5 (R5)                              |
 | T15 | A5 returns a DTO that leaks a field or breaks the client.                            | The connector re-projects every result against an exact field allowlist before serializing. The client validates the exact DTO, including vocabularies and bounds, and deep-freezes what it returns.                                                                                                                                                                                                       | Protocol §Response requirements             |
 | T16 | A1 sends an oversized or never-ending response to the client (port squatting, T14).  | The client reads at most 256 KiB from the stream and cancels on overflow; `Content-Length` is not trusted. A 5-second deadline aborts the request. Redirects are refused.                                                                                                                                                                                                                                  | Protocol §Response requirements; Plan §3.4  |
@@ -157,9 +157,21 @@ reason.
 
 ## Obligations for the committed-tree audit
 
+The M126 Node transport adds raw singleton-line checks and retains the original request-target
+beside the native request. Its bind address is checked after listening; an unexpected address is
+closed and rejected. At its 32-socket budget, the private server admits a newcomer by destroying the
+oldest non-busy socket, including held partial requests and idle keep-alive sockets. Busy sockets
+remain protected until all their responses finish or close, when they move to the back; only an
+all-busy budget refuses the newcomer. This preserves a bound without letting 32 idle sockets lock
+out the paired client. Headers remain bounded at 16 KiB, header time at 5 s and request time at 10
+s, with a 1 s checking interval. Parser failures share one fixed empty `400`, Expect requests take
+the ordinary handler path without interim `100 Continue` or native `417`, and close destroys active
+connections. These transport obligations supplement the protocol bounds below; they do not claim
+that the two runtimes' parsers accept identical inputs.
+
 The audit drives each of these at the real surface — the RuntimePlugin listener on a real loopback
 socket, the real connector and the real native client — with a positive control beside every
-negative half. Wire-level cases use a raw `Deno.connect` socket, never `fetch`, which strips or
+negative half. Wire-level cases use a raw `node:net` socket, never `fetch`, which strips or
 coalesces the very headers these cases are about.
 
 1. **Credentials.** Missing, malformed, wrong-session, wrong-key, replayed, out-of-order, stale
@@ -186,8 +198,8 @@ coalesces the very headers these cases are about.
    body under another identity, an oversized stream without `Content-Length`, a stalled response and
    a redirect are each refused, and none reaches the caller parsed.
 9. **Exposure (T13).** Without the plugin, or with `enabled` absent, no socket is bound. The
-   application's own port serves no `/v1/*` diagnostics route. Non-Deno runtimes refuse before
-   binding.
+   application's own port serves no `/v1/*` diagnostics route. Bun, Workers and unknown runtimes
+   refuse before binding; Deno and Node bind only after explicit activation.
 10. **Canaries (T1, T11).** A canary key and session ID passed through the launcher handoff are
     absent from every response, refusal, log record and diagnostic record, while an approved
     diagnostic field still arrives.

@@ -30,6 +30,10 @@ function createContext(): Harness {
   const ctx = {
     runtime: {
       uuid: (): string => `uuid-${++counter}`,
+      hrtime: (): number => performance.now(),
+      setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+      clearTimeout: (handle: unknown): void =>
+        clearTimeout(handle as ReturnType<typeof setTimeout>),
     },
     logger: {
       info: (message: string): void => {

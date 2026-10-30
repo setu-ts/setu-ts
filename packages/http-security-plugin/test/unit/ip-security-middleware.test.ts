@@ -126,4 +126,44 @@ describe('ipSecurityMiddleware', () => {
       expect(nextCalled).toHaveLength(1);
     });
   });
+
+  describe('one normalized identity (M119d §3.3)', () => {
+    it('publishes a mapped forwarded IPv6 client as dotted IPv4', async () => {
+      const { ctx } = createFakeContext({
+        request: { headers: { Forwarded: 'for="[::ffff:198.51.100.7]"' } },
+      });
+      await ipSecurityMiddleware({ trustProxy: true, forwardedHeader: 'forwarded' })(ctx, () =>
+        Promise.resolve(),
+      );
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('198.51.100.7');
+    });
+
+    it('normalizes the socket peer when trustProxy is off', async () => {
+      const { ctx } = createFakeContext({ request: { ip: '2001:DB8::1' } });
+      await ipSecurityMiddleware()(ctx, () => Promise.resolve());
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('2001:db8::1');
+    });
+
+    it('matches a trusted literal written differently from the hop', async () => {
+      const { ctx } = createFakeContext({
+        request: { headers: { 'X-Forwarded-For': '7.7.7.7, 2001:db8::5' } },
+      });
+      await ipSecurityMiddleware({
+        trustProxy: true,
+        trustedProxies: ['2001:DB8:0::5'],
+      })(ctx, () => Promise.resolve());
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('7.7.7.7');
+    });
+
+    it('does not match an untrusted mapped hop against another IPv4 literal', async () => {
+      const { ctx } = createFakeContext({
+        request: { headers: { 'X-Forwarded-For': '7.7.7.7, ::ffff:10.0.0.9' } },
+      });
+      await ipSecurityMiddleware({
+        trustProxy: true,
+        trustedProxies: ['10.0.0.8'],
+      })(ctx, () => Promise.resolve());
+      expect(ctx.state.get(CLIENT_IP_STATE_KEY)).toBe('10.0.0.9');
+    });
+  });
 });

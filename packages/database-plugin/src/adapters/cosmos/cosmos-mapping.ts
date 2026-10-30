@@ -82,6 +82,8 @@ export interface CosmosEntityMapping {
  * @internal
  */
 export interface CosmosTarget {
+  /** The repository entity name, independent of its container. */
+  readonly entity: string;
   /** The container name. */
   readonly container: string;
   /** The repository-visible primary-key field name. */
@@ -112,6 +114,7 @@ export function resolveCosmosTarget(
 ): CosmosTarget {
   const override = mapping?.[entity];
   return {
+    entity,
     container: override?.container ?? entity,
     primaryKey: override?.primaryKey ?? DEFAULT_PRIMARY_KEY,
     partitionKeyPaths: normalizePartitionKeyPaths(override?.partitionKey),

@@ -5,7 +5,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections', () => {
   it('selects only declared keys and strips their prefix before parsing', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const database = defineConfigSection({
       prefix: 'DATABASE_',
       keys: ['URL', 'POOL_SIZE'],

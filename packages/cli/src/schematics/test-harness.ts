@@ -36,9 +36,10 @@ export interface TestHarness {
 /**
  * Resolves the test harness for a target runtime.
  *
- * Cloudflare Workers takes the Deno harness: a Workers project is developed on
- * the Deno toolchain here (its `deno.json` is what `setu generate` reads), and
- * its tests run there rather than inside an isolate.
+ * Cloudflare Workers takes the Node harness: its tests boot the real Worker on
+ * workerd through wrangler and run under `tsx --test`, exactly as the Node
+ * arm's do, so they use `node:test` and `node:assert` rather than the Deno
+ * modules a Workers project does not import.
  *
  * @param runtime - The scaffolded project's target
  * @returns The harness that runtime can actually execute
@@ -51,7 +52,7 @@ export function testHarnessFor(runtime: TargetRuntime): TestHarness {
     };
   }
 
-  if (runtime === 'node') {
+  if (runtime === 'node' || runtime === 'cloudflare-workers') {
     // `node:test` exposes `describe`/`it`; `expect` is not built in, so the
     // assertion goes through `node:assert`, which is. Reaching for a matcher
     // library would add a dependency to satisfy a generated stub.
@@ -73,7 +74,7 @@ export function testHarnessFor(runtime: TargetRuntime): TestHarness {
  *
  * Node has no `expect`, so the emitted body cannot be shared verbatim across all
  * three. Keeping the difference in ONE function means a generated test never
- * mixes idioms.
+ * mixes idioms. Workers runs through `node:test`, so it follows Node's idiom.
  *
  * @param runtime - The scaffolded project's target
  * @param actual - The expression under test
@@ -81,12 +82,52 @@ export function testHarnessFor(runtime: TargetRuntime): TestHarness {
  * @returns The assertion statement
  */
 export function renderEquals(runtime: TargetRuntime, actual: string, expected: string): string {
-  if (runtime === 'node') return `assert.deepStrictEqual(${actual}, ${expected});`;
+  if (runtime === 'node' || runtime === 'cloudflare-workers') {
+    return `assert.deepStrictEqual(${actual}, ${expected});`;
+  }
   return `expect(${actual}).toEqual(${expected});`;
 }
 
-/** Portable socket test support shared by scaffolded and generated tests. */
-export function renderTestServer(): string {
+/**
+ * Test support that boots the real application for a generated test.
+ *
+ * A socket target starts the application on a free loopback port. A Workers
+ * project cannot: `wrangler dev` serves a `fetch` export, and a template may
+ * need the bindings its `wrangler.toml` declares to boot at all. So it starts
+ * the Worker on workerd through wrangler's test harness instead, which supplies
+ * those bindings. Both variants export the same `startTestServer()` signature,
+ * so every generated test body is runtime-independent.
+ *
+ * @param runtime - The scaffolded project's target
+ * @returns The `test/support/server.ts` contents
+ */
+export function renderTestServer(runtime: TargetRuntime): string {
+  if (runtime === 'cloudflare-workers') {
+    return `import { createTestHarness } from 'wrangler';
+
+/**
+ * Boots the real Worker on workerd, with the bindings \`wrangler.toml\` declares.
+ *
+ * The config is located from this file, not the working directory: wrangler
+ * resolves a relative path from \`process.cwd()\`, so tests started elsewhere would
+ * load that directory's \`wrangler.toml\`, build command included.
+ */
+export async function startTestServer(): Promise<
+  { readonly baseUrl: string; readonly stop: () => Promise<void> }
+> {
+  const harness = createTestHarness({
+    workers: [{ configPath: new URL('../../wrangler.toml', import.meta.url) }],
+  });
+  const { url } = await harness.listen();
+  return {
+    baseUrl: url.origin,
+    stop: async () => {
+      await harness.close();
+    },
+  };
+}
+`;
+  }
   return `import { createServer } from 'node:net';
 import { createApp } from '../../setu.config.ts';
 
@@ -137,9 +178,39 @@ export async function startTestServer(): Promise<
 `;
 }
 
-/** In-process module contract that survives replacing the in-memory store. */
+/** Module contract that survives replacing the in-memory store. */
 export function renderModuleTest(names: DerivedNames, runtime: TargetRuntime): string {
   const eq = (actual: string, expected: string): string => renderEquals(runtime, actual, expected);
+  if (runtime === 'cloudflare-workers') {
+    return `${testHarnessFor(runtime).imports}
+import { startTestServer } from '../../../test/support/server.ts';
+
+describe('${names.kebab} module', () => {
+  it('lists records and reads a created record back', async () => {
+    const server = await startTestServer();
+    try {
+      const list = await fetch(server.baseUrl + '/${names.kebab}');
+      ${eq('list.status', '200')}
+      const listed: { items: unknown[] } = await list.json();
+      ${eq('Array.isArray(listed.items)', 'true')}
+      const created = await fetch(server.baseUrl + '/${names.kebab}', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'Example' }),
+      });
+      ${eq('created.status', '201')}
+      const record: { id: string; name: string } = await created.json();
+      ${eq('record.name', "'Example'")}
+      const read = await fetch(server.baseUrl + '/${names.kebab}/' + record.id);
+      ${eq('read.status', '200')}
+      ${eq('await read.json()', 'record')}
+    } finally {
+      await server.stop();
+    }
+  });
+});
+`;
+  }
   return `${testHarnessFor(runtime).imports}
 import { createTestApp } from '@setu-ts/testing';
 import { createApp } from '../../../setu.config.ts';

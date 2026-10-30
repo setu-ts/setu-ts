@@ -52,6 +52,8 @@ import type {
   ITenantIsolationStrategy,
   RegistryFactory,
 } from '@setu-ts/common';
+import { ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
+import { TenantColumnUnresolvedError } from '../errors.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import type { IDatabaseService } from '../interfaces/index.ts';
@@ -128,6 +130,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   readonly #configuredColumn: string | undefined;
   /** The column adopted from a `'column'` strategy via `useIsolation`, if any. */
   #resolvedColumn: string | undefined;
+  readonly #fields = new Map<string, string>();
 
   /**
    * Binds the store to the database service it reads and writes through.
@@ -150,7 +153,22 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
    * handed to {@linkcode useIsolation}, else the configured `tenantColumn`,
    * else `'tenant_id'`.
    */
-  #column(): string {
+  #column(entity: string): string {
+    const cached = this.#fields.get(entity);
+    if (cached !== undefined) return cached;
+    const column = this.#configuredTenantColumn();
+    const resolver = (
+      this.#service as IDatabaseService & {
+        [ENTITY_FIELD_RESOLVER]?: (entity: string, name: string) => string | undefined;
+      }
+    )[ENTITY_FIELD_RESOLVER];
+    const field = resolver === undefined ? column : resolver(entity, column);
+    if (field === undefined) throw new TenantColumnUnresolvedError(entity, column);
+    this.#fields.set(entity, field);
+    return field;
+  }
+
+  #configuredTenantColumn(): string {
     if (this.#resolvedColumn !== undefined) return this.#resolvedColumn;
     if (this.#configuredColumn !== undefined) return this.#configuredColumn;
     return DEFAULT_TENANT_COLUMN;
@@ -174,6 +192,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
         );
       }
       this.#resolvedColumn = column;
+      this.#fields.clear();
       return;
     }
     throw new TenantStoreStrategyUnsupportedError(
@@ -190,7 +209,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
   }
 
   async findAll<E>(tenantId: string, entity: string): Promise<readonly E[]> {
-    const col = this.#column();
+    const col = this.#column(entity);
     const rows = await this.#repo(entity).findAll({ where: { [col]: tenantId } });
     return rows as unknown as readonly E[];
   }
@@ -204,8 +223,9 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     entity: string,
     id: EntityKey,
   ): Promise<Record<string, unknown> | null> {
+    const col = this.#column(entity);
     const row = await this.#repo(entity).findById(id);
-    if (row === null || row[this.#column()] !== tenantId) return null;
+    if (row === null || row[col] !== tenantId) return null;
     return row;
   }
 
@@ -219,7 +239,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     entity: string,
     filter: Readonly<Record<string, unknown>>,
   ): Promise<readonly E[]> {
-    const col = this.#column();
+    const col = this.#column(entity);
     assertEqualityFilter(filter);
     // The tenant column is spread LAST so a caller's filter cannot override it.
     const rows = await this.#repo(entity).findAll({ where: { ...filter, [col]: tenantId } });
@@ -231,7 +251,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     entity: string,
     data: Readonly<Record<string, unknown>>,
   ): Promise<E> {
-    const col = this.#column();
+    const col = this.#column(entity);
     // The tenant column is stamped LAST so a caller's payload cannot override it.
     const created = await this.#repo(entity).create({ ...data, [col]: tenantId });
     return created as unknown as E;
@@ -243,7 +263,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     id: Id,
     data: Readonly<Record<string, unknown>>,
   ): Promise<E | null> {
-    const col = this.#column();
+    const col = this.#column(entity);
     const repo = this.#repo(entity);
     // Strip the tenant column from the payload so no update can move a row
     // between tenants.
@@ -279,7 +299,9 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
 
   async delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
     const repo = this.#repo(entity);
-    const result = await conditionalDelete(repo, id as EntityKey, { [this.#column()]: tenantId });
+    const result = await conditionalDelete(repo, id as EntityKey, {
+      [this.#column(entity)]: tenantId,
+    });
     if (result.outcome !== 'unsupported') return result.outcome === 'applied';
     const existing = await this.#ownedRow(tenantId, entity, id as EntityKey);
     if (existing === null) return false;

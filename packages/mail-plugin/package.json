@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/mail-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Email over log, SMTP, SES, or SendGrid, with a zero-dependency template engine",
   "repository": {
     "type": "git",
@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-sesv2": "^3",
+    "@setu-ts/health-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
     "@setu-ts/view-plugin": "workspace:^",

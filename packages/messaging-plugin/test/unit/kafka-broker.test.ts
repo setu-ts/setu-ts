@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { AssignerProtocol } from 'kafkajs';
+import { AssignerProtocol, KafkaJSProtocolError } from 'kafkajs';
 import * as startOffsets from '../../src/brokers/kafka-start-offsets.ts';
 import { KafkaBroker, validateClient } from '../../src/brokers/kafka-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
@@ -17,6 +17,35 @@ import {
 } from '../../src/errors.ts';
 
 describe('M113a Kafka bounds and start position', () => {
+  it.each([undefined, '0', '9'])(
+    'M119a first delivery %s while join offsets are pending',
+    async (offset) => {
+      const factory = new FakeKafkaFactory();
+      const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+        client: factory,
+      });
+      await broker.connect();
+      const handler = vi.fn();
+      try {
+        await broker.subscribe('orders', handler, { queue: 'workers' });
+        const consumer = factory.consumer({ groupId: 'workers' });
+        const admin = factory.admins[1]!;
+        const pending = Promise.withResolvers<Awaited<ReturnType<typeof admin.fetchOffsets>>>();
+        vi.spyOn(admin, 'fetchOffsets').mockReturnValueOnce(pending.promise);
+        const join = consumer.join({ orders: [0] });
+        if (offset !== undefined)
+          await consumer.deliver('orders', new FakeKafkaMessage('{}', offset, '1000', {}));
+        pending.resolve([{ topic: 'orders', partitions: [{ partition: 0, offset: '-1' }] }]);
+        await join;
+        expect(handler).toHaveBeenCalledTimes(offset === undefined ? 0 : 1);
+        expect(consumer.calls.filter((c) => c.method === 'seek').map((c) => c.args[0])).toEqual(
+          offset === '0' ? [] : [{ topic: 'orders', partition: 0, offset: '0' }],
+        );
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
   it('releases the connected producer when the probe admin cannot connect', async () => {
     const factory = new FakeKafkaFactory();
     const producer = factory.producer();
@@ -406,6 +435,156 @@ describe('M113a Kafka bounds and start position', () => {
     await Promise.all(subscriptions);
     await broker.disconnect();
     expect(admin.calls.filter((c) => c.method === 'disconnect')).toHaveLength(1);
+  });
+
+  it('retries a retriable watermark failure and seeks to the captured offsets', async () => {
+    vi.useFakeTimers();
+    const factory = new FakeKafkaFactory();
+    const admin = new FakeKafkaAdmin();
+    admin.watermarks = [{ partition: 0, offset: '42', high: '42', low: '0' }];
+    vi.spyOn(factory, 'admin').mockReturnValue(admin);
+    const capture = vi
+      .spyOn(admin, 'fetchTopicOffsets')
+      .mockRejectedValueOnce(
+        new KafkaJSProtocolError(
+          Object.assign(new Error('leader election pending'), { retriable: true }),
+        ),
+      );
+    const warn = vi.fn();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 2, initialRetryTime: 50 },
+      logger: { error: vi.fn(), warn },
+    });
+    try {
+      await broker.connect();
+      const pending = broker.subscribe('orders', () => {}, { queue: 'workers' });
+      await vi.advanceTimersByTimeAsync(49);
+      const consumer = factory.consumer({ groupId: 'workers' });
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(consumer.calls.some((c) => c.method === 'run')).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(capture).toHaveBeenCalledTimes(2);
+      await consumer.join({ orders: [0] });
+      expect(
+        consumer.calls.filter((call) => call.method === 'seek').map((call) => call.args[0]),
+      ).toEqual([{ topic: 'orders', partition: 0, offset: '42' }]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    new KafkaJSProtocolError(Object.assign(new Error('not authorized'), { retriable: false })),
+    new Error('missing retry flag'),
+    { retriable: 'true' },
+    null,
+    'offline',
+  ])('does not retry a non-retriable watermark failure (%s)', async (failure) => {
+    const factory = new FakeKafkaFactory();
+    const admin = new FakeKafkaAdmin();
+    vi.spyOn(factory, 'admin').mockReturnValue(admin);
+    const capture = vi.spyOn(admin, 'fetchTopicOffsets').mockRejectedValue(failure);
+    const warn = vi.fn();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 2, initialRetryTime: 1 },
+      logger: { error: vi.fn(), warn },
+    });
+    try {
+      await broker.connect();
+      await broker.subscribe('orders', () => {}, { queue: 'workers' });
+      const consumer = factory.consumer({ groupId: 'workers' });
+      await consumer.join({ orders: [0] });
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(consumer.calls.some((c) => c.method === 'run')).toBe(true);
+      expect(consumer.calls.filter((c) => c.method === 'seek')).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
+  it('exhausts the watermark retry budget with the subscribe backoff and cap', async () => {
+    vi.useFakeTimers();
+    const factory = new FakeKafkaFactory();
+    const admin = new FakeKafkaAdmin();
+    vi.spyOn(factory, 'admin').mockReturnValue(admin);
+    const capture = vi
+      .spyOn(admin, 'fetchTopicOffsets')
+      .mockRejectedValue(
+        new KafkaJSProtocolError(
+          Object.assign(new Error('leader election pending'), { retriable: true }),
+        ),
+      );
+    const warn = vi.fn();
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 3, initialRetryTime: 10, multiplier: 2, maxRetryTime: 25 },
+      logger: { error: vi.fn(), warn },
+    });
+    try {
+      await broker.connect();
+      const pending = broker.subscribe('orders', () => {}, { queue: 'workers' });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(capture).toHaveBeenCalledTimes(1);
+      for (const [index, delay] of [10, 20, 25].entries()) {
+        await vi.advanceTimersByTimeAsync(delay - 1);
+        expect(capture).toHaveBeenCalledTimes(index + 1);
+        await vi.advanceTimersByTimeAsync(1);
+        expect(capture).toHaveBeenCalledTimes(index + 2);
+      }
+      await pending;
+      const consumer = factory.consumer({ groupId: 'workers' });
+      await consumer.join({ orders: [0] });
+      expect(consumer.calls.some((c) => c.method === 'run')).toBe(true);
+      expect(consumer.calls.filter((c) => c.method === 'seek')).toEqual([]);
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
+  });
+
+  it('cancels a watermark retry wait on disconnect without another read', async () => {
+    vi.useFakeTimers();
+    const factory = new FakeKafkaFactory();
+    const admin = new FakeKafkaAdmin();
+    vi.spyOn(factory, 'admin').mockReturnValue(admin);
+    const capture = vi
+      .spyOn(admin, 'fetchTopicOffsets')
+      .mockRejectedValue(
+        new KafkaJSProtocolError(
+          Object.assign(new Error('leader election pending'), { retriable: true }),
+        ),
+      );
+    const broker = new KafkaBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: factory,
+      retry: { retries: 2, initialRetryTime: 60_000 },
+    });
+    try {
+      await broker.connect();
+      const pending = broker
+        .subscribe('orders', () => {}, { queue: 'workers' })
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(capture).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(1);
+      await broker.disconnect();
+      expect(await pending).toEqual(new Error('KafkaBroker was disconnected while subscribing'));
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(120_000);
+      expect(capture).toHaveBeenCalledTimes(1);
+      const methods = factory.consumer({ groupId: 'workers' }).calls.map((c) => c.method);
+      expect(methods).toContain('disconnect');
+      expect(methods).not.toContain('run');
+    } finally {
+      await broker.disconnect();
+      vi.useRealTimers();
+    }
   });
 
   it.each(['warn', 'error', 'throws', 'absent'] as const)(

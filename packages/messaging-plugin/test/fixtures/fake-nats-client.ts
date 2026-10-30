@@ -66,6 +66,8 @@ export interface FakeConsumerConfig {
   durable_name?: string;
   filter_subject?: string;
   ack_policy?: string;
+  deliver_policy?: string;
+  inactive_threshold?: number;
   metadata?: Record<string, string>;
 }
 
@@ -173,6 +175,11 @@ export class FakeNatsConsumer {
   #filterSubject: string | undefined;
   #stopped = false;
   #failStop = false;
+  #status = Promise.withResolvers<IteratorResult<{ type: string }>>();
+
+  emitStatus(type: string): void {
+    this.#status.resolve({ done: false, value: { type } });
+  }
 
   constructor(messages: FakeNatsMessage[], filterSubject?: string) {
     this.#messages = messages;
@@ -188,7 +195,9 @@ export class FakeNatsConsumer {
    * `stop()` is a `ConsumerMessages` member — so this fake no longer offers
    * one either, and a caller stopping the wrong object fails loudly.
    */
-  consume(options: { callback: (msg: FakeNatsMessage) => void }): Promise<{ stop(): void }> {
+  consume(options: {
+    callback: (msg: FakeNatsMessage) => void;
+  }): Promise<{ stop(): void; status(): Promise<AsyncIterable<{ type: string }>> }> {
     // Deliver messages using the callback from options, filtered by subject if filterSubject is set
     for (const msg of this.#messages) {
       if (!this.#stopped) {
@@ -199,11 +208,23 @@ export class FakeNatsConsumer {
       }
     }
     return Promise.resolve({
+      status: () =>
+        Promise.resolve({
+          [Symbol.asyncIterator]: () => ({
+            next: async () => {
+              const event = await this.#status.promise;
+              this.#status = Promise.withResolvers<IteratorResult<{ type: string }>>();
+              return event;
+            },
+            return: () => Promise.resolve({ done: true, value: undefined }),
+          }),
+        }),
       stop: (): void => {
         if (this.#failStop) {
           throw new Error('stop refused');
         }
         this.#stopped = true;
+        this.#status.resolve({ done: true, value: undefined });
       },
     });
   }
@@ -299,6 +320,31 @@ export class FakeNatsJetStreamManager {
   };
 
   consumers = {
+    list: (stream: string): AsyncIterable<{ name: string; config: FakeConsumerConfig }> => {
+      this.#record('consumers.list', [stream]);
+      const entries = [...this.#configs.entries()];
+      return {
+        async *[Symbol.asyncIterator]() {
+          for (const [key, config] of entries) {
+            if (key.startsWith(`${stream}/`)) yield { name: config.name, config };
+          }
+        },
+      };
+    },
+    update: (
+      stream: string,
+      name: string,
+      patch: { inactive_threshold: number },
+    ): Promise<unknown> => {
+      this.#record('consumers.update', [stream, name, patch]);
+      const config = this.#configs.get(`${stream}/${name}`);
+      if (config) Object.assign(config, patch);
+      return Promise.resolve();
+    },
+    delete: (stream: string, name: string): Promise<boolean> => {
+      this.#record('consumers.delete', [stream, name]);
+      return Promise.resolve(this.#configs.delete(`${stream}/${name}`));
+    },
     add: (stream: string, config: unknown): Promise<{ name: string }> => {
       this.#record('consumers.add', [stream, config]);
       // The broker creates consumers on the MANAGER and reads them back off

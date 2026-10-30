@@ -13,7 +13,13 @@ function createContext(): Harness {
   const registered = new Map<string, unknown>();
   const health = new Map<string, () => Promise<HealthCheckResult>>();
   const ctx = {
-    runtime: { uuid: (): string => 'fixed-origin' },
+    runtime: {
+      uuid: (): string => 'fixed-origin',
+      hrtime: (): number => performance.now(),
+      setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+      clearTimeout: (handle: unknown): void =>
+        clearTimeout(handle as ReturnType<typeof setTimeout>),
+    },
     services: {
       has: (token: string): boolean => registered.has(token),
       get: <T>(token: string): T => registered.get(token) as T,

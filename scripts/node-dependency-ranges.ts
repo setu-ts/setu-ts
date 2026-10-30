@@ -24,11 +24,12 @@
 
 /** The range a scanned external specifier is listed at. */
 export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
+  esbuild: '~0.28.0',
   prettier: '^3.9.10',
   tsx: '^4.23.0',
+  typescript: '6.0.3',
   vitest: '5.0.3',
-  'zod-v3': 'npm:zod@^3.24.0',
-  'zod-v4': 'npm:zod@^4.4.0',
+  'zod-v4': 'npm:zod@^4.6.6',
   'xml-crypto': '^6',
   '@simplewebauthn/server': '14.0.3',
   '@prisma/adapter-pg': '^7.10.0',
@@ -41,6 +42,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   '@opentelemetry/instrumentation-amqplib': '^0.67.0',
   '@opentelemetry/instrumentation-http': '^0.220.0',
   '@opentelemetry/instrumentation-ioredis': '^0.68.0',
+  '@opentelemetry/instrumentation-redis': '^0.69.0',
   '@opentelemetry/instrumentation-kafkajs': '^0.29.0',
   '@opentelemetry/instrumentation-undici': '^0.30.0',
   '@opentelemetry/resources': '^2.9.0',
@@ -74,6 +76,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'drizzle-orm': '0.45.2',
   graphql: '^16',
   ioredis: '5.x',
+  redis: '6.x',
   kafkajs: '2.x',
   mongodb: '^6.21.0',
   nats: '2.x',
@@ -82,7 +85,7 @@ export const EXTERNAL_RANGES: Readonly<Record<string, string>> = {
   'swagger-ui-dist': '^5',
   'react-router': '^8',
   ws: '^8.18.0',
-  zod: '^4.4.0',
+  zod: '^4.6.6',
 };
 
 /**

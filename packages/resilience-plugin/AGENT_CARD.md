@@ -1,7 +1,7 @@
 # @setu-ts/resilience-plugin — protect calls to unreliable services
 
-**Add it:** `setu add resilience` installs it and wires `ResiliencePlugin()` in a recognized
-functional config. It provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
+**Add it:** `setu add resilience` adds it and wires `ResiliencePlugin()` in a recognized functional
+config. It provides `CAPABILITIES.RESILIENCE` (`IResilienceService`).
 
 ## Retry and limit an upstream HTTP call
 

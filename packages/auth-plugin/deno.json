@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/auth-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "test": {
@@ -23,6 +23,7 @@
     "@node-saml/node-saml": "npm:@node-saml/node-saml@^5",
     "@simplewebauthn/server": "npm:@simplewebauthn/server@14.0.3",
     "ioredis": "npm:ioredis@5.x",
+    "redis": "npm:redis@6.x",
     "vitest": "npm:vitest@5.0.3",
     "xml-crypto": "npm:xml-crypto@^6"
   }

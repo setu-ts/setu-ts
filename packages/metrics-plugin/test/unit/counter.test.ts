@@ -127,4 +127,45 @@ describe('Counter', () => {
     expect(counter.values.size).toEqual(1);
     expect(counter.values.get('')).toEqual(12);
   });
+  it('refuses an extra label when the configured names repeat one', () => {
+    const counter = new Counter('dup_labels', {
+      type: 'counter',
+      help: 'Duplicate label names',
+      labels: ['a', 'a'],
+    });
+    expect(() => counter.inc(1, { a: 'x', b: 'y' })).toThrow('does not have a label "b"');
+    expect(counter.values.size).toBe(0);
+  });
+
+  it('leaves no series behind for a label set it refuses', () => {
+    const counter = new Counter('refused_labels', {
+      type: 'counter',
+      help: 'Refused labels',
+      labels: ['method', 'status'],
+    });
+    expect(() => counter.inc(1, { method: 'GET', route: '/x' })).toThrow(
+      'does not have a label "route"',
+    );
+    counter.inc(1, { method: 'GET', status: '200' });
+    expect([...counter.values.keys()]).toEqual(['[["method","GET"],["status","200"]]']);
+  });
+
+  it('keys the same series whatever order the labels are given in', () => {
+    const counter = new Counter('ordered_labels', {
+      type: 'counter',
+      help: 'Label order',
+      labels: ['method', 'status'],
+    });
+    counter.inc(1, { method: 'GET', status: '200' });
+    counter.inc(1, { status: '200', method: 'GET' });
+    expect(counter.getValue({ method: 'GET', status: '200' })).toBe(2);
+    expect(counter.values.size).toBe(1);
+  });
+
+  it('treats an empty label list as unlabeled', () => {
+    const counter = new Counter('empty_labels', { type: 'counter', help: 'No labels', labels: [] });
+    counter.inc(1, {});
+    counter.inc(1);
+    expect(counter.getValue()).toBe(2);
+  });
 });

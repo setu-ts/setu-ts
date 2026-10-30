@@ -72,10 +72,12 @@ const principles = [
       <a class="button" href="https://github.com/setu-ts/setu-ts">GitHub</a>
     </div>
     <div class="install">
-      <div class="label">Deno</div>
-      <pre><code>deno add npm:@setu-ts/kernel npm:@setu-ts/runtime</code></pre>
-      <div class="label">Node</div>
+      <div class="label">New project</div>
+      <pre><code>npm create @setu-ts my-app</code></pre>
+      <div class="label">Existing app — Node</div>
       <pre><code>npm install @setu-ts/kernel @setu-ts/runtime</code></pre>
+      <div class="label">Existing app — Deno</div>
+      <pre><code>deno add npm:@setu-ts/kernel npm:@setu-ts/runtime</code></pre>
     </div>
   </section>
 
@@ -96,10 +98,11 @@ const principles = [
   <section class="landing-section" aria-labelledby="capabilities-heading">
     <h2 id="capabilities-heading">Capabilities</h2>
     <p>
-      48 published packages — the core, 37 plugins, three starters, the SDK, the test
-      utilities, and the <code>setu</code> CLI. Add only what you use; heavy dependencies
+      52 published packages — common, kernel, runtime, exceptions, 41 plugins, three starters,
+      the SDK, test utilities, the <code>setu</code> CLI and its create launcher. Add only what you use; heavy dependencies
       are injected or lazily loaded, never installed by default.
     </p>
+    <p><a href="/packages/">Browse every package</a> · <a href="/examples/">Runnable examples</a></p>
     <ul class="card-grid">
       {
         capabilities.map((capability) => (

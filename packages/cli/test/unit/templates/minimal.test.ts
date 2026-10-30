@@ -2,7 +2,7 @@
  * Tests for the no-template host.
  *
  * The point of this host is that a project with NO decorators and NO container
- * still gets its generated artifacts wired. `setu generate route` is the only
+ * still gets its generated artifacts wired. A function controller is the only
  * HTTP handler such a project can produce, and before M61 it landed unwired —
  * the schematic wrote the barrel and the generated `setu.config.ts` never
  * imported it.
@@ -22,26 +22,22 @@ import { GENERATED_MIDDLEWARE_EXPORT } from '../../../src/seams/middleware.ts';
 import { GENERATED_PLUGINS_EXPORT } from '../../../src/seams/plugins.ts';
 
 describe('MINIMAL_SEAMS', () => {
-  it('is exactly the four families that need no plugin', () => {
-    // `controller` joined this list in M70h/E8, in its functional shape: it is
-    // no longer gated, so a bare project can generate one. It shares the
-    // `route` barrel rather than adding a fourth.
+  it('is exactly the three families that need no plugin', () => {
+    // `controller` is ungated since M70h/E8 and is the one route-registering
+    // family: `setu g route` writes a function controller into its barrel.
     expect(MINIMAL_SEAMS.map((spec) => spec.schematic).sort()).toEqual([
       'controller',
       'middleware',
       'plugin',
-      'route',
     ]);
   });
 
   it('selects the FUNCTIONAL HTTP shapes, never the decorated ones', () => {
     const http = MINIMAL_SEAMS.filter((spec) => spec.barrel === 'src/controllers/index.ts');
-    expect(http.length).toBe(2);
-    for (const spec of http) {
-      // The class-based specs export APP_CONTROLLERS; the functional ones must
-      // not, or the generated config would spread a symbol nothing declares.
-      expect(spec.exports).toEqual(['registerGeneratedRoutes']);
-    }
+    expect(http.length).toBe(1);
+    // The class-based spec exports APP_CONTROLLERS; the functional one must
+    // not, or the generated config would spread a symbol nothing declares.
+    expect(http[0]!.exports).toEqual([REGISTER_ROUTES_EXPORT]);
   });
 
   // M60 declined this host reasoning that "six of the ten seams would be

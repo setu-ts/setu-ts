@@ -85,6 +85,7 @@
     "packages/diagnostics-plugin/test/integration/lifecycle.test.ts",
     "packages/diagnostics-plugin/test/integration/security.test.ts",
     "packages/runtime/test/unit/local-diagnostics-listener.test.ts",
+    "packages/runtime/test/integration/local-diagnostics-listener-conformance.test.ts",
     "packages/runtime/test/integration/read-stream-real.test.ts",
     "packages/runtime/test/integration/peer-address-real.test.ts",
     "packages/runtime/test/integration/signal-real.test.ts",
@@ -93,7 +94,7 @@
     "packages/runtime/src/adapters/deno/deno-http-adapter.ts",
     "packages/runtime/src/adapters/deno/deno-runtime.ts",
     "packages/runtime/src/adapters/deno/deno-ws-upgrader.ts",
-    "packages/runtime/src/diagnostics/local-diagnostics-listener.ts",
+    "packages/runtime/src/diagnostics/deno-local-diagnostics-listener.ts",
     "test/deno-lane",
     "test/fixtures/snippets"
   ]

@@ -127,7 +127,7 @@ const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
 queue.process<{ to: string }>(
   'send-welcome',
   async (job) => {
-    await mailer.send(job.data);
+    await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Welcome!' });
   },
   { concurrency: 5 },
 );
@@ -136,7 +136,9 @@ queue.process<{ to: string }>(
 // An unmatched trigger FAILS the invocation. A logger adds a structured
 // warning naming the registered expressions; it never changes the outcome.
 const cron = new WorkersCron({ logger });
-cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
+cron.on('0 3 * * *', async () => {
+  await queue.add('rebuild-reports', {});
+});
 
 export default {
   fetch: app.fetch,
@@ -369,6 +371,13 @@ its members together. The socket opens lazily on first publish and reopens after
 
 Two applications sharing one namespace must set different `topic` values, or each receives the
 other's frames.
+
+Subscriber throws and returned promise rejections are isolated through common's shared dispatch. The
+default reporter reads the logger at call time: first failure per handler at warn, repeats at debug
+with a count, and recovery at info. Errors use `describeError`, so CR/LF cannot forge log lines;
+frame data is never logged. A directly constructed `DurableObjectBackplane` accepts
+`onHandlerError(error, frame)` in `DurableObjectBackplaneOptions` to receive every failure instead
+of default logging. Hook and logger failures are swallowed.
 
 ### Distributed lock
 
@@ -632,3 +641,11 @@ The store takes `namespace` (required), `keyPrefix` (default `'idempotency:'`), 
 messages) and `timeoutMs` (default 5,000; `0` disables). It advertises `maxRecordBytes` of 120,000 —
 under the KV-backed Durable Object value limit — and has no `isHealthy`, because probing it would
 create and bill an object.
+
+## D1 payload refusals (M119e, 0.11.0)
+
+D1 `create`, `update` and `updateWhere` refuse invalid payload identifiers or unknown payload
+columns with `UnknownPayloadFieldError` from `@setu-ts/common` (400). The SQLite unknown-column
+mapping applies only when the reported column belongs to the payload; precondition-column errors
+keep their existing behavior. A STRICT-table type refusal becomes `InvalidFieldValueError` (400).
+Both HTTP details are fixed and contain no field names or supplied values.

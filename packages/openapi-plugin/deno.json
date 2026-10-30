@@ -1,14 +1,11 @@
 {
   "name": "@setu-ts/openapi-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "license": "MIT",
   "exports": "./src/index.ts",
   "imports": {
-    "npm:zod@^3.24.0": "npm:zod@^3.24.0",
-    "npm:zod@^4.4.0": "npm:zod@^4.4.0",
     "swagger-ui-dist/absolute-path.js": "npm:swagger-ui-dist@^5/absolute-path.js",
     "vitest": "npm:vitest@5.0.3",
-    "zod-v3": "npm:zod@^3.24.0",
-    "zod-v4": "npm:zod@^4.4.0"
+    "zod-v4": "npm:zod@^4.6.6"
   }
 }

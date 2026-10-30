@@ -19,6 +19,9 @@ export interface ParsedArgs {
   readonly flags: Readonly<Record<string, string | boolean | readonly string[]>>;
 }
 
+/** Flags whose every occurrence is kept, in order. */
+const REPEATABLE_FLAGS: ReadonlySet<string> = new Set(['depends-on', 'build-arg']);
+
 /**
  * Parse a command-line argument array into positionals and flags.
  *
@@ -50,9 +53,9 @@ export function parseArgs(
   const setFlag = (key: string, value: string | boolean): void => {
     // Dependencies are intentionally repeatable: a service can wait on more
     // than one sibling, and collapsing a repeated flag would silently discard
-    // a startup edge. All other flags retain their established last-value wins
-    // behavior.
-    if (key !== 'depends-on') {
+    // a startup edge. So is `--build-arg` (M122), one per image build argument.
+    // All other flags retain their established last-value wins behavior.
+    if (!REPEATABLE_FLAGS.has(key)) {
       flags[key] = value;
       return;
     }

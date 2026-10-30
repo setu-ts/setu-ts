@@ -359,7 +359,7 @@ await app.stop();
   //
   // The guard existed (M60) but returned early for any project without
   // `decorator-plugin`, on a premise E8 and M65 had both invalidated.
-  it('refuses a controller whose HTTP path a route already claims, functionally', async () => {
+  it('refuses a controller over a route of the same name, functionally', async () => {
     expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
 
@@ -371,10 +371,13 @@ await app.stop();
     expect(Object.keys(manifest.imports)).not.toContain('@setu-ts/decorator-plugin');
 
     expect(await run(['g', 'route', 'widget', '--dir', project])).toBe(0);
+    const route = await nodeFs.readFile(`${project}/src/controllers/widget.controller.ts`, 'utf8');
+    // One controller family: the route IS widget.controller.ts, so the overwrite
+    // guard refuses before writing and the function controller is untouched.
     expect(await run(['g', 'controller', 'widget', '--dir', project])).toBe(1);
-
-    // Refused BEFORE writing: the colliding file must not exist.
-    await expect(nodeFs.stat(`${project}/src/controllers/widget.controller.ts`)).rejects.toThrow();
+    expect(await nodeFs.readFile(`${project}/src/controllers/widget.controller.ts`, 'utf8')).toBe(
+      route,
+    );
 
     // A distinct name is still generated, so the guard did not over-refuse.
     expect(await run(['g', 'controller', 'gadget', '--dir', project])).toBe(0);
@@ -466,11 +469,11 @@ await app.stop();
     const found: string[] = [];
     for await (const entry of await nodeFs.opendir(`${project}/src`)) found.push(entry.name);
     expect(found.sort()).toEqual([
-      // One HTTP directory since M70h/E8 — `controllers` holds both kinds.
+      // One HTTP directory: `controllers` holds both controller shapes. No
+      // `modules/` until the first `setu g module`.
       'controllers',
       'jobs',
       'middleware',
-      'modules',
       'plugins',
       'services',
     ]);

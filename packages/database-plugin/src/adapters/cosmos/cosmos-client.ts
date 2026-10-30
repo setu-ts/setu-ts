@@ -249,7 +249,10 @@ export async function createLazyClientLoader(
   try {
     mod = (await import('@azure/cosmos')) as unknown as CosmosSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@azure/cosmos', { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/cosmos', {
+      requiredBy: '@setu-ts/database-plugin',
+      cause: error,
+    });
   }
   return {
     createClient: (): Promise<ICosmosClient> =>

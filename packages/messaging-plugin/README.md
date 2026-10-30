@@ -212,6 +212,15 @@ application logger — the first error of an outage at `warn`, identical repeats
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
 injected client gets no listener: it belongs to the caller.
 
+**node-redis.** To use node-redis instead of ioredis, pass
+`{ broker: 'redis-streams', client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
+`@setu-ts/common`, `createClient` from `redis`, installed in your application). The broker's
+blocking read (`XREADGROUP … BLOCK blockSizeMs`, default 100 ms) shares that connection, as it does
+with ioredis, so keep the adapter's `commandTimeoutMs` above `blockSizeMs`, and keep `blockSizeMs`
+positive: `0` blocks indefinitely, and a read the adapter abandoned would stay open and could still
+take a message. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 ### RabbitMQ durability
 
 <!-- version:history -->
@@ -407,9 +416,10 @@ exhausted, the connection closes and health stays down until the application rep
 
 **`publish()` resolves once JetStream has stored the message.** It waits for the server's
 acknowledgement, so a publish to a subject no stream captures rejects with an error naming the
-subject (the server answers `503`), and an unresponsive server rejects after the client's own 5 s
-timeout. Before 0.9.0 the acknowledgement was not awaited: such a publish resolved as a success and
-the refusal surfaced as an unhandled rejection, which terminates a Deno or Node process by default.
+subject (the server answers `503`), and an unresponsive server rejects when `publishTimeoutMs`
+expires (default 15 s; `0` unbounded) with `PublishTimeoutError`. Before 0.9.0 the acknowledgement
+was not awaited: such a publish resolved as a success and the refusal surfaced as an unhandled
+rejection, which terminates a Deno or Node process by default.
 
 **Request-reply needs its subjects in the stream too.** A responder consumes the derived
 `rr.req.<topic>` subject and the requester's reply inbox is `rr.inbox.<uuid>`, so an RPC-capable
@@ -434,6 +444,28 @@ topics, which used to attach silently to the first topic's consumer. A consumer 
 release carries no `setu.queue`; it is accepted when its durable name equals the requested queue and
 its filter matches the topic.
 
+**A queue-less subscription is a shared durable group.** Without a `queue` — `subscribe()`, and
+`respond()` with no queue included — the subscription uses ONE durable JetStream consumer per topic,
+named from `defaultQueue` (default `'messaging-consumers'`): the group is `<defaultQueue>.<topic>`.
+Every replica shares the one consumer, so each message is delivered to ONE replica; a restart
+re-attaches to the existing consumer and resumes from its acknowledgement floor. A group created for
+the first time starts at messages published after it, as a new Kafka group does; an explicit `queue`
+is unchanged. Before 0.11.0 each process created its own durable `messaging-<uuid>` consumer that
+replayed the whole stream on every start and was never removed. To have every replica receive every
+message, pass a `queue` that is stable and unique per replica (for example the pod name); a queue
+made from a random per-start value would leave a durable consumer behind on every start.
+
+**The reply inbox is ephemeral.** The `request()` reply inbox (`rr.inbox.<uuid>`) is an ephemeral
+consumer: it is deleted on shutdown, and if the server removes it the broker re-creates it, so
+replies keep arriving after an outage that reaps it.
+
+**Consumers earlier releases leaked get a reaping threshold.** On `connect()` the broker sets a
+5-minute `inactive_threshold` on the durable consumers earlier releases leaked — named exactly
+`messaging-<uuid>` or `rr_2einbox_2e<uuid>` whose recorded `setu.queue` metadata is absent or
+matches — so the server removes them once nothing reads from them. A replica still running an older
+version keeps its consumer while it reads. A user queue literally named `messaging-<uuid>` is
+therefore a reserved shape: such a consumer is reaped only after 5 min with no client attached.
+
 ### Pub/Sub subscriptions
 
 When `queue` is not supplied, each subscription is derived per topic — `<defaultQueue>.<topic ID>`
@@ -451,14 +483,38 @@ subscription. Pub/Sub reserves no character in a name, so unlike Kafka's colon t
 not recoverable by splitting. A derived or supplied name over 255 characters is refused at
 `subscribe()`. Topics must already exist; the broker creates none.
 
-### Kafka and Pub/Sub publish bounds
+### Publish bounds
 
-Both brokers bound each transport publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded),
-including RPC requests/replies and outbox relay publishes. A value outside 0–2147483647, `NaN` or
-Infinity throws `RangeError` at plugin and broker construction. A timeout names the broker, topic
-and bound and says it may still be delivered: it does not cancel the transport or prove the message
-was dropped. Configure a longer bound for slow brokers, or `0` to restore the previous unbounded
-wait; account for possible delivery before retrying.
+Every broker arm — Kafka, GCP Pub/Sub, RabbitMQ, Redis Streams and NATS — bounds each transport
+publish at `publishTimeoutMs` (default 15000 ms, `0` unbounded), including RPC requests/replies and
+outbox relay publishes. A value outside 0–2147483647, `NaN` or Infinity throws `RangeError` at
+plugin and broker construction.
+
+An expired publish rejects with the exported `PublishTimeoutError`, which carries the published
+topic and the configured bound as the readonly fields `topic` and `timeoutMs`:
+
+```typescript
+import type { IMessageBroker } from '@setu-ts/common';
+import { PublishTimeoutError } from '@setu-ts/messaging-plugin';
+
+declare const broker: IMessageBroker;
+
+try {
+  await broker.publish('orders', { id: 'o-1' });
+} catch (error) {
+  if (!(error instanceof PublishTimeoutError)) throw error;
+  // Not acknowledged within error.timeoutMs; the message may still be delivered.
+  console.warn(`publish to ${error.topic} unconfirmed after ${error.timeoutMs} ms`);
+}
+```
+
+The timeout does not cancel the transport or prove the message was dropped, so account for possible
+delivery before retrying. The Kafka, Pub/Sub and RabbitMQ message texts are unchanged from before,
+so a caller matching on the text keeps working. On Redis Streams the bound covers the publish's
+`XADD` only; consumer reads are unaffected. On NATS it is passed to the client as its own publish
+`timeout` and held by the framework's deadline as well; before 0.11.0 the NATS bound was the
+client's fixed 5 s. Configure a longer bound for slow brokers, or `0` for an unbounded wait (the
+previous behaviour on Redis Streams).
 
 ### Kafka consumer groups
 
@@ -1274,11 +1330,12 @@ The overlap kinds are `fenced` (the pre-publish check refused an expired claim),
 status write found another version) and `duplicate` (`markSent` found the row already sent, or
 `markFailure` did after the relay's publish timed out — the copy may have duplicated). A settlement
 answer is recorded even when it arrives after the call's own bound or the sweep deadline; a relay
-paused inside its publish may also report the `store-write-failing` health reason for that sweep.
-Any kind, including a dispatch sweep, adds the health reason `relay-overlap` inside the configured
-window. Losing at CLAIM time is ordinary contention and has no shipped signal. `retainSentMs: 0`
-disables only `duplicate`; `fenced` and `claim-lost` still work. `sentBy` remains an operator
-diagnostic, and is absent from transition outcomes.
+paused inside its publish or at a settlement write (`markSent` or `markFailure`) may also report the
+`store-write-failing` health reason for that sweep. Any kind, including a dispatch sweep, adds the
+health reason `relay-overlap` inside the configured window. Losing at CLAIM time is ordinary
+contention and has no shipped signal. `retainSentMs: 0` disables only `duplicate`; `fenced` and
+`claim-lost` still work. `sentBy` remains an operator diagnostic, and is absent from transition
+outcomes.
 
 On DynamoDB a stale GSI page cannot cause a publish: the claim's conditional write checks the latest
 base item. This follows AWS's documented model and is exercised against DynamoDB Local, not the
@@ -1342,14 +1399,14 @@ bound): `down` when the store does not answer, otherwise `up` with `data.reasons
 vocabulary, else `up`. `data` carries counts, ages in ms and the last local sweep's counts — never a
 tenant id, ordering key, topic or error text.
 
-| Reason                | Source                                                                                       | Scope                    |
-| --------------------- | -------------------------------------------------------------------------------------------- | ------------------------ |
-| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)                 | cluster-wide (the store) |
-| `failed-rows`         | the failed count is above zero                                                               | cluster-wide             |
-| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete         | cluster-wide             |
-| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set          | this instance            |
-| `store-write-failing` | this instance's last sweep ended on a rejected store call                                    | this instance            |
-| `relay-overlap`       | this instance observed `fenced`, `claim-lost` or `duplicate` inside `health.overlapWindowMs` | this instance            |
+| Reason                | Source                                                                                                       | Scope                    |
+| --------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------ |
+| `oldest-pending-age`  | the oldest pending row is older than `health.degradedAfterMs` (default 60 s)                                 | cluster-wide (the store) |
+| `failed-rows`         | the failed count is above zero                                                                               | cluster-wide             |
+| `failed-scan-cap`     | the failed count reaches `relay.maxFailedScan`, so a lap's blocked set is incomplete                         | cluster-wide             |
+| `blocked-key-cap`     | this instance's current or last completed lap overflowed its 10 000-key blocked set                          | this instance            |
+| `store-write-failing` | this instance's last sweep ended on a store call that was rejected or did not answer within `storeTimeoutMs` | this instance            |
+| `relay-overlap`       | this instance observed `fenced`, `claim-lost` or `duplicate` inside `health.overlapWindowMs`                 | this instance            |
 
 A replica that never wins the scheduler's slot never sweeps, so it reports none of the per-instance
 reasons. With `CAPABILITIES.METRICS` registered the outbox adds counters `outbox_published_total`,
@@ -1840,6 +1897,7 @@ Unknown reachability still reports `up`; changing readiness for unknown is outsi
 | `OutboxRowStateError`                   | class     |
 | `OutboxStoreVerifyTimeoutError`         | class     |
 | `OutboxUnknownTenantError`              | class     |
+| `PublishTimeoutError`                   | class     |
 | `PubSubSubscriptionBoundElsewhereError` | class     |
 | `RabbitMqBroker`                        | class     |
 | `RedisStreamsBroker`                    | class     |

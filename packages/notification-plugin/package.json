@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/notification-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Email, SMS, push, and Slack notifications over one injectable HTTP seam",
   "repository": {
     "type": "git",

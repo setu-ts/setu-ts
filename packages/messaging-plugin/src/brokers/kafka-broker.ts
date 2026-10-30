@@ -16,6 +16,7 @@ import {
 } from '@setu-ts/common';
 import {
   minimumStartOffsets,
+  partitionsToSeek,
   isKafkaStartModule,
   optionalKafkaStartModule,
   startAwareRoundRobin,
@@ -31,7 +32,7 @@ import type { ReplyInbox } from './inbox.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from '@setu-ts/common';
 import type { IKafkaEventEmitter, IKafkaFactory, KafkaOptions } from '../interfaces/index.ts';
-import { KafkaTopicUnavailableError } from '../errors.ts';
+import { KafkaTopicUnavailableError, PublishTimeoutError } from '../errors.ts';
 import { describeError } from './describe-error.ts';
 
 /** Reply topic used when {@link KafkaOptions.replyTopic} is omitted. */
@@ -79,7 +80,10 @@ async function loadKafkajs(): Promise<typeof import('kafkajs')> {
   try {
     return await import('kafkajs');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('kafkajs', { cause: error });
+    throw new OptionalDependencyUnavailableError('kafkajs', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -743,14 +747,25 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The topic to publish to
    * @param message - The message payload
+   * @param options - Caller headers, ordering key and de-duplication id
    * @returns Resolves when published
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes with framework-owned headers under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param headers - Framework-owned transport headers
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when the transport acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @internal
+   */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -787,8 +802,9 @@ export class KafkaBroker implements MessageBrokerAdapter {
       {
         timeoutMs: this.#publishTimeoutMs,
         onTimeout: () =>
-          new Error(
+          new PublishTimeoutError(
             `Kafka did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+            { topic, timeoutMs: this.#publishTimeoutMs },
           ),
         timing: resolveProbeTiming(this.#runtime),
       },
@@ -892,8 +908,12 @@ export class KafkaBroker implements MessageBrokerAdapter {
 
     try {
       await consumerTyped.connect();
-      await this.#subscribeWithRetry(consumerTyped, topic, generation);
-      start = await this.#captureGroupStart(topic, groupId, warn);
+      await this.#withSubscribeRetry(
+        () => consumerTyped.subscribe({ topic, fromBeginning: false }),
+        isUnknownTopicError,
+        generation,
+      );
+      start = await this.#captureGroupStart(topic, groupId, warn, generation);
       // A disconnect() that landed while the consumer was connecting, or during
       // a first attempt that then succeeded, must not leave a consumer running
       // after shutdown (security audit O1). The catch below releases it.
@@ -921,6 +941,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     // documented `partition:offset` identity degrades to `"undefined:<offset>"`
     // — colliding across partitions and breaking the de-duplication the
     // identity exists for (90d verification, Finding 1).
+    const firstDelivered = new Map<number, string>();
     const eachMessage = async ({
       partition,
       message,
@@ -947,6 +968,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
         offset: string;
       };
 
+      if (!firstDelivered.has(partition)) firstDelivered.set(partition, msgTyped.offset);
       const valueBytes = msgTyped.value ?? new Uint8Array(0);
       const content = new TextDecoder().decode(valueBytes);
       const deserialized = this.#serializer.deserialize<T>(content);
@@ -1024,10 +1046,14 @@ export class KafkaBroker implements MessageBrokerAdapter {
               entry.partitions.filter((p) => p.offset === '-1').map((p) => p.partition),
             ),
         );
-        for (const partition of payload.memberAssignment[topic] ?? []) {
-          if (uncommitted.has(partition) && Object.hasOwn(minimum, partition)) {
-            consumerTyped.seek({ topic, partition, offset: minimum[partition]! });
-          }
+        // Decision and seeks are synchronous: no delivery can interleave.
+        for (const { partition, offset } of partitionsToSeek(
+          payload.memberAssignment[topic] ?? [],
+          uncommitted,
+          minimum,
+          firstDelivered,
+        )) {
+          consumerTyped.seek({ topic, partition, offset });
         }
       } catch (error) {
         warn(error);
@@ -1059,6 +1085,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
     topic: string,
     groupId: string,
     warn: (error: unknown) => void,
+    generation: number,
   ): Promise<KafkaStartOffsets | null> {
     const factory = this.#factory;
     if (typeof factory?.admin !== 'function') return null;
@@ -1092,12 +1119,18 @@ export class KafkaBroker implements MessageBrokerAdapter {
         warn(error);
       }
       if (isNew) {
-        return Object.fromEntries(
-          (await admin.fetchTopicOffsets(topic)).map(({ partition, offset }) => [
-            partition,
-            offset,
-          ]),
+        if (generation !== this.#generation) return null;
+        // A fresh KRaft topic can exist before its leaders are ready for ListOffsets.
+        const offsets = await this.#withSubscribeRetry(
+          () => admin.fetchTopicOffsets(topic),
+          (error) =>
+            typeof error === 'object' &&
+            error !== null &&
+            'retriable' in error &&
+            error.retriable === true,
+          generation,
         );
+        return Object.fromEntries(offsets.map(({ partition, offset }) => [partition, offset]));
       }
     } catch (error) {
       warn(error);
@@ -1187,8 +1220,7 @@ export class KafkaBroker implements MessageBrokerAdapter {
   }
 
   /**
-   * Subscribes the consumer, retrying an unknown topic within the
-   * {@link KafkaOptions.retry} budget (M101b, V8-26).
+   * Retries subscribe-time operations within the validated {@link KafkaOptions.retry} budget.
    *
    * kafkajs does not retry `UNKNOWN_TOPIC_OR_PARTITION`, and a KRaft broker
    * that auto-creates answers exactly that to the request that creates the
@@ -1198,26 +1230,31 @@ export class KafkaBroker implements MessageBrokerAdapter {
    * consumer again is safe. Any other error, or the budget running out, is
    * rethrown for the caller to classify.
    *
-   * @param consumer - The connected consumer
-   * @param topic - The topic to subscribe
+   * Watermark reads use the same backoff and cancellable wait, retrying only
+   * errors with kafkajs's `retriable: true` property.
+   *
+   * @param operation - The subscribe or watermark read
+   * @param shouldRetry - Classifies errors eligible for another attempt
    * @param generation - The connection generation `subscribe()` started in;
    *   a `disconnect()` since then ends the retry
    */
-  async #subscribeWithRetry(
-    consumer: { subscribe(options: { topic: string; fromBeginning?: boolean }): Promise<void> },
-    topic: string,
+  async #withSubscribeRetry<T>(
+    operation: () => Promise<T>,
+    shouldRetry: (error: unknown) => boolean,
     generation: number,
-  ): Promise<void> {
+  ): Promise<T> {
     const budget = this.#subscribeRetry;
     let delay = budget.initialRetryTime;
     for (let attempt = 0; ; attempt++) {
       try {
-        await consumer.subscribe({ topic, fromBeginning: false });
-        return;
+        return await operation();
       } catch (err) {
-        if (!isUnknownTopicError(err) || attempt >= budget.retries) {
+        if (!shouldRetry(err) || attempt >= budget.retries) {
           throw err;
         }
+      }
+      if (generation !== this.#generation) {
+        throw new Error('KafkaBroker was disconnected while subscribing');
       }
       await new Promise<void>((resolve) => {
         const cancel = (): void => {

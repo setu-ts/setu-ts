@@ -235,7 +235,10 @@ export async function loadGcsModule(): Promise<GcsSdkModule> {
   try {
     return (await import('@google-cloud/storage')) as unknown as GcsSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@google-cloud/storage', { cause: error });
+    throw new OptionalDependencyUnavailableError('@google-cloud/storage', {
+      requiredBy: '@setu-ts/storage-plugin',
+      cause: error,
+    });
   }
 }
 

@@ -37,7 +37,10 @@ const defaultImporter = async (): Promise<GraphqlModuleLike> => {
   try {
     mod = await import('graphql');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('graphql', { cause: error });
+    throw new OptionalDependencyUnavailableError('graphql', {
+      requiredBy: '@setu-ts/graphql-plugin',
+      cause: error,
+    });
   }
   return {
     parse: mod.parse as unknown as GraphqlModuleLike['parse'],

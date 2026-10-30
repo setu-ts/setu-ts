@@ -27,6 +27,13 @@ export interface ICliFileSystem extends IFileSystem {
   ): Promise<{ before: Uint8Array | undefined }>;
   /** POSIX identity; absent on platforms without getuid and on legacy test filesystems. */
   readonly invokingUid?: number;
+  /**
+   * Whether the invoking user may write this path: `access(path, W_OK)` for an
+   * existing file, else `access` on its directory. Advisory only — the writer's
+   * own mapped refusal covers a permission change after the probe. Absent on
+   * fakes, where the preflight is skipped.
+   */
+  canWrite?(path: string): Promise<boolean>;
   /** lstat metadata for agents workspace directory-chain trust checks; never follows the leaf. */
   directoryOwnership?(path: string): Promise<{
     readonly uid: number;
@@ -61,6 +68,8 @@ export interface GeneratedFile {
   readonly path: string;
   /** The file contents. */
   readonly contents: string;
+  /** Exact binary contents, when present; used instead of the text contents. */
+  readonly bytes?: Uint8Array;
   /**
    * Marks a file the CLI owns outright and regenerates, exempting it from the
    * overwrite refusal in {@linkcode findExisting}.
@@ -507,7 +516,11 @@ export async function classifyFiles(
   const outcomes: WriteOutcome[] = [];
   for (const file of files) {
     outcomes.push(
-      outcomeFor(file.path, await previousBytes(fs, file.path), encoder.encode(file.contents)),
+      outcomeFor(
+        file.path,
+        await previousBytes(fs, file.path),
+        file.bytes ?? encoder.encode(file.contents),
+      ),
     );
   }
   return outcomes;
@@ -608,7 +621,7 @@ export async function writeFiles(
     for (const file of files) {
       throwIfInterrupted(options.signal);
       await ensureDirectory(fs, dirName(file.path), directories, known, options.signal);
-      const bytes = encoder.encode(file.contents);
+      const bytes = file.bytes ?? encoder.encode(file.contents);
       let before: Uint8Array | undefined;
       if (fs.writeRegularFile !== undefined) {
         try {

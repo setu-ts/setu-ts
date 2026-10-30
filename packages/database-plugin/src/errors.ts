@@ -34,35 +34,8 @@
 import { withHttpStatusHint } from '@setu-ts/common';
 import { renderDiagnosticName } from './errors/diagnostic-name.ts';
 
-/**
- * A write names a field absent from the entity's schema. No write was sent.
- * Diagnostics name the entity and field; the HTTP detail discloses neither.
- *
- * @example
- * ```typescript
- * if (error instanceof UnknownPayloadFieldError) {
- *   // Pick the resource's known fields before submitting the payload again.
- * }
- * ```
- * @since 0.10.0
- */
-export class UnknownPayloadFieldError extends Error {
-  /** Stable error discriminant. */
-  override readonly name = 'UnknownPayloadFieldError';
-
-  /**
-   * @param entity - The addressed entity
-   * @param field - The unknown payload field
-   */
-  constructor(entity: string, field: string) {
-    super(`Entity '${entity}' has no payload field ${renderDiagnosticName(field)}.`);
-    withHttpStatusHint(this, {
-      status: 400,
-      title: 'Bad Request',
-      detail: 'The request names a field this resource does not have.',
-    });
-  }
-}
+/** Portable refusal, shared with D1. @since 0.11.0 */
+export { UnknownPayloadFieldError } from '@setu-ts/common';
 
 /**
  * The status every caller-safe refusal in this module is answered with.
@@ -641,5 +614,39 @@ export class DatabaseTimeoutError extends Error {
       title: 'Gateway Timeout',
       detail: 'The database did not answer in time.',
     });
+  }
+}
+
+/**
+ * A registered Drizzle table lacks a repository key column.
+ * This configuration fault has no HTTP status hint.
+ * @since 0.11.0
+ */
+export class MissingKeyColumnError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'MissingKeyColumnError';
+  /** @param entity - The entity name
+   * @param column - The configured key column */
+  constructor(entity: string, column: string) {
+    super(
+      `Drizzle table '${entity}' has no column ${renderDiagnosticName(column)} for its primary key; set entities.${entity}.primaryKey to the table's key column(s), or register a table that has one.`,
+    );
+  }
+}
+
+/**
+ * A tenant column cannot be resolved to exactly one entity property.
+ * This configuration fault has no HTTP status hint.
+ * @since 0.11.0
+ */
+export class TenantColumnUnresolvedError extends Error {
+  /** Stable error discriminant. */
+  override readonly name = 'TenantColumnUnresolvedError';
+  /** @param entity - The entity name
++   * @param column - The configured tenant column */
+  constructor(entity: string, column: string) {
+    super(
+      `Entity '${entity}': tenant column ${renderDiagnosticName(column)} cannot be resolved; name the property on ColumnStrategy, or add the column to the table.`,
+    );
   }
 }

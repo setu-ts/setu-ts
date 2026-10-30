@@ -75,7 +75,10 @@ export async function loadNodemailerModule(): Promise<NodemailerModule> {
   try {
     return (await import('nodemailer')) as unknown as NodemailerModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('nodemailer', { cause: error });
+    throw new OptionalDependencyUnavailableError('nodemailer', {
+      requiredBy: '@setu-ts/mail-plugin',
+      cause: error,
+    });
   }
 }
 

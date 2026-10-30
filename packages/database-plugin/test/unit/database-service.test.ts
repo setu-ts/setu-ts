@@ -484,3 +484,153 @@ describe('M113g driver timeout interception', () => {
     expect(bare.cause).toBeUndefined();
   });
 });
+
+it('M119e resolves the internal entity field member without widening the portable port', async () => {
+  const { ENTITY_FIELD_RESOLVER, FIELD_FOR_COLUMN } =
+    await import('../../src/adapters/drizzle/field-for-column.ts');
+  const adapter = new MemoryAdapter();
+  const source = adapter.createDataSource('User');
+  for (const resolve of [
+    undefined,
+    (name: string) => (name === 'tenant_id' ? 'tenantId' : undefined),
+  ]) {
+    const service = new DatabaseService(
+      adapter,
+      () => ({ ...source, ...(resolve === undefined ? {} : { [FIELD_FOR_COLUMN]: resolve }) }),
+      'memory',
+    );
+    const member = service as unknown as {
+      [ENTITY_FIELD_RESOLVER]: (entity: string, name: string) => string | undefined;
+    };
+    expect(member[ENTITY_FIELD_RESOLVER]('User', 'tenant_id')).toBe(
+      resolve === undefined ? 'tenant_id' : 'tenantId',
+    );
+    expect(member[ENTITY_FIELD_RESOLVER]('User', 'absent')).toBe(
+      resolve === undefined ? 'absent' : undefined,
+    );
+  }
+});
+
+describe('M119e refused PostgreSQL input through the service', () => {
+  it('normalizes every CRUD operation outside and inside transactions', async () => {
+    const { InvalidFieldValueError, InvalidCursorError } = await import('@setu-ts/common');
+    const driver = Object.assign(new Error('invalid value private-canary'), { code: '22P02' });
+    const fail = (): Promise<never> => Promise.reject(driver);
+    const source: DataSource = {
+      findById: fail,
+      findAll: fail,
+      create: fail,
+      update: fail,
+      delete: fail,
+      count: fail,
+      updateWhere: fail,
+      deleteWhere: fail,
+    };
+    const adapter = new MemoryAdapter();
+    adapter.beginTransaction = () =>
+      Promise.resolve({
+        createDataSource: () => source,
+        commit: () => Promise.resolve(),
+        rollback: () => Promise.resolve(),
+      });
+    const service = new DatabaseService(adapter, () => source, 'drizzle');
+    const exercise = async (repo: ReturnType<DatabaseService['getRepository']>): Promise<void> => {
+      for (const call of [
+        () => repo.findById('abc'),
+        () => repo.findAll(),
+        () => repo.count(),
+        () => repo.create({ value: 'x' }),
+        () => repo.update('abc', { value: 'x' }),
+        () => repo.delete('abc'),
+        () => repo.updateWhere!('abc', { role: 'a' }, { value: 'x' }),
+        () => repo.deleteWhere!('abc', { role: 'a' }),
+      ]) {
+        const error: unknown = await call().catch((error: unknown) => error);
+        expect(error).toBeInstanceOf(InvalidFieldValueError);
+        expect(httpStatusHintOf(error)).toEqual({
+          status: 400,
+          title: 'Bad Request',
+          detail: 'A supplied value does not fit the type of its field.',
+        });
+        expect(JSON.stringify(error)).not.toContain('private-canary');
+        expect(((error as Error).cause as Error).message).not.toContain('private-canary');
+      }
+    };
+    await exercise(service.getRepository('User'));
+    await service.transaction(async (uow) => {
+      await exercise(uow.getRepository('User'));
+    });
+    const hinted = new InvalidCursorError('cursor refused', { cause: driver });
+    const passthrough = new DatabaseService(
+      adapter,
+      () => ({ ...source, findById: () => Promise.reject(hinted) }),
+      'drizzle',
+    );
+    await expect(passthrough.getRepository('User').findById('abc')).rejects.toBe(hinted);
+  });
+});
+
+describe('M119e Prisma refusal diagnostics contain no supplied values', () => {
+  for (const [name, code, message, unknownField] of [
+    [
+      'PrismaClientValidationError',
+      undefined,
+      'Unknown argument `surprise`. data: private-prisma-canary',
+      true,
+    ],
+    [
+      'PrismaClientValidationError',
+      undefined,
+      'Argument `age`: Invalid value provided. Expected Int, provided String. private-prisma-canary',
+      false,
+    ],
+    [
+      'PrismaClientKnownRequestError',
+      'P2007',
+      'Invalid input value: invalid input syntax for type uuid: private-prisma-canary',
+      false,
+    ],
+  ] as const) {
+    it(`${name} ${code ?? (unknownField ? 'unknown field' : 'value')} drops the original object and cause chain`, async () => {
+      const { inspect } = await import('node:util');
+      const { InvalidFieldValueError, UnknownPayloadFieldError, serializeError } =
+        await import('@setu-ts/common');
+      const original = Object.assign(
+        new Error(message, { cause: new Error('private-prisma-canary') }),
+        {
+          name,
+          ...(code === undefined ? {} : { code }),
+          meta: { value: 'private-prisma-canary' },
+        },
+      );
+      const source = new MemoryAdapter().createDataSource('User');
+      source.findById = () =>
+        Promise.reject(new Error('wrapper private-prisma-canary', { cause: original }));
+      const adapter = new MemoryAdapter();
+      const service = new DatabaseService(adapter, () => source, 'prisma');
+      const mapped: unknown = await service
+        .getRepository('User')
+        .findById('private-prisma-canary')
+        .catch((error: unknown) => error);
+      expect(mapped).toBeInstanceOf(
+        unknownField ? UnknownPayloadFieldError : InvalidFieldValueError,
+      );
+      const cause = (mapped as Error).cause;
+      expect(cause).toBeInstanceOf(Error);
+      expect(cause).not.toBe(original);
+      expect(cause).toMatchObject({
+        name,
+        message: `Prisma refused the input (${name}${code === undefined ? '' : ` ${code}`}).`,
+      });
+      expect(cause).not.toHaveProperty('cause');
+      for (const diagnostic of [
+        inspect(mapped, { depth: null, showHidden: true }),
+        (mapped as Error).message,
+        JSON.stringify(serializeError(mapped)),
+        JSON.stringify(httpStatusHintOf(mapped)),
+      ])
+        expect(diagnostic).not.toContain('private-prisma-canary');
+      expect(original.message).toContain('private-prisma-canary');
+    });
+  }
+});

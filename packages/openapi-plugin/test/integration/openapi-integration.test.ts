@@ -4,7 +4,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod-v3';
+import { z } from 'zod-v4';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { OpenApiPlugin } from '../../src/plugin/openapi-plugin.ts';

@@ -21,6 +21,7 @@ import { CachePlugin } from '@setu-ts/cache-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY_KEY = 'canary-key-SYNTHETIC';
 const CANARY_PREFIX = 'canary-prefix-SYNTHETIC:';
@@ -38,17 +39,9 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-/** Reserves a free loopback port. */
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 describe('Cache observations e2e (M98i canary)', () => {
   it('serves approved counters end to end while every canary stays absent', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -66,7 +59,7 @@ describe('Cache observations e2e (M98i canary)', () => {
       ],
       diagnostics: {},
     });
-    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     try {
       const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
       const other = app.services.get<ICacheStore>(createCapabilityToken('cache.session'));

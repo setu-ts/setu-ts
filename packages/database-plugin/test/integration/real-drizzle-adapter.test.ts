@@ -1195,7 +1195,8 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
           expect(error).not.toBeInstanceOf(DatabaseTimeoutError);
           expect(error).not.toBeInstanceOf(DatabaseUnavailableError);
           expect(error).not.toBeInstanceOf(DuplicateKeyError);
-          expect((error as Error).cause).toMatchObject({ code: '22P02' });
+          expect(error).toHaveProperty('name', 'InvalidFieldValueError');
+          expect(((error as Error).cause as Error).cause).toMatchObject({ code: '22P02' });
           expect(await repo.findById('invalid')).toBeNull();
           await repo.create({ id: 'valid', value: 42 });
           expect(await repo.findById('valid')).toEqual({ id: 'valid', value: 42 });
@@ -1233,7 +1234,7 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
         const forged = encodeCursor({
           orderedValues: ['private-not-a-number'],
           keyValues: ['a'],
-          sortFingerprint: sortFingerprint(orderBy),
+          sortFingerprint: sortFingerprint(orderBy, { entity: 'Number', keyColumns: ['id'] }),
         });
         const error: unknown = await repo.findPage({ orderBy, limit: 2, cursor: forged }).then(
           () => null,
@@ -1323,7 +1324,9 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
           (entity) => broken.createDataSource(entity),
           'drizzle',
         );
-        expect(() => service.getRepository('User')).toThrow('has no "id" column');
+        expect(() => service.getRepository('User')).toThrow(
+          'has no column "id" for its primary key',
+        );
         await adapter.connect();
         const mapped = new DatabaseService(
           adapter,
@@ -1340,3 +1343,183 @@ describe('M113g real PostgreSQL identity and mapping refusals', () => {
     },
   );
 });
+
+describe('M119e live PostgreSQL tenant and pool contract', () => {
+  it(
+    'resolves tenant_id to tenantId for stamp, reads and conditional writes',
+    { skip: skipLivePg },
+    async () => {
+      const { DatabaseTenantDataStore } = await import('../../src/index.ts');
+      const pool = new Pool({ connectionString: livePgUrl! });
+      const name = `m119e_tenant_${crypto.randomUUID().replaceAll('-', '')}`;
+      const table = pgTable(name, {
+        id: text('id').primaryKey(),
+        tenantId: text('tenant_id'),
+        name: text('name'),
+      });
+      const db = nodePostgresDrizzle(pool);
+      const adapter = new DrizzleAdapter({
+        drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+        drizzleTables: { User: table },
+      });
+      try {
+        await pool.query(`CREATE TABLE "${name}" (id text PRIMARY KEY, tenant_id text, name text)`);
+        await adapter.connect();
+        const service = new DatabaseService(
+          adapter,
+          (entity) => adapter.createDataSource(entity),
+          'drizzle',
+        );
+        const store = new DatabaseTenantDataStore(service);
+        await store.create('a', 'User', { id: '1', tenantId: 'b', name: 'before' });
+        expect(await store.findById('a', 'User', '1')).toEqual({
+          id: '1',
+          tenantId: 'a',
+          name: 'before',
+        });
+        expect(await store.findById('b', 'User', '1')).toBeNull();
+        expect(await store.find('b', 'User', {})).toEqual([]);
+        expect(await store.findAll('a', 'User')).toHaveLength(1);
+        await expect(store.create('a', 'User', { id: '2', tenant_id: 'b' })).rejects.toThrow(
+          'has no payload field',
+        );
+        expect(await service.getRepository('User').findById('2')).toBeNull();
+        expect(await store.update('b', 'User', '1', { name: 'foreign' })).toBeNull();
+        expect(await store.delete('b', 'User', '1')).toBe(false);
+        await store.update('a', 'User', '1', { name: 'after', tenantId: 'b' });
+        expect(await store.findById('a', 'User', '1')).toEqual({
+          id: '1',
+          tenantId: 'a',
+          name: 'after',
+        });
+        expect(await store.delete('a', 'User', '1')).toBe(true);
+        expect(await store.findById('a', 'User', '1')).toBeNull();
+      } finally {
+        await adapter.disconnect();
+        await pool.query(`DROP TABLE IF EXISTS "${name}"`);
+        await pool.end();
+      }
+    },
+  );
+  it('reports a real idle-client termination once and survives', { skip: skipLivePg }, async () => {
+    const { attachPoolErrorListener } =
+      await import('../../src/adapters/drizzle/pool-error-listener.ts');
+    const pool = new Pool({ connectionString: livePgUrl!, max: 1, idleTimeoutMillis: 0 });
+    const control = new Pool({ connectionString: livePgUrl! });
+    const db = nodePostgresDrizzle(pool);
+    const logs: { message: string; meta: Record<string, unknown> }[] = [];
+    let reported: (() => void) | undefined;
+    const event = new Promise<void>((resolve) => {
+      reported = resolve;
+    });
+    try {
+      expect(
+        attachPoolErrorListener(db, (message, meta) => {
+          logs.push({ message, meta });
+          reported!();
+        }),
+      ).toBe(true);
+      const client = await pool.connect();
+      const pid = (await client.query<{ pid: number }>('SELECT pg_backend_pid() AS pid')).rows[0]!
+        .pid;
+      client.release();
+      expect(pool.idleCount).toBe(1);
+      await control.query('SELECT pg_terminate_backend($1)', [pid]);
+      await event;
+      expect(logs).toHaveLength(1);
+      expect(logs[0]!.message).toBe('Database pool reported an idle-connection error');
+      expect(JSON.stringify(logs)).not.toContain('probe');
+      expect(JSON.stringify(logs)).not.toContain('postgresql:');
+      expect((await pool.query('SELECT 1 AS alive')).rows).toEqual([{ alive: 1 }]);
+    } finally {
+      await pool.end();
+      await control.end();
+    }
+  });
+});
+
+it(
+  'M119e serves real UUID and integer refusals as one warn each, with a 500 error control',
+  { skip: skipLivePg },
+  async () => {
+    const { uuid } = await import('drizzle-orm/pg-core');
+    const { errorHandler } = await import('@setu-ts/exceptions');
+    const { RecordingLogger } =
+      await import('../../../logger-plugin/test/fixtures/recording-logger.ts');
+    const pool = new Pool({ connectionString: livePgUrl! });
+    const name = `m119e_value_${crypto.randomUUID().replaceAll('-', '')}`;
+    const table = pgTable(name, { id: uuid('id').primaryKey(), age: integer('age') });
+    const database = nodePostgresDrizzle(pool);
+    const logger = new RecordingLogger();
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        {
+          name: 'logger',
+          version: '1.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, logger);
+          },
+        },
+        DatabasePlugin({
+          type: 'drizzle',
+          options: {
+            drizzleInstance: createDrizzleDatabase(database, (db, work) => db.transaction(work)),
+            drizzleTables: { User: table },
+          },
+        }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 0 });
+    app.router.get('/bad-key', async (ctx) =>
+      ctx.response.json(
+        await ctx.services
+          .get<IDatabaseService>(CAPABILITIES.DATABASE)
+          .getRepository('User')
+          .findById('private-canary-key'),
+      ),
+    );
+    app.router.post('/bad-value', async (ctx) =>
+      ctx.response.json(
+        await ctx.services
+          .get<IDatabaseService>(CAPABILITIES.DATABASE)
+          .getRepository('User')
+          .create({ id: crypto.randomUUID(), age: 'private-canary-value' }),
+      ),
+    );
+    app.router.get('/server-fault', () => {
+      throw new Error('server fault');
+    });
+    try {
+      await pool.query(`CREATE TABLE "${name}" (id uuid PRIMARY KEY, age integer)`);
+      await app.start();
+      for (const [method, url] of [
+        ['GET', '/bad-key'],
+        ['POST', '/bad-value'],
+      ] as const) {
+        logger.calls.length = 0;
+        const response = await app.inject({ method, url });
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail: 'A supplied value does not fit the type of its field.',
+          instance: url,
+        });
+        expect(logger.calls).toHaveLength(1);
+        expect(logger.calls[0]!.level).toBe('warn');
+        expect(JSON.stringify(logger.calls)).not.toContain('private-canary');
+      }
+      logger.calls.length = 0;
+      expect((await app.inject({ method: 'GET', url: '/server-fault' })).statusCode).toBe(500);
+      expect(logger.calls).toHaveLength(1);
+      expect(logger.calls[0]!.level).toBe('error');
+    } finally {
+      await app.stop();
+      await pool.query(`DROP TABLE IF EXISTS "${name}"`);
+      await pool.end();
+    }
+  },
+);

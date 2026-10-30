@@ -110,7 +110,11 @@ export async function readJsonManifest(fs: IFileSystem, path: string): Promise<M
     // Match TextDecoder's default BOM handling used by this reader before bounding it.
     source = text.replace(/^\uFEFF/, '');
   } catch (cause) {
-    return { kind: 'unreadable', reason: failureMessage(cause) };
+    // The bounded reader names the path in its own message; every caller prints
+    // `Cannot read <path>: <reason>`, so a leading `<path>: ` would say it twice.
+    const message = failureMessage(cause);
+    const reason = message.startsWith(`${path}: `) ? message.slice(path.length + 2) : message;
+    return { kind: 'unreadable', reason };
   }
   try {
     return { kind: 'ok', value: JSON.parse(source), format: 'json' };

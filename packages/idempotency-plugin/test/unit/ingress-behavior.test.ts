@@ -210,7 +210,7 @@ describe('createIngressBehavior (M109a §3.7)', () => {
     };
     const run = behavior(store, { topics: ['t'], key: () => 'k' }, logger);
     await run.handle(message('t'), () => Promise.resolve());
-    expect(errors).toEqual([['idempotency complete failed', { error: 'object' }]]);
+    expect(errors).toEqual([['idempotency complete failed', { error: 'Error: [object Object]' }]]);
   });
 
   it('logs a release rejection without replacing the original error', async () => {

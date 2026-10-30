@@ -5,7 +5,7 @@
  *
  * @module
  */
-import type { IContainer, Provider, ProviderOptions, ServiceScope } from '@setu-ts/common';
+import type { ContainerToken, Provider, ProviderOptions, ServiceScope } from '@setu-ts/common';
 
 import type { ExternalResolver } from './container.ts';
 import { DiContainer } from './container.ts';
@@ -16,13 +16,13 @@ import { DiContainer } from './container.ts';
  * @internal
  */
 interface PendingEntry {
-  readonly token: string;
+  readonly token: ContainerToken;
   readonly provider: Provider<unknown>;
   readonly options: ProviderOptions | undefined;
 }
 
 /**
- * Fluent builder for {@linkcode IContainer} instances.
+ * Fluent builder for {@linkcode DiContainer} instances.
  *
  * Collects configuration and provider registrations, then produces a
  * ready-to-use container via {@linkcode build}.
@@ -35,6 +35,7 @@ interface PendingEntry {
  *   .register('users', { useClass: UserService, inject: ['db'] })
  *   .build();
  * ```
+ *
  * @since 0.1.0
  */
 export class ContainerBuilder {
@@ -81,16 +82,22 @@ export class ContainerBuilder {
    * Queues a provider registration to be applied at {@linkcode build} time.
    *
    * @typeParam T - The service type
+   *
    * @param token - The capability token
+   *
    * @param provider - Class, factory, or value provider
+   *
    * @param options - Lifecycle scope
+   *
    * @returns This builder for chaining
+   *
+   * @since 0.11.0
    */
-  register<T>(token: string, provider: Provider<T>, options?: ProviderOptions): this {
+  register<T>(token: ContainerToken<T>, provider: Provider<T>, options?: ProviderOptions<T>): this {
     this.#entries.push({
       token,
       provider: provider as Provider<unknown>,
-      options,
+      options: options as ProviderOptions | undefined,
     });
     return this;
   }
@@ -98,9 +105,12 @@ export class ContainerBuilder {
   /**
    * Creates the container with all queued registrations applied.
    *
-   * @returns A new {@linkcode IContainer}
+   * @returns An open container whose owner can call close()
+   * @throws {Error} If queued tokens are duplicated
+   *
+   * @since 0.11.0
    */
-  build(): IContainer {
+  build(): DiContainer {
     const base = {
       defaultScope: this.#defaultScope,
       autoRegister: this.#autoRegister,
@@ -124,15 +134,18 @@ export class ContainerBuilder {
  * const container = createContainer({ defaultScope: 'singleton' });
  * container.register('svc', { useValue: new MyService() });
  * ```
+ *
  * @param config - Optional configuration
- * @returns A new {@linkcode IContainer}
+ *
+ * @returns A new {@linkcode DiContainer}
+ *
  * @since 0.1.0
  */
 export function createContainer(config?: {
   readonly defaultScope?: ServiceScope;
   readonly autoRegister?: boolean;
   readonly externalResolver?: ExternalResolver;
-}): IContainer {
+}): DiContainer {
   const builder = new ContainerBuilder()
     .setDefaultScope(config?.defaultScope ?? 'singleton')
     .setAutoRegister(config?.autoRegister ?? false);

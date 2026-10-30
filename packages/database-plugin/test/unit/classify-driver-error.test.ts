@@ -398,3 +398,90 @@ describe('M113g measured pg timeout signals', () => {
     expect(isUnansweredConnect({ code: 'ECONNREFUSED' })).toBe(false);
   });
 });
+
+describe('M119e refusedInputOf', () => {
+  it('matches the PostgreSQL refusal table, including bounded nested causes', async () => {
+    const { refusedInputOf } = await import('../../src/errors/classify.ts');
+    const cases: readonly (readonly [unknown, unknown])[] = [
+      ...['22P02', '22003', '22007', '22008'].map((code) => [{ code }, { kind: 'value' }] as const),
+      [{ cause: { code: '22P02' } }, { kind: 'value' }],
+      [{ code: '22012' }, null],
+      [{ code: '23505' }, null],
+      [{ code: 'P2007' }, null],
+      [null, null],
+      ['foreign', null],
+    ];
+    for (const [input, expected] of cases) expect(refusedInputOf(input)).toEqual(expected);
+  });
+});
+
+// Exact Prisma 7 diagnostics measured by the M119e real-backend probe.
+const PRISMA_REFUSALS = [
+  {
+    label: 'malformed uuid findById',
+    name: 'PrismaClientKnownRequestError',
+    code: 'P2007',
+    message:
+      '\nInvalid `client.portableValue.findUnique()` invocation in\n/app/prisma-probe.mts:12:60\n\n   9 const client = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });\n  10 try {\n  11   for (const [label, work] of [\n\u2192 12     [\'malformed uuid findById\', () => client.portableValue.findUnique(\nInvalid input value: invalid input syntax for type uuid: "abc"',
+  },
+  {
+    label: 'mistyped integer create',
+    name: 'PrismaClientValidationError',
+    code: null,
+    message:
+      "\nInvalid `client.portableValue.create()` invocation in\n/app/prisma-probe.mts:13:60\n\n  10 try {\n  11   for (const [label, work] of [\n  12     ['malformed uuid findById', () => client.portableValue.findUnique({ where: { id: 'abc' } })],\n\u2192 13     ['mistyped integer create', () => client.portableValue.create({\n           data: {\n             id: \"70d0c8db-60af-4860-a55a-15fa81559b2f\",\n             age: \"canary-value\"\n                  ~~~~~~~~~~~~~~\n           }\n         })\n\nArgument `age`: Invalid value provided. Expected Int, provided String.",
+  },
+  {
+    label: 'unknown field create',
+    name: 'PrismaClientValidationError',
+    code: null,
+    message:
+      "\nInvalid `client.portableValue.create()` invocation in\n/app/prisma-probe.mts:14:57\n\n  11 for (const [label, work] of [\n  12   ['malformed uuid findById', () => client.portableValue.findUnique({ where: { id: 'abc' } })],\n  13   ['mistyped integer create', () => client.portableValue.create({ data: { id: crypto.randomUUID(), age: 'canary-value' } })],\n\u2192 14   ['unknown field create', () => client.portableValue.create({\n         data: {\n           id: \"8d6f99f1-a5af-4b82-ab4a-eee97d5a5fd8\",\n           age: 1,\n           surprise: \"canary-value\"\n           ~~~~~~~~\n         }\n       })\n\nUnknown argument `surprise`. Available options are marked with ?.",
+  },
+];
+
+describe('M119e measured Prisma input refusals', () => {
+  for (const [index, row] of PRISMA_REFUSALS.entries()) {
+    it(row.label, async () => {
+      const { refusedInputOf } = await import('../../src/errors/classify.ts');
+      const error = Object.assign(new Error(row.message), {
+        name: row.name,
+        ...(row.code === null ? {} : { code: row.code }),
+      });
+      const expected =
+        index === 2 ? { kind: 'unknown-field', field: 'surprise' } : { kind: 'value' };
+      expect(refusedInputOf(error)).toEqual(expected);
+      expect(refusedInputOf(new Error('wrapper', { cause: error }))).toEqual(expected);
+    });
+  }
+  it('matches P2007 only on known-request errors and leaves other codes alone', async () => {
+    const { refusedInputOf } = await import('../../src/errors/classify.ts');
+    expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2007' })).toEqual({
+      kind: 'value',
+    });
+    expect(refusedInputOf({ name: 'OtherError', code: 'P2007' })).toBeNull();
+    // P2023 also reports stored data Prisma cannot read: a server fault, kept unmapped.
+    expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2023' })).toBeNull();
+    expect(refusedInputOf({ name: 'PrismaClientKnownRequestError', code: 'P2002' })).toBeNull();
+    expect(refusedInputOf({ name: 'PrismaClientValidationError' })).toEqual({ kind: 'value' });
+    expect(refusedInputOf({ message: 'Unknown argument `surprise`' })).toBeNull();
+  });
+  it('names the key from Prisma summary line, never from a rendered payload value (audit F-2)', async () => {
+    const { refusedInputOf } = await import('../../src/errors/classify.ts');
+    // The measured shape, with a payload value carrying the summary text: the
+    // rendered value sits indented after its key, above Prisma's own line.
+    const message =
+      '\nInvalid `client.portableValue.create()` invocation:\n\n{\n  data: {\n' +
+      '    id: "Unknown argument `forged_by_value`",\n    age: 1,\n' +
+      '    real_unknown_key: 2\n    ~~~~~~~~~~~~~~~~\n  }\n}\n\n' +
+      'Unknown argument `real_unknown_key`. Available options are marked with ?.';
+    const error = Object.assign(new Error(message), { name: 'PrismaClientValidationError' });
+    expect(refusedInputOf(error)).toEqual({ kind: 'unknown-field', field: 'real_unknown_key' });
+    // A value alone, with no summary line of Prisma's, names no field.
+    const valueOnly = Object.assign(
+      new Error('\n  data: {\n    id: "Unknown argument `forged_by_value`"\n  }\n'),
+      { name: 'PrismaClientValidationError' },
+    );
+    expect(refusedInputOf(valueOnly)).toEqual({ kind: 'value' });
+  });
+});

@@ -20,6 +20,7 @@
 import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
+import { nodeRedisClientCall } from '../templates/node-redis.ts';
 import {
   PROTO_DEV_DEPENDENCIES,
   PROTO_IMPORTS,
@@ -55,6 +56,9 @@ export const TRANSPORTS = [
 
 /** An inter-service transport accepted by `--transport`. */
 export type TransportName = (typeof TRANSPORTS)[number];
+
+/** Redis client selected by a scaffold; ioredis remains the default. @since 0.11.0 */
+export type RedisClient = 'ioredis' | 'node-redis';
 
 /** The transport a workspace uses when `--transport` is not given. */
 export const DEFAULT_TRANSPORT: TransportName = 'http';
@@ -132,6 +136,8 @@ export interface ComposeBacking {
  * What a transport contributes to every member of the workspace.
  */
 export interface TransportSpec {
+  /** Explicit node-redis selection, omitted for the default ioredis arm. */
+  readonly redisClient?: 'node-redis';
   /** The `--transport` value that selects it. */
   readonly name: TransportName;
   /** One line for `--help` and the workspace README. */
@@ -176,6 +182,12 @@ export interface TransportSpec {
    * @returns The argument list, without the enclosing parentheses
    */
   readonly queueArgs?: (connection: string) => string;
+  /** Redis cache options for a later setu add cache in a workspace member. */
+  readonly cacheArgs?: (connection: string) => string;
+  /** Redis distributed-lock options merged with any generated artifact options. */
+  readonly schedulerArgs?: (connection: string) => string;
+  /** Redis backplane options for a later setu add realtime-backplane. */
+  readonly backplaneArgs?: (connection: string) => string;
   /**
    * Client packages the project needs once {@linkcode messagingArgs} selects this
    * broker. Each is an OPTIONAL peer of `messaging-plugin`, which no package
@@ -339,6 +351,10 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     plugins: [],
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
     queueArgs: (connection) => `{ adapter: 'redis', url: ${connection} }`,
+    cacheArgs: (connection) => `{ store: 'redis', options: { url: ${connection} } }`,
+    schedulerArgs: (connection) =>
+      `{ distributedLock: { enabled: true, storage: 'redis', url: ${connection} } }`,
+    backplaneArgs: (connection) => `{ transport: 'redis', url: ${connection} }`,
     connection: {
       variable: 'REDIS_URL',
       localDefault: 'redis://127.0.0.1:6379',
@@ -647,17 +663,56 @@ export function renderConnection(
 }
 
 /**
+ * Reads a transport from the registered ConfigPlugin, including dotenv values.
+ * @param connection - The transport's connection declaration
+ * @param override - The workspace's replacement fallback
+ * @param column - Column at which the expression begins (zero based)
+ * @param depth - Indentation of the containing property
+ * @returns A config read, wrapped to the generated 100-column budget
+ */
+export function renderConfigConnection(
+  connection: TransportConnection,
+  override?: string,
+  column = 15,
+  depth = 10,
+): string {
+  const quote = (value: string): string =>
+    `'${value.replaceAll('\\', '\\\\').replaceAll("'", "\\'").replaceAll('\n', '\\n').replaceAll('\r', '\\r')}'`;
+  const variable = quote(connection.variable);
+  const fallback = quote(override ?? connection.localDefault);
+  const single = `config.get<string>(${variable}, { default: ${fallback} })`;
+  if (column + single.length + 1 <= 100) return single;
+  // What `deno fmt` and Prettier both print when the call overflows (measured on
+  // the Service Bus emulator default, 2026-10-28): the last argument hugs the call,
+  // and `default:` breaks onto its own line only when its value still overflows.
+  // Callers render in the inline frame and shift the literal two spaces deeper, so
+  // the property's final inner column is `depth + 4`.
+  const inner = ' '.repeat(depth + 2);
+  const property =
+    depth + 4 + `default: ${fallback},`.length <= 100
+      ? `${inner}default: ${fallback},`
+      : `${inner}default:\n${inner}  ${fallback},`;
+  return `config.get<string>(${variable}, {\n${property}\n${' '.repeat(depth)}})`;
+}
+
+/**
  * Looks up a transport by an UNTRUSTED string — a flag value, or a manifest
  * field.
  *
  * @param name - The `--transport` value
+ * @param redisClient - Which Redis driver to render, defaulting to ioredis
  * @returns Its spec, or undefined when no such transport exists
  */
-export function getTransport(name: string): TransportSpec | undefined {
+export function getTransport(
+  name: string,
+  redisClient: RedisClient = 'ioredis',
+): TransportSpec | undefined {
   // `Object.hasOwn` rather than a bare index, so an inherited property name
   // (`constructor`, `__proto__`, `toString`) misses cleanly instead of
   // returning something off `Object.prototype`.
-  return Object.hasOwn(TRANSPORT_SPECS, name) ? TRANSPORT_SPECS[name as TransportName] : undefined;
+  return Object.hasOwn(TRANSPORT_SPECS, name)
+    ? transportSpec(name as TransportName, redisClient)
+    : undefined;
 }
 
 /**
@@ -667,10 +722,29 @@ export function getTransport(name: string): TransportSpec | undefined {
  * transport the reader has accepted needs no "cannot happen" branch here.
  *
  * @param name - A validated transport name
+ * @param redisClient - Which Redis driver to render, defaulting to ioredis
  * @returns Its spec
  */
-export function transportSpec(name: TransportName): TransportSpec {
-  return TRANSPORT_SPECS[name];
+export function transportSpec(
+  name: TransportName,
+  redisClient: RedisClient = 'ioredis',
+): TransportSpec {
+  const spec = TRANSPORT_SPECS[name];
+  if (name !== 'redis' || redisClient === 'ioredis') return spec;
+  const client = nodeRedisClientCall;
+  return {
+    ...spec,
+    redisClient: 'node-redis',
+    messagingClients: ['redis'],
+    queueClients: ['redis'],
+    messagingArgs: (connection) => `{ broker: 'redis-streams', client: ${client(connection)} }`,
+    queueArgs: (connection) => `{ adapter: 'redis', client: ${client(connection)} }`,
+    cacheArgs: (connection) => `{ store: 'redis', options: { client: ${client(connection)} } }`,
+    schedulerArgs: (connection) =>
+      `{ distributedLock: { enabled: true, storage: 'redis', client: ${client(connection)} } }`,
+    backplaneArgs: (connection) =>
+      `{ transport: 'redis', client: ${client(connection)}, subscriber: ${client(connection)} }`,
+  };
 }
 
 /**

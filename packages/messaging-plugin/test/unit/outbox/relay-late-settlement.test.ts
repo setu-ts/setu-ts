@@ -148,6 +148,7 @@ describe('late settlement of an invoked publish', () => {
       watch.stop();
     }
     expect(result.endedBy).toBe('store-failure');
+    expect(a.service.instanceSignals().storeWriteFailing).toBe(true);
     expect(a.store.count('markSent')).toBe(1);
     expect(b.broker.sequence()).toEqual([1]);
     expect(await row(a.db, id)).toMatchObject({ status: 'sent' });

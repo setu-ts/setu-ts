@@ -1,8 +1,8 @@
 # @setu-ts/secrets-plugin — retrieve secrets without exposing values
 
-**Add it:** `setu add secrets` installs it and inserts `SecretsPlugin()` into a recognized
-functional `setu.config.ts`. It provides `CAPABILITIES.SECRETS` (`ISecretManager`), using
-environment variables by default.
+**Add it:** `setu add secrets` adds it and inserts `SecretsPlugin()` into a recognized functional
+`setu.config.ts`. It provides `CAPABILITIES.SECRETS` (`ISecretManager`), using environment variables
+by default.
 
 ## Retrieve a secret inside a handler
 

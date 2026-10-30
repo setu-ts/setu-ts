@@ -657,6 +657,10 @@ describe('SseConnection', () => {
     onStream?: (body: ReadableStream<Uint8Array>) => void,
   ): IRequestContext {
     const resp: IResponse = {
+      setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+        for (const name of Object.keys(headers)) resp.header(name, headers[name]!);
+        return resp;
+      },
       header(_name: string, _value: string) {
         return this;
       },

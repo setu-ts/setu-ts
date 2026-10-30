@@ -174,6 +174,12 @@ SecretsPlugin({
 Every cloud provider accepts a structural `client` facade, bypassing the lazy import:
 
 ```typescript
+import { SecretsPlugin } from '@setu-ts/secrets-plugin';
+
+// Your own fetchers, shaped to the facade the plugin expects.
+const myGet = (id: string): Promise<string | null> => Promise.resolve(null);
+const myPut = (id: string, value: string): Promise<void> => Promise.resolve();
+
 SecretsPlugin({
   provider: 'aws-kms',
   options: {

@@ -39,7 +39,11 @@ import type { ReplyInbox } from './inbox.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { assertNotCloudflareWorkers } from './cloud-gate.ts';
-import { PubSubSubscriptionBoundElsewhereError, ReplyInboxUnavailableError } from '../errors.ts';
+import {
+  PubSubSubscriptionBoundElsewhereError,
+  ReplyInboxUnavailableError,
+  PublishTimeoutError,
+} from '../errors.ts';
 
 /** Default reply topic for request-reply. */
 const DEFAULT_REPLY_TOPIC = 'messaging.replies';
@@ -271,7 +275,10 @@ export async function loadPubSubModule(): Promise<PubSubSdkModule> {
   try {
     return (await import('@google-cloud/pubsub')) as unknown as PubSubSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@google-cloud/pubsub', { cause: error });
+    throw new OptionalDependencyUnavailableError('@google-cloud/pubsub', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -657,11 +664,29 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     return reachable !== false;
   }
 
+  /**
+   * Publishes a payload under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when Pub/Sub acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @since 0.1.0
+   */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes with framework-owned headers under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param headers - Framework-owned transport headers
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when the transport acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @internal
+   */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -679,8 +704,9 @@ export class GcpPubSubBroker implements MessageBrokerAdapter {
     await withDeadline(() => transport.publish(topic, bytes, wireHeaders, validated.orderingKey), {
       timeoutMs: this.#publishTimeoutMs,
       onTimeout: () =>
-        new Error(
+        new PublishTimeoutError(
           `Pub/Sub did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+          { topic, timeoutMs: this.#publishTimeoutMs },
         ),
       timing: resolveProbeTiming(this.#runtime),
     });

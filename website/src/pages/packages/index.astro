@@ -1,0 +1,15 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { PACKAGES } from '../../lib/repository';
+---
+<DocsLayout title="Packages — Setu-TS">
+  <article class="prose">
+    <h1>Packages</h1>
+    {['Core', 'Plugins', 'Starters', 'Tools'].map((group) => <section>
+      <h2>{group}</h2>
+      <ul>{PACKAGES.filter((pkg) => pkg.group === group).map((pkg) => <li>
+        <a href={`/packages/${pkg.slug}/`}>{pkg.name}</a> — {pkg.description}
+      </li>)}</ul>
+    </section>)}
+  </article>
+</DocsLayout>

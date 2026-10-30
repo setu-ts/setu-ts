@@ -14077,6 +14077,11 @@ artifacts. Deno gates stay authoritative until the later tooling milestones repl
 
 ## Milestone 113: The `v0.9.0` Smoke Closeout
 
+**Status: complete.** All fifteen letters shipped, and the `v0.10.0` regression run re-drove all 82
+rows against `0.9.0` controls: 79 closed, with V9-77 closed by #485 and V9-79 by M114 among them.
+Three closed only in part, and their remainders are rows in M119: V9-13 in M119h, V9-26 in M119e and
+V9-29 in M119i.
+
 **Source:** the three-stage `v0.9.0` smoke programme, run 2026-10-14/15 against the published npm
 artifacts — the regression run (`smoke/V090-REGRESSION.md`), Part 16's exercise block X67–X73
 (`smoke/X67-X73-FINDINGS.md`), the M104 client-brief run (`smoke/M104-FINDINGS.md`, with its outage
@@ -14657,6 +14662,17 @@ follow if users ask; the second is the parked "project layout" proposal.
 
 ## Milestone 115: The `v0.10.0` Client-Brief Run
 
+**Status: complete (2026-10-24).** Relaymark was built by three agents in turn and reached deployed
+acceptance for every non-outage criterion, but one backend outage drains the whole product. The
+security pass found no framework defect. X74 ran in both forms: (a) passed 53/53, and (b) did not
+deliver within 8 hours. The findings are register rows V10-49…V10-63, grouped by shape in M119; the
+generator gaps are M120–M123.
+
+**Correction: rule 1 was missed.** The brief was written on 2026-10-23, after `0.10.0` was
+published, not frozen before the cut. The product shape was fixed in this section beforehand, but
+the author had read the CHANGELOG, so a story that lands on a `0.10.0` fix may be tailored. The
+brief's header and `smoke/M115-FINDINGS.md` record this.
+
 **Package(s):** none — an exercise block against the PUBLISHED `0.10.0` artifacts, the M104 method
 applied to a second, deliberately different product. Its findings become `smoke/DEFECTS.md` rows and
 its defects become the `0.10.0` closeout letters.
@@ -14696,14 +14712,15 @@ since the run is meant to judge them.
 
 **Deliverables**
 
-- [ ] `smoke/v0.10.0/CLIENT-BRIEF.md` written and frozen before the cut, with the time-measure
-      decision
-- [ ] The product built cold against `0.10.0`, with its delivery ledger
-- [ ] Acceptance from a browser and a generated partner client; outage pass; security pass
-- [ ] X74 run on `0.10.0` (both forms)
-- [ ] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
+- [x] `smoke/v0.10.0/CLIENT-BRIEF.md` with the time-measure decision — written AFTER the cut (see
+      the correction above), frozen when the builder started
+- [x] The product built cold against `0.10.0`, with its delivery ledger
+- [x] Acceptance from a browser and a generated partner client; outage pass; security pass (S4,
+      retry after a crash mid-request, not verified)
+- [x] X74 run on `0.10.0` (both forms)
+- [x] Findings as rows grouped by shape, the generator-gap list, and the delivery comparison with
       M104
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `115`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `115`
 
 ---
 
@@ -14860,8 +14877,9 @@ follow-on; the pilot did not test any of them.
 **Package(s):** `packages/cache-plugin`, `packages/queue-plugin`, `packages/messaging-plugin`,
 `packages/realtime-backplane-plugin`, `packages/scheduler-plugin`, `packages/idempotency-plugin`,
 `packages/auth-plugin` (the rate-limit store), `packages/common` (connection-fault classification),
-`packages/telemetry-plugin` (instrumentation) and `packages/cli` (scaffold choice). The list is
-provisional: the plan confirms each entry against source.
+`packages/telemetry-plugin` (instrumentation), `packages/diagnostics-plugin` (the trace vocabulary)
+and `packages/cli` (scaffold choice). The list is provisional: the plan confirms each entry against
+source.
 
 **Objective:** let an application use node-redis (`redis`), which Redis recommends for new projects,
 anywhere the framework uses Redis today, without writing its own plugin. ioredis stays the default.
@@ -14883,72 +14901,1191 @@ So node-redis already works through the existing seams, but only behind an adapt
 for each facade. The facades take ioredis's call shapes, so nothing tells that user when an adapter
 is wrong.
 
-**What an adapter must translate.** The node-redis facts below come from knowledge of its v4/v5 API
-and are NOT yet verified. node-redis is not installed in the repository, and the plan must check
-each fact against its shipped `.d.ts` and a real server before relying on it.
+**Shipped design** (maintainer decisions 2026-10-29; every node-redis fact below was measured on
+`redis` 6.3.1 and 5.12.1 against Redis 7.4, replacing this section's earlier knowledge-based list):
 
-1. **Positional arguments vs option objects.** For example `set(k, v, 'EX', n)` against
-   `set(k, v, { EX: n })`, `zrangebyscore(..., 'LIMIT', o, c)` against
-   `zRangeByScore(..., { LIMIT })`, and `eval(script, numKeys, ...)` against
-   `eval(script, { keys, arguments })`. The raw `sendCommand([...])` takes ioredis's argument array,
-   which may make most of these one-liners.
-2. **Stream reply shapes.** The Redis Streams broker parses `xreadgroup`/`xpending`/`xclaim`/`xinfo`
-   as ioredis's raw nested arrays, while node-redis's typed stream methods return objects. This
-   carries the most risk, since M75 found the fake's nesting wrong and a whole delivery path had
-   never run.
-3. **Pub/sub model.** ioredis does `subscribe(channel)` plus `'message'` events; node-redis does
-   `subscribe(channel, listener)` on a duplicated connection. The backplane adapter keeps its own
-   listener registry behind `on`/`off`.
-4. **Lifecycle.** node-redis must be connected before its first command and deprecates `quit()` in
-   favour of `close()`.
-
-**Gaps an adapter cannot close.**
-
-- **Connection-fault classification.** `isConnectionFault` in `common` was measured on ioredis
-  errors. If it misclassifies node-redis errors, Redis outages answer `500` where they should answer
-  `503`, undoing M113b for those users. It must be measured against node-redis's real errors and
-  widened if needed.
-- **Command timeouts.** `commandTimeoutMs` (M101a/M113b) is applied only when the framework builds
-  an ioredis client. The plan decides what bounds a call on an injected node-redis client and
-  documents it, rather than leaving a hung server unbounded.
-- **Telemetry.** `telemetry-plugin`'s `ioredis` instrumentation does not cover node-redis. Whether
-  to add an `@opentelemetry/instrumentation-redis` arm is a plan decision.
-
-**Design rules.**
-
-- **No dependency on `redis`.** Each `fromNodeRedis(client)` helper accepts a client the user built
-  and types it structurally; no file under `packages/*/src` imports `redis`. Installing a plugin
-  therefore installs neither client: `ioredis` stays an optional peer, and `redis` needs no entry at
-  all.
-- **The default does not change.** With no client injected, every plugin keeps lazily loading
-  ioredis exactly as today.
-- **One Redis client per scaffolded project.** The CLI adds only the client the user chose, never
-  both. A choice (for example `--redis-client ioredis|node-redis` plus a prompt; the plan settles
-  the shape) defaults to `ioredis`, and that default output must stay byte-identical. The
-  `node-redis` arm writes `redis` instead of `ioredis` and emits the wiring the lazy default
-  provides for free: building and connecting the client, `fromNodeRedis(...)`, and the backplane's
-  second connection. The plan may instead ship the adapters first and leave the scaffold choice to a
-  follow-up letter.
+- **One adapter, in `common`.** `fromNodeRedis(client, { commandTimeoutMs, onError })` returns one
+  ioredis-shaped adapter that all seven facades accept, built on `sendCommand`. This replaces the
+  per-facade helpers suggested here; the facades stay ioredis-shaped. BullMQ's
+  `createNodeRedisClient` is the same model.
+- **RESP3.** node-redis 6 speaks RESP3 by default (v5: RESP2). Through `sendCommand`, every command
+  the facades send replies as under ioredis except map replies (`XREADGROUP`, `XINFO`,
+  `CONFIG GET`), which the adapter turns back into RESP2 shapes.
+- **Command timeouts.** node-redis's per-command `timeout` and `abortSignal` do not bound a written
+  command: a paused server, a stopped one with the offline queue, and a refused `connect()` all
+  hang. The adapter bounds every command and the lazy connect itself, rejecting with ioredis's
+  `Error('Command timed out')`.
+- **Connection-fault classification.** node-redis's outage errors are all `name: 'Error'` with
+  messages `isConnectionFault` did not know; it now recognizes the five measured shapes, so outages
+  answer `503` with either client.
+- **Telemetry.** `instrumentations.redis` through `@opentelemetry/instrumentation-redis` `^0.69.0`
+  (0.68 on the repo's OTel train supports only `redis <6`); a real-span test proves an
+  adapter-driven command is traced. The diagnostics trace vocabulary gains `redis`.
+- **Contract changes.** `IRedisLockClient.eval` returns `Promise<unknown>` (one adapter cannot claim
+  a narrower Lua result); `IRedisBackplaneClient` gains `connect?()`, called at start for an
+  injected `'wait'` client.
+- **CLI.** `--redis-client ioredis|node-redis` on `setu new`/`setu add` and the workspace manifest's
+  `redisClient`; ioredis output is byte-identical. A node-redis project wires each plugin through a
+  generated `src/node-redis.ts` (`nodeRedisClient(url)`), because a `redis` import in
+  `setu.config.ts` made the audited configuration classifier treat it as unclassifiable.
 
 **Dependencies.** After the M113 series, per the maintainer's earlier decision to evaluate
 node-redis only then. It has no ordering dependency on M115 or M116.
 
 **Deliverables**
 
-- [ ] A `fromNodeRedis(client)` adapter for each of the seven facades, typed structurally, with no
+- [x] One `fromNodeRedis(client)` adapter covering all seven facades, typed structurally, with no
       `redis` import in any `src` file
-- [ ] Each adapter driven against a real Redis 7 through a kernel app, with writes read back; the
+- [x] Each adapter driven against a real Redis 7 through a kernel app, with writes read back; the
       streams and backplane adapters run through the same real-backend scenarios as their ioredis
       counterparts, and CI runs them
-- [ ] `isConnectionFault` measured against node-redis's outage errors (stopped, paused, refused) and
+- [x] `isConnectionFault` measured against node-redis's outage errors (stopped, paused, refused) and
       widened if needed, so outages answer `503` with either client
-- [ ] A decided and documented command-timeout story for an injected node-redis client
-- [ ] Telemetry: an instrumentation arm for node-redis, or a documented decision not to add one
-- [ ] CLI: the client choice, with `ioredis` output byte-identical and both variants booted by the
+- [x] A decided and documented command-timeout story for an injected node-redis client
+- [x] Telemetry: an instrumentation arm for node-redis, or a documented decision not to add one
+- [x] CLI: the client choice, with `ioredis` output byte-identical and both variants booted by the
       scaffold e2e (or the scaffold choice explicitly deferred to a follow-up letter)
-- [ ] Docs: each package README, `PUBLIC_API.md`, CHANGELOG, and a node-redis section in the
+- [x] Docs: each package README, `PUBLIC_API.md`, CHANGELOG, and a node-redis section in the
       relevant guides
-- [ ] **ROADMAP.md** — this section and the Progress Tracking row `117`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `117`
+
+---
+
+## Milestone 118: `setu check` — a Wiring Gate for Generated Projects
+
+**Package(s):** `packages/cli` only. No `common`, kernel or plugin `src/` change. The command itself
+changes nothing the CLI generates; wiring it into the generated `check` script and CI is the one
+generated-output change (see "Generated projects run it" below), and wiring it into the production
+build belongs to M120.
+
+**Objective:** give a scaffolded project a read-only command, runnable in CI, that fails when code
+in a CLI-owned seam directory is not registered: an artifact a barrel does not list, a barrel
+`setu.config.ts` does not import, or an artifact registered both by the barrel and by hand. This is
+the M60/M65 defect class (code that compiles and never runs), which `tsc` cannot see and a generated
+e2e test only sees for the routes it requests.
+
+**Where things stand (checked against source, 2026-10-23).** Most of the detection already exists,
+inside `setu generate`:
+
+- Every run scans every seam family the installed plugins enable, whatever schematic was asked for
+  (`scanArtifacts(deps.fs, dir, scanSeamSpecs(installed))`, `commands/generate.ts:421`), plus the
+  module scan. So any `generate` reports every skipped artifact (missing export, non-kebab name, a
+  module without its activation export or `@Module`), every artifact also registered by hand
+  (`scan.manual`, the M68 boot failure), the legacy `src/routes/` layout and the pre-M84 registrar.
+
+What is missing is a way to run that detection on its own, and three gaps in it:
+
+1. **Nothing fails.** Every report goes to stderr and `generate` still exits `0`. It is advice that
+   scrolls past, and no command runs the scan without also generating something (`--dry-run` still
+   needs a schematic and a name).
+2. **Barrel drift is invisible.** A barrel is rewritten only when its family is generated. A file
+   copied or hand-written into `src/controllers/` (by a developer or a coding agent following the
+   M116 brief) stays unregistered until some later `g controller` adopts it, as a side effect of an
+   unrelated run.
+3. **Config wiring is checked only for barrels written in the current run.** `reportUnwiredSeams`
+   filters on the files it just wrote (`commands/generate.ts:684-689`), so a barrel that
+   `setu.config.ts` stopped importing is never reported again.
+
+**Design rules.**
+
+- **One owner for the diagnostics.** The scan-and-report block moves out of `runGenerateCommand`
+  into a pure `diagnoseProject(fs, dir, installed)` returning typed findings. `generate` prints them
+  exactly as today (its stderr stays byte-identical, pinned by a test), and `check` prints them and
+  sets the exit code. Two copies would drift, which is how M65's regenerate loop happened.
+- **Compare name sets, not bytes.** Barrels are formatted with the project's own Prettier config
+  (M111d), so a developer reformatting a barrel must not fail the check. Drift is the difference
+  between the set of artifacts a barrel imports, parsed from its import declarations, and the set
+  the scan admits. A barrel the parser cannot read is a finding naming that barrel.
+- **Three outcomes for config wiring.** `reportUnwiredSeams` reports when it cannot classify
+  `setu.config.ts`, because a false report from `generate` is cheap. A CI gate cannot work that way:
+  since M101g narrowed what the classifier reads, many legitimate hand-edited configs cannot be
+  classified, and a gate that fails on them gets switched off. Wired passes, not wired fails,
+  unclassifiable warns and names the import line to check.
+- **Severity.** Errors (exit `1`): a skipped artifact, barrel drift, an unwired barrel, a duplicate
+  hand registration, a legacy layout still in use. Warnings (exit `0`): an unclassifiable config.
+  `--strict` turns warnings into errors. A hand-written file in a seam directory that its barrel
+  does not list is barrel drift, an error: `check` writes nothing, so it adopts nothing, and the
+  "adopted" notice stays `generate`'s, printed when a write actually adopts (M118 plan §2 C1).
+- **Scope.**
+  - Standalone projects and workspace members. At a workspace root it checks every member and
+    reports per member, as `setu agents --check` does; it refuses a directory that is not a project,
+    with the same message `generate` gives (M101e).
+  - `full-stack` has no seams, so it passes trivially. The check says so rather than printing an
+    empty success.
+  - A Workers project has no jobs seam once the runtime swap removes `QueuePlugin`, so the scan of
+    that family is skipped.
+  - Custom schematics are out of scope: the CLI cannot vouch for what they write.
+  - Placement of code outside the seam directories is out of scope, and stays so. Layout is a
+    convention the CLI scaffolds, not a rule the framework enforces, and `setu adopt` exists for
+    projects that never followed it.
+- **Read-only, with the scanner's existing read limits.** It reads only regular files of at most
+  `MAX_EXISTING_FILE_BYTES` (the M113i fix). It writes nothing, so the ownership and symlink
+  refusals M116 added for writes do not apply.
+- **The `check` verb shadows a plugin command.** Built-in verbs match before plugin-contributed
+  commands (M34b), so a project whose plugin contributes a `check` command loses it. The plan must
+  either accept that with a CHANGELOG note or choose another name.
+
+**Generated projects run it (maintainer decision, 2026-10-24).** A gate the project does not run is
+advice, which is gap 1 again. So:
+
+- **The CLI is a pinned devDependency** of every generated project (`@setu-ts/cli` at the CLI's own
+  version, the pin `setu new` already writes for the framework). Today projects reach the CLI
+  through `npx @setu-ts/cli@<version>`, which in a Docker build stage would download it on every
+  build. A devDependency is installed by the build stage and stays out of the runtime image.
+- **The generated `check` script runs it** beside the type check. The CLI generates no CI workflow,
+  so a project's own CI runs that script (M118 plan §2 C3). The `dev` and `debug` scripts do not, so
+  the edit loop is never blocked.
+- **Only errors fail it.** Warnings print and exit `0`, as the severity rule above says.
+- **The production build runs it too, before compiling** — M120 wires that, so M120 depends on this
+  milestone. Bun and Deno projects have no build step today; for them the `check` script and CI are
+  the gate. Workers projects are built by wrangler, so their `check` script carries it.
+- **Adopted projects** (`setu adopt`) and projects scaffolded before this change get the script from
+  an upgrade-guide entry; nothing rewrites a developer's existing script, and `setu add` has no
+  script-editing path (M118 plan §2 C2).
+- **Added at plan time (maintainer decision, 2026-10-26, after comparing Django `check`, ESLint, Nx
+  `sync:check`/`sync` and Rails `zeitwerk:check`):** `setu sync`, which rewrites every CLI-managed
+  barrel from its directory so drift has a command that fixes it; a stable id per finding
+  (`setu.E001`…, `setu.W001`…); and silencing by id, or by id and path, in `.setu-ts/check.json`. DI
+  graph validation stays at boot in `di-plugin` (M125); `check` does not boot the application.
+
+**Open questions for the plan.**
+
+1. Whether `check` also verifies the M116 brief (folding `setu agents --check` in) or stays limited
+   to wiring.
+2. Output format: plain lines only, or also `--json` for CI annotations.
+
+**Dependencies.** After M115. If the client-brief run shows agents placing files in seam directories
+by hand, that confirms gap 2 as the priority and supplies the e2e cases. It has no ordering
+dependency on M117.
+
+**Deliverables**
+
+- [x] `plans/archive/milestone-118-setu-check.md`, settling the open questions above
+- [x] `diagnoseProject` extracted, with `generate`'s stderr pinned byte-identical before and after
+- [x] `setu check [--dir <path>] [--strict]` for standalone projects and workspaces, with the exit
+      codes above
+- [x] Barrel-drift and all-barrel config-wiring detection, comparing name sets
+- [x] An e2e that scaffolds `rest`, `class-based` and `microservice` projects, passes `check` on
+      each fresh scaffold, then breaks each family one way at a time (a hand-copied artifact, a
+      removed barrel import, a duplicate hand registration, a missing export) and asserts exit `1`
+      naming the file; plus a reformatted barrel and an unclassifiable config that must still pass
+- [x] Generated projects: `@setu-ts/cli` as a pinned devDependency and `setu check` in the `check`
+      script; the scaffold e2e proves a fresh project's `check` passes and a broken seam fails it
+- [x] Docs: `docs/cli.md`, `packages/cli/README.md`, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`
+- [x] `setu sync`, finding ids and `.setu-ts/check.json` silencing (added at plan time)
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `118`
+
+## Milestone 119: The `v0.10.0` Smoke Closeout
+
+**Source:** the `v0.10.0` smoke programme, run 2026-10-23/24 against the published npm artifacts —
+the regression run (`smoke/V0100-REGRESSION.md`: Pass 1 re-drove all 82 open V9 rows against `0.9.0`
+controls, 79 closed and 3 partial; Pass 2 re-drove the 73 retained exercise rows), Part 18's
+exercise block X75–X82 (`smoke/X75-X82-FINDINGS.md`), the M115 Relaymark client-brief run
+(`smoke/M115-FINDINGS.md`, with its outage and security passes) and both forms of X74 (Ledgerline
+re-pinned, and rebuilt cold by a local model; sections in `V0100-REGRESSION.md`). **No release
+regression.** The register is `smoke/DEFECTS.md`, rows V10-1…V10-63, plus the remainders of the
+three partial closures V9-13, V9-26 and V9-29. One row is High (V10-13). Product defects from M115
+and X74 (b) — the builders' own code — stay in their findings files and are not rows.
+
+**Grouped by SHAPE, not by package**, with the M113 letter kinds: a **design** letter changes a
+contract, a default or a behaviour and needs a plan; a **fix** letter's rows are local defects with
+an obvious fix and may ship as separate `fix/…` branches; a **docs** letter ships on one `docs/…`
+branch. Every row still closes only on a re-run against a newly published version. The eight rows
+tagged `[generator gap]` that are features rather than defects — no full-stack member in a broker
+workspace, no production build, no workspace operations, no styling foundation — are milestones of
+their own (M120–M123), not letters here.
+
+| Letter    | Kind   | Shape                                                          | Rows                                                                                                                          | Packages                                                                                                         |
+| --------- | ------ | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **M119a** | design | message delivery that repeats, and calls with no bound         | V10-13 **High**, V10-2, V10-21, V10-30, V10-5                                                                                 | `messaging-plugin`                                                                                               |
+| **M119b** | design | readiness that drains replicas for a shared or fan-out problem | V10-49, V10-20, V10-22, V10-31                                                                                                | `mail`, `health`, `realtime-backplane`, `queue`, `database`                                                      |
+| **M119c** | design | safe framework, broken default                                 | V10-17, V10-1, V10-3, V10-36, V10-6, V10-29, V10-44, V10-14, V10-41, two unfiled generator gaps                               | `cli`, `http-security`, `session`, `openapi`, `telemetry`, `service-discovery`                                   |
+| **M119d** | design | forwarded client identity                                      | V10-19, V10-28                                                                                                                | `http-security-plugin`                                                                                           |
+| **M119e** | design | a data contract that is not portable or not checked at startup | V10-4 (+ V9-26 remainder), V10-32, V10-33, V10-37, V10-45, V10-61                                                             | `database-plugin`, `common`, `cloudflare-plugin`                                                                 |
+| **M119f** | design | optional peers in an npm workspace                             | V10-50, V10-58                                                                                                                | `telemetry-plugin` and every package with optional peers, packaging, docs                                        |
+| **M119g** | fix    | failures that reach the operator without their reason          | V10-62, V10-63, V10-34                                                                                                        | `auth-plugin`, `cache-plugin`, `idempotency-plugin`, `service-discovery-plugin`                                  |
+| **M119h** | fix    | CLI output and commands that are wrong                         | V10-18, V10-23, V10-24, V10-25, V10-26, V10-27, V10-35, V10-9, V10-10 (+ V9-13 remainder), V10-11, V10-42                     | `cli`                                                                                                            |
+| **M119i** | docs   | documentation that does not match the code, or is missing      | V10-7, V10-8, V10-12, V10-15, V10-16, V10-38, V10-39, V10-40, V10-43, V10-46, V10-47, V10-48, V10-56, V10-57, V9-29 remainder | docs of `openapi`, `service-discovery`, `logger`, `react-router`, `worker-pool`; agent cards; `docs/`; CHANGELOG |
+
+**Sequence.** M119a first — it holds the only High: a NATS subscription with no `queue` replays the
+whole stream on every process start, so RPC requests are re-executed after every deploy. M119b next,
+because M115 showed one mail outage taking a whole product out of rotation. M119c is the largest
+user-facing letter and touches what `setu new` emits, so it lands before the M120–M123 generator
+work that edits the same templates. M119d, M119e and M119f are independent design letters. M119g,
+M119h and M119i can start at once. Several letters change a default or generated output, so the
+release that ships them is `0.11.0`.
+
+---
+
+### Milestone 119a: Message Delivery That Repeats, and Calls With No Bound
+
+**Package(s):** `packages/messaging-plugin`
+
+**Objective:** a consumer must not see a message again because the process restarted or the group is
+new, and every broker call must have a bound and a named failure.
+
+- **V10-13 (High)** — a NATS subscription with no `queue` creates a durable consumer named
+  `messaging-<uuid>` (a new uuid per process) with no `deliver_policy`, so the server default (all)
+  applies: every process start replays the whole stream and leaves another durable consumer behind.
+  Measured: an RPC responder's call count 6 → 14 → 24 across restarts, 16 durable consumers after
+  four boots. Same on `0.9.0`. Source: `nats-broker.ts` `jsm.consumers.add(…)` sets `durable_name`
+  and no deliver policy.
+- **V10-2** — a fresh Kafka consumer group delivers its first message twice (4 of 8 runs): M113a's
+  first-join seek rewinds partitions whose committed offset is still `-1`, including partitions
+  already delivered. New in `0.10.0` (`0.9.0` lost the message, V9-3). #493 (after the tag) fixed a
+  different first-join defect — a watermark read failing on a brand-new topic — and the plan must
+  re-measure V10-2 on top of it.
+- **V10-21** — Redis Streams `publish()` has no time bound and hangs against a paused Redis.
+- **V10-30** — the publish timeouts the M113a/M101a letters added reject with a bare `Error`; a
+  caller cannot test for them.
+- **V10-5** — an outbox relay paused at its `markSent` write ends the sweep `store-failure` although
+  the store answered late; the README says only a pause inside the publish does.
+
+**Decisions the plan takes:** a queue-less NATS subscription is a SHARED durable group named
+`<defaultQueue>.<topic>` (default prefix `messaging-consumers`) — the maintainer's choice on
+2026-10-24, matching the four arms that share a `defaultQueue` group for queue-less subscribers
+(Redis Streams, Kafka, Pub/Sub and Service Bus) rather than the two that fan out (RabbitMQ and
+in-memory) — so a queue-less responder is answered by one replica, never all of them, and is not
+re-run on restart; a group created for the first time starts at new messages, as a new Kafka group
+does. The `request()` reply inbox is an ephemeral consumer, deleted on shutdown and re-created if
+the server removes it. Consumers earlier versions leaked are not deleted — that would break an older
+replica mid-rollout — but get a 5-minute `inactive_threshold` on `connect()`, so the server reaps
+them once nothing reads from them. The Kafka first-join seek skips a partition already delivered
+from its start, telling "never delivered" from "delivered but not yet committed" without a commit
+round trip. One exported `PublishTimeoutError` (readonly `topic` and `timeoutMs`) is thrown by every
+bounded arm, and `publishTimeoutMs` (default 15000, `0` unbounded) extends to the Redis Streams and
+NATS arms. A late `markSent` answer keeps the sweep's `store-failure` end — the bound fires before
+any answer exists, and the late answer is recorded on top (M113j) — and the README's narrower claim
+is corrected.
+
+---
+
+### Milestone 119b: Readiness That Drains Replicas for a Shared or Fan-Out Problem
+
+**Package(s):** `packages/mail-plugin`, `packages/health-plugin`,
+`packages/realtime-backplane-plugin`, `packages/queue-plugin`, `packages/database-plugin`
+
+**Objective:** M113b decided that `degraded` means "take this replica out of rotation"; four
+indicators still do that for problems no replica can fix, or report a dependency up when it is not.
+
+- **V10-49** — `mail-plugin`'s indicator reports `down` on an SMTP outage, so `/ready` answers 503
+  on every replica at once. Health-plugin's own guidance says a shared problem that does not stop
+  request serving belongs in `data`. In M115 one Mailpit outage drained the bookings service, and
+  the product's own readiness chaining then took the whole product out of rotation. No per-indicator
+  readiness opt-out exists.
+- **V10-20** — a paused Redis takes the replica out of rotation through the realtime-backplane
+  indicator, whose PING has no bound; fan-out loss is not a reason to stop serving.
+- **V10-22** — the RabbitMQ queue indicator reports `reachable: true` while the broker is paused
+  (the X51-2 mechanism, closed for messaging in M95b, never applied to `queue-plugin`).
+- **V10-31** — M113o's migration readiness turns a paused database into `down` with ~4 s probes.
+
+**Decisions the plan takes:** per-indicator readiness membership with a plugin-declared default
+(`ctx.health.register(name, fn, { readiness })` / `IHealthIndicator.readiness`, absent counts) and
+an application override by name (`HealthPluginOptions.readiness` `include`/`exclude`), the
+maintainer's decision of 2026-10-24 — over moving each condition into `data` the way M113b's seven
+did; `mail` out of readiness by default (V10-49), with `include: ['mail']` restoring the previous
+behaviour; the backplane probe cached 5 s and bounded 2 s, an unanswered check reading
+`reachable: 'unknown'` with the status staying `up` (V10-20); the RabbitMQ queue probe as a
+throwaway-channel round trip, and an unanswered queue check reporting `up` with
+`reachable: 'unknown'` for every adapter (V10-22); the migration ledger read only on a reachable
+connection, a paused database reading `degraded` within one ~2 s bound (V10-31); and the gRPC health
+bridge reading the readiness report so it agrees with `/ready`.
+
+---
+
+### Milestone 119c: Safe Framework, Broken Default
+
+**Package(s):** `packages/cli`, `packages/http-security-plugin`, `packages/session-plugin`,
+`packages/openapi-plugin`, `packages/telemetry-plugin`, `packages/service-discovery-plugin`
+
+**Objective:** the pattern the maintainer named on 2026-10-23. The framework code works as designed,
+but a default, a generated file or a documented example leaves a normal setup broken, and the fix is
+a setting nothing points to. Rated by what the user loses, not by how the code behaves.
+
+| Row        | Breaks                                                                                                                                                                  | The setting                            |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **V10-17** | a generated full-stack app behind a TLS proxy: every React Router action answers 400                                                                                    | `trustedProxies` — no CLI path sets it |
+| **V10-1**  | `csrf: {}` with the plugin's default `Referrer-Policy: no-referrer`: every same-origin HTML form POST is refused 403 in Chrome (a POST navigation sends `Origin: null`) | `referrerPolicy: 'same-origin'`        |
+| **V10-3**  | the README CORS + CSRF example cannot serve a cross-origin POST                                                                                                         | add `x-csrf-token` to `allowedHeaders` |
+| **V10-36** | the CLI installs `swagger-ui-dist@^5` (5.34.0) against SRI hashes for 5.33.3: blank docs page                                                                           | pin `5.33.3`                           |
+| **V10-6**  | `setu add telemetry` prints a registration that crashes at start (no OpenTelemetry peers installed)                                                                     | install the peers                      |
+| **V10-29** | a Redis-transport workspace's generated e2e test never exits with Redis down                                                                                            | test teardown                          |
+| **V10-44** | the `kubernetes` discovery arm outside a cluster reports `down` with no log line                                                                                        | pass `token`                           |
+| **V10-14** | a bearer request's session writes are dropped even on a `csrf.exclude`d path                                                                                            | `exemptBearer: false`                  |
+
+Plus V10-41 (the react-router README and `docs/deployment.md` do not say V10-17 happens) and two
+Part 18 generator gaps that are not rows: `setu add cache` installs no `ioredis`, and in a
+Redis-transport workspace `setu add cache|scheduler|realtime-backplane` inserts in-memory defaults.
+
+**Decisions taken (plan `plans/archive/milestone-119c-safe-defaults.md`):** V10-1 — the CSRF check
+accepts `Origin: null` only with `Sec-Fetch-Site: same-origin` (maintainer decision 2026-10-24, the
+Fetch Metadata rule Go and Hono use; the `no-referrer` default stays). V10-36 — the CLI installs
+`swagger-ui-dist` at exactly `5.33.3`, the release the SRI hashes match. V10-17 — the full-stack
+template reads `TRUSTED_PROXIES` (empty leaves IP security off). V10-29 was measured to be the
+`node --test` runner, not a leaked client; generated Node scripts pass `--test-force-exit`. V10-14
+is documentation only. **Gate:** every row with a code or generated-output change gets a test that
+reproduces the broken setup through the generated project or the documented example, not a unit test
+of the setting; the documentation-only row (V10-14) is covered by `check:docs`.
+
+---
+
+### Milestone 119d: Forwarded Client Identity
+
+**Package(s):** `packages/http-security-plugin`
+
+**Objective:** M113n made the socket peer the last link and the forwarded chain trustworthy behind
+`trustedProxies`; two inputs still change who the client is.
+
+- **V10-19** — behind an appending RFC 7239 proxy, a malformed `Forwarded` element sent by the
+  client erases the client's identity, so rate limiting and audit fall back. New in `0.10.0`. (M113n
+  fixed the direct-client case; this is the case behind a trusted proxy.)
+- **V10-28** — a forwarded IPv4-mapped address (`::ffff:a.b.c.d`) is not normalized, while the
+  socket peer is, so one client has two identities.
+
+**Decisions the plan takes:** how a malformed element in an appended chain is treated (skipped,
+treated as the boundary, or the request's forwarded identity discarded in favour of the trusted
+proxy's own address), and that every resolved address goes through one normalizer.
+
+---
+
+### Milestone 119e: A Data Contract That Is Not Portable or Not Checked at Startup
+
+**Package(s):** `packages/database-plugin`, `packages/common`, `packages/cloudflare-plugin`
+
+**Objective:** the same repository call must mean the same thing on every adapter, and a
+configuration that cannot work must fail at startup, not as a client error.
+
+- **V10-4** (+ the V9-26 remainder) — the Drizzle tenant bridge stamps the tenant **column** name,
+  while M113g's unknown-field refusal accepts **property** names, so a tenant column mapped under
+  another property answers every tenant-scoped write `400` "names a field this resource does not
+  have" — blaming the client — with no startup check (`database-tenant-data-store.ts:236`).
+- **V10-32** — the keyset cursor fingerprint carries no entity, so a cursor from one entity is
+  accepted by another (since `0.2.0`).
+- **V10-33** — an unknown payload field is a 400 on Drizzle, a masked 500 on D1 and silently stored
+  on MongoDB and DynamoDB.
+- **V10-37** — a malformed URL key reaches the database and answers 500 with an `error` log line
+  instead of 400.
+- **V10-45** — the Drizzle missing-key-column refusal is a plain `Error`, raised per request, naming
+  no `entities.<Entity>.primaryKey` remedy, so the app boots and reports ready.
+- **V10-61** — the Drizzle arm requires an app-owned `pg` Pool, and nothing says the pool needs an
+  `'error'` listener; an idle client dropped by Postgres throws an unhandled `'error'` event and the
+  process exits. X74 (b)'s pod crash-looped through a database stop. No README, agent card or guide
+  shows a node-postgres pool setup at all.
+
+**Decisions the plan takes:** whether the tenant bridge validates its column mapping at `onInit`
+against the Drizzle table; whether the cursor fingerprint binds the entity (a token change: old
+cursors stop working, which is the point); the portable answer for an unknown field (refuse
+everywhere, with the schema-less adapters refusing against observed columns or declaring the field
+set); and for V10-61 whether the framework attaches a reporting listener to a pool it is handed, or
+documents the pool setup with the listener in the Drizzle section and the agent card.
+
+---
+
+### Milestone 119f: Optional Peers in an npm Workspace
+
+**Package(s):** `packages/telemetry-plugin` and every package that loads an optional peer; packaging
+(`scripts/node-manifests.ts`); docs
+
+**Objective:** M113d made every optional peer a guarded `await import()` resolved from the
+**package's** location. In an npm workspace where npm hoists the plugin to the root, a peer
+installed in the member is invisible to it.
+
+- **V10-50 (Medium)** — `telemetry-plugin` (and an ioredis-using plugin) hoisted to the workspace
+  root does not find peers installed in the member, and the app crashes at startup. Reported and
+  reproduced by the M115 builders; not re-driven by the operator, so the plan's first step is to
+  reproduce it.
+- **V10-58** — no document says where optional peers go in an npm workspace.
+
+**Decisions the plan takes:** whether the fix is documentation (install peers at the root, or
+prevent hoisting) or a resolution change (resolve from the application's entry, or accept an
+injected module, which the inject-or-lazy arms already allow); and whether `setu add` in a workspace
+member installs peers where they will be found.
+
+---
+
+### Milestone 119g: Failures That Reach the Operator Without Their Reason
+
+**Package(s):** `packages/auth-plugin`, `packages/cache-plugin`, `packages/idempotency-plugin`,
+`packages/service-discovery-plugin`
+
+**Objective:** three failures an operator meets with no cause in the default log.
+
+- **V10-62** — an OIDC login route answering `503 provider-unavailable` logs its reason (in X74 (b),
+  a discovery document whose `issuer` differed from the configured one, because Keycloak derives the
+  issuer from the request host) only at `debug`.
+- **V10-63** — the cache and idempotency Redis store warnings log `error: ""` for an
+  `AggregateError` (multi-address `ECONNREFUSED`/`ETIMEDOUT`); its message is empty and the inner
+  errors are not read.
+- **V10-34** — a service-discovery outage with nothing cached answers a masked 500 instead of a
+  named 503.
+
+**Fix:** log the provider-unavailable reason once per state change at `warn`; describe an
+`AggregateError` by its inner errors through the shared error describer; brand the discovery outage
+with a 503 status hint (the M89b mechanism).
+
+---
+
+### Milestone 119h: CLI Output and Commands That Are Wrong
+
+**Package(s):** `packages/cli`
+
+**Objective:** local defects in generated output and command behaviour, each with an obvious fix.
+
+- **V10-18** — `setu generate … --module <m>` writes into a module that is not wired into
+  `src/modules/index.ts` and says nothing.
+- **V10-23** — Workers projects get no generated `test`/`test:e2e` (`0.9.0` had a stub test).
+- **V10-24 … V10-27** — `setu agents`: `--check` accepts a section whose card path does not exist;
+  run inside a symlinked member it writes into the link target; `--dry-run` promises writes the real
+  run refuses (raw `EACCES`, temp-file name in the message); a symlinked workspace's refusal gives
+  the ownership remedy.
+- **V10-35** — the generated module's 404 echoes the caller-supplied id.
+- **V10-9** — `setu new` accepts a Workers project name containing `.`, which wrangler refuses.
+- **V10-10** (+ the V9-13 remainder) — after a SIGKILL mid-`setu adopt`, the re-run records
+  `healthProbes`/`metricsEndpoint` false, because `adopt.ts:191` probes the original root.
+- **V10-11** — the generated injectable-service comment says `@Inject(...)` goes on a constructor
+  parameter; standard decorators reject that (TS1206).
+- **V10-42** — `setu add` and `setu generate migration` print `blob/develop` and `tree/develop`
+  links from a published CLI; links must name the CLI's own version tag.
+
+---
+
+### Milestone 119i: Documentation That Does Not Match the Code, or Is Missing
+
+**Package(s):** docs of `openapi-plugin`, `service-discovery-plugin`, `logger-plugin`,
+`react-router-plugin`, `worker-pool-plugin`; `packages/cli` (agents); the agent cards, including
+`auth-plugin` and `full-stack-starter`; `docs/`, including the React Router development,
+getting-started, custom-plugins and examples guides; the website homepage; CHANGELOG
+
+- **Upgrade guide (`docs/upgrading.md`, `0.10.0` section)** — V10-15 (where `swagger-ui-dist` goes
+  on Deno: the workspace ROOT `deno.json`), V10-16 (the Workers full-stack repair never says to set
+  `allowJs`), V10-39 (responder terminals log nothing, beside "handled 4xx logs once at warn"),
+  V10-46 (`ReactRouterPluginOptions` became a union, so `interface X extends …` fails TS2312),
+  V10-47 (the SDK generator renames operations named `client`/`encodeURIComponent`), V10-48 (a
+  plugin command named `agents` becomes unreachable).
+- **Wrong claims** — V10-7 (links to `upgrading.md#unreleased` and "see Unreleased" in the published
+  `[0.10.0]` section), V10-8 (`docs/deployment.md` says generated probes are always `tcpSocket`),
+  V10-12 (service-discovery README passes `retry: { maxAttempts }` where `RetryPolicy` is
+  `{ limit, delay, backoff }`; the README is not in the fence gate — add it), V10-38 (the documented
+  module-scoped service token is `<module>-<name>-service`; the generator writes
+  `<module>.<name>-service`), V10-43 (33 agent cards say `setu add` "installs it"; it edits
+  `package.json` and prints `Next: npm install`), V10-56 (the React Router version differs between
+  the plugin's README and its agent card).
+- **Missing** — V10-40 (the request logger records the raw path, so a bound value that is also a
+  path segment reaches the log despite the M113f scrub), V10-57 (Zod dates become
+  `x-setu-unrepresentable` with no warning at generation time), and the V9-29 remainder (the
+  worker-pool README understates the thread overshoot: cold Node bursts reach 6 threads at bound 3,
+  once for ~0.7 s).
+
+- **Folded scope (2026-10-30)** — development commands and current full-stack/messaging rules in
+  agent briefs; M124 auth and M121 starter cards; scaffold-first development and getting-started
+  guides, npm plugin publishing, a teaching path through the examples with app README pointers, and
+  a homepage create command and current package count.
+
+**Recurrence:** V10-12 is the second README outside the fence gate found by a smoke run (M70k, M86);
+the letter adds every package README with a compilable fence to the gate, and a check that
+`docs/upgrading.md` and the CHANGELOG link only headings that exist.
+
+**Deliverables (M119 as a whole):**
+
+- [ ] M119a–M119i, each closing its rows on a published re-run
+- [ ] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
+- [x] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
+
+---
+
+## Milestone 120: A Production Build for Generated Services
+
+**Package(s):** `packages/cli` (templates, Dockerfile, scripts, `.gitignore`), docs
+
+**Source:** M115 (Relaymark), the maintainer's review of its scaffold, and the build-step review
+`smoke/v0.10.0/BUILD-STEP-REVIEW.md`, measured on published `0.10.0`. Closes **V10-54**, **V10-53**
+and **V10-55**.
+
+**The problem.** Every generated Node service runs TypeScript in production through `tsx`. The
+workspace Dockerfile is one stage, installs dev dependencies (because `tsx` is one) and runs
+`sh -c "npx tsx main.ts"`. A standalone project gets no Dockerfile at all. No Node project gets a
+`dev` (watch) or `debug` script. The full-stack member's Dockerfile does not build the React Router
+SSR bundle (V10-53), and its `.gitignore` does not ignore `build/` (V10-55, the V9-11 class).
+
+**Measured (`rest` and `class-based` scaffolds, five starts each, medians):**
+
+| Mode                                         | Startup    | RSS     | Image (`node:24-alpine`) |
+| -------------------------------------------- | ---------- | ------- | ------------------------ |
+| `npx tsx main.ts` (what the Dockerfile runs) | 312–331 ms | ~267 MB | 417 MB                   |
+| `node --import tsx main.ts`                  | 190 ms     | ~107 MB | —                        |
+| `node dist/main.js` (compiled)               | 108–129 ms | ~91 MB  | 284 MB                   |
+
+The `tsx` image never serves on a read-only root without a writable `/tmp`
+(`ENOENT: mkdir '/tmp/tsx-1000'`) and the process stays alive with no listener. The generated
+Kubernetes manifest mounts an `emptyDir` at `/tmp` for that reason; any other read-only host fails
+silently. A real compile of both scaffolds needs no source edit: a `tsconfig.build.json` with
+`module: nodenext`, `rewriteRelativeImportExtensions` and `sourceMap` compiles with zero errors,
+decorators included, and the output serves.
+
+**Why build.** Startup, memory, image size, production dependencies only and a type-check gate in
+the image build. Not comments or minification: server code never reaches a user, and minifying a
+Node service gains little and worsens stack traces.
+
+**Decisions the plan takes:**
+
+1. **Workspace libraries.** `setu build` bundles source libraries with esbuild and keeps npm
+   dependencies and optional peers external. Libraries keep source exports; tsc --noEmit remains the
+   type-check gate.
+2. **Scripts.** Node build runs tsc --noEmit then setu build (wiring errors refuse, warnings print).
+   Production start is node --enable-source-maps dist/main.js; start:dev watches source and
+   start:debug uses the inspector. Full-stack develops through dev.ts and builds its frontend before
+   the service. Tests build only the frontend when needed, without the wiring gate.
+3. **Dockerfile.** Multi-stage: a build stage (which runs `build`, and so `setu check`, using the
+   `@setu-ts/cli` devDependency M118 adds — no download per build), then `npm ci --omit=dev` and
+   `dist/` with the M95a and V9-78 properties (read-only root, no network at runtime). Standalone
+   projects get it too. Full-stack builds the server entry beside `react-router build`, and its
+   production `start` must not rebuild the bundle on every start, as the standalone `start` does
+   today.
+4. **Other TypeScript entry points:** the migration runner, the devtool entry `main.dev.ts` (stays
+   out of the build, as M101f keeps it out of images).
+5. **Bun and Deno** retain native source execution. `bun build` and `deno compile` are documented
+   custom packaging choices, not generated steps.
+6. **Interim command superseded.** M120 ships compiled Node starts; Bun and Deno retain source.
+
+**Dependencies.** After M118, which ships `setu check` and makes the CLI a devDependency of
+generated projects; this milestone wires it into `build`.
+
+**Gate:** Node scaffold e2e builds and serves compiled output, including full-stack SSR and a
+workspace library. The deploy gate runs the Node workspace/library, Node standalone, Bun
+workspace/library and Deno workspace (with a library under a root `nodeModulesDir: "auto"`) images
+read-only with no external network. Full-stack and standalone Deno Dockerfiles are unit-tested;
+full-stack images were built and run by hand in review.
+
+**Deliverables:**
+
+- [x] Build, `start:dev` and `start:debug` scripts for every Node template and workspace member;
+      `build` runs `setu check` first, and the e2e proves a broken seam fails the build
+- [x] Multi-stage Dockerfile for workspaces and standalone projects; full-stack SSR bundle built in
+      it
+- [x] `.gitignore` covers `dist/` and `build/`
+- [x] Workspace libraries inlined by setu build; Bun roots use the hoisted linker
+- [x] The gate above; `docs/upgrading.md`, `docs/deployment.md`, CLI README, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `120`
+
+---
+
+## Milestone 121: Full-Stack Members With a Broker, and Messaging on a Full-Stack Project
+
+**Package(s):** `packages/cli`; `packages/starters/full-stack-starter` only if the plan finds an
+option the starter does not already accept
+
+**Source:** M115 (Relaymark) and the maintainer's discussion recorded in `smoke/M115-FINDINGS.md`.
+Closes **V10-51** and **V10-52**. **Maintainer decision (2026-10-24): support it.**
+
+**The problem.** The brief's exact shape — services on a broker plus a React portal — cannot be
+generated. Three entry points share one cause:
+
+1. `setu generate app <name> --template full-stack` is refused in a broker-transport workspace.
+2. `setu new --template full-stack --broker <x>` is refused.
+3. `setu add messaging` on a full-stack project adds the package and prints "configure its messaging
+   arm" — no option written, no broker client installed, and its doc link points at `develop`.
+
+The CLI applies a transport by rewriting the arguments of inline `MessagingPlugin(...)` and
+`QueuePlugin(...)` calls (`withBrokerArgs`, M72). A full-stack member has no inline plugin list —
+its plugins are assembled inside `createFullStackAppFromConfig` in the published starter — and a
+second `MessagingPlugin` is refused by the kernel (duplicate capability provider). So M85 kept the
+refusal for brokers while letting gRPC through, because gRPC is an appended plugin. It is the CLI's
+mechanism, not a framework limit: `MicroserviceStarterOptions` already accepts
+`messaging?: MessagingPluginOptions` and `queue?: QueuePluginOptions`, and the full-stack starter
+inherits both.
+
+M115's first builder hit entry point 1, fell back to `--template rest` plus `setu add react-router`
+(V10-52: it adds the dependency only, and scaffolds no React Router app, routes, Vite config or
+build script), and spent about an hour hand-building what the template generates.
+
+**Design.** Route the transport into the starter's options object, the way M61 routed `di` and M67
+routed `SERVICE_ENDPOINTS` (`AppFactoryRenderContext`). The same rendering serves all three entry
+points. `setu add react-router` either scaffolds the framework-mode app or refuses with the command
+that does (`setu new --template full-stack`, or a new `setu generate app`), rather than half-adding
+it.
+
+**The trap.** TypeScript does not excess-property-check an object literal returned from a callback
+(M61), so a misspelled `messaging` key in the generated
+`createFullStackAppFromConfig((config) => ({…}))` type-checks and is ignored. The gate needs the M61
+typed-position probe, and an e2e that boots a full-stack member on a real broker and proves a
+message crosses it.
+
+**Deliverables:**
+
+- [x] The three entry points generate a full-stack project whose starter receives the transport
+- [x] `setu add messaging` / `queue` on a full-stack project writes the option and installs the
+      client
+- [x] `setu add react-router` refuses with the right command (maintainer decision 2026-10-28)
+- [x] Typed-position probe; real-broker e2e for a full-stack member in a broker workspace
+- [x] CLI README, `docs/cli.md`, CHANGELOG; the M85 refusal text removed
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `121`
+
+---
+
+## Milestone 122: Workspace Operations — Build, Test and Deploy From the Root
+
+**Package(s):** `packages/cli`
+
+**Source:** M115 (Relaymark). Closes **V10-60**.
+
+**The problem.** A generated workspace root has one script, `dev` → `scripts/dev.mjs` (starts
+members in dependency order, waits on each prerequisite's `/ready`, shuts down on Ctrl+C), plus
+`docker/compose.yaml`. There is no root test task across members, no build-all-images step, no
+deploy script and no Kubernetes apply or rollout helper; `dev` runs each member's `start`, so
+nothing watches files. The CLI wrote about 70% of Relaymark's deployment files (701 of 996 lines);
+the builders hand-wrote the rest, including `scripts/deploy.sh` (build, kind-load, apply, set image,
+rollout), `scripts/bootstrap-secrets.mjs` (Secret wiring for 12 `secretKeyRef`s) and a root test
+task.
+
+**Decisions taken (plan `plans/archive/milestone-122-workspace-operations.md`, maintainer
+2026-10-29):** the operations are CLI commands, `setu workspace build` and `setu workspace deploy`,
+reading `setu.workspace.json` at run time — so existing workspaces get them without edits and fixes
+ship with the CLI — rather than a managed script; a new root also gets `test` (the package manager's
+own recursion), `build` and `deploy` scripts. Secrets are wired: names from each member's
+`.env.example`, values from a gitignored `k8s/secrets/<member>/.env`, one Secret per member applied
+server-side, read through `envFrom`. `dev` already watches: M120 made the dev runner start each
+member's `start:dev`.
+
+**Deliverables:**
+
+- [x] `setu workspace build` / `setu workspace deploy`, plus root `test`, `build` and `deploy`
+      scripts in a new workspace; they read the manifest at run time, so they follow `generate app`
+- [x] Secret manifests from member environment declarations (`.env.example` names, operator values,
+      server-side apply), `envFrom` in every generated Deployment, `env_file` in Compose
+- [x] Workspace e2e running the root tasks against a real kind cluster (`check:deploy --workspace`)
+- [x] CLI README, `docs/deployment.md`, `docs/upgrading.md`, CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `122`
+
+---
+
+## Milestone 123: A Styling Foundation and App Shell for Generated UIs
+
+**Package(s):** `packages/cli` (the full-stack template, and `setu add view` for server-rendered
+views); docs (`docs/mvc.md`, the view-plugin README)
+
+**Source:** M115 (Relaymark), the maintainer's review of its UI (`smoke/PRODUCT-DEFECTS.md` RM-2),
+and the view-styling probe on published `0.10.0` (`smoke/v0.10.0/VIEW-STYLING-PROBE.md`). Closes
+**V10-59** and **V10-64**.
+
+**The problem.** The full-stack template's whole stylesheet is 13 lines (`color-scheme: light dark`,
+a system font, margins) and the layouts use plain class names. No CSS tooling, design tokens or
+theme switch, so every real product builds its design system from scratch: Relaymark's builders
+added Tailwind 4, shadcn/ui (through the shadcn CLI), tokens and a per-user theme by hand.
+
+**The app shell does not stay put.** Relaymark's UI looked good and was responsive, but its top bar
+and sidebar scrolled away with the page: `.app-frame` used `min-height`, and neither bar was sticky,
+so the whole document scrolled instead of only the content region. That is not what a SaaS UI is
+expected to do, and the template's layouts give a builder no shell to start from. The probe showed
+the expected pattern working with Tailwind: a viewport-height frame (`h-dvh overflow-hidden`), a
+sticky header and sidebar, and an `overflow-y-auto` content region — after a 3,000 px scroll the
+window stayed at 0 while the content scrolled.
+
+**Server-rendered views need a styling story too, and it differs.** The probe measured the view
+plugin with Tailwind and shadcn/ui:
+
+|                                                                               | Result                                                                                                                                                                                           |
+| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tailwind with the `hono-jsx` arm                                              | Works: Tailwind 4 found the classes in `.tsx` views unconfigured; `static-plugin` served the built CSS                                                                                           |
+| shadcn static components (`Card`, `Button`) through a `'custom'` React engine | Render with shadcn's look, once shadcn's theme CSS is present                                                                                                                                    |
+| shadcn interactive components (`Dialog`)                                      | Do not work: the server-rendered path ships no client JavaScript, so Radix never runs                                                                                                            |
+| hono-JSX and React in one project                                             | Every React file, including each file shadcn copies in, needs `/** @jsxImportSource react */`, and the two global JSX type sets conflict in one TypeScript project; separate projects type-check |
+
+So there are two stories: the full-stack template gets Tailwind and, optionally, shadcn/ui
+(interactive components work, because it is React); server-rendered views get Tailwind with shadcn's
+class recipes and theme variables, without React and without interactive components.
+
+**`setu add view` scaffolds the Tailwind setup (maintainer decision, 2026-10-24).** Adding the view
+plugin leaves a project ready to render styled pages, not just wired:
+
+- the dependencies: `hono` (which closes V10-64 together with the JSX compiler options),
+  `tailwindcss` and `@tailwindcss/cli`, plus `@setu-ts/static-plugin` when the project does not
+  already have it;
+- the JSX compiler options (`jsx: "react-jsx"`, `jsxImportSource: "hono/jsx"`) on targets that use a
+  `tsconfig.json`, and the Deno equivalent;
+- a source stylesheet (`@import "tailwindcss"` plus design tokens as CSS custom properties, the
+  variables shadcn's class recipes expect) and an ignored build output;
+- a `css` build step and a watch step for `dev`, run by the project's `build` (M120);
+- `StaticPlugin` registered for the built CSS, and a layout component carrying the fixed app shell
+  and the stylesheet link, which the generated example view renders through.
+
+**Decisions the plan takes:** whether the template adopts Tailwind (the default most React Router
+starters and shadcn/ui assume) or stays tool-neutral with design tokens in CSS custom properties;
+whether a component library is scaffolded or left to `npx shadcn`, with the template's paths and
+aliases ready for it; how `setu add view` behaves in a project that already has a stylesheet, a
+`StaticPlugin` registration or its own CSS build (refuse, merge, or print the lines to add — never
+overwrite); whether the docs present a React engine for views at all, given the JSX type conflict;
+light/dark and a persisted user preference without a flash on SSR; and keeping the M37c lesson — the
+landing page must render visible content, asserted by the e2e. Whatever ships must survive
+`deno fmt`/Prettier and the scaffold e2e on every runtime the template supports, and the built CSS
+must reach the M120 image.
+
+**Deliverables:**
+
+- [x] The chosen styling foundation in the full-stack template, with a theme switch
+- [x] A fixed app shell in the generated layouts: viewport-height frame, sticky header and sidebar,
+      only the content region scrolls; the e2e scrolls the content and asserts the header and
+      sidebar have not moved
+- [x] `setu add view` scaffolds the Tailwind setup listed above (closing V10-64); a scaffold e2e
+      runs `setu add view` on each Node, Bun and Deno target, builds the CSS, boots, and asserts a
+      styled page in a browser with the shell fixed; `docs/mvc.md` states what shadcn/ui can and
+      cannot do in server-rendered views
+- [x] Scaffold e2e: builds, serves styled pages, no unstyled flash — the full-stack template on
+      every runtime it supports, `setu add view` on Node, Bun and Deno (Workers views carry no
+      Tailwind setup)
+- [x] Template README and `docs/` entry; CHANGELOG
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `123`
+
+---
+
+## Milestone 124: Session and Account Lifecycle
+
+**Package(s):** `packages/auth-plugin`; docs, including the `session-plugin` README. `common` and
+`session-plugin` code are unchanged: the stamp lives on the application's user record (see "Shipped
+design"), so no per-user session stamp contract was needed. The CLI is not touched.
+
+**Source:** the maintainer's review of a production React Router application whose API
+authentication uses the cookie session rather than JWTs (2026-10-24). The application keeps a
+server-side session registry, re-checks the account on every request, answers JSON 401/403 to API
+callers while redirecting pages to the sign-in page, and supports forced password resets and admin
+impersonation. Compared against `session-plugin` and `auth-plugin` on `develop`, most of it is
+already covered: encrypted or signed cookie sessions with `SameSite=Lax`, server-authoritative
+absolute and idle expiry, immediate revocation of one session on the store strategy, cookie-session
+API authentication with Problem Details 401/403, session-id rotation at sign-in, CSRF tokens, OIDC
+sign-in, and tenant or organization rules through policies and scoped RBAC. Three pieces are the
+framework's responsibility and missing; three are application or generator material. Register rows:
+**V10-65**, **V10-66**.
+
+**The framework comparison below is from knowledge, not measured** (the M97 precedent). The plan
+re-checked each framework's current behaviour against its source before relying on it; its table
+supersedes this one where they differ (ASP.NET Core and Spring both answer an
+`X-Requested-With: XMLHttpRequest` request with 401 rather than the redirect).
+
+| Concern                                                            | Laravel                               | Django                                                         | Rails                                        | ASP.NET Core Identity          | Spring Security            | Setu-TS today                                                          |
+| ------------------------------------------------------------------ | ------------------------------------- | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------ | -------------------------- | ---------------------------------------------------------------------- |
+| Unauthenticated page redirects to sign-in; an API request gets 401 | `auth` middleware, by `expectsJson()` | `login_required` → `LOGIN_URL`                                 | Devise `authenticate_user!`, by format       | cookie scheme `LoginPath`      | authentication entry point | `requireAuth()` always answers 401                                     |
+| Account re-checked on every request                                | session guard reloads the user        | middleware reloads the user, checks `is_active`                | Warden reloads; `active_for_authentication?` | security stamp, on an interval | loaded at sign-in only     | `refreshPrincipal`, but unreachable for password-only apps without MFA |
+| Sign out all of a user's sessions                                  | `logoutOtherDevices()`                | password change invalidates other sessions (session auth hash) | Devise salts the session with the password   | `UpdateSecurityStampAsync`     | `SessionRegistry`          | none: `ISessionStore` has `read`/`write`/`destroy` by session id only  |
+
+**1. Every session configuration can re-check the account per request (V10-65, defect).** The
+`signIn` arm, which carries the async per-request `refreshPrincipal` (returning `null` makes the
+request anonymous), refuses to start unless it has an outside provider, passkeys or MFA
+(`auth-plugin/src/sign-in/config.ts:333`). A password-only application without MFA therefore falls
+back to `AuthPlugin({ session })`, whose `toPrincipal` is synchronous
+(`strategies/session-strategy.ts:25`) and cannot ask the database whether the account still exists,
+is deactivated, or has lost its access. The mechanism exists; a startup refusal blocks it.
+
+**2. Pages redirect to sign-in, APIs answer 401 (V10-66).** `requireAuth()` takes no options and
+always answers 401 (`guards/index.ts:69`). A server-rendered page (the view plugin, M92) has no
+guard that sends a browser to the sign-in page with a return path, so every such application writes
+one, and getting the return path wrong is an open redirect. React Router loaders can redirect
+themselves; the gap is the server-rendered and plain-route side.
+
+**3. Sign out all of a user's sessions.** Changing a password, an admin revoking access, or a "sign
+out everywhere" button needs every session of one user to stop working. The established way needs no
+session registry: a per-user stamp (a version number or hash) recorded in the session at sign-in and
+compared on each request's re-check; bumping it invalidates every session at once. That also gives
+"revoke on password change" for free.
+
+**Decisions the plan takes:**
+
+- For 1: lift the refusal so `signIn` (and `IAuthSessionService`) can run with no outside provider,
+  or let the session arm take an async `toPrincipal`. One mechanism, not two, and the plan says
+  which and why.
+- For 2: how the guard decides HTML from API — `Accept`, `Sec-Fetch-Dest`/`Sec-Fetch-Mode`, or an
+  explicit per-route choice; where the sign-in path is configured; and that the return path accepts
+  only a same-origin relative path (M100c's `returnTo` rule is the precedent). Whether this is an
+  option on `requireAuth` or a separate guard.
+- For 3: where the stamp lives (a small port in `common` with memory and cache-backed stores, read
+  through the same per-request re-check), its cost per request, and the API that bumps it
+  (`signOutEverywhere(userId)` or similar). How it behaves on the cookie strategy, where the session
+  itself cannot be destroyed server-side.
+
+**Shipped design** (maintainer decisions 2026-10-29, recorded in the plan):
+
+- **1:** the `signIn` refusal is lifted — `providers: []` without `mfa` or `passkeys` is a
+  password-only sign-in. `AuthPlugin({ session })` stays synchronous and points to `signIn`; one
+  mechanism re-checks.
+- **2:** an option on the existing guard, `requireAuth({ signInPage })`. A navigation is a
+  `GET`/`HEAD` that is not `X-Requested-With: XMLHttpRequest` and carries `Sec-Fetch-Mode: navigate`
+  (or, without it, an `Accept` naming `text/html` or `application/xhtml+xml`; a bare `*/*` is not
+  enough). It gets `302` to the page with `returnTo` through `safeReturnTo`, now exported;
+  everything else keeps the 401, and both answers append to `Vary`.
+- **3:** the stamp lives on the application's user record, as in Laravel, Django, Devise and ASP.NET
+  Core: `signIn.sessionStamp(principal)` is read at sign-in, its SHA-256 digest recorded, and the
+  digest of the current value compared on every request in constant time. **This replaces the
+  suggested `common` port and stores**, which would have duplicated state the application already
+  owns. **No framework bump API ships:** the application bumps its own stamp (a one-line update),
+  and signs the current session in again to keep it. It works on the cookie strategy because the
+  compare, not a server-side delete, is what ends the session.
+
+**Named, not taken.** These are application or generator material; the reviewed application is right
+to own them, and other frameworks mostly leave them to packages or starter kits:
+
+- **Listing a user's sessions with IP and device**, and revoking one from a settings screen —
+  generator material (Laravel's database session driver with Jetstream, the Rails 8 authentication
+  generator). A candidate for the full-stack template once item 3 exists.
+- **Forced password reset** with an allow-list of paths — a recipe over `refreshPrincipal` and a
+  guard.
+- **Admin impersonation**, with changes credited to the real admin — a recipe or a later plugin;
+  among the compared frameworks only Spring ships it (`SwitchUserFilter`).
+
+**Deliverables:**
+
+- [x] Items 1–3 implemented, each with tests that reproduce the gap first
+- [x] A real-kernel e2e: a password-only application without MFA whose deactivated account stops
+      authenticating on the next request; a page request redirected to sign-in with a safe return
+      path while the same unauthenticated API request answers 401; and a stamp bump signing out two
+      concurrent sessions of one user on the store strategy
+- [x] The auth and session READMEs, `PUBLIC_API.md`, CHANGELOG, `docs/upgrading.md`, and recipes for
+      the three "named, not taken" items or a stated decision not to write them
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `124`
+
+---
+
+## Milestone 125: A Compiled Container and a Request Scope
+
+**Package(s):** `packages/di-plugin`, `packages/common` (`container.ts`, `IRequestContext`),
+`packages/kernel` (request completion), `packages/decorator-plugin` (registration and a
+request-scoped parameter source), `packages/testing` (`OverridingContainer`), `apps/di-decorators`;
+docs.
+
+**Source:** the maintainer's review of the DI container against Elysia, NestJS, ASP.NET Core,
+Spring, Awilix, Angular and Encore.ts (2026-10-25), and a read of `di-plugin` on `develop` made for
+it. One finding is a defect in merged code and would ordinarily be a `fix/` branch; it ships here by
+the maintainer's direction, because the request scope below is unsafe without it.
+
+**Where things stand (checked against source, 2026-10-25).**
+
+1. **A singleton captures a scoped service (defect).** A child scope shares its parent's singleton
+   map and owns only its scoped map (`di-plugin/src/container/scope-manager.ts:96-97`). A singleton
+   first resolved inside scope X is built with X's scoped instances and cached for the whole
+   application, so every later scope receives X's instance through it. Resolving a `scoped` token on
+   the root container caches it in the root's own scoped map, so it silently behaves as a singleton.
+   No test covers either case.
+2. **`@Optional` classes resolve from the registering container.** `ClassProvider.inject` is a bare
+   token list, so a class with an `@Optional` argument registers a `useFactory` that closes over the
+   container it was registered on (`decorator-plugin/src/plugin/decorator-plugin.ts:240-276`, which
+   documents this). Its dependencies resolve from the root, never from the resolving scope: the same
+   capture by another door.
+3. **Controllers are built once, at registration** (`decorator-plugin.ts:997`). A controller is
+   therefore singleton-lived, and any scoped dependency it takes is captured. The example app
+   reaches scoped services only by calling `createScope()` by hand inside a handler
+   (`apps/di-decorators/src/modules/lifetimes/lifetimes.controller.ts:26`).
+4. **No request scope.** `ServiceScope`'s JSDoc says so (`common/src/container.ts:24`). It also says
+   the application "disposes" a scope explicitly, and `IContainer` has no dispose member: that
+   sentence describes nothing.
+5. **Everything is decided per resolve.** `#resolveToken` enters the cycle detector before any
+   lookup, cache hits included (`di-plugin/src/container/container.ts:169`), and walks the registry
+   chain by string. Cycles and missing providers surface on the first request that reaches them, not
+   at boot. Nothing is validated when the application starts.
+6. **Tokens are untyped strings.** `resolve<T>(token: string)` takes `T` on trust, so a wrong or
+   mistyped token compiles. NestJS has the same weakness for its string and symbol tokens; its class
+   tokens carry their type.
+
+**The framework comparison below is from the 2026-10-25 review, partly from knowledge** (the M97
+precedent). The plan re-checks each row before relying on it.
+
+| Concern                    | NestJS                                  | ASP.NET Core                                 | Awilix / `@fastify/awilix`      | Spring                           | Elysia / Encore.ts                          | Setu-TS today     |
+| -------------------------- | --------------------------------------- | -------------------------------------------- | ------------------------------- | -------------------------------- | ------------------------------------------- | ----------------- |
+| Per-request scope          | `Scope.REQUEST`, bubbling up the chain  | a scope per request                          | `scopePerRequest` / `diScope`   | request scope via scoped proxies | per-request values, no container            | none              |
+| Its cost                   | controller subtree rebuilt per request  | one scope per request                        | one child container per request | a proxy hop per call             | none                                        | —                 |
+| Singleton holding a scoped | silently made request-scoped (bubbling) | refused (`ValidateScopes`, Development only) | not refused                     | proxied                          | not applicable                              | silently captured |
+| Graph checked at boot      | yes                                     | `ValidateOnBuild`                            | no                              | yes                              | not applicable                              | no                |
+| Typed tokens               | class tokens only                       | types are tokens                             | no (string names)               | types are tokens                 | inferred context (Elysia), codegen (Encore) | no                |
+| Scope disposal             | per request                             | `IDisposable` at scope end                   | `disposeOnResponse`             | destruction callbacks            | not applicable                              | none              |
+
+**Rejected, with the reason recorded:** NestJS's scope bubbling (it rebuilds the controller subtree
+on every request, the cost NestJS's own durable providers exist to avoid), Spring-style proxies (a
+hop on every call, and they need `AsyncLocalStorage` to find the current request), and an ambient
+`currentRequest()`-style lookup as the default (its `AsyncLocalStorage` cost lands on every request,
+used or not). Per-request data — user, tenant, locale — stays on typed state keys; the scope is for
+the few things that need a per-request instance, such as a unit of work.
+
+**Decisions the plan takes:**
+
+1. **Close and compile the graph at the end of bootstrap.** The container stays open while plugins
+   register (the decorator plugin builds controllers during `register()`), compiling a token's
+   subgraph on its first resolve; it closes when the last bootstrap hook has run, the moment the
+   service registry seals. Closing compiles and validates every provider once — missing providers,
+   cycles, and any singleton reaching a scoped service on any path — into direct factories:
+   singletons captured, scoped dependencies as numbered slots. No resolve runs the cycle detector;
+   only the compile walk does. Build-time generation (Dagger, Wire) is not taken: start-up
+   compilation gives the same safety on Bun, Deno and Workers, which M120 gives no build step, and
+   costs microseconds per provider once per process.
+2. **Typed tokens.** `createToken<T>(name)` returns a frozen object `{ name }` that `resolve` infers
+   `T` from, keyed by identity. It carries no process-unique id: a creation counter would be
+   module-level mutable state, which AI_GUIDELINES §11.4 forbids, and the compiled graph makes the
+   id unnecessary — every dependency inside the graph is a direct reference with no lookup, so only
+   a top-level `resolve()` reads a `Map`, the same cost as a string token. A class is also accepted
+   as its own token, by identity, and bare strings keep working. Bundling and minification cannot
+   break class tokens (`constructor.name` appears in error messages and nowhere else). (Maintainer
+   decision, 2026-10-25, replacing an earlier id-based design.)
+3. **Dependencies that can be seen.** `ClassProvider.inject` and a new optional
+   `FactoryProvider.inject` accept `{ token, optional: true }`, and a factory receives its resolved
+   dependencies as arguments. That retires the `@Optional` closure (finding 2). A factory without
+   `inject` stays legal but opaque: boot validation cannot see its dependencies, and the plugin
+   lists such tokens in one `debug` line.
+4. **A lazy request scope, on by default, without DI in the kernel.** The kernel gains two generic
+   per-request primitives: `ctx.defer(cleanup)`, whose list is allocated on first call — completion
+   (fast path, full path and error path) checks whether it exists and does nothing more when it does
+   not — and `ctx.slot(key, create)`, owner-keyed storage under a key only its owner holds (added
+   2026-10-26: caching the scope in a `WeakMap` cost a request scope 10% of hello-world throughput).
+   The scope itself is `container.forRequest(ctx)` in di-plugin: created on first call, kept in the
+   request's slot, disposed through `ctx.defer`. This is NOT an `onResponse` hook: any registered
+   hook moves every request off the M87 synchronous path
+   (`kernel/src/application/application.ts:1221`). Cleanup finishes before a buffered response is
+   handed back, and when the body stream ends, errors or is cancelled for a streaming one — work
+   after the response is not reliable on Workers without `waitUntil`, which the kernel cannot reach.
+   A transaction's commit is not disposal and stays in the handler or middleware.
+5. **Disposal is real.** A provider may declare a `dispose` option; `IContainer.dispose()` runs it
+   for what the container created, and returns a promise only when a dispose function did, so a
+   request scope with synchronous disposal stays on the synchronous path. `Symbol.dispose` is not
+   taken yet.
+6. **Scoped services reach decorated handlers per request.** A controller stays singleton-lived;
+   NestJS-style bubbling is rejected above. `@Params(Service(TOKEN))` resolves from
+   `container.forRequest(ctx)` on each call (named `Service`, because `ScopedRoles` and
+   `ScopedPermissions` already mean RBAC scopes). A controller constructor that reaches a scoped
+   service fails the boot (decision 1), naming this source as the fix.
+7. **The defect fix (finding 1), in 0.11.0.** The next release, 0.11.0, is a minor that already
+   carries a BREAKING entry, and the Versioning Policy batches breaks into a minor, so every refusal
+   ships there with no warning phase: resolving `scoped` from the root, a captive graph, registering
+   after close, and a scope shadowing a parent token. `IContainer`'s new `forRequest` and `dispose`
+   are required in the same minor; `OverridingContainer` in `packages/testing` implements them. If
+   M125 misses the 0.11.0 cut, the entries move to the next minor unchanged. (Maintainer decision,
+   2026-10-25.)
+
+**Measured, not estimated.** The review's figures are estimates and the plan replaces them. The
+benchmark harness runs three configurations against the `develop` baseline: no DI; DI registered and
+`forRequest` never called (must match the baseline — the fast path is the property under test); and
+a request resolving scoped services. The plan sets the acceptance threshold for the third.
+
+**Coordination, not dependency.** Independent of M118 and M120. Whichever of M120 and this milestone
+lands second runs the scaffold e2e with the other in place: compiled output booting with DI and the
+request scope in use, decorators lowered by whatever M120 bundles with.
+
+**Named, not taken:**
+
+- **Static validation in `setu check`** of a generated `@Module` graph, so a missing provider fails
+  CI before anything boots. A follow-up once M118 and this milestone have both shipped; M118
+  compares name sets and reads no types.
+- **Tenant-keyed scopes** (NestJS durable providers grouped by tenant), over the multi-tenancy
+  plugin. Only if a consumer needs it.
+- **An ambient `currentScope()`** over `AsyncLocalStorage`, opt-in and behind `packages/runtime`.
+
+**Deliverables:**
+
+- [x] Findings 1 and 2 reproduced by failing tests first, then fixed per decisions 3 and 7
+- [x] Decisions 1–6 implemented in `di-plugin`, `common`, `kernel` and `decorator-plugin`
+- [x] A real-kernel e2e: two concurrent requests each receive their own scoped instance and neither
+      sees the other's; a scoped service is disposed after its request, including a request that
+      throws; a singleton reaching a scoped service fails the boot with both names; and a request
+      that never calls `forRequest` stays on the synchronous path
+- [x] The three-configuration benchmark, results in the PR
+- [x] `apps/di-decorators` moved off hand-made scopes onto the request scope
+- [x] The di-plugin and decorator-plugin READMEs, `PUBLIC_API.md`, CHANGELOG (with the deferred
+      refusals marked for their minor), and `docs/upgrading.md`
+- [x] **ROADMAP.md** — this section and the Progress Tracking row `125`
+
+---
+
+## Milestone 126: A Local Diagnostics Listener on Node
+
+**Package(s):** `packages/runtime` (the listener), `packages/cli` (the devtool opt-in, the
+development entry and the workspace runner on a Node target), `scripts/` (test lanes and the
+consumer exercise); docs. `packages/common` and `packages/diagnostics-plugin` source do not change:
+the `ILocalDiagnosticsListenerFactory` contract is runtime-neutral, and it already says that a
+runtime with no supported transport refuses before it binds. The connector, its `Host` check and the
+native client contain no Deno API (checked: no `Deno` reference in `diagnostics-plugin/src`).
+
+**Source:** the maintainer's direction (2026-10-28), from refreshing the devtool roadmap against
+`v0.10.0`. Since M111d, Node has been the default target. The default `setu new` template is the
+plugin-list minimal host, which the devtool opt-in accepts, so a default project is a Node project
+the opt-in would otherwise accept. The local diagnostics listener (M98b) binds only on Deno, and
+M98c refuses every other runtime. The separately maintained devtool therefore cannot inspect a
+project generated with the defaults. This milestone is the only framework prerequisite for widening
+the devtool's support matrix beyond Deno.
+
+**Where things stand (checked against source, 2026-10-28):**
+
+1. **The listener refuses on Node before it binds.** `createLocalDiagnosticsListenerFactory` returns
+   the refusing factory for every platform except `deno`
+   (`runtime/src/diagnostics/local-diagnostics-listener.ts:305`). Its fixed error names Deno as the
+   only supported runtime (`:45`). The RuntimePlugin builds the factory once and registers
+   `closeActive()` on the close hook (`runtime/src/plugin/runtime-plugin.ts:248-256`). A Node
+   factory plugs into that seam unchanged.
+2. **`@hono/node-server`'s `serve()` cannot host this listener as it stands** (2.1.5, read from
+   `dist/index.mjs`):
+   - It answers a missing `Host`, an invalid `Host` or an invalid URL with its own
+     `new Response(null, { status: 400 })`, before the fetch callback runs. That is not the
+     protocol's fixed refusal.
+   - When a response fails, it writes `Error: ${err.message}` to the client.
+   - `serve()` returns the server synchronously and listens without an `'error'` listener. A port
+     conflict is therefore an uncaught `'error'` event, not a rejected `listen()`. The adapter's
+     `await host.serve(...)` (`node-http-adapter.ts:549`) awaits nothing.
+   - `getRequestListener` does accept an `errorHandler`, but `serve()` never passes one through.
+3. **Node exposes what Deno hides.** On Deno, duplicate singleton header lines can be detected only
+   by looking for a comma in the coalesced value (`SINGLETON_HEADER_NAMES`, `nativeFramingRefusal`
+   at `:127`). Node gives the real line multiplicity in `IncomingMessage.rawHeaders`. Node also
+   applies its own HTTP parser limits (`maxHeaderSize`, `headersTimeout`, `requestTimeout`,
+   keep-alive), and its `clientError` path answers a parse error before any application code runs.
+4. **The proof runs only on Deno.** `NODE_EXCLUDED_TESTS` in `scripts/test-lanes.ts` keeps 18 suites
+   that need a real connector off the Node lane:
+   - 16 diagnostics-plugin suites: every end-to-end observation family, plus the `activation`,
+     `core-conformance`, `lifecycle` and `security` integration suites;
+   - the Redis realtime-observations suite;
+   - the M98b consumer exercise (`test/inspect-local-diagnostics.test.ts`).
+
+   The listener source is in `DENO_ONLY_SOURCES`, so only the Deno lane measures its coverage. On
+   Node, nothing in the suite has ever reached a real connector.
+
+5. **The CLI's devtool output is Deno-shaped from end to end:**
+   - `devtoolRuntimeRefusal` (`cli/src/devtool/planner.ts:255`) refuses `new --devtool`,
+     `generate app --devtool` and `devtool enable` on any other target.
+   - `devtool enable` writes only into a `deno.json` and imports the plugin through the Deno
+     specifier (`cli/src/commands/devtool.ts:91`).
+   - The development entry reads its credentials with `Deno.env.get` and stops with `Deno.exit`
+     (`cli/src/devtool/dev-entry.ts:100-115`).
+   - `devtoolTasks` emits `deno run …` and a `deno check` that includes `main.dev.ts`
+     (`project-files.ts:1350`).
+   - Since M120, a Node project has `build` (`tsc --noEmit && setu build`) and `start` (the compiled
+     `dist/main.js`). It also has `start:dev` (`tsx watch main.ts`) and `start:debug`
+     (`project-files.ts:1637-1660`). No Node template has a `dev` script; Deno's devtool task is
+     named `dev`.
+6. **The Node workspace runner has no devtool path, and it leaves the devtool's process group.**
+   `nodeRunner` (`cli/src/workspace/dev-runner.ts:185`) always runs `npm run start:dev`, which is
+   watch mode (`:243`). It never reads `SETU_DEVTOOL_MEMBER`. Its `spawn` passes no `env`, so every
+   member would inherit the launcher's session pair; the Deno runner blanks it for every member
+   except the selected one (`:109-121`). It also starts each member with `detached: true`, in a
+   process group of its own, so that a non-forwarding shell cannot strand a server. The devtool's
+   supervisor is a process-group leader and tears down with `process.kill(0, …)`
+   (`setu-ts-devtool/src/launch/supervisor.ts:19,39`). A detached member escapes that teardown.
+7. **One more process level.** A Node project runs TypeScript under `tsx` (`project-files.ts:1680`),
+   and tsx's CLI (4.23.15) runs the script in a child `process.execPath`. Under `npm run`, the
+   application is four processes below the launcher: npm, a shell, tsx, then node. These all stay in
+   the launcher's group unless something detaches them (item 6).
+8. **The production image already excludes a development dependency.** M120's Node runtime stage
+   runs `npm ci --omit=dev` and copies only `dist` (`cli/src/workspace/compose.ts:371`).
+   `setu build` bundles `main.ts` alone (`cli/src/commands/build.ts:163`), and `.dockerignore`
+   excludes `main.dev.ts` (`compose.ts:298-299`). A `diagnostics-plugin` declared in
+   `devDependencies` therefore never reaches a Node image, with no strip step like the Deno image's
+   (`compose.ts:213`, the V8-21 fix).
+
+**Decisions:**
+
+1. **The listener is `node:http`, not `serve()`.** It uses `createServer` with node-server's own
+   request mapping and no node-server code: node-server normalizes the request-target
+   (`/v1/./status` arrives as `/v1/status`, measured), which would make the connector serve an alias
+   it must refuse. It sits behind an injectable host seam, as the Deno factory does. `listen()`
+   resolves on `'listening'` and rejects on `'error'`, so a port conflict fails closed and the
+   application never crashes. The server is created with explicit values for `maxHeaderSize`,
+   `headersTimeout`, `requestTimeout`, `keepAliveTimeout` and `maxRequestsPerSocket`, with
+   `insecureHTTPParser: false` and a `clientError` handler that writes fixed bytes and destroys the
+   socket.
+2. **The protocol is identical on both runtimes; the transport is not.** For every request that
+   reaches the protocol, status, body bytes, refusal code and the protocol's own headers
+   (`content-type`, `cache-control`, `x-content-type-options`, the `x-setu-*` set) match the Deno
+   listener. Each HTTP parser refuses some malformed requests before the protocol sees them, with a
+   bare `400` and no body. The two parsers draw that line in different places (measured: Node
+   refuses a duplicate `Content-Length`, Deno a duplicate `Host`), and the conformance table records
+   each row's outcome per runtime. Headers the HTTP stack adds (`date`, `connection`, `keep-alive`,
+   `content-length` versus chunked) are documented, not asserted equal. The native client checks
+   only the protocol headers.
+3. **Duplicate-header refusal on Node uses `rawHeaders`**, the real line multiplicity, and keeps the
+   comma check, so Node refuses a superset of what Deno refuses. Tests write to a raw `node:net`
+   socket, never through `fetch`.
+4. **Every existing real-connector suite runs on both lanes.** The 18 suites in item 4 leave
+   `NODE_EXCLUDED_TESTS`, and the listener source leaves `DENO_ONLY_SOURCES`. Only the Deno
+   listener's own host-specific cases stay Deno-only. This is the conformance proof; a new
+   two-runtime table covers only the framing and parser cases the existing suites do not reach.
+5. **`close()` is bounded, as on Deno.** `server.close()` stops accepting connections; idle
+   keep-alive sockets are closed immediately, and an in-flight poll is given the same bound the Deno
+   listener gives it before `closeAllConnections()`. The close hook can never hang shutdown.
+6. **`onListen` keeps its meaning.** It receives `{ hostname, port }` mapped from
+   `server.address()`. Without it, the Node listener prints the same default banner Deno prints, so
+   the bind is never silent (the reason `diagnostics-plugin.ts:417-427` omits the key).
+7. **The CLI emits the devtool for a Node target from the planner that `new`, `generate app` and
+   `enable` already share:**
+   - The development entry reads its credentials through `runtime.env` and stops with the
+     runtime-neutral shutdown block, so one rendering serves every runtime that has a listener.
+   - `diagnostics-plugin` goes in `devDependencies`. Framework pins that disagree with the CLI are
+     refused with the upgrade guide named, never bumped (the shipped V8-19 rule).
+   - The script is named `dev` and runs `tsx main.dev.ts` (the maintainer deferred the name until
+     M120 merged; it is chosen against what M120 shipped). M120 took `start:dev` and `start:debug`,
+     so `dev` collides with nothing. It is the name the Deno devtool task already has, so the
+     launcher runs `dev` on both runtimes. It is never `tsx watch`: a watch restart is a new
+     instance, and a new instance ends the session.
+   - `diagnostics-plugin` in `devDependencies` is what keeps it out of the production image (item
+     8). A test asserts that the Node runtime stage's dependency tree contains no
+     `diagnostics-plugin`.
+   - The project's `tsc --noEmit` check covers `main.dev.ts`.
+   - The refusal narrows to Bun and Workers.
+8. **The Node workspace runner gains the devtool path:**
+   - It reads the three variables. It runs `dev` for the selected member and `start:dev` for every
+     other member, as today.
+   - It passes every child an explicit environment that blanks the pair for every other member.
+   - When the launcher selects a member, it does not detach, so the devtool's group teardown reaches
+     every process it started. It still forwards `SIGINT`/`SIGTERM` itself.
+   - A workspace whose `scripts/dev.ts` is the pre-M126 Node runner is refused by name, as M98c
+     refuses a stale Deno runner.
+
+**Open questions the plan resolves rather than inherits:**
+
+- **Whether an in-flight poll is bounded at all today on Deno.** The plan measures it, and decision
+  5 matches whatever bound it finds.
+
+**Security.** This milestone opens an authenticated loopback listener on a second runtime and
+changes which processes receive session credentials, so it crosses a trust boundary. The plan
+carries a design security review written as a delta against `docs/diagnostics-security-review.md`
+(T13 and the "Non-Deno runtimes refuse" line at `:189` change). The committed tree gets an
+independent security audit before merge. The audit covers:
+
+- DNS rebinding and `Host`, including node-server's missing-`Host` default (it falls back to the
+  configured hostname);
+- every framing and parser refusal, over raw sockets;
+- no reflected error text on any path, including a response that fails mid-write;
+- sibling members never holding a working credential;
+- a Node project's dependency install never binding the listener without the explicit opt-in.
+
+**Builds on M120** (merged, PR #515). Item 5's scripts and item 8's image are what M120 ships, and
+decisions 7 and 8 are written against them. The devtool's own Node support is milestone D06 in the
+devtool repository, which consumes this one: npm project discovery, the Node recipe catalog, launch
+through the `dev` script, and teardown across the npm/shell/tsx/node chain.
+
+**Named, not taken:**
+
+- **Bun.** `Bun.serve` resembles `Deno.serve`, and Bun also runs `node:http`. Take it as a small
+  follow-up letter only when the devtool asks for Bun.
+- **Workers.** A Worker has no loopback socket of its own; inspecting one needs a different
+  transport design.
+
+**Deliverables:**
+
+- [x] A Node `ILocalDiagnosticsListenerFactory` per decisions 1, 5 and 6: `127.0.0.1` only, the same
+      port bounds, one active listener, a port conflict that rejects `listen()`, and a bounded,
+      idempotent `close()` released by the RuntimePlugin close hook on every shutdown and
+      failed-startup path
+- [x] The diagnostics-plugin real-connector suites, the listener suite and the consumer exercise
+      running on BOTH lanes (decision 4), plus a raw-socket table for duplicate headers, malformed
+      requests, a missing or invalid `Host`, oversized headers and slow headers (decisions 2 and 3)
+- [x] The CLI Node arm at all three entry points (decision 7), with the refusal narrowed to Bun and
+      Workers, and the production-image assertion
+- [x] The Node workspace runner's devtool path, with no detach under the devtool, sibling blanks,
+      and a refusal of a pre-M126 runner (decision 8)
+- [x] A scaffold end-to-end test that boots a standalone Node devtool project AND a Node workspace
+      member under the generated runner, pairs with each, renews, and proves that no other member's
+      environment holds the pair
+- [x] The design security review delta, and the committed-tree audit record in the PR
+- [x] Docs that say Deno-only today, corrected:
+  - `docs/runtime-deployment.md:336`
+  - `docs/diagnostics-protocol.md:17`
+  - `docs/diagnostics-security-review.md:189`
+  - `packages/cli/README.md:274,307`
+  - `packages/diagnostics-plugin/AGENT_CARD.md:36`
+  - the runtime and diagnostics-plugin READMEs
+  - `PUBLIC_API.md` (`--devtool` row)
+  - the CHANGELOG
+  - the process chain under `tsx` in `docs/diagnostics-protocol.md`, for the launcher
+- [x] **ROADMAP.md**: this section and the Progress Tracking row `126`
 
 ---
 
@@ -15203,7 +16340,7 @@ patch by construction and gains nothing new here.
 | 111e2     | ✅     | repository scripts and root tests on Node (Vitest); doc gates re-pointed; JSDoc ratchet re-measured on TypeDoc                                                                                                                                                                            |
 | 111e3     | ✅     | CI on pnpm, apps and website on pnpm, compiled-binary decided, root deno.json/deno.lock removed                                                                                                                                                                                           |
 | 111f      | ✅     | docs — governing documents rewritten for the Node toolchain; JSR sunset notes ([#460](https://github.com/setu-ts/setu-ts/pull/460))                                                                                                                                                       |
-| 113       | ⬜     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o                                                                                                                                                                                                        |
+| 113       | ✅     | the `v0.9.0` smoke closeout — 82 rows V9-1…V9-82 grouped by shape into M113a–M113o; closed on published `0.10.0` (V9-13/26/29 remainders carried into M119)                                                                                                                               |
 | 113a      | ✅     | messaging-plugin — brokers that report healthy while down, and publishes with no bound                                                                                                                                                                                                    |
 | 113b      | ✅     | service-discovery + health + scheduler + cache + session + auth + messaging + realtime-backplane + worker-pool + static + feature-flags + common + database — readiness that does not describe the dependency                                                                             |
 | 113c      | ✅     | queue-plugin + runtime + common + messaging-plugin — connections and jobs that never recover, and a shutdown with no bound                                                                                                                                                                |
@@ -15220,6 +16357,24 @@ patch by construction and gains nothing new here.
 | 113n      | ✅     | http-security + runtime + common + kernel + session + react-router — security behind a reverse proxy; PR #473                                                                                                                                                                             |
 | 113o      | ✅     | database-plugin + cli + service-discovery-plugin — schema-aware and stale-cache readiness; PR #475                                                                                                                                                                                        |
 | 114       | ✅     | cli + validation-plugin — self-contained feature modules: functional modules in one folder, feature-scoped placement, `src/shared/`, `<name>.schemas.ts` + a typed validated-value accessor, generated e2e tests (V9-79)                                                                  |
-| 115       | ⬜     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
+| 115       | ✅     | none — the `v0.10.0` client-brief run: a second, different product (multi-service, messaging, webhooks, realtime, storage, full-stack), plus X74 re-running M104's Ledgerline                                                                                                             |
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
-| 117       | ⬜     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
+| 117       | ✅     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
+| 118       | ✅     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
+| 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
+| 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
+| 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
+| 119c      | ✅     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |
+| 119d      | ✅     | http-security-plugin — forwarded client identity                                                                                                                                                                                                                                          |
+| 119e      | ✅     | database + common + cloudflare — a data contract that is not portable or not checked at startup                                                                                                                                                                                           |
+| 119f      | ✅     | telemetry + optional-peer packages + packaging — optional peers in an npm workspace                                                                                                                                                                                                       |
+| 119g      | ✅     | auth + cache + idempotency + service-discovery — failures that reach the operator without their reason (fix branches)                                                                                                                                                                     |
+| 119h      | ✅     | cli — output and commands that are wrong (fix branches)                                                                                                                                                                                                                                   |
+| 119i      | ✅     | docs — documentation that does not match the code, or is missing                                                                                                                                                                                                                          |
+| 120       | ✅     | cli — a production build, dev and debug scripts, and a multi-stage Dockerfile for generated services                                                                                                                                                                                      |
+| 121       | ✅     | cli — full-stack members with a broker, and messaging on a full-stack project                                                                                                                                                                                                             |
+| 122       | ✅     | cli — workspace operations: build, test and deploy from the root                                                                                                                                                                                                                          |
+| 123       | ✅     | cli — a styling foundation and fixed app shell for the full-stack template and server-rendered views                                                                                                                                                                                      |
+| 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |
+| 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
+| 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |

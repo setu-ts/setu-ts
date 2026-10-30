@@ -1,0 +1,21 @@
+---
+import { getCollection } from 'astro:content';
+import RepositoryArticle from '../../components/RepositoryArticle.astro';
+import { PACKAGES, publicApiSections, EXAMPLE_FILES } from '../../lib/repository';
+import { retargetMissingFragments, rewriteDocsHtml } from '../../lib/docs-links';
+export async function getStaticPaths() {
+  const entries = await getCollection('repository');
+  return PACKAGES.flatMap((pkg) => [
+    { params: { slug: pkg.slug }, props: { pkg, entry: entries.find((entry) => entry.id === `${pkg.directory}/README.md`)!, card: false } },
+    ...(pkg.card ? [{ params: { slug: `${pkg.slug}/agent-card` }, props: { pkg, entry: entries.find((entry) => entry.id === `${pkg.directory}/AGENT_CARD.md`)!, card: true } }] : []),
+  ]);
+}
+const { pkg, entry, card } = Astro.props;
+if (!entry?.rendered) throw new Error(`No rendered content for ${pkg.directory}`);
+const reference = (await getCollection('repository')).find((candidate) => candidate.id === 'PUBLIC_API.md');
+const api = card ? '' : publicApiSections(reference!.rendered!.html, pkg.name);
+const apiHtml = api ? '<h2>API reference</h2>' + rewriteDocsHtml(api, '', EXAMPLE_FILES) : '';
+---
+<RepositoryArticle html={retargetMissingFragments(entry.rendered.html + apiHtml, '/public-api/')} directory={pkg.directory}>
+  {!card && <p>{pkg.card && <><a href={`/packages/${pkg.slug}/agent-card/`}>Agent card</a> · </>}<a href="/api/">TypeDoc API reference</a></p>}
+</RepositoryArticle>

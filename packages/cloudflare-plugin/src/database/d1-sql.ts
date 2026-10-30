@@ -25,6 +25,7 @@ import type {
   NormalizedQuery,
   WritePrecondition,
 } from '@setu-ts/common';
+import { UnknownPayloadFieldError } from '@setu-ts/common';
 import { CloudflareUnsupportedError } from '../errors.ts';
 
 /**
@@ -48,6 +49,8 @@ export interface D1Statement {
 
 /** What a builder needs to know about the entity it is addressing. */
 export interface D1Target {
+  /** The repository entity name, independent of its physical table. */
+  readonly entity: string;
   /** The physical table name. */
   readonly table: string;
   /** The primary-key column(s), in declaration order. A scalar entity uses `['id']`. */
@@ -62,12 +65,14 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  *
  * @param value - The raw identifier
  * @param position - Where it came from, for the error message
+ * @param payloadEntity - The addressed table for a payload-field refusal
  * @returns The double-quoted identifier
  * @throws {CloudflareUnsupportedError} When the identifier is not a bare
  * `[A-Za-z_][A-Za-z0-9_]*` name
  */
-export function quoteIdentifier(value: string, position: string): string {
+export function quoteIdentifier(value: string, position: string, payloadEntity?: string): string {
   if (!IDENTIFIER.test(value)) {
+    if (payloadEntity !== undefined) throw new UnknownPayloadFieldError(payloadEntity, value);
     throw new CloudflareUnsupportedError(
       `D1: ${position} '${value}' is not a valid SQL identifier. ` +
         'Only letters, digits and underscores are accepted, and the first ' +
@@ -318,7 +323,9 @@ export function buildInsert(target: D1Target, data: Partial<Record<string, unkno
     );
   }
 
-  const columns = entries.map(([c]) => quoteIdentifier(c, 'insert column')).join(', ');
+  const columns = entries
+    .map(([c]) => quoteIdentifier(c, 'insert column', target.entity))
+    .join(', ');
   const placeholders = entries.map((_, i) => `?${i + 1}`).join(', ');
   const params = entries.map(([, v]) => v);
 
@@ -360,7 +367,7 @@ export function buildUpdate(
   const assignments = entries
     .map(([column, value]) => {
       params.push(value);
-      return `${quoteIdentifier(column, 'update column')} = ?${params.length}`;
+      return `${quoteIdentifier(column, 'update column', target.entity)} = ?${params.length}`;
     })
     .join(', ');
 
@@ -424,14 +431,6 @@ export function buildUpdateWhere(
   where: WritePrecondition,
   data: Partial<Record<string, unknown>>,
 ): D1Statement {
-  // Checked before `buildUpdate`, whose identifier refusal would quote the field.
-  for (const field of Object.keys(data)) {
-    if (!IDENTIFIER.test(field)) {
-      throw new CloudflareUnsupportedError(
-        'D1: a conditional update payload field is not a valid SQL identifier.',
-      );
-    }
-  }
   return withPrecondition(buildUpdate(target, id, data), where);
 }
 

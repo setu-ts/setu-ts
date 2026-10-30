@@ -320,9 +320,9 @@ describe('SsePlugin realtime observations (M98l)', () => {
       expect(snapshot.gauges).toEqual({ state: 'available', openConnections: 1, groups: 0 });
     });
 
-    it('sees a channel created with no traffic, and repeated reads create none', async () => {
+    it('sees a joined channel with no traffic, and repeated reads create none', async () => {
       const harness = await setup({ diagnostics: ENABLED });
-      harness.service.channel('announcements');
+      harness.service.channel('announcements').add(openStream(harness).conn);
       for (let index = 0; index < 5; index++) {
         expect(harness.source.snapshot().gauges.groups).toBe(1);
       }

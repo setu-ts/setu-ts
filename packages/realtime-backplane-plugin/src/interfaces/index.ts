@@ -9,6 +9,7 @@ import type {
   ConnectionErrorReporter,
   IRealtimeBackplane,
   RealtimeDiagnosticsOptions,
+  RealtimeFrame,
 } from '@setu-ts/common';
 
 /**
@@ -76,6 +77,14 @@ export interface IRedisBackplaneClient {
    */
   ping?(): Promise<unknown>;
   /**
+   * Opens a caller-owned lazy connection. The backplane awaits this at start
+   * only when an injected client's status is `'wait'`, before subscribing.
+   *
+   * @returns Resolves when the client is connected
+   * @since 0.11.0
+   */
+  connect?(): Promise<unknown>;
+  /**
    * M70c: the `ioredis` connection state (`'ready'` when usable). Optional for
    * the same reason as {@linkcode ping}.
    *
@@ -109,6 +118,12 @@ export interface IRedisModule {
  * Options shared by every transport arm.
  */
 export interface BackplaneCommonOptions {
+  /**
+   * Receives every subscriber throw or rejection instead of default logging.
+   * Hook failures are swallowed; the bounded handlerErrors history is retained.
+   * @since 0.11.0
+   */
+  readonly onHandlerError?: (error: unknown, frame: RealtimeFrame) => void;
   /**
    * M70n X3-4: when the resolved transport is `'memory'`, the plugin logs a
    * process-local notice at `register()` — frames fan out only within this

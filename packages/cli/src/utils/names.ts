@@ -91,7 +91,7 @@ export function isKebabIdentifier(name: string): boolean {
  * string literals (`@Injectable({ token: '<kebab>-service' })`), and the
  * commands join the kebab into a filesystem path — a workspace member
  * (`generate app`, `adopt`), a library, or an artifact file name
- * (`src/controllers/<kebab>.routes.ts`). `setu new` joins the kebab into a path
+ * (`src/controllers/<kebab>.controller.ts`). `setu new` joins the kebab into a path
  * and a manifest and never into an identifier, so it runs
  * {@linkcode isPathSegmentSafe} alone — a project may be called `3d-shop`.
  *
@@ -177,6 +177,26 @@ export const PROJECT_NAME_RULE: string =
   'digits, `.` and `-` (a space or `_` becomes `-`) — no path separator, control character, ' +
   'quote or other punctuation — not a Windows device name (`con`, `nul`, `com1`, …, with or ' +
   'without an extension) and not ending in `.`, in at most 255 bytes.';
+
+/** The rule `setu new --runtime cloudflare-workers` states for its project name. */
+export const WORKER_NAME_RULE: string =
+  'wrangler accepts only lowercase letters, digits and -, at most 63 characters.';
+
+/**
+ * Reports whether a derived kebab is a name wrangler accepts.
+ *
+ * `setu new` writes the kebab into `wrangler.toml` as `name`, and wrangler
+ * refuses anything outside `[a-z0-9-]` (no leading or trailing `-`) or longer
+ * than 63 characters. The project-name path rule is deliberately wider — it
+ * admits `.` and Unicode letters — so a target that reaches wrangler carries
+ * this check as well.
+ *
+ * @param kebab - The derived kebab-case project name
+ * @returns Whether wrangler will accept it as a Worker name
+ */
+export function isWorkerNameSafe(kebab: string): boolean {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(kebab) && kebab.length <= 63;
+}
 
 /** One identifier: an ID_Start character, then ID_Continue characters. */
 const IDENTIFIER = /^\p{ID_Start}\p{ID_Continue}*$/u;

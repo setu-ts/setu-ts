@@ -43,7 +43,10 @@ export const loadPrettier: PrettierLoader = async () => {
   try {
     prettier = await import('prettier');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('prettier', { cause: error });
+    throw new OptionalDependencyUnavailableError('prettier', {
+      requiredBy: '@setu-ts/cli',
+      cause: error,
+    });
   }
   return {
     resolveConfigFile: (path) => prettier.resolveConfigFile(path),

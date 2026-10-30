@@ -10,6 +10,36 @@
 import { describe, expect, it } from 'vitest';
 import * as common from '../../src/index.ts';
 import type { RequestOrigin } from '../../src/index.ts';
+import type { HealthIndicatorOptions, IHealthApi, IHealthService } from '../../src/index.ts';
+
+it('exports typed container tokens and dependency entries', () => {
+  const token: common.InjectionToken<number> = common.createToken<number>('count');
+  const key: common.ContainerToken<number> = token;
+  const dependency: common.InjectEntry = { token: key, optional: true };
+  expect(dependency.token).toBe(token);
+});
+
+it('exports optional health readiness contracts from the barrel', async () => {
+  const options: HealthIndicatorOptions = { readiness: false };
+  const indicator: common.IHealthIndicator = {
+    name: 'mail',
+    readiness: options.readiness!,
+    check: () => Promise.resolve({ status: 'down' }),
+  };
+  const calls: HealthIndicatorOptions[] = [];
+  const register: IHealthApi['register'] & IHealthService['registerIndicator'] = (
+    _name,
+    _check,
+    supplied,
+  ) => {
+    calls.push(supplied ?? {});
+  };
+  register(indicator.name, indicator.check);
+  register(indicator.name, indicator.check, options);
+  expect(calls).toEqual([{}, { readiness: false }]);
+  expect(indicator.readiness).toBe(false);
+  expect(await indicator.check()).toEqual({ status: 'down' });
+});
 
 describe('public request origin exports', () => {
   it('exports the origin accessors, key and return type', () => {

@@ -37,8 +37,10 @@ import { encodeBase64Url } from '../utils/base64url.ts';
 import { ID_TOKEN_SESSION_KEY, RP_PROVIDER_SESSION_KEY } from './auth-session-service.ts';
 import { addPending, takePending } from './pending-state.ts';
 import { createPkcePair } from './pkce.ts';
-import { safeReturnTo } from './return-to.ts';
+import { RETURN_TO_QUERY_PARAM, safeReturnTo } from './return-to.ts';
 import { authorizationUrl, exchangeCode, fetchUserInfo } from './token-exchange.ts';
+import { createStateChangeReporter } from '../issuers/failure-reporter.ts';
+import type { StateChangeReporter } from '../issuers/failure-reporter.ts';
 
 /** State and nonce entropy in bytes. */
 const ENTROPY_BYTES = 32;
@@ -46,8 +48,7 @@ const ENTROPY_BYTES = 32;
 /** Wall-clock budget for one provider round trip (discovery, token, userinfo). */
 export const PROVIDER_TIMEOUT_MS = 10_000;
 
-/** The query parameter carrying the post-sign-in target at the login route. */
-export const RETURN_TO_QUERY_PARAM = 'returnTo';
+export { RETURN_TO_QUERY_PARAM } from './return-to.ts';
 
 /**
  * The fixed `?error=` codes a callback failure redirects with.
@@ -82,6 +83,12 @@ export interface SignInRouteDeps {
   readonly keySets: ReadonlyMap<string, IssuerKeySet>;
   /** Best-effort debug reporting; a throwing implementation is ignored. */
   readonly debug?: (message: string) => void;
+  /**
+   * Best-effort warn reporting for a provider state change: the first failure
+   * of a reason, or a change of reason, is written here. A throwing
+   * implementation is ignored; omitted, the line is dropped.
+   */
+  readonly warn?: (message: string) => void;
 }
 
 /** A provider's endpoints, from discovery (`oidc`) or configuration (`oauth2`). */
@@ -90,6 +97,11 @@ interface ResolvedEndpoints {
   readonly tokenEndpoint: string;
   readonly endSessionEndpoint: string | null;
 }
+
+/** The outcome of {@linkcode resolveEndpoints}: endpoints, or a fixed reason code. */
+type EndpointResolution =
+  | { readonly ok: true; readonly endpoints: ResolvedEndpoints }
+  | { readonly ok: false; readonly reason: string };
 
 /**
  * Runs `body` with a signal that aborts after `timeoutMs`, mapping any throw —
@@ -127,29 +139,35 @@ export async function attempt<T>(
  *
  * For `oidc` they come from the SAME cached, issuer-checked discovery document
  * that supplies `jwks_uri`, so the authorization redirect and the verification
- * cannot be pointed at different servers by one spoofed document. Returns `null`
- * when the document cannot be read or lacks the endpoint the caller needs.
+ * cannot be pointed at different servers by one spoofed document. Answers a
+ * fixed reason code when the document cannot be read or lacks the endpoint the
+ * caller needs: `'key-set-missing'`, the key set's last discovery failure (or
+ * `'discovery-stale'`), or `'discovery-endpoint-invalid'`. Reasons never carry
+ * response data or issuer values.
  */
 async function resolveEndpoints(
   provider: CompiledProvider,
   keySets: ReadonlyMap<string, IssuerKeySet>,
-): Promise<ResolvedEndpoints | null> {
+): Promise<EndpointResolution> {
   if (provider.kind === 'oauth2') {
     // compileSignIn has already refused a missing or non-https endpoint.
     return {
-      authorizationEndpoint: provider.authorizationEndpoint ?? '',
-      tokenEndpoint: provider.tokenEndpoint ?? '',
-      endSessionEndpoint: null,
+      ok: true,
+      endpoints: {
+        authorizationEndpoint: provider.authorizationEndpoint ?? '',
+        tokenEndpoint: provider.tokenEndpoint ?? '',
+        endSessionEndpoint: null,
+      },
     };
   }
   const keySet = keySets.get(provider.name);
   const issuer = provider.compiledIssuer;
   if (keySet === undefined || issuer === undefined) {
-    return null;
+    return { ok: false, reason: 'key-set-missing' };
   }
   const document = await keySet.discovery();
   if (document === null) {
-    return null;
+    return { ok: false, reason: keySet.lastDiscoveryFailure() ?? 'discovery-stale' };
   }
   const authorizationEndpoint = document.authorization_endpoint;
   const tokenEndpoint = document.token_endpoint;
@@ -157,19 +175,27 @@ async function resolveEndpoints(
   // would receive the client secret in cleartext, and an authorization endpoint
   // becomes a `Location` header the user's browser follows.
   if (!isEndpoint(authorizationEndpoint) || !isEndpoint(tokenEndpoint)) {
-    return null;
+    return { ok: false, reason: 'discovery-endpoint-invalid' };
   }
   const endSession = document.end_session_endpoint;
   return {
-    authorizationEndpoint,
-    tokenEndpoint,
-    endSessionEndpoint: isEndpoint(endSession) ? endSession : null,
+    ok: true,
+    endpoints: {
+      authorizationEndpoint,
+      tokenEndpoint,
+      endSessionEndpoint: isEndpoint(endSession) ? endSession : null,
+    },
   };
 }
 
 /** A discovery-supplied endpoint: a string that is https, or http on loopback. */
 function isEndpoint(value: unknown): value is string {
   return typeof value === 'string' && isAcceptableUrl(value);
+}
+
+/** The operator line for a provider whose endpoints could not be resolved. */
+function providerUnavailableMessage(provider: CompiledProvider, reason: string): string {
+  return `auth-plugin: signIn['${provider.name}'] provider unavailable (${reason})`;
 }
 
 /**
@@ -248,16 +274,22 @@ function registerLogin(
   router: IRouterApi,
   provider: CompiledProvider,
   deps: SignInRouteDeps,
+  reporter: StateChangeReporter,
 ): void {
   router.get(
     provider.loginPath,
     flowRoute(async (ctx): Promise<FlowOutcome> => {
-      const endpoints = await resolveEndpoints(provider, deps.keySets);
-      if (endpoints === null) {
+      const resolved = await resolveEndpoints(provider, deps.keySets);
+      if (!resolved.ok) {
         // Refused rather than redirecting to a half-known authorization URL: the
         // alternative is sending a user's browser to an endpoint we never read.
         // `503`, not `401`: nothing is wrong with the caller — the provider's
         // discovery document could not be read.
+        reporter.failed(
+          provider.name,
+          resolved.reason,
+          providerUnavailableMessage(provider, resolved.reason),
+        );
         respondWithError(ctx, {
           status: 503,
           title: 'Service Unavailable',
@@ -265,6 +297,8 @@ function registerLogin(
         });
         return null;
       }
+      reporter.recovered(provider.name);
+      const endpoints = resolved.endpoints;
 
       const session = deps.sessionService.from(ctx);
       const state = encodeBase64Url(deps.runtime.randomBytes(ENTROPY_BYTES));
@@ -408,10 +442,11 @@ function registerCallback(
       if (typeof code !== 'string' || code.length === 0) {
         return fail(provider, ctx, 'exchange-failed');
       }
-      const endpoints = await resolveEndpoints(provider, deps.keySets);
-      if (endpoints === null) {
+      const resolved = await resolveEndpoints(provider, deps.keySets);
+      if (!resolved.ok) {
         return fail(provider, ctx, 'exchange-failed');
       }
+      const endpoints = resolved.endpoints;
 
       const exchanged = await attempt(deps.runtime, PROVIDER_TIMEOUT_MS, (signal) =>
         exchangeCode(deps.http, {
@@ -518,7 +553,11 @@ function registerCallback(
  * strategy `signOut` deletes the entry the session id points at, and the hint has
  * to be in hand before that happens.
  */
-function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
+function registerLogout(
+  router: IRouterApi,
+  deps: SignInRouteDeps,
+  reporter: StateChangeReporter,
+): void {
   router.post(
     deps.config.logoutPath,
     flowRoute(async (ctx): Promise<FlowOutcome> => {
@@ -540,8 +579,17 @@ function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
       if (!wantsRpLogout || provider === null) {
         return '/';
       }
-      const endpoints = await resolveEndpoints(provider, deps.keySets);
-      const endSession = endpoints?.endSessionEndpoint;
+      const resolved = await resolveEndpoints(provider, deps.keySets);
+      if (!resolved.ok) {
+        reporter.failed(
+          provider.name,
+          resolved.reason,
+          providerUnavailableMessage(provider, resolved.reason),
+        );
+      } else {
+        reporter.recovered(provider.name);
+      }
+      const endSession = resolved.ok ? resolved.endpoints.endSessionEndpoint : undefined;
       if (endSession === null || endSession === undefined) {
         // Discovery does not advertise an end-session endpoint, so there is no
         // provider session to end; the local sign-out is the whole answer.
@@ -572,9 +620,15 @@ function registerLogout(router: IRouterApi, deps: SignInRouteDeps): void {
  * @param deps - The router, compiled configuration, and the services the routes need
  */
 export function registerSignInRoutes(deps: SignInRouteDeps): void {
+  // One reporter for the whole plugin: the login route and the logout path
+  // surface the same provider outage, and the key is the provider name.
+  const reporter = createStateChangeReporter({
+    warn: (message) => deps.warn?.(message),
+    debug: (message) => deps.debug?.(message),
+  });
   for (const provider of deps.config.providers) {
-    registerLogin(deps.router, provider, deps);
+    registerLogin(deps.router, provider, deps, reporter);
     registerCallback(deps.router, provider, deps);
   }
-  registerLogout(deps.router, deps);
+  registerLogout(deps.router, deps, reporter);
 }

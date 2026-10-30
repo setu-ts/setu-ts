@@ -78,8 +78,8 @@ describe('RealtimeBackplanePlugin: redis connection errors', () => {
       clients[0].emit('error', new Error('connect ECONNREFUSED'));
 
       expect(logger.forSource(SOURCE).map((entry) => [entry.level, entry.message])).toEqual([
-        ['warn', `${SOURCE}: connection error: connect ECONNREFUSED`],
-        ['debug', `${SOURCE}: connection error repeated: connect ECONNREFUSED`],
+        ['warn', `${SOURCE}: connection error: Error: connect ECONNREFUSED`],
+        ['debug', `${SOURCE}: connection error repeated: Error: connect ECONNREFUSED`],
       ]);
     } finally {
       await app.stop();

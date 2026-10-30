@@ -35,6 +35,7 @@ export async function loadOtlpExporter(
     return mod.OTLPTraceExporter;
   } catch (error) {
     throw new OptionalDependencyUnavailableError('@opentelemetry/exporter-trace-otlp-http', {
+      requiredBy: '@setu-ts/telemetry-plugin',
       cause: error,
     });
   }

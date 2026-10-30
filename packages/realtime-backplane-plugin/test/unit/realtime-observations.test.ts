@@ -126,7 +126,13 @@ async function setup(
   const multi = new Map<string, unknown[]>();
   const closeHooks: (() => void | Promise<void>)[] = [];
   const ctx = {
-    runtime: { uuid: (): string => 'uuid-1', hrtime: (): number => now },
+    runtime: {
+      uuid: (): string => 'uuid-1',
+      hrtime: (): number => now,
+      setTimeout: (fn: () => void, ms: number): unknown => setTimeout(fn, ms),
+      clearTimeout: (handle: unknown): void =>
+        clearTimeout(handle as ReturnType<typeof setTimeout>),
+    },
     services: {
       has: (token: string): boolean => single.has(token),
       get: <T>(token: string): T => single.get(token) as T,

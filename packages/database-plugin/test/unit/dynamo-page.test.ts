@@ -65,7 +65,7 @@ describe('DynamoDB cursor pages', () => {
     const cursor = encodeCursor({
       orderedValues: ['S:p'],
       keyValues: ['S:p'],
-      sortFingerprint: '',
+      sortFingerprint: JSON.stringify(['Item', ['pk'], '']),
     });
     expect((await ds.findPage!(query({ cursor }))).nextCursor).not.toBeNull();
     expect(calls).toBe(2);

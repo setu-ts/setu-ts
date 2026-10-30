@@ -20,7 +20,7 @@ import * as nodeFs from 'node:fs/promises';
  * @module
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type {
   CacheDiagnosticsResponse,
@@ -34,14 +34,32 @@ import {
   workspaceEntrypoint,
 } from '../fixtures/generated-project.ts';
 import { VERSION } from '../../src/version.ts';
+import {
+  npmInstall,
+  npmRun,
+  type RegistryOverlay,
+  startOverlay,
+} from '../fixtures/node-project.ts';
+import { tmpdir } from 'node:os';
+import { eventually, launchGroup, liveProcesses } from '../fixtures/process-group.ts';
+import { createDiagnosticsClient } from '../../../diagnostics-plugin/src/index.ts';
+import { createConnection } from 'node:net';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
 
 let root = '';
+let overlay: RegistryOverlay;
+
+beforeAll(async () => {
+  overlay = await startOverlay();
+}, 900_000);
+afterAll(async () => {
+  await overlay?.close();
+});
 
 beforeEach(async () => {
-  root = await tempDir({ prefix: 'setu-devtool-e2e-' });
+  root = await tempDir({ dir: tmpdir(), prefix: 'setu-devtool-e2e-' });
 });
 
 afterEach(async () => {
@@ -69,7 +87,7 @@ async function denoRun(
     runProcess(denoBinary(), {
       args: [...args],
       cwd,
-      env,
+      env: { NPM_CONFIG_REGISTRY: overlay.url, ...env },
       stdin: 'null',
       stdout: 'piped',
       stderr: 'piped',
@@ -128,6 +146,218 @@ console.log(JSON.stringify({
 }));
 client.close();
 `;
+
+/** The reviewed client, with a new launcher pair for every Node boot. */
+function nodeClient(port: number, pair: ReturnType<typeof credentials>) {
+  return createDiagnosticsClient({
+    endpoint: `http://127.0.0.1:${port}`,
+    sessionId: pair.sessionId,
+    sessionKey: Uint8Array.from(pair.sessionKey.match(/../g)!, (byte) => Number.parseInt(byte, 16)),
+    subtle: crypto.subtle,
+    fetch,
+    timing: { setTimeout, clearTimeout },
+  });
+}
+
+/** Cancels the response body while polling an application's actual HTTP port. */
+async function nodeReady(port: number): Promise<boolean> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/`, {
+      signal: AbortSignal.timeout(1_000),
+    });
+    await response.body?.cancel();
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Checks the TCP port itself, so a protocol refusal still counts as a bound socket. */
+function acceptsConnection(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = createConnection({ host: '127.0.0.1', port });
+    const finish = (accepted: boolean): void => {
+      socket.destroy();
+      resolve(accepted);
+    };
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+    socket.setTimeout(1_000, () => finish(false));
+  });
+}
+
+describe('a scaffolded Node devtool project, driven end to end', () => {
+  it(
+    'checks, boots, snapshots, reads events, renews, stops its process tree and excludes the connector from the production bundle',
+    { timeout: 300_000 },
+    async () => {
+      const port = await unusedPort();
+      const appPort = await unusedPort();
+      expect(await run(['new', 'node-shop', '--devtool', '--devtool-port', String(port)])).toBe(0);
+      const project = `${root}/node-shop`;
+      // The same registry fixture as the Deno cases serves packages packed from
+      // this exact worktree, including its current CLI, runtime and connector.
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      for (const script of ['format:check', 'lint', 'check']) {
+        const result = await npmRun(project, script);
+        expect(result.code, result.output).toBe(0);
+      }
+      const pair = credentials();
+      const launched = launchGroup('npm', ['run', 'dev'], project, {
+        ...pair.env,
+        SETU_DEVTOOL_MEMBER: '',
+        PORT: String(appPort),
+      });
+      const client = nodeClient(port, pair);
+      try {
+        await eventually(
+          () => nodeReady(appPort),
+          'The generated Node development entry did not become ready',
+        );
+        expect((await client.snapshot()).state).toBe('running');
+        expect(await nodeReady(appPort)).toBe(true);
+        const batch = await client.read(0, 16);
+        expect(batch.events.length).toBeGreaterThan(0);
+        const renewed = await client.renew();
+        expect(renewed.renewal).not.toBeNull();
+        expect(renewed.expiresInMs).toBeGreaterThan(0);
+        expect(launched.output().includes(pair.sessionId)).toBe(false);
+        expect(launched.output().includes(pair.sessionKey)).toBe(false);
+      } finally {
+        client.close();
+        await launched.stop();
+      }
+      expect(await acceptsConnection(port)).toBe(false);
+      expect(await acceptsConnection(appPort)).toBe(false);
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
+      const bundle = await nodeFs.readFile(`${project}/dist/main.js`, 'utf8');
+      expect(bundle).not.toContain('diagnostics-plugin');
+      expect(bundle).not.toContain('SETU_DEVTOOL_');
+    },
+  );
+
+  it(
+    'pairs only with workspace member a and blanks both credentials in member b node processes',
+    { timeout: 300_000 },
+    async () => {
+      const appPort = await unusedPort();
+      const siblingPort = await unusedPort();
+      const port = await unusedPort();
+      expect(await run(['new', 'node-workspace', '--workspace', '--port', String(appPort)])).toBe(
+        0,
+      );
+      const project = `${root}/node-workspace`;
+      expect(
+        await run(
+          [
+            'generate',
+            'app',
+            'a',
+            '--port',
+            String(appPort),
+            '--devtool',
+            '--devtool-port',
+            String(port),
+          ],
+          project,
+        ),
+      ).toBe(0);
+      expect(await run(['generate', 'app', 'b', '--port', String(siblingPort)], project)).toBe(0);
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      for (const member of ['a', 'b']) {
+        for (const script of ['format:check', 'lint', 'check']) {
+          const result = await npmRun(`${project}/apps/${member}`, script);
+          expect(result.code, result.output).toBe(0);
+        }
+      }
+      const pair = credentials();
+      const launched = launchGroup('npm', ['run', 'dev'], project, {
+        ...pair.env,
+        SETU_DEVTOOL_MEMBER: 'a',
+      });
+      const client = nodeClient(port, pair);
+      try {
+        await eventually(
+          async () => (await nodeReady(appPort)) && (await nodeReady(siblingPort)),
+          'Both Node workspace members must become ready',
+        );
+        expect((await client.snapshot()).state).toBe('running');
+        if (process.platform === 'linux') {
+          const siblings = [];
+          for (const row of await liveProcesses()) {
+            if (!/node\s/.test(row.command) || !row.command.includes('main.ts')) continue;
+            const cwd = await nodeFs.readlink(`/proc/${row.pid}/cwd`).catch(() => '');
+            if (cwd !== `${project}/apps/b`) continue;
+            siblings.push(row);
+            const values = (await nodeFs.readFile(`/proc/${row.pid}/environ`, 'utf8')).split('\0');
+            for (const name of [
+              'SETU_DEVTOOL_MEMBER',
+              'SETU_DEVTOOL_SESSION_ID',
+              'SETU_DEVTOOL_SESSION_KEY',
+            ]) {
+              expect(
+                values.includes(`${name}=`),
+                `${name} must be blank in sibling node process`,
+              ).toBe(true);
+            }
+            expect(row.group).toBe(launched.pid);
+          }
+          expect(siblings.length).toBeGreaterThan(0);
+        }
+        expect(launched.output().includes(pair.sessionId)).toBe(false);
+        expect(launched.output().includes(pair.sessionKey)).toBe(false);
+      } finally {
+        client.close();
+        await launched.stop();
+      }
+      expect(await acceptsConnection(appPort)).toBe(false);
+      expect(await acceptsConnection(siblingPort)).toBe(false);
+      expect(await acceptsConnection(port)).toBe(false);
+    },
+  );
+
+  it(
+    'exits non-zero without credentials, names the missing variable and binds neither port',
+    { timeout: 300_000 },
+    async () => {
+      const port = await unusedPort();
+      const appPort = await unusedPort();
+      expect(await run(['new', 'node-refused', '--devtool', '--devtool-port', String(port)])).toBe(
+        0,
+      );
+      const project = `${root}/node-refused`;
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const launched = launchGroup('npm', ['run', 'dev'], project, {
+        SETU_DEVTOOL_MEMBER: '',
+        SETU_DEVTOOL_SESSION_ID: '',
+        SETU_DEVTOOL_SESSION_KEY: '',
+        PORT: String(appPort),
+      });
+      try {
+        let code: number | null | undefined;
+        void launched.status.then((value) => {
+          code = value;
+        });
+        await eventually(
+          () => code !== undefined,
+          'Missing credentials must fail startup promptly',
+        );
+        expect(code).not.toBe(0);
+        expect(code).not.toBeNull();
+        expect(launched.output()).toContain('SETU_DEVTOOL_SESSION_ID is absent or malformed');
+        expect(launched.output()).not.toContain('Listening on');
+        expect(await acceptsConnection(port)).toBe(false);
+        expect(await acceptsConnection(appPort)).toBe(false);
+      } finally {
+        await launched.stop();
+      }
+    },
+  );
+});
 
 interface Booted {
   stop(): Promise<void>;
@@ -197,42 +427,51 @@ async function bootDev(
 }
 
 describe('a scaffolded devtool project, driven end to end', () => {
-  it('generates ready health/cache sources for dev while production keeps both disabled', async () => {
-    const devtoolPort = await unusedPort();
-    const appPort = await unusedPort();
-    expect(
-      await run([
-        'new',
-        '--runtime',
-        'deno',
-        'sources',
-        '--template',
-        'rest',
-        '--devtool',
-        '--devtool-port',
-        String(devtoolPort),
-      ]),
-    ).toBe(0);
-    const project = `${root}/sources`;
-    expect(await run(['add', 'cache'], project)).toBe(0);
-    await useWorkspacePackages(project);
-    const formatted = await denoRun(project, ['fmt', '--check']);
-    expect(formatted.code, formatted.output).toBe(0);
-    const configPath = `${project}/setu.config.ts`;
-    const config =
-      "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
-      (await nodeFs.readFile(configPath, 'utf8')).replace(
-        '  return app;',
-        `  app.router.get('/cache-probe', async (ctx) => {
+  // Eight sequential Deno processes (scaffold, add, fmt, two probes, check, dev boot,
+  // driver): 23-28 s alone on develop at 47be7fe1, so the suite's 30 s default failed
+  // it under a parallel `ci:local` run. 120 s still bounds a hang, as the boot test
+  // below does at 240 s.
+  it(
+    'generates ready health/cache sources for dev while production keeps both disabled',
+    {
+      timeout: 120_000,
+    },
+    async () => {
+      const devtoolPort = await unusedPort();
+      const appPort = await unusedPort();
+      expect(
+        await run([
+          'new',
+          '--runtime',
+          'deno',
+          'sources',
+          '--template',
+          'rest',
+          '--devtool',
+          '--devtool-port',
+          String(devtoolPort),
+        ]),
+      ).toBe(0);
+      const project = `${root}/sources`;
+      expect(await run(['add', 'cache'], project)).toBe(0);
+      await useWorkspacePackages(project);
+      const formatted = await denoRun(project, ['fmt', '--check']);
+      expect(formatted.code, formatted.output).toBe(0);
+      const configPath = `${project}/setu.config.ts`;
+      const config =
+        "import { CAPABILITIES, type ICacheStore } from '@setu-ts/common';\n" +
+        (await nodeFs.readFile(configPath, 'utf8')).replace(
+          '  return app;',
+          `  app.router.get('/cache-probe', async (ctx) => {
     const cache = app.services.get<ICacheStore>(CAPABILITIES.CACHE);
     await cache.set('probe', 'value');
     await cache.get('probe');
     return ctx.response.json({ ok: true });
   });
   return app;`,
-      );
-    await nodeFs.writeFile(configPath, config);
-    const probe = `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
+        );
+      await nodeFs.writeFile(configPath, config);
+      const probe = `import { CAPABILITIES, type ICacheDiagnosticsSource, type IHealthDiagnosticsSource } from '@setu-ts/common';
 import { createApp } from './setu.config.ts';
 const app = createApp();
 await app.start();
@@ -242,64 +481,67 @@ try {
   console.log(JSON.stringify({ health: health.state, cache: cache.map((source) => source.state) }));
 } finally { await app.stop(); }
 `;
-    await nodeFs.writeFile(`${project}/production-probe.ts`, probe);
-    const production = await denoRun(project, ['run', '-A', 'production-probe.ts']);
-    expect(production.code, production.output).toBe(0);
-    expect(production.stdout).toContain('"health":"disabled"');
-    expect(production.stdout).toContain('"cache":["disabled"]');
-    try {
-      await nodeFs.writeFile(
-        configPath,
-        config.replace('devtool === undefined ? {} : DEVTOOL_SOURCES', 'DEVTOOL_SOURCES'),
-      );
-      const broken = await denoRun(project, ['run', '-A', 'production-probe.ts']);
-      expect(broken.code, broken.output).toBe(0);
-      expect(broken.stdout).not.toContain('"health":"disabled"');
-      expect(broken.stdout).not.toContain('"cache":["disabled"]');
-    } finally {
-      await nodeFs.writeFile(configPath, config);
-    }
-    const checked = await denoRun(project, ['task', 'check']);
-    expect(checked.code, checked.output).toBe(0);
-    const credentials_ = credentials();
-    const booted = await bootDev(project, appPort, credentials_.env);
-    try {
-      await nodeFs.writeFile(
-        `${project}/source-driver.ts`,
-        DRIVER.replace(
-          'const snapshot = await client.snapshot();',
-          `await fetch(\`http://127.0.0.1:\${appPort}/health\`);
+      await nodeFs.writeFile(`${project}/production-probe.ts`, probe);
+      const production = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+      expect(production.code, production.output).toBe(0);
+      expect(production.stdout).toContain('"health":"disabled"');
+      expect(production.stdout).toContain('"cache":["disabled"]');
+      try {
+        await nodeFs.writeFile(
+          configPath,
+          config.replace('devtool === undefined ? {} : DEVTOOL_SOURCES', 'DEVTOOL_SOURCES'),
+        );
+        const broken = await denoRun(project, ['run', '-A', 'production-probe.ts']);
+        expect(broken.code, broken.output).toBe(0);
+        expect(broken.stdout).not.toContain('"health":"disabled"');
+        expect(broken.stdout).not.toContain('"cache":["disabled"]');
+      } finally {
+        await nodeFs.writeFile(configPath, config);
+      }
+      const checked = await denoRun(project, ['task', 'check']);
+      expect(checked.code, checked.output).toBe(0);
+      const credentials_ = credentials();
+      const booted = await bootDev(project, appPort, credentials_.env);
+      try {
+        await nodeFs.writeFile(
+          `${project}/source-driver.ts`,
+          DRIVER.replace(
+            'const snapshot = await client.snapshot();',
+            `await fetch(\`http://127.0.0.1:\${appPort}/health\`);
 await fetch(\`http://127.0.0.1:\${appPort}/cache-probe\`);
 const health = await client.health();
 const cache = await client.cache();
 console.log('__SOURCES__' + JSON.stringify({ health, cache }));
 const snapshot = await client.snapshot();`,
-        ),
-      );
-      const driven = await denoRun(project, [
-        'run',
-        '--allow-net',
-        'source-driver.ts',
-        String(devtoolPort),
-        String(appPort),
-        credentials_.sessionId,
-        credentials_.sessionKey,
-      ]);
-      expect(driven.code, driven.output).toBe(0);
-      const reportLine = driven.stdout.split('\n').find((line) => line.startsWith('__SOURCES__'))!;
-      const report = JSON.parse(reportLine.slice('__SOURCES__'.length)) as {
-        health: HealthDiagnosticsSnapshot;
-        cache: CacheDiagnosticsResponse;
-      };
-      expect(report.health.state).toBe('ready');
-      expect(report.health.observations.length).toBeGreaterThan(0);
-      expect(report.cache.sources.length).toBe(1);
-      expect(report.cache.state).toBe('ready');
-      expect(report.cache.sources[0]?.snapshot.records.length).toBeGreaterThan(0);
-    } finally {
-      await booted.stop();
-    }
-  });
+          ),
+        );
+        const driven = await denoRun(project, [
+          'run',
+          '--allow-net',
+          'source-driver.ts',
+          String(devtoolPort),
+          String(appPort),
+          credentials_.sessionId,
+          credentials_.sessionKey,
+        ]);
+        expect(driven.code, driven.output).toBe(0);
+        const reportLine = driven.stdout
+          .split('\n')
+          .find((line) => line.startsWith('__SOURCES__'))!;
+        const report = JSON.parse(reportLine.slice('__SOURCES__'.length)) as {
+          health: HealthDiagnosticsSnapshot;
+          cache: CacheDiagnosticsResponse;
+        };
+        expect(report.health.state).toBe('ready');
+        expect(report.health.observations.length).toBeGreaterThan(0);
+        expect(report.cache.sources.length).toBe(1);
+        expect(report.cache.state).toBe('ready');
+        expect(report.cache.sources[0]?.snapshot.records.length).toBeGreaterThan(0);
+      } finally {
+        await booted.stop();
+      }
+    },
+  );
   it('formats both standalone and workspace development entries without a repair', async () => {
     expect(await run(['new', '--runtime', 'deno', 'formatted', '--devtool'])).toBe(0);
     const standalone = await denoRun(`${root}/formatted`, ['fmt', '--check']);
@@ -401,7 +643,8 @@ const snapshot = await client.snapshot();`,
         pair.sessionKey,
       ]);
       expect(result.code, result.output).toBe(0);
-      expect(JSON.parse(result.output.trim().split('\n').pop()!).instanceId).not.toBeNull();
+      // The driver emits JSON on stdout; Deno dependency diagnostics use stderr.
+      expect(JSON.parse(result.stdout.trim().split('\n').pop()!).instanceId).not.toBeNull();
       expect(
         await fetch(`http://127.0.0.1:${oldPort}/v1/status`)
           .then(() => true)

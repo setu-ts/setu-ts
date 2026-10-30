@@ -8,6 +8,7 @@
 ## Table of Contents
 
 - [Shared reconnect supervisor (`@setu-ts/common`)](#shared-reconnect-supervisor-setu-tscommon)
+- [Dotenv parser (`@setu-ts/common`)](#dotenv-parser-setu-tscommon)
 
 1. [Installation](#installation)
 2. [Full Stack Application](#full-stack-application)
@@ -324,6 +325,8 @@ an injected multipart upload parse as an empty form.
 
 ## Shared reconnect supervisor (`@setu-ts/common`)
 
+<!-- version:history -->
+
 Since 0.10.0, common exports `ReconnectSupervisor`, `ReconnectSupervisorOptions`, `ReconnectMode`
 and `fullJitterDelay(attempt, initialMs, maxMs)`. Messaging's RabbitMQ, NATS and Kafka brokers and
 the RabbitMQ queue adapter share this implementation. Messaging does not re-export these symbols.
@@ -339,6 +342,26 @@ Call `start()` to attach listeners, `fault()` to mark an outage and start drive-
 `recovered()` to clear a fault, and `stop()` to cancel scheduled attempts and dispose listeners.
 `faulted` reports the current fault window. A stopped supervisor is terminal; construct a new
 instance to start another lifecycle.
+
+## Dotenv parser (`@setu-ts/common`)
+
+Since 0.11.0, common exports `parseEnv(content: string): Readonly<Record<string, string>>`, the
+strict dotenv parser `ConfigPlugin` loads `.env` files with. It moved from config-plugin, where it
+was internal, so that `setu workspace deploy` builds a member's Kubernetes Secret from exactly the
+values the application would read from the same file.
+
+Blank lines and `#` comment lines are ignored. An entry may start with `export `. A value may be
+unquoted (a trailing ` # comment` is dropped), double-quoted (escape sequences decoded) or
+single-quoted (taken literally). An empty value is the empty string, and a duplicate key keeps its
+last value. A line without `=`, an invalid key, or an unterminated quote throws an `Error` naming
+the line number.
+
+```ts
+import { parseEnv } from '@setu-ts/common';
+
+parseEnv('export A="x y"\nB=plain # note\nEMPTY=\n');
+// { A: 'x y', B: 'plain', EMPTY: '' }
+```
 
 ## RuntimePlugin() (`@setu-ts/runtime`)
 
@@ -357,6 +380,8 @@ app.register(
 ```
 
 ### Deno shutdown
+
+<!-- version:history -->
 
 Since 0.10.0, Deno adapter `close()` waits for the first of `shutdown()` and a 1000 ms grace,
 catching a rejected shutdown. After the kernel's bounded drain, shutdown and close hooks can run
@@ -384,6 +409,8 @@ cause and the wrong remedy. `@setu-ts/graphql-plugin`'s two HTTP transports answ
 serves the hint through `respondWithError`.
 
 ### Reporting a failed WebSocket handshake
+
+<!-- version:history -->
 
 `HttpAdapterOptions.reportError?: (record: Readonly<Record<string, unknown>>) => void`
 (`@since 0.10.0`) is a last-resort sink for a server-side Node handshake failure: `ws` is not
@@ -561,7 +588,7 @@ import { LoggerPlugin } from '@setu-ts/logger-plugin';
 app.register(
   LoggerPlugin({
     level: 'info', // minimum level to emit (default 'info')
-    transport: 'console', // 'console' | 'pino' | 'noop' (default 'console')
+    transport: 'console', // 'console' | 'pino' | 'noop' | 'custom' (default 'console')
     pretty: false, // pretty-print console output
     redact: ['password', 'token', 'authorization'], // dot-paths to redact
     requestLogging: true, // register request/response middleware
@@ -573,11 +600,21 @@ app.register(
 
 ### Transports
 
-| Transport   | Description                                                                                |
-| ----------- | ------------------------------------------------------------------------------------------ |
-| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                    |
-| `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async. |
-| `'noop'`    | Discards all output. For tests or disabling logging.                                       |
+| Transport   | Description                                                                                             |
+| ----------- | ------------------------------------------------------------------------------------------------------- |
+| `'console'` | Runtime-independent JSON lines (or pretty text) via `console`. Default.                                 |
+| `'pino'`    | Pino-backed, loaded via `await import('pino')` or injected factory. `register()` is async.              |
+| `'noop'`    | Discards all output. For tests or disabling logging.                                                    |
+| `'custom'`  | Wraps `LoggerPluginOptions.logger: ILogger` with framework level filtering and redaction. Since 0.11.0. |
+
+`LoggerPluginOptions.logger?: ILogger` (since 0.11.0) is required with `transport: 'custom'` and
+refused with every other transport, including the default. Invalid combinations throw an `Error`
+named `LoggerConfigurationError` when constructing the plugin. The wrapper applies `level` (default
+`info`), error normalization, and the same `redaction` policy and `redact` paths as built-in
+transports before delegating metadata. Default secret patterns apply when `redact` is omitted; an
+explicit list replaces them. Children delegate to the supplied logger's `child()` with redacted
+bindings and retain the wrapper. Request logging and trace correlation also apply. The supplied
+logger controls its own sink and may impose additional filtering.
 
 ### Usage in Routes
 
@@ -695,13 +732,19 @@ app.middleware.add(
 The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child logger bound to
 `requestId`, and logs:
 
-- Incoming request (method, path)
-- Outgoing response (status, duration in ms), including a request that threw: the status is the one
-  `errorHandler`'s responder predicts through `statusFor` (`500` without it), so a custom `respond`
-  hook that chooses another status is not reflected
+- `request received` at `debug` (method, path — the concrete path as the client sent it, not a route
+  template). Set `level: 'debug'` to emit this arrival entry; its metadata is not built when the
+  child's exposed level excludes debug. With no readable level, the middleware calls `debug()` and
+  lets the logger filter.
+- One `request completed` at `info` (method, path, status, duration in ms), including a request that
+  threw: the status is the one `errorHandler`'s responder predicts through `statusFor` (`500`
+  without it), so a custom `respond` hook that chooses another status is not reflected
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
-It does not log the error itself; `errorHandler` logs it once (V9-80).
+It does not log the error itself; `errorHandler` logs it once (V9-80). The database-plugin scrub
+covers database errors only, so an identifier in a path segment reaches the log; keep it out with
+`excludePaths`, a `redaction` field redactor for `path`, or `redact` (which replaces the default
+secret patterns, so re-list them).
 
 ---
 
@@ -1076,13 +1119,13 @@ app.router.put('/users/:id', {
 });
 ```
 
-`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
-3 and 4 alike, inferred from the schema you pass, so the type follows the schema instead of being
-restated (or cast) in the handler. `value(ctx)` returns the stored value only when that validator
-ran on the request; it throws a `TypeError` naming the target otherwise — when the validator is not
-in the route's chain, or a later validator for the same target overwrote it. Validated values are
-still stored in `ctx.state` under `validatedStateKey(target)` — the wire format is unchanged, and
-the `@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it — so the old
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — inferred
+from the schema you pass, so the type follows the schema instead of being restated (or cast) in the
+handler. `value(ctx)` returns the stored value only when that validator ran on the request; it
+throws a `TypeError` naming the target otherwise — when the validator is not in the route's chain,
+or a later validator for the same target overwrote it. Validated values are still stored in
+`ctx.state` under `validatedStateKey(target)` — the wire format is unchanged, and the
+`@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it — so the old
 `ctx.state.get(validatedStateKey('body'))` read still works.
 
 ### Using the Service's middleware() Method
@@ -1216,6 +1259,17 @@ app.register(
 ---
 
 ## DatabasePlugin() (`@setu-ts/database-plugin`)
+
+### Portable data refusals and tenant resolution (M119e, since 0.11.0)
+
+`UnknownPayloadFieldError` is defined in `@setu-ts/common` and re-exported unchanged here.
+`MissingKeyColumnError(entity: string, column: string)` names a missing Drizzle primary-key column
+and the `entities.<Entity>.primaryKey` remedy. Explicit configured keys are checked at connect for
+registered tables; query-only tables without a key override are checked when a repository is
+requested. `TenantColumnUnresolvedError(entity: string, column: string)` names a tenant column that
+resolves to no property or multiple properties, with a `ColumnStrategy` remedy. Both configuration
+errors carry no HTTP hint (masked 500). The tenant bridge resolves its own configured column to the
+Drizzle property once per entity; caller payload keys are never translated.
 
 The database driver's existing unavailable-errno classification uses the shared
 `isConnectionFaultCode(code)` predicate from `@setu-ts/common`. The eight-code set is
@@ -1776,9 +1830,11 @@ copy is what gets validated and written, so an input that changes between reads 
 send something other than what passed. An own `__proto__` key is refused, in the predicate and in
 the payload, because Node and Bun drop it from any object a backend rebuilds by assignment. Every
 implementation validates direct calls as well as repository calls. `checkWritePrecondition`'s
-refusal reasons quote no caller field name or value, and Prisma's validation message — which renders
-the whole query — is replaced with a fixed sentence. No other guarantee is made about message text:
-key handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
+refusal reasons quote no caller field name or value, and a Prisma validation refusal — whose message
+renders the whole query — becomes `UnknownPayloadFieldError` or `InvalidFieldValueError` with a
+fixed-message cause, on a direct data-source call as through a repository (M119e; it was
+`UnsupportedQueryFeatureError` before 0.11.0). No other guarantee is made about message text: key
+handling shared with `findById`/`update`/`delete`, adapter mapping and marshalling refusals, and
 driver or server errors (a type the column rejects, an unknown column) may quote caller keys, field
 names or values, as for every other repository operation. Responses mask them (X12-3), so they reach
 server logs only. Invalid inputs reject with `UnsupportedQueryFeatureError` feature
@@ -1861,11 +1917,36 @@ from `@setu-ts/common`.
 | `encodeCursor`      | function  | Encodes a `CursorPayload` as an opaque base64url token.                                                                                                                                                                                                                                                                                                                                                                    |
 | `decodeCursor`      | function  | Decodes a token, or returns `null` when it is malformed — it never throws, because the token is untrusted caller input.                                                                                                                                                                                                                                                                                                    |
 | `keysetPredicate`   | function  | Builds the "row after this one" comparison as a portable `FilterExpression`.                                                                                                                                                                                                                                                                                                                                               |
-| `sortFingerprint`   | function  | The stable fingerprint embedded in every cursor.                                                                                                                                                                                                                                                                                                                                                                           |
+| `sortFingerprint`   | function  | The stable fingerprint embedded in every cursor; optional scope binds entity and key columns (since 0.11.0).                                                                                                                                                                                                                                                                                                               |
 | `mintNextCursor`    | function  | Mints the next-page cursor from the last row of a non-terminal page. Refuses a value that cannot survive the wire — `null`/`undefined`, a non-finite number, an invalid `Date`, or a non-scalar — naming the field, because each of those otherwise fails on the NEXT request or one frame from its cause.                                                                                                                 |
 | `resolveKeysetSort` | function  | The sort a keyset comparison is expanded over: the caller's `orderBy` plus any key columns it lacks, appended ascending. **A backend must order by this, not by `orderBy`** — ordering by the caller's fields alone leaves tied rows in an order the database picks freely, and the predicate then skips or repeats them. `keysetPredicate` derives its own comparison from the same function, so the two cannot disagree. |
 
 #### Composite keys
+
+**Scoped fingerprints (since 0.11.0).**
+`sortFingerprint(orderBy: Readonly<Record<string, OrderDirection>>, scope?: { readonly entity: string; readonly keyColumns: readonly string[] }): string`
+returns the byte-identical legacy `field:direction` pairs without scope. With scope it returns
+`JSON.stringify([scope.entity, scope.keyColumns, pairs])`. Memory, Prisma, Drizzle, MongoDB,
+DynamoDB, Cosmos DB, Bigtable and D1 pass the resolved entity and key columns on mint and decode.
+Scope is a correctness check, not authorization; tenant predicates remain required.
+
+**Portable refusal classes (`@setu-ts/common`, since 0.11.0).**
+`UnknownPayloadFieldError(entity: string, field: string, options?: ErrorOptions)` has name
+`UnknownPayloadFieldError`, a capped, single-line field diagnostic and the fixed hint
+`{ status: 400, title: 'Bad Request', detail: 'The request names a field this resource does not have.' }`.
+`InvalidFieldValueError(entity: string, options?: ErrorOptions)` has name `InvalidFieldValueError`
+and hint
+`{ status: 400, title: 'Bad Request', detail: 'A supplied value does not fit the type of its field.' }`.
+Its message is `Entity '<entity>': the database refused a supplied value for its field type.` No
+supplied value, key or field is included. Repository mappings retain a scrubbed driver error as
+cause. Drizzle PostgreSQL repositories map the four supplied-value SQLSTATE codes; D1 maps
+STRICT-table type refusals. Prisma validation errors containing ``Unknown argument `<field>` `` map
+to `UnknownPayloadFieldError`; other validation errors and known-request `P2007` errors map to
+`InvalidFieldValueError`. This includes conditional writes, which now answer 400 rather than 501 for
+these refusals. A Prisma refusal cause is a new `Error` whose copied `name` and fixed message name
+only the original name and code, for example
+`Prisma refused the input (PrismaClientKnownRequestError P2007).`; the original object, query and
+payload are discarded.
 
 `findById`, `update` and `delete` accept a composite record. Each adapter learns its key columns
 from a per-entity mapping whose primary-key field accepts a column list:
@@ -2421,7 +2502,7 @@ injection seam, so an application implementing its own facade can name every sig
 | `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
 | `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
 | `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                            |
-| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`                                                                                                                                                                                                            | classes                            |
+| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`                                                                                                                                                    | classes                            |
 | `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
 | `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
 | `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
@@ -2502,6 +2583,8 @@ against a real server (SQLSTATE `40001` through Drizzle and Prisma's `P2034` ali
 `TransactionConflictException` and Cosmos's `449` are documented-unverified** — neither was
 reproducible against DynamoDB Local or the local emulator, and Cosmos's connect refusal is a startup
 failure that never reaches a client.
+
+<!-- version:history -->
 
 **A timed-out query answers `504 Gateway Timeout` (M113g, V9-33).** `DatabaseService` classifies
 node-postgres's `query_timeout` firing — the driver's `Query read timeout` rejection — as a new
@@ -2782,6 +2865,8 @@ scanned: a route added after `start()` and a guard added as global middleware �
 there rejects per request (fail closed). A policy is identified by its NAME. See
 [Authorization](docs/authorization.md).
 
+<!-- version:history -->
+
 **Scoped RBAC (M110b).** `scopedRbac` (requires `rbac`) grants a catalogue role IN a scope — a
 `ScopeRef { type, id }` naming a tenant, organisation, team or region — rather than everywhere.
 AuthPlugin defines ONE built-in policy, `SCOPED_RBAC_POLICY` (`'scoped-rbac'`, a reserved name an
@@ -2944,6 +3029,35 @@ what changed is that the refusal is legible.
 > `AuthPlugin` option. `IJwtService` still exposes only `sign`/`verify`/`decode` — a refresh token
 > is a signed JWT carrying `type: 'refresh'` and a `jti`.
 
+> **Session and account lifecycle (M124, 0.11.0):** `signIn.providers` may be empty with neither
+> `mfa` nor `passkeys` — a password-only sign-in that registers `CAPABILITIES.AUTH_SESSION`, the
+> `auth-session` strategy and the logout route only; a non-array `providers` still throws
+> `AuthPluginConfigurationError`. `signIn.sessionStamp?: SessionStamp`, where
+> `SessionStamp = (principal: IPrincipal) => string | null | Promise<string | null>`, is read once
+> by `IAuthSessionService.signIn` before any write (a throw, or a value other than a string or
+> `null`, rejects `signIn` and records nothing); its base64url SHA-256 digest (or `null`) is stored
+> as `stamp` in the signed-in record, or in the pending second-factor record and copied on
+> promotion. On every request the `auth-session` strategy resolves the principal (snapshot or
+> `refreshPrincipal`), calls `sessionStamp` with it, and compares digests in constant time; a
+> mismatch, a throw or a malformed value makes the request anonymous. A record without `stamp` reads
+> as `null`, which matches only a user whose stamp is `null`. The plugin's passkey registration
+> routes admit through the same re-checks (`refreshPrincipal`, then the stamp), so a session either
+> has ended cannot enrol a credential; `IAuthSessionService.current(ctx)` remains the synchronous,
+> un-re-checked snapshot. A non-function `sessionStamp` throws `AuthPluginConfigurationError` from
+> `AuthPlugin(...)`. No API bumps the stamp: the application changes it on its own user record.
+> `requireAuth(options?: RequireAuthOptions)`,
+> `RequireAuthOptions = { readonly signInPage?: string }`: without options, unchanged. With
+> `signInPage` (a same-origin absolute path that `safeReturnTo` keeps unchanged, else
+> `AuthPluginConfigurationError` when the guard is built), an unauthenticated `GET`/`HEAD` that is
+> not `X-Requested-With: XMLHttpRequest` and carries `Sec-Fetch-Mode: navigate` (or, without that
+> header, an `Accept` naming `text/html` or `application/xhtml+xml`) is answered `302` to
+> `signInPage` with `returnTo=safeReturnTo(path + query)` added to its query; every other
+> unauthenticated request, and a request for `signInPage`'s own path, gets the existing 401. Both
+> unauthenticated answers append `Accept`, `Sec-Fetch-Mode` and `X-Requested-With` to `Vary`.
+> `safeReturnTo(value: string | undefined, fallback = '/'): string` is exported unchanged: it
+> returns `value` when it is a single-leading-slash path with no `\`, no control character and at
+> most 256 bytes after non-ASCII characters are percent-encoded (the encoded form), else `fallback`.
+
 ### Exports
 
 | Export                              | File                                          | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -2962,7 +3076,7 @@ what changed is that the refusal is legible.
 | `IssuerKeySource`                   | `src/interfaces/index.ts`                     | `{ jwksUri }` or `{ discovery: true }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `IssuerAlgorithm`                   | `src/interfaces/index.ts`                     | `'RS256' \| 'PS256' \| 'ES256' \| 'ES384' \| 'EdDSA'` issuer allowlist entry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `IAuthHttp`                         | `src/interfaces/index.ts`                     | Outbound seam: `get` for issuer key sets and discovery documents, `post` (form-encoded) for the sign-in token exchange                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `SignInConfig`                      | `src/interfaces/index.ts`                     | M100c `signIn` option: `basePath`, `providers`, `refreshPrincipal`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `SignInConfig`                      | `src/interfaces/index.ts`                     | M100c `signIn` option: `basePath`, `providers`, `refreshPrincipal`, `sessionStamp` (M124); `providers: []` is a password-only sign-in                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `SignInProvider`                    | `src/interfaces/index.ts`                     | `OidcProvider \| OAuth2Provider \| SamlProvider`, discriminated on `kind` (M100f added the `saml` arm)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `SignInProviderBase`                | `src/interfaces/index.ts`                     | Fields both provider arms share (`name`, `clientId`, credentials, `redirectUri`, `toPrincipal`, …)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `OidcProvider`                      | `src/interfaces/index.ts`                     | OpenID Connect provider: `issuer` (discovery), optional `rpInitiatedLogout`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -2970,11 +3084,14 @@ what changed is that the refusal is legible.
 | `TokenEndpointAuth`                 | `src/interfaces/index.ts`                     | `'client_secret_basic' \| 'client_secret_post' \| 'none'`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `ProviderTokens`                    | `src/interfaces/index.ts`                     | The provider's token response, handed to `onTokens` and stored nowhere else                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `RefreshPrincipal`                  | `src/interfaces/index.ts`                     | `signIn.refreshPrincipal`: per-request re-read of the stored principal; `null` → anonymous                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `SessionStamp`                      | `src/interfaces/index.ts`                     | M124 `signIn.sessionStamp`: reads the user's stamp; its digest is recorded at sign-in and compared per request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `PasswordHasher`                    | `src/services/password-hasher.ts`             | PBKDF2-SHA256 hash/verify utility; 600,000 iterations by default, `needsRehash` for upgrades                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `MalformedPasswordHashError`        | `src/services/password-hasher.ts`             | Thrown by `PasswordHasher.verify` when `stored` is not a well-formed hash                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `PasswordHasherOptions`             | `src/services/password-hasher.ts`             | M113e: `{ iterations? }` — the PBKDF2 count for new hashes, 100,000–10,000,000, default 600,000                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `authMiddleware`                    | `src/middleware/auth-middleware.ts`           | Global middleware: authenticates and populates `ctx.request.user`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `requireAuth`                       | `src/guards/index.ts`                         | Guard: require an authenticated principal (401); M124 `{ signInPage }` redirects a browser navigation (302 with `returnTo`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `RequireAuthOptions`                | `src/interfaces/index.ts`                     | M124 `requireAuth` options: `signInPage?`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `safeReturnTo`                      | `src/sign-in/return-to.ts`                    | M124 export: a same-origin `returnTo` path, else the fallback                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `requireRole`                       | `src/guards/index.ts`                         | Guard: require a role (401/403)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `requirePermission`                 | `src/guards/index.ts`                         | Guard: require a permission (401/403)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `requireAnyRole`                    | `src/guards/index.ts`                         | Guard: require any of the given roles                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
@@ -3033,7 +3150,7 @@ what changed is that the refusal is legible.
 | `RefreshTokenStore`                 | `src/stores/refresh-token-store.ts`           | Pluggable async store interface for refresh-token records                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `RefreshTokenRecord`                | `src/stores/refresh-token-store.ts`           | Record shape store implementations produce/consume                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `IRefreshTokenRotation`             | `src/stores/refresh-token-store.ts`           | Result of atomically rotating a refresh record                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `MemoryRefreshTokenStore`           | `src/stores/refresh-token-store.ts`           | Default in-memory store with lazy expiry on get and amortised expiry sweeps on save and rotate; unexpired revoked records are retained for reuse detection                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `IAccessTokenRevocationStore`       | `src/stores/access-token-revocation-store.ts` | Pluggable bounded access-token revocation interface                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `MemoryAccessTokenRevocationStore`  | `src/stores/access-token-revocation-store.ts` | Single-process access-token revocation store with lazy expiry                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `rateLimitMiddleware`               | `src/middleware/rate-limit-middleware.ts`     | Fixed-window rate limiter middleware factory (429 short-circuit)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -3137,6 +3254,12 @@ To invalidate an access credential at logout before its regular expiry, construc
 shared implementation. Custom `RefreshTokenStore` implementations must preserve `familyId` and make
 `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family: family revocation must
 durably block later rotations and include any earlier successor.
+
+`MemoryRefreshTokenStore` expires records lazily on `get()` and through amortised sweeps on
+`save()`, starting at 1,024 entries and doubling the surviving size for the next sweep (minimum
+1,024). Only expired records are removed; unexpired revoked records remain for rotation reuse
+detection. `MemoryRateLimitStore` follows the same sweep rule on `increment()`, retaining each
+entry's window duration and dropping only expired windows; live limits are never evicted for a cap.
 
 ```typescript
 import {
@@ -3501,15 +3624,20 @@ script on a credentialed CORS origin could otherwise name its own host; scripts 
 checked against the URL origin and `trustedOrigins` only: a browser cannot send the target's real
 public origin cross-site, and a trusted proxy that passes a client's `X-Forwarded-Host` through
 would otherwise publish a host the attacker then matches. It does not grant proxy trust to other
-consumers. `trustedOrigins` adds further allowed origins. Both headers absent → pass through
-(non-browser clients). Optional `customHeader` requires that header on unsafe methods (403 when
-absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely — checked
-before the method test, so an excluded path is never inspected. It is for a protocol endpoint whose
-own defences make the check redundant (the SAML ACS: its signed assertion, single-use request and
-binding cookie), not for an application form route. An origin allowlist cannot admit an IdP that
-serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with `Origin: null`, and
-`trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so the documented SAML
-recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's form CSRF.
+consumers. Since 0.11.0 (M119c) `Origin: null` passes when the request also carries
+`Sec-Fetch-Site: same-origin` — the pair a browser sends for a same-origin form POST under
+`Referrer-Policy: no-referrer`; `acceptNullOriginSameOrigin?: boolean` (default `true`; a
+non-boolean throws `TypeError` when the middleware is built) set to `false` restores the earlier
+refusal of every `null` origin. `trustedOrigins` adds further allowed origins. Both headers absent →
+pass through (non-browser clients). Optional `customHeader` requires that header on unsafe methods
+(403 when absent). `exclude` lists paths (exact string or `RegExp`) that skip the check entirely —
+checked before the method test, so an excluded path is never inspected. It is for a protocol
+endpoint whose own defences make the check redundant (the SAML ACS: its signed assertion, single-use
+request and binding cookie), not for an application form route. An origin allowlist cannot admit an
+IdP that serves `Referrer-Policy: no-referrer` (Keycloak does) — the browser posts with
+`Origin: null`, and `trustedOrigins: ['null']` admits every opaque-origin `POST` on every route — so
+the documented SAML recipe is `exclude: ['/auth/<provider>/acs']` here and in the session plugin's
+form CSRF.
 
 #### Request Size (`requestSizeMiddleware`)
 
@@ -3522,20 +3650,27 @@ Resolves client IP and publishes to `ctx.state.set(CLIENT_IP_STATE_KEY, ip)`. Wi
 `trustProxy: false` (default), it uses the socket peer. With `true`, `ipHeader` defaults to
 `X-Forwarded-For`. `trustedProxies` walks right to left starting at the socket peer when available;
 an untrusted peer is the client and forwarded entries are ignored. With no peer, it walks the header
-alone. IPv4 CIDR is expanded; native IPv6 proxy addresses are compared literally. `proxyHops` and
-the leftmost default retain their header-only selection and do not check the peer. Prefer
-`trustedProxies` for stable proxy addresses. `trustedProxies` and `proxyHops` are mutually
-exclusive; `proxyHops` must be a non-negative safe integer. Never short-circuits.
+alone. IPv4 CIDR is expanded; native IPv6 proxy addresses are compared literally. Every published
+address is normalized: an IPv4-mapped address becomes dotted IPv4, and an IPv6 address is published
+in canonical lowercase compressed form; a trusted literal is normalized the same way before
+comparison. `proxyHops` and the leftmost default retain their header-only selection and do not check
+the peer. Prefer `trustedProxies` for stable proxy addresses. `trustedProxies` and `proxyHops` are
+mutually exclusive; `proxyHops` must be a non-negative safe integer. Never short-circuits.
 
 `IpSecurityOptions.forwardedHeader?: 'x-forwarded' | 'forwarded'` defaults to `'x-forwarded'`.
 `'forwarded'` reads only RFC 7239 `Forwarded` and conflicts with `ipHeader`; invalid values and the
-conflict throw at construction. Its parser handles quoted strings, escapes, IPv6 and IPv4 ports;
-malformed input, over 8 KiB, or over 64 elements contributes no hops and no forwarded origin, so the
-socket peer is still checked — a direct client keeps its own address, a trusted proxy sending it
-yields no client. In the default family a `proxyHops` header too short for the chain, or a chain of
-only trusted proxies, also resolves `undefined`, never the socket peer. Unknown or obfuscated hops
-cannot match a trusted proxy and are never returned as clients. The two header families are never
-merged.
+conflict throw at construction. Its parser handles quoted strings, escapes, IPv6 and IPv4 ports. A
+malformed element is a boundary, not a void: the elements to its right were written by later hops
+and are still read, while the trust walk stops at the boundary and never continues left of it;
+everything left of the boundary is one unreadable entry. An oversized field (over 8 KiB or 64
+elements) is read from the right within those bounds instead of voiding the field, so a trusted
+proxy that appends its element still resolves the client behind a padded or malformed prefix. A
+trusted proxy that writes a comma inside a quoted value to the right of malformed input loses that
+element to the boundary and resolves no client (fail closed). A direct client keeps its own address,
+and a boundary with only trusted entries to its right yields no client rather than the proxy's own
+address. In the default family a `proxyHops` header too short for the chain, or a chain of only
+trusted proxies, also resolves `undefined`, never the socket peer. Unknown or obfuscated hops cannot
+match a trusted proxy and are never returned as clients. The two header families are never merged.
 
 The middleware publishes `{ protocol, host }` under `REQUEST_ORIGIN_STATE_KEY`. Forwarded values are
 believed only with `trustedProxies`, a socket peer present and trusted, and the selected client from
@@ -4006,21 +4141,17 @@ Omitting an option disables that behaviour (no timer created).
 
 - `ISseService.open(ctx): ISseConnection` — opens a new SSE connection; sets headers, returns a
   connection with `result` (`HandlerResult`) the handler must return.
-- `ISseService.channel(name): SseChannel` — get-or-create a named broadcast channel. First call
-  creates, so reading `size` for a caller-supplied name is a write, and **nothing reclaims a channel
-  before shutdown** — the registry has no removal path outside the one that runs when the
-  application stops.
+- `ISseService.channel(name): SseChannel` — returns a reusable named broadcast handle. Membership is
+  allocated on add and reclaimed when the last member leaves. A held handle resolves current members
+  by name, including members who joined after reclamation. Empty handles are not retained.
 - `ISseService.peek(name): SseChannel | undefined` — the non-allocating counterpart. Returns the
-  channel when one exists and `undefined` otherwise, registering nothing. Use it wherever the name
-  comes from a request. Added in M74; a **required** member, so a replacement implementation of
+  channel when it has members and `undefined` otherwise, registering nothing. Use it wherever the
+  name comes from a request. Added in M74; a **required** member, so a replacement implementation of
   `ISseService` must supply it.
 - `ISseService.connectionCount: number` — current open connections.
-- `ISseService.channelCount: number` — channels the registry currently holds; the counterpart to
-  `IWebSocketService.roomCount`, reported by the `sse` health indicator as `channels`. Nothing
-  reclaims a channel, so the value **only rises for the life of a running application** and a
-  steadily climbing one is the operator-visible signal that channel names are being derived from
-  unbounded input. Shutdown is the sole exception: `onClose` discards every channel, so a probe
-  racing teardown reads `0`. Added in M74; a **required** member, like `peek`.
+- `ISseService.channelCount: number` — channels with members, reported by the health indicator as
+  `channels`. Drops when the last member leaves and becomes zero at shutdown. Disconnect cleanup
+  visits only channels joined by that connection. Added in M74; a **required** member, like `peek`.
 - `ISseConnection.send(msg)` — enqueue an encoded SSE frame (`id:`, `event:`, `data:` / multi-line
   `data:`, `retry:` + blank-line terminator).
 - `ISseConnection.comment(text)` — enqueue a comment frame (`: text\n\n`).
@@ -4223,7 +4354,9 @@ ws.route(
   never does. `IWebSocketService.peek(name): WebSocketRoom | undefined` returns the room when one
   exists and `undefined` otherwise, registering nothing, and is what a presence or dashboard
   endpoint reading a request-supplied name should call. Added in M74; a **required** member, so a
-  replacement implementation of `IWebSocketService` must supply it.
+  replacement implementation of `IWebSocketService` must supply it. At the registry level,
+  `RoomRegistry.get(name)` creates on lookup too; use `RoomRegistry.peek(name)` for reads of
+  client-supplied room names.
 - **Rooms are in-process until a backplane is registered.** Register
   [`RealtimeBackplanePlugin`](#realtimebackplaneplugin-setu-tsrealtime-backplane-plugin) and every
   `broadcast` also reaches members on other replicas; with no `CAPABILITIES.REALTIME_BACKPLANE`
@@ -4280,6 +4413,15 @@ registers and subscribes.
 
 Discriminated on `transport`.
 
+`BackplaneCommonOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void` (0.11.0)
+replaces default subscriber logging for every sync throw and async rejection on built-in transports.
+Hook failures are swallowed. Without it, a call-time logger warns on the first failure per handler,
+debugs repeats with a count and logs recovery once at info. Descriptions use `describeError`, with
+frame kind and name metadata but no frame data. The latest 100 failures are retained in
+`handlerErrors` in either mode. Direct transport constructors accept an optional trailing
+`IRealtimeHandlerErrorReporter`; omitted, they retain history only. Custom transports are used as
+supplied and own their reporting.
+
 | Option                    | Applies to         | Default                  | Description                                                                                                                                                                                                                                                                                                                                                                                                        |
 | ------------------------- | ------------------ | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `transport`               | all                | `'memory'`               | `'memory' \| 'messaging' \| 'redis' \| 'custom'`                                                                                                                                                                                                                                                                                                                                                                   |
@@ -4300,6 +4442,9 @@ but a single-process one, and before the `localNotice` existed a bare registrati
 consumers' startup notices without fanning anything out. The notice now comes from the plugin that
 knows its own transport.
 
+The memory, messaging, and Redis transports retain the most recent 100 subscriber errors in
+`handlerErrors`, oldest first.
+
 ### Transports
 
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                          |
@@ -4311,29 +4456,29 @@ knows its own transport.
 
 ### Exports
 
-| Symbol                                                                                                                             | Kind              | Description                                                                            |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ----------------- | -------------------------------------------------------------------------------------- |
-| `RealtimeBackplanePlugin`                                                                                                          | function          | Plugin factory                                                                         |
-| `createBackplane`                                                                                                                  | function          | Transport factory dispatching on the `transport` discriminant                          |
-| `MemoryBackplane`                                                                                                                  | class             | In-process transport                                                                   |
-| `MessagingBackplane`                                                                                                               | class             | Transport over `CAPABILITIES.MESSAGING`                                                |
-| `RedisBackplane`                                                                                                                   | class             | Redis pub/sub transport                                                                |
-| `isRealtimeFrame`                                                                                                                  | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`                           |
-| `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                          |
-| `loadRedisModule`                                                                                                                  | function          | Real lazy `import('ioredis')`                                                          |
-| `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                   |
-| `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                   |
-| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                |
-| `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client                                         |
-| `IRedisModule`                                                                                                                     | interface         | Structural facade for the `ioredis` module                                             |
-| `RealtimeBackplanePluginOptions`                                                                                                   | type              | Discriminated union of the four transport arms                                         |
-| `BackplaneCommonOptions`                                                                                                           | interface         | `topic`, `origin`, `localNotice` and `diagnostics`, shared by every arm but `'custom'` |
-| `MemoryBackplaneOptions`                                                                                                           | interface         | The `'memory'` arm                                                                     |
-| `MessagingBackplaneOptions`                                                                                                        | interface         | The `'messaging'` arm                                                                  |
-| `RedisBackplaneOptions`                                                                                                            | interface         | The `'redis'` arm                                                                      |
-| `CustomBackplaneOptions`                                                                                                           | interface         | The `'custom'` arm                                                                     |
-| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`, `RealtimeDiagnosticsOptions` | type (re-export)  | From `@setu-ts/common`                                                                 |
-| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                                               | value (re-export) | From `@setu-ts/common`                                                                 |
+| Symbol                                                                                                                             | Kind              | Description                                                                                                                                       |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RealtimeBackplanePlugin`                                                                                                          | function          | Plugin factory                                                                                                                                    |
+| `createBackplane`                                                                                                                  | function          | Transport factory dispatching on the `transport` discriminant                                                                                     |
+| `MemoryBackplane`                                                                                                                  | class             | In-process transport                                                                                                                              |
+| `MessagingBackplane`                                                                                                               | class             | Transport over `CAPABILITIES.MESSAGING`                                                                                                           |
+| `RedisBackplane`                                                                                                                   | class             | Redis pub/sub transport                                                                                                                           |
+| `isRealtimeFrame`                                                                                                                  | function          | Guard narrowing arriving broker traffic to a `RealtimeFrame`                                                                                      |
+| `adaptRedisModule`                                                                                                                 | function          | Narrows an `ioredis` module to `IRedisModule`                                                                                                     |
+| `loadRedisModule`                                                                                                                  | function          | Real lazy `import('ioredis')`                                                                                                                     |
+| `RedisModuleError`                                                                                                                 | class             | Thrown when `ioredis` cannot be loaded or recognized                                                                                              |
+| `DEFAULT_TOPIC`                                                                                                                    | const             | `'setu-ts.realtime'`                                                                                                                              |
+| `DEFAULT_REDIS_COMMAND_TIMEOUT_MS`                                                                                                 | const             | `15000`, the default `commandTimeoutMs`                                                                                                           |
+| `IRedisBackplaneClient`                                                                                                            | interface         | Structural facade for an injected Redis client; optional `connect?()` (M117) is called at start for an injected client whose `status` is `'wait'` |
+| `IRedisModule`                                                                                                                     | interface         | Structural facade for the `ioredis` module                                                                                                        |
+| `RealtimeBackplanePluginOptions`                                                                                                   | type              | Discriminated union of the four transport arms                                                                                                    |
+| `BackplaneCommonOptions`                                                                                                           | interface         | `topic`, `origin`, `localNotice` and `diagnostics`, shared by every arm but `'custom'`                                                            |
+| `MemoryBackplaneOptions`                                                                                                           | interface         | The `'memory'` arm                                                                                                                                |
+| `MessagingBackplaneOptions`                                                                                                        | interface         | The `'messaging'` arm                                                                                                                             |
+| `RedisBackplaneOptions`                                                                                                            | interface         | The `'redis'` arm                                                                                                                                 |
+| `CustomBackplaneOptions`                                                                                                           | interface         | The `'custom'` arm                                                                                                                                |
+| `IRealtimeBackplane`, `RealtimeFrame`, `RealtimeFrameHandler`, `RealtimeFrameKind`, `EncodedPayload`, `RealtimeDiagnosticsOptions` | type (re-export)  | From `@setu-ts/common`                                                                                                                            |
+| `encodeFrameData`, `decodeFrameData`, `CAPABILITIES`                                                                               | value (re-export) | From `@setu-ts/common`                                                                                                                            |
 
 ### Notes
 
@@ -4489,6 +4634,8 @@ package README's "What `SameSite` does not separate".
 
 ### Notes
 
+<!-- version:history -->
+
 - **`ISessionService.fromHeaders(headers)` is the headers-only read for non-HTTP entry points.** It
   opens the session from a `Headers` object alone — a WebSocket `onOpen` handler, an auth strategy
   reading a cookie — and returns a read-only `SessionView` (`{ id, data }`) or `null`. It runs the
@@ -4592,7 +4739,7 @@ package README's "What `SameSite` does not separate".
 
 ## ReactRouterPlugin() (`@setu-ts/react-router-plugin`)
 
-Embeds **React Router v7 framework mode** as a first-party plugin so a Setu-TS application can serve
+Embeds **React Router 8 framework mode** as a first-party plugin so a Setu-TS application can serve
 a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
@@ -4640,6 +4787,8 @@ app.router.get('/api/health', (ctx) => {
 ```
 
 ### Options
+
+<!-- version:history -->
 
 | Option                | Type                                                         | Default        | Description                                                                                                                                                                                                                                                                                                                     |
 | --------------------- | ------------------------------------------------------------ | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -4776,13 +4925,13 @@ Environment API, and neither a top-level `ssr.external` nor `environments.ssr.re
 reaches that build. `setu new --template full-stack` emits all of this already.
 
 Development mode needs the same guarantee from Vite's dev SSR runner, which loads route modules
-itself. Unaided it cannot resolve a JSR import at all, and it would inline a package mapped to a
-local path as a second copy. `viteDevExternals` keeps those packages external there too, resolved by
-the runtime.
+itself. `viteDevExternals` keeps framework packages and workspace libraries external, resolved by
+the server runtime, so route modules and the entry share one module instance. Context keys from
+`contextKeyFor()` match by identity; a second copy would read different keys.
 
 The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
 package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
-client bundle has to inline what it imports and cannot resolve a JSR specifier.
+client bundle has to inline what it imports; server framework packages must stay on the server.
 
 ### Notes
 
@@ -4973,8 +5122,12 @@ worker the pool terminates (on a timeout, a startup deadline or a hand-over) lea
 once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
 CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
 `maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
-CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
-resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+CPU. A slot is released to the budget before its thread has exited, and the next waiter spawns at
+once, so at a hand-over the terminated thread and its replacement can briefly be alive together:
+measured on Node 24 with 20 ms sampling and `maxWorkers: 3`, a cold first burst peaked at 6 threads
+in 3 of 3 runs, one burst above the bound for about 0.7 s. Treat a task timeout as a correctness
+bound rather than a resource bound for CPU-bound code that can loop, and have long tasks check a
+deadline and return.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.
@@ -5051,9 +5204,14 @@ remain usable.
 
 ## Diagnostics Connector (`@setu-ts/diagnostics-plugin`)
 
+Authenticated promotion periodically reclaims per-session rate buckets that have refilled to their
+full burst. Sweeps use doubling thresholds starting at 64; drained and partially refilled buckets
+keep their limits.
+
 An authenticated local connector between a native devtool client and M98a's kernel diagnostics,
-served over a runtime-owned IPv4 loopback listener. Deno and bounded polling only; no browser UI, no
-application data, no control commands, and no environment fallback. Activation is explicit:
+served over a runtime-owned IPv4 loopback listener. Deno and Node, with bounded polling only; no
+browser UI, no application data, no control commands, and no environment fallback. Activation is
+explicit:
 `DiagnosticsPlugin({ enabled: true, port, sessionId, sessionKey, ttlMs?, maxSessionLifetimeMs? })` —
 an omitted or `false` `enabled`, an invalid port or credential, an unsupported runtime, or an
 application without M98a diagnostics refuses activation. `enabled` is typed as the LITERAL `true`,
@@ -5334,8 +5492,8 @@ has `outboundHttp: false` answers a frozen `unsupported` response without sendin
 The listener side ships in `@setu-ts/common` + `@setu-ts/runtime`: `RuntimePlugin` provides
 `ILocalDiagnosticsListenerFactory` under `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`
 (`LocalDiagnosticsListenerOptions { port, handler }` → `ILocalDiagnosticsListener.close()`), binding
-exactly one `127.0.0.1` listener on Deno and rejecting every `listen` on other platforms before any
-bind. The full wire specification lives in `docs/diagnostics-protocol.md`.
+exactly one `127.0.0.1` listener on Deno or Node and rejecting every `listen` on unsupported
+platforms before any bind. The full wire specification lives in `docs/diagnostics-protocol.md`.
 
 ## SecretsPlugin() (`@setu-ts/secrets-plugin`)
 
@@ -5875,6 +6033,12 @@ interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   deadLetterMaxLen?: number;
   /** Foreign empty consumer inactivity threshold, default 3600000 ms. */
   consumerIdleSweepMs?: number;
+  /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647. Zero disables the bound;
+   * an expired publish may still be delivered. Consumer reads are unaffected.
+   * @defaultValue 15000 @since 0.11.0
+   */
+  publishTimeoutMs?: number;
 }
 
 // ── RabbitMQ ─────────────────────────────────────────────────────────────────────────
@@ -5923,6 +6087,13 @@ interface RabbitMqMessagingOptions extends MessagingCommonOptions {
 // version:history — the `@since` below records when the member appeared, not the
 // current release; an `@since` is never bumped.
 interface NatsMessagingOptions extends MessagingCommonOptions {
+  /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647. Zero disables the bound;
+   * an expired publish may still be delivered. Passed to the client as its own publish
+   * `timeout` and held by the framework's deadline as well; consumer reads are unaffected.
+   * @defaultValue 15000 @since 0.11.0
+   */
+  publishTimeoutMs?: number;
   /** Lazy connection only: defaults -1 (forever) / 2000 ms. @since 0.10.0 */
   reconnect?: { maxAttempts?: number; waitMs?: number };
   broker: 'nats';
@@ -5949,19 +6120,23 @@ interface NatsMessagingOptions extends MessagingCommonOptions {
    */
   streamSubjects?: readonly string[];
   /**
-   * Default consumer group / queue name. A queue becomes the JetStream durable
-   * consumer name with each character the nats client refuses (`.`, `*`, `>`,
-   * `/`, `\`, whitespace) escaped as `_` + two hex digits — `orders.eu` →
-   * `orders_2eeu` (M101b). A queue whose encoding collides with another queue's,
-   * or that is reused across topics, rejects `subscribe()` with
+   * Shared queue-less group prefix; the group is `<defaultQueue>.<topic>`.
+   * A newly created group starts at new messages; later subscribers resume it.
+   * An explicit queue becomes the JetStream durable consumer name with each
+   * character the nats client refuses (`.`, `*`, `>`, `/`, `\`, whitespace)
+   * escaped as `_` + two hex digits — `orders.eu` → `orders_2eeu` (M101b). A
+   * queue whose encoding collides with another queue's, or that is reused
+   * across topics, rejects `subscribe()` with
    * `NatsConsumerNameCollisionError`. The raw queue is recorded as consumer
    * metadata, which needs NATS 2.10+.
+   * @defaultValue 'messaging-consumers'
    */
   defaultQueue?: string;
 }
 
 // ── Kafka ────────────────────────────────────────────────────────────────────────────
 interface KafkaMessagingOptions extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -6008,6 +6183,7 @@ interface KafkaMessagingOptions extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — injected transport (client required; credentials optional) ─────────
 interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -6041,6 +6217,7 @@ interface PubSubMessagingOptionsInjected extends MessagingCommonOptions {
 
 // ── GCP Pub/Sub — production (projectId required; client must be omitted) ────────────
 interface PubSubMessagingOptionsProduction extends MessagingCommonOptions {
+  // version:history
   /** Publish bound in ms; default 15000, 0 unbounded. Timeout may still deliver. @since 0.10.0 */
   publishTimeoutMs?: number;
 
@@ -6298,14 +6475,15 @@ respond<TReq, TRes>(
 
 Pass `options.queue` to `respond` to load-balance requests across competing responders.
 
-`request` rejects with one of three exported error classes (import from `@setu-ts/messaging-plugin`
+`request` rejects with one of four exported error classes (import from `@setu-ts/messaging-plugin`
 for `instanceof` handling):
 
-| Error                        | Thrown when                                                                      |
-| ---------------------------- | -------------------------------------------------------------------------------- |
-| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                             |
-| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                |
-| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility. |
+| Error                        | Thrown when                                                                                                             |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `RequestTimeoutError`        | No reply arrived within `timeoutMs`.                                                                                    |
+| `RemoteHandlerError`         | The responder threw; `.remoteMessage` carries the remote message.                                                       |
+| `MessagingNotSupportedError` | **Deprecated — no broker throws this.** Retained for `instanceof` compatibility.                                        |
+| `PublishTimeoutError`        | The request's publish outlived `publishTimeoutMs`; the message may still be delivered. Carries `topic` and `timeoutMs`. |
 
 Two more error classes are exported for the NATS broker's startup prerequisites (M90d / X28-3). Each
 carries the platform error as `cause` **when there is one** — the absent-stream refusal below is a
@@ -6415,7 +6593,7 @@ export type { PubSubSdkModule, ServiceBusSdkModule } from '@setu-ts/messaging-pl
 export { JsonSerializer } from '@setu-ts/messaging-plugin';
 export type { ISerializer } from '@setu-ts/messaging-plugin';
 
-// Request-reply, gate, and NATS-prerequisite error classes
+// Request-reply, gate, publish-timeout, and NATS-prerequisite error classes
 export {
   ChainGateTimeoutError,
   CloudBrokerUnavailableError,
@@ -6425,6 +6603,7 @@ export {
   MessagingNotSupportedError,
   NatsConsumerNameCollisionError,
   PubSubSubscriptionBoundElsewhereError,
+  PublishTimeoutError,
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
@@ -6729,11 +6908,14 @@ other numeric code (including 7/16 authorization responses) means true; no numer
 An omitted transport probe means unknown. Unknown still reports up. See the
 [per-broker probe table](packages/messaging-plugin/README.md#health-indicator).
 
-`KafkaOptions` and `PubSubOptions`, as well as both Pub/Sub plugin arms and the Kafka plugin arm,
-accept `publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
-`RangeError` at plugin and broker construction. Both publish entry points, RPC and outbox relay
-publishes use the bound; the timeout error names broker, topic and bound and warns that delivery may
-still occur. It does not cancel the transport.
+The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS plugin arms — and their `KafkaOptions`,
+`PubSubOptions`, `RabbitMqOptions`, `RedisStreamsOptions` and `NatsOptions` shapes — accept
+`publishTimeoutMs` (default 15000 ms, `0` unbounded). Out-of-range or non-finite values throw
+`RangeError` at `MessagingPlugin(...)` and at broker construction. Every publish entry point, RPC
+and outbox relay publishes use the bound; the timeout is the exported `PublishTimeoutError`, which
+names the broker, topic and bound and warns that delivery may still occur. It does not cancel the
+transport. On Redis Streams the bound covers the publish's `XADD` only; on NATS it is passed to the
+client as its own publish `timeout` as well.
 
 Fresh Kafka groups whose every partition offset is `-1` capture high watermarks before `run()`. On
 the first join, members seek assigned, still-uncommitted partitions to the minimum start offset
@@ -7313,12 +7495,16 @@ prefix. Use a distinct prefix per application on a shared Redis. It must be a no
 most 128 characters with no control characters; invalid values throw `RangeError` at adapter or
 Redis plugin construction. The RabbitMQ-only `prefix` option does not configure Redis.
 
+<!-- version:history -->
+
 **RabbitMQ recovery (0.10.0).** Connection or channel faults drive automatic reconnect with
 full-jitter backoff through the common supervisor. Readiness reports down during the fault window.
 An injected connection receives only a new channel. Successful recovery clears local delivery
 bookkeeping and lazily re-declares queues. Unacked jobs return to the broker for at-least-once
 redelivery, possibly with the original attempt count. Disconnect stops scheduled retries and
 disposes listeners.
+
+<!-- version:history -->
 
 **Delivery claims (0.10.0).** RabbitMQ uses a fresh runtime UUID for each delivery. Redis 5+ uses
 atomic Lua scripts, server `TIME` for lease deadlines, the reserving replica's `nowMs` (the clock
@@ -7674,7 +7860,9 @@ schedule until the registering plugin re-creates it. For durable background work
 - **`IDistributedLock`** — Lock seam (`acquire`/`release`) for a custom lock implementation;
   optional `isHealthy?(): Promise<boolean | undefined>` reports reachable, unreachable, or unknown
 - **`IRedisLockClient`** — Structural ioredis shape accepted by `distributedLock.client`; optional
-  `ping?(): Promise<unknown>` supports lock reachability probes
+  `ping?(): Promise<unknown>` supports lock reachability probes; `eval(...)` returns
+  `Promise<unknown>` (M117, widened from `Promise<number | string | null>` so a `fromNodeRedis`
+  adapter satisfies it; the lock ignores the result)
 - **`IScheduler`** — Scheduler service interface (re-exported from `@setu-ts/common`)
 - **`ScheduledJob<T>`** — Job instance handed to the handler (re-exported)
 - **`SchedulerJobHandler<T>`** — Handler callback type (re-exported)
@@ -8435,11 +8623,11 @@ app.router.post('/users', async (ctx) => {
   provider is never reached.
 - `TemplateEngine.render(name, data)` returns `Promise<RenderedTemplate>` (asynchronous since M102,
   because `IViewEngine.render` may answer a promise); every refusal is a rejection.
-- `LogProvider` never sends real email — it records each message (`.messages`), forwards to `sink`,
-  and logs via `ctx.logger`. Like every provider, it refuses a send outside `connect()`..
-  `disconnect()` with `'LogProvider is not connected'`, so a send after `app.stop()` rejects.
-  `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only; `SendGridProvider` is the
-  Cloudflare Workers-portable path.
+- `LogProvider` never sends real email — `.messages` retains the most recent 1,000 messages in send
+  order, while `sink` receives every message and logging uses `ctx.logger`. Like every provider, it
+  refuses a send outside `connect()`.. `disconnect()` with `'LogProvider is not connected'`, so a
+  send after `app.stop()` rejects. `SmtpProvider` needs raw sockets, so it is Node/Deno/Bun only;
+  `SendGridProvider` is the Cloudflare Workers-portable path.
 
 ---
 
@@ -8639,19 +8827,20 @@ app.router.get('/beta', {
 
 ### Options
 
-| Option                       | Provider(s)            | Required                | Description                                                                         |
-| ---------------------------- | ---------------------- | ----------------------- | ----------------------------------------------------------------------------------- |
-| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'` |
-| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                   |
-| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                     |
-| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                   |
-| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`         |
-| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                      |
-| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                            |
-| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                  |
-| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws        |
-| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                              |
-| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                   |
+| Option                       | Provider(s)            | Required                | Description                                                                                                                                                                       |
+| ---------------------------- | ---------------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider`                   | all                    | yes                     | Discriminant: `'config'`, `'memory'`, `'database'`, `'launchdarkly'`, or `'custom'`                                                                                               |
+| `options.flags`              | `'config'`, `'memory'` | config: yes, memory: no | Static `Readonly<Record<string, FlagDefinition>>`                                                                                                                                 |
+| `options.store`              | `'database'`           | yes                     | Injected `IFlagStore` providing `{ loadFlags(): Promise<...> }`                                                                                                                   |
+| `options.refreshIntervalMs`  | `'database'`           | no                      | Poll cadence; defaults to `30000`                                                                                                                                                 |
+| `options.sdkKey`             | `'launchdarkly'`       | unless `client`         | LaunchDarkly SDK key; a missing key with no `client` throws at `register()`                                                                                                       |
+| `options.client`             | `'launchdarkly'`       | no                      | Prebuilt `ILaunchDarklyClient`; suppresses the lazy SDK import                                                                                                                    |
+| `options.module`             | `'launchdarkly'`       | no                      | SDK module to adapt instead of importing — the test seam                                                                                                                          |
+| `options.fallbackValue`      | `'launchdarkly'`       | no                      | Value the sync path returns on a cold context; defaults to `false`                                                                                                                |
+| `options.initTimeoutSeconds` | `'launchdarkly'`       | no                      | Initial-connection budget; defaults to `5`. A timeout degrades, never throws                                                                                                      |
+| `options.ldOptions`          | `'launchdarkly'`       | no                      | Forwarded verbatim as the SDK `init()` second argument                                                                                                                            |
+| `maxCachedContexts`          | `'launchdarkly'`       | no                      | Wrapper option: LRU snapshot cap, default 10,000; positive integer or RangeError at provider construction. Hits refresh recency; evicted contexts return fallback while refilling |
+| `options.instance`           | `'custom'`             | yes                     | Pre-built `FlagProvider` instance                                                                                                                                                 |
 
 ### Exports
 
@@ -8876,8 +9065,10 @@ that never include indicator `data`. HTTP status rules are unchanged.
 
 ### What `degraded` means
 
-`/ready` returns 200 only when every contributed indicator is `up`; `degraded` and `down` both
-return 503. `/health` returns 200 for `up` or `degraded`, and 503 for `down`. `/live` remains 200.
+`/ready` runs only the indicators that count toward readiness (never `self`) and returns 200 only
+when every one of them is `up`; `degraded` and `down` both return 503. An indicator outside
+readiness still runs on `/health`. `/health` returns 200 for `up` or `degraded`, and 503 for `down`.
+`/live` remains 200.
 
 Use `degraded` when this replica should stop taking traffic. A shared problem that does not stop
 request serving belongs in the indicator's `data`: draining every replica would remove healthy
@@ -8891,7 +9082,7 @@ Resolve the service via `ctx.services.get<IHealthService>('health')`. The servic
 
 ```typescript
 interface IHealthService {
-  registerIndicator(name: string, indicator: HealthIndicatorFn): void;
+  registerIndicator(name: string, indicator: HealthIndicatorFn, options?: HealthIndicatorOptions): void;
   check(): Promise<HealthReport>;
   checkLive(): Promise<HealthReport>;
   checkReady(): Promise<HealthReport>;
@@ -8905,6 +9096,27 @@ interface HealthReport {
   >;
 }
 ```
+
+Since **M119b** every indicator carries a readiness membership — whether it counts toward `/ready` —
+exposed through three additive, optional members: the exported `HealthIndicatorOptions` interface
+(`{ readiness?: boolean }`; absent means the indicator counts — the previous behaviour), the
+optional `IHealthIndicator.readiness?` member a plugin or application indicator instance sets, and
+the `options?` parameter on both registration surfaces —
+`IHealthApi.register(name, indicator, options?)` (the plugin context's `ctx.health.register`) and
+`IHealthService.registerIndicator(name, indicator, options?)` above. `checkReady()` runs the
+indicators that are not `self` and whose effective membership is `true`; an indicator outside
+readiness still runs in `check()` (`/health`) and is absent from the `/ready` report. `checkLive()`
+is unchanged. `HealthPluginOptions.readiness`
+(`{ include?: readonly string[], exclude?: readonly string[] }`) overrides a contributor's declared
+membership by exact indicator name: `include` forces a named indicator into readiness, `exclude`
+forces it out. The override is applied inside `HealthService.registerIndicator`, so it covers every
+registration path, including a plugin that calls `IHealthService.registerIndicator` directly; a
+directly constructed service takes it as `new HealthService(runtime, { readiness })`. Both
+`HealthPlugin(...)` and that constructor refuse an invalid option with `TypeError` — a `readiness`
+that is not a plain object (an array included), a list that is not an array, an empty or non-string
+name, the name `self`, or a name in both lists; the message names the option and never echoes a
+name. After every plugin has initialized (at bootstrap), names that match no registered indicator
+produce one count-only warning.
 
 Since **M70c** each indicator's result is **projected** to the declared {@linkcode
 HealthCheckResult} shape — `status`, and `data` when present — before it enters the report. An
@@ -8998,11 +9210,11 @@ app.register({
 
 ### Endpoints
 
-| Endpoint  | Method | Description                            | Status Codes                          |
-| --------- | ------ | -------------------------------------- | ------------------------------------- |
-| `/health` | GET    | Overall health (all indicators)        | 200 (up/degraded), 503 (down)         |
-| `/live`   | GET    | Liveness (self indicator only)         | 200 (always, unless self is down)     |
-| `/ready`  | GET    | Readiness (all contributed indicators) | 200 (all up), 503 (any down/degraded) |
+| Endpoint  | Method | Description                                     | Status Codes                          |
+| --------- | ------ | ----------------------------------------------- | ------------------------------------- |
+| `/health` | GET    | Overall health (all indicators)                 | 200 (up/degraded), 503 (down)         |
+| `/live`   | GET    | Liveness (self indicator only)                  | 200 (always, unless self is down)     |
+| `/ready`  | GET    | Readiness (readiness members, excluding `self`) | 200 (all up), 503 (any down/degraded) |
 
 ### Response
 
@@ -9023,7 +9235,8 @@ GET /health
 **Status aggregation rules:**
 
 - `/live`: Always 200 as long as the process responds (self indicator always returns 'up')
-- `/ready`: 200 when all contributed indicators are 'up', 503 when any is 'degraded' or 'down'
+- `/ready`: 200 when all indicators that count toward readiness are 'up', 503 when any is 'degraded'
+  or 'down'
 - `/health`: 200 when no participating indicator is 'down' (degraded stays 200), 503 when any is
   'down'
 
@@ -9090,6 +9303,10 @@ wire shape and inspector manifest are in `docs/diagnostics-protocol.md`.
 ---
 
 ## Metrics (`@setu-ts/metrics-plugin`)
+
+Built-in HTTP series carry `method` and `status` labels. The method label preserves `GET`, `HEAD`,
+`POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE`, and `PATCH`, compared case-sensitively; all
+other methods use `_OTHER` on both success and error paths.
 
 Provides Prometheus metrics.
 
@@ -9290,11 +9507,14 @@ when the channel is empty.
 ### Auto-instrumentation
 
 Milestone 24b adds the `instrumentations` option — a per-kind map of `true | InstrumentationConfig`
-keys: `http`, `fetch`, `ioredis`, `amqplib`, `kafkajs`. Each key enables one auto-instrumentation.
-On non-Node runtimes (Deno, Bun, Cloudflare Workers) all instrumentations degrade to a **documented
-no-op** — they never throw. When `tracerProviderFactory` returns a host with a truthy
-`otelProvider`, the registry calls `setTracerProvider` + `enable()` on each loaded instrumentation
-instance; when `otelProvider` is absent, the registry returns a no-op handle immediately.
+keys: `http`, `fetch`, `ioredis`, `redis` (M117: node-redis v5/v6 through
+`@opentelemetry/instrumentation-redis` `^0.69.0`, an optional peer; a command sent through
+`fromNodeRedis` is traced as `redis-<COMMAND>`), `amqplib`, `kafkajs`. Each key enables one
+auto-instrumentation. On non-Node runtimes (Deno, Bun, Cloudflare Workers) all instrumentations
+degrade to a **documented no-op** — they never throw. When `tracerProviderFactory` returns a host
+with a truthy `otelProvider`, the registry calls `setTracerProvider` + `enable()` on each loaded
+instrumentation instance; when `otelProvider` is absent, the registry returns a no-op handle
+immediately.
 
 Each instrumentation uses the **inject-or-lazy seam**: when `InstrumentationConfig.instrumentation`
 is set, the instance is used directly (inject path); otherwise the registry lazy-loads the OTel
@@ -9522,6 +9742,8 @@ app.register(
 
 ### Operation ids and descriptions
 
+<!-- version:history -->
+
 Optional `RouteSchema.operationId` and `RouteSchema.description` (since 0.10.0) carry programmatic
 declarations and `@ApiOperation({ operationId, description })` metadata. The id is used verbatim;
 without it, ids keep the derived method/path format (`GET /users/:id` → `get-users-by-id`). The
@@ -9533,6 +9755,8 @@ neither claim nor collide. `OpenApiGenerator.generate(routes)` throws `Operation
 (empty or whitespace-only) or duplicate declared ids. `OpenApiPlugin` performs the same route scan
 at bootstrap, failing `start()` without building or caching a document. A route added after
 bootstrap is checked when the document is first built; a failure then answers `500`.
+
+<!-- version:history -->
 
 `OperationIdError extends Error` is exported from `@setu-ts/openapi-plugin` (since 0.10.0). Its
 constructor is `(reason: 'duplicate' | 'blank', message: string)`; readonly `reason` names the
@@ -9757,22 +9981,22 @@ app.router.post('/users', {
 
 ### Zod Version Support
 
-Both **zod v3 and zod v4** are supported, detected per schema by duck typing — `toJSONSchema`
-presence marks a v4 schema; the plugin imports neither major.
+The supported Zod range is **`>=4.6.6 <5`**. Schemas are recognized by the public `toJSONSchema`
+method; the plugin does not import Zod.
 
 - **Zod v4** is converted through `schema.toJSONSchema()` and adapted from JSON Schema draft 2020-12
   to OpenAPI 3.1: the dialect `$schema` key is dropped, formats and constraints pass through
   verbatim (`format`, `pattern`, `contentEncoding`, …), reused schemas are hoisted into
   `components/schemas` with their pointers rewritten, and a recursive schema's root-cycle pointer
   forces that schema into `components` so no bare `#` ref survives in the document.
-- **A type union is always spelled `anyOf`, on both majors and every supported zod v4.** Draft
-  2020-12 permits two spellings, and zod switched between them inside the supported range: through
-  4.4 a union of bare types emitted `anyOf: [{ "type": "string" }, { "type": "null" }]`, and from
-  4.5 it collapses to `"type": ["string", "null"]`. The transformer normalizes the collapsed form
-  back, so one schema produces one document whichever in-range zod the application installs, the v4
-  path agrees with the v3 path, and the document stays convertible to OpenAPI 3.0 (where a `type`
-  array is not legal). Sibling keywords stay beside the `anyOf` rather than being distributed into
-  its arms — `{ "type": ["string", "null"], "minLength": 2 }` becomes
+- **A type union is always spelled `anyOf`, on every supported zod v4.** Draft 2020-12 permits two
+  spellings, and zod switched between them across v4 releases: through 4.4 a union of bare types
+  emitted `anyOf: [{ "type": "string" }, { "type": "null" }]`, and from 4.5 it collapses to
+  `"type": ["string", "null"]`. The transformer normalizes the collapsed form back, so one schema
+  produces one document whichever in-range zod the application installs, and the document stays
+  convertible to OpenAPI 3.0 (where a `type` array is not legal). Sibling keywords stay beside the
+  `anyOf` rather than being distributed into its arms —
+  `{ "type": ["string", "null"], "minLength": 2 }` becomes
   `{ "minLength": 2, "anyOf": [{ "type": "string" }, { "type": "null" }] }`, which asserts the same
   thing without applying a string constraint to the `null` arm. Only schema positions are rewritten:
   a `default`, `const`, `enum`, example or vendor-extension value is instance DATA and is preserved
@@ -9794,10 +10018,14 @@ presence marks a v4 schema; the plugin imports neither major.
   ```
 
   `at` names the operationId, so the affected route is identifiable without diffing documents. The
-  extension is absent when every schema is representable.
+  extension is absent when every schema is representable. Nothing is logged when a node degrades:
+  the document is built on the first `getSpec()` / `/openapi.json` request, not at startup, so
+  inspect it (or test for `x-setu-unrepresentable`) in CI. For dates, `z.iso.datetime()` represents
+  a date-time in JSON Schema.
 
-- **Zod v3 output is unchanged** — the same schemas produce byte-identical documents as before this
-  support existed.
+- **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
+  `{}` and report the existing `not a recognized zod schema` diagnostic through
+  `x-setu-unrepresentable`. Upgrade Zod to at least 4.6.6 before regenerating documents.
 
 #### Request and response are documented from different sides
 
@@ -9819,21 +10047,18 @@ on the three object modes, measured against zod 4.4:
 | `z.looseObject`  | accepted, kept         | `additionalProperties:{}`    | `additionalProperties:{}`    |
 
 `ZodToOpenApi.transform(schema, io?)` takes the side as an optional second argument, defaulting to
-`'output'`, so a direct call is unchanged. Only the zod v4 path reads it: the v3 path has no `io`
-concept and already emits the input view, which is why v3 documents are byte-identical and why the
-two majors now agree on a request body.
+`'output'`, so a direct call uses the response view.
 
-**Deduplication follows the side.** A schema whose two views are identical — every zod v3 schema,
-and any v4 schema with no default, transform, coercion or object-mode difference — is hoisted into
-ONE component shared by every site, exactly as before. A schema whose views differ and that is used
-on both sides yields one component per side, because the two sites do not describe the same shape. A
-schema registered through `addSchema('Name', …)` keeps that name for the output side and gains a
-`NameInput` twin when a request site reaches it, so the contributor's chosen name still appears on
-both sides. The twin is identified by SCHEMA, never by name alone — registering both `Address` and
-an unrelated `AddressInput` is legal, and the twin then takes the next free suffixed name rather
-than adopting the unrelated component. It belongs to the document that needed it: a later
-`generate()` with no request site for that schema drops it, exactly as it drops every other
-per-document component.
+**Deduplication follows the side.** A schema whose two views are identical — any v4 schema with no
+default, transform, coercion or object-mode difference — is hoisted into ONE component shared by
+every site, exactly as before. A schema whose views differ and that is used on both sides yields one
+component per side, because the two sites do not describe the same shape. A schema registered
+through `addSchema('Name', …)` keeps that name for the output side and gains a `NameInput` twin when
+a request site reaches it, so the contributor's chosen name still appears on both sides. The twin is
+identified by SCHEMA, never by name alone — registering both `Address` and an unrelated
+`AddressInput` is legal, and the twin then takes the next free suffixed name rather than adopting
+the unrelated component. It belongs to the document that needed it: a later `generate()` with no
+request site for that schema drops it, exactly as it drops every other per-document component.
 
 ### Notes
 
@@ -9930,6 +10155,15 @@ earlier) is refused the same way, pointing at the upgrade guide.
 
 ### `@setu-ts/cli/main` — the process boundary
 
+`setu new --logger console|pino` and `setu generate app --logger console|pino` (since 0.11.0) select
+the logger for `rest`, `microservice`, `class-based`, and `full-stack`, including styled templates.
+The default is Pino on Node, Deno and Bun, and console on Cloudflare Workers. Pino adds `pino: 10.x`
+to runtime dependencies (the same range in Deno's import map). Explicit console adds no Pino
+dependency. `--logger pino` on Workers is refused by name before writing. A minimal host or
+workspace root also refuses the flag because it registers no logger. Interactive `new` asks
+`Logger?` only for a host with logging; `--yes` takes the runtime default. `--dry-run` reports the
+selected logger and writes nothing.
+
 | Export          | Kind      | Description                                                                                                                                   |
 | --------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runMain`       | function  | `(runtime: MainRuntime, host: MainProcess) => Promise<number>` — runs one invocation and returns its exit code; never exits                   |
@@ -9956,6 +10190,14 @@ exactly what `setu new` accepts.
 
 ### Commands
 
+`setu build [--dir <path>] [--dry-run]` checks CLI wiring and bundles one Node project or workspace
+member into dist/main.js and a source map, plus dist/src/migrations/run.js when present. It never
+boots the app. Libraries are inlined and npm packages remain external; runtime devDependency imports
+fail with the importing file named. Dry-run checks and reports without bundling or writing.
+Workspace roots and non-Node targets refuse with exit 2; build failures exit 1. Generated Node build
+scripts type-check before invoking this command; production start runs the bundle. Use start:dev and
+start:debug for development. See [CLI build](docs/cli.md#production-build-setu-build).
+
 Every socket-target scaffold includes `test/app.test.ts`: it starts the application's own
 `createApp()` through `createTestApp`, injects its smoke-test endpoint, and stops it. Workers needs
 the platform environment and emits no smoke test; its `test` task permits an empty suite.
@@ -9970,6 +10212,7 @@ setu new my-app --template microservice --runtime bun
 setu new my-app --template rest --style class-based   # functional | class-based (rest, microservice)
 setu new my-app --template class-based          # byte-identical alias of --template rest --style class-based
 setu new my-app --template rest --env-file config/.env.local
+setu new my-app --template rest --logger console  # console | pino; since 0.11.0
 
 # Scaffold a monorepo (creates ./acme, no member yet)
 setu new acme --workspace
@@ -9977,6 +10220,7 @@ setu new acme --workspace --port 4100          # base port for its members
 setu new acme --workspace --transport redis    # http | grpc | memory | redis | rabbitmq | nats | kafka
 setu generate app orders --template microservice
 setu generate app billing --template microservice
+setu generate app reports --template rest --logger console
 setu generate app shipping --template microservice --depends-on orders --depends-on billing
 setu generate app orders --devtool                   # + main.dev.ts, dev/check tasks, a devtool port
 setu devtool enable orders                           # same composition, on a member that exists
@@ -9989,6 +10233,12 @@ setu add auth-plugin                           # bare package name
 setu add @setu-ts/auth-plugin                  # full specifier — all three are the same command
 setu add cache --dir ./services/orders
 setu add cache --dry-run                       # report the manifest edits, write nothing
+
+# Check that every seam artifact is wired (read-only), or rewrite the managed barrels
+setu check                                     # exit 1 on an error finding; standalone or workspace
+setu check --strict                            # warnings fail too
+setu sync                                      # rewrite CLI-managed barrels from their directories
+setu sync --dry-run                            # print the barrels it would write
 
 # Write or check this project's AGENTS.md brief
 setu agents                                    # standalone, workspace root or member
@@ -10034,30 +10284,33 @@ Any casing of the name produces identical output: `setu g controller user-profil
 
 ### Options
 
-| Option                                          | Commands                                              | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| ----------------------------------------------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                                     | On `new`, selects the entry shape and manifest and defaults to `deno`. On `generate`, passes `SchematicOptions.runtime` to the schematic (read by custom schematics) and otherwise detects the target from the existing project's manifest. An unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `--workspace`                                   | `new`                                                 | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`            | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `--env-file <path>`                             | `new`, `generate app`                                 | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                   |
-| `--depends-on <member>`                         | `generate app`                                        | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `--module <name>`                               | `generate`                                            | Place a `service`, `route`, `controller` or `schema` inside the named feature module, instead of the top-level folder. The name must be a module already admitted by the project's style, else the refusal lists the admitted modules. Functional: the file lands in `src/modules/<name>/` and the module's CLI-owned `index.ts` is regenerated to register it; a module-scoped route or controller mounts at `/<module>/<name>`. Class-based: the file is written and the `@Module({ providers \| controllers })` line to add is printed — the developer-owned declaration is never edited — and a module-scoped service registers under the token `<module>-<name>-service`. `route --module` is functional-only (a class-based module has no imperative registration point); every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                   |
-| `--devtool`                                     | `new`, `generate app`                                 | Opts the project (or member) into the local diagnostics connector: emits a `main.dev.ts` development entry the production graph never imports, adds `dev` and `check` tasks, and — for a workspace member — records a `devtoolPort`. Refused by name on a non-Deno runtime, on a starter-composed template (kernel diagnostics must be enabled at construction), and, for `--devtool-port`, when the port is already used. The generated entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from the environment and refuses to start without a valid pair; it never generates, writes or prints one. In a workspace the launcher also sets `SETU_DEVTOOL_MEMBER` to the member it is inspecting, and the generated `scripts/dev.ts` forwards all three to that member's child alone, blanking them for every sibling. **All three names are published CLI surface**: renaming one is a breaking change to every scaffolded project, and the root workspace `dev` task's `--allow-env` grant is scoped to exactly them. |
-| `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`               | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `--transport <name>`                            | `new --workspace`                                     | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `--transport-url <url>`                         | `new --workspace`                                     | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `--style functional\|class-based`               | `new`, `generate app`                                 | The decorator-and-DI axis, separate from `--template`: `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`; `class-based` installs both together. Accepted on the styleable templates `rest` and `microservice`; refused with no template to apply to, with an unknown value, and on `full-stack`, which composes through a starter and has no controller or ingress seam. `--template class-based` is a byte-identical alias of `--template rest --style class-based`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `--broker <name>`                               | `new` (standalone)                                    | The project's own message broker: `memory` (default), `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Rewrites the template's `MessagingPlugin` wiring to that arm, adds the arm's connection variable to the generated dotenv pair, and emits `docker/compose.yaml` starting the broker so the scaffold can complete `app.start()`. Refused — each with its own reason, never silently ignored — on Cloudflare Workers (the runtime swap removes both wirings), starter-composed templates (`full-stack`; a factory-rendered plugin list would drop the rewrite), templates registering no messaging (`rest` and no template; `microservice` registers messaging in every style), unknown names, and `--workspace`/`generate app` (a workspace's transport is chosen once with `--transport`).                                                                                                                                                                                                                            |
-| `--queue <name>`                                | `new` (standalone)                                    | The job queue backend: `memory` (default), `redis`, `rabbitmq`. Same overlay as `--broker`, applied to the `QueuePlugin` wiring, sharing the connection variable and Compose service when both flags name the same arm. Refused for the brokers the queue does not support (`nats`, `kafka`, `pubsub`, `service-bus`) and everywhere `--broker` is refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| `--yes`, `-y`                                   | `new`                                                 | Take every default and ask nothing. A no-op when no prompter is present, never an error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| `--scope <scope>`                               | `generate library`                                    | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `--name <member>`                               | `adopt`                                               | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `--agents`                                      | `new`                                                 | Write the project's `AGENTS.md` agent brief after scaffolding, through the same writer `setu agents` uses. On `--workspace`, the brief is written for the new root. Opt-in: `setu new` writes no brief without it, and `setu add` does not run the writer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `--check`                                       | `agents`                                              | Render every brief the command would write and compare it with the section on disk, writing nothing. Exit `0` when every file matches; exit `1` naming each file that is missing a section or whose section differs. Refused together with `--dry-run` (exit `2`). Card presence is not checked, so it does not depend on whether `install` has run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `--dir <path>`                                  | `new`, `generate`, `add`, `agents`                    | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| `--dry-run`                                     | `new`, `generate`, `add`, `agents`, `workspace ports` | Prints `would create <path>` per file and performs zero writes and zero directory creations. On `add`, prints `would update <manifest>` instead, since it edits files rather than creating them. On `agents`, prints `would write <path>` per brief. `workspace ports` prints `would update <path>` for each managed file instead of writing the workspace manifest.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `--help`, `-h`                                  | both                                                  | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `--version`, `-v`                               | —                                                     | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Option                                          | Commands                                              | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| ----------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                                     | On `new`, selects the entry shape and manifest and defaults to `node`. On `generate`, passes `SchematicOptions.runtime` to the schematic (read by custom schematics) and otherwise detects the target from the existing project's manifest. An unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--example <app>`                               | `new`                                                 | Downloads a standalone Node example from the CLI release tag on GitHub. Dry-run lists paths without fetching. Refuses composition flags and non-Node runtimes; unknown or excluded examples exit 1 with alternatives.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `--workspace`                                   | `new`                                                 | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`            | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--env-file <path>`                             | `new`, `generate app`                                 | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `--depends-on <member>`                         | `generate app`                                        | Repeat for each existing prerequisite. The member records the names in `setu.workspace.json`; the root dev runner starts prerequisites first and waits for `/ready`. Duplicate or missing names are usage errors, as is using it anywhere but `generate app`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `--module <name>`                               | `generate`, `add view`                                | Place a `controller`, `route`, `service`, `sse` or `schema` (or `add view`'s controller) inside the named feature module. The name must be an admitted module, else the refusal lists them. The first four require it once the project has modules, and a flat project refuses it. The file lands in `src/modules/<name>/`; a function controller is registered by the module's CLI-owned `index.ts`, and a class controller or service is added to the `@Module` declaration's `controllers` or `providers` array when that is a plain array literal (otherwise the line to add is printed). A module-scoped controller mounts at `/<module>/<name>`, and a module-scoped service registers under the token `<module>.<name>-service`. Every other schematic is app-wide and refuses the flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `--adopt-controllers`                           | `generate module`                                     | The first module only: move every file under `src/controllers/` and `src/services/` into it, keeping subfolders and URL paths, rewriting relative imports and switching `setu.config.ts`, all or nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `--devtool`                                     | `new`, `generate app`                                 | Opts a Deno or Node project/member into the local diagnostics connector through a runtime-neutral `main.dev.ts` entry that the production graph never imports. Node adds a `dev` script (`tsx main.dev.ts`) and a diagnostics-plugin devDependency; its existing `check` script covers the entry. Deno adds `dev` and widens `check`. A member records an allocated `devtoolPort`. Bun, Workers and starter-composed templates are refused by name. The entry reads `SETU_DEVTOOL_SESSION_ID` and `SETU_DEVTOOL_SESSION_KEY` from runtime services, refuses invalid pairs, and never generates, writes or prints credentials. The launcher names `SETU_DEVTOOL_MEMBER`; `scripts/dev.mjs` (Node) or `scripts/dev.ts` (Deno) forwards all three only to that member and blanks siblings. Node selects `npm run dev` for that member, `npm run start:dev` for others, and keeps selected children in the launcher process group. Stale runners are refused with a delete-and-rerun remedy. All three names are published CLI surface; the Deno root task grants environment access to exactly them. Node enablement writes only the member package.json, refuses conflicting framework pins or a developer-owned dev script, prints `npm install`, and never runs it. Older CLI-owned entries remain recognized. |
+| `--devtool-port <n>`                            | `new`, `generate app`, `devtool enable`               | The IPv4 loopback port the connector binds. Range-checked like `--port`; refused when it equals any member's application or devtool port. Absent, it is allocated in a workspace and probes 4919 through 5019 standalone.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `--transport <name>`                            | `new --workspace`                                     | How the workspace's services talk to each other: `http` (default), `grpc`, `memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Recorded in `setu.workspace.json`; every member added later inherits it. A usage error on a standalone project, on `generate app`, or for an unknown value.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `--transport-url <url>`                         | `new --workspace`                                     | Replaces the baked local fallback for the endpoint-shaped broker transports. A usage error for `http`, `grpc` and `memory`, which have no broker to address, and for `pubsub` and `service-bus`, whose connection value is a project id or a secret read from the environment — that refusal names the variable.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `--style functional\|class-based`               | `new`, `generate app`                                 | The decorator-and-DI axis, separate from `--template`: `functional` (default) installs neither `DecoratorPlugin` nor `DiPlugin`; `class-based` installs both together. Accepted on the styleable templates `rest` and `microservice`; refused with no template to apply to, with an unknown value, and on `full-stack`, which composes through a starter and has no controller or ingress seam. `--template class-based` is a byte-identical alias of `--template rest --style class-based`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--broker <name>`                               | `new` (standalone)                                    | The project's own message broker: `memory` (default), `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`. Rewrites the template's `MessagingPlugin` wiring to that arm, adds the arm's connection variable to the generated dotenv pair, and emits `docker/compose.yaml` starting the broker so the scaffold can complete `app.start()`. Refused — each with its own reason, never silently ignored — on Cloudflare Workers (the runtime swap removes both wirings), starter-composed templates (`full-stack`; a factory-rendered plugin list would drop the rewrite), templates registering no messaging (`rest` and no template; `microservice` registers messaging in every style), unknown names, and `--workspace`/`generate app` (a workspace's transport is chosen once with `--transport`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `--queue <name>`                                | `new` (standalone)                                    | The job queue backend: `memory` (default), `redis`, `rabbitmq`. Same overlay as `--broker`, applied to the `QueuePlugin` wiring, sharing the connection variable and Compose service when both flags name the same arm. Refused for the brokers the queue does not support (`nats`, `kafka`, `pubsub`, `service-bus`) and everywhere `--broker` is refused.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| `--redis-client <name>`                         | `new`, `add` (with a Redis arm)                       | M117: `ioredis` (default, output unchanged) or `node-redis`. A node-redis project depends on `redis` instead of `ioredis` and wires each Redis-backed plugin with `client: nodeRedisClient(<url>)` from a generated `src/node-redis.ts` (one client per plugin; the backplane also gets `subscriber`), keeping `setu.config.ts` free of third-party imports. `--workspace --transport redis --redis-client node-redis` records `redisClient: 'node-redis'` in the workspace manifest (absent = ioredis); `generate app` and member `setu add` follow it. Refused (exit 2) without a Redis arm, on Cloudflare Workers, on `generate app`, inside a workspace member, and for an unknown value; an unknown stored `redisClient` is refused (exit 1) by name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `--yes`, `-y`                                   | `new`                                                 | Take every default and ask nothing. A no-op when no prompter is present, never an error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `--scope <scope>`                               | `generate library`                                    | The import scope a shared library is named under, without the leading `@`. Defaults to the workspace directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--name <member>`                               | `adopt`                                               | The member name the converted project takes. Defaults to the project directory name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--agents`                                      | `new`                                                 | Write the project's `AGENTS.md` agent brief after scaffolding, through the same writer `setu agents` uses. On `--workspace`, the brief is written for the new root. Opt-in: `setu new` writes no brief without it, and `setu add` does not run the writer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `--check`                                       | `agents`                                              | Render every brief the command would write and compare it with the section on disk, writing nothing. Exit `0` when every file matches; exit `1` naming each file that is missing a section or whose section differs. Refused together with `--dry-run` (exit `2`). Card presence is not checked, so it does not depend on whether `install` has run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--dir <path>`                                  | `new`, `generate`, `add`, `agents`                    | Operate on this directory instead of the working directory. A relative path is resolved against the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `--dry-run`                                     | `new`, `generate`, `add`, `agents`, `workspace ports` | Prints `would create <path>` per file and performs zero writes and zero directory creations. On `add`, prints `would update <manifest>` instead, since it edits files rather than creating them. On `agents`, prints `would write <path>` per brief. `workspace ports` prints `would update <path>` for each managed file instead of writing the workspace manifest.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `--help`, `-h`                                  | both                                                  | Prints usage and exits `0`. `setu generate --help` lists only the schematics available here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--version`, `-v`                               | —                                                     | Prints the version read from the package's own `deno.json` and exits `0`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
 Every command refuses an option outside its own set — subcommand-aware for `generate app`,
 `generate library`, and `workspace ports` — with exit `2` and nothing written, suggesting the
@@ -10117,6 +10370,14 @@ A **workspace root** is refused (exit `2`, nothing written) — recognised by `s
 each member, because `setu generate` reads the member's manifest for plugin gating; run
 `setu add <plugin> --dir <member directory>` instead.
 
+Since 0.11.0 (M119f), optional peers supplied by `setu add` are also recorded in the workspace
+root's `package.json` `dependencies` when the target is a listed Node/Bun Setu workspace member. The
+same `CLIENT_RANGES` ranges remain in the member; existing peer entries in either manifest are
+preserved. Both edited paths are printed, and the writes share rollback handling. An absent root
+manifest keeps member-only behavior; JSONC or invalid/unreadable JSON is refused by the root
+filename before any writes. Deno workspaces and standalone projects are unchanged. See
+[Optional peers in a workspace](docs/plugins.md#optional-peers-in-a-workspace).
+
 Exit codes follow the table below: `0` on success, `1` when the directory holds no manifest or a
 manifest cannot be parsed, `2` for an unknown package name, a missing argument, or a workspace root.
 
@@ -10125,9 +10386,9 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 Writes or checks the project's agent brief: `AGENTS.md` in the project directory. The CLI owns one
 section, delimited by `<!-- setu-agents:begin -->` and `<!-- setu-agents:end -->`, and regenerates
 it from the project's real state — the installed `@setu-ts/*` packages, style, runtime, the scripts
-its manifest defines, and the schematics available to it. The line after `begin` reads "Generated by
-`setu agents` from this project's manifests. Edits between these markers are overwritten." Every
-byte outside the markers is preserved, so a developer-owned preamble survives a rewrite.
+its manifest defines, and the schematics available to it. The line after `begin` reads
+"`setu agents` reads manifests and overwrites these markers' contents." Every byte outside the
+markers is preserved, so a developer-owned preamble survives a rewrite.
 
 The marker arrangements have one behaviour each: an absent file is created containing only the
 section; a file with no markers gets the section at the top, one blank line, then its existing
@@ -10177,12 +10438,12 @@ and neither command edits an existing file silently.
 
 ### Exit codes
 
-| Code  | Meaning                                                                                                                                                                                                                                                     |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `0`   | Success (including `--help` and `--version`).                                                                                                                                                                                                               |
-| `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                         |
-| `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
-| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                   |
+| Code  | Meaning                                                                                                                                                                                                                                                                      |
+| ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `0`   | Success (including `--help` and `--version`).                                                                                                                                                                                                                                |
+| `1`   | Runtime error: a gated schematic's plugin is absent, a target file exists, a write failed, the application failed to load or start, a command handler threw, or a command name is registered twice.                                                                          |
+| `2`   | Usage error: unknown command or schematic, missing argument, unknown `--runtime`, an unusable `--broker`/`--queue`/`--redis-client` value, an option the command does not recognize, or a name that cannot form an identifier (empty after normalization, or digit-leading). |
+| `130` | Interrupted or cancelled; built-in writes are rolled back, or plugin application shutdown was attempted. Incomplete recovery is reported.                                                                                                                                    |
 
 Rollback covers SIGINT (Ctrl+C) and caught errors only. SIGTERM, SIGKILL (`kill -9`) and power loss
 end the command without rollback. Re-running `setu adopt` converges; an interrupted `new` or
@@ -10255,15 +10516,15 @@ rather than a registration: `setu.config.ts` does not import it, and you import 
 function is needed. In a class-based project the same path holds the `APP_SERVICES` array of
 `@Injectable` classes, which the scaffolded config does pass to `DecoratorPlugin`.
 
-> **The Node target runs TypeScript through `tsx`, not through type stripping.** Node's built-in
+> **Node development runs TypeScript through `tsx`; production runs the bundle.** Node's built-in
 > support (`--experimental-strip-types`) ERASES types without transforming code, so it cannot run a
 > decorator — V8 has not shipped them, so even a TC39 **standard** decorator is a bare
 > `SyntaxError: Invalid or unexpected token` there — or the constructor parameter property
 > `setu generate module` emits (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). A generated Node project
-> therefore declares `tsx` in `devDependencies` and starts with `tsx main.ts`, which transforms
-> both; its `tsconfig.json` sets no decorator option, because standard decorators need none. Bun
-> compiles TypeScript outright and Deno and Workers never invoke it, so no other target carries the
-> dependency.
+> therefore declares `tsx` in `devDependencies` and develops with `tsx watch main.ts`, which
+> transforms both; its `tsconfig.json` sets no decorator option, because standard decorators need
+> none. Bun compiles TypeScript outright and Deno and Workers never invoke it, so no other target
+> carries the dependency.
 
 > **The Workers target carries an npm manifest as well as `deno.json`.** `wrangler` bundles
 > `src/index.ts` with esbuild, which does not read a Deno import map, so a scaffolded Workers
@@ -10550,25 +10811,25 @@ schematic emits its artifact plus its family's seam barrel; the barrel is regene
 its directory, and the scaffolded `setu.config.ts` already imports it. Some artifacts have no
 registration site, and the reason is recorded rather than left to discovery.
 
-| Schematic          | Emitted at                                                                                                                          | Registration site                                                                                                                                    |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `module`           | `src/modules/<name>/` (no file in the controllers folder)                                                                           | `DecoratorPlugin({ modules })` via `MODULES` (class mode); `registerModules(app.router, app.services)` from `src/modules/index.ts` (functional mode) |
-| `controller`       | `src/controllers/<name>.controller.ts`; `src/modules/<module>/` with `--module`                                                     | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS` (class mode); the module's `index.ts` (functional mode)                                     |
-| `service`          | `src/services/<name>.service.ts`; `src/modules/<module>/` with `--module`                                                           | `DecoratorPlugin({ services })` via `APP_SERVICES` — see below                                                                                       |
-| `route`            | `src/controllers/<name>.routes.ts`; `src/modules/<module>/` with `--module` (functional mode)                                       | `registerGeneratedRoutes(app.router, app.services)` in `createApp()`, or the module's `index.ts` (functional mode)                                   |
-| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                    | Nothing — the feature that uses it imports it                                                                                                        |
-| `sse`              | `src/controllers/<name>.controller.ts`, plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | HTTP registrar; the hook, when emitted, remains application-local                                                                                    |
-| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                               | `...GENERATED_PLUGINS` in `createApplication({ plugins })`; class-based: `DecoratorPlugin({ ingress })`                                              |
-| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                               | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                                                                                                |
-| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                      | `...GENERATED_PLUGINS` in `createApplication({ plugins })`                                                                                           |
-| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                    | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`                                                                                               |
-| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                      | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`                                                                                              |
-| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                  | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                     |
-| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                      | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                         |
-| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                    | `EventsPlugin({ handlers: EVENT_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                            |
-| `guard`            | `src/guards/<name>.guard.ts`                                                                                                        | **None** — per route, by design (see below)                                                                                                          |
-| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                                                          | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })`      |
-| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                  | **None** — the framework ships no migration runner                                                                                                   |
+| Schematic          | Emitted at                                                                                                                                                                                       | Registration site                                                                                                                                                               |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `module`           | `src/modules/<name>/`; the first module switches a flat project to modules (`--adopt-controllers` moves the flat controllers and services in)                                                    | `registerModules(app.router, app.services)` from `src/modules/index.ts`, plus `DecoratorPlugin({ modules })` via `MODULES` (class mode)                                         |
+| `controller`       | `src/controllers/<name>.controller.ts`; `src/modules/<module>/<name>.controller.ts` with `--module` (required once the project has modules)                                                      | `DecoratorPlugin({ controllers })` via `APP_CONTROLLERS` (class mode) or `registerGeneratedRoutes`; in a module, its `@Module` declaration (class) or its `index.ts` (function) |
+| `service`          | `src/services/<name>.service.ts`; `src/modules/<module>/<name>.service.ts` with `--module` (required once the project has modules)                                                               | `DecoratorPlugin({ services })` via `APP_SERVICES`, or in a module its `@Module({ providers })` — see below                                                                     |
+| `route`            | a function controller: `src/controllers/<name>.controller.ts`; `src/modules/<module>/<name>.controller.ts` with `--module`                                                                       | `registerGeneratedRoutes(app.router, app.services)` in `createApp()`, or the module's `index.ts`                                                                                |
+| `schema`           | `src/shared/schemas/<name>.schemas.ts`; `src/modules/<module>/<name>.schemas.ts` with `--module`                                                                                                 | Nothing — the feature that uses it imports it                                                                                                                                   |
+| `sse`              | `src/controllers/<name>.controller.ts`; `src/modules/<module>/<name>.controller.ts` with `--module`; plus `src/hooks/use-<name>.ts` ONLY when `react-router-plugin` and `sdk` are both installed | As for `controller`; the hook, when emitted, remains application-local                                                                                                          |
+| `ws-route`         | `src/plugins/<name>.plugin.ts`; class-based: `src/ingress/<name>-ws-route.ingress.ts`                                                                                                            | `...GENERATED_PLUGINS` in `createApplication({ plugins })`; class-based: `DecoratorPlugin({ ingress })`                                                                         |
+| `middleware`       | `src/middleware/<name>.middleware.ts`                                                                                                                                                            | `app.middleware.add(...)` over `GENERATED_MIDDLEWARE`                                                                                                                           |
+| `plugin`           | `src/plugins/<name>.plugin.ts`                                                                                                                                                                   | `...GENERATED_PLUGINS` in `createApplication({ plugins })`                                                                                                                      |
+| `health-indicator` | `src/health/<name>.indicator.ts`                                                                                                                                                                 | `HealthPlugin({ indicators: [...HEALTH_INDICATORS] })`                                                                                                                          |
+| `metric`           | `src/metrics/<name>.metric.ts`                                                                                                                                                                   | `MetricsPlugin({ customMetrics: [...CUSTOM_METRICS] })`                                                                                                                         |
+| `command-handler`  | `src/cqrs/<name>.command-handler.ts`; class-based: `src/ingress/<name>-command-handler.ingress.ts`                                                                                               | `CqrsPlugin({ commandHandlers: COMMAND_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                                                |
+| `query-handler`    | `src/cqrs/<name>.query-handler.ts`; class-based: `src/ingress/<name>-query-handler.ingress.ts`                                                                                                   | `CqrsPlugin({ queryHandlers: QUERY_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                                                    |
+| `event-handler`    | `src/events/<name>.event-handler.ts`; class-based: `src/ingress/<name>-event-handler.ingress.ts`                                                                                                 | `EventsPlugin({ handlers: EVENT_HANDLERS })`; class-based: `DecoratorPlugin({ ingress })`                                                                                       |
+| `guard`            | `src/guards/<name>.guard.ts`                                                                                                                                                                     | **None** — per route, by design (see below)                                                                                                                                     |
+| `job`              | `src/jobs/<name>.job.ts`; class-based: `src/ingress/<name>-job.ingress.ts`                                                                                                                       | Functional + queue: `QueuePlugin({ processors: [...QUEUE_PROCESSORS] })`; standalone without queue; class-based: `DecoratorPlugin({ ingress })`                                 |
+| `migration`        | `src/migrations/<stamp>-<name>.ts`                                                                                                                                                               | **None** — the framework ships no migration runner                                                                                                                              |
 
 Registration details for artifacts with conditional or per-route wiring:
 
@@ -10707,7 +10968,8 @@ admitted module: in functional mode the file lands in `src/modules/<name>/` and 
 CLI-owned `index.ts` is regenerated to register it, with a module-scoped route or controller
 mounting at `/<module>/<name>`; in class-based mode the file is written and the
 `@Module({ providers | controllers })` line to add is printed — the declaration is never edited —
-and a module-scoped service registers under the token `<module>-<name>-service`.
+and a module-scoped service registers under the token `<module>.<name>-service` (for example
+`billing.invoice-service`).
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
 setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their
@@ -10930,6 +11192,10 @@ makes `--dry-run` exact.
 `modules` is optional so that a harness written before it existed still compiles; `setu generate`
 always supplies it. `targetModule` and `moduleArtifacts` are optional for the same
 published-interface reason, and are supplied only when `--module` names an admitted module.
+`GeneratedFile.bytes`, when present, supplies exact binary contents instead of encoding `contents`.
+`CliDependencies.fetch` optionally injects the example downloader; it defaults to
+`globalThis.fetch`.
+
 `GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
 
 ### Programmatic API
@@ -10937,10 +11203,10 @@ published-interface reason, and are supplied only when `--module` names an admit
 | Export             | Kind      | Purpose                                                                                                                                                  |
 | ------------------ | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `runCli`           | function  | Runs the CLI and RETURNS an exit code; never calls `Deno.exit`.                                                                                          |
-| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting and interruption.                                                                    |
+| `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting, interruption and the verified logical working directory.                            |
 | `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                                                                                     |
 | `DerivedNames`     | type      | The result of `deriveNames`.                                                                                                                             |
-| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                                                                                    |
+| `GeneratedFile`    | type      | `{ path, contents, managed?, bytes? }` — one file a schematic asks to create.                                                                            |
 | `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                                                                                          |
 | `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`, and with `--module` the optional `targetModule?` and `moduleArtifacts?`). |
 | `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                                                                                         |
@@ -10954,7 +11220,9 @@ published-interface reason, and are supplied only when `--module` names an admit
 
 `CliDependencies` has no default: `src/main.ts` owns the process boundary (`Deno.args`,
 `Deno.cwd()`, `console`, the real filesystem, and the single `Deno.exit`), so every other path is
-testable without terminating the runner.
+testable without terminating the runner. Its optional `logicalCwd` member carries the shell's `PWD`
+only when it is absolute and resolves to the physical working directory; `setu agents` uses it
+solely to refuse a write through a symlinked workspace member, never to authorize one.
 
 ### Not in this release
 
@@ -11838,30 +12106,30 @@ and every read here sends `passing=true`.
 
 ### Exports
 
-| Export                              | Kind      | Purpose                                                            |
-| ----------------------------------- | --------- | ------------------------------------------------------------------ |
-| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                 |
-| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                     |
-| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                 |
-| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                 |
-| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                             |
-| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`) |
-| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                 |
-| `StaticServiceDefinition`           | interface | One entry of a static service list                                 |
-| `EjectionOptions`                   | interface | Ejection tuning                                                    |
-| `SelfRegistration`                  | interface | What this instance advertises                                      |
-| `SelfRegistrationCheck`             | interface | The mandatory health check                                         |
-| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                          |
-| `StaticProvider`                    | class     | The `'static'` provider                                            |
-| `ConsulProvider`                    | class     | The `'consul'` provider                                            |
-| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                        |
-| `DnsProvider`                       | class     | The `'dns'` provider                                               |
-| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                    |
-| `DiscoveryHttpResponse`             | interface | Buffered response shape                                            |
-| `DiscoveryHttpStream`               | interface | Streaming response shape                                           |
-| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                      |
-| `DiscoveryUnavailableError`         | class     | Cold backend failure, missing DNS resolver, k8s multi-port         |
-| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                  |
+| Export                              | Kind      | Purpose                                                                  |
+| ----------------------------------- | --------- | ------------------------------------------------------------------------ |
+| `ServiceDiscoveryPlugin`            | function  | The plugin factory                                                       |
+| `ServiceDiscoveryPluginOptions`     | type      | The discriminated option union                                           |
+| `StaticDiscoveryOptions`            | interface | The `'static'` arm                                                       |
+| `ConsulDiscoveryOptions`            | interface | The `'consul'` arm                                                       |
+| `KubernetesDiscoveryOptions`        | interface | The `'kubernetes'` arm                                                   |
+| `DnsDiscoveryOptions`               | type      | The `'dns'` arm (`SrvDnsDiscoveryOptions \| ADnsDiscoveryOptions`)       |
+| `CustomDiscoveryOptions`            | interface | The `'custom'` arm                                                       |
+| `StaticServiceDefinition`           | interface | One entry of a static service list                                       |
+| `EjectionOptions`                   | interface | Ejection tuning                                                          |
+| `SelfRegistration`                  | interface | What this instance advertises                                            |
+| `SelfRegistrationCheck`             | interface | The mandatory health check                                               |
+| `DiscoveryProvider`                 | interface | The provider port, for the `'custom'` arm                                |
+| `StaticProvider`                    | class     | The `'static'` provider                                                  |
+| `ConsulProvider`                    | class     | The `'consul'` provider                                                  |
+| `KubernetesProvider`                | class     | The `'kubernetes'` provider                                              |
+| `DnsProvider`                       | class     | The `'dns'` provider                                                     |
+| `IDiscoveryHttp`                    | interface | The injectable HTTP seam (buffered + streaming)                          |
+| `DiscoveryHttpResponse`             | interface | Buffered response shape                                                  |
+| `DiscoveryHttpStream`               | interface | Streaming response shape                                                 |
+| `createDefaultDiscoveryHttp`        | function  | The default seam over `fetch`                                            |
+| `DiscoveryUnavailableError`         | class     | Cold backend failure (branded 503), missing DNS resolver, k8s multi-port |
+| `SelfRegistrationNotSupportedError` | class     | `selfRegistration` on an arm that cannot register                        |
 
 ### Notes
 
@@ -12198,8 +12466,36 @@ app.register({
 | `IErrorResponder.statusFor?(error: unknown): number`                             | Request logger                                                        | Pure prediction of the owner's served status rule; no clamp reporting; custom response-hook status overrides are not reflected |
 
 `isConnectionFault(error: unknown): boolean` walks up to five cause objects, stops at cycles, and
-recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections. It
+recognises the eight node/net connection-fault codes plus measured ioredis 5 outage rejections and,
+since M117, node-redis 6's: messages `The client is closed`, `The client is offline`,
+`Socket closed unexpectedly`, `Connection timeout`, and the pattern
+`Socket timeout timeout. Expecting data, but didn't receive any in <n>ms.` (all `name: 'Error'`). It
 never mutates errors. Command errors such as WRONGTYPE remain unclassified.
+
+**node-redis (M117, 0.11.0).**
+`fromNodeRedis(client: NodeRedisClientLike | NodeRedisClientFactory, options?: NodeRedisAdapterOptions): NodeRedisAdapter`
+wraps a node-redis client (`redis` v5/v6) in one ioredis-shaped adapter that every Redis-backed
+plugin's `client` option accepts (`IRedisClient`, `IRedisQueueClient`, `IRedisStreamsClient`,
+`IRedisBackplaneClient`, `IRedisLockClient`, `IRedisIdempotencyClient`, `IRateLimitRedisClient`).
+`NodeRedisClientLike` is structural — `isOpen`, `isReady`, `connect()`, `sendCommand(args)`,
+`close()`, `destroy()`, `on`/`off`, `subscribe(channel, listener)`, `unsubscribe(channel)` — and no
+package imports `redis`. Commands go through `sendCommand` with ioredis's argument rule (`undefined`
+dropped, arrays spread one level, numbers as strings). `NodeRedisAdapterOptions.commandTimeoutMs`
+(default `15000`; `0` disables; a finite number up to `2147483647`, otherwise `RangeError`) bounds
+every command and the lazy connect, rejecting with `Error('Command timed out')`; the node-redis
+command is not cancelled. `onError(error)` receives the client's `'error'` events through a listener
+the adapter always attaches. RESP3 map replies become RESP2 shapes (`XREADGROUP`/`XREAD` →
+`[key, value]` pairs; other maps → flat arrays). `connect()` resolves at once for an open client and
+connects once otherwise; `quit()` is idempotent, closes with `close()` and falls back to `destroy()`
+past the bound; `disconnect()` destroys; `status` is `'wait'`, `'connecting'`, `'ready'` or `'end'`.
+Pub/sub: `subscribe(channel)` delivers `(channel, message)` to `on('message', …)` listeners. Cluster
+and sentinel clients are not supported. `NodeRedisClientFactory`
+(`() => NodeRedisClientLike | Promise<NodeRedisClientLike>`) may be passed instead of a client: it
+is called once, on the first connect (a rejection is retried on the next), and listeners registered
+with `on`/`off` before then are attached when the client exists. A factory that imports `redis`
+inside it is how a client built at module load is traced: OpenTelemetry patches `@redis/client` as
+Node loads it, after `TelemetryPlugin` has registered. A `quit()` before or during the first connect
+opens no socket, and one issued while a connect is in flight closes the socket that connect opens.
 
 `isConnectionFaultCode(code: unknown): boolean` returns true only for a string in the module-private
 set: `ECONNREFUSED`, `ECONNRESET`, `ETIMEDOUT`, `EHOSTUNREACH`, `ENETUNREACH`, `ENOTFOUND`,
@@ -12208,6 +12504,23 @@ export; callers cannot mutate the classification vocabulary.
 
 The contract layer every other package builds on. Implemented in **Milestone 1**; this section is
 the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+### Realtime subscriber dispatch (0.11.0)
+
+`dispatchRealtimeFrame(handlers: Iterable<RealtimeFrameHandler>, frame: RealtimeFrame, reporter: IRealtimeHandlerErrorReporter): boolean`
+snapshots subscribers, isolates synchronous throws and returned thenable rejections, and reports
+each completion. It returns `false` only for synchronous throws; asynchronous outcomes are unknown
+at return, preserving the M98l receive count.
+
+`IRealtimeHandlerErrorReporter` exposes `failed(handler, error, frame): void` and
+`succeeded(handler): void`; implementations must not throw. `createRealtimeHandlerErrorReporter`
+accepts `RealtimeHandlerErrorReporterOptions` (`source`, call-time `logger`, optional
+`onHandlerError(error, frame)`) and returns that interface. A WeakMap tracks failures per handler:
+first failure warns, subsequent failures debug with `repeats` starting at 1, the next success logs
+`subscriber recovered after N failures` at info and rearms the warning. Diagnostics use
+`describeError` and metadata `{ source, error, frameKind, frameName }`, never frame data. The hook
+replaces all default logging and receives every failure. Logger and hook failures are swallowed; no
+clock or timers are involved. Both backplane provider packages consume these exports.
 
 ### Diagnostics alias character policy
 
@@ -12227,10 +12540,13 @@ number) and map classifications to a `Redactor`. Matching is case-insensitive by
 `createRedactionService(policy, { caseSensitive: true })` enables case-sensitive matching. When
 patterns overlap, the most specific match wins; equally specific patterns retain declaration order.
 `eraseRedactor` replaces values with `'[Redacted]'`, while `createMaskRedactor({ keep: 4 })`
-preserves a trailing suffix of strings. `redactRecord()` is clone-on-write: it never mutates caller
-metadata, preserves unclassified subtrees by identity, and descends only into plain objects and
-arrays. The logger, telemetry, and audit plugins accept either a policy or an `IRedactionService`
-through their `redaction` option; this is an option-passed pure utility, not a capability token.
+preserves a trailing suffix of strings. `redactRecord()` never mutates caller metadata and descends
+only into plain objects and arrays. Since 0.11.0 it returns a snapshot: each plain object and array
+it walks is read once and copied, unclassified subtrees included, so what a logger serializes is
+exactly what redaction checked (a getter cannot change it afterwards). Earlier versions returned
+unclassified subtrees by identity. The logger, telemetry, and audit plugins accept either a policy
+or an `IRedactionService` through their `redaction` option; this is an option-passed pure utility,
+not a capability token.
 
 `RedactionPolicy` has three members:
 
@@ -12260,11 +12576,18 @@ reaches `redactors[<string>]`):
 
 ### Values (runtime exports)
 
+<!-- version:history -->
+
 | Export                                                 | Kind                                                                                                                                                                                                                                                                                                                                                                                                                                      | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CAPABILITIES`                                         | const                                                                                                                                                                                                                                                                                                                                                                                                                                     | Standard capability tokens — the single source of truth. Includes `SSE: 'sse'` (SSE hub), `SSR: 'ssr'` (SSR framework), `WORKER_POOL: 'worker-pool'` (worker thread pool), `REALTIME_BACKPLANE: 'realtime-backplane'` (cross-replica fan-out), `SESSION: 'session'` (cookie sessions), `AUTH_SESSION: 'auth-session'` (signed-in principal), `VIEW: 'view'` (view rendering), `LOCALIZATION: 'localization'` (message catalogues and locale resolution, M103), `OUTBOX: 'outbox'` (transactional outbox, `outbox.<name>` for a named messaging instance, M107), `INBOX: 'inbox'` (consumer inbox, `inbox.<name>` for a named messaging instance, M108)                                                                                                                                                                                                                                                                                                                                        |
 | `createCapabilityToken(name)`                          | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Validates and creates a custom (optionally dot-namespaced) token; throws `TypeError` on invalid names                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `isConnectionFault(error)`                             | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Recognises connection outages through a bounded, cycle-safe cause walk, including measured ioredis rejection shapes.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `fromNodeRedis(client, options?)`                      | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | M117: wraps a node-redis client in the ioredis-shaped adapter every Redis-backed plugin's `client` option accepts                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `NodeRedisClientFactory`                               | type                                                                                                                                                                                                                                                                                                                                                                                                                                      | M117: creates the node-redis client on the adapter's first connect, so `redis` can load after `TelemetryPlugin` registers its instrumentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `NodeRedisClientLike`                                  | type                                                                                                                                                                                                                                                                                                                                                                                                                                      | M117: the structural node-redis client `fromNodeRedis` takes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `NodeRedisAdapterOptions`                              | type                                                                                                                                                                                                                                                                                                                                                                                                                                      | M117: `commandTimeoutMs`, `onError`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `NodeRedisAdapter`                                     | type                                                                                                                                                                                                                                                                                                                                                                                                                                      | M117: the adapter `fromNodeRedis` returns                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `isConnectionFaultCode(code)`                          | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Returns true only for a string in the private eight-code node/net connection-fault set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `encodeFrameData(data)`                                | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Encodes a WebSocket payload for a realtime backplane; binary becomes base64                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `decodeFrameData(payload)`                             | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Decodes a backplane payload back to `string` or `Uint8Array`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -12273,7 +12596,7 @@ reaches `redactors[<string>]`):
 | `deadlineRangeError(name, timeoutMs)`                  | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | **Since M101a.** Returns the `RangeError` naming `name` for a deadline outside `0`–`2147483647` (including `NaN`), or `null` when valid — so an option holder can refuse a bad value at construction with the same message `withDeadline` uses                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `DeadlineOptions`                                      | type                                                                                                                                                                                                                                                                                                                                                                                                                                      | **Since M101a.** `{ timeoutMs, onTimeout, timing? }` for `withDeadline`; `timing` is the `setTimer`/`clearTimer` surface, typically `resolveProbeTiming(ctx.runtime)`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `resolveProbeTiming(runtime)`                          | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Resolves a probe's clock-and-timer surface — `{ hrtime, setTimer, clearTimer }` bound to the injected `IRuntimeServices` (e.g. `ctx.runtime`), ready to spread into `createCachedProbe`'s options. NO ambient `performance.now()`/`Date.now()` fallback: all time access outside `packages/runtime` goes through `IRuntimeServices` (AI_GUIDELINES §4), so a caller with no runtime to inject has no clock the probe may lawfully read                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `createConnectionErrorReporter(options)`               | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose message differs from the previous, logs at `warn`; a repeat of the previous message logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. Only the error's message is logged, never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                                                                                                        |
+| `createConnectionErrorReporter(options)`               | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Builds a de-duplicating sink for one connection's error events from `{ source, logger }`, where `logger` is a thunk read at CALL time. The first error of a run, or one whose rendering differs from the previous, logs at `warn`; a repeat of the previous rendering logs at `debug` with a `repeats` count; `recovered()` after at least one error logs once at `info` and resets, so the next outage warns again. The error is rendered by `describeError` — name, message, safe classifiers, aggregate members and the cause chain — and never its stack. Neither method throws — a failing logger or an unstringifiable value is swallowed, since the caller is an event-emitter listener. An accessor returning `undefined` drops the event (no log sink is registered; the owning package's `isHealthy` probe still reports the outage)                                                                                                                                                |
 | `attachConnectionErrorReporter(client, reporter?)`     | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Attaches a reporter to a client's `'error'` (→ `report`) and `'ready'` (→ `recovered`) events, returning `false` when the value exposes no `on` method. With no `reporter` the listeners still attach and drop every event, so a built client never writes to the console. For clients a package BUILT: an injected client belongs to the caller, and adding an `'error'` listener to it would silence the caller's own handling, since `ioredis` falls back to `console.error` only when no listener exists                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `parseCookie(header)`                                  | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Parses a `Cookie` header into a name→value record; percent-decodes, strips RFC 6265 quoting, first occurrence wins. Here because the session plugin and the decorator plugin's `Cookie()` source both need it and no plugin may import another                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `serializeCookie(n, v, a?)`                            | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Serializes a `Set-Cookie` value; percent-encodes so a payload cannot inject attributes, and forces `Secure` alongside `SameSite=None`. Throws `TypeError` on an invalid name or a non-integer `maxAge`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -12281,6 +12604,7 @@ reaches `redactors[<string>]`):
 | `isWorkerTaskRequest(m)`                               | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Guard: narrows a worker message to a `WorkerTaskRequest`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `isWorkerTaskReply(m)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Guard: narrows a worker message to a `WorkerTaskReply`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `PLUGIN_PRIORITY`                                      | const                                                                                                                                                                                                                                                                                                                                                                                                                                     | Well-known plugin priority bands (`HIGHEST`…`LOWEST`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `createToken<T>(name)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Creates a typed DI token (M125): a frozen `{ name }` object that `IContainer.register`, `resolve` and `has` accept and match by identity, and from which `resolve` infers `T` with no type argument. Pure — it keeps no counter or other state, so two calls with one name are two distinct tokens. A DI token, not a capability token: it is never checked against the capability-token grammar.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `ok(value)` / `err(error)`                             | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | `Result` constructors                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `isOk(r)` / `isErr(r)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | `Result` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `unwrap(r)`                                            | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Returns the `Ok` value or throws the `Err` error                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -12288,13 +12612,14 @@ reaches `redactors[<string>]`):
 | `isSome(o)` / `isNone(o)`                              | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | `Option` type guards                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `fromNullable(v)`                                      | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Converts `T \| null \| undefined` to `Option<T>`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `serializeError(value)`                                | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Serializes any thrown value into a plain `SerializedError` (`{ name, message, stack?, cause?, classifiers?, errors?, omittedErrorCount? }`) with the `cause` chain followed to a bounded depth. `classifiers` only carries strings, finite numbers, and booleans from `code`, `errno`, `syscall`, `severity`, `constraint`, `codeName`, and `statusCode`; payload objects such as query data and `$metadata` are omitted. `errors` is present only for an `AggregateError`. Classifier strings cap at 512 Unicode code points, `AggregateError.errors` caps at eight direct members, and one call produces at most 64 error nodes; a truncated aggregate reports `omittedErrorCount`. A non-`Error` value yields `{ name: 'Error', message: String(value) }`. Pure — no runtime-specific APIs. Here so the logger plugin (metadata normalization), the kernel (fallback-500 logging), `exceptions`, `grpc-plugin`, and `notification-plugin` can all serialize without importing one another. |
+| `describeError(value)`                                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Renders any thrown value as ONE bounded diagnostic line for a string log sink: `Name: message (code=…, …) [inner; inner] <- cause`, built from the same `serializeError` record, so a non-`Error` value yields `Error: <string>` and an `AggregateError` lists its members. Whitespace and control or format characters collapse to a single space (one value cannot inject a line break), and the line caps at 8192 Unicode code points with `… [truncated]`. Pure and total — it never throws, whatever getters a value carries. Shared by `createConnectionErrorReporter`, the idempotency plugin's claim/release/settle lines, and the messaging plugin's broker error lines, which re-export it (M119g).                                                                                                                                                                                                                                                                                 |
 | `causeMessage(value)`                                  | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Extracts a caller-facing message from any thrown value: its `message` when it is an `Error`, `String(value)` otherwise. The one-line counterpart of `serializeError` — that shapes a record for a log sink, this supplies the sentence that goes inside another error's message. Pure. Here because `resolveRegistryEntry` and `@setu-ts/scheduler-plugin`'s declared-job refusal must produce the SAME sentence for the two arms of one option, and §2.2 forbids one reading the other's copy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `parseJsonBody(text)`                                  | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Parses one request-body text as JSON — the ONE parse all three `IRequest.json()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, so a malformed body answers `400` at every producer rather than a masked `500` on the served path while the test path answered `400` (X37-1). Throws `MalformedRequestBodyError`, carrying the platform `SyntaxError` as `cause` (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `DuplicateKeyError`                                    | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | A write that would duplicate a primary key or a unique index, branded `409 Conflict` with the fixed detail "A record with the same unique key already exists. The conflicting write was rejected." Carries the targeted `entity` when known and the driver error as `cause`, never served. Not retryable. In `common` because `@setu-ts/database-plugin` and `@setu-ts/cloudflare-plugin` raise it and any store recording "already processed" with a unique insert must recognise it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `assertPrimaryKeyUnchanged`                            | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | **Since M113g.** The one shared primary-key check every `update`/`updateWhere` of the eight `IDataSource` implementations (the seven `database-plugin` adapters and `cloudflare-plugin`'s D1 data source) runs before any I/O; throws `PrimaryKeyChangeError` when the payload carries an own key column whose value is not `undefined` and does not equal the addressed key's value for that column. An equal value is accepted, compared as a string for `string`, `number`, `bigint` and `ObjectId`-like values and by time for `Date` values. In `common` because `cloudflare-plugin` raises it too and §2.2 forbids it importing `database-plugin` (the `DuplicateKeyError` precedent). Ships in 0.10.0                                                                                                                                                                                                                                                                                  |
 | `PrimaryKeyChangeError`                                | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | **Since M113g.** An `update`/`updateWhere` payload that changes a row's primary key, branded `400 Bad Request` at construction with the fixed detail "An update cannot change a row's primary key." Thrown by `assertPrimaryKeyUnchanged` before any I/O; the `message` names the entity and the column, never a key value; `errorHandler` reads its hint. In `common` for the `DuplicateKeyError` reason — every `database-plugin` adapter and `cloudflare-plugin`'s D1 data source raise it, and an application must be able to `instanceof` it without importing either. Ships in 0.10.0                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `InvalidCursorError`                                   | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | **Since M113g.** A cursor the backend cannot use — a malformed token, a sort-fingerprint mismatch, or a decoded key-value list whose length or kinds do not fit the target — branded `400 Bad Request` at construction with the fixed detail "The pagination cursor is not valid for this query." Thrown (rejected) by the eight `findPage` implementations before any backend call; the `message` names the entity and which check failed, never the token or its values; `errorHandler` reads its hint. In `common` for the `DuplicateKeyError` reason. Ships in 0.10.0                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `OptionalDependencyUnavailableError`                   | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | Thrown when an optional, lazily-loaded dependency could not be imported (M113d). Carries the bare package name in `dependency` and the original rejection as `cause`; the message names both remedies (install it, or choose an option that does not need it on this runtime). A startup/configuration fault, so no HTTP status hint. In `common` because every converted loader `catch` (14 published packages and `cli`) throws it, and the named-error wrappers in gRPC, SAML and GraphQL carry it as `cause`; §2.2 forbids a plugin importing another plugin. Ships in 0.10.0                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `OptionalDependencyUnavailableError`                   | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | Thrown when an optional, lazily-loaded dependency could not be imported (M113d). Constructor: `(dependency: string, options?: { cause?: unknown; requiredBy?: string })`. Carries the bare package name in `dependency` and the original rejection as `cause`. Since 0.11.0, optional `requiredBy` names the loading npm package in the message only (no instance field); omitted names use generic wording. The message directs installation where that package is installed, within the version range that package declares for it, usually the workspace root in npm/Yarn/Bun workspaces, or choosing an option that does not need it. A startup/configuration fault, so no HTTP status hint. In `common` because every converted loader `catch` (14 published packages and `cli`) throws it, and the named-error wrappers in gRPC, SAML and GraphQL carry it as `cause`; §2.2 forbids a plugin importing another plugin. Ships in 0.10.0                                                  |
 | `MalformedRequestBodyError`                            | class                                                                                                                                                                                                                                                                                                                                                                                                                                     | The malformed request body rejection, branded `400 Bad Request` at construction with the fixed detail "The request body could not be parsed as JSON." The `cause` is the platform `SyntaxError` — kept for the log, never served (M90f)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `parseFormBody(body, contentType)`                     | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Parses one request body as a form — the ONE parse all three `IRequest.formData?()` implementations (`@setu-ts/runtime`'s served HTTP path, the kernel's `inject()`, `@setu-ts/testing`'s `MockRequest`) share, and the function every accessor-less fallback path calls (M94b). Adopts the web `FormData` semantics — ordered `getAll` for repeated names, `entries()` in wire order, file-versus-text discriminated on `filename !== undefined` (`filename=""` is still a file) — over a framework-owned value whose bytes stay synchronous. Throws `UnsupportedFormEncodingError` (`415`) for a non-form content-type (JSON, a missing content-type, a multipart type with no `boundary=`); an UNPARSEABLE multipart body yields an EMPTY form, the promoted parser's released behaviour, documented as the accessor's limit (M94b)                                                                                                                                                         |
 | `formEncodingOf(contentType)`                          | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Classifies a content-type as `'urlencoded'` or `'multipart'` — case-insensitively and parameter-tolerantly — or `undefined` when the type is not a parseable form, a multipart type with no `boundary=` included. The ONE classifier the upload middleware's multipart guard and the CSRF verifier's form guard both read, replacing two private `includes()` checks that had drifted on case folding (M94b)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -12323,6 +12648,7 @@ reaches `redactors[<string>]`):
 | `SESSION_TENANT_BINDING_STATE_KEY`                     | const                                                                                                                                                                                                                                                                                                                                                                                                                                     | `session-plugin:tenant-binding`, set to `true` by `session-plugin`'s middleware when `tenantBinding` is on; `multi-tenancy-plugin`'s tenant-side compare runs only when it reads `true`, so `tenantBinding: false` disables both compare sites in every middleware order (M101c, V8-7)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `tenantBindingMismatch(session, tenantId)`             | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | The pure tenant-binding compare shared by the two compare sites (M101c, V8-7): `true` only when the session is bound to a DIFFERENT tenant than the one resolved for the request; inert for an unbound session or a tenant-less request                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `createPathMatcher(patterns)`                          | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Builds a path-exclusion predicate from `readonly PathPattern[]`; strings match exactly and regular expressions are tested against the path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `installRequestIdentityGuard(prototype)`               | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Installs the identity guard once on a request class's prototype, so its instances need no per-request seal; called by the runtime's served request, the kernel's `inject()` request and `@setu-ts/testing`'s mock (0.11.0)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `sealRequestIdentity(request)`                         | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Installs the one-implicit-write request identity guard for `user`, `tenant` and `locale`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `replacePrincipal(request, principal)`                 | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Deliberately replaces `request.user` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `replaceTenant(request, tenant)`                       | function                                                                                                                                                                                                                                                                                                                                                                                                                                  | Deliberately replaces `request.tenant` after it has been guarded                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -12341,11 +12667,11 @@ reaches `redactors[<string>]`):
 | Service registry       | `IServiceRegistry`, `RegisterOptions`, `ServiceFactory<T>`, `RegistryFactory<T>`, `resolveRegistryEntry`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | HTTP                   | `IRequest`, `IResponse`, `IRequestContext`, `IMiddleware`, `MiddlewareFunction`, `NextFunction`, `RouteHandler`, `RouteDefinition`, `RouteSchema`, `SecurityRequirement`, `SECURITY_METADATA`, `RouteSecurityMetadata`, `withSecurityMetadata`, `securityMetadataOf`, `VALIDATION_METADATA`, `RouteValidationMetadata`, `withValidationMetadata`, `validationMetadataOf`, `RESPONSE_METADATA`, `RouteResponseMetadata`, `withResponseMetadata`, `responseMetadataOf`, `HandlerResult`, `ResponseSnapshot`, `ResponseSnapshotInit`, `UPGRADE_INTENT`, `WebSocketUpgradeIntent`, `setUpgradeIntent`, `upgradeIntentOf`, `isWebSocketUpgradeRequest`, `HTTP_STATUS_HINT`, `HttpStatusHint`, `withHttpStatusHint`, `httpStatusHintOf`                                                                                                                                                                                                                      |
 | Runtime                | `IRuntimeServices`, `IFileSystem`, `IHttpAdapter`, `IWorkerHost`, `IWorkerHandle`, `TimerHandle`, `ServerHandle`, `StatResult`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| DI (optional)          | `IContainer`, `Constructor<T>`, `ServiceScope`, `Provider<T>`, `ClassProvider<T>`, `FactoryProvider<T>`, `ValueProvider<T>`, `ProviderOptions<T>`, `InjectionToken<T>`, `ContainerToken<T>` — `string \| InjectionToken<T> \| Constructor<T>`, the token any `IContainer` method accepts — and `InjectEntry`, one `inject` element: a `ContainerToken` or `{ token, optional: true }`. See "DI container contract (M125)" below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | Logging                | `ILogger`, `LogMetadata`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Config                 | `IConfig`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Validation             | `IValidationService`, `ValidationTarget`, `ValidationIssue`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Health                 | `IHealthIndicator`, `HealthIndicatorFn`, `HealthIndicatorOptions`, `HealthCheckResult`, `IHealthService`, `HealthReport`, `HealthStatus`, `CachedProbeOptions`, `ProbeTiming`, `ConnectionErrorReporter`, `ConnectionErrorReporterOptions`, `ConnectionErrorLogger`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Metrics                | `IMetric`, `MetricConfig`, `IMetricsService`, `ICounter`, `IGauge`, `IHistogram`, `ISummary`, `MetricOptions`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | Auth                   | `IPrincipal`, `IJwtService`, `JwtSignOptions` — `IPrincipal` is `{ id: string; roles?: readonly string[]; permissions?: readonly string[]; claims?: Readonly<Record<string, unknown>> }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | Database               | `IOrmAdapter`, `ITransaction`, `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `OrderDirection`, `TransactionOptions`, `TransactionIsolationLevel`, `ITransactionIsolationSupport` — the data-access port, promoted from `database-plugin` in M52c so a backend can live in another package (`cloudflare-plugin`'s `D1Adapter` is the first); the last three carry portable transaction isolation (M90g)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -12383,6 +12709,52 @@ reaches `redactors[<string>]`):
 | Inbox                  | `IInboxStore`, `InboxRecord`, `InboxStatus`, `InboxIds`, `InboxFailureUpdate`, `InboxReleaseOutcome`, `InboxStoreStats`, `INBOX_RECORD_KIND` — the consumer-inbox store port (`find`, `run`, `recordFailure`, `park`, `parked`, `release`, `stats`, `purge`, `verify`; every method rejects, never throws; `run` creates the marker first in one transaction), the row shape (every field a JSON scalar, times as epoch ms), the release outcome (`applied` / `missing` / `not-parked`), and the `'setu-inbox'` discriminator every row carries and every read requires (M108)                                                                                                                                                                                                                                                                                                                                                                         |
 | Idempotency            | `IIdempotencyStore`, `IdempotencyClaimRequest`, `IdempotencyClaimResult`, `IdempotencySettleResult`, `IIdempotencyService`, `IdempotentRouteOptions`, `IdempotencyKeySource`, `IdempotencyFingerprintSource`, `IdempotentIngressOptions`, `IdempotentIngressCommonOptions`, `IngressIdempotencyKeySource`, `IngressIdempotencyFingerprintSource` — the store port, the service contract served under `CAPABILITIES.IDEMPOTENCY`, and the route/ingress option types (M109a). The record is an opaque string so every store holds identical bytes; the mechanism lives in `@setu-ts/idempotency-plugin`. `IngressContext.consumer` (below) is the dispatch identity the ingress key is scoped by.                                                                                                                                                                                                                                                       |
 
+**DI container contract (M125).** The container is optional (no plugin may require it), and its
+contract changed in 0.11.0:
+
+- **Tokens.** Every `IContainer` method takes a `ContainerToken<T>`: a string, an
+  `InjectionToken<T>` from `createToken<T>(name)`, or a class (`Constructor<T>`). Object tokens are
+  matched by identity. `resolve` on an `InjectionToken<T>` or a class returns `T` without a type
+  argument; `resolve<T>(token: string)` is unchanged.
+- **Visible dependencies.** `ClassProvider.inject` and the new `FactoryProvider.inject` are
+  `readonly InjectEntry[]`. `FactoryProvider.useFactory` is `(...deps: never[]) => T` and is called
+  with the resolved dependencies in `inject` order; an absent optional dependency arrives as
+  `undefined`. A factory without `inject` is opaque to boot validation.
+- **`ProviderOptions<T>`** (generic, default `unknown`) adds
+  `dispose?: (instance: T) => void | Promise<void>`, called by `dispose()` for each instance the
+  container created.
+- **`forRequest(ctx: IRequestContext): IContainer`** returns the request's scope, created on first
+  call and disposed through `ctx.defer` when the request finishes. Without `ctx.defer` it throws.
+- **`dispose(): void | Promise<void>`** disposes what the container created — on a scope its scoped
+  instances and the transients it built, on the root its singletons — in reverse creation order,
+  each even if an earlier one failed — an asynchronous one bounded at 5000 ms, recorded as a named
+  timeout when it expires — then throws (or rejects with) one `AggregateError`. It returns a promise
+  only when a dispose function did. Repeat calls are no-ops; a disposed scope refuses further
+  resolves. Instances from the service-registry fallback are never disposed.
+- **`ServiceScope`.** `scoped` means one instance per scope; a request reaches its scope through
+  `forRequest`. Resolving a `scoped` token on the root container is refused, and so is a `transient`
+  there whose graph reaches a `scoped` provider.
+- **Breaking for implementors:** `forRequest` and `dispose` are required members (0.11.0).
+
+**`IRequestContext.defer?(cleanup)`** (M125) — registers per-request cleanup. The kernel runs
+cleanups in reverse registration order once the request finishes: before a buffered response is
+handed back (awaiting any that return a promise), and when a streaming body ends, errors or is
+cancelled; on the failure path, after the 500 is written. Each asynchronous cleanup is bounded at
+5000 ms: on expiry the kernel reports it and moves on, and the cleanup's later outcome is ignored. A
+cleanup's throw or rejection is reported at `warn` through the logger capability when one is
+registered, and never changes the response; a `defer` after completion runs at once. The member is
+optional, so no implementor breaks: the kernel's context implements it, `createTestContext` does
+not. A request that never calls it stays on the synchronous path.
+
+**`IRequestContext.slot?<T>(key, create)`** (M125) — owner-keyed per-request storage. It returns the
+value this request holds under `key`, compared by object identity, and on the first call for that
+key stores and returns `create()`; a throwing `create` stores nothing, so a later call retries.
+Entries cannot be enumerated or deleted and live as long as the context, so a key the owner keeps
+private gives it storage no other code can read or replace through `slot`. `create` must not call
+`slot` with its own key. The kernel's context keeps the first entry without allocating; the member
+is optional, and `createTestContext` does not implement it. `forRequest` keeps each request's scope
+here.
+
 **`isPromiseLike(value)`** (M87) — reports whether a value is thenable, by the duck-typed test
 (`typeof value.then === 'function'`) rather than `instanceof Promise`. `@setu-ts/kernel` and
 `@setu-ts/runtime` both use it on the request path to decide whether a handler result needed
@@ -12400,6 +12772,8 @@ documented live `snapshot.headers` view; snapshots with explicitly mutated or re
 that existing path unchanged.
 
 Contract notes:
+
+<!-- version:history -->
 
 - `IPluginContext.runtime` is **non-optional**: a runtime provider is mandatory and registers first,
   so every plugin may rely on it (ARCHITECTURE.md §7).
@@ -12527,6 +12901,15 @@ Contract notes:
   without removing existing ones (`Headers.append`). `appendHeader` is the correct way to emit
   multiple headers of the same name — most notably several `Set-Cookie` headers (e.g. access +
   refresh cookies). Both chain (`return this`).
+- `IResponse.setHeaders(headers: Readonly<Record<string, string>>): IResponse` (0.11.0) — sets
+  several headers at once, exactly as `header(name, value)` called for each own enumerable
+  string-keyed entry in order, with the same validation and errors. Passing the SAME frozen object
+  on every request lets the kernel validate it once and copy it into each response in one step; any
+  other object is applied entry by entry. `HttpSecurityPlugin`'s security headers use it. Fastify's
+  `reply.headers(obj)`, Express's `res.set(obj)` and Koa's `ctx.set(obj)` are the precedent for the
+  batch call; the template cache is Setu's. **Breaking for `IResponse` implementors**, including
+  test fakes typed as `IResponse`: add the member as a loop over `header()`, or use
+  `@setu-ts/testing`'s `createTestContext`.
 - `IResponse.html(body: string): HandlerResult` — sends an HTML response with
   `content-type: text/html; charset=utf-8`. The charset is not optional: a bare `text/html` lets a
   browser sniff the encoding. Added because every CSRF-protected form example was setting the header
@@ -12557,7 +12940,12 @@ Contract notes:
 - `IRequest.user`, `IRequest.tenant` and `IRequest.locale` each allow one implicit assignment per
   request; a later assignment throws. `replacePrincipal`, `replaceTenant` and `replaceLocale` are
   the explicit escapes for an intentional replacement. This catches late accidental overwrites, not
-  authorization bypasses: a write before authentication is still the permitted first write.
+  authorization bypasses: a write before authentication is still the permitted first write. Every
+  request the framework creates — a served request, an `inject()` request and a `createTestContext`
+  request — carries this guard on its class prototype (`installRequestIdentityGuard`, 0.11.0), so on
+  those the three fields are inherited accessors: `Object.keys(request)` and
+  `JSON.stringify(request)` do not list them. A request an application builds itself is guarded per
+  instance by the kernel, as before, and its fields stay own and enumerable.
 - `IRequest.locale?: string` (M103) — the request's resolved BCP 47 tag, written by the localization
   plugin's middleware at priority 45 and absent without that plugin or on a path it excludes. It is
   a flagged, optional, source-compatible widening on the `tenant` precedent. Three things to keep in
@@ -12721,12 +13109,13 @@ a SINGLE-provider token: the TelemetryPlugin always registers one `ITraceDiagnos
 instance id the batch must match, M98a cursor contract over a 1,024-record ring, `limit` 1–128,
 throws the fixed value-free `RangeError` for a bad instance, a bad cursor, or a cursor beyond the
 source's sequence). The DTOs are `TraceDiagnosticsBatch` and `TraceObservation`; the closed
-vocabularies are `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind`, `TraceOutcome`,
-`TraceParentVisibility` and the `TraceSamplerDescription` shape. Minimization precedes retention:
-only exact approved operation aliases, validated W3C identifiers, at most eight validated link
-pairs, kind, outcome, duration and monotonic age are retained; span names, attributes, events,
-resources, tracestate, baggage, exceptions and status messages never reach collector state
-(canary-asserted). See the diagnostics-connector section for the wire operation.
+vocabularies are `TraceSourceState`, `TraceCoverage`, `TraceInstrumentationKind` (`http`, `fetch`,
+`ioredis`, `redis` since M117, `amqplib`, `kafkajs`), `TraceOutcome`, `TraceParentVisibility` and
+the `TraceSamplerDescription` shape. Minimization precedes retention: only exact approved operation
+aliases, validated W3C identifiers, at most eight validated link pairs, kind, outcome, duration and
+monotonic age are retained; span names, attributes, events, resources, tracestate, baggage,
+exceptions and status messages never reach collector state (canary-asserted). See the
+diagnostics-connector section for the wire operation.
 
 **Queue observation contracts (M98f).** `CAPABILITIES.QUEUE_DIAGNOSTICS` (`'queue-diagnostics'`) is
 a MULTI-provider token: every QueuePlugin instance registers one `IQueueDiagnosticsSource`
@@ -12866,6 +13255,17 @@ The plugin kernel: resolves plugin dependencies, builds the middleware pipeline 
 validates environment variables, and dispatches requests. Implemented in **Milestone 2**; route
 matching was delegated to Hono in **Milestone 22** (behind the unchanged `IRouterApi` contract).
 This section is the authoritative export list (AI_GUIDELINES §10.5). All exports carry full JSDoc.
+
+Route patterns are static segments, `:name` parameters (a word, `\w+`, other than `__proto__`), a
+final optional `:name?`, `*` segments and a final `prefix*`. Since 0.11.0 anything else is refused
+at registration with an error naming the unsupported part — a Hono regular-expression parameter
+(`:name{…}`, whose `/`-spanning form `TrieRouter` matches in time quadratic in the path length), an
+empty segment, a `*` inside a non-final segment, an optional parameter that is not last.
+`router.group()` joins its prefix and each path with exactly one `/`. A request may carry one extra
+trailing slash (`/users/` reaches `/users`); a static route registered with a trailing slash answers
+only that spelling, while a parameter route's trailing slash is not significant (`/users/:id/`
+answers `/users/42`). A pattern written without a leading slash is the same route as its
+slash-prefixed spelling.
 
 ### Values (runtime exports)
 
@@ -13321,21 +13721,29 @@ Contract notes:
 
 Optional dependency injection container plugin. Registers an `IContainer` under
 `CAPABILITIES.DI_CONTAINER`. The service registry remains the primary resolution mechanism; this
-container is a convenience layer for constructor injection and lifecycle management. No other plugin
-depends on it. Implemented in **Milestone 8**; this section is the authoritative export list
-(AI_GUIDELINES §10.5). All exports carry full JSDoc.
+container is a convenience layer for constructor injection, lifetimes and disposal. No other plugin
+depends on it. Implemented in **Milestone 8**; compiled graph, boot validation and the request scope
+in **Milestone 125**. This section is the authoritative export list (AI_GUIDELINES §10.5). All
+exports carry full JSDoc.
 
 ### Values (di-plugin exports)
 
-| Export             | Kind     | Purpose                                                                   |
-| ------------------ | -------- | ------------------------------------------------------------------------- |
-| `DiPlugin`         | function | Plugin factory — registers `IContainer` under `CAPABILITIES.DI_CONTAINER` |
-| `ContainerBuilder` | class    | Fluent builder for configuring and creating a `DiContainer`               |
-| `createContainer`  | function | Convenience factory for a standalone `IContainer`                         |
-| `DiContainer`      | class    | The `IContainer` implementation (for direct construction or testing)      |
-| `CircularDetector` | class    | Circular dependency detector (exported for testing and advanced use)      |
-| `ProviderRegistry` | class    | Token-keyed provider store with hierarchical lookups                      |
-| `ScopeManager`     | class    | Singleton/scoped/transient instance cache manager                         |
+| Export                         | Kind     | Purpose                                                                                                      |
+| ------------------------------ | -------- | ------------------------------------------------------------------------------------------------------------ |
+| `DiPlugin`                     | function | Plugin factory — registers `IContainer` under `CAPABILITIES.DI_CONTAINER`, closes it at the end of bootstrap |
+| `ContainerBuilder`             | class    | Fluent builder for configuring and creating a `DiContainer`                                                  |
+| `createContainer`              | function | Convenience factory for a standalone `IContainer`                                                            |
+| `DiContainer`                  | class    | The `IContainer` implementation; adds `close()`, which ends registration and validates the graph             |
+| `CircularDetector`             | class    | Cycle detector used by the graph compiler's walk (exported for testing and advanced use)                     |
+| `ProviderRegistry`             | class    | Token-keyed provider store with hierarchical lookups                                                         |
+| `ContainerValidationError`     | class    | Thrown when a compile or `close()` finds missing, cyclic or captive dependencies; carries `findings`         |
+| `ScopeRequiredError`           | class    | Thrown when a `scoped` token, or a `transient` reaching one, is resolved on the root container               |
+| `ScopeDisposedError`           | class    | Thrown by `resolve` on a disposed scope                                                                      |
+| `ContainerClosedError`         | class    | Thrown by `register` on a closed root container                                                              |
+| `RequestScopeUnavailableError` | class    | Thrown by `forRequest` when the request context has no `defer` (for example one from `createTestContext`)    |
+
+`ScopeManager` was removed in 0.11.0: the compiled graph keeps singletons on their compiled entries
+and scoped instances in a per-scope slot array.
 
 ### Types
 
@@ -13352,25 +13760,47 @@ Contract notes:
 
 - **Optional**: no plugin depends on the DI container. When `DiPlugin` is not registered,
   `ctx.container` is `undefined` and services resolve directly from the `ServiceRegistry`.
-- **Three provider forms**: `ClassProvider` (constructor injection via `inject` tokens),
-  `FactoryProvider` (factory function), `ValueProvider` (pre-built value) — all defined in
-  `@setu-ts/common`.
-- **Three lifecycle scopes**: `singleton` (one instance, shared across child scopes), `scoped` (one
-  instance per `createScope()` scope), `transient` (new instance every resolve). Default is
-  `singleton`. The framework creates no scope per request, so a `scoped` service is not re-created
-  on every HTTP request.
-- **Circular dependency detection**: an instance-level resolution stack catches cycles that cross
-  public `resolve()` boundaries (including factory providers calling back into the container).
-  Throws `Error` with a readable `A → B → A` chain.
-- **Hierarchical containers**: `createScope()` returns a child container that shares singletons with
-  the parent but has its own scoped-instance cache. A scope is created and disposed explicitly by
-  the application; the framework creates no scope per request.
-- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): resolving a token not in the
-  container falls back to the kernel's `ServiceRegistry`; `false` confines resolution to the
-  container's own registrations. The first successful fallback is cached as a singleton; explicit DI
-  registrations always take precedence. `ClassProvider.inject` dependencies also use this two-tier
-  resolution, so framework capability tokens (`CAPABILITIES.LOGGER`, etc.) work as constructor
-  dependencies without pre-registration.
+- **Three provider forms**: `ClassProvider` (constructor injection via `inject`), `FactoryProvider`
+  (a factory called with its `inject` dependencies), `ValueProvider` (pre-built value) — all defined
+  in `@setu-ts/common`, with the token and `inject` rules in "DI container contract (M125)".
+- **Three lifetimes**: `singleton` (one instance, shared with every scope), `scoped` (one instance
+  per scope — a request's scope comes from `forRequest(ctx)`), `transient` (new instance every
+  resolve, tracked by the scope that built it). Default is `singleton`.
+- **Open, then closed**: a container accepts registrations and resolves while open; a resolve
+  compiles that token's subgraph on demand. `DiPlugin` closes the container after the last bootstrap
+  hook, the moment the service registry seals; a `register` on the closed root then throws
+  `ContainerClosedError`. A standalone container stays open until its owner calls `close()`.
+- **Boot validation**: closing compiles every provider into a direct factory and validates the whole
+  graph once — a missing dependency, a cycle (reported `A → B → A`), and a `singleton` reaching a
+  `scoped` provider directly or through `transient`s — throwing one `ContainerValidationError` that
+  lists every finding. Validation instantiates nothing. A factory without `inject` is opaque;
+  `DiPlugin` lists such tokens in one `debug` line.
+- **Compiled resolution**: no resolve runs the cycle detector or looks up a dependency by token; a
+  top-level `resolve(token)` reads one `Map`. Singletons are still created lazily, on first resolve.
+- **Scopes**: `createScope()` and `forRequest(ctx)` return child containers that share singletons
+  with their parent. A scope may register tokens its parent chain does not have, and they live as
+  long as the scope (a `singleton` lifetime there is stored as `scoped`); registering one it has
+  throws, because the parent's compiled graph cannot be rebound from below.
+- **Request scope**: `forRequest(ctx)` creates the scope on first call for that request, keeps it in
+  `ctx.slot` under a key private to the container (a context without `slot` falls back to a
+  per-container `WeakMap`), and registers its disposal with `ctx.defer`. A request that never calls
+  it pays one `undefined` check and stays on the kernel's synchronous path. A scope allocates its
+  own registry only when it registers a token, and instances of its own registrations are held by
+  the scope that resolves them, so request volume never grows anything the root holds.
+- **Disposal**: `ProviderOptions.dispose` runs from `dispose()` — for a request scope when the
+  request finishes, for the root in `DiPlugin`'s `onClose` hook. Each asynchronous dispose is
+  bounded at 5000 ms, on the runtime's timers when a runtime is registered
+  (`ContainerConfig.timing`); one that never settles is reported in the `AggregateError` and the
+  rest still run, so `app.stop()` is never held indefinitely. The bound is per disposal, not a
+  total: k disposals that never settle take about k × 5000 ms, which can exceed the 10 s shutdown
+  drain. A request scope reports each disposal failure itself, through `DiPlugin`'s logger at `warn`
+  (`ContainerConfig.reportDisposeError`), whenever it settles — also after the kernel's 5000 ms
+  cleanup bound has already reported its own timeout.
+- **Auto-registration** (`autoRegister`, default `true` since 0.9.0): a token not in the container
+  falls back to the kernel's `ServiceRegistry`, checked with `has()` during validation and resolved
+  lazily once, then cached as a singleton; `false` confines resolution to the container's own
+  registrations. Explicit DI registrations always take precedence, and framework capability tokens
+  (`CAPABILITIES.LOGGER`, etc.) work as dependencies without pre-registration.
 - **No runtime-specific APIs**: the container uses no `Date.now()`, `crypto.*`, or `process.*` — it
   is pure TypeScript and runtime-independent.
 
@@ -13429,6 +13859,7 @@ carry full JSDoc.
 | `CommandHandler`/`QueryHandler`                              | function | Method decorators — register bound `ICommandHandler` / `IQueryHandler` objects during `onInit`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `UseIngressBehaviors`/`UsePipelineBehaviors`                 | function | Method decorators — scope `IIngressBehavior` to one supported non-HTTP ingress handler, or `IPipelineBehavior` to one command/query handler; wrong decorator category is refused at startup                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `Params`                                                     | function | Method decorator binding handler arguments to sources, positionally; type-checked against the handler's signature                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `Service`                                                    | function | Parameter source for `@Params(...)` (M125): `Service<T>(token)` resolves `token` from the request's DI scope (`container.forRequest(ctx)`) on every call, so a singleton controller reaches `scoped` services per request. `token` is any `ContainerToken<T>`. Without a registered DI container it is reported at startup as unresolvable. A controller constructor that reaches a `scoped` service fails the boot, and its error names this source                                                                                                                                                                                                                                           |
 | `Injectable`                                                 | function | Class decorator — marks a class for DI registration                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `Inject`                                                     | function | Class decorator declaring constructor injection tokens, one per argument in argument order                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `Optional`                                                   | function | Wraps a token inside `@Inject(...)`; that argument receives `undefined` when the token has no provider                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
@@ -13570,6 +14001,10 @@ Contract notes:
   a built-in custom parameter type and needs no resolver registration. It is recognised by a marker
   registered with `Symbol.for`, so it keeps working if two copies of the package share a process,
   and an application's own `Custom('context')` still reaches its own resolver.
+- **Controllers and the DI container**: controllers are built once, during `register()`, and are
+  registered in the container as `singleton` whatever its `defaultScope` (M125). A `scoped` service
+  reaches a handler through `@Params(Service(token))`; an `@Injectable` class is also registered
+  under the class itself, so `resolve(UserService)` returns the same instance as its string token.
 - **Startup diagnostics**: when a logger is registered, `DecoratorPlugin.register()` warns (never
   throws) about two silent misconfigurations. A class passed in `controllers` that carries no
   `@Controller` metadata registers no routes — the usual cause is two copies of the package, where
@@ -13651,13 +14086,10 @@ Contract notes:
   it would otherwise pass `undefined` for an argument nothing declares.
 
   Both construction paths honor it identically — the DI container when one is registered, the
-  kernel's service registry otherwise. One consequence is worth knowing on the container path: a
-  class carrying `@Optional` registers as a `useFactory` provider rather than a `useClass` one,
-  because `ClassProvider.inject` is a bare token list with nowhere to record optionality. The
-  class's own `scope` is still honored, but since `FactoryProvider.useFactory` takes no arguments,
-  that factory resolves its dependencies from the container the class was registered on rather than
-  from the resolving scope. Classes without `@Optional` are unaffected and still register as
-  `useClass`.
+  kernel's service registry otherwise. On the container path a class carrying `@Optional` registers
+  as a `useClass` provider whose `inject` entries mark the optional positions
+  (`{ token, optional: true }`, M125), so its dependencies resolve from the scope that resolves it —
+  a request scope included — and boot validation sees them.
 
 - **No runtime-specific APIs**: the package uses no `Date.now()`, `Deno`, `process`, or `fs` — all
   file/time operations go through `IRuntimeServices`.
@@ -13786,7 +14218,7 @@ capability without declaring it fails startup with `Capability '<token>' is alre
 either, exclude the provider and supply the double ahead of its consumers —
 `without: ['mail-plugin']` plus a `createMockPlugin` at `PLUGIN_PRIORITY.HIGH`.
 
-`overrideProvider<T>(token: string, provider: Provider<T>, options?: ProviderOptions): IPlugin`
+`overrideProvider<T>(token: ContainerToken<T>, provider: Provider<T>, options?: ProviderOptions<T>): IPlugin`
 replaces a provider in the DI container, which `overrideCapability` cannot reach: with `DiPlugin`
 registered, `DecoratorPlugin` puts each `@Injectable` class into the container, and the container
 refuses a second registration of a token. The plugin depends on `CAPABILITIES.DI_CONTAINER` and
@@ -13796,7 +14228,9 @@ swallows the application's later registration of the same token and passes every
 so every class that injects the token is constructed with the double. `start()` fails from
 `register()` when the application has no container or the real provider was registered first, and
 from an `onInit` hook when nothing registered, resolved or checked for the token, which is how a
-mistyped token surfaces.
+mistyped token surfaces. The token may be a string, a `createToken` token or a class (M125); the
+double also applies inside request scopes (`forRequest`), and `dispose()` passes through to the real
+container.
 
 > `overrideCapability` **replaces**; `createMockPlugin` **provides**. `createMockPlugin` declares
 > the token in `provides`, which satisfies a dependent plugin's `dependencies` check and which the
@@ -13922,7 +14356,7 @@ not register a plugin or resolve capability tokens — it is an external-consume
 ### Installation
 
 ```bash
-npm install @setu-ts/sdk@^0.10.0
+npm install @setu-ts/sdk@^0.11.0
 ```
 
 ### createClient()
@@ -14656,6 +15090,13 @@ asserted verbatim, and the whole surface is driven against a real SQLite engine 
 runs), including batch rollback.
 
 ### Durable Objects — realtime backplane and distributed lock
+
+`DurableObjectBackplaneOptions.onHandlerError?: (error: unknown, frame: RealtimeFrame) => void`
+(0.11.0) receives every subscriber throw or rejection instead of default logging. The default
+reporter uses common's shared dispatch, `describeError`, a call-time logger, first failure at warn,
+repeats at debug with a count, and recovery at info. Metadata includes frame kind and name, never
+data. Hook and logger failures are swallowed. This option belongs to direct backplane construction;
+the `CloudflarePlugin` arm uses default reporting.
 
 Both need a Durable Object class the **application** exports plus a wrangler stanza; no plugin
 option can export a class on an application's behalf. This package ships the behaviour as two plain
@@ -15519,11 +15960,11 @@ Applications own their third-party dependency resolution. Setu-TS therefore does
 consumer's dependency graph; it declares the third-party values it accepts at an application
 boundary and tests those claims in `pnpm run check:compat`.
 
-| Third-party value                  | Owning packages                                           | Supported versions                 | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| ---------------------------------- | --------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Zod schemas                        | `validation-plugin`, `openapi-plugin`, `decorator-plugin` | zod `>=3.24.0 <4` and `>=4.4.0 <5` | Validation uses public `safeParse`; OpenAPI uses Zod v4's public `toJSONSchema()`. The legacy Zod v3 transformer has no equivalent public conversion API, so its private-internal compatibility is limited to the stated v3 range and tested separately. Decorators forward schemas to the validation/OpenAPI boundaries without inspecting them. `toJSONSchema()` output shifts within the v4 range (4.5 collapses a union of bare types into a `type` array), so the OpenAPI transformer normalizes the union spelling rather than passing it through — see Zod Version Support. |
-| Drizzle database and table objects | `database-plugin`                                         | `0.45.2` baseline; range pending   | The application creates the database configuration and tables; the plugin loads its own query operators. Its exact lazy-loader import is a separate resolution-policy repair, so no broader application-instance range is claimed until that pin is removed and both endpoints are tested.                                                                                                                                                                                                                                                                                         |
-| Prisma client                      | `database-plugin`                                         | **Pending boundary repair**        | Prisma v7 is the current application integration, but no formal range is claimed until the adapter stops its `_activeProvider` fallback and relies solely on the documented `provider` option plus public client methods.                                                                                                                                                                                                                                                                                                                                                          |
+| Third-party value                  | Owning packages                                           | Supported versions               | Boundary and compatibility rule                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------- | --------------------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Zod schemas                        | `validation-plugin`, `openapi-plugin`, `decorator-plugin` | zod `>=4.6.6 <5`                 | Validation duck-types public `safeParse` and is tested with Zod 4 only; OpenAPI uses public `toJSONSchema()`. Schemas without that method degrade to `{}` with the existing unrepresentable diagnostic. Decorators forward schemas without inspecting them. OpenAPI normalizes type unions to `anyOf` — see Zod Version Support. |
+| Drizzle database and table objects | `database-plugin`                                         | `0.45.2` baseline; range pending | The application creates the database configuration and tables; the plugin loads its own query operators. Its exact lazy-loader import is a separate resolution-policy repair, so no broader application-instance range is claimed until that pin is removed and both endpoints are tested.                                       |
+| Prisma client                      | `database-plugin`                                         | **Pending boundary repair**      | Prisma v7 is the current application integration, but no formal range is claimed until the adapter stops its `_activeProvider` fallback and relies solely on the documented `provider` option plus public client methods.                                                                                                        |
 
 GraphQL is intentionally absent: `graphqlModule` is a package-declared `GraphqlModuleLike` facade,
 not an opaque `unknown` value. Its compile-time shape and adapter tests cover that boundary.

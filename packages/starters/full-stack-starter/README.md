@@ -258,14 +258,17 @@ Three things to know:
   which is what lets `@Inject(CAPABILITIES.LOGGER)` find the framework's own services. Earlier
   releases defaulted it to `false`, so write `di: { autoRegister: true }` there, or every page
   answers 500 with `No provider registered for DI token 'logger'`.
-- **There is no per-request scope.** Nothing creates a scope for each request, so a `scoped` service
-  resolved from the root container acts as a singleton. For one instance per request, call
-  `container.createScope()` in `populateLoadContext` and resolve from the scope.
-- **A DI mistake fails every page, not startup.** An unlisted service, a misspelled token, or a
-  missing `di` arm starts cleanly and answers `/health` with 200, then throws in
-  `populateLoadContext` on every server-rendered request. The smoke test `setu new` generates
-  requests `/` as well as `/health`, so the project's own test script catches it; keep that request
-  in.
+- **Each request has a DI scope.** `container.forRequest(ctx)` returns the request's scope, created
+  on first use and disposed when the response is finished, so a `scoped` service resolved through it
+  is one instance per request. Resolving a `scoped` service on the root container throws
+  `ScopeRequiredError`.
+- **A DI mistake in a resolve of your own fails every page, not startup.** Since 0.11.0 the
+  container refuses a broken graph at `start()` — a missing dependency, a cycle, or a singleton that
+  captures a scoped service. But a token that only `populateLoadContext` resolves is not part of any
+  graph: a misspelled token there, an unlisted service, or a missing `di` arm starts cleanly and
+  answers `/health` with 200, then throws on every server-rendered request. The smoke test
+  `setu new` generates requests `/` as well as `/health`, so the project's own test script catches
+  it; keep that request in.
 
 ## Composing from configuration
 
@@ -274,14 +277,26 @@ Plugin options must be decided **before** the plugins are constructed — which 
 yet. `createFullStackAppFromConfig` closes that ordering gap for every option at once:
 
 ```typescript
-import { createFullStackAppFromConfig, fullStackConfigOf } from '@setu-ts/full-stack-starter';
+import {
+  createFullStackAppFromConfig,
+  fullStackConfigOf,
+  type FullStackStarterOptions,
+} from '@setu-ts/full-stack-starter';
 
 const app = await createFullStackAppFromConfig(
-  (config) => ({
+  (config): FullStackStarterOptions => ({
     // `prismaClient` is generated and constructed by the application — a Prisma v7
     // client carries its own connection configuration, so `url` is not an option.
     database: { type: 'prisma', options: { prismaClient } },
     session: { secret: config.getOrThrow<string>('SESSION_SECRET'), csrf: {} },
+    messaging: {
+      broker: 'redis-streams',
+      url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+    },
+    queue: {
+      adapter: 'redis',
+      url: config.get<string>('REDIS_URL', { default: 'redis://127.0.0.1:6379' }),
+    },
   }),
   { config: { envFilePath: ['.env.local', '.env'] } },
 );
@@ -290,6 +305,11 @@ const config = fullStackConfigOf(app); // the exact snapshot passed to the callb
 
 await app.start({ port: 3000 });
 ```
+
+The Redis options above require `ioredis` installed in the application. The CLI supplies that client
+and these options with `setu new portal --template full-stack --broker redis --queue redis`, or from
+a workspace's `--transport redis` when generating a full-stack member. The same config read sees
+dotenv and deployment environment values; omitting the options keeps the starter's memory defaults.
 
 Configuration is loaded once and the **same snapshot** is registered under `CAPABILITIES.CONFIG`, so
 the values the composition branched on are the values handlers read — not a second snapshot taken a

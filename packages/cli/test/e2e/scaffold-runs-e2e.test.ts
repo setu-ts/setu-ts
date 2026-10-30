@@ -35,6 +35,7 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import type { IFileSystem } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import type { Prompter } from '../../src/prompt.ts';
+import { listTransports } from '../../src/workspace/transport.ts';
 import {
   bootAndProbe,
   bootWithGeneratedPermissions,
@@ -42,10 +43,128 @@ import {
   useWorkspacePackages,
   withGeneratedServer,
 } from '../fixtures/generated-project.ts';
-import { npmInstall, runIn, startOverlay, withNodeServer } from '../fixtures/node-project.ts';
+import {
+  npmInstall,
+  npmRun,
+  runIn,
+  startOverlay,
+  withNodeServer,
+} from '../fixtures/node-project.ts';
 
 const runtime = createNodeRuntimeServices();
 const fs: IFileSystem = runtime.fs!;
+
+// `class-based` runs the same request logger behind DI and decorator dispatch,
+// so it gets the same one-line proof rather than relying on `rest`'s.
+for (const template of ['rest', 'class-based'] as const) {
+  it(
+    `boots a pino-default ${template} scaffold and emits one numeric-level JSON request log`,
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', 'pino-app', '--template', template, '--runtime', 'node'])).toBe(0);
+      const project = `${root}/pino-app`;
+      const overlay = await startOverlay();
+      try {
+        const installed = await npmInstall(project, overlay);
+        expect(installed.code, installed.output).toBe(0);
+        // M120: `npm start` runs the compiled bundle, so build first — which also
+        // proves the pino logger works from the bundle (pino stays external).
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
+        const result = await withNodeServer(project, async (origin, output) => {
+          const response = await fetch(`${origin}/greetings/log-probe`);
+          await response.body?.cancel();
+          // Pino's default stdout destination writes asynchronously, and the
+          // server is SIGKILLed when this returns: wait (bounded) for the line.
+          for (let waited = 0; waited < 10_000; waited += 50) {
+            if (output().includes('"path":"/greetings/log-probe"')) break;
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return response.status;
+        });
+        expect(result.result, result.output).toBe(200);
+        const lines = result.output
+          .split('\n')
+          .filter((line) => line.startsWith('{'))
+          .map((line) => JSON.parse(line) as Record<string, unknown>);
+        expect(
+          lines.filter((line) => line['path'] === '/greetings/log-probe'),
+          result.output,
+        ).toEqual([
+          expect.objectContaining({
+            level: 30,
+            msg: 'request completed',
+            requestId: expect.any(String),
+            method: 'GET',
+            path: '/greetings/log-probe',
+            status: 200,
+            duration: expect.any(Number),
+          }),
+        ]);
+        expect(
+          lines.filter((line) => line['msg'] === 'request received'),
+          result.output,
+        ).toEqual([]);
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
+for (const target of ['deno', 'bun'] as const) {
+  it(
+    `runs the ${target} scaffold check task and catches a removed barrel import`,
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', 'shop', '--runtime', target, '--template', 'rest'])).toBe(0);
+      const project = `${root}/shop`;
+      const overlay = await startOverlay();
+      try {
+        const install = await runIn(project, target, ['install'], overlay);
+        expect(install.code, install.output).toBe(0);
+        const args = target === 'deno' ? ['task', 'check'] : ['run', 'check'];
+        const fresh = await runIn(project, target, args, overlay);
+        expect(fresh.code, fresh.output).toBe(0);
+        const path = `${project}/src/controllers/index.ts`;
+        const source = await nodeFs.readFile(path, 'utf8');
+        const removed = source.replace(
+          /import\s+\{[^}]*\}\s+from\s*[\x27\x22]\.\/greeting\.controller\.ts[\x27\x22];?/,
+          '',
+        );
+        expect(removed).not.toBe(source);
+        // Keep the barrel type-correct so the wiring gate is the failing half.
+        const emptied = removed.replace(/\[\s*registerGreetingRoutes,?\s*\]/, '[]');
+        expect(emptied).not.toBe(removed);
+        await nodeFs.writeFile(path, emptied);
+        const broken = await runIn(project, target, args, overlay);
+        expect(broken.code, broken.output).not.toBe(0);
+        expect(broken.output).toContain('setu.E003');
+        expect(broken.output).toContain('greeting.controller.ts');
+      } finally {
+        await overlay.close();
+      }
+    },
+  );
+}
+
+// The full-stack Deno manifest is the other `denoTasks` arm (it has an npm
+// build), so its `check` task is proven separately: it must pass on a fresh
+// install without a prior build, and say it found no CLI-owned seams.
+it('runs the deno full-stack scaffold check task', { timeout: 900_000 }, async () => {
+  expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'full-stack'])).toBe(0);
+  const project = `${root}/shop`;
+  const overlay = await startOverlay();
+  try {
+    const install = await runIn(project, 'deno', ['task', 'install'], overlay);
+    expect(install.code, install.output).toBe(0);
+    const checked = await runIn(project, 'deno', ['task', 'check'], overlay);
+    expect(checked.code, checked.output).toBe(0);
+    expect(checked.output).toContain('setu check: 0 error(s)');
+  } finally {
+    await overlay.close();
+  }
+});
 
 /** Templates that wire an HTTP surface and boot without an npm build. */
 // X5-3's fix and its gate are the same change: `full-stack` was excluded from
@@ -98,7 +217,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await nodeFs.rm(root, { recursive: true }).catch(() => {});
-});
+}, 30_000);
 
 /**
  * Runs the CLI with the temp root as its working directory.
@@ -114,6 +233,48 @@ async function run(args: readonly string[]): Promise<number> {
     log: () => {},
     error: () => {},
   });
+}
+
+for (const spec of listTransports()) {
+  for (const flag of ['broker', 'queue'] as const) {
+    if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
+    for (const target of ['deno', 'node'] as const) {
+      it(
+        `formats full-stack ${target} --${flag} ${spec.name} as rendered`,
+        { timeout: 120_000 },
+        async () => {
+          expect(
+            await run([
+              'new',
+              'portal',
+              '--runtime',
+              target,
+              '--template',
+              'full-stack',
+              `--${flag}`,
+              spec.name,
+            ]),
+          ).toBe(0);
+          const project = `${root}/portal`;
+          const result =
+            target === 'deno'
+              ? await denoRun(project, ['fmt', '--check'])
+              : await runIn(project, process.execPath, [
+                  new URL('../../../../node_modules/prettier/bin/prettier.cjs', import.meta.url)
+                    .pathname,
+                  '--check',
+                  '.',
+                ]);
+          expect(result.code, result.output).toBe(0);
+          if (target === 'deno' && spec.name === 'redis') {
+            await useWorkspacePackages(project);
+            const checked = await denoRun(project, ['check', 'setu.config.ts']);
+            expect(checked.code, checked.output).toBe(0);
+          }
+        },
+      );
+    }
+  }
 }
 
 /**
@@ -322,6 +483,119 @@ async function advertisedPaths(project: string): Promise<string[]> {
 }
 
 describe('a scaffolded project serves its own advertised endpoints', () => {
+  it('uses TRUSTED_PROXIES for a full-stack TLS action (V10-17)', async () => {
+    expect(await run(['new', '--runtime', 'node', 'proxy-shop', '--template', 'full-stack'])).toBe(
+      0,
+    );
+    const project = `${root}/proxy-shop`;
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const built = await runIn(project, 'npm', ['run', 'build']);
+      expect(built.code, built.output).toBe(0);
+      await nodeFs.writeFile(
+        `${project}/proxy-probe.ts`,
+        `
+import assert from 'node:assert/strict';
+import { requestOriginOf, CLIENT_IP_STATE_KEY } from '@setu-ts/common';
+import { createApp } from './setu.config.ts';
+// §8a.1.5-6: unset/empty lists add no IP security; a listed peer is trusted;
+// an unmatched or malformed-but-literal entry (compared literally) trusts nothing.
+const options = [undefined, '', ',', ' , ', '192.0.2.1/32', '127.0.0.1/32', 'example', '10.0.0.0/33', '::1/129'];
+const port = Number(process.argv[2]);
+const origin = 'http://127.0.0.1:' + port;
+for (const proxies of options) {
+  if (proxies === undefined) delete process.env['TRUSTED_PROXIES'];
+  else process.env['TRUSTED_PROXIES'] = proxies;
+  const app = await createApp();
+  const middlewareNames: (string | undefined)[] = [];
+  const addMiddleware = app.middleware.add.bind(app.middleware);
+  app.middleware.add = (fn, options) => { middlewareNames.push(options?.name); addMiddleware(fn, options); };
+  app.router.get('/identity-probe', (ctx) => ctx.response.json({ ip: ctx.state.get(CLIENT_IP_STATE_KEY) ?? ctx.request.ip, origin: requestOriginOf(ctx).origin }));
+  await app.start({ port, hostname: '127.0.0.1' });
+  try {
+    const listed = (proxies ?? '').split(',').some((entry) => entry.trim() !== '');
+    assert.equal(middlewareNames.includes('IpSecurityMiddleware'), listed);
+    const headers = { 'X-Forwarded-For': '203.0.113.9', 'X-Forwarded-Host': 'public.example', 'X-Forwarded-Proto': 'https' };
+    const trusted = proxies === '127.0.0.1/32';
+    const identity = await fetch(origin + '/identity-probe', { headers });
+    assert.deepEqual(await identity.json(), { ip: trusted ? '203.0.113.9' : '127.0.0.1', origin: trusted ? 'https://public.example' : origin });
+    const page = await fetch(origin + '/login', { headers });
+    assert.equal(page.status, 200);
+    const token = /name="_csrf"\\s+value="([^"]+)"/.exec(await page.text())?.[1];
+    assert.ok(token);
+    const cookie = page.headers.getSetCookie().map((line) => line.split(';', 1)[0]).join('; ');
+    // The scaffold uses the session plugin's secure:true default on both paths.
+    assert.equal(page.headers.getSetCookie().some((line) => /; Secure/i.test(line)), true);
+    const action = await fetch(origin + '/login', { method: 'POST', redirect: 'manual', headers: {
+      ...headers, cookie, Origin: 'https://public.example', 'Sec-Fetch-Site': 'same-origin',
+    }, body: new URLSearchParams({ _csrf: token, email: 'ada@example.com' }) });
+    assert.equal(action.status, trusted ? 302 : 400, String(proxies) + ': ' + await action.text());
+    console.log('PROXY_CASE', JSON.stringify(proxies), action.status);
+  } finally { await app.stop(); }
+}
+// §8a.1.6: a CIDR width that is not plain digits fails start() with the named
+// error rather than compiling to a mask that trusts every address.
+for (const proxies of ['10.0.0.1/', '10.0.0.0/0x20']) {
+  process.env['TRUSTED_PROXIES'] = proxies;
+  // Refused at construction or at start(), whichever builds the middleware.
+  await assert.rejects(async () => {
+    const app = await createApp();
+    try { await app.start({ port, hostname: '127.0.0.1' }); } finally { await app.stop(); }
+  }, /malformed CIDR width/);
+  console.log('PROXY_CASE', JSON.stringify(proxies), 'refused');
+}
+`,
+      );
+      const proof = await runIn(project, `${project}/node_modules/.bin/tsx`, [
+        'proxy-probe.ts',
+        String(await unusedPort()),
+      ]);
+      expect(proof.code, proof.output).toBe(0);
+      expect(proof.output.match(/PROXY_CASE/g)).toHaveLength(11);
+    } finally {
+      await overlay.close();
+    }
+  }, 900_000);
+
+  it('boots the printed setu add telemetry registration with its installed peers (V10-6)', async () => {
+    expect(await run(['new', '--runtime', 'node', 'traced'])).toBe(0);
+    const project = `${root}/traced`;
+    const output: string[] = [];
+    expect(
+      await runCli(['add', 'telemetry'], {
+        fs,
+        cwd: project,
+        now: () => runtime.now(),
+        log: (line) => output.push(line),
+        error: (line) => output.push(line),
+      }),
+    ).toBe(0);
+    const registration = /Register (TelemetryPlugin\(.+\)) in setu.config.ts\./.exec(
+      output.join('\n'),
+    )?.[1];
+    expect(registration).toBeDefined();
+    const configPath = `${project}/setu.config.ts`;
+    const config = await nodeFs.readFile(configPath, 'utf8');
+    await nodeFs.writeFile(
+      configPath,
+      `import { TelemetryPlugin } from '@setu-ts/telemetry-plugin';\n` +
+        config.replace('RuntimePlugin(),', `RuntimePlugin(), ${registration},`),
+    );
+    const overlay = await startOverlay();
+    try {
+      const installed = await npmInstall(project, overlay);
+      expect(installed.code, installed.output).toBe(0);
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
+      const booted = await withNodeServer(project, async (origin) => (await fetch(origin)).status);
+      expect(booted.result, booted.output).toBe(200);
+    } finally {
+      await overlay.close();
+    }
+  }, 900_000);
+
   it('runs two generated migrations twice in one serving app and reflects the ledger in /ready', async () => {
     expect(await run(['new', 'shop', '--runtime', 'deno', '--template', 'rest'])).toBe(0);
     const project = `${root}/shop`;
@@ -399,6 +673,8 @@ try {
       expect(await nodeFs.readFile(`${project}/src/services/billing.service.ts`, 'utf8')).toContain(
         'billing',
       );
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
       const booted = await withNodeServer(project, async (origin) => {
         const statuses: number[] = [];
         // `/health` is requested too, so the log assertions below can prove the
@@ -459,67 +735,71 @@ try {
   });
 
   for (const template of BOOTABLE) {
-    it(`holds for --template ${template}`, async () => {
-      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
-      const project = `${root}/shop`;
-      await useWorkspacePackages(project);
+    it(
+      `holds for --template ${template}`,
+      { timeout: template === 'full-stack' ? 900_000 : 30_000 },
+      async () => {
+        expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
+        const project = `${root}/shop`;
+        await useWorkspacePackages(project);
 
-      // No separate build first, even for `full-stack`: a fresh user runs
-      // `deno task test` on a project that has never been built, and the
-      // generated smoke test boots an app that loads the server build. The
-      // task must build it itself (V8-39) — pre-building here hid exactly that.
-      // The build it leaves behind is what the boot below serves. Retried like
-      // any install, since for `full-stack` this task now runs `deno install`.
-      const tested = await denoRunRetry(project, ['task', 'test']);
-      expect(tested.code, tested.output).toBe(0);
-      expect(tested.output).toMatch(/\b[1-9]\d* passed/);
-      const e2e = await denoRunRetry(project, ['task', 'test:e2e']);
-      expect(e2e.code, e2e.output).toBe(0);
+        // No separate build first, even for `full-stack`: a fresh user runs
+        // `deno task test` on a project that has never been built, and the
+        // generated smoke test boots an app that loads the server build. The
+        // task must build it itself (V8-39) — pre-building here hid exactly that.
+        // The build it leaves behind is what the boot below serves. Retried like
+        // any install, since for `full-stack` this task now runs `deno install`.
+        const tested = await denoRunRetry(project, ['task', 'test']);
+        expect(tested.code, tested.output).toBe(0);
+        expect(tested.output).toMatch(/\b[1-9]\d* passed/);
+        const e2e = await denoRunRetry(project, ['task', 'test:e2e']);
+        expect(e2e.code, e2e.output).toBe(0);
 
-      // Every path the README's "What it serves" section lists must answer,
-      // so the section cannot advertise a route the project does not serve.
-      const advertised = await advertisedPaths(project);
-      // Vacuity guard: every bootable template lists at least `/` and the six
-      // plugin endpoints, so fewer means the section or its parser broke.
-      expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
-      const paths = [
-        ...new Set([
-          ...DOCS_PATHS,
-          '/health',
-          '/ready',
-          '/metrics',
-          ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
-          ...advertised,
-        ]),
-      ];
-      const result = await bootWithGeneratedPermissions(project, paths);
-      for (const path of DOCS_PATHS) expect(result.statuses[path], result.output).toBe(200);
-      for (const path of advertised) {
-        // `fetch` follows redirects, so a page behind sign-in lands on the
-        // sign-in form and answers 200 as well.
-        expect({ path, status: result.statuses[path] }, result.output).toEqual({
-          path,
-          status: 200,
-        });
-      }
+        // Every path the README's "What it serves" section lists must answer,
+        // so the section cannot advertise a route the project does not serve.
+        const advertised = await advertisedPaths(project);
+        // Vacuity guard: every bootable template lists at least `/` and the six
+        // plugin endpoints, so fewer means the section or its parser broke.
+        expect(advertised.length, advertised.join(' ')).toBeGreaterThanOrEqual(7);
+        const paths = [
+          ...new Set([
+            ...DOCS_PATHS,
+            '/health',
+            '/ready',
+            '/metrics',
+            ...(template === 'rest' ? ['/greetings', '/greetings/Setu'] : []),
+            ...advertised,
+          ]),
+        ];
+        const result = await bootWithGeneratedPermissions(project, paths);
+        for (const path of DOCS_PATHS) expect(result.statuses[path], result.output).toBe(200);
+        for (const path of advertised) {
+          // `fetch` follows redirects, so a page behind sign-in lands on the
+          // sign-in form and answers 200 as well.
+          expect({ path, status: result.statuses[path] }, result.output).toEqual({
+            path,
+            status: 200,
+          });
+        }
 
-      // The assertion D2 failed: without `--allow-sys` the self indicator's
-      // `runtime.hostname()` throws and the probe answers 500.
-      expect(result.statuses['/health'], result.output).toBe(200);
-      expect(result.statuses['/ready'], result.output).toBe(200);
-      expect(result.statuses['/metrics'], result.output).toBe(200);
+        // The assertion D2 failed: without `--allow-sys` the self indicator's
+        // `runtime.hostname()` throws and the probe answers 500.
+        expect(result.statuses['/health'], result.output).toBe(200);
+        expect(result.statuses['/ready'], result.output).toBe(200);
+        expect(result.statuses['/metrics'], result.output).toBe(200);
 
-      // Not merely a 200: a health body reporting `down` would also be a 200
-      // shaped failure on some configurations.
-      expect(result.bodies['/health']).toContain('"status":"up"');
+        // Not merely a 200: a health body reporting `down` would also be a 200
+        // shaped failure on some configurations.
+        expect(result.bodies['/health']).toContain('"status":"up"');
 
-      if (template === 'rest') {
-        expect(result.statuses['/greetings'], result.output).toBe(200);
-        expect(result.statuses['/greetings/Setu'], result.output).toBe(200);
-        expect(result.bodies['/greetings']).toContain('Hello, world!');
-        expect(result.bodies['/greetings/Setu']).toContain('Hello, Setu!');
-      }
-    });
+        if (template === 'rest') {
+          expect(result.statuses['/greetings'], result.output).toBe(200);
+          expect(result.statuses['/greetings/Setu'], result.output).toBe(200);
+          expect(result.bodies['/greetings']).toContain('Hello, world!');
+          expect(result.bodies['/greetings/Setu']).toContain('Hello, Setu!');
+        }
+      },
+    );
   }
 
   it('runs a smoke test on the template-less host', async () => {
@@ -919,9 +1199,11 @@ describe('a scaffolded full-stack project runs both middleware layers', () => {
   //
   // Skipped in CI at the maintainer's direction: the install, React Router
   // build and boot overran the 30 s test limit on a CI runner (PR #462) while
-  // passing on a re-run. It still runs locally.
+  // passing on a re-run. It still runs locally, with the same install/build budget
+  // as the other full-stack integration proofs now that Tailwind and Radix are installed.
   it.skipIf(process.env['CI'] === 'true')(
     'applies kernel middleware to every request and route middleware to its route',
+    { timeout: 900_000 },
     async () => {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
       const project = `${root}/shop`;
@@ -997,86 +1279,198 @@ describe('a scaffolded full-stack project serves route edits in development', ()
   // resolve a JSR import; and a package Vite loaded itself would have been a
   // second copy whose context keys matched nothing. This boots the generated
   // entry and edits a route while it runs.
-  it('renders through Vite, shares context keys, and serves an edit without a restart', async () => {
-    expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
-    const project = `${root}/shop`;
-    await useWorkspacePackages(project);
-    const installed = await denoRunRetry(project, ['install', '--allow-scripts']);
-    expect(installed.code, installed.output).toBe(0);
+  it(
+    'renders through Vite, shares context keys, and serves an edit without a restart',
+    { timeout: 900_000 },
+    async () => {
+      expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      await useWorkspacePackages(project);
+      const installed = await denoRunRetry(project, ['install', '--allow-scripts']);
+      expect(installed.code, installed.output).toBe(0);
 
-    const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
-      tasks: Record<string, string>;
-    };
-    expect(manifest.tasks['dev']).toBe('deno task install && deno run -A dev.ts');
-    // `deno run` does not type-check, and the project's `check:app` does not
-    // reach the entry, so check it here.
-    const checked = await denoRunRetry(project, ['check', 'dev.ts']);
-    expect(checked.code, checked.output).toBe(0);
+      const manifest = JSON.parse(await nodeFs.readFile(`${project}/deno.json`, 'utf8')) as {
+        tasks: Record<string, string>;
+      };
+      expect(manifest.tasks['dev']).toBe('deno task install && deno run -A dev.ts');
+      // `deno run` does not type-check, and the project's `check:app` does not
+      // reach the entry, so check it here.
+      const checked = await denoRunRetry(project, ['check', 'dev.ts']);
+      expect(checked.code, checked.output).toBe(0);
 
-    const port = await unusedPort();
-    const vitePort = await unusedPort();
-    // The task's own command after its install step, so the process killed
-    // below is the server itself rather than a task runner wrapping it.
-    const child = spawnProcess(denoBinary(), {
-      args: ['run', '-A', 'dev.ts'],
-      cwd: project,
-      env: { PORT: String(port), VITE_PORT: String(vitePort) },
-      stdout: 'piped',
-      stderr: 'piped',
-    });
-    const origin = `http://127.0.0.1:${port}`;
-    try {
-      let served = false;
-      for (let attempt = 0; attempt < 300 && !served; attempt++) {
-        try {
-          const response = await fetch(`${origin}/health`);
-          await response.body?.cancel();
-          served = response.ok;
-        } catch {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        }
-      }
-      expect(served).toBe(true);
-
-      // The login loader reads the CSRF token populateLoadContext set under a
-      // contextKeyFor() key: a second module copy would leave it at its default.
-      const login = await fetch(`${origin}/login`);
-      const page = await login.text();
-      expect(login.status, page).toBe(200);
-      expect(page).toMatch(/name="_csrf"\s+value="[^"]+"/);
-
-      // A client module, through the application's port.
-      const module = /"(\/__vite\/app\/root\.tsx[^"]*)"/.exec(page)?.[1];
-      expect(module).toBeDefined();
-      const client = await fetch(`${origin}${module}`);
-      await client.body?.cancel();
-      expect(client.status).toBe(200);
-      expect(client.headers.get('content-type')).toContain('javascript');
-
-      const route = `${project}/app/routes/_auth/login.tsx`;
-      const source = await nodeFs.readFile(route, 'utf8');
-      expect(source).toContain('>Sign in<');
-      await nodeFs.writeFile(route, source.replace('>Sign in<', '>Sign in, edited<'));
-      let edited = '';
-      for (let attempt = 0; attempt < 50 && !edited.includes('Sign in, edited'); attempt++) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-        edited = await (await fetch(`${origin}/login`)).text();
-      }
-      expect(edited).toContain('Sign in, edited');
-
-      // SIGINT runs the entry's shutdown, which stops the app and Vite and exits 0.
-      child.kill('SIGINT');
-      const stopped = await child.status;
-      expect(stopped.code).toBe(0);
-    } finally {
+      const port = await unusedPort();
+      const vitePort = await unusedPort();
+      // The task's own command after its install step, so the process killed
+      // below is the server itself rather than a task runner wrapping it.
+      const child = spawnProcess(denoBinary(), {
+        args: ['run', '-A', 'dev.ts'],
+        cwd: project,
+        env: { PORT: String(port), VITE_PORT: String(vitePort) },
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      const origin = `http://127.0.0.1:${port}`;
       try {
-        child.kill('SIGKILL');
-      } catch {
-        // Already exited; its output is still drained below.
+        let served = false;
+        for (let attempt = 0; attempt < 300 && !served; attempt++) {
+          try {
+            const response = await fetch(`${origin}/health`);
+            await response.body?.cancel();
+            served = response.ok;
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 100));
+          }
+        }
+        expect(served).toBe(true);
+
+        // The login loader reads the CSRF token populateLoadContext set under a
+        // contextKeyFor() key: a second module copy would leave it at its default.
+        const login = await fetch(`${origin}/login`);
+        const page = await login.text();
+        expect(login.status, page).toBe(200);
+        expect(page).toMatch(/name="_csrf"\s+value="[^"]+"/);
+
+        // A client module, through the application's port.
+        const module = /"(\/__vite\/app\/root\.tsx[^"]*)"/.exec(page)?.[1];
+        expect(module).toBeDefined();
+        const client = await fetch(`${origin}${module}`);
+        await client.body?.cancel();
+        expect(client.status).toBe(200);
+        expect(client.headers.get('content-type')).toContain('javascript');
+
+        const route = `${project}/app/routes/_auth/login.tsx`;
+        const source = await nodeFs.readFile(route, 'utf8');
+        expect(source).toContain('>Sign in<');
+        await nodeFs.writeFile(route, source.replace('>Sign in<', '>Sign in, edited<'));
+        let edited = '';
+        for (let attempt = 0; attempt < 50 && !edited.includes('Sign in, edited'); attempt++) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          edited = await (await fetch(`${origin}/login`)).text();
+        }
+        expect(edited).toContain('Sign in, edited');
+
+        // SIGINT runs the entry's shutdown, which stops the app and Vite and exits 0.
+        child.kill('SIGINT');
+        const stopped = await child.status;
+        expect(stopped.code).toBe(0);
+      } finally {
+        try {
+          child.kill('SIGKILL');
+        } catch {
+          // Already exited; its output is still drained below.
+        }
+        await child.status;
+        await child.stdout!.cancel();
+        await child.stderr!.cancel();
       }
-      await child.status;
-      await child.stdout!.cancel();
-      await child.stderr!.cancel();
-    }
-  });
+    },
+  );
+});
+
+/** M123: these assertions require built and booted output, rather than template text. */
+describe('styled scaffolds (M123)', () => {
+  for (const [target, template] of [
+    ['node', 'rest'],
+    ['bun', 'rest'],
+    ['deno', 'rest'],
+    ['node', 'class-based'],
+  ] as const) {
+    it(`builds and serves add view on ${target} ${template}`, { timeout: 900_000 }, async () => {
+      expect(await run(['new', 'shop', '--runtime', target, '--template', template])).toBe(0);
+      const project = `${root}/shop`;
+      expect(await run(['add', 'view', '--dir', project])).toBe(0);
+      const formatted =
+        target === 'deno'
+          ? await denoRun(project, ['fmt', '--check'])
+          : await prettierCheck(project);
+      expect(formatted.code, formatted.output).toBe(0);
+      const overlay = await startOverlay();
+      const execute = (args: string[]) =>
+        runIn(project, target === 'node' ? 'npm' : target, args, overlay);
+      const boot = (drive: (origin: string) => Promise<void>) =>
+        target === 'deno' ? withGeneratedServer(project, drive) : withNodeServer(project, drive);
+      try {
+        const install = await execute(['install']);
+        expect(install.code, install.output).toBe(0);
+        const built = await execute([target === 'deno' ? 'task' : 'run', 'build']);
+        expect(built.code, built.output).toBe(0);
+        const checked = await execute([target === 'deno' ? 'task' : 'run', 'check']);
+        expect(checked.code, checked.output).toBe(0);
+        // The normal check reaches routes through setu.config.ts; assert the JSX path explicitly too.
+        if (target === 'deno') {
+          const views = await execute([
+            'check',
+            'src/views/home.tsx',
+            'src/views/layout.tsx',
+            'src/controllers/views.controller.ts',
+          ]);
+          expect(views.code, views.output).toBe(0);
+        }
+        await boot(async (origin) => {
+          const page = await fetch(`${origin}/ui`);
+          expect(page.status).toBe(200);
+          const html = await page.text();
+          expect(html).toContain('data-shell="frame"');
+          expect(html).toContain('/assets/app.css');
+          const css = await fetch(`${origin}/assets/app.css`);
+          expect(css.status).toBe(200);
+          expect(css.headers.get('content-type')).toContain('text/css');
+          expect(await css.text()).toContain('.h-dvh');
+        });
+      } finally {
+        await overlay.close();
+      }
+    });
+  }
+  for (const target of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
+    it(`builds full-stack token and shell CSS on ${target}`, { timeout: 900_000 }, async () => {
+      expect(await run(['new', 'shop', '--runtime', target, '--template', 'full-stack'])).toBe(0);
+      const project = `${root}/shop`;
+      const formatted =
+        target === 'deno'
+          ? await denoRun(project, ['fmt', '--check'])
+          : await prettierCheck(project);
+      expect(formatted.code, formatted.output).toBe(0);
+      const overlay = await startOverlay();
+      const executable = target === 'node' || target === 'cloudflare-workers' ? 'npm' : target;
+      try {
+        const install = await runIn(
+          project,
+          executable,
+          target === 'deno' ? ['task', 'install'] : ['install'],
+          overlay,
+        );
+        expect(install.code, install.output).toBe(0);
+        const built = await runIn(
+          project,
+          executable,
+          [target === 'deno' ? 'task' : 'run', 'build'],
+          overlay,
+        );
+        expect(built.code, built.output).toBe(0);
+        if (target === 'node') {
+          await nodeFs.mkdir(`${project}/.tmp`, { recursive: true });
+          await nodeFs.writeFile(
+            `${project}/.tmp/cn-probe.ts`,
+            "import { cn } from 'cn';\nconsole.log(cn('p-2', false, 'p-6'));\n",
+          );
+          const merged = await runIn(project, 'node', ['--import', 'tsx', '.tmp/cn-probe.ts']);
+          expect(merged.code, merged.output).toBe(0);
+          expect(merged.output.trim()).toBe('p-6');
+        }
+        const assets = `${project}/build/client/assets`;
+        const css = (
+          await Promise.all(
+            (await nodeFs.readdir(assets))
+              .filter((name) => name.endsWith('.css'))
+              .map((name) => nodeFs.readFile(`${assets}/${name}`, 'utf8')),
+          )
+        ).join('\n');
+        expect(css).toContain('.h-dvh');
+        expect(css).toContain('--primary:');
+      } finally {
+        await overlay.close();
+      }
+    });
+  }
 });

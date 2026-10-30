@@ -437,3 +437,44 @@ observe.
 - [`@setu-ts/view-plugin`](../packages/view-plugin/README.md) — options, exports and examples
 - [`@setu-ts/decorator-plugin`](../packages/decorator-plugin/README.md) — the decorator surface
 - [PUBLIC_API.md](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md) — the full contract
+
+## Styling server-rendered views
+
+Run `setu add view` in a generated REST project. It adds `hono`, the hono JSX compiler options,
+Tailwind 4's standalone CLI, neutral shadcn theme tokens in `src/views/styles.css`, and an example
+`/ui` page in `src/views/home.tsx`, served by a function controller like any other route:
+`src/controllers/views.controller.ts`, or `src/modules/<module>/views.controller.ts` with
+`--module <module>`, which a project with modules requires. The layout keeps the header and sidebar
+fixed while the content scrolls. It reads the stored light/dark/system preference before paint; its
+toggle follows the system preference while in system mode.
+
+The command writes only absent pieces. Existing files, dependency pins, JSX choices and CSS scripts
+are preserved and named in its output. When `setu.config.ts` is not a recognized generated factory,
+it prints the plugin and route registrations to add manually. Review those notes before starting.
+
+On Node, run `npm install`, then `npm run build` and `npm start`. Bun uses `bun install`,
+`bun run build` and `bun start`; Deno uses `deno install`, `deno task build` and `deno task start`.
+A `build` or `start:dev` script the command creates or prefixes runs `css` first, emitting
+`build/assets/app.css`; `StaticPlugin` serves it at `/assets/app.css`. A script that already called
+`css` is left as it was, so check that it runs `css` before the build. In another terminal, run
+`npm run css:watch`, `bun run css:watch`, or `deno task css:watch` while editing views. There is no
+combined watcher command. The generated production image already copies `build/`.
+
+shadcn's **class recipes** work with hono JSX: the generated home page uses card and button classes
+as plain strings. Interactive shadcn components do not work on this path because server-rendered
+views ship no React client JavaScript. Use the full-stack template for interactive React components;
+it includes Tailwind, shadcn Button/Card and `components.json` for `npx shadcn add <component>`.
+
+A `'custom'` React view engine can render static shadcn components. Every React file, including
+copied shadcn components, needs `/** @jsxImportSource react */`. Keep React and hono JSX in separate
+TypeScript projects: their global JSX type sets conflict in one project. The CLI does not scaffold
+that configuration.
+
+The early theme script and the view toggle are static inline scripts. An application adding a CSP
+must allow them by hash or nonce; no CSP is configured by default. Storage values are compared
+against literals, never inserted into markup. With JavaScript disabled the page renders light.
+
+On Cloudflare Workers, `setu add view` adds `hono`, JSX options, the example view files and their
+controller, and prints the `ViewPlugin()` registration. It does not add Tailwind, a stylesheet link,
+CSS tasks or `StaticPlugin`: Workers has no filesystem for that plugin. Serve CSS through Wrangler
+static assets and add the stylesheet link yourself.

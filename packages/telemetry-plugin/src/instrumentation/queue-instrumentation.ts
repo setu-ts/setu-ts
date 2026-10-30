@@ -51,6 +51,7 @@ export async function loadAmqplibInstrumentation(
       return await import('@opentelemetry/instrumentation-amqplib');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-amqplib', {
+        requiredBy: '@setu-ts/telemetry-plugin',
         cause: error,
       });
     }
@@ -91,6 +92,7 @@ export async function loadKafkaJsInstrumentation(
       return await import('@opentelemetry/instrumentation-kafkajs');
     } catch (error) {
       throw new OptionalDependencyUnavailableError('@opentelemetry/instrumentation-kafkajs', {
+        requiredBy: '@setu-ts/telemetry-plugin',
         cause: error,
       });
     }

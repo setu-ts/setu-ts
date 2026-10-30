@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/logger-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Structured logging over console, pino, or noop, with request/response middleware",
   "repository": {
     "type": "git",

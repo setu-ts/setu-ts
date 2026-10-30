@@ -9,7 +9,96 @@ import {
   JetStreamUnavailableError,
   NatsConsumerNameCollisionError,
   RequestTimeoutError,
+  PublishTimeoutError,
 } from '../../src/errors.ts';
+
+describe('M119a stable queue-less NATS delivery', () => {
+  it.each([undefined, 'workers.eu'])(
+    'derives a durable group from defaultQueue %s',
+    async (defaultQueue) => {
+      const client = new FakeNatsConnection();
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        ...(defaultQueue === undefined ? {} : { defaultQueue }),
+      });
+      await broker.connect();
+      try {
+        await broker.subscribe('orders.created', () => {});
+        await broker.subscribe('orders.created', () => {});
+        const jsm = await client.jetstreamManager();
+        const configs = jsm.calls.filter((c) => c.method === 'consumers.add').map((c) => c.args[1]);
+        const queue = `${defaultQueue ?? 'messaging-consumers'}.orders.created`;
+        expect(configs).toEqual(
+          [0, 1].map(() => ({
+            name: queue.replaceAll('.', '_2e'),
+            durable_name: queue.replaceAll('.', '_2e'),
+            filter_subject: 'orders.created',
+            ack_policy: 'explicit',
+            deliver_policy: 'new',
+            metadata: { 'setu.queue': queue },
+          })),
+        );
+        expect(jsm.calls.some((c) => c.method === 'consumers.list')).toBe(true);
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
+
+  it('refuses a concatenation collision belonging to another topic', async () => {
+    const client = new FakeNatsConnection();
+    const a = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      defaultQueue: 'a',
+    });
+    const b = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      defaultQueue: 'a.b',
+    });
+    await a.connect();
+    await b.connect();
+    await a.subscribe('b.c', () => {});
+    await expect(b.subscribe('c', () => {})).rejects.toBeInstanceOf(NatsConsumerNameCollisionError);
+    await b.disconnect();
+    await a.disconnect();
+  });
+
+  it('does not await the sweep and reports its rejection without failing connect', async () => {
+    const client = new FakeNatsConnection();
+    const jsm = await client.jetstreamManager();
+    const pending = Promise.withResolvers<IteratorResult<never>>();
+    vi.spyOn(jsm.consumers, 'list').mockReturnValue({
+      [Symbol.asyncIterator]: () => ({ next: () => pending.promise }),
+    });
+    const error = vi.fn();
+    const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      logger: { error },
+    });
+    await broker.connect();
+    expect(broker.isReady()).toBe(true);
+    pending.reject(new Error('list refused'));
+    await vi.waitFor(() => expect(error).toHaveBeenCalledTimes(1));
+    await broker.disconnect();
+  });
+
+  it.each([undefined, 37, 0])(
+    'forwards the publish timeout %s to JetStream',
+    async (publishTimeoutMs) => {
+      const client = new FakeNatsConnection();
+      const broker = new NatsBroker(createFakeRuntime(), new JsonSerializer(), {
+        client,
+        ...(publishTimeoutMs === undefined ? {} : { publishTimeoutMs }),
+      });
+      await broker.connect();
+      await broker.publish('orders', {});
+      expect(client.jetstream().calls.find((c) => c.method === 'publish')!.args[2]).toEqual({
+        timeout: publishTimeoutMs === 0 ? 2147483647 : (publishTimeoutMs ?? 15000),
+      });
+      await broker.disconnect();
+    },
+  );
+});
 
 describe('M113a NATS reconnect policy', () => {
   it.each([undefined, {}, { maxAttempts: 3, waitMs: 17 }, { maxAttempts: 0, waitMs: 2147483647 }])(
@@ -140,7 +229,7 @@ describe('NatsBroker', () => {
       );
       expect(error!.message).toContain('"orders"');
       expect(error!.message).not.toContain('streamSubjects');
-      expect(error!.cause?.code).toBe('TIMEOUT');
+      expect(error).toBeInstanceOf(PublishTimeoutError);
       await broker.disconnect();
     });
 
@@ -217,8 +306,8 @@ describe('NatsBroker', () => {
     await broker.publish('orders', { id: 2 });
 
     const publishes = fakeConnection.jetstream().calls.filter((c) => c.method === 'publish');
-    expect(publishes[0]?.args[2]).toEqual({ msgID: 'order-1' });
-    expect(publishes[1]?.args[2]).toBeUndefined();
+    expect(publishes[0]?.args[2]).toEqual({ msgID: 'order-1', timeout: 15000 });
+    expect(publishes[1]?.args[2]).toEqual({ timeout: 15000 });
     await broker.disconnect();
   });
 

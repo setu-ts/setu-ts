@@ -74,7 +74,7 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
           });
         expect(await run()).toBe(1);
         expect(errors).toEqual([
-          `${root}/apps/b: symlink; run \`setu agents\` in a workspace you own`,
+          `${root}/apps/b: symlink; replace the link with the directory it points at, or run setu agents from its real path (${root}/elsewhere)`,
         ]);
         expect(await readdir(root)).toEqual(['apps', 'elsewhere', 'setu.workspace.json']);
         for (const member of ['a', 'b'])
@@ -174,6 +174,77 @@ describe.skipIf(typeof process.getuid !== 'function' || process.platform === 'wi
         `${escapeName(unusual)}: cannot check directory ownership; run \`setu agents\` in a workspace you own`,
       ]);
       expect(await readdir(unusual)).toEqual(['setu.workspace.json']);
+    });
+
+    it.skipIf(process.getuid?.() === 0)(
+      'refuses a real read-only project through the Node canWrite probe, writing nothing',
+      async () => {
+        const project = `${root}/apps/a`;
+        const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+        await chmod(project, 0o555);
+        try {
+          expect(await fs.canWrite!(`${project}/AGENTS.md`)).toBe(false);
+          const errors: string[] = [];
+          const code = await runCli(['agents'], {
+            fs,
+            cwd: project,
+            now: () => 0,
+            log: () => {},
+            error: (message) => errors.push(message),
+          });
+          expect(code).toBe(1);
+          expect(errors).toEqual([
+            `${project}/AGENTS.md: not writable by you; nothing was written`,
+          ]);
+          expect(await readdir(project)).toEqual(['package.json']);
+          expect(await readdir(root)).toEqual(['apps', 'setu.workspace.json']);
+        } finally {
+          await chmod(project, 0o755);
+        }
+      },
+    );
+
+    it.skipIf(process.getuid?.() === 0)(
+      'refuses a writable brief inside a read-only directory, which the rename needs',
+      async () => {
+        const project = `${root}/apps/a`;
+        await writeFile(`${project}/AGENTS.md`, '# notes\n');
+        const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+        await chmod(project, 0o555);
+        try {
+          expect(await fs.canWrite!(`${project}/AGENTS.md`)).toBe(false);
+        } finally {
+          await chmod(project, 0o755);
+        }
+        expect(await fs.canWrite!(`${project}/AGENTS.md`)).toBe(true);
+        expect(await fs.canWrite!(`${project}/missing.md`)).toBe(true);
+      },
+    );
+
+    it('refuses a symlinked member from inside the link target when PWD names the link', async () => {
+      await rm(`${root}/apps/b`, { recursive: true });
+      await mkdir(`${root}/elsewhere`, { mode: 0o755 });
+      await writeFile(`${root}/elsewhere/package.json`, '{}');
+      await symlink(`${root}/elsewhere`, `${root}/apps/b`);
+      const fs = withRegularFileReads(createNodeRuntimeServices().fs!);
+      const errors: string[] = [];
+      const code = await runCli(['agents'], {
+        // The physical path is the link target; only the shell knows the
+        // logical path that walks into the workspace.
+        fs,
+        cwd: `${root}/elsewhere`,
+        logicalCwd: `${root}/apps/b`,
+        now: () => 0,
+        log: () => {},
+        error: (message) => errors.push(message),
+      });
+      expect(code).toBe(1);
+      expect(errors).toEqual([
+        `${root}/apps/b is a symlinked member of the workspace at ${root}; Setu will not write ` +
+          `through links inside a workspace. Replace the link with the directory it points at, ` +
+          `then run setu agents from ${root}.`,
+      ]);
+      expect(await readdir(`${root}/elsewhere`)).toEqual(['package.json']);
     });
   },
 );

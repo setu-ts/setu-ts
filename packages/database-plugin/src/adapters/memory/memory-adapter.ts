@@ -956,7 +956,7 @@ export class MemoryAdapter implements IDatabaseAdapter {
 
     // 2. Sort fingerprint guard. A cursor minted under a different sort must be
     //    refused by name rather than served a silently wrong page.
-    const fingerprint = sortFingerprint(query.orderBy);
+    const fingerprint = sortFingerprint(query.orderBy, { entity, keyColumns });
     if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
       return Promise.reject(
         new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),

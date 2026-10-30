@@ -48,6 +48,9 @@ describe('barrel exports', () => {
     expect(messaging.JsonSerializer).toBeDefined();
     expect(typeof messaging.JsonSerializer).toBe('function');
 
+    expect(typeof messaging.PublishTimeoutError).toBe('function');
+    expect('sweepLeakedConsumers' in messaging).toBe(false);
+    expect('partitionsToSeek' in messaging).toBe(false);
     // Request-reply error classes
     expect(messaging.RequestTimeoutError).toBeDefined();
     expect(typeof messaging.RequestTimeoutError).toBe('function');

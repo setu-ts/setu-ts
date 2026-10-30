@@ -1,6 +1,6 @@
 # @setu-ts/queue-plugin — background jobs and retries
 
-**Add it:** `setu add queue` installs it and wires `QueuePlugin()` with its processors seam in a
+**Add it:** `setu add queue` adds it and wires `QueuePlugin()` with its processors seam in a
 recognized functional config. It provides `CAPABILITIES.QUEUE` (`IQueue`).
 
 ## Enqueue work from a route

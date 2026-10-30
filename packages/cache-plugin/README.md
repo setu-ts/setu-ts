@@ -56,6 +56,13 @@ application logger — the first error of an outage at `warn`, identical repeats
 recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
 injected client gets no listener: it belongs to the caller.
 
+**node-redis.** To use node-redis instead of ioredis, pass
+`options: { client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from `@setu-ts/common`,
+`createClient` from `redis`, installed in your application). The adapter bounds its own commands
+(`fromNodeRedis(client, { commandTimeoutMs })`); this store's `commandTimeoutMs` applies only to the
+client it builds. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 `options.commandTimeoutMs` (Redis only, default `15000`, `0` disables) bounds each command on the
 client the store builds. A paused or partitioned server keeps its socket open, so without the bound
 a cache call waits forever; with it the call rejects and the diagnostics count it `failed`. (The

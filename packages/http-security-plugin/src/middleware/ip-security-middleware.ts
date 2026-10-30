@@ -14,7 +14,8 @@
 import { CLIENT_IP_STATE_KEY, REQUEST_ORIGIN_STATE_KEY, requestOriginOf } from '@setu-ts/common';
 import type { RequestOrigin } from '@setu-ts/common';
 import type { IRequestContext, MiddlewareFunction } from '@setu-ts/common';
-import { parseForwarded } from './forwarded-header.ts';
+import { MALFORMED, parseForwarded } from './forwarded-header.ts';
+import { ipv4ToNumber, normalizeIp, parseClientAddress } from './normalize-ip.ts';
 
 /** Options for IP security middleware. */
 export interface IpSecurityOptions {
@@ -32,6 +33,7 @@ export interface IpSecurityOptions {
    * right. With `false`, the client is the socket peer on Node, Deno and Bun.
    * Leftmost and `proxyHops` modes do not check the socket peer; prefer
    * `trustedProxies` when proxy addresses are stable.
+   * A selected header entry must be an IP address (port stripped), or no client is resolved.
    */
   readonly trustProxy?: boolean;
   /**
@@ -41,6 +43,7 @@ export interface IpSecurityOptions {
    * {@linkcode IpSecurityOptions.proxyHops} supplied, the LEFTMOST address is
    * taken — which is the entry a client controls under an appending proxy (see
    * those two options).
+   * A selected entry must be an IP address (port stripped), or no client is resolved.
    */
   readonly ipHeader?: string;
   /**
@@ -67,6 +70,7 @@ export interface IpSecurityOptions {
    * Mutually exclusive with {@linkcode IpSecurityOptions.proxyHops}; supplying
    * both throws at middleware construction. Omitted, resolution stays leftmost,
    * unchanged from before 0.5.0.
+   * Each examined header entry must be an IP address (port stripped), or no client is resolved.
    *
    * @since 0.5.0
    */
@@ -91,6 +95,7 @@ export interface IpSecurityOptions {
    * Mutually exclusive with {@linkcode IpSecurityOptions.trustedProxies}.
    * Does not count or check the socket peer. Prefer `trustedProxies` for
    * proxies with stable addresses.
+   * The selected entry and entries to its right must be IP addresses (ports stripped), or no client is resolved.
    *
    * @since 0.5.0
    */
@@ -159,49 +164,14 @@ function compileTrustedProxy(entry: string): (candidate: string) => boolean {
       const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0;
       const base = (networkValue & mask) >>> 0;
       return (candidate: string): boolean => {
-        const value = ipv4ToNumber(unmapIpv4(candidate));
+        // Every candidate reaches a matcher already normalized (M119d §3.3).
+        const value = ipv4ToNumber(candidate);
         return value !== null && (value & mask) >>> 0 === base;
       };
     }
   }
-  const literal = unmapIpv4(entry).toLowerCase();
-  return (candidate: string): boolean => unmapIpv4(candidate).toLowerCase() === literal;
-}
-
-/** An IPv4-mapped IPv6 address (`::ffff:a.b.c.d`). */
-const MAPPED_IPV4 = /^::ffff:([0-9]{1,3}(?:\.[0-9]{1,3}){3})$/i;
-
-/**
- * Unmaps `::ffff:a.b.c.d` to `a.b.c.d` for matching, as the runtime adapters
- * already do for the socket peer. A dual-stack proxy may write a forwarded hop
- * in the mapped form, which would otherwise never match an IPv4 trusted entry.
- */
-function unmapIpv4(candidate: string): string {
-  const match = MAPPED_IPV4.exec(candidate);
-  const address = match?.[1];
-  return address !== undefined && ipv4ToNumber(address) !== null ? address : candidate;
-}
-
-/** Converts a dotted-quad IPv4 literal to its numeric value, or `null`. */
-function ipv4ToNumber(address: string): number | null {
-  const parts = address.split('.');
-  if (parts.length !== 4) {
-    return null;
-  }
-  let value = 0;
-  for (const part of parts) {
-    // `Number('')` is 0 and `Number(' 1')` is 1, so the digits are checked
-    // explicitly rather than inferred from the conversion.
-    if (part.length === 0 || part.length > 3 || !/^[0-9]+$/.test(part)) {
-      return null;
-    }
-    const octet = Number(part);
-    if (octet > 255) {
-      return null;
-    }
-    value = value * 256 + octet;
-  }
-  return value >>> 0;
+  const literal = normalizeIp(entry);
+  return (candidate: string): boolean => candidate === literal;
 }
 
 /**
@@ -271,23 +241,35 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
       if (hasHeader || trustedMatchers !== undefined) {
         const raw = headerValue ?? '';
         const elements = forwardedHeader === 'forwarded' ? parseForwarded(raw) : undefined;
-        // A malformed Forwarded header contributes no hops rather than ending
-        // resolution: the walk below still checks the socket peer, so a client
-        // connecting directly cannot erase its own identity by sending garbage.
-        const chain =
-          forwardedHeader === 'forwarded'
-            ? (elements ?? []).map((element) => element.ip)
-            : [...parseForwardedChain(raw)];
+        // A malformed Forwarded element is a BOUNDARY, not a void: the entries
+        // to its right were written by later hops and are still read, while
+        // everything left of it collapses into the one `MALFORMED` entry the
+        // parser returns. The walk below never crosses that boundary, so a
+        // client cannot erase its identity (V10-19) nor walk past an unreadable
+        // hop into text it wrote itself (M119d §3.1).
+        const chain: (string | undefined | typeof MALFORMED)[] =
+          elements === undefined
+            ? [...parseForwardedChain(raw)]
+            : elements.map((element) => (element === MALFORMED ? MALFORMED : element.ip));
         const forwardedLength = chain.length;
         if (trustedMatchers !== undefined && ctx.request.ip !== undefined) {
           chain.push(ctx.request.ip);
         }
-        const index = resolveForwardedIndex(chain, trustedMatchers, proxyHops);
-        const selected = index === undefined ? undefined : chain[index];
+        const index = resolveForwardedIndex(
+          chain,
+          trustedMatchers,
+          proxyHops,
+          elements === undefined ? forwardedLength : 0,
+        );
+        const entry = index === undefined ? undefined : chain[index];
+        // A selection never lands on the boundary: `resolveForwardedIndex`
+        // refuses such an index, and the narrowing keeps the marker out of the
+        // published value.
+        const selected = entry === MALFORMED ? undefined : entry;
         // A header that resolves no client (a `proxyHops` chain too short, an
-        // all-trusted chain, an `unknown` Forwarded hop) resolves `undefined` in
-        // both families. Falling back to the socket peer would key every caller
-        // behind one proxy on that proxy's address.
+        // all-trusted chain, an `unknown` Forwarded hop, a boundary in the way)
+        // resolves `undefined` in both families. Falling back to the socket peer
+        // would key every caller behind one proxy on that proxy's address.
         ip = selected;
         // The forwarded origin is believed only when the walk itself passed a
         // trusted socket peer. Leftmost, `proxyHops`, and a deployment with no
@@ -300,17 +282,24 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
           index !== undefined &&
           index < forwardedLength
         ) {
-          const element = elements?.[index];
-          origin =
-            forwardedHeader === 'forwarded'
-              ? validatedForwardedOrigin(origin, element?.proto, element?.host)
-              : xForwardedOrigin(ctx, origin);
+          if (forwardedHeader === 'forwarded') {
+            const element = elements?.[index];
+            const forwardedElement = element === MALFORMED ? undefined : element;
+            origin = validatedForwardedOrigin(
+              origin,
+              forwardedElement?.proto,
+              forwardedElement?.host,
+            );
+          } else {
+            origin = xForwardedOrigin(ctx, origin);
+          }
         }
       }
     }
 
-    // Publish the resolved IP to state (even if undefined)
-    ctx.state.set(CLIENT_IP_STATE_KEY, ip);
+    // Publish one normalized identity in EVERY mode, the socket peer included:
+    // a mapped or non-canonical IPv6 client must not hold two keys (V10-28).
+    ctx.state.set(CLIENT_IP_STATE_KEY, ip === undefined ? undefined : normalizeIp(ip));
     ctx.state.set(REQUEST_ORIGIN_STATE_KEY, origin);
 
     // Never short-circuit
@@ -326,21 +315,25 @@ export function ipSecurityMiddleware(options: IpSecurityOptions = {}): Middlewar
  * - `trustedMatchers` — walk right to left and return the first entry that is
  *   not a trusted proxy. Every entry to the right of it was added by
  *   infrastructure this deployment controls; the one returned is the furthest
- *   address that could not have been forged past a trusted hop.
+ *   address that could not have been forged past a trusted hop. Reaching a
+ *   `MALFORMED` boundary returns `undefined`: the walk never crosses it.
  * - `proxyHops` — return the nth entry from the right. Used when the proxies
- *   cannot be addressed by IP. A header too short for the declared chain
- *   resolves to `undefined`.
- * - neither — return the leftmost entry, the released behaviour.
+ *   cannot be addressed by IP. A header too short for the declared chain, or a
+ *   selection with a boundary at or to its right, resolves to `undefined`.
+ * - neither — return the leftmost entry, the released behaviour. A chain
+ *   carrying a boundary resolves `undefined`: index 0 is, or lies left of, it.
  *
  * @param chain - Wire-order entries, with the peer appended in trusted-proxy mode
  * @param trustedMatchers - Compiled trusted-proxy predicates, when configured
  * @param proxyHops - Declared proxy count, when configured
+ * @param unvalidatedLength - Number of X-Forwarded entries; excludes the runtime peer and RFC 7239 elements
  * @returns The selected index, or `undefined` when none can be resolved
  */
 function resolveForwardedIndex(
-  chain: readonly (string | undefined)[],
+  chain: (string | undefined | typeof MALFORMED)[],
   trustedMatchers: readonly ((candidate: string) => boolean)[] | undefined,
   proxyHops: number | undefined,
+  unvalidatedLength: number,
 ): number | undefined {
   if (chain.length === 0) {
     return undefined;
@@ -348,8 +341,16 @@ function resolveForwardedIndex(
 
   if (trustedMatchers !== undefined) {
     for (let i = chain.length - 1; i >= 0; i--) {
-      const entry = chain[i];
-      if (entry === undefined || !trustedMatchers.some((matches) => matches(entry))) {
+      const entry = examinedEntry(chain, i, unvalidatedLength);
+      if (entry === MALFORMED) {
+        return undefined;
+      }
+      if (entry === undefined) {
+        return i;
+      }
+      // The runtime peer retains its normalized comparison without validation.
+      const candidate = normalizeIp(entry);
+      if (!trustedMatchers.some((matches) => matches(candidate))) {
         return i;
       }
     }
@@ -363,10 +364,34 @@ function resolveForwardedIndex(
     if (index < 0) {
       return undefined;
     }
+    // A boundary at the selected index or anywhere to its right means the walk
+    // would have had to cross it, so nothing left of it may be returned.
+    for (let i = index; i < chain.length; i++) {
+      if (examinedEntry(chain, i, unvalidatedLength) === MALFORMED) {
+        return undefined;
+      }
+    }
     return index;
   }
 
-  return 0;
+  return examinedEntry(chain, 0, unvalidatedLength) === MALFORMED ? undefined : 0;
+}
+
+/**
+ * Validated and normalized lazily, only for entries the walk examines: an
+ * X-Forwarded-For chain is unbounded. Cache the canonical entry for publication;
+ * RFC 7239 elements are already validated and the runtime peer is out of scope.
+ */
+function examinedEntry(
+  chain: (string | undefined | typeof MALFORMED)[],
+  index: number,
+  unvalidatedLength: number,
+): string | undefined | typeof MALFORMED {
+  const entry = chain[index];
+  if (index >= unvalidatedLength || typeof entry !== 'string') return entry;
+  const parsed = parseClientAddress(entry);
+  chain[index] = parsed === null ? MALFORMED : parsed;
+  return chain[index];
 }
 
 /**

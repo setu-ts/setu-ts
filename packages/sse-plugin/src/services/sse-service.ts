@@ -159,12 +159,12 @@ export class SseService implements IService {
     return conn;
   }
 
-  /** Return or create a named channel. */
+  /** Return a reusable named channel handle; membership is allocated on add. */
   channel(name: string): SseChannel {
     return this.#registry.get(name);
   }
 
-  /** Return the named channel if it already exists, without creating it. */
+  /** Return the named channel when it has members, without creating an entry. */
   peek(name: string): SseChannel | undefined {
     return this.#registry.peek(name);
   }
@@ -175,11 +175,8 @@ export class SseService implements IService {
   }
 
   /**
-   * Number of channels the registry currently holds.
-   *
-   * Rises for the life of a running application, since nothing reclaims a
-   * channel; {@linkcode SseService.closeAll} discards them all at shutdown,
-   * which is the only thing that lowers it.
+   * Number of channels with members. The registry reclaims a channel's entry
+   * when its last member leaves; held handles continue to work by name.
    */
   get channelCount(): number {
     return this.#registry.size;

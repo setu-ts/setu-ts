@@ -319,7 +319,10 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
   try {
     return (await import('@azure/storage-blob')) as unknown as AzureSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@azure/storage-blob', { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/storage-blob', {
+      requiredBy: '@setu-ts/storage-plugin',
+      cause: error,
+    });
   }
 }
 

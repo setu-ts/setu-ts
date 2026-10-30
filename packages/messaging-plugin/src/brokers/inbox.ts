@@ -30,8 +30,8 @@ const TOPIC_INBOX_PREFIX = 'rr.inbox.';
  * make a public queue exclusive and auto-delete. The marker travels only on
  * the broker's internal call and never on the public `subscribe()` surface.
  *
- * Package-internal: it is read by `RabbitMqBroker` (the only broker whose
- * queue declaration must distinguish the two shapes) and is not exported
+ * Package-internal: it is read by `RabbitMqBroker` and `NatsBroker` to distinguish
+ * private transient inboxes from durable consumer groups and is not exported
  * from `src/index.ts`.
  */
 export const REPLY_INBOX_TRANSIENT: unique symbol = Symbol('reply-inbox-transient');

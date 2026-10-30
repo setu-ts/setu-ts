@@ -27,6 +27,7 @@ import type { ISqsTransport, SqsReceivedMessage } from '@setu-ts/queue-plugin';
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { requestMacFields, signFields } from '../../src/security/authentication.ts';
 import { importTestKey, TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { connect, unusedPort } from '../../../../test/node-helpers.ts';
 
 const PAYLOAD_CANARY = 'payload-canary-SYNTHETIC-0001';
 const HEADER_CANARY = 'header-canary-SYNTHETIC-0002';
@@ -97,15 +98,8 @@ async function until(predicate: () => boolean, what: string): Promise<void> {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 async function startQueueApplication() {
-  const connectorPort = freePort();
+  const connectorPort = await unusedPort();
   const delivered: string[] = [];
   const transport = canaryTransport();
   const app = createApplication({
@@ -254,7 +248,7 @@ describe('Queue observations e2e (M98f canary)', () => {
   });
 
   it('answers an unsupported queues batch when no queue plugin is present', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -289,11 +283,13 @@ describe('Queue observations e2e (M98f canary)', () => {
 
 /** Sends one RAW request over a fresh TCP connection. */
 async function rawRequest(port: number, raw: string): Promise<{ status: number; body: string }> {
-  const connection = await Deno.connect({ port, hostname: '127.0.0.1' });
+  const connection = await connect({ port, hostname: '127.0.0.1' });
   await connection.write(new TextEncoder().encode(raw));
-  const response = await connection.readable.getReader().read();
-  await connection.close();
-  const text = new TextDecoder().decode(response.value);
+  const buffer = new Uint8Array(64 * 1024);
+  const count = await connection.read(buffer);
+  connection.close();
+  if (count === null) throw new Error('no response');
+  const text = new TextDecoder().decode(buffer.subarray(0, count));
   const [head, ...rest] = text.split('\r\n\r\n');
   return { status: Number.parseInt(head.split('\r\n')[0].split(' ')[1], 10), body: rest.join('') };
 }

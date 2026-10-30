@@ -2,7 +2,9 @@ import * as nodeFs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { createServer } from 'node:net';
+import { tempDir } from '../../../../test/node-helpers.ts';
 import { emitInterrupt, type MainProcess, nodeProcess, runMain } from '../../src/main.ts';
+import { logicalCwdFor } from '../../src/utils/logical-cwd.ts';
 
 // Host process reads and exits: Deno's (generated Deno source is emitted by the
 // allowlisted modules as text) and Node's. Only the boundary may touch them.
@@ -103,6 +105,33 @@ describe('the process boundary of packages/cli/src', () => {
     expect(errors.text()).toContain('requires filesystem access');
     expect(await runMain({ fs: createFakeFs(), now: () => 0 }, process)).toBe(0);
     expect(output.lines).not.toEqual([]);
+  });
+
+  it("hands the host's command runner to the workspace commands, and the Node host has one", async () => {
+    const hostWith = (
+      errors: ReturnType<typeof createRecorder>,
+      withRunner: boolean,
+    ): MainProcess => ({
+      args: ['workspace', 'build', '--dir', '/ws'],
+      cwd: () => '/work',
+      isTerminal: () => false,
+      prompt: () => Promise.resolve(null),
+      log: () => {},
+      error: errors.sink,
+      portAvailable: () => Promise.resolve(true),
+      ...(withRunner
+        ? { runCommand: () => Promise.resolve({ code: 0, stdout: '', stderr: '' }) }
+        : {}),
+    });
+    // No workspace at /ws, so the command stops before running anything — but it reaches the
+    // manifest check only once it has a runner.
+    const withRunner = createRecorder();
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, hostWith(withRunner, true))).toBe(1);
+    expect(withRunner.text()).toContain('not a Setu workspace');
+    const without = createRecorder();
+    expect(await runMain({ fs: createFakeFs(), now: () => 0 }, hostWith(without, false))).toBe(1);
+    expect(without.text()).toContain('cannot run docker');
+    expect(typeof nodeProcess(() => {}).runCommand).toBe('function');
   });
 
   it('builds a Node adapter whose port probe reports bind success and refusal', async () => {
@@ -252,3 +281,98 @@ function stripComments(source: string): string {
   }
   return out;
 }
+
+describe('the shell logical working directory', () => {
+  it('trusts PWD only when it is absolute and resolves to the physical cwd', async () => {
+    const root = await tempDir({ prefix: 'm119h-pwd-' });
+    const real = `${root}/real`;
+    const link = `${root}/link`;
+    const other = `${root}/other`;
+    await nodeFs.mkdir(real);
+    await nodeFs.mkdir(other);
+    await nodeFs.symlink(real, link);
+    const previous = process.env['PWD'];
+    try {
+      process.env['PWD'] = link;
+      expect(logicalCwdFor(real)).toBe(link);
+      process.env['PWD'] = real;
+      expect(logicalCwdFor(real)).toBe(real);
+      process.env['PWD'] = other;
+      expect(logicalCwdFor(real)).toBeUndefined();
+      process.env['PWD'] = `${root}/elsewhere`;
+      expect(logicalCwdFor(real)).toBeUndefined();
+      process.env['PWD'] = 'relative/path';
+      expect(logicalCwdFor(real)).toBeUndefined();
+      delete process.env['PWD'];
+      expect(logicalCwdFor(real)).toBeUndefined();
+    } finally {
+      if (previous === undefined) delete process.env['PWD'];
+      else process.env['PWD'] = previous;
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('threads a trusted PWD into the run, so a symlinked member is refused', async () => {
+    const root = await nodeFs.realpath(await tempDir({ prefix: 'm119h-pwd-link-' }));
+    const real = `${root}/real`;
+    const link = `${root}/ws/apps/a`;
+    await nodeFs.mkdir(real);
+    await nodeFs.mkdir(`${root}/ws/apps`, { recursive: true });
+    await nodeFs.symlink(real, link);
+    const previous = process.env['PWD'];
+    try {
+      process.env['PWD'] = link;
+      const fs = createFakeFs({
+        [`${root}/ws/setu.workspace.json`]: JSON.stringify({
+          version: 1,
+          basePort: 3000,
+          runtime: 'node',
+          transport: 'http',
+          members: [{ name: 'a', port: 3000 }],
+        }),
+        [`${real}/package.json`]: '{}',
+      });
+      const errors: string[] = [];
+      const host: MainProcess = {
+        args: ['agents'],
+        cwd: () => real,
+        isTerminal: () => false,
+        prompt: () => Promise.resolve(null),
+        log: () => {},
+        error: (message) => errors.push(message),
+        portAvailable: () => Promise.resolve(true),
+      };
+      expect(await runMain({ fs, now: () => 0 }, host)).toBe(1);
+      expect(errors.join('\n')).toContain('is a symlinked member of the workspace at');
+      expect(fs.writes).toEqual([]);
+    } finally {
+      if (previous === undefined) delete process.env['PWD'];
+      else process.env['PWD'] = previous;
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('threads a trusted PWD into the run instead of dropping it', async () => {
+    const root = await tempDir({ prefix: 'm119h-pwd-thread-' });
+    const previous = process.env['PWD'];
+    try {
+      process.env['PWD'] = root;
+      const fs = createFakeFs({ [`${root}/package.json`]: '{}' });
+      const host: MainProcess = {
+        args: ['agents'],
+        cwd: () => root,
+        isTerminal: () => false,
+        prompt: () => Promise.resolve(null),
+        log: () => {},
+        error: () => {},
+        portAvailable: () => Promise.resolve(true),
+      };
+      expect(await runMain({ fs, now: () => 0 }, host)).toBe(0);
+      expect(fs.writes).toEqual([`${root}/AGENTS.md`]);
+    } finally {
+      if (previous === undefined) delete process.env['PWD'];
+      else process.env['PWD'] = previous;
+      await nodeFs.rm(root, { recursive: true, force: true });
+    }
+  });
+});

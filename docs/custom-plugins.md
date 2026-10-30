@@ -268,7 +268,7 @@ ctx.lifecycle.onClose(() => {
 ### CLI Commands
 
 ```typescript
-ctx.cli.register('my-command', async (args) => {
+ctx.cli.register('my-plugin:greet', async (args) => {
   console.log('Command executed with args:', args);
 });
 ```
@@ -551,7 +551,8 @@ Provide clear, actionable error messages when something goes wrong.
 
 ```
 my-plugin/
-├── deno.json
+├── package.json
+├── tsconfig.json
 ├── README.md
 ├── src/
 │   ├── index.ts
@@ -560,18 +561,61 @@ my-plugin/
     └── plugin.test.ts
 ```
 
-### deno.json
+### package.json
 
 ```json
 {
   "name": "@acme/my-plugin",
   "version": "1.0.0",
-  "exports": "./src/index.ts",
-  "imports": {
-    "@setu-ts/common": "npm:@setu-ts/common@^0.10.0"
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": { "build": "tsc" },
+  "peerDependencies": {
+    "@setu-ts/common": "^0.11.0"
+  },
+  "devDependencies": {
+    "@setu-ts/common": "^0.11.0",
+    "typescript": "^6.0.3"
   }
 }
 ```
+
+Declare every `@setu-ts` package the plugin imports at runtime as a peer at the application's range,
+and also as a development dependency to build against it. The example plugin imports only
+`@setu-ts/common` at runtime; change its range to match the application consuming it.
+
+The application must hold one copy of each framework package. The exceptions handler checks
+`rawError instanceof HttpError`, common stores request state under module-private symbols, and React
+Router's `contextKeyFor()` keys match by identity. A private copy can turn an intended HTTP error
+into a 500 or read a slot the application never wrote. First-party packages use dependencies because
+they release in lockstep.
+
+### tsconfig.json
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "strict": true,
+    "declaration": true,
+    "rootDir": "src",
+    "outDir": "dist",
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src/**/*.ts"]
+}
+```
+
+`npm run build` emits JavaScript and declarations into `dist`; relative source imports such as
+`./plugin.ts` become JavaScript imports in the output. Publish the built package to npm.
 
 ### README.md
 
@@ -583,7 +627,7 @@ A custom plugin for Setu-TS.
 ## Installation
 
 ```bash
-deno add jsr:@acme/my-plugin
+npm install @acme/my-plugin
 ```
 
 ## Usage
@@ -601,6 +645,13 @@ app.register(MyPlugin({ greeting: 'Bonjour' }));
 | greeting | string  | `'Hello'` | The greeting word            |
 | enabled  | boolean | `true`    | Adds the `x-greeting` header |
 ````
+
+### Sharing a plugin inside one workspace
+
+In a workspace created with `setu new <name> --workspace`, run `setu generate library <name>`. It
+creates `libs/<name>/`, consumed as TypeScript source with no build step. The generated library
+manifest starts with no framework dependency: add every `@setu-ts` package it imports to that
+manifest at the members' range (`dependencies` in `package.json`, or `imports` in `deno.json`).
 
 ## Next Steps
 

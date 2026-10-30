@@ -57,6 +57,10 @@ packages:
 # member's build is `tsc -b`, which orders its own references.
 ignoreWorkspaceCycles: true
 
+# @azure/identity still requests msal-node 6; 7.1 fixes GHSA-xcx6-jx8p-x3h5.
+overrides:
+  '@azure/msal-node': ^7.1.0
+
 # Google SDK install scripts are denied: both are transitive deps of
 # the Google Cloud SDKs the tests reach only through fakes and guarded
 # suites. pnpm 12 refuses a frozen install while either is undecided.

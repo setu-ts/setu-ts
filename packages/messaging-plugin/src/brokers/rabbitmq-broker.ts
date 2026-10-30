@@ -16,7 +16,7 @@ import {
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
 import { describeError, describeLogText } from './describe-error.ts';
-import { IntegrationEventRejectedError } from '../errors.ts';
+import { IntegrationEventRejectedError, PublishTimeoutError } from '../errors.ts';
 import { normalizeTransportHeaders, type TransportHeaderValue } from './header-normalize.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { createTopicInbox, type InternalSubscribeOptions, REPLY_INBOX_TRANSIENT } from './inbox.ts';
@@ -40,7 +40,10 @@ async function loadAmqplib(): Promise<typeof import('amqplib')> {
   try {
     return await import('amqplib');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+    throw new OptionalDependencyUnavailableError('amqplib', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -713,14 +716,25 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The topic to publish to
    * @param message - The message payload
+   * @param options - Caller headers, ordering key and de-duplication id
    * @returns Resolves when published
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes with framework-owned headers under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param headers - Framework-owned transport headers
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when the transport acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @internal
+   */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -827,10 +841,11 @@ export class RabbitMqBroker implements MessageBrokerAdapter {
       {
         timeoutMs,
         onTimeout: () =>
-          new Error(
+          new PublishTimeoutError(
             `RabbitMQ did not accept the message published to exchange "${exchange}" ` +
               `with routing key "${routingKey}" within ${timeoutMs} ms (publishTimeoutMs); ` +
               'it may still be accepted',
+            { topic: routingKey, timeoutMs },
           ),
         timing: {
           setTimer: (fn, ms) => this.#runtime.setTimeout(fn, ms),

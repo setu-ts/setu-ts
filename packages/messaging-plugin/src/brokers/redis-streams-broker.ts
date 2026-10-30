@@ -1,4 +1,9 @@
-import { attachConnectionErrorReporter, createCachedProbe } from '@setu-ts/common';
+import {
+  attachConnectionErrorReporter,
+  createCachedProbe,
+  withDeadline,
+  resolveProbeTiming,
+} from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
@@ -13,12 +18,14 @@ import type {
 import type { IRuntimeServices, TimerHandle } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { IntegrationEventRejectedError } from '../errors.ts';
+import { IntegrationEventRejectedError, PublishTimeoutError } from '../errors.ts';
 import { describeError } from './describe-error.ts';
 import { createTopicInbox } from './inbox.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import type { IRedisStreamsClient, RedisStreamsOptions } from '../interfaces/index.ts';
+
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
 
 /**
  * The stream field carrying the serialized message body. Reserved: it is never
@@ -56,7 +63,10 @@ async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
     const mod = await import('ioredis');
     return mod.Redis;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+    throw new OptionalDependencyUnavailableError('ioredis', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -151,6 +161,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #url: string;
   #injectedClient: IRedisStreamsClient | undefined;
   #defaultQueue: string;
+  #publishTimeoutMs: number;
   #pollIntervalMs: number;
   #blockSizeMs: number;
   #logger?: { error: (msg: string) => void };
@@ -173,9 +184,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @param runtime - Runtime services for uuid, timestamps, and timers
    * @param serializer - Serializer for message payloads
    * @param options - Redis connection and polling options
-   * @throws {RangeError} If a retry, reclaim, retention, or sweep bound is invalid
+   * @throws {RangeError} If a retry, reclaim, retention, sweep or publish bound is invalid
    */
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: RedisStreamsOptions) {
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'redis://localhost:6379';
@@ -330,14 +342,25 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The topic (stream name) to publish to
    * @param message - The message payload
+   * @param options - Caller headers, ordering key and de-duplication id
    * @returns Resolves when published
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes with framework-owned headers under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param headers - Framework-owned transport headers
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when the transport acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @internal
+   */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -357,7 +380,16 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     const fields = Object.entries(wireHeaders)
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
-    await this.#client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields);
+    const client = this.#client;
+    await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
+      timeoutMs: this.#publishTimeoutMs,
+      onTimeout: () =>
+        new PublishTimeoutError(
+          `Redis did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+          { topic, timeoutMs: this.#publishTimeoutMs },
+        ),
+      timing: resolveProbeTiming(this.#runtime),
+    });
   }
 
   /**

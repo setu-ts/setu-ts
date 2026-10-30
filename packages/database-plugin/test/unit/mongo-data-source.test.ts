@@ -704,7 +704,7 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
       encodeCursor({
         orderedValues: [2],
         keyValues: [p2.rows[1].id as string | number],
-        sortFingerprint: 'size:asc',
+        sortFingerprint: JSON.stringify(['Widget', ['id'], 'size:asc']),
       }),
     );
   });
@@ -732,7 +732,7 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
           cursor: encodeCursor({
             orderedValues: [1],
             keyValues: [ID.a],
-            sortFingerprint: 'size:asc',
+            sortFingerprint: JSON.stringify(['Widget', ['id'], 'size:asc']),
           }),
         }),
       ),
@@ -771,7 +771,7 @@ describe('createMongoDataSource — findPage (§3.8 keyset pagination)', () => {
           cursor: encodeCursor({
             orderedValues: [1],
             keyValues: [ID.a],
-            sortFingerprint: 'size:asc',
+            sortFingerprint: JSON.stringify(['Widget', ['id'], 'size:asc']),
           }),
         }),
       ),

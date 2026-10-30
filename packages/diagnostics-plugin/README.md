@@ -2,8 +2,8 @@
 
 The authenticated **local diagnostics connector** (M98b): connects a native devtool client to the
 kernel diagnostics (M98a) over a separate, runtime-owned authenticated IPv4 loopback HTTP listener.
-Deno and bounded polling only. No browser UI, no application-data reads, no application-control
-commands, and authentication is independent of any devtool subscription.
+Deno and Node, with bounded polling only. No browser UI, no application-data reads, no
+application-control commands, and authentication is independent of any devtool subscription.
 
 ## Trust model — read this first
 
@@ -25,6 +25,10 @@ import { DiagnosticsPlugin } from '@setu-ts/diagnostics-plugin';
 No third-party dependency. The listener socket is owned by `@setu-ts/runtime` (`RuntimePlugin` is a
 required dependency of every application and now provides
 `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER`).
+
+Per-session rate buckets are swept on authenticated promotion using a doubling threshold starting at
+64 sessions. A bucket is discarded only after it has refilled to its full burst; a drained or
+partially refilled bucket keeps its budget.
 
 ## Pairing
 

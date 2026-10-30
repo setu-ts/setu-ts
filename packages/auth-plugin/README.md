@@ -131,7 +131,11 @@ seconds and is at most 300 seconds.
   required `session.toPrincipal` callback; it returns `null` when no session opened or the session
   carries no identity, so the chain continues. Configured by the `session` option and never
   barrel-exported, like the other two; it requires `SessionPlugin` to be registered, or `register()`
-  throws naming both plugins.
+  throws naming both plugins. `toPrincipal` is synchronous and reads only the session, so this
+  strategy cannot re-check the account on each request; for a deactivation or a "sign out
+  everywhere" to take effect before the session ends, use `signIn: { providers: [] }` with
+  `refreshPrincipal` and `sessionStamp` instead (see
+  [Ending every session of a user](#ending-every-session-of-a-user)).
 - **LocalStrategy** — explicit credentials verification. Not passive; reached only via
   `IAuthService.verifyCredentials` from a login handler.
 
@@ -275,6 +279,8 @@ app.router.get('/orgs/:orgId', {
 });
 ```
 
+<!-- version:history -->
+
 Several roles are any-of, several permissions all-of. A guard naming a permission or role outside
 the catalogue fails `app.start()`. Grant sources (`static`, `claims`, `custom` — including
 `createDatabaseGrantSource` from `@setu-ts/database-plugin`) are unioned, and **one failing source
@@ -332,6 +338,43 @@ app.router.get('/health', { middleware: [publicRoute()], handler });
 ```
 
 > `publicRoute` is used instead of `public` because `public` is a reserved word.
+
+### Sending a browser to the sign-in page
+
+`requireAuth({ signInPage })` answers an unauthenticated **page navigation** with a `302` to the
+sign-in page, carrying the requested path and query as `returnTo`. Every other unauthenticated
+request — `fetch()`, an API client, a form `POST` — keeps the `401`.
+
+```typescript
+import { requireAuth } from '@setu-ts/auth-plugin';
+
+const signedIn = requireAuth({ signInPage: '/login' });
+app.router.get('/account', { middleware: [signedIn], handler });
+// GET /account from a browser tab → 302 Location: /login?returnTo=%2Faccount
+// GET /account from fetch() or curl → 401
+```
+
+A request is a navigation when it is a `GET` or `HEAD`, is not `X-Requested-With: XMLHttpRequest`,
+and carries `Sec-Fetch-Mode: navigate` — or, from a client that sends no `Sec-Fetch-Mode`, an
+`Accept` that names `text/html` or `application/xhtml+xml`. A bare `*/*` is not enough: `curl` and
+most HTTP clients send it. This is the rule Laravel, Devise, ASP.NET Core and Spring Security apply.
+A `POST` is never redirected, because the redirect would turn it into a `GET` and drop its body.
+
+- **`signInPage`** must be a same-origin absolute path (`safeReturnTo` keeps it unchanged); anything
+  else throws `AuthPluginConfigurationError` when the guard is built. Its own query and fragment are
+  kept, and `returnTo` is added beside them.
+- **`returnTo`** is the requested path and query passed through `safeReturnTo`, so a path longer
+  than 256 bytes becomes `/`. Your login handler should apply `safeReturnTo` again before it
+  redirects back: the query string is the client's to change.
+- **Caching.** Both unauthenticated answers append `Accept`, `Sec-Fetch-Mode` and `X-Requested-With`
+  to `Vary`, keeping any `Vary` already set (CORS appends `Origin`), so a shared cache cannot serve
+  a browser's redirect to an API client.
+- **No loop.** A request for the sign-in page's own path answers `401`, so a sign-in page placed
+  behind the guard by mistake cannot redirect to itself.
+- **Role and permission guards stay `401`.** List `requireAuth({ signInPage })` first:
+  `[requireAuth({ signInPage: '/login' }), requireRole('admin')]`. A decorated controller takes the
+  guard through `@UseGuards(requireAuth({ signInPage: '/login' }))`; `@RequirePolicy` answers its
+  own `401`.
 
 ### Guards without `rbac`
 
@@ -499,7 +542,10 @@ AuthPlugin({
   faults do not withdraw this replica from `/ready`. It reads cached state and performs no I/O, so
   it reports `unfetched` until the first token from that issuer arrives.
 - **Failures** return no principal and are logged at `debug` with a fixed reason code, never the
-  token.
+  token. A key-set refresh failure — a provider the operator cannot reach — is the exception: it
+  logs `auth-plugin: issuer '<name>' key-set refresh failed (<reason>)` at `warn` once per change of
+  reason per issuer, and repeats at `debug`; a successful refresh resets it. Both lines carry the
+  fixed reason code, never the token.
 
 **Give the API its own audience.** Access-token type (`typ: at+jwt`, RFC 9068) is not enforced, so a
 provider's **ID token** whose `aud` equals `audience` could verify as an access token. That happens
@@ -586,7 +632,10 @@ afterwards.
   scheme, no control character, at most 256 bytes with non-ASCII percent-encoded — and otherwise
   becomes `/`; it is stored at login and never read from the callback URL, so the redirect after
   sign-in cannot be steered. When the provider's discovery document cannot be read, login answers
-  `503` `provider-unavailable` rather than redirecting to an endpoint it never read.
+  `503` `provider-unavailable` rather than redirecting to an endpoint it never read, and logs
+  `auth-plugin: signIn['<provider>'] provider unavailable (<reason>)` at `warn` on the first or a
+  changed reason and at `debug` on a repeat — so a persistent outage cannot flood the log from an
+  unauthenticated route.
 - **Callback** refuses — `401`, or a redirect to `failureRedirect` with `?error=<code>` — with one
   of four fixed codes: `provider-denied` (the provider reported an error), `state-invalid` (unknown,
   replayed, expired, issued for another provider, or an RFC 9207 `iss` naming another issuer),
@@ -605,12 +654,16 @@ afterwards.
   top-level `GET`, which `SameSite=Lax` (the session default) and `None` send and `Strict` does not:
   with `sameSite: 'strict'` every callback fails closed as `state-invalid`.
 
-**Signing in without a provider.** A password login records its principal through the same contract,
-so it authenticates exactly as a federated one does:
+**Signing in without a provider.** `signIn: { providers: [] }` is a password-only sign-in: there are
+no provider routes, and `signIn` still supplies the auth-session capability, the per-request
+`refreshPrincipal` and `sessionStamp` checks, and the logout route. A password login records its
+principal through the same contract, so it authenticates exactly as a federated one does, and
+`safeReturnTo` validates the `returnTo` that `requireAuth({ signInPage })` sent:
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IAuthService, IAuthSessionService } from '@setu-ts/common';
+import { safeReturnTo } from '@setu-ts/auth-plugin';
 
 app.router.post('/login', async (ctx) => {
   const { username, password } = await ctx.request.json<{ username: string; password: string }>();
@@ -621,7 +674,7 @@ app.router.post('/login', async (ctx) => {
   }
   const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
   await authSession.signIn(ctx, principal, { methods: ['pwd'] });
-  return ctx.response.redirect('/', 302);
+  return ctx.response.redirect(safeReturnTo(ctx.query.returnTo), 303);
 });
 ```
 
@@ -655,6 +708,114 @@ app.router.get('/account', (ctx) =>
   ends. `signIn.refreshPrincipal(stored)` re-reads it on every request: return the current
   principal, or `null` to make the request anonymous. It runs per request, so it is opt-in; a
   throwing re-read is treated as anonymous, never as the stale snapshot.
+- **Ending every session of one user** is `signIn.sessionStamp` — see below.
+- **`IAuthSessionService.current(ctx)` is the stored snapshot**: neither re-read runs, so it still
+  returns a user whose session `refreshPrincipal` or the stamp has ended. Decide who may act from
+  `ctx.request.user`, which the `auth-session` strategy re-checked. The plugin's own passkey
+  registration routes re-check the same way.
+
+### Ending every session of a user
+
+Keep a stamp on your user record — a `sessionVersion` counter, or a prefix of the password hash as
+Laravel, Django and Devise do — and give `signIn` a reader for it. `IAuthSessionService.signIn`
+records a SHA-256 digest of the stamp; every request compares the digest of the current stamp with
+it, in constant time. Change the stamp and every session of that user answers anonymous on its next
+request — `ctx.request.user` is unset, and passkey registration refuses it — on the cookie strategy
+as well as the store strategy.
+
+```typescript
+import type { IPrincipal } from '@setu-ts/common';
+import { AuthPlugin } from '@setu-ts/auth-plugin';
+
+declare const users: {
+  find(id: string): Promise<{ active: boolean; roles: string[]; sessionVersion: number } | null>;
+};
+
+// Principals this request's refreshPrincipal just loaded. A snapshot read back
+// from the session is a new object and never in here.
+const loaded = new WeakSet<IPrincipal>();
+
+AuthPlugin({
+  signIn: {
+    providers: [],
+    // One user load per request: the re-read carries the stamp in a claim…
+    refreshPrincipal: async (stored) => {
+      const user = await users.find(stored.id);
+      if (user?.active !== true) return null;
+      const principal: IPrincipal = {
+        id: stored.id,
+        roles: user.roles,
+        claims: { sessionVersion: String(user.sessionVersion) },
+      };
+      loaded.add(principal);
+      return principal;
+    },
+    // …and the stamp reader takes it only from a principal refreshPrincipal
+    // loaded; at sign-in (or for anything else) it reads the user record.
+    sessionStamp: async (principal) => {
+      const claim = principal.claims?.sessionVersion;
+      if (loaded.has(principal) && typeof claim === 'string') return claim;
+      const user = await users.find(principal.id);
+      return user === null ? null : String(user.sessionVersion);
+    },
+  },
+});
+```
+
+The claim shortcut is safe only for a principal `refreshPrincipal` loaded **on this request**. A
+reader that trusts the claim on any principal also trusts the stored snapshot — which is what it
+receives at sign-in, and on every request when `refreshPrincipal` is not configured — and then a
+bump never ends anything. Without `refreshPrincipal`, read the stamp from the user record.
+
+- **The reader runs at sign-in and on every request.** At sign-in it receives the principal you pass
+  to `signIn`; on a request, the principal `refreshPrincipal` returned (or the stored snapshot
+  without one). A reader that throws, or returns anything but a string or `null`, makes the request
+  anonymous; at sign-in the same failure rejects `signIn` and records nothing.
+- **`null` means "no stamp"** and matches only a session recorded with none. Enabling `sessionStamp`
+  on a running application ends every existing session whose user already has a stamp.
+- **Only the digest is stored.** Under `SessionPlugin({ mode: 'sign' })` the client can read the
+  cookie, so a password-hash prefix never reaches it as the stamp — but a claim you put on the
+  principal you pass to `signIn` IS stored. Put a secret-derived stamp in the reader, not in the
+  signed-in principal's claims; a counter is safe in either.
+- **Sign out everywhere** is one write: `UPDATE users SET session_version = session_version + 1`.
+- **Keep the current session through a password change** by signing it in again after the bump, with
+  the methods it already recorded — passing only `['pwd']` would send an MFA session back to the
+  second-factor step. A re-sign-in also forgets the provider-session keys, so RP-initiated logout no
+  longer reaches the provider for a federated user:
+
+```typescript
+import { CAPABILITIES } from '@setu-ts/common';
+import type { AuthMethod, IAuthSessionService } from '@setu-ts/common';
+import { requireAuth } from '@setu-ts/auth-plugin';
+
+declare const users: { bumpSessionVersion(id: string): Promise<void> };
+
+app.router.post('/account/password', {
+  middleware: [requireAuth()],
+  handler: async (ctx) => {
+    const principal = ctx.request.user!;
+    // …verify the current password and store the new hash…
+    await users.bumpSessionVersion(principal.id);
+    const methods = (principal.claims?.amr ?? []) as AuthMethod[];
+    const authSession = ctx.services.get<IAuthSessionService>(CAPABILITIES.AUTH_SESSION);
+    // Only the id: the request's principal still carries the OLD sessionVersion
+    // claim, which the stamp reader would record. refreshPrincipal reloads the rest.
+    await authSession.signIn(ctx, { id: principal.id }, { methods });
+    return ctx.response.json({ ok: true });
+  },
+});
+```
+
+Two account flows are recipes rather than features:
+
+- **Forced password reset.** Have `refreshPrincipal` add a claim such as `mustResetPassword: true`
+  and register a middleware that refuses every route but the reset page while the claim is set.
+- **Admin impersonation** is not provided. An application that needs it signs the admin in as the
+  target principal with a claim naming the real admin (`impersonatedBy`), records both ids through
+  `@setu-ts/audit-plugin`, and ends the impersonation with an ordinary sign-in as the admin.
+
+Listing a user's sessions with their IP address and device needs a server-side session index, which
+`ISessionStore` does not have; it is not provided.
 
 Not provided: the implicit and hybrid flows, the device flow, dynamic client registration, front-
 and back-channel logout, and account linking — `toPrincipal` decides what an identity maps to.
@@ -826,10 +987,9 @@ A shared `ITotpStore` implementation must preserve these operations across repli
 | `saveRecoveryCodes(principalId, digests)`               | Replace the whole recovery set with SHA-256 hex digests, never plaintext; `void`                                                                                                                                                      | Regeneration replaces the previous set                                       |
 | `consumeRecoveryCode(principalId, digest)`              | Atomically find and consume; `true` once, `false` when absent or already used                                                                                                                                                         | Concurrent uses of one recovery code cannot both succeed                     |
 
-A password-only application sets `providers: []` with `mfa` (an empty list is refused unless `mfa`
-or `passkeys` is set) and records its own principal through `IAuthSessionService.signIn`, as the
-`/login` route below does; `signIn` then supplies the auth-session capability, the pending state and
-the logout route.
+A password-only application sets `providers: []` with `mfa` and records its own principal through
+`IAuthSessionService.signIn`, as the `/login` route below does; `signIn` then supplies the
+auth-session capability, the pending state and the logout route.
 
 ```typescript
 import { CAPABILITIES } from '@setu-ts/common';
@@ -1152,7 +1312,9 @@ To make logout invalidate the paired access credential before its normal expiry,
 application supplies a shared implementation. Access revocation requires `accessToken.expiresIn`, so
 revocation entries are bounded. `RefreshTokenStore` implementations must persist family lineage and
 make `rotate(jti, successor)` and `revokeFamily(jti)` linearizable per family; the shipped
-`MemoryRefreshTokenStore` does both with lazy expiry.
+`MemoryRefreshTokenStore` does both with lazy expiry on `get()` and amortised expiry sweeps on
+`save()` and `rotate()`. Sweeps remove only expired records; unexpired revoked records remain
+available for rotation reuse detection. No background timer is required.
 
 ```typescript
 import {
@@ -1225,6 +1387,11 @@ over your logger) and the `'error'` events of the client it builds are logged �
 `warn`, repeats at `debug`, recovery at `info` — rather than printed by `ioredis` to `console.error`
 on every reconnect attempt. An injected `client` never gets a listener.
 
+To back the store with node-redis, pass
+`new RedisRateLimitStore({ client: fromNodeRedis(createClient({ url })) })` (`fromNodeRedis` from
+`@setu-ts/common`, `createClient` from `redis`). See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 The default key resolves in this order: the authenticated principal, the client IP published by
 `ipSecurityMiddleware` (see `http-security-plugin`), `IRequest.ip`, and only then one global
 `'anonymous'` bucket — shared by every caller for whom none of the three resolved.
@@ -1289,6 +1456,10 @@ rateLimitMiddleware({
 | `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |
 | `standardHeaders` | `boolean`                | `true`                                                | Emit `RateLimit-*` headers.                                              |
 | `exclude`         | `readonly PathPattern[]` | six operational paths                                 | Paths skipped entirely; strings match exactly and regexps test the path. |
+
+`MemoryRateLimitStore` reclaims expired windows on `increment()` with a doubling-threshold sweep
+starting at 1,024 entries. Each key retains its own window duration; live windows are never evicted
+for a hard cap, so active rate limits survive cleanup.
 
 ## Diagnostics
 
@@ -1358,6 +1529,7 @@ MIT
 | `requireRole`                       | function  |
 | `requireScopedPermission`           | function  |
 | `requireScopedRole`                 | function  |
+| `safeReturnTo`                      | function  |
 | `AuthorizationDeniedError`          | class     |
 | `AuthPluginConfigurationError`      | class     |
 | `GrantResolutionError`              | class     |
@@ -1413,6 +1585,7 @@ MIT
 | `RefreshTokenOptions`               | interface |
 | `RefreshTokenRecord`                | interface |
 | `RefreshTokenStore`                 | interface |
+| `RequireAuthOptions`                | interface |
 | `ReserveAttemptResult`              | interface |
 | `RoleDefinition`                    | interface |
 | `SamlModule`                        | interface |
@@ -1445,6 +1618,7 @@ MIT
 | `RecoveryVerifyResult`              | type      |
 | `RefreshPrincipal`                  | type      |
 | `ScopedRbacTiming`                  | type      |
+| `SessionStamp`                      | type      |
 | `SignInProvider`                    | type      |
 | `TokenEndpointAuth`                 | type      |
 | `TotpCompleteSignInResult`          | type      |

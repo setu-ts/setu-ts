@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IssuerKeySet, MAX_KEYS, MAX_RESPONSE_BYTES } from '../../src/issuers/key-set-cache.ts';
-import { compileIssuers } from '../../src/issuers/trusted-issuer.ts';
+import { compileIssuers, discoveryUrlFor } from '../../src/issuers/trusted-issuer.ts';
 import type { IAuthHttp, TrustedIssuer } from '../../src/interfaces/index.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { createFakeHttp } from '../fixtures/issuer-tokens.ts';
@@ -36,18 +36,45 @@ function setup(body: unknown = { keys: [KEY] }, overrides: Partial<TrustedIssuer
   let response: { status?: number; body: unknown } = { body };
   const fake = createFakeHttp({ [JWKS]: () => response });
   const failures: string[] = [];
-  const keySet = new IssuerKeySet(issuer(overrides), runtime, fake.http, (_n, reason) => {
-    failures.push(reason);
+  const recoveries: string[] = [];
+  const keySet = new IssuerKeySet(issuer(overrides), runtime, fake.http, {
+    failed: (_n, reason) => {
+      failures.push(reason);
+    },
+    recovered: (name) => {
+      recoveries.push(name);
+    },
   });
   return {
     runtime,
     keySet,
     calls: fake.calls,
     failures,
+    recoveries,
     respond: (next: { status?: number; body: unknown }) => {
       response = next;
     },
   };
+}
+
+/** A key set backed by discovery, so `lastDiscoveryFailure()` can be driven. */
+function discoverySetup(document: () => { status?: number; body: unknown }) {
+  const runtime = createFakeRuntime();
+  const fake = createFakeHttp({
+    [discoveryUrlFor('https://idp.test')]: document,
+    [JWKS]: { body: { keys: [KEY] } },
+  });
+  const failures: string[] = [];
+  const recoveries: string[] = [];
+  const keySet = new IssuerKeySet(issuer({ keys: { discovery: true } }), runtime, fake.http, {
+    failed: (_n, reason) => {
+      failures.push(reason);
+    },
+    recovered: (name) => {
+      recoveries.push(name);
+    },
+  });
+  return { runtime, keySet, calls: fake.calls, failures, recoveries };
 }
 
 describe('IssuerKeySet', () => {
@@ -56,6 +83,70 @@ describe('IssuerKeySet', () => {
     expect(t.keySet.state()).toBe('unfetched');
     expect(await t.keySet.keys()).toEqual([KEY]);
     expect(t.keySet.state()).toBe('current');
+  });
+
+  it('calls recovered after a successful key-set fetch', async () => {
+    const t = setup();
+    await t.keySet.keys();
+    expect(t.recoveries).toEqual(['idp']);
+  });
+
+  it('does not report recovery when discovery succeeds but the JWKS read fails', async () => {
+    const runtime = createFakeRuntime();
+    const fake = createFakeHttp({
+      [discoveryUrlFor('https://idp.test')]: {
+        body: { issuer: 'https://idp.test', jwks_uri: JWKS },
+      },
+      [JWKS]: { status: 503, body: 'down' },
+    });
+    const failures: string[] = [];
+    const recoveries: string[] = [];
+    const keySet = new IssuerKeySet(issuer({ keys: { discovery: true } }), runtime, fake.http, {
+      failed: (_n, reason) => {
+        failures.push(reason);
+      },
+      recovered: (name) => {
+        recoveries.push(name);
+      },
+    });
+    expect(await keySet.keys()).toBeNull();
+    expect(failures).toEqual(['http-status']);
+    expect(recoveries).toEqual([]);
+  });
+
+  it('reports a fixed failure code, never response data', async () => {
+    const t = setup();
+    t.respond({ status: 503, body: 'secret-bearing response body' });
+    expect(await t.keySet.keys()).toBeNull();
+    expect(t.failures).toEqual(['http-status']);
+  });
+
+  it('sets lastDiscoveryFailure on an issuer mismatch and keeps it through a cooldown call', async () => {
+    const t = discoverySetup(() => ({
+      body: { issuer: 'https://evil.test', jwks_uri: JWKS },
+    }));
+    expect(await t.keySet.discovery()).toBeNull();
+    expect(t.keySet.lastDiscoveryFailure()).toBe('discovery-issuer-mismatch');
+    // Within minRefreshIntervalMs: the cooldown is reported, but it is not a
+    // new cause and must not replace the mismatch.
+    expect(await t.keySet.discovery()).toBeNull();
+    expect(t.failures).toEqual(['discovery-issuer-mismatch', 'discovery-cooldown']);
+    expect(t.keySet.lastDiscoveryFailure()).toBe('discovery-issuer-mismatch');
+  });
+
+  it('clears lastDiscoveryFailure and reports recovery after a later successful fetch', async () => {
+    let document: { status?: number; body: unknown } = {
+      body: { issuer: 'https://evil.test', jwks_uri: JWKS },
+    };
+    const t = discoverySetup(() => document);
+    expect(await t.keySet.discovery()).toBeNull();
+    expect(t.keySet.lastDiscoveryFailure()).toBe('discovery-issuer-mismatch');
+
+    document = { body: { issuer: 'https://idp.test', jwks_uri: JWKS } };
+    t.runtime.setHrtime(100);
+    expect(await t.keySet.discovery()).not.toBeNull();
+    expect(t.keySet.lastDiscoveryFailure()).toBeNull();
+    expect(t.recoveries).toEqual(['idp']);
   });
 
   it('serves from cache within the TTL and refetches past it', async () => {
@@ -135,7 +226,12 @@ describe('IssuerKeySet', () => {
         seen.push(maxBytes);
         return Promise.reject(new Error('secret-bearing transport message'));
       }),
-      (_n, reason) => failures.push(reason),
+      {
+        failed: (_n, reason) => {
+          failures.push(reason);
+        },
+        recovered: () => {},
+      },
     );
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['key-set-fetch-failed']);
@@ -154,7 +250,12 @@ describe('IssuerKeySet', () => {
             signal.addEventListener('abort', () => reject(new Error('aborted')));
           }),
       ),
-      (_n, reason) => failures.push(reason),
+      {
+        failed: (_n, reason) => {
+          failures.push(reason);
+        },
+        recovered: () => {},
+      },
     );
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['fetch-aborted']);
@@ -167,7 +268,12 @@ describe('IssuerKeySet', () => {
       issuer({ keySet: { fetchTimeoutMs: 5 } }),
       runtime,
       getOnly(() => new Promise(() => {})),
-      (_n, reason) => failures.push(reason),
+      {
+        failed: (_n, reason) => {
+          failures.push(reason);
+        },
+        recovered: () => {},
+      },
     );
     expect(await keySet.keys()).toBeNull();
     expect(failures).toEqual(['fetch-aborted']);
@@ -179,7 +285,7 @@ describe('IssuerKeySet', () => {
       issuer(),
       runtime,
       getOnly(() => new Promise(() => {})),
-      () => {},
+      { failed: () => {}, recovered: () => {} },
     );
     const pending = keySet.keys();
     keySet.close();
@@ -218,7 +324,7 @@ describe('IssuerKeySet', () => {
           });
         });
       }),
-      () => {},
+      { failed: () => {}, recovered: () => {} },
     );
     const pending = keySet.keys();
     keySet.close();
@@ -255,7 +361,7 @@ describe('IssuerKeySet', () => {
           release = () => resolve({ status: 200, body: JSON.stringify({ keys: [KEY] }) });
         });
       }),
-      () => {},
+      { failed: () => {}, recovered: () => {} },
     );
     await keySet.keys();
     runtime.setHrtime(100);

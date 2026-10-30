@@ -12,6 +12,7 @@
  * @module
  */
 
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 
@@ -43,6 +44,7 @@ import {
   withEnvFile,
 } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { isCoveredDotenvName, readEnvFilePath } from '../templates/env-file.ts';
 import { listTemplates } from '../templates/registry.ts';
 import { deriveNames, escapeName, IDENTIFIER_NAME_RULE, isIdentifierSafe } from '../utils/names.ts';
@@ -131,8 +133,11 @@ function printUsage(log: (message: string) => void): void {
     }
   }
   log('  --style <name>      Code style for a styleable template: functional | class-based');
+  log('  --logger <name>     console | pino (default pino)');
   log('  --port <n>          Bind this port instead of the next one the CLI would allocate');
-  log('  --devtool           Enable the local diagnostics connector for this member (Deno only)');
+  log(
+    '  --devtool           Enable the local diagnostics connector for this member (Deno or Node)',
+  );
   log('  --devtool-port <n>  The loopback port the connector binds (allocated by default)');
   log('  --env-file <path>   Store local configuration in this ignored relative path');
   log("  --depends-on <name> Wait for this sibling's /ready endpoint before starting this member");
@@ -182,6 +187,12 @@ function reportNoWorkspace(
     );
     return EXIT_ERROR;
   }
+  if (problem.kind === 'unknown-redis-client') {
+    error(
+      `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names unknown redisClient "${escapeName(problem.redisClient)}". Expected node-redis, or omit it for ioredis.`,
+    );
+    return EXIT_ERROR;
+  }
   if (problem.kind === 'unknown-transport') {
     error(
       `${escapeName(joinPath(dir, WORKSPACE_MANIFEST))} names the transport "${escapeName(
@@ -223,7 +234,12 @@ function planMember(
   rootGitignore: string,
   devtoolPort?: number,
 ):
-  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: true;
+      readonly files: readonly GeneratedFile[];
+      readonly notice?: string;
+      readonly logger?: string;
+    }
   | {
       readonly ok: false;
       readonly message: string;
@@ -239,35 +255,6 @@ function planMember(
   // may enable. Measured: a real `react-router build` and an SSR 200 both work
   // inside a member once the root declares it.
   if (choice.template?.manifest?.npmBuild !== undefined) {
-    // …but a starter-composed template cannot accept a transport that rewrites
-    // its starter-owned messaging or queue arguments. Direct plugin additions
-    // are registered after the factory returns — gRPC uses that path — but an
-    // argument rewrite would otherwise be silently dropped and leave the member
-    // connected to the template default instead of its workspace transport.
-    const rewritesStarterPlugin =
-      transport.messagingArgs !== undefined || transport.queueArgs !== undefined;
-    if (choice.template.appFactory !== undefined && rewritesStarterPlugin) {
-      // The advice is narrowed per what each transport actually delivers: for a
-      // BROKER the standalone escape now restores the choice (`--broker`
-      // exists), but a standalone full-stack project still cannot take one, so
-      // pointing there would suggest an equivalence that does not hold.
-      const advice =
-        transport.messagingArgs !== undefined
-          ? `Add it to a workspace on --transport http or memory, or scaffold a broker-connected ` +
-            `service with \`${cliInvocation(profile.runtime)} new <name> --template microservice --broker ` +
-            `${transport.name}\`.`
-          : `Add it to a workspace on --transport http or memory, or scaffold it standalone with ` +
-            `\`${cliInvocation(profile.runtime)} new <name> --template ${choice.template.name}\`.`;
-      return {
-        ok: false,
-        message:
-          `The "${choice.template.name}" template composes its whole plugin set through ` +
-          `${choice.template.appFactory.symbol}, so this workspace's "${transport.name}" ` +
-          `transport cannot reach it — the plugin it contributes would be dropped and the member ` +
-          `would look connected while talking to nobody. ${advice}`,
-      };
-    }
-
     // Deno only. `nodeModulesDir` is a Deno setting that turns on the real
     // `node_modules` directory npm and Bun have BY CONSTRUCTION — so on an npm
     // workspace there is nothing to enable, and asking for the field would mean
@@ -289,7 +276,11 @@ function planMember(
   // The HOST, not the template: `--style class-based` resolves to the
   // template's precomputed variant, and the member inherits it exactly as a
   // standalone project does.
-  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
+  const initial = resolveHost(choice.host ?? MINIMAL_HOST, profile.runtime);
+  const loggerChoice = resolveLoggerChoice(args, profile.runtime, initial);
+  if (!loggerChoice.ok) return loggerChoice;
+  const resolved =
+    loggerChoice.logger === undefined ? initial : withLogger(initial, loggerChoice.logger);
   const envHost = envFile.path === undefined ? resolved : withEnvFile(resolved, envFile.path);
   if (envHost === undefined) {
     return {
@@ -325,12 +316,23 @@ function planMember(
   const devHost =
     devtoolPort === undefined
       ? host
-      : withDevtool(host, devtoolPort, { symbol: SERVICE_PORT_EXPORT, from: DISCOVERY_SPECIFIER });
+      : withDevtool(host, devtoolPort, profile.runtime, {
+          symbol: SERVICE_PORT_EXPORT,
+          from: DISCOVERY_SPECIFIER,
+        });
 
   const files: GeneratedFile[] = projectFiles(name, profile.runtime, devHost, {
     symbol: SERVICE_PORT_EXPORT,
     from: DISCOVERY_SPECIFIER,
   }).map((file) => ({ ...file, path: joinPath(memberRoot, file.path) }));
+
+  if (devtoolPort !== undefined && profile.runtime === 'node') {
+    const index = files.findIndex((file) => file.path === joinPath(memberRoot, 'package.json'));
+    const manifest = files[index]!;
+    const plan = planNodeDevtool(manifest.contents, manifest.path);
+    if (!plan.ok) return plan;
+    if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
+  }
 
   // Every member, not only the new one: adding a service registers it with its
   // callers, which is the whole point — a sibling that never learns the new name
@@ -357,7 +359,12 @@ function planMember(
 
   for (const file of extra) files.push(file);
 
-  return { ok: true, files, ...(choice.notice === undefined ? {} : { notice: choice.notice }) };
+  return {
+    ok: true,
+    files,
+    ...(choice.notice === undefined ? {} : { notice: choice.notice }),
+    ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
+  };
 }
 
 /**
@@ -398,7 +405,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // reach each other expressible in one flag. The standalone broker flags get
   // the same refusal with their own reason — they configure ONE project, and a
   // member inherits whatever the workspace already recorded.
-  for (const flag of ['transport', 'transport-url', 'broker', 'queue'] as const) {
+  for (const flag of ['transport', 'transport-url', 'broker', 'queue', 'redis-client'] as const) {
     if (args.flags[flag] !== undefined) {
       if (flag === 'broker' || flag === 'queue') {
         deps.error(
@@ -409,6 +416,18 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
           `This workspace already records its transport in ${WORKSPACE_MANIFEST}. To choose ` +
             `this backend for one service, scaffold it outside the workspace with ` +
             `\`${PROGRAM_NAME} new <name> --template microservice --${flag} <value>\`.`,
+        );
+      } else if (flag === 'redis-client') {
+        // Its own text: the generic suggestion has no `--transport redis`, and a
+        // --redis-client with no Redis arm is refused.
+        deps.error(
+          '--redis-client is a workspace-wide choice, not a per-member one: members share the ' +
+            'Redis client the workspace records.',
+        );
+        deps.error(
+          `Set it when you create the workspace: ` +
+            `\`${PROGRAM_NAME} new <name> --workspace --transport redis --redis-client <value>\`. ` +
+            `This workspace already records its own in ${WORKSPACE_MANIFEST}.`,
         );
       } else {
         deps.error(
@@ -574,7 +593,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
       deps.error(runtimeRefusal);
       return EXIT_USAGE;
     }
-    const runner = devtoolDevRunner();
+    const runner = devtoolDevRunner(read.manifest.runtime);
     let existingRunner: string | undefined;
     try {
       existingRunner = new TextDecoder().decode(
@@ -714,7 +733,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
     name,
     next,
     args,
-    transportSpec(next.transport),
+    transportSpec(next.transport, next.redisClient),
     profile,
     rootManifest,
     rootGitignore,
@@ -742,6 +761,7 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   ].map((file) => ({ ...file, path: joinPath(deps.dir, file.path) }));
 
   if (args.flags['dry-run'] === true) {
+    if (plan.logger !== undefined) deps.log(`Logger: ${plan.logger}`);
     return reportDryRunPlan(deps, files);
   }
 
@@ -803,7 +823,15 @@ export async function runAppCommand(args: ParsedArgs, deps: AppDependencies): Pr
   // after being told to run `bun install`.
   deps.log(
     `  ${profile.install} && cd ${joinPath(MEMBERS_DIR, name)} && ` +
-      `${profile.runScript('start')}`,
+      `${profile.runScript('start:dev')}`,
   );
+  // The member's `dev` entry exits without the launcher's session pair, so the
+  // devtool instruction runs the workspace root's runner, as `devtool enable` prints.
+  if (devtoolRequested) {
+    deps.log(
+      `  With the devtool, from the workspace root: SETU_DEVTOOL_MEMBER=${name} ` +
+        `${profile.runScript('dev')} (the launcher supplies the session credentials)`,
+    );
+  }
   return EXIT_OK;
 }

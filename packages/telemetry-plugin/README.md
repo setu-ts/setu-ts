@@ -6,19 +6,26 @@ OpenTelemetry distributed tracing. Registers an `ITelemetryService` under `CAPAB
 Without an `exporter` the plugin runs in noop mode. With an exporter, install the optional peers for
 the features you enable; the SDK is loaded during registration.
 
+Install peers within the ranges declared by this package's `peerDependencies`, where this package is
+installed — usually the root in an npm/Yarn/Bun workspace. A peer nested only under a member cannot
+be loaded by a root-hoisted plugin. `setu add telemetry` records the four console-exporter peers in
+both manifests in a Node or Bun Setu workspace. See
+[Optional peers in a workspace](https://github.com/setu-ts/setu-ts/blob/main/docs/plugins.md#optional-peers-in-a-workspace).
+
 ## Installation
 
-| Feature                                               | Optional peer packages loaded                                                      |
-| ----------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| Any exporter                                          | `@opentelemetry/sdk-trace-base`, `@opentelemetry/resources`, `@opentelemetry/api`  |
-| `exporter: 'console'`                                 | The common peers above; the console exporter is in `@opentelemetry/sdk-trace-base` |
-| `exporter: 'otlp'`                                    | Common peers plus `@opentelemetry/exporter-trace-otlp-http`                        |
-| `contextPropagation: true` (default with an exporter) | `@opentelemetry/context-async-hooks`                                               |
-| `instrumentations.http`                               | `@opentelemetry/instrumentation-http`                                              |
-| `instrumentations.fetch`                              | `@opentelemetry/instrumentation-undici`                                            |
-| `instrumentations.ioredis`                            | `@opentelemetry/instrumentation-ioredis`                                           |
-| `instrumentations.amqplib`                            | `@opentelemetry/instrumentation-amqplib`                                           |
-| `instrumentations.kafkajs`                            | `@opentelemetry/instrumentation-kafkajs`                                           |
+| Feature                                               | Optional peer packages loaded                                                                  |
+| ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Any exporter                                          | `@opentelemetry/sdk-trace-base`, `@opentelemetry/resources`, `@opentelemetry/api`              |
+| `exporter: 'console'`                                 | The common peers above; the console exporter is in `@opentelemetry/sdk-trace-base`             |
+| `exporter: 'otlp'`                                    | Common peers plus `@opentelemetry/exporter-trace-otlp-http`                                    |
+| `contextPropagation: true` (default with an exporter) | `@opentelemetry/context-async-hooks`                                                           |
+| `instrumentations.http`                               | `@opentelemetry/instrumentation-http`                                                          |
+| `instrumentations.fetch`                              | `@opentelemetry/instrumentation-undici`                                                        |
+| `instrumentations.ioredis`                            | `@opentelemetry/instrumentation-ioredis`                                                       |
+| `instrumentations.redis`                              | `@opentelemetry/instrumentation-redis` (`^0.69.0`, the first release supporting node-redis v6) |
+| `instrumentations.amqplib`                            | `@opentelemetry/instrumentation-amqplib`                                                       |
+| `instrumentations.kafkajs`                            | `@opentelemetry/instrumentation-kafkajs`                                                       |
 
 A common OTLP setup with nested spans:
 
@@ -28,7 +35,7 @@ npm install @setu-ts/telemetry-plugin @opentelemetry/sdk-trace-base @opentelemet
 
 A missing common SDK peer makes `app.start()` reject with `OptionalDependencyUnavailableError`
 naming the package; it does not switch to noop. For example, without the SDK on Node:
-`Optional dependency '@opentelemetry/sdk-trace-base' could not be loaded. Install it in the application, or choose an option that does not need it on this runtime.`
+`Optional dependency '@opentelemetry/sdk-trace-base' could not be loaded by '@setu-ts/telemetry-plugin'. Install it where '@setu-ts/telemetry-plugin' is installed, in the version range that package declares for it — in an npm, Yarn or Bun workspace that is usually the workspace root, not the member — or choose an option that does not need it on this runtime.`
 A missing instrumentation package is instead a logged no-op, as described below; a missing context
 manager leaves spans unnested, as described under Propagation.
 
@@ -80,10 +87,19 @@ await app.start({ port: 3000 });
 
 ## Auto-instrumentation
 
-`instrumentations` takes a per-key object (`http`, `fetch`, `ioredis`, `amqplib`, `kafkajs`), each
-`true` or an `InstrumentationConfig` — not a bare `string[]`. It is **Node-gated**: on an
-unsupported runtime, or when the `@opentelemetry/instrumentation-*` package is absent, the
+`instrumentations` takes a per-key object (`http`, `fetch`, `ioredis`, `redis`, `amqplib`,
+`kafkajs`), each `true` or an `InstrumentationConfig` — not a bare `string[]`. It is **Node-gated**:
+on an unsupported runtime, or when the `@opentelemetry/instrumentation-*` package is absent, the
 instrumentation is a documented **no-op, never a throw**, so one codebase deploys everywhere.
+
+`redis` traces node-redis (`redis` v5 and v6), including a client wrapped in `fromNodeRedis` from
+`@setu-ts/common`: a `SET` sent through the adapter is recorded as a `redis-SET` span with
+`db.system.name` `redis`. Enable `ioredis`, `redis` or both to match the clients the application
+uses. node-redis 6 can also report OpenTelemetry metrics itself (`OpenTelemetry.init`); spans need
+this arm. The instrumentation patches node-redis as Node loads it, and this plugin registers it when
+the application starts, so `redis` must not be loaded before then: build the client through a
+factory, `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`, as a
+`--redis-client node-redis` scaffold does. A `redis` imported at module load records no spans.
 
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 

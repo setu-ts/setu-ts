@@ -47,8 +47,12 @@ describe('request completion status', () => {
           const res = await app.inject({ method: 'GET', url: path });
           const status = handler ? expected : 500;
           expect(res.statusCode).toBe(status);
-          expect(logger.calls.filter((c) => c.message === 'request completed')).toMatchObject([
-            { meta: { status } },
+          expect(logger.calls.filter((c) => c.level === 'info')).toEqual([
+            {
+              level: 'info',
+              message: 'request completed',
+              meta: { method: 'GET', path, status, duration: expect.any(Number) },
+            },
           ]);
           expect(logger.calls.some((c) => c.message === 'request failed')).toBe(false);
           const faults = logger.calls.filter(
@@ -60,7 +64,13 @@ describe('request completion status', () => {
         }
         logger.calls.length = 0;
         await app.inject({ method: 'GET', url: '/ok' });
-        expect(logger.calls.find((c) => c.message === 'request completed')?.meta?.status).toBe(201);
+        expect(logger.calls).toEqual([
+          {
+            level: 'info',
+            message: 'request completed',
+            meta: { method: 'GET', path: '/ok', status: 201, duration: expect.any(Number) },
+          },
+        ]);
       } finally {
         await app.stop();
       }
@@ -92,7 +102,13 @@ describe('request completion status', () => {
     await app.start();
     try {
       await app.inject({ method: 'GET', url: '/fault' });
-      expect(logger.calls.find((c) => c.message === 'request completed')?.meta?.status).toBe(500);
+      expect(logger.calls.filter((call) => call.level === 'info')).toEqual([
+        {
+          level: 'info',
+          message: 'request completed',
+          meta: { method: 'GET', path: '/fault', status: 500, duration: expect.any(Number) },
+        },
+      ]);
     } finally {
       await app.stop();
     }

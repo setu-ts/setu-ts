@@ -22,6 +22,29 @@ export class RequestTimeoutError extends Error {
 }
 
 /**
+ * A publish exceeded its acknowledgement bound and may still be delivered.
+ * Applications can distinguish this uncertain outcome from a broker refusal.
+ * @since 0.11.0
+ */
+export class PublishTimeoutError extends Error {
+  /** The topic whose publish exceeded its bound. */
+  readonly topic: string;
+  /** The configured acknowledgement bound in milliseconds. */
+  readonly timeoutMs: number;
+
+  /**
+   * @param message - Transport-specific description of the uncertain outcome
+   * @param details - Published topic and configured bound
+   */
+  constructor(message: string, details: { topic: string; timeoutMs: number }) {
+    super(message);
+    this.name = 'PublishTimeoutError';
+    this.topic = details.topic;
+    this.timeoutMs = details.timeoutMs;
+  }
+}
+
+/**
  * Thrown by {@link IMessageBroker.request} when the remote responder threw while
  * handling the request. The responder's error message is propagated back to the
  * caller in {@linkcode remoteMessage}.

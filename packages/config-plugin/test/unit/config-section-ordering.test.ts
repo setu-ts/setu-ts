@@ -6,7 +6,7 @@ import { createRuntime } from '../fixtures/fake-runtime.ts';
 
 describe('typed configuration sections | validation ordering', () => {
   it('reads whole-snapshot coercions before parsing a section', async () => {
-    const { z } = await import('zod-v3');
+    const { z } = await import('zod-v4');
     const sectionSchema = z.object({ PORT: z.number().int() });
     const application = defineConfigSection({
       prefix: 'APP_',

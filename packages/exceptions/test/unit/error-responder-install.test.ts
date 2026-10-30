@@ -36,6 +36,10 @@ function fakeResponse(): { response: IResponse; record: { status?: number; body?
       record.status = code;
       return self;
     },
+    setHeaders(headers: Readonly<Record<string, string>>): IResponse {
+      for (const name of Object.keys(headers)) self.header(name, headers[name]!);
+      return self;
+    },
     header(name: string, value: string) {
       record.headers.set(name, value);
       return self;

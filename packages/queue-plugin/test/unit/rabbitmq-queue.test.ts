@@ -2,13 +2,45 @@
  * Unit tests for RabbitMqQueue adapter.
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { RabbitMqQueue, validateClient } from '../../src/adapters/rabbitmq-queue.ts';
 import { createFakeAmqpConnection } from '../fixtures/fake-amqplib-client.ts';
-import type { FakeAmqpQueueChannel } from '../fixtures/fake-amqplib-client.ts';
+import { FakeAmqpQueueChannel } from '../fixtures/fake-amqplib-client.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
 
 describe('RabbitMqQueue', () => {
+  it('probes a throwaway channel, closes it, refuses faults and failed round trips', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const shared = new FakeAmqpQueueChannel();
+    const temporary = new FakeAmqpQueueChannel();
+    const close = vi.spyOn(temporary, 'close');
+    const sharedClose = vi.spyOn(shared, 'close');
+    const open = vi.fn(() => Promise.resolve(temporary));
+    const connection = Object.assign(new EventEmitter(), {
+      createConfirmChannel: () => Promise.resolve(shared),
+      createChannel: open,
+      close: async () => {},
+    });
+    const queue = new RabbitMqQueue(runtime, { client: connection });
+    await queue.connect();
+    try {
+      expect(await queue.isHealthy!()).toBe(true);
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+      expect(sharedClose).not.toHaveBeenCalled();
+      open.mockRejectedValueOnce(new Error('broker refused channel'));
+      expect(await queue.isHealthy!()).toBe(false);
+      close.mockRejectedValueOnce(new Error('broker closed channel'));
+      expect(await queue.isHealthy!()).toBe(false);
+      const beforeFault = open.mock.calls.length;
+      connection.emit('error', new Error('connection lost'));
+      expect(await queue.isHealthy!()).toBe(false);
+      expect(open).toHaveBeenCalledTimes(beforeFault);
+    } finally {
+      await queue.disconnect();
+    }
+  });
   describe('validateClient', () => {
     it('rejects null', () => {
       expect(validateClient(null)).toBe(false);

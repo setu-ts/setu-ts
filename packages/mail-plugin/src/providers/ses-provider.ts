@@ -76,7 +76,10 @@ export async function loadSesModule(): Promise<SesSdkModule> {
   try {
     return (await import('@aws-sdk/client-sesv2')) as unknown as SesSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sesv2', { cause: error });
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sesv2', {
+      requiredBy: '@setu-ts/mail-plugin',
+      cause: error,
+    });
   }
 }
 

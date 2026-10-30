@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/grpc-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Co-serve gRPC, Connect, and gRPC-Web on the same port as ordinary routes",
   "repository": {
     "type": "git",

@@ -26,8 +26,25 @@ export const MAX_KEYS = 64;
 /** Cached key-set state, as the health indicator reports it. */
 export type KeySetState = 'current' | 'stale' | 'expired' | 'unfetched';
 
-/** Reports one refresh failure. `reason` is a fixed code, never response data. */
-export type RefreshFailureReporter = (issuer: string, reason: string) => void;
+/**
+ * Reports one refresh failure and one recovery. `reason` is a fixed code, never
+ * response data. Internal: not exported from the package barrel.
+ */
+export interface RefreshFailureReporter {
+  /**
+   * Reports one failed fetch.
+   *
+   * @param issuer - The issuer whose cache failed
+   * @param reason - The fixed failure code
+   */
+  failed(issuer: string, reason: string): void;
+  /**
+   * Reports a successful fetch, so the next failure is a state change again.
+   *
+   * @param issuer - The issuer whose cache recovered
+   */
+  recovered(issuer: string): void;
+}
 
 class RefreshError extends Error {}
 
@@ -47,6 +64,9 @@ export class IssuerKeySet {
   #discovery: Readonly<Record<string, unknown>> | null = null;
   #discoveryAt = 0;
   #discoveryAttemptAt: number | null = null;
+  // The last discovery failure code, kept across a cooldown call so a sign-in
+  // route can report the original cause rather than "cooldown".
+  #discoveryFailure: string | null = null;
   // Shared by the key-set path and the sign-in routes, so a burst of logins
   // cannot each fetch the document.
   #discoveryInflight: Promise<void> | null = null;
@@ -85,6 +105,19 @@ export class IssuerKeySet {
       return 'current';
     }
     return age <= this.#issuer.timings.maxStaleMs ? 'stale' : 'expired';
+  }
+
+  /**
+   * The fixed code of the last discovery failure, or `null` when the last
+   * discovery fetch succeeded (or none has run yet).
+   *
+   * A cooldown call does not overwrite it: a sign-in route asking why the
+   * document is unavailable reports the original cause, not `'discovery-cooldown'`.
+   *
+   * @returns The last discovery failure code, or `null`
+   */
+  lastDiscoveryFailure(): string | null {
+    return this.#discoveryFailure;
   }
 
   /**
@@ -162,8 +195,9 @@ export class IssuerKeySet {
       );
       this.#confirmedAt = this.#runtime.hrtime();
       this.#everFetched = true;
+      this.#report.recovered(this.#issuer.name);
     } catch (error) {
-      this.#report(
+      this.#report.failed(
         this.#issuer.name,
         error instanceof RefreshError ? error.message : 'key-set-fetch-failed',
       );
@@ -189,11 +223,18 @@ export class IssuerKeySet {
     }
     try {
       await this.#ensureDiscovery();
+      // Recovery is reported here, not inside the shared fetch: on the key-set
+      // path a fresh document followed by a failing JWKS read is still a
+      // failure, and resetting the reporter there would re-warn every refresh.
+      this.#report.recovered(this.#issuer.name);
     } catch (error) {
-      this.#report(
-        this.#issuer.name,
-        error instanceof RefreshError ? error.message : 'discovery-fetch-failed',
-      );
+      const reason = error instanceof RefreshError ? error.message : 'discovery-fetch-failed';
+      // A cooldown is not a new cause: keep the failure that armed it, so the
+      // sign-in route reports the original code rather than 'discovery-cooldown'.
+      if (reason !== 'discovery-cooldown') {
+        this.#discoveryFailure = reason;
+      }
+      this.#report.failed(this.#issuer.name, reason);
     }
     // A failed or cooled-down refresh keeps serving the last issuer-checked
     // document for as long as the keys it produced would stay usable.
@@ -241,6 +282,7 @@ export class IssuerKeySet {
       }
       this.#discovery = document;
       this.#discoveryAt = this.#runtime.hrtime();
+      this.#discoveryFailure = null;
     })();
     try {
       await this.#discoveryInflight;

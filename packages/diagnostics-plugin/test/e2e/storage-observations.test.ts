@@ -21,6 +21,7 @@ import { StoragePlugin, StorageService } from '@setu-ts/storage-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY_PATH = 'canary-object-SYNTHETIC';
 const CANARY_CONTENT_TYPE = 'canary-type-SYNTHETIC';
@@ -35,17 +36,9 @@ function capturingFetch(frames: string[]): typeof fetch {
   };
 }
 
-/** Reserves a free loopback port. */
-function freePort(): number {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const port = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  return port;
-}
-
 describe('Storage observations e2e (M98m canary)', () => {
   it('serves approved counters end to end while every canary stays absent', async () => {
-    const connectorPort = freePort();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),
@@ -62,7 +55,7 @@ describe('Storage observations e2e (M98m canary)', () => {
       ],
       diagnostics: {},
     });
-    await app.start({ port: freePort(), hostname: '127.0.0.1' });
+    await app.start({ port: await unusedPort(), hostname: '127.0.0.1' });
     try {
       const storage = app.services.get<IStorage>(CAPABILITIES.STORAGE);
       // A service constructed directly carries no collector: its work never

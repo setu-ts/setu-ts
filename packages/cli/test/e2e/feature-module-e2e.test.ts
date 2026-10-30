@@ -7,6 +7,7 @@ import { runCli } from '../../src/cli.ts';
 import {
   startOverlay,
   npmInstall,
+  npmRun,
   runIn,
   withNodeServer,
   type RegistryOverlay,
@@ -59,6 +60,8 @@ describe('feature module generated tasks', () => {
       try {
         expect(await run(['new', 'shop', '--template', 'rest', '--runtime', target])).toBe(0);
         for (const args of [
+          // The scaffold's untouched (on npm targets, Prettier-formatted)
+          // greeting example moves in without --adopt-controllers.
           ['module', 'invoices'],
           ['service', 'pricing', '--module', 'invoices'],
           ['route', 'summary', '--module', 'invoices'],
@@ -80,14 +83,23 @@ describe('feature module generated tasks', () => {
           expect(installed.code, installed.output).toBe(0);
         }
         for (const task of ['test:e2e', 'test']) {
+          // Bun's console reporter may omit passing test names when the logger
+          // writes directly to stdout (Pino). Use its machine report to prove
+          // which files ran, independently of the chosen logging transport.
+          const reportFile = `bun-${task === 'test' ? 'unit' : 'e2e'}-results.xml`;
           const result = await runIn(project, target === 'node' ? 'npm' : target, [
             target === 'deno' ? 'task' : 'run',
             task,
+            ...(target === 'bun' ? ['--reporter=junit', '--reporter-outfile', reportFile] : []),
           ]);
           expect(result.code, `${target} ${task}\n${result.output}`).toBe(0);
+          const scopeReport =
+            target === 'bun'
+              ? await nodeFs.readFile(`${project}/${reportFile}`, 'utf8')
+              : result.output;
           if (task === 'test')
-            expect(result.output).not.toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
-          else expect(result.output).toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
+            expect(scopeReport).not.toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
+          else expect(scopeReport).toMatch(/invoices e2e|invoices\.e2e\.test\.ts/);
         }
         const drive = async (origin: string): Promise<void> => {
           const response = await fetch(`${origin}/openapi.json`);
@@ -126,15 +138,34 @@ describe('feature module generated tasks', () => {
             expect(await missing.json(), method).toMatchObject({
               status: 404,
               title: 'Not Found',
-              detail: 'Invoices missing was not found.',
+              detail: 'Invoices not found.',
             });
           }
+          // A hostile id must not be reflected into the Problem Details body:
+          // the detail is fixed, so neither the tag nor its attribute survives.
+          const echoed = await fetch(`${origin}/invoices/${encodeURIComponent('"><img src=x>')}`);
+          expect(echoed.status).toBe(404);
+          expect(echoed.headers.get('content-type')).toContain('application/problem+json');
+          const echoedBody = await echoed.text();
+          expect(echoedBody).not.toContain('<img');
+          expect(echoedBody).not.toContain('src=x');
+          expect(JSON.parse(echoedBody)).toMatchObject({
+            status: 404,
+            title: 'Not Found',
+            detail: 'Invoices not found.',
+          });
           const summary = await fetch(`${origin}/invoices/summary`);
           expect(summary.status).toBe(200);
           expect(await summary.json()).toEqual({ items: [] });
         };
         if (target === 'deno') await withGeneratedServer(project, drive);
-        else await withNodeServer(project, drive);
+        else {
+          if (target === 'node') {
+            const built = await npmRun(project, 'build');
+            expect(built.code, built.output).toBe(0);
+          }
+          await withNodeServer(project, drive);
+        }
         await nodeFs.rm(`${project}/src/modules/invoices`, { recursive: true });
         // The source redirect adds all framework imports for source resolution;
         // generation must see the installed package set the scaffold declared.
@@ -149,12 +180,20 @@ describe('feature module generated tasks', () => {
           const response = await fetch(`${origin}/other`);
           expect(response.status).toBe(200);
           expect(await response.json()).toEqual({ items: [] });
+          // The greeting example was adopted into the deleted module, so it went
+          // with it.
           const greeting = await fetch(`${origin}/greetings/Setu`);
-          expect(greeting.status).toBe(200);
-          expect(await greeting.json()).toEqual({ message: 'Hello, Setu!' });
+          expect(greeting.status).toBe(404);
+          await greeting.body?.cancel();
         };
         if (target === 'deno') await withGeneratedServer(project, afterDelete);
-        else await withNodeServer(project, afterDelete);
+        else {
+          if (target === 'node') {
+            const built = await npmRun(project, 'build');
+            expect(built.code, built.output).toBe(0);
+          }
+          await withNodeServer(project, afterDelete);
+        }
       } finally {
         await nodeFs.rm(root, { recursive: true, force: true });
       }

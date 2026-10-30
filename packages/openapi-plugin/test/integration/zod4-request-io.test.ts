@@ -16,7 +16,6 @@
  */
 import { describe, expect, it } from 'vitest';
 import { z as z4 } from 'zod-v4';
-import { z as z3 } from 'zod-v3';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import type { IKernelApplication } from '@setu-ts/kernel';
@@ -157,24 +156,6 @@ describe('A10-1 — request bodies are documented in the input view', () => {
     expect(byName.q?.required).toBe(true);
     // A query parameter the server defaults is one the client may omit.
     expect(byName.page?.required).toBeFalsy();
-    await app.stop();
-  });
-
-  it('leaves zod v3 documents unchanged, which is what closes the majors disagreement', async () => {
-    const Signup = z3.object({ name: z3.string(), plan: z3.string().default('free') });
-    const app = createApplication({
-      plugins: [RuntimePlugin(), OpenApiPlugin({ title: 'T', version: '1' })],
-    });
-    app.router.post('/v3', { handler: (ctx) => ctx.response.json({}), schema: { body: Signup } });
-    await app.start();
-
-    const body = (await specOf(app)).paths['/v3']?.post?.requestBody?.content['application/json']
-      .schema;
-    // v3 hand-walks `_def` and has no `io` concept: what it emits is already
-    // the input view, and always was. So after the fix the two majors agree
-    // on a request body, which is the half A10-1 named.
-    expect(body?.required).toEqual(['name']);
-    expect(body).not.toHaveProperty('additionalProperties');
     await app.stop();
   });
 });

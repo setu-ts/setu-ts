@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/multi-tenancy-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Tenant resolution by subdomain, header, path, or JWT, with schema/database/column isolation",
   "repository": {
     "type": "git",

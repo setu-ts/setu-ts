@@ -9,7 +9,7 @@
  * @module
  */
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IAuthSessionService, IPlugin } from '@setu-ts/common';
+import type { IAuthSessionService, ILogger, IPlugin, IRuntimeServices } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -88,6 +88,10 @@ export interface BuildOptions {
   readonly onTokensThrows?: boolean;
   /** The discovery document to serve from the start. */
   readonly discovery?: Record<string, unknown>;
+  /** A runtime to inject, so a test can control the monotonic clock. */
+  readonly runtime?: IRuntimeServices;
+  /** A logger to register before start, so a test can record what is reported. */
+  readonly logger?: ILogger;
 }
 
 /** Seconds since the epoch; the verifier checks `exp`/`iat` against the runtime clock. */
@@ -168,9 +172,14 @@ export async function buildSignInApp(options: BuildOptions = {}): Promise<SignIn
     ...options.oauth2,
   };
 
+  const injectedRuntime = options.runtime;
+  const runtimePlugin =
+    injectedRuntime === undefined
+      ? RuntimePlugin()
+      : RuntimePlugin({ platform: 'node', adapters: { node: () => injectedRuntime } });
   const app = createApplication({
     plugins: [
-      RuntimePlugin(),
+      runtimePlugin,
       SessionPlugin({ secret: SESSION_SECRET, ...options.session }),
       AuthPlugin({
         http,
@@ -179,6 +188,9 @@ export async function buildSignInApp(options: BuildOptions = {}): Promise<SignIn
       ...(options.plugins ?? []),
     ],
   });
+  if (options.logger !== undefined) {
+    app.services.register(CAPABILITIES.LOGGER, options.logger);
+  }
 
   // Routes the tests read state through. None of them is part of the plugin.
   app.router.get('/me', {

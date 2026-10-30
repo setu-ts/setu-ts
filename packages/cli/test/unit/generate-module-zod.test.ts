@@ -12,7 +12,7 @@ describe('schema generation Zod installation guidance', () => {
           const entries = {
             '@setu-ts/validation-plugin':
               runtime === 'deno' ? 'npm:@setu-ts/validation-plugin@^0.9' : '^0.9',
-            ...(present ? { zod: runtime === 'deno' ? 'npm:zod@^4' : '^4' } : {}),
+            ...(present ? { zod: runtime === 'deno' ? 'npm:zod@^4.6.6' : '^4.6.6' } : {}),
           };
           const text = JSON.stringify(
             runtime === 'deno' ? { imports: entries } : { dependencies: entries },
@@ -34,7 +34,7 @@ describe('schema generation Zod installation guidance', () => {
           if (present) expect(out.text()).not.toContain('Install Zod:');
           else
             expect(out.text()).toContain(
-              `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4' : runtime === 'bun' ? 'bun add zod@^4' : 'npm install zod@^4'}`,
+              `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4.6.6' : runtime === 'bun' ? 'bun add zod@^4.6.6' : 'npm install zod@^4.6.6'}`,
             );
         });
       }

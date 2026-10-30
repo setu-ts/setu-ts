@@ -211,6 +211,26 @@ function loggerPlugin(logger: ILogger): IPlugin {
 
 describe('DynamoAdapter against DynamoDB Local (guarded)', () => {
   it(
+    'M119e stores and returns unknown payload fields on DynamoDB',
+    { skip: skipReal },
+    async () => {
+      const { adapter, source } = await connectedSource('Crud', mapping(tables.crud, 'id'));
+      try {
+        await source.create({ id: 'm119e', extra: 'created' });
+        expect(await source.findById('m119e')).toMatchObject({ extra: 'created' });
+        await source.update('m119e', { extra: 'updated' });
+        expect(await source.findById('m119e')).toMatchObject({ extra: 'updated' });
+        await source.updateWhere!('m119e', { extra: 'updated' }, { extra: 'conditional' });
+        expect(await source.findById('m119e')).toMatchObject({ extra: 'conditional' });
+        await source.delete('m119e');
+        expect(await source.findById('m119e')).toBeNull();
+      } finally {
+        await adapter.disconnect();
+      }
+    },
+  );
+
+  it(
     'M105 conditional writes persist matches and leave misses unchanged',
     { skip: skipReal },
     async () => {

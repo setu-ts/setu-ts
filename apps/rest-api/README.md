@@ -16,3 +16,6 @@ parameter is typed as a string rather than rendering as `any`.
 
 Open http://localhost:3000/docs after `pnpm --dir apps/rest-api run start` to exercise the API from
 the browser: click **Authorize**, paste a token, and call `GET /todos/{id}`.
+
+Read the [example deep dive](../../docs/examples.md#rest-api) for the concept and source
+walkthrough.

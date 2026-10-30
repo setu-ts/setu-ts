@@ -161,6 +161,49 @@ async function scaffoldAndInstall(args: readonly string[]): Promise<string> {
 }
 
 describe('a scaffolded npm project runs its own scripts', () => {
+  it(
+    'builds a broken DI graph, then rejects it when npm test boots the application',
+    { timeout: INSTALL_TIMEOUT_MS },
+    async () => {
+      const project = await scaffoldAndInstall(['--template', 'class-based']);
+      const fresh = await npmRun(project, 'test');
+      expect(fresh.code, fresh.output).toBe(0);
+      await nodeFs.mkdir(`${project}/src/services`, { recursive: true });
+      await nodeFs.writeFile(
+        `${project}/src/services/broken.service.ts`,
+        "import { Injectable, Inject } from '@setu-ts/decorator-plugin';\n@Injectable()\n@Inject('m120-missing-token')\nexport class BrokenService { constructor(readonly dependency: unknown) {} }\n",
+      );
+      expect(await run(['sync', '--dir', project])).toBe(0);
+      const built = await npmRun(project, 'build');
+      expect(built.code, built.output).toBe(0);
+      const tested = await npmRun(project, 'test');
+      expect(tested.code, tested.output).not.toBe(0);
+      expect(tested.output).toContain('ContainerValidationError');
+      expect(tested.output).toContain('missing:');
+      expect(tested.output).toContain('m120-missing-token');
+    },
+  );
+  it(
+    'fails its own check script for a copied, unregistered controller',
+    { timeout: INSTALL_TIMEOUT_MS },
+    async () => {
+      const project = await scaffoldAndInstall(['--template', 'rest']);
+      expect(await run(['generate', 'controller', 'original', '--dir', project])).toBe(0);
+      expect((await npmRun(project, 'check')).code).toBe(0);
+      const original = await nodeFs.readFile(
+        `${project}/src/controllers/original.controller.ts`,
+        'utf8',
+      );
+      await nodeFs.writeFile(
+        `${project}/src/controllers/extra.controller.ts`,
+        original.replaceAll('Original', 'Extra').replaceAll('original', 'extra'),
+      );
+      const result = await npmRun(project, 'check');
+      expect(result.code, result.output).not.toBe(0);
+      expect(result.output).toContain('extra.controller.ts');
+      expect(result.output).toContain('setu.E003');
+    },
+  );
   it('scaffolds Node when no target is named', { timeout: INSTALL_TIMEOUT_MS }, async () => {
     expect(await run(['new', 'shop'])).toBe(0);
     await nodeFs.stat(`${root}/shop/package.json`);
@@ -176,9 +219,10 @@ describe('a scaffolded npm project runs its own scripts', () => {
       async () => {
         const project = await scaffoldAndInstall(args);
 
-        // A socket target carries a composition-root smoke test (M101g); a Workers
-        // project serves no socket and carries none.
-        const scripts = ['check', 'lint', 'format:check', ...(boots ? ['test', 'test:e2e'] : [])];
+        // Every target carries generated tests: a socket target runs them in
+        // process, a Workers target boots the real Worker on workerd (V10-23).
+        // Only a socket target is then served on a local port.
+        const scripts = ['check', 'lint', 'format:check', 'test', 'test:e2e'];
         const manifest = JSON.parse(await nodeFs.readFile(`${project}/package.json`, 'utf8')) as {
           scripts?: Record<string, string>;
         };
@@ -188,6 +232,8 @@ describe('a scaffolded npm project runs its own scripts', () => {
           expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
         }
         if (!boots) return;
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
 
         const advertised = await advertisedPaths(project);
         // Vacuity guard: every host lists at least `/`.
@@ -225,8 +271,10 @@ describe('a scaffolded npm project runs its own scripts', () => {
         expect(await run(['new', 'shop', ...args])).toBe(0);
         const project = `${root}/shop`;
         for (const artifact of [
-          ['module', 'widget'],
-          ['service', 'billing'],
+          // The first module takes the greeting example with it; from then on
+          // services live in a module.
+          ['module', 'widget', '--adopt-controllers'],
+          ['service', 'billing', '--module', 'widget'],
           ['middleware', 'audit'],
         ]) {
           expect(await run(['generate', ...artifact, '--dir', project]), artifact.join(' ')).toBe(
@@ -239,6 +287,8 @@ describe('a scaffolded npm project runs its own scripts', () => {
           const result = await npmRun(project, script);
           expect({ script, code: result.code }, result.output).toEqual({ script, code: 0 });
         }
+        const built = await npmRun(project, 'build');
+        expect(built.code, built.output).toBe(0);
         const { result, output } = await withNodeServer(
           project,
           async (origin) => await fetchServed(origin, '/widget'),

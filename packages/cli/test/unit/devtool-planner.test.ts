@@ -13,6 +13,28 @@ import {
 } from '../../src/workspace/manifest.ts';
 import { LEGACY_DENO_RUN_ALL } from '../../src/workspace/runtime-profile.ts';
 import { VERSION } from '../../src/version.ts';
+import { devtoolRuntimeRefusal, devtoolDevRunner } from '../../src/devtool/planner.ts';
+
+describe('devtool runtime support', () => {
+  for (const [runtime, supported] of [
+    ['deno', true],
+    ['node', true],
+    ['bun', false],
+    ['cloudflare-workers', false],
+  ] as const) {
+    for (const context of ['enable', 'scaffold'] as const) {
+      it(`${context}: ${runtime} ${supported ? 'supported' : 'refused'}`, () => {
+        const refusal = devtoolRuntimeRefusal(runtime, context);
+        if (supported) expect(refusal).toBeUndefined();
+        else expect(refusal).toContain('Deno or Node');
+      });
+    }
+  }
+  it('renders the runner belonging to the target profile', () => {
+    expect(devtoolDevRunner('node').path).toBe('scripts/dev.mjs');
+    expect(devtoolDevRunner('deno').path).toBe('scripts/dev.ts');
+  });
+});
 
 /** The emitted config module a current CLI writes — the signature `enable` accepts. */
 const CONFIG = `import { createApplication, type KernelDiagnosticsOptions } from '@setu-ts/kernel';

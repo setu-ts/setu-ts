@@ -29,6 +29,34 @@ function route(
 
 const generator = () => new OpenApiGenerator({ title: 'T', version: '1' });
 
+it('degrades legacy request, bare response and wrapped response schemas with diagnostics', () => {
+  const legacy = { _def: { typeName: 'ZodString' } };
+  // Legacy schemas expose description metadata on their prototype; only a
+  // wrapper's own fields should cause response unwrapping.
+  Object.setPrototypeOf(legacy, {
+    get description() {
+      return 'Legacy metadata';
+    },
+  });
+  const doc = generator().generate([
+    route('POST', '/legacy', {
+      body: legacy,
+      response: { 200: legacy, 400: { schema: legacy, description: 'Legacy error' } },
+    }),
+  ]);
+  const operation = doc.paths['/legacy']?.post;
+  expect(operation?.requestBody?.content['application/json'].schema).toEqual({});
+  for (const status of ['200', '400']) {
+    expect(operation?.responses[status]?.content?.['application/json']?.schema).toEqual({});
+  }
+  expect(operation?.responses['400']?.description).toBe('Legacy error');
+  expect(operation?.['x-setu-unrepresentable']).toEqual([
+    { at: 'post-legacy', reason: 'not a recognized zod schema' },
+    { at: 'post-legacy', reason: 'not a recognized zod schema' },
+    { at: 'post-legacy', reason: 'not a recognized zod schema' },
+  ]);
+});
+
 function bodySchema(doc: ReturnType<OpenApiGenerator['generate']>, path: string): unknown {
   return doc.paths[path]?.post?.requestBody?.content['application/json'].schema;
 }

@@ -5,6 +5,11 @@
  */
 import type { IMetric, MetricConfig, MetricType } from '@setu-ts/common';
 
+interface ILabelKeyNode {
+  readonly children: Map<string, ILabelKeyNode>;
+  key?: string;
+}
+
 /**
  * Abstract base class for all metric types.
  *
@@ -15,6 +20,12 @@ export abstract class MetricBase implements IMetric {
   readonly #type: MetricType;
   readonly #help: string;
   readonly #labelNames: readonly string[] | undefined;
+  /**
+   * Whether the configured label names are non-empty and pairwise distinct —
+   * the condition under which a label set's shape alone proves it valid.
+   */
+  readonly #shapeProvesValidity: boolean;
+  readonly #labelKeys: ILabelKeyNode = { children: new Map() };
 
   /**
    * Creates a new metric.
@@ -27,7 +38,11 @@ export abstract class MetricBase implements IMetric {
     this.#name = name;
     this.#type = config.type;
     this.#help = help ?? config.help ?? name;
-    this.#labelNames = config.labels;
+    this.#labelNames = config.labels === undefined ? undefined : [...config.labels];
+    this.#shapeProvesValidity =
+      this.#labelNames !== undefined &&
+      this.#labelNames.length > 0 &&
+      new Set(this.#labelNames).size === this.#labelNames.length;
   }
 
   /**
@@ -90,14 +105,53 @@ export abstract class MetricBase implements IMetric {
   }
 
   /**
-   * Creates a deterministic key from labels for storage/retrieval.
+   * Copies the caller's labels once per observation. Validation, the series key
+   * and the stored labels all read this copy, so an accessor returning a
+   * different value on each read cannot file a series under one label set and
+   * export it under another.
+   *
+   * @param labels - The caller's labels
+   * @returns A private copy, or `undefined` when unlabeled (null included)
+   */
+  protected snapshotLabels(
+    labels: Readonly<Record<string, string>> | undefined,
+  ): Readonly<Record<string, string>> | undefined {
+    return labels ? { ...labels } : undefined;
+  }
+
+  /**
+   * Creates a deterministic key from labels for storage/retrieval. A pure
+   * lookup: it reads the key cache but never adds to it, so a getter cannot
+   * grow the cache — only {@linkcode MetricBase.seriesKey}, for an observed
+   * series, does.
    *
    * @param labels - The labels to key by
    * @returns A deterministic string key
    */
   protected labelKey(labels: Readonly<Record<string, string>> | undefined): string {
-    if (!labels || Object.keys(labels).length === 0) {
+    // `!labels`, not `=== undefined`: a JavaScript caller may pass null.
+    if (!labels) return '';
+    const names = Object.keys(labels);
+    if (names.length === 0) {
       return '';
+    }
+    const configured = this.#labelNames;
+    if (
+      configured !== undefined &&
+      names.length === configured.length &&
+      configured.every((name) => Object.hasOwn(labels, name))
+    ) {
+      // Each value is read exactly once: a getter returning different values
+      // on each read must not cache a key for a series it did not observe.
+      const values = configured.map((name) => labels[name]!);
+      let node = this.#labelKeys;
+      for (const value of values) {
+        const child = node.children.get(value);
+        if (child === undefined) return snapshotKey(configured, values);
+        node = child;
+      }
+      // A node at full depth is a leaf, and seriesKey keys every leaf it creates.
+      return node.key!;
     }
     // JSON.stringify of sorted entries ensures injectivity:
     // - Distinct label-sets → distinct keys (no collision from |, =, or \ in values)
@@ -107,7 +161,63 @@ export abstract class MetricBase implements IMetric {
   }
 
   /**
+   * Validates an observation's label snapshot and returns its series key, in
+   * one pass when it can. A snapshot (from {@linkcode snapshotLabels}) holds
+   * only own, enumerable data properties; when it has exactly as many as the
+   * configured names, and every configured name is among them, it carries
+   * exactly the configured labels — which is what `validateLabels` checks —
+   * provided the configured names are distinct (with `['a', 'a']`, the set
+   * `{ a, b }` would pass the count and presence test). Anything else takes
+   * `validateLabels`, so an invalid set throws the same error as before.
+   *
+   * @param snapshot - The observation's own copy of its labels
+   * @returns The series key
+   * @throws {Error} If the labels do not match the configured names
+   */
+  protected seriesKey(snapshot: Readonly<Record<string, string>> | undefined): string {
+    const configured = this.#labelNames;
+    if (
+      snapshot !== undefined &&
+      this.#shapeProvesValidity &&
+      Object.keys(snapshot).length === configured!.length &&
+      configured!.every((name) => Object.hasOwn(snapshot, name))
+    ) {
+      // Shape proven before any node is created: an invalid set must not
+      // leave cache entries behind on its way to validateLabels' error.
+      let node = this.#labelKeys;
+      for (const name of configured!) {
+        const value = snapshot[name]!;
+        let child = node.children.get(value);
+        if (child === undefined) {
+          child = { children: new Map() };
+          node.children.set(value, child);
+        }
+        node = child;
+      }
+      // The snapshot is the observation's own data copy, so reading its
+      // values again for a first-seen series cannot change them.
+      return (node.key ??= snapshotKey(
+        configured!,
+        configured!.map((name) => snapshot[name]!),
+      ));
+    }
+    this.validateLabels(snapshot);
+    return this.labelKey(snapshot);
+  }
+
+  /**
    * Records an observation (implemented by subclasses).
    */
   abstract observe(value?: number, labels?: Readonly<Record<string, string>>): void;
+}
+
+/**
+ * Builds the label key from values already read, byte-identical to
+ * `JSON.stringify(Object.entries(labels).sort())` for the same label set. The
+ * default sort compares each pair as the string `name,value`, so the input
+ * order matters only when two pairs stringify equally, which needs a comma in a
+ * label name; then the configured order decides, the same on every call.
+ */
+function snapshotKey(names: readonly string[], values: readonly string[]): string {
+  return JSON.stringify(names.map((name, index) => [name, values[index]!]).sort());
 }

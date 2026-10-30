@@ -50,6 +50,7 @@ import type { DataSource } from '../../repositories/base-repository.ts';
 import { keyValues, resolveKeyColumns } from '../../query/key-target.ts';
 import {
   UnknownPayloadFieldError,
+  MissingKeyColumnError,
   UnsupportedIsolationLevelError,
   UnsupportedQueryFeatureError,
 } from '../../errors.ts';
@@ -63,6 +64,7 @@ import {
   type DrizzleQueryHandleProvider,
   type NativeDrizzleQueryHandle,
 } from '../../query/drizzle-query.ts';
+import { FIELD_FOR_COLUMN, fieldForColumn } from './field-for-column.ts';
 import { readDrizzleDatabase } from '../../query/drizzle-database.ts';
 import type { DrizzleDatabaseIdentity } from '../../query/drizzle-database.ts';
 
@@ -362,12 +364,21 @@ export class DrizzleAdapter implements IDatabaseAdapter {
     // key table registered only so the typed query builder can reach it needs
     // no `id` column — `createDrizzleDataSourceInner` refuses by name at the
     // moment a repository is asked for, not at `connect()` time.
+    const entities = (this._options as DrizzleAdapterOptions).entities;
     for (const [name, table] of Object.entries(tables)) {
       if (table == null || typeof table !== 'object') {
         throw new Error(
           `Drizzle table '${name}' must be a table definition; ` +
             'provide a proper Drizzle table definition in options.drizzleTables.',
         );
+      }
+    }
+
+    for (const [entity, mapping] of Object.entries(entities ?? {})) {
+      const table = tables[entity];
+      if (mapping.primaryKey === undefined || table === undefined) continue;
+      for (const column of resolveKeyColumns(mapping.primaryKey)) {
+        if (!hasColumn(table, column)) throw new MissingKeyColumnError(entity, column);
       }
     }
 
@@ -562,7 +573,7 @@ export class DrizzleAdapter implements IDatabaseAdapter {
    * @returns A data source with the same methods and behavior
    */
   #countingCompletions(source: DataSource): DataSource {
-    const wrapped: Record<string, unknown> = {};
+    const wrapped: Record<string, unknown> = { ...source };
     for (const [name, method] of Object.entries(source)) {
       wrapped[name] = async (...args: unknown[]): Promise<unknown> => {
         const result = await (method as (...a: unknown[]) => Promise<unknown>)(...args);
@@ -686,7 +697,7 @@ function createDrizzleDataSourceInner(
   tables: Record<string, unknown>,
   operators: DrizzleOperators,
   entities?: Readonly<Record<string, { primaryKey?: string | readonly string[] }>>,
-): DataSource {
+): DataSource & { [FIELD_FOR_COLUMN]: (name: string) => string | undefined } {
   const table = tables[entity];
   if (table == null || typeof table !== 'object') {
     throw new Error(
@@ -696,7 +707,9 @@ function createDrizzleDataSourceInner(
   const drizzleTable = table as DrizzleTable;
   const primaryKeyOverride = entities?.[entity]?.primaryKey;
   const keyColumns = resolveKeyColumns(primaryKeyOverride ?? 'id');
-  for (const column of keyColumns) columnFor(drizzleTable, entity, column);
+  for (const column of keyColumns) {
+    if (!hasColumn(drizzleTable, column)) throw new MissingKeyColumnError(entity, column);
+  }
   const assertPayloadColumns = (data: Readonly<Record<string, unknown>>): void => {
     for (const field of Object.keys(data)) {
       if (data[field] !== undefined && !hasColumn(drizzleTable, field)) {
@@ -706,6 +719,7 @@ function createDrizzleDataSourceInner(
   };
 
   return {
+    [FIELD_FOR_COLUMN]: (name: string) => fieldForColumn(drizzleTable, name),
     async findById(id) {
       const values = keyValues(id, keyColumns, `findById on '${entity}'`);
       const predicates = keyColumns.map((col, i) =>
@@ -920,7 +934,7 @@ async function findDrizzlePage(
 
   // 3. Sort-fingerprint guard — a cross-sort cursor would return a silently
   //    wrong page.
-  const fingerprint = sortFingerprint(normalized.orderBy);
+  const fingerprint = sortFingerprint(normalized.orderBy, { entity, keyColumns });
   if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
     return Promise.reject(
       new InvalidCursorError(`Entity '${entity}': cursor fingerprint mismatch.`),

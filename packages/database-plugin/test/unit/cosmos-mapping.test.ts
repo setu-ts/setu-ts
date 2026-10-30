@@ -20,6 +20,7 @@ import {
 describe('resolveCosmosTarget', () => {
   it('defaults the container to the entity name and the key to id', () => {
     expect(resolveCosmosTarget('Order', undefined)).toEqual({
+      entity: 'Order',
       container: 'Order',
       primaryKey: 'id',
       partitionKeyPaths: null,
@@ -32,6 +33,7 @@ describe('resolveCosmosTarget', () => {
         Order: { container: 'orders', primaryKey: 'orderId', partitionKey: 'tenantId' },
       }),
     ).toEqual({
+      entity: 'Order',
       container: 'orders',
       primaryKey: 'orderId',
       partitionKeyPaths: [['tenantId']],

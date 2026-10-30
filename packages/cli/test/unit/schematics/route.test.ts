@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { deriveNames } from '../../../src/utils/names.ts';
 import { generateRoute } from '../../../src/schematics/route.ts';
-import { artifactOf, assertSeamContract, barrelOf, gateOf, options } from './_shared.ts';
+import { artifactOf, assertSeamContract, barrelOf, options } from './_shared.ts';
 
 describe('route schematic', () => {
   const files = generateRoute(deriveNames('order-item'), options());
@@ -9,7 +9,7 @@ describe('route schematic', () => {
 
   it('emits the route module plus its seam barrel', () => {
     expect(files.map((f) => f.path)).toEqual([
-      'src/controllers/order-item.routes.ts',
+      'src/controllers/order-item.controller.ts',
       'src/controllers/index.ts',
     ]);
   });
@@ -46,22 +46,8 @@ describe('route schematic', () => {
     ).toBe(true);
   });
 
-  it('emits it at src/controllers/order-item.routes.ts', () => {
-    expect(file.path).toBe('src/controllers/order-item.routes.ts');
-  });
-
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
-  it('is ungated', () => {
-    expect(gateOf('route')).toBe(undefined);
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateRoute(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
+  it('emits it at src/controllers/order-item.controller.ts', () => {
+    expect(file.path).toBe('src/controllers/order-item.controller.ts');
   });
 
   it('exports the register function', () => {

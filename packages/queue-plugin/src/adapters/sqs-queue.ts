@@ -114,7 +114,10 @@ export async function loadSqsModule(): Promise<SqsSdkModule> {
   try {
     return (await import('@aws-sdk/client-sqs')) as unknown as SqsSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sqs', { cause: error });
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sqs', {
+      requiredBy: '@setu-ts/queue-plugin',
+      cause: error,
+    });
   }
 }
 

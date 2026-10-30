@@ -573,6 +573,7 @@ export function renderRootPackageJson(): string {
         'fmt:check':
           'pnpm exec prettier --check . && deno fmt --no-config --line-width=100 --single-quote --check packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
         'docs:exports': 'node scripts/generate-package-exports.ts',
+        'examples:manifest': 'node scripts/generate-example-manifest.ts',
         'test:deno-lane': 'node scripts/test-deno-lane.ts',
         'test:tooling': 'SETU_TEST_MEMBER=tooling vitest run',
         'test:tooling:coverage': 'SETU_TEST_MEMBER=tooling vitest run --coverage',
@@ -586,7 +587,7 @@ export function renderRootPackageJson(): string {
         typedoc: '0.28.20',
         yaml: '2.9.1',
         hono: EXTERNAL_RANGES.hono,
-        zod: EXTERNAL_RANGES['zod-v3']!.replace('npm:zod@', ''),
+        zod: EXTERNAL_RANGES['zod-v4']!.replace('npm:zod@', ''),
         graphql: EXTERNAL_RANGES.graphql,
         'drizzle-orm': EXTERNAL_RANGES['drizzle-orm'],
       },
@@ -694,7 +695,7 @@ export function externalAliases(member: MemberInput): ReadonlyMap<string, string
 /**
  * The member `deno.json` with its `imports` block regenerated: the bare
  * aliases from {@linkcode externalAliases} plus any `npm:`/`jsr:`-keyed pin
- * already present (openapi-plugin's two zod majors, kept until 111b), sorted.
+ * already present, sorted.
  *
  * Only the `imports` block is spliced; every other byte stays as `deno fmt`
  * wrote it, because re-serializing the whole file would unfold the short

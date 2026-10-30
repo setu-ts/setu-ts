@@ -30,7 +30,7 @@ import { IdempotencyPlugin } from '../../src/index.ts';
 // Real Zod, guarded the same way the validation suites are: the invalid-body
 // case needs a schema that actually rejects, so it is skipped where npm:zod
 // cannot load rather than passing vacuously.
-const zodModule = await import('zod-v3').catch(() => undefined);
+const zodModule = await import('zod-v4').catch(() => undefined);
 const z = zodModule?.z;
 const itZod = z === undefined ? it.skip : it;
 

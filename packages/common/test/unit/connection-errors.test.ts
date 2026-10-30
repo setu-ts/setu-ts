@@ -61,10 +61,54 @@ describe('createConnectionErrorReporter', () => {
     expect(entries).toEqual([
       {
         level: 'warn',
-        message: 'pkg: redis: connection error: connect ECONNREFUSED 127.0.0.1:6379',
-        metadata: { source: 'pkg: redis', error: 'connect ECONNREFUSED 127.0.0.1:6379' },
+        message: 'pkg: redis: connection error: Error: connect ECONNREFUSED 127.0.0.1:6379',
+        metadata: { source: 'pkg: redis', error: 'Error: connect ECONNREFUSED 127.0.0.1:6379' },
       },
     ]);
+  });
+
+  it('describes an AggregateError by its inner errors, with their classifiers', () => {
+    const { logger, entries } = recordingLogger();
+    const reporter = createConnectionErrorReporter({ source: 'pkg: redis', logger: () => logger });
+    const aggregate = new AggregateError(
+      [
+        Object.assign(new Error('connect ECONNREFUSED ::1:6379'), { code: 'ECONNREFUSED' }),
+        Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+          code: 'ECONNREFUSED',
+        }),
+      ],
+      'Reached the max retries per request limit',
+    );
+
+    reporter.report(aggregate);
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe('warn');
+    expect(entries[0].message).toContain('connect ECONNREFUSED ::1:6379');
+    expect(entries[0].message).toContain('connect ECONNREFUSED 127.0.0.1:6379');
+    expect(entries[0].message).toContain('code=ECONNREFUSED');
+    expect(entries[0].metadata?.['error']).toEqual(expect.stringContaining('code=ECONNREFUSED'));
+    expect(entries[0].metadata?.['error']).toEqual(
+      expect.stringContaining('connect ECONNREFUSED ::1:6379'),
+    );
+  });
+
+  it('logs a repeat of the same aggregate at debug with the repeat count', () => {
+    const { logger, entries } = recordingLogger();
+    const reporter = createConnectionErrorReporter({ source: 'pkg: redis', logger: () => logger });
+    const aggregate = new AggregateError([
+      Object.assign(new Error('connect ECONNREFUSED ::1:6379'), { code: 'ECONNREFUSED' }),
+      Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+        code: 'ECONNREFUSED',
+      }),
+    ]);
+
+    reporter.report(aggregate);
+    reporter.report(aggregate);
+
+    expect(entries.map((e) => e.level)).toEqual(['warn', 'debug']);
+    expect(entries[1].metadata?.['repeats']).toBe(1);
+    expect(entries[1].message).toContain('connect ECONNREFUSED 127.0.0.1:6379');
   });
 
   it('logs consecutive identical errors at debug with a running count', () => {
@@ -75,7 +119,7 @@ describe('createConnectionErrorReporter', () => {
 
     expect(entries.map((e) => e.level)).toEqual(['warn', 'debug', 'debug', 'debug']);
     expect(entries.map((e) => e.metadata?.['repeats'])).toEqual([undefined, 1, 2, 3]);
-    expect(entries[1].message).toBe('s: connection error repeated: refused');
+    expect(entries[1].message).toBe('s: connection error repeated: Error: refused');
   });
 
   it('warns again when the message changes', () => {
@@ -127,7 +171,7 @@ describe('createConnectionErrorReporter', () => {
     holder.current = logger;
     reporter.report(new Error('after'));
 
-    expect(entries.map((e) => e.metadata?.['error'])).toEqual(['after']);
+    expect(entries.map((e) => e.metadata?.['error'])).toEqual(['Error: after']);
   });
 
   it('drops the event when no logger is registered, without throwing', () => {
@@ -167,7 +211,7 @@ describe('createConnectionErrorReporter', () => {
     }).not.toThrow();
   });
 
-  it('logs a non-Error value by its string form, and survives one that cannot be stringified', () => {
+  it('logs a non-Error value by its rendered description', () => {
     const { logger, entries } = recordingLogger();
     const reporter = createConnectionErrorReporter({ source: 's', logger: () => logger });
     const hostile = {
@@ -180,8 +224,8 @@ describe('createConnectionErrorReporter', () => {
     reporter.report(hostile);
 
     expect(entries.map((e) => e.metadata?.['error'])).toEqual([
-      'plain string',
-      'unrepresentable error value',
+      'Error: plain string',
+      'Error: [object Object]',
     ]);
   });
 

@@ -19,6 +19,23 @@ function parseHelpFlags(text: string): Set<string> {
   return names;
 }
 
+it('inventories build as a zero-positional command with dir and dry-run flags', () => {
+  const spec = commandFlagsFor('build', undefined);
+  expect(spec?.documented).toEqual(['dir', 'dry-run']);
+  expect(spec?.positionals).toEqual({ fixed: 1, taken: 0, noun: 'no arguments' });
+});
+
+it('dispatches standalone add broker and queue selections through the real CLI', async () => {
+  const h = harness();
+  expect(await h.run(['new', 'api', '--template', 'rest', '--runtime', 'node'])).toBe(0);
+  expect(await h.run(['add', 'messaging', '--broker', 'redis', '--dir', '/work/api'])).toBe(0);
+  expect(await h.run(['add', 'queue', '--queue', 'redis', '--dir', '/work/api'])).toBe(0);
+  const config = h.fs.read('/work/api/setu.config.ts');
+  expect(config).toContain("broker: 'redis-streams'");
+  expect(config).toContain("adapter: 'redis'");
+  expect(h.fs.read('/work/api/package.json')).toContain('ioredis');
+});
+
 interface IHarness {
   readonly fs: FakeFs;
   readonly out: Recorder;
@@ -152,6 +169,8 @@ describe('unknown-option refusal', () => {
       [['workspace', 'bogus-sub', '--bogus'], 'setu workspace'],
       [['commands', '--bogus'], 'setu commands'],
       [['help', '--bogus'], 'setu help'],
+      [['check', '--json'], 'setu check'],
+      [['sync', '--json'], 'setu sync'],
     ];
     for (const [argv, label] of cases) {
       const h = harness(WORKSPACE_SEED);
@@ -360,8 +379,12 @@ describe('help text agrees with the inventory', () => {
     ['generate library', ['generate', 'library', '--help']],
     ['add', ['add', '--help']],
     ['agents', ['agents', '--help']],
+    ['check', ['check', '--help']],
+    ['sync', ['sync', '--help']],
     ['adopt', ['adopt', '--help']],
     ['workspace ports', ['workspace', 'ports', '--help']],
+    ['workspace build', ['workspace', 'build', '--help']],
+    ['workspace deploy', ['workspace', 'deploy', '--help']],
   ];
 
   for (const [label, argv] of gateCases) {

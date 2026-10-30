@@ -15,6 +15,9 @@
  *
  * @module
  */
+import type { FormBody, HttpMethod, IPrincipal, IRequest, ITenant } from '@setu-ts/common';
+import { installRequestIdentityGuard, parseFormBody, parseJsonBody } from '@setu-ts/common';
+
 import type { InjectRequest } from './application.ts';
 
 /**
@@ -127,4 +130,101 @@ function refusalMessage(value: unknown): string {
     `every other shape, which destroyed the value — pass bytes for a binary or multipart ` +
     `body, or a plain object for JSON.`
   );
+}
+
+/**
+ * The {@linkcode IRequest} an `inject()` call dispatches. A class rather than
+ * an object literal so the identity guard sits on its prototype, as on the
+ * runtime's served request: an injected request and a served one guard
+ * `user`, `tenant` and `locale` the same way.
+ *
+ * @since 0.11.0
+ * @internal
+ */
+export class InjectedRequest implements IRequest {
+  readonly method: HttpMethod;
+  readonly url: string;
+  readonly headers: Headers;
+  // `declare`: absent, not `undefined`, when the caller supplied none — the
+  // shape the object literal this replaced had.
+  declare readonly ip?: string;
+  declare readonly raw?: Request;
+  // `declare`, never class fields: an own property would shadow the guard.
+  declare user?: IPrincipal;
+  declare tenant?: ITenant;
+  declare locale?: string;
+  readonly #bodyBytes: Uint8Array | undefined;
+  // The form read is memoized like `json()`'s: the in-flight promise is
+  // cached (a rejection with it), so two middleware reading the same
+  // injected body trigger one parse, and a body that is not a form keeps
+  // rejecting identically on a retry.
+  #form: Promise<FormBody> | undefined;
+
+  /**
+   * @param method - The request method
+   * @param url - The absolute request URL
+   * @param headers - The request headers (already the inject's own copy)
+   * @param bodyBytes - The coerced body, or `undefined` when none was sent
+   * @param ip - The caller-supplied client address, if any
+   * @param raw - The web `Request` the handler may inspect, if it could be built
+   */
+  constructor(
+    method: HttpMethod,
+    url: string,
+    headers: Headers,
+    bodyBytes: Uint8Array | undefined,
+    ip: string | undefined,
+    raw: Request | undefined,
+  ) {
+    // Guarded on the prototype like the runtime's served request, so an
+    // injected and a served request guard identity the same way. Installed by
+    // the first construction (idempotent after that), not at import.
+    installRequestIdentityGuard(InjectedRequest.prototype);
+    this.method = method;
+    this.url = url;
+    this.headers = headers;
+    this.#bodyBytes = bodyBytes;
+    if (ip !== undefined) (this as { ip?: string }).ip = ip;
+    if (raw !== undefined) (this as { raw?: Request }).raw = raw;
+  }
+
+  get path(): string {
+    return new URL(this.url).pathname;
+  }
+
+  json<T>(): Promise<T> {
+    // The shared parse (X37-1): a malformed body rejects with the
+    // `400`-branded MalformedRequestBodyError, so `inject()` observes the
+    // same failure the served path produces. The empty-body arm keeps its
+    // `{}` default — an in-process inject that sent no body is not a
+    // malformed body.
+    const bodyBytes = this.#bodyBytes;
+    return Promise.resolve().then(
+      () =>
+        parseJsonBody(bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes)) as T,
+    );
+  }
+
+  text(): Promise<string> {
+    const bodyBytes = this.#bodyBytes;
+    return Promise.resolve(bodyBytes === undefined ? '' : new TextDecoder().decode(bodyBytes));
+  }
+
+  bytes(): Promise<Uint8Array> {
+    return Promise.resolve(this.#bodyBytes ?? new Uint8Array(0));
+  }
+
+  formData(): Promise<FormBody> {
+    // The shared parse (M94b): a non-form content-type rejects with the
+    // `415`-branded UnsupportedFormEncodingError, so an injected request
+    // observes what a served request observes. A `Uint8Array` or an
+    // `ArrayBuffer` sets NO default content type (M95c §3.9), so an
+    // injected multipart in those shapes must supply its own — exactly
+    // what a served request requires. A `Blob` supplies it from `.type`
+    // (M99c), as the platform does.
+    this.#form ??= Promise.resolve().then(() =>
+      parseFormBody(this.#bodyBytes ?? new Uint8Array(0), this.headers.get('content-type')),
+    );
+    return this.#form;
+  }
 }

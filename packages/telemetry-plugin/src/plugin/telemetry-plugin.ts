@@ -58,6 +58,7 @@ const TRACE_INSTRUMENTATION_ORDER: readonly TraceInstrumentationKind[] = [
   'http',
   'fetch',
   'ioredis',
+  'redis',
   'amqplib',
   'kafkajs',
 ];

@@ -58,7 +58,10 @@ export async function loadSnsModule(): Promise<SnsSdkModule> {
   try {
     return (await import('@aws-sdk/client-sns')) as unknown as SnsSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sns', { cause: error });
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-sns', {
+      requiredBy: '@setu-ts/queue-plugin',
+      cause: error,
+    });
   }
 }
 

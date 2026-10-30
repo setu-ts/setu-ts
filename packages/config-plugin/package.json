@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/config-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Configuration with env loading, variable expansion, and schema validation",
   "repository": {
     "type": "git",
@@ -44,6 +44,6 @@
     "@types/node": "^24",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
-    "zod-v3": "npm:zod@^3.24.0"
+    "zod-v4": "npm:zod@^4.6.6"
   }
 }

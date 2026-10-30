@@ -9,9 +9,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import { createApplication } from '@setu-ts/kernel';
-import { RuntimePlugin } from '@setu-ts/runtime';
+import { RuntimePlugin, createNodeRuntimeServices } from '@setu-ts/runtime';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { HealthCheckResult, IServiceDiscovery } from '@setu-ts/common';
+import type { HealthCheckResult, IServiceDiscovery, ILogger } from '@setu-ts/common';
+import { errorHandler } from '@setu-ts/exceptions';
 
 import {
   DiscoveryUnavailableError,
@@ -62,6 +63,67 @@ function healthCapture(): {
 }
 
 describe('ServiceDiscoveryPlugin — registration', () => {
+  it('names token and apiServer for the documented Kubernetes setup outside a pod (V10-44)', async () => {
+    const runtime = createNodeRuntimeServices();
+    const failure = Object.assign(new Error('ENOENT: projected service-account token'), {
+      code: 'ENOENT',
+    });
+    const warnings: string[] = [];
+    const logger: ILogger = {
+      level: 'warn',
+      fatal: () => {},
+      error: () => {},
+      info: () => {},
+      debug: () => {},
+      trace: () => {},
+      warn: (message) => {
+        warnings.push(message);
+      },
+      child: () => logger,
+    };
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin({
+          platform: 'node',
+          adapters: {
+            node: () => ({
+              ...runtime,
+              fs: {
+                ...runtime.fs!,
+                stat: () => Promise.reject(failure),
+                readFile: () => Promise.reject(failure),
+              },
+            }),
+          },
+        }),
+        {
+          name: 'logger',
+          version: '0.0.0',
+          provides: [CAPABILITIES.LOGGER],
+          register(ctx) {
+            ctx.services.register(CAPABILITIES.LOGGER, logger);
+          },
+        },
+        ServiceDiscoveryPlugin({
+          provider: 'kubernetes',
+          namespace: 'default',
+          apiServer: 'https://API_SERVER_CANARY.invalid',
+        }),
+      ],
+    });
+    await app.start();
+    try {
+      expect(warnings).toHaveLength(1);
+      const discovery = app.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await expect(discovery.resolve('billing')).rejects.toThrow(/token.*apiServer/);
+      }
+      expect(warnings).toHaveLength(1);
+      expect(warnings.join()).not.toContain('API_SERVER_CANARY');
+    } finally {
+      await app.stop();
+    }
+  });
   it('registers the capability, typed as IServiceDiscovery', async () => {
     const app = createApplication({
       plugins: [
@@ -204,6 +266,40 @@ describe('ServiceDiscoveryPlugin — health indicator', () => {
 
     await expect(discovery.resolve('billing')).rejects.toThrow(DiscoveryUnavailableError);
     await app.stop();
+  });
+
+  it('answers a cold provider failure as a named 503, never a masked 500 (M119g, V10-34)', async () => {
+    const provider = createFakeProvider([]);
+    provider.failWith(new Error('backend down'));
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        ServiceDiscoveryPlugin({ provider: 'custom', discovery: provider }),
+      ],
+    });
+    app.middleware.add(errorHandler({ format: 'rfc9457' }), { priority: 10, name: 'errors' });
+    app.router.get('/discover', async (ctx) => {
+      const discovery = ctx.services.get<IServiceDiscovery>(CAPABILITIES.SERVICE_DISCOVERY);
+      return ctx.response.json(await discovery.resolve('billing'));
+    });
+    await app.start();
+    try {
+      const response = await app.inject({ method: 'GET', url: 'http://localhost/discover' });
+      expect(response.statusCode).toBe(503);
+      const body = response.json<Record<string, unknown>>();
+      expect(body).toEqual({
+        type: 'about:blank',
+        title: 'Service Unavailable',
+        status: 503,
+        detail: 'Service discovery is temporarily unavailable.',
+        instance: '/discover',
+      });
+      // The operator sentence and the requested service name stay out of the body.
+      expect(body).not.toHaveProperty('message');
+      expect(JSON.stringify(body)).not.toContain('billing');
+    } finally {
+      await app.stop();
+    }
   });
 });
 

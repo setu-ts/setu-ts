@@ -24,11 +24,70 @@ import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import { RabbitMqQueue } from '../../src/adapters/rabbitmq-queue.ts';
 import { CAPABILITIES } from '@setu-ts/common';
-import type { IQueue, IQueueDiagnosticsSource, IRuntimeServices } from '@setu-ts/common';
+import type {
+  HealthReport,
+  IQueue,
+  IQueueDiagnosticsSource,
+  IRuntimeServices,
+} from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { QueuePlugin } from '../../src/index.ts';
+import { REDIS_CLIENTS, redisOptions } from '../../../common/test/fixtures/redis-clients.ts';
+
+describe('M119b REAL RabbitMQ queue reachability', () => {
+  it(
+    'paused broker reports unknown, stopped broker reports down through /ready',
+    {
+      skip: process.env['RABBITMQ_URL'] === undefined,
+    },
+    async () => {
+      const url = toIpv4(process.env['RABBITMQ_URL']!);
+      const port = Number(new URL(url).port || 5672);
+      const containerId = await containerIdForPort(port);
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          HealthPlugin({ details: true }),
+          QueuePlugin({ adapter: 'rabbitmq', url }),
+        ],
+      });
+      let paused = false;
+      try {
+        await app.start();
+        await docker(['pause', containerId]);
+        paused = true;
+        const started = performance.now();
+        const ready = await app.inject({ method: 'GET', url: '/ready' });
+        expect(performance.now() - started).toBeLessThan(3500);
+        expect(ready.statusCode).toBe(200);
+        const check = ready.json<HealthReport>().checks.queue;
+        expect(check).toMatchObject({ status: 'up', data: { reachable: 'unknown' } });
+        expect(check.data).not.toHaveProperty('queues');
+        await docker(['unpause', containerId]);
+        paused = false;
+        await docker(['stop', containerId]);
+        await waitTrue(
+          async () => {
+            const result = await app.inject({ method: 'GET', url: '/ready' });
+            return (
+              result.statusCode === 503 &&
+              result.json<HealthReport>().checks.queue.data?.reachable === false
+            );
+          },
+          'stopped queue down',
+          15000,
+        );
+      } finally {
+        if (paused) await docker(['unpause', containerId]);
+        await docker(['start', containerId]);
+        await waitForPort(port, 30000);
+        await app.stop();
+      }
+    },
+  );
+});
 
 // ── Docker stop/start helpers ───────────────────────────────────────────────
 
@@ -130,7 +189,7 @@ function makeRuntime(): IRuntimeServices {
 
 // ── RedisQueue outage ───────────────────────────────────────────────────────
 
-describe('REAL RedisQueue outage (§3.7)', () => {
+describe.each(REDIS_CLIENTS)('%s REAL RedisQueue outage (§3.7)', (redisVariant) => {
   it(
     'up → stop → down → restart → up',
     { skip: process.env['REDIS_URL'] === undefined },
@@ -143,7 +202,7 @@ describe('REAL RedisQueue outage (§3.7)', () => {
       const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
       const containerId = await containerIdForPort(port);
 
-      const queue = new RedisQueue({ url: toIpv4(url) });
+      const queue = new RedisQueue({ ...redisOptions(redisVariant, toIpv4(url)) });
 
       try {
         await queue.connect();
@@ -230,10 +289,10 @@ const redisUrl = process.env['REDIS_URL'];
 const BOUND_MS = 1000;
 const JOB_NAME = 'm101a.bounded';
 
-describe(
-  'REAL paused Redis bounds queue.add (M101a V8-5)',
+describe.each(REDIS_CLIENTS)(
+  '%s REAL paused Redis bounds queue.add (M101a V8-5)',
   { skip: redisUrl === undefined },
-  () => {
+  (redisVariant) => {
     it('paused → add rejects within the bound and /health down → unpaused → add succeeds', async () => {
       const url = toIpv4(redisUrl!);
       const port = new URL(url).port === '' ? 6379 : Number(new URL(url).port);
@@ -244,7 +303,7 @@ describe(
           RuntimePlugin(),
           QueuePlugin({
             adapter: 'redis',
-            url,
+            ...redisOptions(redisVariant, url, BOUND_MS),
             commandTimeoutMs: BOUND_MS,
             processors: [{ name: JOB_NAME, processor: () => {} }],
             diagnostics: {

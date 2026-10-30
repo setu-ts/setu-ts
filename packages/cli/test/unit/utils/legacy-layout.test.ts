@@ -16,7 +16,6 @@ import {
   LEGACY_HTTP_DIR,
   legacyLayoutNotice,
   legacyRegistrarNotice,
-  readConfigModule,
   readLegacyHttpFiles,
 } from '../../../src/utils/legacy-layout.ts';
 
@@ -100,19 +99,5 @@ describe('legacyRegistrarNotice', () => {
 
   it('says nothing when the project does not call the registrar at all', () => {
     expect(legacyRegistrarNotice('export function createApp() {}')).toEqual([]);
-  });
-});
-
-describe('readConfigModule', () => {
-  it('reads the project config as text', async () => {
-    const fs = createFakeFs({ '/app/setu.config.ts': 'registerGeneratedRoutes(app.router);' });
-
-    expect(await readConfigModule(fs, '/app')).toContain('registerGeneratedRoutes');
-  });
-
-  it('reports an empty source when the project has no config', async () => {
-    // A bare directory, or a project keeping its wiring elsewhere: nothing to
-    // migrate rather than a crash.
-    expect(await readConfigModule(createFakeFs({}), '/app')).toBe('');
   });
 });

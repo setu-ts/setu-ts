@@ -5,6 +5,7 @@ import {
   unusedPort as nodeUnusedPort,
 } from '../../../../test/node-helpers.ts';
 import * as nodeFs from 'node:fs/promises';
+import { createServer, type Server } from 'node:net';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { workspaceMembers } from '../../../../scripts/lib/workspace.ts';
@@ -117,10 +118,17 @@ export async function useWorkspacePackages(root: string): Promise<void> {
   const manifestPath = `${root}/deno.json`;
   const manifest = JSON.parse(await nodeFs.readFile(manifestPath, 'utf8')) as {
     imports?: Record<string, string>;
+    scopes?: Record<string, Record<string, string>>;
     compilerOptions?: Record<string, unknown>;
   };
   // The project's own entries win: they are what the CLI emitted.
-  const imports: Record<string, string> = await frameworkImports();
+  const framework = await frameworkImports();
+  // Extra framework mappings belong to source resolution, not the project's
+  // installed plugin inventory. In particular, exposing decorator-plugin at
+  // the top level would switch a functional fixture to class-based generation.
+  const imports: Record<string, string> = Object.fromEntries(
+    Object.entries(framework).filter(([specifier]) => !specifier.startsWith('@setu-ts/')),
+  );
   for (const [specifier, target] of Object.entries(manifest.imports ?? {})) {
     // Only framework specifiers are repointed. A template may also declare a
     // project-local alias (`~/` → `./app/`), and rewriting that to a package
@@ -132,6 +140,10 @@ export async function useWorkspacePackages(root: string): Promise<void> {
     imports[specifier] = workspaceEntrypoint(specifier.slice('@setu-ts/'.length));
   }
   manifest.imports = imports;
+  manifest.scopes = {
+    ...manifest.scopes,
+    [new URL('../../../../', import.meta.url).href]: framework,
+  };
   manifest.compilerOptions = { ...manifest.compilerOptions, ...WORKSPACE_COMPILER_OPTIONS };
   // Trailing newline, or a later `deno fmt --check` on the repointed project
   // would flag the fixture's own rewrite rather than anything the CLI emitted.
@@ -185,6 +197,31 @@ export interface CheckResult {
  * @returns The process result
  */
 export async function denoCheck(root: string, files: readonly string[]): Promise<CheckResult> {
+  const manifest = JSON.parse(await nodeFs.readFile(`${root}/deno.json`, 'utf8')) as {
+    tasks?: Record<string, string>;
+  };
+  if (
+    manifest.tasks?.['build'] !== undefined &&
+    files.some((file) => /(?:^|\/)main\.ts$/.test(file))
+  ) {
+    const ready = await nodeFs.stat(`${root}/build/server/index.js`).then(
+      () => true,
+      () => false,
+    );
+    if (!ready) {
+      const built = await runProcess(denoBinary(), {
+        args: ['task', 'build'],
+        cwd: root,
+        stdout: 'piped',
+        stderr: 'piped',
+      });
+      if (built.code !== 0)
+        return {
+          code: built.code,
+          stderr: new TextDecoder().decode(built.stdout) + new TextDecoder().decode(built.stderr),
+        };
+    }
+  }
   const command = () =>
     runProcess(denoBinary(), {
       // `--node-modules-dir=none` because a template that also emits a
@@ -238,6 +275,37 @@ export async function collectSources(dir: string): Promise<string[]> {
  */
 export function unusedPort(): Promise<number> {
   return nodeUnusedPort();
+}
+
+/**
+ * A run of `count` consecutive free TCP ports, for a workspace whose members bind
+ * `base`, `base + 1`, ….
+ *
+ * {@linkcode unusedPort} proves only `base` free; `base + 1` can belong to anything,
+ * and a member that loses that race exits with `AddrInUse` before it binds (the
+ * `workspace-mesh-e2e` "never bound" failure, PR #519). Every port is held at once,
+ * then released, and a run with a taken port is retried from a new base.
+ *
+ * @param count - How many consecutive ports the workspace binds
+ * @returns The first port of the run
+ */
+export async function unusedPortRange(count: number): Promise<number> {
+  const bind = (port: number): Promise<Server | undefined> =>
+    new Promise((accept) => {
+      const server = createServer();
+      server.once('error', () => accept(undefined));
+      server.listen(port, '127.0.0.1', () => accept(server));
+    });
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const base = await unusedPort();
+    if (base + count - 1 > 65_535) continue;
+    const held = await Promise.all(Array.from({ length: count }, (_, i) => bind(base + i)));
+    await Promise.all(
+      held.map((server) => server && new Promise<void>((done) => server.close(() => done()))),
+    );
+    if (held.every((server) => server !== undefined)) return base;
+  }
+  throw new Error(`no run of ${count} free ports found`);
 }
 
 /** How a booted project ended after it was signalled. */
@@ -412,8 +480,11 @@ export interface ProbeOutcome {
  * releases answering 500 on `/health` because its task never requested
  * `--allow-sys`, and an `-A` boot passes that every time.
  *
- * `--config` and `--node-modules-dir` are added on top, since neither grants a
- * permission — the flags under test are exactly the ones the template declared.
+ * Source-only fixtures resolve repointed packages from the npm cache (`none`),
+ * as they did before the styling foundation. Projects with a build task prepare
+ * installed modules first and keep their configured nodeModulesDir: forcing
+ * `none` there breaks Radix's transitive CommonJS subpaths. Neither changes the
+ * permission flags the generated task declares.
  *
  * @param project - The project directory, already repointed at the workspace
  * @param drive - Called once the project is serving, with its origin
@@ -446,8 +517,9 @@ export async function withGeneratedServer<T>(
   const port = workspacePort ?? (await unusedPort());
   const entry = `${project}/main.ts`;
 
+  const moduleFlags = manifest.tasks?.['build'] === undefined ? ['--node-modules-dir=none'] : [];
   const child = spawnProcess(denoBinary(), {
-    args: ['run', ...flags, '--node-modules-dir=none', '--config', `${project}/deno.json`, entry],
+    args: ['run', ...flags, ...moduleFlags, '--config', `${project}/deno.json`, entry],
     cwd: project,
     env: { PORT: String(port) },
     stdout: 'piped',

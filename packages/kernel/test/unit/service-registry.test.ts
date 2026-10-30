@@ -329,4 +329,40 @@ describe('ServiceRegistry', () => {
       expect(events).toEqual([]);
     });
   });
+  describe('a child that has registered nothing', () => {
+    it('answers every read through its parent', () => {
+      const parent = new ServiceRegistry();
+      const single = { kind: 'single' };
+      const multi = { kind: 'multi' };
+      parent.register('svc', single);
+      parent.register('many', multi, { multi: true });
+      const child = parent.createChild();
+
+      expect(child.has('svc')).toBe(true);
+      expect(child.has('many')).toBe(true);
+      expect(child.has('missing')).toBe(false);
+      expect(child.get('svc')).toBe(single);
+      expect(child.getAll('many')).toEqual([multi]);
+      expect(child.getAll('svc')).toEqual([single]);
+      expect(child.peekResolved('svc')).toBe(single);
+      expect(child.isCurrent('svc', single)).toBe(true);
+      expect(child.unregister('svc')).toBe(false);
+      expect(parent.get('svc')).toBe(single);
+    });
+
+    it('starts storing on its first registration, single or multi', () => {
+      const parent = new ServiceRegistry();
+      parent.register('svc', { from: 'parent' });
+      const child = parent.createChild();
+      const own = { from: 'child' };
+      child.register('svc', own);
+      child.register('many', { n: 1 }, { multi: true });
+      child.register('many', { n: 2 }, { multi: true });
+
+      expect(child.get('svc')).toBe(own);
+      expect(child.getAll('many')).toEqual([{ n: 1 }, { n: 2 }]);
+      expect(child.unregister('many')).toBe(true);
+      expect(child.has('many')).toBe(false);
+    });
+  });
 });

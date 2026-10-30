@@ -26,6 +26,16 @@ export interface HealthCheckResult {
 export type HealthIndicatorFn = () => Promise<HealthCheckResult>;
 
 /**
+ * Membership options for a registered health indicator.
+ *
+ * @since 0.11.0
+ */
+export interface HealthIndicatorOptions {
+  /** Whether the indicator counts toward readiness. Defaults to true. @since 0.11.0 */
+  readonly readiness?: boolean;
+}
+
+/**
  * A named health indicator contributing to `/health`, `/live`, and
  * `/ready`.
  *
@@ -44,6 +54,8 @@ export type HealthIndicatorFn = () => Promise<HealthCheckResult>;
 export interface IHealthIndicator {
   /** Indicator name, unique per application. */
   readonly name: string;
+  /** Whether the indicator counts toward readiness. Defaults to true. @since 0.11.0 */
+  readonly readiness?: boolean;
   /**
    * Performs the health check.
    *
@@ -88,9 +100,14 @@ export interface IHealthService {
    *
    * @param name - Indicator name (must be unique; throws on duplicate)
    * @param indicator - Health check function
+   * @param options - Readiness membership; absent means included
    * @throws {Error} If an indicator with the same name is already registered
    */
-  registerIndicator(name: string, indicator: HealthIndicatorFn): void;
+  registerIndicator(
+    name: string,
+    indicator: HealthIndicatorFn,
+    options?: HealthIndicatorOptions,
+  ): void;
 
   /**
    * Runs all registered indicators and returns the aggregated report.
@@ -107,7 +124,7 @@ export interface IHealthService {
   checkLive(): Promise<HealthReport>;
 
   /**
-   * Runs all contributed indicators for readiness.
+   * Runs readiness members, excluding the built-in "self" indicator.
    *
    * @returns The readiness report
    */

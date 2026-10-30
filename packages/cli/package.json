@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/cli",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "setu — project scaffolding and plugin-aware code generation",
   "repository": {
     "type": "git",
@@ -48,6 +48,7 @@
   "dependencies": {
     "@setu-ts/common": "workspace:^",
     "@setu-ts/runtime": "workspace:^",
+    "esbuild": "~0.28.0",
     "prettier": "^3.9.10",
     "tsx": "^4.23.0"
   },
@@ -59,7 +60,6 @@
     "@setu-ts/cqrs-plugin": "workspace:^",
     "@setu-ts/database-plugin": "workspace:^",
     "@setu-ts/events-plugin": "workspace:^",
-    "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/feature-flags-plugin": "workspace:^",
     "@setu-ts/graphql-plugin": "workspace:^",
     "@setu-ts/grpc-plugin": "workspace:^",

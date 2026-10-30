@@ -3,14 +3,14 @@
 Optional dependency-injection container. Registers an `IContainer` under `CAPABILITIES.DI_CONTAINER`
 (`'di-container'`).
 
-Supports singleton, scoped, and transient lifecycles, constructor injection, class/factory/value
-providers, circular-dependency detection, hierarchical scopes, and an optional fallback to the
-kernel's `ServiceRegistry`.
+Supports singleton, scoped, and transient lifetimes, constructor and factory injection, string,
+typed and class tokens, a request scope, disposal, and an optional fallback to the kernel's
+`ServiceRegistry`. The graph is compiled into direct factories and validated once at boot: a missing
+dependency, a cycle, or a singleton that reaches a scoped service fails `app.start()`.
 
 The framework does not require this package — the kernel's service registry is enough for most
-applications. Reach for the container when you want constructor injection and explicit scopes
-(`container.createScope()`); the framework creates no scope per request, so a `scoped` service is
-not re-created on every HTTP request.
+applications. Reach for the container when you want constructor injection, per-request instances
+(`container.forRequest(ctx)`), or something to dispose of what you created.
 
 ## Installation
 
@@ -20,24 +20,58 @@ import { DiPlugin } from '@setu-ts/di-plugin';
 
 ## Usage
 
+Register providers while plugins register (or from `onInit` and `onBootstrap`); the container closes
+after the last bootstrap hook, and a `register` after that throws `ContainerClosedError`.
+
 ```typescript
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { createContainer, DiPlugin } from '@setu-ts/di-plugin';
-import { CAPABILITIES, type IContainer } from '@setu-ts/common';
+import { DiPlugin } from '@setu-ts/di-plugin';
+import { CAPABILITIES, createToken, type IContainer, type IPlugin } from '@setu-ts/common';
 
-const app = createApplication({
-  plugins: [RuntimePlugin(), DiPlugin({ defaultScope: 'singleton' })],
+class Clock {
+  now(): number {
+    return 0;
+  }
+}
+
+class UnitOfWork {
+  constructor(readonly clock: Clock) {}
+  release(): void {}
+}
+
+const UNIT_OF_WORK = createToken<UnitOfWork>('unit-of-work');
+
+const providers: IPlugin = {
+  name: 'app-providers',
+  version: '1.0.0',
+  dependencies: [CAPABILITIES.DI_CONTAINER],
+  register(ctx) {
+    const container = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
+    container.register(Clock, { useClass: Clock });
+    container.register(
+      UNIT_OF_WORK,
+      { useClass: UnitOfWork, inject: [Clock] },
+      { scope: 'scoped', dispose: (uow) => uow.release() },
+    );
+  },
+};
+
+const app = createApplication({ plugins: [RuntimePlugin(), DiPlugin(), providers] });
+
+app.router.get('/now', (ctx) => {
+  // One UnitOfWork per request, released when the response is finished.
+  const scope = ctx.services.get<IContainer>(CAPABILITIES.DI_CONTAINER).forRequest(ctx);
+  const uow = scope.resolve(UNIT_OF_WORK);
+  return ctx.response.json({ now: uow.clock.now() });
 });
+
 await app.start({ port: 3000 });
-
-const container = app.services.get<IContainer>(CAPABILITIES.DI_CONTAINER);
-
-// A token is a STRING; the class travels in the provider, and the lifecycle in
-// the third argument.
-container.register('user-service', { useClass: UserService }, { scope: 'scoped' });
-const users = container.resolve<UserService>('user-service');
 ```
+
+A token is a string, a typed token from `createToken<T>(name)`, or a class; `resolve` infers the
+type from the last two. A factory declares its dependencies in `inject` and receives them as
+arguments: `{ useFactory: (clock: Clock) => new UnitOfWork(clock), inject: [Clock] }`.
 
 ## Options
 
@@ -46,24 +80,28 @@ const users = container.resolve<UserService>('user-service');
 | `defaultScope` | `'singleton' \| 'scoped' \| 'transient'` | `'singleton'` | Lifecycle for providers registered without an explicit scope.      |
 | `autoRegister` | `boolean`                                | `true`        | Fall back to the kernel `ServiceRegistry` for unregistered tokens. |
 
-With `autoRegister`, the first successful fallback is cached as a singleton. Explicit container
-registrations always take precedence.
+With `autoRegister`, boot validation checks a fallback token with `has()`, and the first successful
+resolve is cached as a singleton. Explicit container registrations always take precedence.
 
 ## Exports
 
-| Export             | Kind      |
-| ------------------ | --------- |
-| `createContainer`  | function  |
-| `DiPlugin`         | function  |
-| `CircularDetector` | class     |
-| `ContainerBuilder` | class     |
-| `DiContainer`      | class     |
-| `ProviderRegistry` | class     |
-| `ScopeManager`     | class     |
-| `ContainerConfig`  | interface |
-| `DiPluginOptions`  | interface |
-| `ExternalResolver` | interface |
-| `ProviderEntry`    | interface |
+| Export                         | Kind      |
+| ------------------------------ | --------- |
+| `createContainer`              | function  |
+| `DiPlugin`                     | function  |
+| `CircularDetector`             | class     |
+| `ContainerBuilder`             | class     |
+| `ContainerClosedError`         | class     |
+| `ContainerValidationError`     | class     |
+| `DiContainer`                  | class     |
+| `ProviderRegistry`             | class     |
+| `RequestScopeUnavailableError` | class     |
+| `ScopeDisposedError`           | class     |
+| `ScopeRequiredError`           | class     |
+| `ContainerConfig`              | interface |
+| `DiPluginOptions`              | interface |
+| `ExternalResolver`             | interface |
+| `ProviderEntry`                | interface |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

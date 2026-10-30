@@ -11,6 +11,8 @@ import type { IRuntimeServices } from '@setu-ts/common';
 
 import type { ServiceRegistry } from '../registry/service-registry.ts';
 import { ResponseBuilder } from './response.ts';
+import { runDeferred } from './deferred.ts';
+import type { DeferredCleanup } from './deferred.ts';
 
 /**
  * Internal result of {@linkcode createRequestContext}: the immutable
@@ -18,12 +20,20 @@ import { ResponseBuilder } from './response.ts';
  * to install matched route parameters after routing. This shape is NOT
  * exported from the package public API — only the kernel dispatch path
  * uses `setParams`.
+ * @since 0.11.0
+ * @internal
  */
 export interface RequestContextHandle {
   /** The per-request context. */
   readonly ctx: IRequestContext;
   /** Replaces the params exposed by `ctx.params` (used after route match). */
   setParams(params: Record<string, string>): void;
+  /**
+   * Marks completion and takes ownership of the lazily allocated cleanup list.
+   * @returns The registered callbacks, or undefined for an unused context
+   * @since 0.11.0
+   */
+  takeDeferred(): DeferredCleanup[] | undefined;
 }
 
 /** Shared empty params — replaced by `setParams` once a route matches. */
@@ -59,6 +69,11 @@ class RequestContext implements IRequestContext {
   #state: Map<string, unknown> | undefined;
   #query: Readonly<Record<string, string>> | undefined;
   #signal: AbortSignal | undefined;
+  #deferred: DeferredCleanup[] | undefined;
+  #completed = false;
+  #slotKey: object | undefined;
+  #slotValue: unknown;
+  #slotOverflow: { readonly key: object; readonly value: unknown }[] | undefined;
 
   constructor(request: IRequest, registry: ServiceRegistry, runtime: IRuntimeServices) {
     this.request = request;
@@ -137,6 +152,53 @@ class RequestContext implements IRequestContext {
   setParams(params: Record<string, string>): void {
     this.#params = params;
   }
+
+  /**
+   * Gets an owner-keyed request value without allocating storage for the first key.
+   * `create` must not call `slot` with its own key.
+   * @param key - The owner's private identity key
+   * @param create - Factory used when the key is absent
+   * @returns The value held for this key
+   * @throws {Error} If creation fails; no entry is stored
+   * @since 0.11.0
+   */
+  slot<T>(key: object, create: () => T): T {
+    if (this.#slotKey === key) return this.#slotValue as T;
+    if (this.#slotOverflow !== undefined) {
+      for (const entry of this.#slotOverflow) {
+        if (entry.key === key) return entry.value as T;
+      }
+    }
+    const value = create();
+    if (this.#slotKey === undefined) {
+      this.#slotKey = key;
+      this.#slotValue = value;
+    } else {
+      (this.#slotOverflow ??= []).push({ key, value });
+    }
+    return value;
+  }
+
+  /**
+   * Registers cleanup lazily; late registrations run immediately. Asynchronous
+   * cleanup is bounded at 5000 ms; expiry warns once and continues, ignoring
+   * later settlement. Synchronous cleanup stays synchronous and untimed.
+   */
+  defer(cleanup: DeferredCleanup): void {
+    if (this.#completed) {
+      void runDeferred([cleanup], this.#registry);
+      return;
+    }
+    (this.#deferred ??= []).push(cleanup);
+  }
+
+  /** Internal completion handoff; no list is allocated for an unused request. */
+  takeDeferred(): DeferredCleanup[] | undefined {
+    this.#completed = true;
+    const cleanups = this.#deferred;
+    this.#deferred = undefined;
+    return cleanups;
+  }
 }
 
 /**
@@ -152,6 +214,8 @@ class RequestContext implements IRequestContext {
  *   on first `ctx.services` read)
  * @param runtime - Runtime services for uuid and hrtime
  * @returns The request context handle
+ * @since 0.11.0
+ * @internal
  */
 export function createRequestContext(
   request: IRequest,
@@ -165,5 +229,6 @@ export function createRequestContext(
     setParams(next: Record<string, string>): void {
       ctx.setParams(next);
     },
+    takeDeferred: () => ctx.takeDeferred(),
   };
 }

@@ -37,7 +37,10 @@ async function loadAmqplib(): Promise<typeof import('amqplib')> {
   try {
     return await import('amqplib');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('amqplib', { cause: error });
+    throw new OptionalDependencyUnavailableError('amqplib', {
+      requiredBy: '@setu-ts/queue-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -309,6 +312,8 @@ export class RabbitMqQueue implements QueueAdapter {
   /**
    * M70c: present only when the connection exposes `on?`; its absence is
    * *unknown* reachability, not `false`.
+   * A fault returns false immediately; otherwise a throwaway channel round trip
+   * measures reachability. QueueService bounds and caches this probe.
    *
    * @since 0.1.0
    */
@@ -449,9 +454,32 @@ export class RabbitMqQueue implements QueueAdapter {
     // an `on` surface is *unknown* reachability, not `false` (the indicator
     // reads absence, not a false positive).
     if (this.#connection !== null && typeof this.#connection.on === 'function') {
-      this.isHealthy = (): Promise<boolean> => Promise.resolve(!this.#supervisor.faulted);
+      this.isHealthy = (): Promise<boolean> =>
+        this.#supervisor.faulted ? Promise.resolve(false) : this.#openThrowawayChannel();
     } else {
       delete this.isHealthy;
+    }
+  }
+
+  /**
+   * Open a dedicated AMQP channel so a paused broker cannot report reachable.
+   * Release it even if the caller's probe deadline has already elapsed; the
+   * shared processing channel must never be touched by a health poll.
+   */
+  async #openThrowawayChannel(): Promise<boolean> {
+    const connection = this.#connection;
+    if (connection === null) return false;
+    try {
+      const channel = await connection.createChannel();
+      try {
+        return true;
+      } finally {
+        if (typeof channel.close === 'function') await channel.close();
+      }
+    } catch {
+      // A refused round trip is positively unreachable; a hung one is resolved
+      // as unknown by QueueService's outer bound.
+      return false;
     }
   }
 

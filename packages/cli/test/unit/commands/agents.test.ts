@@ -1,12 +1,12 @@
-import type { IFileSystem } from '@setu-ts/common';
 import { describe, expect, it } from 'vitest';
 import { runCli } from '../../../src/cli.ts';
 import { createFakeFs, createRecorder } from '../../fixtures/fake-fs.ts';
 import { BRIEF_BEGIN, BRIEF_END } from '../../../src/agents/brief-file.ts';
+import type { ICliFileSystem } from '../../../src/utils/file-writer.ts';
 
 function harness(
   seed: Readonly<Record<string, string>> = { '/work/package.json': '{}' },
-  fsOverride?: (fs: IFileSystem) => IFileSystem,
+  fsOverride?: (fs: ICliFileSystem) => ICliFileSystem,
 ) {
   const fs = createFakeFs(seed);
   const out = createRecorder();
@@ -43,7 +43,7 @@ describe('setu agents', () => {
         '/work/apps\\x/package.json': '{}',
       });
       expect(await h.run(['agents', '--dir', 'apps\\x', '--dry-run'])).toBe(0);
-      expect(h.out.lines).toEqual(['would write /work/apps\\x/AGENTS.md']);
+      expect(h.out.lines).toEqual(['would create /work/apps\\x/AGENTS.md']);
       expect(h.fs.has('/work/AGENTS.md')).toBe(false);
       expect(h.fs.has('/work/apps/x/AGENTS.md')).toBe(false);
     },
@@ -186,8 +186,9 @@ describe('setu agents', () => {
   it('has help and strict flags, positional arity and exclusive modes', async () => {
     const h = harness();
     for (const flag of ['--help', '-h']) expect(await h.run(['agents', flag])).toBe(0);
-    for (const args of [['--bogus'], ['extra'], ['--dir'], ['--check', '--dry-run']])
+    for (const args of [['--bogus'], ['extra'], ['--dir'], ['--check', '--dry-run'], ['--strict']])
       expect(await h.run(['agents', ...args])).toBe(2);
+    expect(h.err.text()).toContain('--strict requires --check.');
     expect(h.fs.writes).toEqual([]);
   });
   it('refuses outside a project, bad manifests and unreadable runtime markers without writes', async () => {
@@ -210,7 +211,7 @@ describe('setu agents', () => {
   it('dry-runs resolved paths without touching any file', async () => {
     const h = harness({ '/work/app/package.json': '{}' });
     expect(await h.run(['agents', '--dir', 'app', '--dry-run'])).toBe(0);
-    expect(h.out.text()).toContain('would write /work/app/AGENTS.md');
+    expect(h.out.text()).toContain('would create /work/app/AGENTS.md');
     expect(h.fs.writes).toEqual([]);
   });
   it('creates, preserves personal bytes, checks freshness and refuses malformed ownership', async () => {
@@ -377,4 +378,73 @@ describe('setu agents', () => {
     expect(h.fs.has('/work/app/package.json')).toBe(true);
     expect(h.fs.read('/work/app/AGENTS.md')).toBe('personal');
   });
+  it('dry-runs the verbs of the real run and never rewrites an unchanged brief', async () => {
+    const create = harness({ '/work/package.json': '{}' });
+    expect(await create.run(['agents', '--dry-run'])).toBe(0);
+    expect(create.out.lines).toEqual(['would create /work/AGENTS.md']);
+    expect(create.fs.writes).toEqual([]);
+
+    const update = harness({ '/work/package.json': '{}', '/work/AGENTS.md': 'personal\n' });
+    expect(await update.run(['agents', '--dry-run'])).toBe(0);
+    expect(update.out.lines).toEqual(['would update /work/AGENTS.md']);
+    expect(update.fs.writes).toEqual([]);
+
+    expect(await create.run(['agents'])).toBe(0);
+    const writes = create.fs.writes.length;
+    const afterFirst = create.out.lines.length;
+    expect(await create.run(['agents'])).toBe(0);
+    expect(create.fs.writes.length).toBe(writes);
+    expect(create.out.lines.slice(afterFirst)).toEqual(['unchanged /work/AGENTS.md']);
+    const afterSecond = create.out.lines.length;
+    expect(await create.run(['agents', '--dry-run'])).toBe(0);
+    expect(create.out.lines.slice(afterSecond)).toEqual(['unchanged /work/AGENTS.md']);
+    expect(create.fs.writes.length).toBe(writes);
+  });
+  it('refuses an unwritable target in both modes before writing a byte', async () => {
+    for (const mode of ['dry-run', undefined] as const) {
+      const h = harness({ '/work/app/package.json': '{}' }, (fs) => ({
+        ...fs,
+        canWrite: (path: string) => Promise.resolve(path !== '/work/app/AGENTS.md'),
+      }));
+      const args = ['agents', '--dir', 'app', ...(mode === undefined ? [] : [`--${mode}`])];
+      expect(await h.run(args)).toBe(1);
+      expect(h.fs.writes).toEqual([]);
+      expect(h.err.lines).toEqual([
+        mode === undefined
+          ? '/work/app/AGENTS.md: not writable by you; nothing was written'
+          : 'WOULD REFUSE: /work/app/AGENTS.md is not writable by you',
+      ]);
+    }
+  });
+  it.each(['write', 'check', 'dry-run'] as const)(
+    'refuses a logical path a workspace lists as a member (%s mode)',
+    async (mode) => {
+      const fs = createFakeFs({
+        '/logical/setu.workspace.json': JSON.stringify({
+          version: 1,
+          basePort: 3000,
+          runtime: 'node',
+          transport: 'http',
+          members: [{ name: 'a', port: 3000 }],
+        }),
+        '/real/package.json': '{}',
+      });
+      const err = createRecorder();
+      const code = await runCli(['agents', ...(mode === 'write' ? [] : [`--${mode}`])], {
+        fs,
+        cwd: '/real',
+        logicalCwd: '/logical/apps/a',
+        now: () => 0,
+        log: () => {},
+        error: err.sink,
+      });
+      expect(code).toBe(1);
+      expect(err.text()).toContain(
+        '/logical/apps/a is a symlinked member of the workspace at /logical; Setu will not write ' +
+          'through links inside a workspace. Replace the link with the directory it points at, ' +
+          'then run setu agents from /logical.',
+      );
+      expect(fs.writes).toEqual([]);
+    },
+  );
 });

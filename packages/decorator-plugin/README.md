@@ -12,8 +12,8 @@ The store itself is registered under `CAPABILITIES.METADATA_STORE` (`'metadata-s
 
 `@ValidateBody`, `@ValidateQuery`, and `@ValidateParams` preserve application-created schemas and
 hand them to the validation/OpenAPI boundaries; this package does not inspect Zod internals. The
-supported Zod ranges are therefore the shared validation contract: `>=3.24.0 <4` and `>=4.4.0 <5`.
-`pnpm run check:compat` exercises both majors through the validation and OpenAPI owners.
+supported Zod range is therefore the shared validation contract: `>=4.6.6 <5`.
+`pnpm run check:compat` exercises Zod 4 through the validation and OpenAPI owners.
 
 ## Installation
 
@@ -230,7 +230,7 @@ schema and a description the declaration does not carry.
 - **Routing** — `@Controller`, `@Version`,
   `@Get`/`@Post`/`@Put`/`@Patch`/`@Delete`/`@Head`/`@Options`
 - **Parameters** — `@Params(...)`, taking the sources `Body`, `Query`, `Param`, `Header`, `Cookie`,
-  `CurrentUser`, `Ctx`, `Custom`
+  `CurrentUser`, `Ctx`, `Service` (a DI service from the request's scope), `Custom`
 - **Modules** — `@Module({ controllers, providers, imports })`
 - **Non-HTTP ingress** — `@Processor`, `@Cron`, `@Every`, `@OnEvent`, `@Subscribe`,
   `@CommandHandler`, `@QueryHandler`, `@Gateway` (+ `@OnOpen`/`@OnMessage`/`@OnClose`)
@@ -452,6 +452,7 @@ checked through the permissions it bundles). They run after `@Roles`/`@Permissio
 | `Roles`                      | function  |
 | `ScopedPermissions`          | function  |
 | `ScopedRoles`                | function  |
+| `Service`                    | function  |
 | `Subscribe`                  | function  |
 | `UseFilters`                 | function  |
 | `UseGuards`                  | function  |

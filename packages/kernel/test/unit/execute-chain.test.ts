@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { IRequestContext, MiddlewareFunction, NextFunction } from '@setu-ts/common';
 
 import { executeChain } from '../../src/pipeline/execute-chain.ts';
+import type { ChainObserver } from '../../src/pipeline/execute-chain.ts';
 import { ResponseBuilder } from '../../src/context/response.ts';
 
 /** Builds a real context backed by a ResponseBuilder. */
@@ -22,7 +23,23 @@ function recordingTerminal(order: string[], label: string): () => Promise<void> 
   };
 }
 
-describe('executeChain', () => {
+/**
+ * Both dispatch paths must honour the same chaining semantics: the plain path
+ * every request takes without diagnostics, and the observed path.
+ */
+const MODES: readonly (readonly [string, ChainObserver | undefined])[] = [
+  ['without an observer', undefined],
+  ['with an observer', { clock: () => 0, onStage: () => {} }],
+];
+
+describe.each(MODES)('executeChain %s', (_mode, observer) => {
+  const run = (
+    chain: readonly MiddlewareFunction[],
+    ctx: IRequestContext,
+    terminal: () => Promise<void>,
+    names?: readonly string[],
+  ): Promise<void> => executeChain(chain, ctx, terminal, names, observer);
+
   it('runs middleware in order and the terminal last', async () => {
     const order: string[] = [];
     const chain: MiddlewareFunction[] = [
@@ -35,7 +52,7 @@ describe('executeChain', () => {
         return next();
       },
     ];
-    await executeChain(chain, bareCtx(), recordingTerminal(order, 'terminal'));
+    await run(chain, bareCtx(), recordingTerminal(order, 'terminal'));
     expect(order).toEqual(['a', 'b', 'terminal']);
   });
 
@@ -49,7 +66,7 @@ describe('executeChain', () => {
         order.push('b');
       },
     ];
-    await executeChain(chain, bareCtx(), recordingTerminal(order, 'terminal'));
+    await run(chain, bareCtx(), recordingTerminal(order, 'terminal'));
     expect(order).toEqual(['a']);
   });
 
@@ -61,7 +78,7 @@ describe('executeChain', () => {
         return next();
       },
     ];
-    await executeChain(chain, bareCtx(), () => Promise.resolve());
+    await run(chain, bareCtx(), () => Promise.resolve());
     expect(() => nextFn!()).toThrow('next() called multiple times');
   });
 
@@ -79,7 +96,7 @@ describe('executeChain', () => {
         return c.response.json({ ok: true });
       },
     ];
-    await executeChain(chain, ctx, recordingTerminal(order, 'terminal'));
+    await run(chain, ctx, recordingTerminal(order, 'terminal'));
     expect(order).toEqual(['a']);
     expect((ctx.response as ResponseBuilder).snapshot().status).toBe(418);
   });
@@ -95,14 +112,14 @@ describe('executeChain', () => {
         return next();
       },
     ];
-    await executeChain(chain, ctx, recordingTerminal(order, 'terminal'));
+    await run(chain, ctx, recordingTerminal(order, 'terminal'));
     expect(order).toEqual(['a']);
   });
 
   it('runs the terminal when no middleware ends the response', async () => {
     let terminalRan = false;
     const ctx = ctxWithResponse();
-    await executeChain([], ctx, () => {
+    await run([], ctx, () => {
       terminalRan = true;
       return Promise.resolve();
     });
@@ -115,7 +132,7 @@ describe('executeChain', () => {
         throw new Error('boom');
       },
     ];
-    await expect(executeChain(chain, bareCtx(), () => Promise.resolve())).rejects.toThrow('boom');
+    await expect(run(chain, bareCtx(), () => Promise.resolve())).rejects.toThrow('boom');
   });
 
   // Route-level chains pass no `names` array, so the label falls back to the
@@ -126,7 +143,7 @@ describe('executeChain', () => {
       expect(() => next()).toThrow('next() called multiple times in middleware authGuard');
     }
 
-    await executeChain([authGuard], ctxWithResponse(), () => Promise.resolve());
+    await run([authGuard], ctxWithResponse(), () => Promise.resolve());
   });
 
   it('labels a double next() <anonymous> for a function with an empty name', async () => {
@@ -138,7 +155,7 @@ describe('executeChain', () => {
     // reach the '' case a route middleware built by `.bind()` or a factory hits.
     Object.defineProperty(anonymous, 'name', { value: '' });
 
-    await executeChain([anonymous], ctxWithResponse(), () => Promise.resolve());
+    await run([anonymous], ctxWithResponse(), () => Promise.resolve());
   });
 
   it('prefers a supplied diagnostic name over the function name', async () => {
@@ -147,6 +164,54 @@ describe('executeChain', () => {
       expect(() => next()).toThrow('next() called multiple times in middleware registered-label');
     }
 
-    await executeChain([inner], ctxWithResponse(), () => Promise.resolve(), ['registered-label']);
+    await run([inner], ctxWithResponse(), () => Promise.resolve(), ['registered-label']);
+  });
+  it('turns a synchronous throw from the terminal into a rejection', async () => {
+    const terminal = (): Promise<void> => {
+      throw new Error('terminal boom');
+    };
+    let settled: Promise<void> | undefined;
+    expect(() => {
+      settled = run([], ctxWithResponse(), terminal);
+    }).not.toThrow();
+    await expect(settled).rejects.toThrow('terminal boom');
+  });
+
+  it('turns a synchronous throw from a stage into a rejection', () => {
+    const chain: MiddlewareFunction[] = [
+      () => {
+        throw new Error('stage boom');
+      },
+    ];
+    const settled = run(chain, ctxWithResponse(), () => Promise.resolve());
+    return expect(settled).rejects.toThrow('stage boom');
+  });
+
+  it('runs synchronous stages that return no promise', async () => {
+    const order: string[] = [];
+    const chain = [
+      ((_ctx: IRequestContext, next: NextFunction) => {
+        order.push('a');
+        void next();
+      }) as MiddlewareFunction,
+      ((_ctx: IRequestContext, next: NextFunction) => {
+        order.push('b');
+        void next();
+      }) as MiddlewareFunction,
+    ];
+    await run(chain, ctxWithResponse(), recordingTerminal(order, 'terminal'));
+    expect(order).toEqual(['a', 'b', 'terminal']);
+  });
+
+  it('rejects when a synchronous stage calls next() twice', async () => {
+    const chain = [
+      function twice(_ctx: IRequestContext, next: NextFunction): void {
+        void next();
+        void next();
+      } as MiddlewareFunction,
+    ];
+    await expect(run(chain, ctxWithResponse(), () => Promise.resolve())).rejects.toThrow(
+      'next() called multiple times in middleware twice',
+    );
   });
 });

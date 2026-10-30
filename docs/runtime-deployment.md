@@ -155,9 +155,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "tsx watch main.ts"
   },
   "dependencies": {
-    "@setu-ts/common": "^0.10.0",
-    "@setu-ts/kernel": "^0.10.0",
-    "@setu-ts/runtime": "^0.10.0"
+    "@setu-ts/common": "^0.11.0",
+    "@setu-ts/kernel": "^0.11.0",
+    "@setu-ts/runtime": "^0.11.0"
   },
   "devDependencies": {
     "tsx": "^4.20.0"
@@ -205,7 +205,9 @@ pm2 start npm --name my-app -- start
 
 #### Serverless
 
-Use a serverless adapter for your platform (Vercel, AWS Lambda, etc.).
+AWS Lambda (Web Functions and classic event-driven functions) and Azure Functions each take a short
+entry file rather than an adapter package: see
+[Serverless: AWS Lambda and Azure Functions](./serverless.md).
 
 ### Limitations
 
@@ -265,9 +267,9 @@ console.log('Server running on http://localhost:3000');
     "dev": "deno run --watch --allow-net --allow-env main.ts"
   },
   "imports": {
-    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.10.0",
-    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.10.0",
-    "@setu-ts/common": "npm:@setu-ts/common@^0.10.0"
+    "@setu-ts/kernel": "npm:@setu-ts/kernel@^0.11.0",
+    "@setu-ts/runtime": "npm:@setu-ts/runtime@^0.11.0",
+    "@setu-ts/common": "npm:@setu-ts/common@^0.11.0"
   }
 }
 ```
@@ -333,15 +335,22 @@ deno compile --allow-net --allow-env --output my-app main.ts
 
 ---
 
-### Local diagnostics listener (Deno only)
+### Local diagnostics listener (Deno and Node)
 
 The RuntimePlugin provides `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` — a factory that binds exactly
 ONE additional IPv4 loopback (`127.0.0.1`) listener on a port you choose (1024–65535), consumed by
-`@setu-ts/diagnostics-plugin` for the authenticated local diagnostics connection. On Node, Bun, and
-Cloudflare Workers the factory refuses every `listen` call before any bind. This listener is not a
-generic second HTTP server API: the connector supplies its protocol handler and never receives an
-adapter or server handle. See `docs/diagnostics-protocol.md` for the wire protocol and its trust
-limits.
+`@setu-ts/diagnostics-plugin` for the authenticated local diagnostics connection on Deno and Node.
+On Bun and Cloudflare Workers the factory refuses every `listen` call before any bind. This listener
+is not a generic second HTTP server API: the connector supplies its protocol handler and never
+receives an adapter or server handle. See `docs/diagnostics-protocol.md` for the wire protocol and
+its trust limits.
+
+The Node listener uses `node:http` directly, preserves the original request-target and refuses
+duplicate singleton header lines before mapping. It has a 16 KiB native header limit, 5 s header
+timeout, 10 s request timeout, 5 s keep-alive timeout and a 32-connection cap. Native parser errors
+answer a fixed bare `400` with no body; protocol refusals retain their fixed JSON body. A bind
+conflict rejects startup, and shutdown closes active connections immediately. Without an `onListen`
+callback, both runtimes announce `Listening on http://127.0.0.1:<port>/` to stderr.
 
 ## Bun Deployment
 

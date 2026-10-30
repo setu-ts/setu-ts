@@ -1,0 +1,21 @@
+---
+import { getCollection } from 'astro:content';
+import { Code } from 'astro:components';
+import RepositoryArticle from '../../components/RepositoryArticle.astro';
+import { APPS, EXAMPLE_FILES, readSource } from '../../lib/repository';
+import { fileAnchor } from '../../lib/docs-links';
+export async function getStaticPaths() {
+  const entries = await getCollection('repository');
+  return APPS.map((app) => ({ params: { app }, props: { app, entry: entries.find((entry) => entry.id === `apps/${app}/README.md`)! } }));
+}
+const { app, entry } = Astro.props;
+if (!entry?.rendered) throw new Error(`Missing apps/${app}/README.md`);
+const files = EXAMPLE_FILES[app].map((path) => ({ path, source: readSource(`apps/${app}/${path}`), lang: path.endsWith('.tsx') ? 'tsx' : path.endsWith('.ts') ? 'ts' : path.endsWith('.toml') ? 'toml' : path.endsWith('.proto') ? 'proto' : 'text' }));
+---
+<RepositoryArticle html={entry.rendered.html} directory={`apps/${app}`}>
+  <article class="prose">
+    <h2>Read, in order</h2>
+    <ul>{files.map((file) => <li><a href={`#${fileAnchor(file.path)}`}>{file.path}</a></li>)}</ul>
+    {files.map((file) => <section><h3 id={fileAnchor(file.path)}>{file.path}</h3><Code code={file.source} lang={file.lang} /></section>)}
+  </article>
+</RepositoryArticle>

@@ -253,13 +253,19 @@ export async function loadAwsS3Module(): Promise<AwsStorageSdkModule> {
   try {
     s3Mod = (await import('@aws-sdk/client-s3')) as unknown as AwsSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@aws-sdk/client-s3', { cause: error });
+    throw new OptionalDependencyUnavailableError('@aws-sdk/client-s3', {
+      requiredBy: '@setu-ts/storage-plugin',
+      cause: error,
+    });
   }
   let presignerMod: PresignerSdkModule;
   try {
     presignerMod = (await import('@aws-sdk/s3-request-presigner')) as PresignerSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@aws-sdk/s3-request-presigner', { cause: error });
+    throw new OptionalDependencyUnavailableError('@aws-sdk/s3-request-presigner', {
+      requiredBy: '@setu-ts/storage-plugin',
+      cause: error,
+    });
   }
   return { s3: s3Mod, presigner: presignerMod };
 }

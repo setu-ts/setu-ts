@@ -8,7 +8,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
-import { Redis } from 'ioredis';
+import { createConnectionErrorReporter } from '@setu-ts/common';
 import type { IKernelApplication } from '@setu-ts/kernel';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
@@ -21,63 +21,87 @@ import {
   REDIS_URL,
   redisUrl,
 } from '../../../common/test/fixtures/redis-connection-errors.ts';
+import {
+  REDIS_CLIENTS,
+  redisOptions,
+  injectedRedis,
+} from '../../../common/test/fixtures/redis-clients.ts';
 
-describe('REAL Redis scheduler lock: connection errors', () => {
-  it(
-    'route to the logger, de-duplicated, and never to the console',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const logger = new RecordingLogger();
-      let app: IKernelApplication | undefined;
-      await expectOutageRoutedToLogger({
-        logger,
-        source: 'scheduler-plugin: redis lock',
-        start: async () => {
-          app = createApplication({
-            plugins: [
-              RuntimePlugin(),
-              loggerPlugin(logger),
-              SchedulerPlugin({
-                distributedLock: { enabled: true, storage: 'redis', url: redisUrl() },
+describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
+  describe('REAL Redis scheduler lock: connection errors', () => {
+    it(
+      'route to the logger, de-duplicated, and never to the console',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const logger = new RecordingLogger();
+        let app: IKernelApplication | undefined;
+        await expectOutageRoutedToLogger({
+          logger,
+          source: 'scheduler-plugin: redis lock',
+          start: async () => {
+            const options = redisOptions(
+              redisVariant,
+              redisUrl(),
+              5000,
+              createConnectionErrorReporter({
+                source: 'scheduler-plugin: redis lock',
+                logger: () => logger,
               }),
-            ],
-          });
-          await app.start();
-        },
-        stop: async () => {
-          await app?.stop();
-        },
-      });
-    },
-  );
+            );
+            // With no jobs registered this scenario sends no commands; open
+            // the caller-owned lazy client before stopping its server.
+            if ('client' in options) await options.client.connect();
+            app = createApplication({
+              plugins: [
+                RuntimePlugin(),
+                loggerPlugin(logger),
+                SchedulerPlugin({
+                  distributedLock: {
+                    enabled: true,
+                    storage: 'redis',
+                    ...options,
+                  },
+                }),
+              ],
+            });
+            await app.start();
+          },
+          stop: async () => {
+            await app?.stop();
+          },
+        });
+      },
+    );
 
-  it(
-    'attaches no listener to an injected client',
-    {
-      skip: REDIS_URL === undefined,
-    },
-    async () => {
-      const client = new Redis(redisUrl(), { lazyConnect: true });
-      const injected = client as unknown as IRedisLockClient;
-      const before = client.listenerCount('error');
-      const app = createApplication({
-        plugins: [
-          RuntimePlugin(),
-          loggerPlugin(new RecordingLogger()),
-          SchedulerPlugin({
-            distributedLock: { enabled: true, storage: 'redis', client: injected },
-          }),
-        ],
-      });
-      try {
-        await app.start();
-        expect(client.listenerCount('error')).toBe(before);
-      } finally {
-        await app.stop();
-        client.disconnect();
-      }
-    },
-  );
+    it(
+      'attaches no listener to an injected client',
+      {
+        skip: REDIS_URL === undefined,
+      },
+      async () => {
+        const handle = injectedRedis(redisVariant, redisUrl());
+        const client = handle.client;
+        const injected = client as unknown as IRedisLockClient;
+        const before = handle.listenerCount();
+        const app = createApplication({
+          plugins: [
+            RuntimePlugin(),
+            loggerPlugin(new RecordingLogger()),
+            SchedulerPlugin({
+              distributedLock: { enabled: true, storage: 'redis', client: injected },
+            }),
+          ],
+        });
+        try {
+          await app.start();
+          expect(handle.listenerCount()).toBe(before);
+        } finally {
+          await app.stop();
+          handle.disconnect();
+        }
+      },
+    );
+  });
 });

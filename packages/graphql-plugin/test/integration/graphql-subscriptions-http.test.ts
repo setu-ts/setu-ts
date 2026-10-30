@@ -202,6 +202,35 @@ describe('GraphQL subscriptions integration', () => {
     }
   });
 
+  it('subscriptions: SSE path joins a trailing-slash endpoint with one slash', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        GraphqlPlugin({
+          path: '/graphql/',
+          typeDefs,
+          resolvers: resolvers as never,
+          subscriptions: {},
+        }),
+      ],
+    });
+    await app.start({ port: 0 });
+
+    try {
+      const res = await app.fetch(
+        new Request('http://localhost/graphql/stream', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ query: '{ hello }' }),
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('text/event-stream');
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('subscriptions: WS route registered when WebSocket capability available', async () => {
     // The WS route is registered when the WebSocket capability is present.
     // We verify this indirectly by checking the health indicator reports it.

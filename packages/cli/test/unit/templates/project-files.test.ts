@@ -15,28 +15,53 @@ import { workspaceProfile } from '../../../src/workspace/runtime-profile.ts';
 import { withPluginOptionSeams } from '../../../src/templates/seam.ts';
 import { JOBS_SEAM } from '../../../src/seams/jobs.ts';
 
-describe('functional module hosts and generated test tasks', () => {
+describe('functional hosts and generated test tasks', () => {
+  it('emits the TLS proxy setting and warns about universal trust (M119c)', () => {
+    const files = [
+      ...projectFiles('shop', 'node', resolveHost(getTemplate('full-stack')!, 'node')),
+    ];
+    const config = contentsOf(files, 'setu.config.ts');
+    expect(config).toContain("config.get<string>('TRUSTED_PROXIES', { default: '' })");
+    expect(config).toContain(".split(',')");
+    expect(config).toContain('.filter((entry) => entry.length > 0)');
+    expect(config).toContain('trustedProxies.length > 0');
+    for (const file of ['.env', '.env.example', 'README.md']) {
+      const source = contentsOf(files, file);
+      expect(source).toContain('TRUSTED_PROXIES');
+      expect(source).toContain('0.0.0.0/0');
+      expect(source).toMatch(/single IPv6 addresses|IPv6 proxies as single addresses/);
+      expect(source).toContain('forwarded');
+      expect(source).toContain('400');
+    }
+    expect(contentsOf(files, 'README.md')).toContain('## Behind a TLS proxy');
+    // Audit L1: `::/0` is compared literally and trusts nothing, so no file may claim it trusts all.
+    for (const file of ['.env', '.env.example', 'README.md']) {
+      expect(contentsOf(files, file)).not.toContain('::/0');
+    }
+  });
   for (const target of ['node', 'deno', 'bun', 'cloudflare-workers'] as const) {
     for (const name of ['minimal', 'rest', 'microservice', 'full-stack']) {
-      it(`wires modules and splits unit/e2e tasks for ${name} on ${target}`, () => {
+      it(`starts flat and splits unit/e2e tasks for ${name} on ${target}`, () => {
         const host = resolveHost(name === 'minimal' ? MINIMAL_HOST : getTemplate(name)!, target);
         const files = [...projectFiles('svc', target, host)];
         const config = contentsOf(files, 'setu.config.ts');
-        expect(config).toContain("import { registerModules } from './src/modules/index.ts'");
-        expect(config).toMatch(
-          /registerGeneratedRoutes\(app.router, app.services\);\s+registerModules\(app.router, app.services\);/,
+        // A new project starts flat: the first `setu g module` writes the module
+        // barrel and switches these lines.
+        expect(config).toContain(
+          "import { registerGeneratedRoutes } from './src/controllers/index.ts'",
         );
-        expect(contentsOf(files, 'src/modules/index.ts')).toContain(
-          'export function registerModules',
-        );
-        const socket = target !== 'cloudflare-workers';
-        expect(files.some((file) => file.path === 'test/support/server.ts')).toBe(socket);
-        expect(files.some((file) => file.path === 'test/e2e/app.e2e.test.ts')).toBe(socket);
+        expect(config).toContain('registerGeneratedRoutes(app.router, app.services);');
+        expect(config).not.toContain('registerModules');
+        expect(files.some((file) => file.path === 'src/modules/index.ts')).toBe(false);
+        // V10-23: every target, Workers included, emits socket test support and
+        // the app-level e2e smoke test. Workers boots the real Worker on workerd
+        // through the same `startTestServer()`.
+        expect(files.some((file) => file.path === 'test/support/server.ts')).toBe(true);
+        expect(files.some((file) => file.path === 'test/e2e/app.e2e.test.ts')).toBe(true);
+        // Deno runs its tasks from `deno.json`; every npm-manifest target,
+        // Workers included, declares its test scripts in `package.json`.
         const manifest = JSON.parse(
-          contentsOf(
-            files,
-            target === 'deno' || target === 'cloudflare-workers' ? 'deno.json' : 'package.json',
-          ),
+          contentsOf(files, target === 'deno' ? 'deno.json' : 'package.json'),
         ) as { scripts?: Record<string, string>; tasks?: Record<string, string> };
         const tasks = manifest.tasks ?? manifest.scripts!;
         if (name === 'full-stack' || name === 'rest' || name === 'microservice') {
@@ -47,33 +72,29 @@ describe('functional module hosts and generated test tasks', () => {
             ),
           ) as { imports?: Record<string, string>; dependencies?: Record<string, string> };
           expect(dependencies.imports?.['zod'] ?? dependencies.dependencies?.['zod']).toBe(
-            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4' : '^4',
+            target === 'deno' || target === 'cloudflare-workers' ? 'npm:zod@^4.6.6' : '^4.6.6',
           );
-        }
-        if (!socket) {
-          expect(tasks['test:e2e']).toBeUndefined();
-          return;
         }
         const unit =
           target === 'deno'
             ? "deno test -A --ignore='**/*.e2e.test.ts'"
             : target === 'bun'
               ? "bun test --path-ignore-patterns='**/*.e2e.test.ts'"
-              : "tsx --test '**/!(*.e2e).test.ts'";
+              : "tsx --test --test-force-exit '**/!(*.e2e).test.ts'";
         const e2e =
           target === 'deno'
             ? "deno test -A '**/*.e2e.test.ts'"
             : target === 'bun'
               ? 'bun test .e2e.test'
-              : "tsx --test '**/*.e2e.test.ts'";
+              : "tsx --test --test-force-exit '**/*.e2e.test.ts'";
         const prefix =
           name !== 'full-stack'
             ? ''
             : target === 'deno'
               ? 'deno task build && '
-              : target === 'bun'
-                ? 'bun run build && '
-                : 'npm run build && ';
+              : target === 'cloudflare-workers'
+                ? 'npm run build && '
+                : 'react-router build && ';
         expect(tasks['test']).toBe(prefix + unit);
         expect(tasks['test:e2e']).toBe(prefix + e2e);
         const test = contentsOf(files, 'test/e2e/app.e2e.test.ts');
@@ -81,17 +102,13 @@ describe('functional module hosts and generated test tasks', () => {
         expect(test).not.toContain('inject');
         if (name === 'rest') {
           expect(test).toContain('/greetings');
-          expect(contentsOf(files, 'src/modules/index.ts')).toContain('registerGreetingModule');
-          expect(contentsOf(files, 'src/modules/greeting/greeting.routes.ts')).toContain(
-            "from './greeting.service.ts'",
+          // The greeting example is a flat function controller and its service.
+          expect(files.some((file) => file.path.startsWith('src/modules/'))).toBe(false);
+          expect(contentsOf(files, 'src/controllers/greeting.controller.ts')).toContain(
+            "from '../services/greeting.service.ts'",
           );
+          expect(contentsOf(files, 'src/controllers/index.ts')).toContain('registerGreetingRoutes');
           expect(files.some((file) => file.path.endsWith('greeting.schemas.ts'))).toBe(false);
-          for (const suffix of ['test.ts', 'e2e.test.ts']) {
-            const greetingTest = contentsOf(files, `src/modules/greeting/greeting.${suffix}`);
-            expect(greetingTest).toContain('Hello, world!');
-            expect(greetingTest).toContain('Hello, ada!');
-            expect(greetingTest).not.toContain("method: 'POST'");
-          }
         }
       });
     }
@@ -166,13 +183,11 @@ describe('resolveHost', () => {
       { plugins: [{ pkg: 'runtime', symbol: 'RuntimePlugin' }], middleware: [] },
       'deno',
     );
-    expect(resolved.localImports).toEqual([
-      { symbols: ['registerModules'], from: './src/modules/index.ts' },
-    ]);
+    expect(resolved.localImports).toEqual([]);
     expect(resolved.packageImports).toEqual([]);
-    expect(resolved.files.map((file) => file.path)).toEqual(['src/modules/index.ts']);
+    expect(resolved.files.map((file) => file.path)).toEqual([]);
     expect(resolved.pluginSpreads).toEqual([]);
-    expect(resolved.setupCalls).toEqual(['registerModules(app.router, app.services);']);
+    expect(resolved.setupCalls).toEqual([]);
     expect(resolved.appFactory).toBeUndefined();
     expect(resolved.manifest).toBeUndefined();
   });
@@ -451,9 +466,9 @@ describe('a template with a frontend build, on a Deno target', () => {
           scripts: Record<string, string>;
         }
       ).scripts;
-      expect(scripts['dev']).toBe(dev);
+      expect(scripts['start:dev']).toBe(dev);
       expect(contentsOf(files, 'README.md')).toContain(
-        runtime === 'bun' ? '```bash\nbun run dev\n```' : '```bash\nnpm run dev\n```',
+        runtime === 'bun' ? '```bash\nbun run start:dev\n```' : '```bash\nnpm run start:dev\n```',
       );
       // `ssr` is read on these targets, not underscore-prefixed.
       expect(contentsOf(files, 'setu.config.ts')).toContain(
@@ -562,7 +577,7 @@ describe('the Cloudflare Workers target', () => {
     // `wrangler` bundles with esbuild, which strips types without checking them,
     // and `deno check` types `cloudflare:workers` as `any` — so the README's own
     // Durable Object snippet failed under the only checker present.
-    expect(pkg.scripts['check']).toBe('tsc --noEmit');
+    expect(pkg.scripts['check']).toBe('tsc --noEmit && setu check');
     expect(pkg.devDependencies['typescript']).toBeDefined();
     expect(pkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
@@ -575,13 +590,13 @@ describe('the Cloudflare Workers target', () => {
     const fullStackPkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
     ) as { scripts: Record<string, string> };
-    expect(fullStackPkg.scripts['check']).toBe('npm run build && tsc --noEmit');
+    expect(fullStackPkg.scripts['check']).toBe('npm run build && tsc --noEmit && setu check');
 
     // A rest Worker imports no build output, so its check stays the bare one.
     const restPkg = JSON.parse(contentsOf(filesOf(rest), 'package.json')) as {
       scripts: Record<string, string>;
     };
-    expect(restPkg.scripts['check']).toBe('tsc --noEmit');
+    expect(restPkg.scripts['check']).toBe('tsc --noEmit && setu check');
   });
 
   it("ignores the frontend toolchain's generated directories (V9-11)", () => {
@@ -620,7 +635,7 @@ describe('the Cloudflare Workers target', () => {
     // this it was installed and read by nothing.
     expect(tsconfig.compilerOptions['allowImportingTsExtensions']).toBe(true);
     expect(tsconfig.compilerOptions['noEmit']).toBe(true);
-    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'node']);
     expect(tsconfig.compilerOptions['lib']).toEqual(['ES2022']);
   });
 
@@ -643,7 +658,7 @@ describe('the Cloudflare Workers target', () => {
     expect(tsconfig.compilerOptions['allowJs']).toBe(true);
   });
 
-  it('declares @types/node for a Workers project with an npm build (V9-9)', () => {
+  it('declares @types/node for every Workers project (V9-9, V10-23)', () => {
     const fullStack = resolveHost(getTemplate('full-stack')!, 'cloudflare-workers');
     const pkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', fullStack)], 'package.json'),
@@ -652,25 +667,27 @@ describe('the Cloudflare Workers target', () => {
     };
 
     expect(pkg.devDependencies['@types/node']).toBe('^24.0.0');
-    // A Workers project with no npm build has no `node:` import to type.
+    // V10-23: a Workers project with no npm build now emits tests too, so it
+    // needs the Node declarations and the `tsx` runner regardless of a build.
     const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
     const restPkg = JSON.parse(
       contentsOf([...projectFiles('edge', 'cloudflare-workers', rest)], 'package.json'),
     ) as {
       devDependencies: Record<string, string>;
     };
-    expect(restPkg.devDependencies['@types/node']).toBeUndefined();
+    expect(restPkg.devDependencies['@types/node']).toBe('^24.0.0');
+    expect(restPkg.devDependencies['tsx']).toBe('^4.20.0');
     expect(restPkg.devDependencies['@cloudflare/workers-types']).toBeDefined();
   });
 
-  it('adds no Node types or build ignores where the Workers template has no npm build', () => {
+  it('adds no build ignores where the Workers template has no npm build', () => {
     const rest = resolveHost(getTemplate('rest')!, 'cloudflare-workers');
     const files = [...projectFiles('edge', 'cloudflare-workers', rest)];
     const tsconfig = JSON.parse(contentsOf(files, 'tsconfig.json')) as {
       compilerOptions: Record<string, unknown>;
     };
 
-    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types']);
+    expect(tsconfig.compilerOptions['types']).toEqual(['@cloudflare/workers-types', 'node']);
     expect(tsconfig.compilerOptions['allowJs']).toBeUndefined();
     expect(contentsOf(files, 'eslint.config.js')).not.toContain("'build/'");
     expect(contentsOf(files, '.prettierignore')).not.toContain('build/');

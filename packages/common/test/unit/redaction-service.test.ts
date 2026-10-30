@@ -1,4 +1,4 @@
-/** Tests for the common clone-on-write redaction service. */
+/** Tests for the common snapshot redaction service. */
 import { describe, expect, it } from 'vitest';
 import { createMaskRedactor, createRedactionService } from '../../src/index.ts';
 import type { RedactionContext, Redactor } from '../../src/index.ts';
@@ -36,7 +36,7 @@ describe('createRedactionService', () => {
     expect(context).toEqual({ path: 'APIKEY', classification: 'secret' });
   });
 
-  it('masks strings, erases non-strings, and preserves unmatched identity', () => {
+  it('masks strings, erases non-strings, and returns unmatched subtrees as snapshots', () => {
     const nested = { retained: true };
     const service = createRedactionService({
       fields: { card: 'pci', count: 'pci' },
@@ -45,7 +45,8 @@ describe('createRedactionService', () => {
     const result = service.redactRecord({ card: '12345678', count: 4, nested });
 
     expect(result).toEqual({ card: '****5678', count: '[Redacted]', nested });
-    expect(result.nested).toBe(nested);
+    // A snapshot, not the caller's object: what is serialized is what was checked.
+    expect(result.nested).not.toBe(nested);
     expect(service.redactValue('other', 'unchanged')).toBe('unchanged');
   });
 
@@ -270,5 +271,151 @@ describe('createRedactionService', () => {
       expect(service.redactValue('email', 'jane@example.com')).toBe('[Redacted]');
       expect(service.redactValue('phone', '555-0100')).toBe('[Redacted]');
     });
+  });
+});
+
+describe('redactRecord reads each property once', () => {
+  it('should redact the nested value it copied when a getter changes between reads', () => {
+    // Re-audit of #512: the copy was taken from one read and the redaction
+    // decided on a second, so a getter returning a secret first and a clean
+    // object second left the secret in the output.
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    let reads = 0;
+    const record = Object.defineProperty({ password: 'top' }, 'meta', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? { password: 'canary-nested' } : { clean: true }),
+    });
+    const output = JSON.stringify(service.redactRecord(record));
+    expect(reads).toBe(1);
+    expect(output).not.toContain('canary-nested');
+    expect(output).not.toContain('top');
+    expect(service.redactRecord({ meta: { password: 'plain', safe: 'ok' } })).toEqual({
+      meta: { password: '[Redacted]', safe: 'ok' },
+    });
+  });
+
+  it('should serialize the value it checked when a getter turns secret after redaction', () => {
+    // Re-audit N5: an unchanged subtree used to come back by identity, so the
+    // serializer read the getter again and wrote a secret redaction never saw.
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    let reads = 0;
+    const record = Object.defineProperty({ safe: 1 }, 'meta', {
+      enumerable: true,
+      get: () => (reads++ === 0 ? { clean: true } : { password: 'canary-late' }),
+    });
+    const output = JSON.stringify(service.redactRecord(record));
+    expect(output).not.toContain('canary-late');
+    expect(JSON.parse(output)).toEqual({ safe: 1, meta: { clean: true } });
+    expect(reads).toBe(1);
+  });
+
+  it('should keep enumerable symbol-keyed values on a redacted copy', () => {
+    const service = createRedactionService({ fields: { password: 'secret' } });
+    const tag = Symbol('tag');
+    const output = service.redactRecord({ password: 'hidden', [tag]: 'kept' }) as Record<
+      PropertyKey,
+      unknown
+    >;
+    expect(output['password']).toBe('[Redacted]');
+    expect(output[tag]).toBe('kept');
+  });
+  it("copies an own __proto__ key as data, never as the copy's prototype", () => {
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    const record = JSON.parse(
+      '{"__proto__":{"password":"hidden","polluted":true},"safe":1}',
+    ) as Record<string, unknown>;
+    const output = service.redactRecord(record);
+    expect(Object.getPrototypeOf(output)).toBe(Object.prototype);
+    expect(Object.hasOwn(output, '__proto__')).toBe(true);
+    expect((output as { polluted?: unknown }).polluted).toBeUndefined();
+    expect(Object.getOwnPropertyDescriptor(output, '__proto__')?.value).toEqual({
+      password: '[Redacted]',
+      polluted: true,
+    });
+  });
+
+  it('skips a property a getter deletes before it is read, as Object.entries does', () => {
+    const service = createRedactionService({ fields: { '**.token': 'secret' } });
+    const record: Record<string, unknown> = {
+      get first() {
+        delete record['token'];
+        return 1;
+      },
+      token: 'never-read',
+    };
+    expect(service.redactRecord(record)).toEqual({ first: 1 });
+  });
+
+  it('redacts every leaf of a flat record without a nested walk', () => {
+    const service = createRedactionService({ fields: { '**.authorization': 'secret' } });
+    expect(
+      service.redactRecord({ method: 'GET', path: '/', status: 200, authorization: 'Bearer x' }),
+    ).toEqual({ method: 'GET', path: '/', status: 200, authorization: '[Redacted]' });
+  });
+
+  it('decides traversal from one prototype read, so a nested Proxy cannot hide a secret', () => {
+    const service = createRedactionService({ fields: { 'nested.token': 'secret' } });
+    let prototypeReads = 0;
+    // Answers "plain object" on its first prototype read, "not plain" after.
+    const nested = new Proxy(
+      { token: 'leaked-if-unredacted', safe: 1 },
+      {
+        getPrototypeOf: () => (prototypeReads++ === 0 ? Object.prototype : Map.prototype),
+      },
+    );
+    const output = service.redactRecord({ nested });
+    expect(JSON.stringify(output)).not.toContain('leaked-if-unredacted');
+    expect(output['nested']).toEqual({ token: '[Redacted]', safe: 1 });
+    expect(prototypeReads).toBe(1);
+  });
+
+  it('returns a non-object record from a JavaScript caller unchanged', () => {
+    const service = createRedactionService({ fields: { password: 'secret' } });
+    for (const value of [null, 'text', 7]) {
+      expect(service.redactRecord(value as never)).toBe(value);
+    }
+  });
+
+  it.each([
+    ['sibling aliases', (shared: object) => ({ a: shared, b: shared })],
+    ['an alias nested deeper', (shared: object) => ({ a: shared, b: { c: shared } })],
+  ])('keeps a Proxy reached through %s redacted at every reference', (_label, build) => {
+    const service = createRedactionService({ fields: { '**.token': 'secret' } });
+    let prototypeReads = 0;
+    // Plain on its first prototype read, not plain on every later one.
+    const shared = new Proxy(
+      { token: 'leaked-if-unredacted' },
+      { getPrototypeOf: () => (prototypeReads++ === 0 ? Object.prototype : Map.prototype) },
+    );
+    const output = JSON.stringify(service.redactRecord(build(shared) as never));
+    expect(output).not.toContain('leaked-if-unredacted');
+    expect(prototypeReads).toBe(1);
+  });
+
+  it('never hands a value to a setter on a polluted Object.prototype', () => {
+    const service = createRedactionService({ fields: { '**.password': 'secret' } });
+    const tag = Symbol('tag');
+    const captured: unknown[] = [];
+    const capture = {
+      configurable: true,
+      set(value: unknown) {
+        captured.push(value);
+      },
+    };
+    Object.defineProperty(Object.prototype, 'password', capture);
+    Object.defineProperty(Object.prototype, tag, capture);
+    try {
+      const record: Record<PropertyKey, unknown> = { user: { password: 'hunter2' } };
+      Object.defineProperty(record, 'password', { value: 'top-level', enumerable: true });
+      Object.defineProperty(record, tag, { value: 'tagged', enumerable: true });
+      const output = service.redactRecord(record as never) as Record<PropertyKey, unknown>;
+      expect(captured).toEqual([]);
+      expect(Object.getOwnPropertyDescriptor(output, 'password')?.value).toBe('[Redacted]');
+      expect(Object.getOwnPropertyDescriptor(output['user'], 'password')?.value).toBe('[Redacted]');
+      expect(Object.getOwnPropertyDescriptor(output, tag)?.value).toBe('tagged');
+    } finally {
+      delete (Object.prototype as Record<PropertyKey, unknown>)['password'];
+      delete (Object.prototype as Record<PropertyKey, unknown>)[tag];
+    }
   });
 });

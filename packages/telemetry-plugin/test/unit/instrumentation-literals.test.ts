@@ -28,7 +28,10 @@ import {
   loadFetchInstrumentation,
   loadHttpInstrumentation,
 } from '../../src/instrumentation/http-instrumentation.ts';
-import { loadIORedisInstrumentation } from '../../src/instrumentation/database-instrumentation.ts';
+import {
+  loadIORedisInstrumentation,
+  loadRedisInstrumentation,
+} from '../../src/instrumentation/database-instrumentation.ts';
 import {
   loadAmqplibInstrumentation,
   loadKafkaJsInstrumentation,
@@ -41,6 +44,7 @@ const LOADERS: ReadonlyArray<
   ['http', loadHttpInstrumentation, '@opentelemetry/instrumentation-http'],
   ['fetch', loadFetchInstrumentation, '@opentelemetry/instrumentation-undici'],
   ['ioredis', loadIORedisInstrumentation, '@opentelemetry/instrumentation-ioredis'],
+  ['redis', loadRedisInstrumentation, '@opentelemetry/instrumentation-redis'],
   ['amqplib', loadAmqplibInstrumentation, '@opentelemetry/instrumentation-amqplib'],
   ['kafkajs', loadKafkaJsInstrumentation, '@opentelemetry/instrumentation-kafkajs'],
 ];
@@ -51,7 +55,11 @@ describe('instrumentation loaders — literal package specifiers', () => {
       // The default importer is a default PARAMETER, so it is part of the
       // function's own source text.
       const file =
-        name === 'http' || name === 'fetch' ? 'http' : name === 'ioredis' ? 'database' : 'queue';
+        name === 'http' || name === 'fetch'
+          ? 'http'
+          : name === 'ioredis' || name === 'redis'
+            ? 'database'
+            : 'queue';
       const source = readFileSync(
         new URL(`../../src/instrumentation/${file}-instrumentation.ts`, import.meta.url),
         'utf8',
@@ -75,6 +83,7 @@ describe('instrumentation loaders — literal package specifiers', () => {
             HttpInstrumentation: class {},
             UndiciInstrumentation: class {},
             IORedisInstrumentation: class {},
+            RedisInstrumentation: class {},
             AmqplibInstrumentation: class {},
             KafkaJsInstrumentation: class {},
           }),

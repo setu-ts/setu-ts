@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/scheduler-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Cron, interval, and delayed jobs with distributed locking",
   "repository": {
     "type": "git",
@@ -53,6 +53,7 @@
     "@setu-ts/runtime": "workspace:^",
     "@types/node": "^24",
     "ioredis": "5.x",
+    "redis": "6.x",
     "typescript": "6.0.3",
     "vitest": "5.0.3"
   }

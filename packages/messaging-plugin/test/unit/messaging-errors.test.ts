@@ -6,9 +6,23 @@ import {
   RemoteHandlerError,
   ReplyInboxUnavailableError,
   RequestTimeoutError,
+  PublishTimeoutError,
 } from '../../src/errors.ts';
 
 describe('messaging errors', () => {
+  it('PublishTimeoutError preserves its message and uncertainty details', () => {
+    const error = new PublishTimeoutError('may still be delivered', {
+      topic: 'orders',
+      timeoutMs: 23,
+    });
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toMatchObject({
+      name: 'PublishTimeoutError',
+      message: 'may still be delivered',
+      topic: 'orders',
+      timeoutMs: 23,
+    });
+  });
   it('RequestTimeoutError has correct name and message', () => {
     const err = new RequestTimeoutError();
     expect(err.name).toBe('RequestTimeoutError');

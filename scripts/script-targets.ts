@@ -1,5 +1,6 @@
 /** Frozen script coverage inventory from before the M111e2 runner retirement. */
 export const SCRIPT_TARGETS: readonly string[] = [
+  'scripts/generate-example-manifest.ts',
   'scripts/script-targets.ts',
   'scripts/set-jsr-metadata.ts',
   'scripts/jsr-sunset.ts',

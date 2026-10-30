@@ -2,7 +2,7 @@
  * Unit tests for MemoryRefreshTokenStore.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
 import type { RefreshTokenRecord } from '../../src/stores/refresh-token-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -21,6 +21,69 @@ function makeRecord(
 }
 
 describe('MemoryRefreshTokenStore', () => {
+  it('D4 sweeps 100,000 unread expired records while retaining live tokens and revoked reuse evidence', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryRefreshTokenStore(runtime);
+    const live = makeRecord(runtime, 'live-token');
+    const revoked = { ...makeRecord(runtime, 'revoked-token'), revoked: true };
+    const writes = vi.spyOn(Map.prototype, 'set');
+    let entries: Map<unknown, unknown> | undefined;
+    try {
+      await store.save(live);
+      entries = writes.mock.contexts.find(
+        (map): map is Map<unknown, unknown> => map instanceof Map && map.has(live.jti),
+      );
+    } finally {
+      writes.mockRestore();
+    }
+    expect(entries).toBeDefined();
+    await store.save(revoked);
+    for (let i = 0; i < 100_000; i++) {
+      await store.save({ ...makeRecord(runtime, `expired-${i}`), expiresAt: 1 });
+    }
+    runtime.setNow(1);
+    // The previous sweep had 65,536 survivors. Fill to its doubled threshold,
+    // then make the one save that must reclaim every unread expired record.
+    for (let i = 100_000; i < 131_070; i++) {
+      await store.save({ ...makeRecord(runtime, `expired-${i}`), expiresAt: 1 });
+    }
+    await store.save(makeRecord(runtime, 'fresh-token'));
+    expect(await store.get(live.jti)).toEqual(live);
+    expect(await store.get(revoked.jti)).toEqual(revoked);
+    expect(await store.rotate(revoked.jti, makeRecord(runtime, 'refused-child'))).toEqual({
+      record: revoked,
+      rotated: false,
+    });
+    expect(await store.get('refused-child')).toBeNull();
+    expect(entries!.size).toBeLessThan(2_048);
+  });
+
+  it('sweeps expired records on the rotation write path, not only on save', async () => {
+    const runtime = createFakeRuntime(0);
+    const store = new MemoryRefreshTokenStore(runtime);
+    const first = { ...makeRecord(runtime, 'chain-0'), expiresAt: 10 };
+    const writes = vi.spyOn(Map.prototype, 'set');
+    let entries: Map<unknown, unknown> | undefined;
+    try {
+      await store.save(first);
+      entries = writes.mock.contexts.find(
+        (map): map is Map<unknown, unknown> => map instanceof Map && map.has(first.jti),
+      );
+    } finally {
+      writes.mockRestore();
+    }
+    expect(entries).toBeDefined();
+    // One login, then only rotations: each successor lives 10 ms and every
+    // rotated-out predecessor expires behind the chain.
+    for (let i = 1; i <= 5_000; i++) {
+      runtime.setNow(i);
+      const successor = { ...makeRecord(runtime, `chain-${i}`), expiresAt: i + 10 };
+      expect((await store.rotate(`chain-${i - 1}`, successor)).rotated).toBe(true);
+    }
+    expect(await store.get('chain-5000')).toMatchObject({ jti: 'chain-5000', revoked: false });
+    expect(entries!.size).toBeLessThan(2_048);
+  });
+
   it('save then get returns the record', async () => {
     const runtime = createFakeRuntime();
     const store = new MemoryRefreshTokenStore(runtime);

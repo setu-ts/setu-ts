@@ -10,7 +10,495 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## 0.11.0
+
+### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)
+
+Nothing changes for an application on ioredis: every plugin still loads ioredis lazily when no
+client is injected, and scaffolds still default to it. To move a plugin to node-redis, install
+`redis` (v5 or v6) and pass `fromNodeRedis(createClient({ url }))` as its `client` — one client per
+plugin, two for the realtime backplane. A plugin's own `commandTimeoutMs` does not apply to an
+injected client; set the adapter's (`fromNodeRedis(client, { commandTimeoutMs })`, default 15 s),
+and keep it above the Redis Streams broker's `blockSizeMs`, which must be positive: `0` blocks
+indefinitely, so a read the adapter had abandoned would stay open and could still take a message.
+The idempotency store never closes an injected client, so close it at shutdown. For traces on Node,
+add `instrumentations.redis`, install `@opentelemetry/instrumentation-redis` `^0.69.0`, and pass
+`fromNodeRedis` a factory that imports `redis`
+(`async () => (await import('redis')).createClient({ url })`): a `redis` loaded before the
+application starts records no spans. Like every auto-instrumentation it is Node-only, so on Deno and
+Bun it reports `unsupported platform` and records no spans.
+
+A custom client implementing `IRedisLockClient` keeps compiling: `eval` now returns
+`Promise<unknown>`. A custom `IRedisBackplaneClient` that exposes `connect()` and reports `status`
+`'wait'` is now connected when the backplane starts.
+
+### Workspace build, test and deploy from the root (M122, 0.11.0, `@setu-ts/cli`, `@setu-ts/common`)
+
+`setu workspace build` and `setu workspace deploy` work in any existing workspace; nothing has to be
+regenerated to run them. A workspace root created with 0.11.0 also gets `build` and `deploy` scripts
+(Deno: tasks) and, on npm and Bun, `test`; on Deno, run `deno task --recursive test` from the root —
+a root `test` task running it would call itself, because Deno's recursion includes the root. An
+older root keeps its manifest — the CLI writes it once — so add the three entries yourself if you
+want them: for npm, `"test": "npm run test --workspaces --if-present"`,
+`"build": "setu workspace build"` and `"deploy": "setu workspace deploy"`.
+
+Generated Deployments now read a `<member>-env` Secret through `envFrom`, and generated Compose
+services read the member's own `.env` through an optional `env_file` and name their image
+`<member>:dev`. That optional `env_file` form needs Docker Compose 2.24.0 or later. Existing
+`k8s/members.yaml` and `docker/compose.yaml` pick these up the next time `setu generate app` (or
+`setu workspace ports --reallocate`) regenerates them. Until then, `setu workspace deploy` refuses a
+member that has a Secret — a `k8s/secrets/<member>/.env` file, or variables declared in its
+`.env.example` — when its Deployment does not read that Secret, and prints the four `envFrom` lines
+to add — which matters for a full-stack member, because nothing else sets its `SESSION_SECRET`. Put
+each member's values in `k8s/secrets/<member>/.env`; the root `.env` ignore rule already covers that
+path in older roots.
+
+`parseEnv`, the dotenv parser `ConfigPlugin` uses, is now exported from `@setu-ts/common`. It was
+internal to `@setu-ts/config-plugin`, whose own surface is unchanged.
+
+### Session and account lifecycle (M124, 0.11.0, `@setu-ts/auth-plugin`)
+
+Nothing breaks. Three things change what an existing application can rely on:
+
+- **`signIn: { providers: [] }` no longer throws** when neither `mfa` nor `passkeys` is set. An
+  application that worked around the refusal with `AuthPlugin({ session: { toPrincipal } })` and its
+  own session key can move to `IAuthSessionService.signIn` to get `refreshPrincipal`, `amr` and
+  session-id rotation at sign-in.
+- **Adding `signIn.sessionStamp` to a running application ends every session whose user already has
+  a stamp**: those sessions were recorded without one, and a recorded "no stamp" matches only a user
+  whose stamp is still `null`. Deploy it when a one-time sign-out is acceptable, or return `null`
+  until every session has been renewed.
+- **`requireAuth()` without options is unchanged.** With `signInPage`, an anonymous `fetch()` still
+  gets `401`; only a page navigation is redirected. A route guarded by a role or permission guard
+  alone keeps answering `401`; put `requireAuth({ signInPage })` first to redirect it.
+
+### `setu add messaging` and full-stack brokers (M121, 0.11.0, `@setu-ts/cli`)
+
+Full-stack projects now accept `new --broker` / `--queue`, and full-stack workspace members receive
+the workspace transport through their starter options. Existing standalone projects can run
+`setu add messaging --broker redis` or `setu add queue --queue redis`; members use the workspace
+transport automatically. Install again after adding so the selected client is available. Existing
+calls and option values are preserved; review the exact property printed when manual configuration
+is needed. Standalone `add` creates missing broker Compose files and prints the connection variable
+and default, while leaving dotenv files unchanged; an existing `docker/compose.yaml` is never
+rewritten, and a selected service it lacks is printed for you to add. Generated full-stack options
+use `config.get`, so both dotenv values and deployment environment variables apply, with environment
+taking precedence.
+
+`setu add react-router` now refuses an app without a full-stack factory or an existing
+ReactRouterPlugin. Create a full-stack project with `setu new <name> --template full-stack`, or a
+workspace member with `setu generate app <name> --template full-stack`. Adding the dependency alone
+does not create the frontend files, routes or build scripts. Workers continues to refuse broker and
+queue flags.
+
+### `setu add view` and the styled app shell (M123, 0.11.0, `@setu-ts/cli`)
+
+Fresh full-stack scaffolds include Tailwind 4 through Vite, neutral shadcn tokens, Button/Card,
+`components.json`, a fixed app shell and a light/dark/system theme toggle. Existing apps are not
+rewritten. When copying files from a fresh scaffold, replace `classNames` from `app/lib/utils.ts`
+with `cn` from shadcn's `cn` package (the copied components import it too) and add `cn`,
+`class-variance-authority` and `radix-ui` to runtime dependencies. Add `tailwindcss` and
+`@tailwindcss/vite` at `^4.3.3` to development dependencies and put `tailwindcss()` before
+`reactRouter()` in Vite's plugins. Copy the stylesheet and theme files together with the layouts;
+the shell resets its content scroll position on pathname changes.
+
+Rerun `setu add view` to fill missing view setup in an existing project; a project whose
+`setu.config.ts` already registers `ViewPlugin()` also gets the example `/ui` route. It preserves
+existing files, pins, compiler choices and CSS tasks and prints what needs manual work; review every
+note. A `build` or `start:dev` script the command creates or prefixes runs CSS once first; one that
+already called `css` is left as it was, so check its order. Run the separate CSS watcher while
+editing. Workers receives only the dependency/JSX/example-view pieces; use Wrangler static assets
+for CSS. See [styling server-rendered views](./mvc.md#styling-server-rendered-views). If adding a
+CSP, allow the static inline theme scripts by hash or nonce.
+
+### `setu build`, production images and Bun library resolution (M120, 0.11.0, `@setu-ts/cli`)
+
+Update existing Node scripts explicitly; the CLI does not rewrite scripts:
+
+```json
+{
+  "build": "tsc --noEmit && setu build",
+  "start": "node --enable-source-maps dist/main.js",
+  "start:dev": "tsx watch main.ts",
+  "start:debug": "node --inspect --import tsx main.ts"
+}
+```
+
+Keep TypeScript, tsx and the matching CLI version as development dependencies. Full-stack Node
+prefixes build and check with `react-router build && `; development/debug use dev.ts instead of
+main.ts (development is `tsx dev.ts`, without watch). Prefix full-stack tests with
+`react-router build && `, replacing `npm run build && `, so tests do not depend on wiring checks. In
+full-stack socket main.ts import `* as serverBuild` from `./build/server/index.js` and call
+`createApp(undefined, undefined, { serverBuild })`; in `setu.config.ts` that arm must also set
+`assetsDir: './build/client/assets'` on Node, Bun and Deno (not Workers), or the page renders and
+every `/assets/*.js` answers 404. Keep the config's path fallback for tests and set `allowJs: true`
+in tsconfig.json so the static server-build import can be checked.
+
+Bun keeps `start: bun run main.ts`; add `start:dev: bun --watch main.ts` and
+`start:debug: bun --inspect main.ts`. Full-stack uses `bun run dev.ts` and `bun --inspect dev.ts`;
+run its frontend build before starting, removing the build prefix from start. Deno keeps its
+production start; add watch/inspect to its existing run command with the same grants. Full-stack
+Deno instead uses `deno task install && deno run -A --watch dev.ts` and the inspect equivalent; its
+check prefixes `deno task build && `.
+
+Ignore dist/ in standalone Node projects. Workspace roots add `apps/*/build/` everywhere and
+`apps/*/dist/` on Node/Bun. Use the generated Dockerfile from a fresh scaffold as the migration
+template: Node builds in one stage, installs production dependencies in a separate stage and copies
+dist/ and frontend build/. Bun installs with --production. Deno builds a declared frontend in a
+Debian `frontend` stage, caches source, and switches a root `nodeModulesDir: "auto"` to `"manual"`
+after installing (under `"auto"` a read-only container cannot start). Copy the generated
+.dockerignore too: exclude node_modules, dist, build, coverage, git and dotenv files, keeping
+.env.example. Workspace images use the root context and MEMBER build argument. See
+[deployment](./deployment.md).
+
+Generated install steps mount an optional build secret `npmrc` at `/root/.npmrc` (M120b), so
+`docker build --secret id=npmrc,src=.npmrc …` or `NPMRC="$(cat .npmrc)" docker compose … up --build`
+supplies a private registry token or npm settings without copying `.npmrc` into the image. An
+existing project gets this by regenerating its Dockerfile and Compose file, or by adding
+`--mount=type=secret,id=npmrc,target=/root/.npmrc` after `RUN` on each install line and a
+`secrets: [npmrc]` build entry with a top-level `secrets: { npmrc: { environment: NPMRC } }`. The
+mount needs BuildKit.
+
+Bun workspace roots need bunfig.toml containing:
+
+```toml
+[install]
+linker = "hoisted"
+```
+
+Rerun bun install. This exposes sibling libraries to members. Library generation creates a missing
+file, preserves hoisted settings and refuses other or missing linker settings in existing TOML, with
+the line to add. The CLI never rewrites user-owned TOML. The Bun image copies this file too.
+
+For built Node migrations use `node dist/src/migrations/run.js`; in development use
+`npx tsx src/migrations/run.ts`. Bun and Deno keep their source runners. Native `bun build` and
+`deno compile` are available for custom packaging; generated services do not emit those steps.
+
+### `setu check` in the generated check script (M118, 0.11.0, `@setu-ts/cli`)
+
+New projects run `setu check` from their `check` script. Nothing rewrites an existing project's
+scripts, so add it yourself. In a Node, Bun or Workers project, add the CLI as a development
+dependency at your framework version and append ` && setu check` to the end of your existing `check`
+script, keeping whatever runs before it:
+
+```json
+{
+  "scripts": { "check": "tsc --noEmit && setu check" },
+  "devDependencies": { "@setu-ts/cli": "^0.11.0" }
+}
+```
+
+A Workers project with a build keeps its build first: its script becomes
+`npm run build && tsc --noEmit && setu check`.
+
+In a Deno project, add a `check` task (`main.dev.ts` belongs in the `deno check` list only when you
+enabled the devtool):
+
+```json
+{
+  "tasks": {
+    "check": "deno check main.ts setu.config.ts && deno run -A npm:@setu-ts/cli@^0.11.0 check"
+  }
+}
+```
+
+Run `setu check` once before you add it. A project that copied or hand-wrote files into a seam
+directory reports `setu.E003`; `setu sync` rewrites the barrels from their directories. A finding
+you accept can be silenced in `.setu-ts/check.json` — see
+[Silencing a finding](./cli.md#silencing-a-finding).
+
+`setu devtool enable` replaces a scaffold's own `check` task with the devtool form, which adds
+`main.dev.ts`. In a project that enabled the devtool before this release, re-running it refuses the
+older `check` task by name; change the task to the form above, with `main.dev.ts` in the list.
+
+A plugin command named `check` or `sync` is now shadowed by the built-in verb; rename it.
+
+### Optional peers and `setu add` workspace root entries (M119f, 0.11.0, `@setu-ts/common`, `@setu-ts/cli`)
+
+In a Node or Bun Setu workspace, re-run `setu add <plugin> --dir apps/<member>` for an installed
+plugin whose optional peers are missing at the root, then run the printed install command from the
+workspace root. The command now records its peers in both root and member `package.json`
+`dependencies`, leaving a peer already in `dependencies`, `optionalDependencies` or a non-optional
+`peerDependencies` as it is, adding an optional peer to `dependencies` at its own spec, moving one
+declared only in `devDependencies` to `dependencies` with its pin unchanged, and recording a peer
+the root `overrides` pins (a string value, or an object's `"."` entry) at the override's own spec,
+since npm refuses a direct dependency whose spec differs from its override. A `$name` reference or a
+conditional override (a version-selector key, or several rules for one package) is left to you with
+a printed line. When a workspace member pins the peer at a different spec, the root entry is still
+written at the CLI's range and a note names that member, since npm may install a second copy for it.
+Both edited paths are printed. No framework pin is added at the root, and `setu add` still targets a
+member.
+
+For manually selected drivers, install peers where the framework package is installed, within the
+version range it declares for them. Avoid conflicting member pins: they can produce nested copies
+that a hoisted plugin cannot load. Existing pins are never corrected automatically. An absent root
+`package.json` keeps the member-only behavior; JSONC or invalid JSON is refused by filename before
+writing. Deno workspaces and standalone projects keep their existing behavior.
+
+The startup error now names the loading package and the placement rule via the optional `requiredBy`
+constructor option. Its `dependency` and `cause` are unchanged. See
+[Optional peers in a workspace](./plugins.md#optional-peers-in-a-workspace).
+
+### Portable data contract: tenant columns, cursors, unknown fields and refused values (M119e, 0.11.0, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/cloudflare-plugin`)
+
+Restart pagination once on Memory, Prisma, Drizzle, MongoDB, DynamoDB, Cosmos DB, Bigtable and D1:
+old cursors are refused with `InvalidCursorError` (400), because new fingerprints bind entity, key
+columns and sort. Treat the cursor as a correctness token; continue enforcing tenant predicates.
+
+On Drizzle, a default tenant column `tenant_id` resolves to the model property `tenantId` when
+declared as `tenantId: text('tenant_id')`. Use model properties in payloads. The bridge caches the
+resolved field per entity, stamps it last, strips it from updates, and uses it for ownership and
+conditional writes. An absent or ambiguous column now throws `TenantColumnUnresolvedError` (500). An
+explicit wrong Drizzle primary-key mapping now fails connect with `MissingKeyColumnError`; fix
+`entities.<Entity>.primaryKey` or the table registration.
+
+D1 unknown payload fields and invalid payload identifiers, and Prisma unknown payload fields now
+answer 400 `UnknownPayloadFieldError`. PostgreSQL field type refusals through Drizzle, Prisma
+validation and `P2007` known-request refusals, and D1 STRICT-table type refusals now answer 400
+`InvalidFieldValueError`. SQL payload restriction is adapter-specific: Memory, MongoDB, DynamoDB,
+Cosmos DB and Bigtable store unknown fields; restrict request fields in the route body schema.
+Existing database-plugin imports of `UnknownPayloadFieldError` keep working; the class is now
+defined in common.
+
+Attach a node-postgres pool `'error'` listener in app setup (see the database-plugin README). The
+framework installs a reporting listener only when the pool has none; the app owns closing it.
+
+Prisma conditional-write validation now uses the same 400 split as ordinary writes, replacing its
+previous 501. Prisma refusal causes contain a fresh error with only the original name and code in a
+fixed message; query text and payload values are discarded.
+
+### Upgrade `zod` and override `@azure/msal-node` for Azure secrets (0.11.0)
+
+Upgrade Zod to `>=4.6.6 <5` and migrate any Zod 3 API usage. Zod 3 support has been removed;
+validation is tested with Zod 4 only. OpenAPI schemas without `toJSONSchema` now produce `{}` and
+the existing `not a recognized zod schema` diagnostic in `x-setu-unrepresentable`. Regenerate
+OpenAPI documents and clients after upgrading.
+
+If you use the Azure secrets provider (`@azure/identity`), add this pnpm override to your
+`pnpm-workspace.yaml` until Azure ships an identity release that accepts patched MSAL Node:
+
+```yaml
+overrides:
+  '@azure/msal-node': ^7.1.0
+```
+
+For npm, put `"overrides": { "@azure/msal-node": "^7.1.0" }` in the root `package.json`. Reinstall
+dependencies and verify that the lockfile resolves MSAL Node 7.1.0 or newer. These steps address
+[GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5) and
+[GHSA-xcx6-jx8p-x3h5](https://github.com/advisories/GHSA-xcx6-jx8p-x3h5).
+
+### NATS subscriptions without a queue are shared, and every publish is bounded (M119a, 0.11.0, `@setu-ts/messaging-plugin`)
+
+Affects every application on the NATS arm that subscribes without a `queue`, and every application
+on the Kafka, Pub/Sub, RabbitMQ, Redis Streams or NATS arm that publishes.
+
+- **Queue-less NATS subscriptions no longer fan out.** Before this release a `subscribe()` with no
+  `queue` gave every process its own durable consumer (`messaging-<uuid>`), so every replica
+  received every message, and every start replayed the whole stream. The subscription now uses one
+  durable JetStream consumer per topic — `<defaultQueue>.<topic>` (default prefix
+  `messaging-consumers`) — shared by every replica: each message is delivered to ONE replica, and a
+  restart resumes from the consumer's acknowledgement floor. A group created for the first time
+  starts at messages published after it, so messages published before any replica of a new
+  queue-less group subscribed are not delivered — the same rule as a new Kafka group. An explicit
+  `queue` is unchanged. `respond()` with no queue follows the same path. If you relied on every
+  replica receiving every message, pass a `queue` that is stable and unique per replica (for example
+  the pod name). Do not build the queue from a random per-start value: it would leave a durable
+  consumer behind on every start.
+- **Catch `PublishTimeoutError`.** The Kafka, Pub/Sub, RabbitMQ, Redis Streams and NATS publish
+  paths reject an expired publish with the exported `PublishTimeoutError` (readonly `topic: string`
+  and `timeoutMs: number`). A timeout does not cancel the transport: the message may still be
+  delivered, so retries need de-duplication. The Kafka, Pub/Sub and RabbitMQ message texts are
+  unchanged from before.
+- **Redis Streams publishes are bounded at 15 s by default.** Before this release a publish held
+  indefinitely against a paused Redis. Set `publishTimeoutMs: 0` to keep the previous unbounded
+  publish wait; consumer reads are unaffected.
+- **The NATS publish bound moved from the client's fixed 5 s to `publishTimeoutMs` (default 15 s).**
+  Code that relied on the 5-second refusal now sees 15 s by default; set `publishTimeoutMs` to the
+  bound you need.
+- **The NATS `request()` reply inbox is ephemeral.** It is deleted on shutdown and re-created if the
+  server removes it, so it no longer leaves a durable consumer behind on every start.
+- **Consumers earlier releases leaked are reaped.** On `connect()` the broker sets a 5-minute
+  `inactive_threshold` on durable consumers named exactly `messaging-<uuid>` or
+  `rr_2einbox_2e<uuid>` whose recorded `setu.queue` metadata is absent or matches, so the server
+  removes them once nothing reads from them; a replica still running an older version keeps its
+  consumer while it reads. A user queue literally named `messaging-<uuid>` is a reserved shape for
+  this reason: such a consumer is reaped only after 5 min with no client attached.
+
+### Health indicators gain a readiness membership, and a mail outage no longer drains every replica (M119b, 0.11.0, `@setu-ts/health-plugin`, `@setu-ts/mail-plugin`)
+
+Affects every application that registers `HealthPlugin`, and — through the changed default and the
+repaired probes — every application using `@setu-ts/mail-plugin`, `@setu-ts/queue-plugin`,
+`@setu-ts/realtime-backplane-plugin`, `@setu-ts/database-plugin` (migration readiness) or the gRPC
+health bridge.
+
+- **A mail outage no longer fails `/ready`.** The `mail` indicator is registered outside readiness
+  by default (V10-49). Its status mapping is unchanged: an unreachable mail backend still reads
+  `down`, so `/health` reports the outage (503) and alerts still fire — but `/ready` ignores the
+  indicator and stays 200, because an SMTP outage is shared by every replica and does not stop
+  request serving. **To restore the previous behaviour, pass
+  `HealthPlugin({ readiness: { include: ['mail'] } })`.**
+- **Override readiness membership by name.**
+  `HealthPlugin({ readiness: { include: [...], exclude: [...] } })` forces a named indicator into
+  readiness (`include`) or out of it (`exclude`), overriding what the contributing plugin declared;
+  a plugin can declare it itself with `ctx.health.register(name, fn, { readiness: false })`. An
+  invalid list (a non-array, an empty or non-string name, the name `self`, or a name in both lists)
+  throws `TypeError` at `HealthPlugin(...)`; names that match no registered indicator produce one
+  count-only warning at startup. An indicator outside readiness still runs on `/health` — its `down`
+  still 503s the endpoint and still alerts — but is absent from the `/ready` report.
+- **A queue reachability check that does not answer is `up` with `reachable: 'unknown'`.** For every
+  queue adapter, a check that does not answer within its 2 s bound now reports `up` with
+  `reachable: 'unknown'` and no depth counts, instead of `down`: a queue backend that hangs keeps
+  the replica in rotation where it used to be drained, and a stopped broker still reads `down` at
+  once. The RabbitMQ adapter's check also opens and closes a throwaway channel, so a paused broker
+  no longer reports `reachable: true` (V10-22).
+- **A paused Redis no longer drains the replica through the backplane indicator (V10-20).** The
+  `realtime-backplane` reachability check is cached for 5 s and bounded at 2 s; a check that does
+  not answer within the bound reports `reachable: 'unknown'` and the status stays `up`.
+- **gRPC health reads readiness.** `grpc.health.v1.Health/Check` for the whole server now maps the
+  readiness report, so an indicator that is out of readiness (mail, by default) no longer turns the
+  server `NOT_SERVING`.
+- **A paused database reads `degraded` in one bound (V10-31).** With migration readiness opted in,
+  the ledger is read only on a reachable connection; otherwise the indicator's result is returned
+  unchanged with `data.migrations.state: 'unknown'` added — an adapter with no reachability check is
+  still checked — and a paused database reads `degraded` within one ~2 s bound instead of `down`
+  after ~4 s.
+
+### Generated projects, CSRF and `setu add` defaults that broke a normal setup (M119c, 0.11.0, `@setu-ts/cli`, `@setu-ts/http-security-plugin`)
+
+- **Full-stack behind a TLS proxy:** a project generated by `setu new --template full-stack` before
+  0.11.0 answers 400 on every React Router action behind TLS termination. Add IP security yourself —
+  `httpSecurity: { ipSecurity: { trustProxy: true, trustedProxies: ['<your proxy CIDRs>'] } }` — or
+  read a `TRUSTED_PROXIES` value as new scaffolds do. List only your proxies — IPv6 proxies as
+  single addresses, since an IPv6 CIDR matches nothing — and never `0.0.0.0/0`, which trusts every
+  IPv4 client.
+- **CSRF and `Origin: null`:** a same-origin form POST under the default `Referrer-Policy` now
+  passes when the browser sends `Sec-Fetch-Site: same-origin`. If you set
+  `referrerPolicy: 'same-origin'` only to work around the 403, you can keep or remove it. To keep
+  refusing every `null` origin, set `csrf: { acceptNullOriginSameOrigin: false }`.
+- **Swagger UI `{ baseUrl }`:** install `swagger-ui-dist` at exactly `5.33.3`
+  (`npm install swagger-ui-dist@5.33.3 --save-exact`); a newer release fails the integrity hashes.
+  On Deno, add `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's
+  `deno.json` (in a workspace, the member's — as generated members do — or the root's), run
+  `deno install` from the workspace root, and keep `--allow-read` on the start task. The plugin's
+  optional import resolves from the installed `node_modules`, so an entry with no install still
+  fails at startup.
+- **Telemetry peers:** install
+  `@opentelemetry/api@~1.9.0 @opentelemetry/sdk-trace-base@^2.9.0 @opentelemetry/resources@^2.9.0 @opentelemetry/context-async-hooks@^2.0.0`;
+  unpinned names fail with ERESOLVE today.
+- **Generated tests:** add `--test-force-exit` to an existing Node project's `test` and `test:e2e`
+  scripts to stop a failed start hanging CI.
+
+### Workers tests, `setu agents` output and module 404 details (M119h, 0.11.0, `@setu-ts/cli`)
+
+- **Workers projects can run tests.** A `cloudflare-workers` project scaffolded before 0.11.0 has no
+  test scripts, and its `deno.json` `test` task permits an empty suite. Add the two scripts and the
+  devDependencies new scaffolds ship:
+
+  ```json
+  "scripts": {
+    "test": "tsx --test --test-force-exit '**/!(*.e2e).test.ts'",
+    "test:e2e": "tsx --test --test-force-exit '**/*.e2e.test.ts'"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "@types/node": "^24.0.0"
+  }
+  ```
+
+  Prefix both commands with `npm run build && ` when the tests need the built Worker, and add
+  `"node"` to `types` in `tsconfig.json`. Then add `test/support/server.ts`, which boots the Worker
+  on workerd through wrangler's `createTestHarness` (the `wrangler` dependency the project already
+  has supplies it), and write tests that call `startTestServer()` and
+  `fetch(server.baseUrl + path)`:
+
+  ```ts
+  import { createTestHarness } from 'wrangler';
+
+  export async function startTestServer(): Promise<{
+    readonly baseUrl: string;
+    readonly stop: () => Promise<void>;
+  }> {
+    // Located from this file: a relative path would resolve from the working directory.
+    const harness = createTestHarness({
+      workers: [{ configPath: new URL('../../wrangler.toml', import.meta.url) }],
+    });
+    const { url } = await harness.listen();
+    return {
+      baseUrl: url.origin,
+      stop: async () => {
+        await harness.close();
+      },
+    };
+  }
+  ```
+
+- **`setu agents --dry-run` speaks in `would create` / `would update` / `unchanged`.** A script that
+  matched the old `would write <path>` line must match the verb; an unchanged brief is reported and
+  no longer rewritten by the real run. Add `--strict` to `setu agents --check` where CI should also
+  fail on a missing agent card.
+- **A pre-0.11.0 generated module still echoes the id in its 404.** New modules answer
+  `<Pascal> not found.`; an existing module keeps its text until you edit the detail in its
+  controller or routes. A test that asserted the old `<Pascal> <id> was not found.` must assert the
+  fixed detail instead, and should not assert that the id is echoed.
+
+### DI lifetimes are enforced, and every request has a scope (M125, 0.11.0, `@setu-ts/di-plugin`, `@setu-ts/common`, `@setu-ts/decorator-plugin`, breaking)
+
+Affects applications that register `DiPlugin`, and any code implementing `IContainer` itself. An
+application without `DiPlugin` is unaffected.
+
+- **A boot failure naming a `captive` dependency** means a `singleton` reaches a `scoped` service,
+  directly or through `transient`s. Before 0.11.0 the singleton kept the first scope's instance for
+  the life of the application. Make the dependent `scoped` too, or resolve the scoped service per
+  request: `container.forRequest(ctx).resolve(token)` in a handler, or `@Params(Service(token))` on
+  a decorated one. A decorated **controller** is always a singleton (it is built once, at
+  registration, whatever `defaultScope` says), so a controller constructor that takes a scoped
+  service needs the handler-parameter form:
+
+  ```typescript
+  // Before: constructor(private readonly reports: ReportService) {} — now a boot failure
+  @Get()
+  @Params(Service<ReportService>('report-service'))
+  today(reports: ReportService) {
+    return reports.summary();
+  }
+  ```
+
+- **A boot failure naming a `missing` dependency or a `cycle`** used to surface on the first request
+  that resolved it; it now fails `app.start()`, listing every finding at once.
+- **`ScopeRequiredError`** replaces the old behaviour of a `scoped` token resolved on the root
+  container quietly acting as a singleton. It is also thrown for a `transient` with a `dispose`
+  option resolved on the root, which the root would otherwise keep until the application closes.
+  Resolve it through `forRequest(ctx)` or a scope from `createScope()`.
+- **`ContainerClosedError`**: `DiPlugin` closes the container after the last bootstrap hook. Move a
+  `register` that runs after `app.start()` into a plugin's `register()`, `onInit` or `onBootstrap`.
+  A scope may still register tokens its parent does not have, but registering one the parent has now
+  throws; register the replacement on the root, or use `overrideProvider` in tests.
+- **Factories receive their dependencies.** `useFactory` is called with the resolved `inject`
+  entries in order. A zero-argument factory that resolves from a captured container keeps working,
+  but boot validation cannot see what it uses; prefer
+  `{ useFactory: (db: Db) => new Repo(db), inject: [DB] }`.
+- **Own `IContainer` implementations** add `forRequest(ctx)` and `dispose()`. Delegating to the
+  wrapped container, as `OverridingContainer` in `@setu-ts/testing` does, is enough for a wrapper.
+- **`ScopeManager` is gone** from `@setu-ts/di-plugin`; nothing replaces it as an export.
+- **Unit tests of a request-scoped handler** need the kernel's request context, which implements
+  `ctx.defer`: test them through `createTestApp` and `inject()`. A `createTestContext` context makes
+  `forRequest` throw `RequestScopeUnavailableError`.
+- **A `dispose` that takes longer than 5 s** no longer holds the response, the scope's other
+  disposals or `app.stop()`: it is reported (at `warn` for a request, in the `AggregateError` from
+  `dispose()`) and the rest still run. The bound is per disposal, so k disposals that never settle
+  hold `app.stop()` for about k × 5 s — longer than the 10 s drain once k exceeds 2. A request
+  scope's disposal failures are logged at `warn` as `Request scope disposal failed`, even when they
+  settle after the kernel's own 5 s bound.
+- **A provider registered on a scope lives as long as that scope.** A `singleton` lifetime there
+  means once per scope; it is no longer created and kept on the root.
+- **Shutdown and streamed responses.** A streamed response whose request used a scope stays
+  in-flight until its body finishes, so `stop()` waits for it, up to the 10 s drain bound.
+
+<!-- version:history -->
+
 ## 0.10.0
+
+<!-- version:history -->
 
 ### Run a patched Node release (`engines.node ^22.23.4 || ^24.22.1 || >=26.12.1`, 0.10.0)
 
@@ -33,6 +521,8 @@ floor, it does not enforce it. The fixes are in Node itself, so no Setu-TS code 
   reaches the Brotli decoder flaw (CVE-2026-111497, rated High, out-of-bounds write) through any
   outbound call: the SDK client, OIDC discovery and key-set fetches, Consul and Kubernetes
   discovery, Vault, and the SendGrid, Twilio, FCM and Slack providers.
+
+<!-- version:history -->
 
 ### Declared `@ApiOperation` ids and descriptions (0.10.0)
 
@@ -62,6 +552,8 @@ Check SDK names as well: declared `getUsers` beside undeclared `GET /users` (der
 valid OpenAPI, but `generateOpenApiClient` refuses it with `Duplicate operation name` because both
 sanitize to `getUsers`. Choose ids with distinct sanitized TypeScript names.
 
+<!-- version:history -->
+
 ### Environment secrets fall back to config (V9-77, 0.10.0, `@setu-ts/secrets-plugin`)
 
 When CONFIG is registered, the default `EnvProvider` now resolves string secrets present only in
@@ -87,6 +579,8 @@ environment. Only string config values qualify. On Workers, config normally cont
 bindings as `runtime.env` and adds no keys; an injected `ConfigPlugin({ instance })` or another
 `IConfig` provider can supply additional keys. `envFilePath` requires filesystem support.
 
+<!-- version:history -->
+
 ### Declare JSON media types on validated bodies (M114, 0.10.0, `@setu-ts/validation-plugin`)
 
 Send `Content-Type: application/json` on JSON requests to `validateBody` or `@ValidateBody` routes
@@ -99,6 +593,8 @@ instead of 400; `{ forms: true }` still opts that validator into form bodies. Ro
 `ctx.request.json()` directly are unchanged. Replacement `IValidationService` implementations own
 their media-type handling. Cookie-authenticated routes still need `csrfMiddleware` or
 `csrfFormMiddleware`.
+
+<!-- version:history -->
 
 ### Refresh generated output for M114 (0.10.0, `@setu-ts/cli`, `@setu-ts/validation-plugin`)
 
@@ -146,6 +642,8 @@ call to add.
   `validation-plugin` and added by `setu add validation` on every runtime; `setu g module` and
   `setu g schema` print the runtime's install command in a project that lacks it.
 
+<!-- version:history -->
+
 ### Refresh generated output for M113h (0.10.0, `@setu-ts/cli`, `@setu-ts/runtime`, `@setu-ts/kernel`)
 
 New scaffolds emit the corrected output; an existing project keeps working, and these steps are what
@@ -171,6 +669,8 @@ adopts the fixes.
   record stays "unknown", so its Kubernetes probes stay `tcpSocket` and its Prometheus annotations
   stay off until you set the fields.
 
+<!-- version:history -->
+
 ### Add a `create<Pascal>JobProcessor` export to existing job modules, and expect `--dry-run` to exit 1 on a collision (M113i, 0.10.0, `@setu-ts/cli`)
 
 **Standalone job modules in a functional project with `queue-plugin`.** `setu generate job` now
@@ -186,6 +686,8 @@ would refuse to overwrite and exits 1 when any exists, matching `setu adopt`; be
 `would create` for every file and exited 0 before the existing-file check ran. A script or CI step
 that ran a dry run over files that already exist and expected exit 0 must handle the new exit 1. A
 clean dry run still exits 0, printing the `would create` / `would update` / `unchanged` lines.
+
+<!-- version:history -->
 
 ### Pass the database and ledger to `runMigrations` (M113o, 0.10.0)
 
@@ -205,6 +707,8 @@ no executable entry block: call from code holding bindings or use `wrangler d1 m
 
 Discovery warm-cache outages now keep the indicator `up`. If you alerted on `degraded`, inspect
 `data.degraded` and `data.reachable` instead; `/ready` keeps serving warm replicas.
+
+<!-- version:history -->
 
 ### Review `IRequest.ip`, rate-limit buckets and loader URLs (M113n, 0.10.0, breaking)
 
@@ -310,9 +814,13 @@ Programmatic health reports stay full and the gRPC bridge is unchanged; diagnost
 indicator `data` and are unaffected.
 
 **V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
-that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need `--allow-read`.
-Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets
-instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
+that use `OpenApiPlugin` or a starter with Swagger enabled. On Deno, add
+`"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
+workspace, the member's — as generated members do — or the root's), run `deno install` from the
+workspace root, and keep `--allow-read` on the start task: the plugin's optional import resolves
+from the installed `node_modules`, so an entry with no install still fails at startup. Otherwise
+startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets instead,
+set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
 `openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
 `assets: { baseUrl: '/assets' }`; the starters select the CDN there when no Swagger asset mode is
 chosen; a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare
@@ -322,9 +830,12 @@ existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends inst
 projects do. In a workspace the setting belongs in the root `package.json`, the one npm is run from;
 a member's own setting is ignored.
 
-Handled 4xx now logs once at `warn`; handled 5xx logs once at `error`. Completion logs report the
-responder's status rule; a custom `respond` hook choosing another status is not reflected there.
-Without a logger, handled 5xx and kernel unhandled errors reach the runtime's default error sink.
+Errors thrown into `errorHandler` log once: `warn` below 500, `error` at 500 and above. The
+responder terminals — an unmatched route's 404, a guard's 401/403, validation's 400/415, and the
+kernel's pre-pipeline refusals — write the response and log nothing beyond the request logger's
+completion record. Completion logs report the responder's status rule; a custom `respond` hook
+choosing another status is not reflected there. Without a logger, handled 5xx and kernel unhandled
+errors reach the runtime's default error sink.
 
 ### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
 
@@ -440,6 +951,8 @@ import { waitUntil } from 'cloudflare:workers';
 return createApp(env, waitUntil);
 ```
 
+<!-- version:history -->
+
 A project scaffolded by 0.10.0 already has the parameter, named `_waitUntil` while nothing reads it;
 rename it to `waitUntil` when you add the registration.
 
@@ -456,6 +969,10 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
 
 - In `src/index.ts`, add `import * as serverBuild from '../build/server/index.js';` and call
   `createApp(env, waitUntil, undefined, { serverBuild })`.
+- In `tsconfig.json`, add `"allowJs": true` to `compilerOptions`. The entry now imports the compiled
+  server build, which has no declarations, so `tsc --noEmit` reports TS7016 on it without the flag;
+  fresh scaffolds set it for this reason. Verify with the project's `check` script,
+  `npm run build && tsc --noEmit`.
 - In `setu.config.ts`, give `createApp` a second `_waitUntil` parameter and widen the `ssr`
   parameter to
   `{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>`. In the
@@ -468,6 +985,8 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   production value with `npx wrangler secret put SESSION_SECRET`.
 
 ### Readiness and `RedisRateLimitStore` outage migration (M113b)
+
+<!-- version:history -->
 
 - **Breaking readiness behaviour (M113b, 0.10.0).** Seven indicators now remain `up` where they
   previously reported `degraded`, so `/ready` changes from 503 to 200 and `/health` no longer
@@ -510,6 +1029,32 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   and concurrent first starts can miss messages. A member crashing before the join takes its start
   offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
   non-fatal.
+
+<!-- version:history -->
+
+### `ReactRouterPluginOptions` is a union type (0.10.0, `@setu-ts/react-router-plugin`)
+
+`ReactRouterPluginOptions` changed from an `interface` to a union `type`
+(`ReactRouterPathOptions | ReactRouterModuleOptions`, exactly one arm required). An application that
+does `interface X extends ReactRouterPluginOptions` no longer compiles (TS2312); use
+`type X = ReactRouterPluginOptions & { … }` instead. A caller passing `serverBuildPath` is
+unaffected.
+
+<!-- version:history -->
+
+### The SDK generator prefixes operations named `client` or `encodeURIComponent` (0.10.0, `@setu-ts/sdk`)
+
+An operation whose method name is `client` or `encodeURIComponent` is emitted as `_client` or
+`_encodeURIComponent`; before, `client` was a duplicate identifier and `encodeURIComponent` shadowed
+the global every generated path calls. Callers of those operations change after regenerating.
+
+<!-- version:history -->
+
+### `agents` is a built-in CLI command (0.10.0, `@setu-ts/cli`)
+
+Built-in verbs are matched before any plugin-registered command and always win, so a plugin command
+named `agents` is no longer reachable. No in-repo plugin registers one; rename the plugin command if
+yours does, following the `plugin:command` convention (`ICliApi.register`).
 
 <!-- version:history -->
 
@@ -952,8 +1497,8 @@ copy the fix from a fresh scaffold:
   fresh `setu new --runtime cloudflare-workers` project does (the old pair fails `npm install` with
   `ERESOLVE`), and replace `src/index.ts`'s single memoized application with the per-`env` cache the
   new entry carries, so a bindings-only deploy is picked up.
-- **Full-stack on Node or Bun:** prefix the `start` script with the build, as a fresh scaffold does;
-  without it the first `start` fails with "Failed to load React Router server build".
+- **Full-stack on Node or Bun:** run the build before production start. Use start:dev for
+  development; see the M120 production scripts above.
 - **Generated guards:** `setu generate guard <name>` now emits `requirePermission('<name>')`, which
   answers `501` unless `AuthPlugin` is registered with an `rbac` option. A guard generated earlier
   is unchanged.

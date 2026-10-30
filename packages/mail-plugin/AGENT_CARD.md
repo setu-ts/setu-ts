@@ -1,7 +1,7 @@
 # @setu-ts/mail-plugin — send transactional email
 
-**Add it:** `setu add mail` installs it and wires `MailPlugin()` in a recognized functional config.
-It provides `CAPABILITIES.MAIL` (`IMailer`); the default provider only logs.
+**Add it:** `setu add mail` adds it and wires `MailPlugin()` in a recognized functional config. It
+provides `CAPABILITIES.MAIL` (`IMailer`); the default provider only logs.
 
 ## Configure a provider and a welcome template
 

@@ -12,13 +12,18 @@
 
 import type { IFileSystem } from '@setu-ts/common';
 
-import { joinPath, MAX_EXISTING_FILE_BYTES } from './file-writer.ts';
+import {
+  assertInsideProject,
+  joinPath,
+  MAX_EXISTING_FILE_BYTES,
+  PathEscapesProjectError,
+} from './file-writer.ts';
 import { registerModuleSymbol } from '../seams/modules.ts';
 import { deriveNames, isKebabIdentifier } from './names.ts';
 import { isMissingPath } from './filesystem-errors.ts';
 import { exportsSymbol } from '../seams/seam-spec.ts';
 import type { GeneratorMode } from './generator-mode.ts';
-import { FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM } from '../seams/http.ts';
+import { CONTROLLERS_SEAM, FUNCTIONAL_CONTROLLERS_SEAM } from '../seams/http.ts';
 import { scanArtifacts, type ArtifactScanAll } from './artifact-scanner.ts';
 
 /** Where `setu generate module` places domain modules, relative to the project root. */
@@ -49,6 +54,8 @@ export interface ModuleScan {
    * does not compile and a name carrying a line feed would forge output lines.
    */
   readonly rejected: readonly string[];
+  /** Directories that could not be safely scanned. */
+  readonly unreadable?: readonly { readonly path: string; readonly reason: 'unsafe-directory' }[];
 }
 
 /** Evidence about a file the activation barrel would import. */
@@ -89,10 +96,9 @@ async function isFile(fs: IFileSystem, path: string): Promise<boolean> {
 /**
  * Lists the domain modules under `src/modules/`.
  *
- * Class-based modules require their controller, service and declaration files.
- * Functional modules require their canonical routes file and an index exporting
- * the registrar named by registerModuleSymbol. Pre-M114 service-only modules
- * remain under the old HTTP barrel and are neither admitted nor reported here.
+ * Class-based modules require an exported module declaration. Functional modules
+ * require an index exporting the registrar named by registerModuleSymbol. Neither
+ * depends on the location of its controllers or services.
  * Unrelated directories such as shared helpers are ignored in both modes.
  *
  * Sorted, because `readdir` enumeration order is filesystem-defined: without a
@@ -115,6 +121,19 @@ export async function scanModules(
 ): Promise<ModuleScan> {
   const root = joinPath(dir, MODULES_DIR);
 
+  const unreadable: { readonly path: string; readonly reason: 'unsafe-directory' }[] = [];
+  try {
+    await assertInsideProject(fs, dir, root);
+  } catch (cause) {
+    if (!(cause instanceof PathEscapesProjectError)) throw cause;
+    return {
+      names: [],
+      skipped: [],
+      rejected: [],
+      unreadable: [{ path: MODULES_DIR, reason: 'unsafe-directory' }],
+    };
+  }
+
   let entries: readonly string[];
   try {
     entries = await fs.readdir(root);
@@ -127,6 +146,13 @@ export async function scanModules(
   const skipped: SkippedModule[] = [];
   const rejected: string[] = [];
   for (const entry of entries) {
+    try {
+      await assertInsideProject(fs, dir, joinPath(root, entry));
+    } catch (cause) {
+      if (!(cause instanceof PathEscapesProjectError)) throw cause;
+      unreadable.push({ path: `${MODULES_DIR}/${entry}`, reason: 'unsafe-directory' });
+      continue;
+    }
     let stat;
     try {
       stat = await fs.stat(joinPath(root, entry));
@@ -139,7 +165,11 @@ export async function scanModules(
 
     const base = joinPath(root, entry, entry);
     if (mode === 'functional') {
-      if (!(await isFile(fs, `${base}.routes.ts`))) continue;
+      if (
+        !(await isFile(fs, joinPath(root, entry, 'index.ts'))) &&
+        !(await isFile(fs, `${base}.controller.ts`))
+      )
+        continue;
       if (!isKebabIdentifier(entry)) {
         rejected.push(`${MODULES_DIR}/${entry}`);
         continue;
@@ -157,24 +187,24 @@ export async function scanModules(
       continue;
     }
     if (!isKebabIdentifier(entry)) {
-      if ((await isFile(fs, `${base}.controller.ts`)) && (await isFile(fs, `${base}.service.ts`))) {
+      if (
+        (await isFile(fs, `${base}.module.ts`)) ||
+        ((await isFile(fs, `${base}.controller.ts`)) && (await isFile(fs, `${base}.service.ts`)))
+      ) {
         rejected.push(`${MODULES_DIR}/${entry}`);
       }
       continue;
     }
     const pascal = deriveNames(entry).pascal;
-    const controller = await exportStatus(fs, `${base}.controller.ts`, `${pascal}Controller`);
-    const service = await exportStatus(fs, `${base}.service.ts`, `${pascal}Service`);
-    if (controller === 'missing' || service === 'missing') continue;
     const module = await exportStatus(fs, `${base}.module.ts`, `${pascal}Module`);
-    const missing =
-      controller === 'missing-export'
-        ? `${pascal}Controller`
-        : service === 'missing-export'
-          ? `${pascal}Service`
-          : module === 'missing-export'
-            ? `${pascal}Module`
-            : undefined;
+    // Retain diagnostics for pre-declaration generated modules without making
+    // their old controller/service locations part of modern module identity.
+    if (
+      module === 'missing' &&
+      !((await isFile(fs, `${base}.controller.ts`)) && (await isFile(fs, `${base}.service.ts`)))
+    )
+      continue;
+    const missing = module === 'missing-export' ? `${pascal}Module` : undefined;
     if (missing !== undefined)
       skipped.push({
         kind: 'missing-export',
@@ -196,20 +226,29 @@ export async function scanModules(
     names: names.sort(),
     skipped: skipped.sort((a, b) => a.path.localeCompare(b.path)),
     rejected: rejected.sort(),
+    ...(unreadable.length === 0 ? {} : { unreadable }),
   };
 }
 
-/** Scans the two imperative registrar families inside one admitted feature. */
+/** Scans controllers inside one admitted feature using the project's controller shape. */
 export function scanModuleArtifacts(
   fs: IFileSystem,
   dir: string,
   module: string,
+  mode: GeneratorMode = 'functional',
 ): Promise<ArtifactScanAll> {
   const moduleDir = `${MODULES_DIR}/${module}`;
   return scanArtifacts(
     fs,
     dir,
-    [FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM].map((spec) => ({
+    [
+      mode === 'class-based'
+        ? {
+            ...CONTROLLERS_SEAM,
+            alternative: { ...CONTROLLERS_SEAM.alternative!, onlyShapeInBarrel: true },
+          }
+        : FUNCTIONAL_CONTROLLERS_SEAM,
+    ].map((spec) => ({
       ...spec,
       dir: moduleDir,
       barrel: `${moduleDir}/index.ts`,

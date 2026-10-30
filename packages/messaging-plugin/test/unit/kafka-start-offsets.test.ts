@@ -3,6 +3,7 @@ import { AssignerProtocol, PartitionAssigners } from 'kafkajs';
 import type { PartitionAssigner } from 'kafkajs';
 import {
   minimumStartOffsets,
+  partitionsToSeek,
   MAX_MEMBER_METADATA_BYTES,
   isKafkaStartModule,
   optionalKafkaStartModule,
@@ -157,5 +158,26 @@ describe('Kafka start-offset internal seams against real kafkajs', () => {
     [module, true],
   ] as const)('recognises a usable kafkajs module shape (%#)', (value, expected) => {
     expect(isKafkaStartModule(value)).toBe(expected);
+  });
+});
+
+describe('M119a partitionsToSeek', () => {
+  it.each([undefined, '9', '10', '11', '9007199254740993'])(
+    'first delivered %s against minimum 10',
+    (first) => {
+      expect(
+        partitionsToSeek(
+          [0],
+          new Set([0]),
+          { '0': '10' },
+          first === undefined ? new Map() : new Map([[0, first]]),
+        ),
+      ).toEqual(first === undefined || BigInt(first) > 10n ? [{ partition: 0, offset: '10' }] : []);
+    },
+  );
+  it('ignores unassigned, committed, and missing-minimum partitions', () => {
+    expect(
+      partitionsToSeek([0, 1, 2], new Set([1, 2, 3]), { '0': '0', '1': '12', '3': '0' }, new Map()),
+    ).toEqual([{ partition: 1, offset: '12' }]);
   });
 });

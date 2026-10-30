@@ -191,6 +191,8 @@ export interface WorkspaceManifest {
    * trivially expressible.
    */
   readonly transport: TransportName;
+  /** Redis driver; omitted means ioredis. @since 0.11.0 */
+  readonly redisClient?: 'node-redis';
   /**
    * Where the transport's broker listens, when it has one.
    *
@@ -244,6 +246,7 @@ export type WorkspaceManifestProblem =
    * other and no diagnostic saying why.
    */
   | { readonly kind: 'unknown-transport'; readonly transport: string }
+  | { readonly kind: 'unknown-redis-client'; readonly redisClient: string }
   /**
    * Well-formed, but naming a runtime no workspace can be built with.
    *
@@ -380,6 +383,13 @@ export async function readWorkspaceManifest(
   }
 
   const rawUrl = record['transportUrl'];
+  const redisClient = record['redisClient'];
+  if (redisClient !== undefined && redisClient !== 'node-redis') {
+    return {
+      ok: false,
+      problem: { kind: 'unknown-redis-client', redisClient: String(redisClient) },
+    };
+  }
   if (rawUrl !== undefined && typeof rawUrl !== 'string') {
     return { ok: false, problem: { kind: 'malformed' } };
   }
@@ -450,6 +460,7 @@ export async function readWorkspaceManifest(
       basePort,
       ...(devtoolBasePort === undefined ? {} : { devtoolBasePort }),
       transport: transport as TransportName,
+      ...(redisClient === undefined ? {} : { redisClient }),
       runtime,
       ...(rawUrl === undefined ? {} : { transportUrl: rawUrl }),
       members,

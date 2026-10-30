@@ -24,7 +24,7 @@ import {
 const UNWIRED = ['guard', 'migration'] as const;
 
 describe('seam registry', () => {
-  it('declares the ten family seams plus the class-based ingress aggregate', () => {
+  it('declares one controller family plus the other registration seams', () => {
     expect(
       listSeamSpecs()
         .map((spec) => spec.schematic)
@@ -40,7 +40,6 @@ describe('seam registry', () => {
       'middleware',
       'plugin',
       'query-handler',
-      'route',
       'service',
     ]);
   });
@@ -134,7 +133,7 @@ describe('seam registry', () => {
 
 describe('seam rendering helpers', () => {
   it('sorts and deduplicates names, and appends the one being generated', () => {
-    expect(seamNames({ route: ['user', 'billing'] }, 'route', 'admin')).toEqual([
+    expect(seamNames({ controller: ['user', 'billing'] }, 'controller', 'admin')).toEqual([
       'admin',
       'billing',
       'user',
@@ -142,7 +141,7 @@ describe('seam rendering helpers', () => {
   });
 
   it('lists a name already scanned exactly once', () => {
-    expect(seamNames({ route: ['user'] }, 'route', 'user')).toEqual(['user']);
+    expect(seamNames({ controller: ['user'] }, 'controller', 'user')).toEqual(['user']);
   });
 
   it('treats an absent family and absent artifacts alike', () => {

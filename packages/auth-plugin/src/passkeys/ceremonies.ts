@@ -21,7 +21,7 @@ import type {
 import type { IPasskeyStore, StoredPasskey } from '../stores/passkey-store.ts';
 import type { PasskeyOptions, PasskeyRegistrationContext } from '../interfaces/index.ts';
 import type { PendingPromotion } from '../sign-in/auth-session-service.ts';
-import { asPendingPromotion } from '../sign-in/auth-session-service.ts';
+import { asPendingPromotion, asVerifiedSessionRead } from '../sign-in/auth-session-service.ts';
 import { AuthPluginConfigurationError } from '../errors.ts';
 import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { decodeCbor } from './cbor.ts';
@@ -392,11 +392,20 @@ export class PasskeyCeremonies {
    * Reads the signed-in principal through the ceremonies' own sign-in owner,
    * for the register routes' admission check.
    *
+   * Re-checked through `refreshPrincipal` and the session stamp (M124 audit
+   * F1): a session either has ended must not enrol a passkey, which would
+   * mint a fresh session carrying the user's current stamp. Only an
+   * `IAuthSessionService` that is not the plugin's own falls back to its
+   * `current`, since its sessions carry no stamp this package could check.
+   *
    * @param ctx - The request context; the session middleware must have run
    * @returns The principal, or `null` when the session holds no identity
    */
-  currentPrincipal(ctx: IRequestContext): IPrincipal | null {
-    return this.#authSession.current(ctx);
+  currentPrincipal(ctx: IRequestContext): Promise<IPrincipal | null> {
+    const verified = asVerifiedSessionRead(this.#authSession);
+    return verified === null
+      ? Promise.resolve(this.#authSession.current(ctx))
+      : verified.verifiedCurrent(ctx);
   }
 
   #report(message: string): void {
@@ -533,7 +542,7 @@ export class PasskeyCeremonies {
   async registrationOptions(
     ctx: IRequestContext,
   ): Promise<RegistrationOptionsJson | PasskeyRefusal> {
-    const principal = this.#authSession.current(ctx);
+    const principal = await this.currentPrincipal(ctx);
     if (principal === null) {
       return 'sign-in-required';
     }

@@ -26,6 +26,40 @@ import type { IMessageBroker } from '@setu-ts/common';
 import type { MessagingPluginOptions } from '../../src/interfaces/index.ts';
 import type { MessageBrokerAdapter } from '../../src/brokers/message-broker.ts';
 import { kafkaHealthClientConfig } from '../../src/brokers/kafka-broker.ts';
+import { PublishTimeoutError } from '../../src/errors.ts';
+import { REDIS_CLIENTS, redisOptions } from '../../../common/test/fixtures/redis-clients.ts';
+
+describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
+  it(
+    'M119a REAL paused Redis rejects at the configured publish bound',
+    { skip: !process.env['REDIS_URL'] },
+    async () => {
+      const url = process.env['REDIS_URL']!;
+      const container = await containerIdForPort(Number(new URL(url).port || 6379));
+      const broker = new RedisStreamsBroker(makeRuntime(), new JsonSerializer(), {
+        ...redisOptions(redisVariant, url),
+        publishTimeoutMs: 2000,
+      });
+      let paused = false;
+      try {
+        await broker.connect();
+        await broker.publish(`m119a.baseline.${crypto.randomUUID()}`, {});
+        await docker(['pause', container]);
+        paused = true;
+        const started = performance.now();
+        const error = await broker.publish('m119a.paused', {}).catch((error: unknown) => error);
+        const elapsed = performance.now() - started;
+        expect(error).toBeInstanceOf(PublishTimeoutError);
+        expect(error).toMatchObject({ topic: 'm119a.paused', timeoutMs: 2000 });
+        expect(elapsed).toBeGreaterThanOrEqual(2000);
+        expect(elapsed).toBeLessThan(3000);
+      } finally {
+        if (paused) await docker(['unpause', container]);
+        await broker.disconnect();
+      }
+    },
+  );
+});
 
 // ── Docker stop/start helpers (inlined; no cross-package dep) ──────────────
 
@@ -145,7 +179,10 @@ describe('M113a REAL Kafka metadata outage', { skip: !process.env['KAFKA_BROKERS
     const port = Number(brokers[0]!.split(':').at(-1));
     const container = await containerIdForPort(port);
     await waitKafkaReady(brokers);
-    const { app, broker, health, reachability } = await startM113App({ broker: 'kafka', brokers });
+    const { app, broker, health, reachability } = await startM113App({
+      broker: 'kafka',
+      brokers,
+    });
     try {
       expect(await broker.isHealthy!()).toBe(true);
       await docker(['stop', container]);
@@ -321,7 +358,9 @@ describe('REAL RabbitMQ outage (§3.7)', () => {
       const port = new URL(url).port === '' ? 5672 : Number(new URL(url).port);
       const containerId = await containerIdForPort(port);
 
-      const broker = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
+      const broker = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), {
+        url: toIpv4(url),
+      });
       const received: string[] = [];
 
       try {
@@ -363,7 +402,7 @@ describe('REAL RabbitMQ outage (§3.7)', () => {
 
 // ── Redis Streams outage ────────────────────────────────────────────────────
 
-describe('REAL Redis Streams outage (§3.7)', () => {
+describe.each(REDIS_CLIENTS)('%s REAL Redis Streams outage (§3.7)', (redisVariant) => {
   it(
     'up → stop → down → restart → up',
     { skip: process.env['REDIS_URL'] === undefined },
@@ -377,7 +416,7 @@ describe('REAL Redis Streams outage (§3.7)', () => {
       const containerId = await containerIdForPort(port);
 
       const broker = new RedisStreamsBroker(makeRuntime(), new JsonSerializer(), {
-        url: toIpv4(url),
+        ...redisOptions(redisVariant, toIpv4(url)),
       });
 
       try {
@@ -433,7 +472,9 @@ describe('REAL RabbitMQ register-time publish (M89c §6)', () => {
       // IN-MEMORY promise only, so this pins that the real path cannot regress.
       const { promise: chainReady, resolve: openChainGate } = Promise.withResolvers<void>();
       const log: string[] = [];
-      const rabbit = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), { url: toIpv4(url) });
+      const rabbit = new RabbitMqBroker(makeRuntime(), new JsonSerializer(), {
+        url: toIpv4(url),
+      });
       const piped = new PipelinedBroker(
         rabbit,
         [

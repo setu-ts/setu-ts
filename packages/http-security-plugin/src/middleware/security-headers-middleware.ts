@@ -102,12 +102,12 @@ export function securityHeadersMiddleware(
     return (_ctx, next) => next();
   }
 
-  const headersToSet = buildHeaders(options);
+  // One frozen record, the same object on every request: the kernel validates
+  // it once and copies it into each response in one step (`setHeaders`).
+  const headersToSet = Object.freeze(Object.fromEntries(buildHeaders(options)));
 
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
-    for (const [name, value] of headersToSet) {
-      ctx.response.header(name, value);
-    }
+    ctx.response.setHeaders(headersToSet);
     await next();
   };
 }

@@ -15,9 +15,25 @@ export function regularFileFlags(flags: {
   return flags.O_RDONLY | (flags.O_NONBLOCK ?? 0) | (flags.O_NOCTTY ?? 0);
 }
 
-/** Reads only the regular file actually opened, never allocating beyond the byte bound. */
+/**
+ * Reads only the regular file actually opened, never allocating beyond the byte bound.
+ *
+ * Opened with `O_NOFOLLOW`, like the writer below: a link as the file itself is
+ * refused rather than followed (M120 audit F1 — a pull request linking a
+ * manifest to a host file made the CLI read it and echo part of it in a parse
+ * error). Linked DIRECTORIES above it are the callers' `assertInsideProject`.
+ */
 export async function readRegularFile(path: string, maxBytes: number): Promise<Uint8Array> {
-  const handle = await open(path, regularFileFlags(constants));
+  const handle = await open(path, regularFileFlags(constants) | (constants.O_NOFOLLOW ?? 0)).catch(
+    (cause: unknown) => {
+      if (cause instanceof Error && 'code' in cause && cause.code === 'ELOOP') {
+        throw new Error(`${path}: is a symbolic link; Setu does not read through links`, {
+          cause,
+        });
+      }
+      throw cause;
+    },
+  );
   try {
     const stat = await handle.stat();
     if (!stat.isFile()) throw new Error(`${path}: expected a regular file at most 1 MiB`);
@@ -131,7 +147,20 @@ export async function writeRegularFile(
       temp,
       regularFileWriteFlags(constants),
       existing === undefined ? 0o666 : 0o600,
-    );
+    ).catch((cause: unknown) => {
+      // The temp name is ours, not the developer's: naming it in a refusal is
+      // noise, and it must never be mistaken for the target. The raw errno is
+      // kept as the cause for anyone diagnosing it.
+      if (
+        cause instanceof Error &&
+        'code' in cause &&
+        (cause.code === 'EACCES' || cause.code === 'EPERM')
+      )
+        throw new Error(`${path}: permission denied creating a file in ${dirname(path)}`, {
+          cause,
+        });
+      throw cause;
+    });
     created = true;
     try {
       let written = 0;
@@ -187,6 +216,22 @@ export function withRegularFileReads(fs: IFileSystem): ICliFileSystem {
     ...(fs.readStream === undefined ? {} : { readStream: fs.readStream.bind(fs) }),
     readRegularFile,
     writeRegularFile,
+    canWrite: async (path: string) => {
+      // The writer always creates a temp file beside the target and renames it
+      // over, so the directory must be writable even when the target is.
+      try {
+        await access(dirname(path), constants.W_OK);
+      } catch {
+        return false;
+      }
+      try {
+        await access(path, constants.W_OK);
+        return true;
+      } catch (cause) {
+        // A missing target is created; any other error on it is a refusal.
+        return cause instanceof Error && 'code' in cause && cause.code === 'ENOENT';
+      }
+    },
     ...(typeof process.getuid !== 'function'
       ? {}
       : {

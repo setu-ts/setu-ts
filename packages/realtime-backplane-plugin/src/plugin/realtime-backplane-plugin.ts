@@ -17,8 +17,11 @@ import {
   CAPABILITIES,
   compileRealtimeDiagnosticsAlias,
   createConnectionErrorReporter,
+  createRealtimeHandlerErrorReporter,
+  createCachedProbe,
   createRealtimeObservationCollector,
   PLUGIN_PRIORITY,
+  resolveProbeTiming,
 } from '@setu-ts/common';
 import {
   attachRealtimeObserver,
@@ -107,7 +110,19 @@ export function RealtimeBackplanePlugin(
               }),
             }
           : options;
-      const backplane = createBackplane(resolved, ctx.services, ctx.runtime.uuid());
+      const handlerReporter = createRealtimeHandlerErrorReporter({
+        source: `realtime-backplane-plugin: ${options.transport ?? 'memory'} transport`,
+        logger: () => ctx.logger,
+        ...(options.transport !== 'custom' && options.onHandlerError !== undefined
+          ? { onHandlerError: options.onHandlerError }
+          : {}),
+      });
+      const backplane = createBackplane(
+        resolved,
+        ctx.services,
+        ctx.runtime.uuid(),
+        handlerReporter,
+      );
 
       // Awaited, so the subscription is live before the first request and
       // before either consumer plugin registers its handler.
@@ -132,14 +147,18 @@ export function RealtimeBackplanePlugin(
         { multi: true },
       );
 
+      const probe = createCachedProbe<boolean | 'unknown'>({
+        probe: () => backplane.isHealthy?.() ?? Promise.resolve('unknown'),
+        fallback: 'unknown',
+        ttlMs: 5000,
+        timeoutMs: 2000,
+        ...resolveProbeTiming(ctx.runtime),
+      });
       ctx.health.register('realtime-backplane', async (): Promise<HealthCheckResult> => {
         // Shared fan-out faults stay in data: determineStatusCode withdraws
         // every non-up replica, while local request delivery still works.
         // A transport without isHealthy reports unknown reachability.
-        let reachable: boolean | 'unknown' = 'unknown';
-        if (typeof backplane.isHealthy === 'function') {
-          reachable = await backplane.isHealthy();
-        }
+        const reachable = await probe();
         return {
           status: 'up',
           data: {

@@ -1,4 +1,4 @@
-import { createCachedProbe } from '@setu-ts/common';
+import { createCachedProbe, withDeadline, resolveProbeTiming } from '@setu-ts/common';
 import type {
   ISubscription,
   MessageHandler,
@@ -12,7 +12,8 @@ import type { IRuntimeServices } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ISerializer } from '../serializers/serializer.ts';
 import type { MessageBrokerAdapter } from './message-broker.ts';
-import { createTopicInbox } from './inbox.ts';
+import { createTopicInbox, REPLY_INBOX_TRANSIENT } from './inbox.ts';
+import type { InternalSubscribeOptions } from './inbox.ts';
 import { buildTransportHeaders, validatePublishOptions } from './publish-options.ts';
 import { RequestReplyCore } from './request-reply-core.ts';
 import { ReconnectSupervisor } from '@setu-ts/common';
@@ -21,9 +22,14 @@ import {
   JetStreamStreamError,
   JetStreamUnavailableError,
   NatsConsumerNameCollisionError,
+  PublishTimeoutError,
 } from '../errors.ts';
 import { describeError } from './describe-error.ts';
 import { toJetStreamConsumerName } from './nats-consumer-name.ts';
+
+import { resolvePublishTimeoutMs } from './publish-timeout.ts';
+import { INBOX_INACTIVE_THRESHOLD_NS, sweepLeakedConsumers } from './nats-leaked-consumers.ts';
+import type { ILeakedConsumerManager } from './nats-leaked-consumers.ts';
 
 /** Consumer metadata key recording the raw queue a consumer was created for (M101b). */
 const QUEUE_METADATA_KEY = 'setu.queue';
@@ -69,7 +75,10 @@ async function loadNats(): Promise<typeof import('nats')> {
   try {
     return await import('nats');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('nats', { cause: error });
+    throw new OptionalDependencyUnavailableError('nats', {
+      requiredBy: '@setu-ts/messaging-plugin',
+      cause: error,
+    });
   }
 }
 
@@ -175,6 +184,9 @@ interface ActiveConsumer {
   id: string;
   consumer: unknown;
   subscription: unknown;
+  active: boolean;
+  cancelRetry?: () => void;
+  close: () => Promise<void>;
 }
 
 /**
@@ -209,6 +221,9 @@ export class NatsBroker implements MessageBrokerAdapter {
   #reconnect: ReturnType<typeof resolveNatsReconnect>;
   #injectedClient: INatsConnection | undefined;
   #streamName: string;
+  #defaultQueue: string;
+  #publishTimeoutMs: number;
+  #sweepActive: { active: boolean } | null = null;
   #streamSubjects: readonly string[] | undefined;
   #headersFactory: (() => INatsHeaders) | undefined;
   #logger: { error: (msg: string) => void } | undefined;
@@ -230,9 +245,12 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @param runtime - Runtime services for uuid, timestamps, and timers
    * @param serializer - Serializer for message payloads
    * @param options - NATS connection and configuration options
+   * @throws {RangeError} If a reconnect or publish bound is invalid
    */
   constructor(runtime: IRuntimeServices, serializer: ISerializer, options?: NatsOptions) {
     this.#reconnect = resolveNatsReconnect(options);
+    this.#defaultQueue = options?.defaultQueue ?? 'messaging-consumers';
+    this.#publishTimeoutMs = resolvePublishTimeoutMs(options?.publishTimeoutMs);
     this.#runtime = runtime;
     this.#serializer = serializer;
     this.#url = options?.url ?? 'nats://localhost:4222';
@@ -392,6 +410,14 @@ export class NatsBroker implements MessageBrokerAdapter {
     // Get JetStream instance unconditionally
     const realConn2 = this.#connection as unknown as { jetstream(): unknown };
     this.#js = realConn2.jetstream();
+    const sweep = { active: true };
+    this.#sweepActive = sweep;
+    void sweepLeakedConsumers(
+      (jsm as { consumers: ILeakedConsumerManager }).consumers,
+      this.#streamName,
+      () => sweep.active,
+      (error) => this.#reportLifecycleError('legacy consumer sweep', error),
+    );
   }
 
   /**
@@ -429,19 +455,9 @@ export class NatsBroker implements MessageBrokerAdapter {
    */
   async disconnect(): Promise<void> {
     this.#supervisor.stop();
+    if (this.#sweepActive) this.#sweepActive.active = false;
     await this.#rr.close();
-    // Stop all active consumers. `stop()` is a `ConsumerMessages` member, so
-    // the SUBSCRIPTION handle is what carries it — the `Consumer` this used to
-    // call it on has only `info`/`delete`/`next`/`fetch`/`consume`, so every
-    // shutdown raised a swallowed `TypeError` and left the callbacks running.
-    for (const consumer of this.#activeConsumers.values()) {
-      try {
-        const realSub = consumer.subscription as unknown as { stop(): void };
-        realSub.stop();
-      } catch {
-        // Ignore errors during shutdown
-      }
-    }
+    await Promise.all([...this.#activeConsumers.values()].map((consumer) => consumer.close()));
     this.#activeConsumers.clear();
     this.#consumerQueues.clear();
     if (this.#connection) {
@@ -533,14 +549,26 @@ export class NatsBroker implements MessageBrokerAdapter {
    * @typeParam T - The message payload type
    * @param topic - The subject to publish to
    * @param message - The message payload
+   * @param options - Optional publish headers, ordering key and de-duplication id
    * @returns Resolves when published
+   * @throws {PublishTimeoutError} When the acknowledgement exceeds publishTimeoutMs;
+   *   the message may still be delivered
    * @since 0.1.0
    */
   publish<T>(topic: string, message: T, options?: PublishOptions): Promise<void> {
     return this.publishWithHeaders(topic, message, {}, options);
   }
 
-  /** Publishes a message with framework-owned transport headers. @internal */
+  /**
+   * Publishes with framework-owned headers under the configured acknowledgement bound.
+   * @param topic - Destination topic
+   * @param message - Payload to serialize
+   * @param headers - Framework-owned transport headers
+   * @param options - Caller headers, ordering key and de-duplication id
+   * @returns Resolves when the transport acknowledges the publish
+   * @throws {PublishTimeoutError} When publishTimeoutMs expires; delivery remains possible
+   * @internal
+   */
   async publishWithHeaders<T>(
     topic: string,
     message: T,
@@ -559,48 +587,63 @@ export class NatsBroker implements MessageBrokerAdapter {
     // `js.publish` answers with a promise of the server's PubAck. Awaiting it
     // is what makes a resolved publish mean "stored": unawaited, a refusal
     // resolved as a success and escaped as an unhandled rejection, which
-    // terminates a Deno or Node process. The client bounds the wait itself
-    // (measured: TIMEOUT after 5 s against a paused server).
+    // terminates a Deno or Node process. M119a bounds the wait by
+    // `publishTimeoutMs`, passed to the client as its own `timeout` and held
+    // by `withDeadline` as well (the client's default was a fixed 5 s).
     const realJs = this.#js as unknown as {
       publish(
         subject: string,
         data: Uint8Array,
-        options?: { headers: INatsHeaders } | { msgID: string },
+        options: { timeout: number; headers?: INatsHeaders; msgID?: string },
       ): Promise<unknown>;
     };
     const natsHeaders = this.#headersFactory?.();
-    try {
-      if (natsHeaders) {
-        for (const [key, value] of Object.entries(wireHeaders)) natsHeaders.set(key, value);
-        // NATS's native mapping: the server de-duplicates within the stream's
-        // `duplicate_window` from this header. Framework-written, because the
-        // `nats-` prefix is reserved for callers.
-        if (validated.deduplicationId !== undefined) {
-          natsHeaders.set(NATS_MSG_ID_HEADER, validated.deduplicationId);
-        }
-        await realJs.publish(topic, data, { headers: natsHeaders });
-      } else {
-        // No `MsgHdrs` factory: an injected connection carries no nats module,
-        // so there is nothing to build headers with. Publishing still
-        // succeeds, but trace context and caller headers cannot cross this
-        // broker — report it once rather than dropping them silently on every
-        // publish. The de-duplication id survives: nats.js's own `msgID`
-        // option builds the `Nats-Msg-Id` header internally, so the server
-        // still de-duplicates.
-        this.#reportMissingHeaderChannel(wireHeaders);
-        if (validated.deduplicationId !== undefined) {
-          await realJs.publish(topic, data, { msgID: validated.deduplicationId });
-        } else {
-          await realJs.publish(topic, data);
-        }
+    const publishOptions: { timeout: number; headers?: INatsHeaders; msgID?: string } = {
+      timeout: this.#publishTimeoutMs || 2147483647,
+    };
+    if (natsHeaders) {
+      for (const [key, value] of Object.entries(wireHeaders)) natsHeaders.set(key, value);
+      // NATS's native mapping: the server de-duplicates within the stream's
+      // `duplicate_window` from this header. Framework-written, because the
+      // `nats-` prefix is reserved for callers.
+      if (validated.deduplicationId !== undefined) {
+        natsHeaders.set(NATS_MSG_ID_HEADER, validated.deduplicationId);
       }
+      publishOptions.headers = natsHeaders;
+    } else {
+      // No `MsgHdrs` factory: an injected connection carries no nats module,
+      // so there is nothing to build headers with. Publishing still
+      // succeeds, but trace context and caller headers cannot cross this
+      // broker — report it once rather than dropping them silently on every
+      // publish. The de-duplication id survives: nats.js's own `msgID`
+      // option builds the `Nats-Msg-Id` header internally, so the server
+      // still de-duplicates.
+      this.#reportMissingHeaderChannel(wireHeaders);
+      if (validated.deduplicationId !== undefined) publishOptions.msgID = validated.deduplicationId;
+    }
+    const timeoutError = (): PublishTimeoutError =>
+      new PublishTimeoutError(
+        `NATS did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+        { topic, timeoutMs: this.#publishTimeoutMs },
+      );
+    try {
+      await withDeadline(() => realJs.publish(topic, data, publishOptions), {
+        timeoutMs: this.#publishTimeoutMs,
+        onTimeout: timeoutError,
+        timing: resolveProbeTiming(this.#runtime),
+      });
     } catch (error) {
+      if (error instanceof PublishTimeoutError) throw error;
+      if ((error as { code?: unknown } | null)?.code === 'TIMEOUT') throw timeoutError();
       throw new Error(describePublishRefusal(topic, error), { cause: error });
     }
   }
 
   /**
-   * Subscribes to a topic using JetStream durable consumers.
+   * Subscribes through a durable JetStream group. Without an explicit queue,
+   * replicas share `<defaultQueue>.<topic>`, starting at new messages when the
+   * group is first created. Explicit queues retain the server's delivery policy.
+   * Internal reply inboxes use ephemeral consumers and recover deleted handles.
    *
    * @typeParam T - The message payload type
    * @param topic - The subject to subscribe to
@@ -625,10 +668,12 @@ export class NatsBroker implements MessageBrokerAdapter {
     // M101b (V8-6): the raw queue may contain characters the nats client
     // refuses in a consumer name (the reply inbox's `rr.inbox.<uuid>` always
     // does), so it is encoded; the SUBJECT filter below stays verbatim.
-    const queue = options?.queue ?? `messaging-${this.#runtime.uuid()}`;
+    const transient =
+      (options as InternalSubscribeOptions | undefined)?.[REPLY_INBOX_TRANSIENT] === true;
+    const queue = options?.queue ?? `${this.#defaultQueue}.${topic}`;
     const consumerName = toJetStreamConsumerName(queue);
     const mappedQueue = this.#consumerQueues.get(consumerName);
-    if (mappedQueue !== undefined && mappedQueue !== queue) {
+    if (!transient && mappedQueue !== undefined && mappedQueue !== queue) {
       throw new NatsConsumerNameCollisionError(queue, mappedQueue, consumerName);
     }
 
@@ -647,36 +692,47 @@ export class NatsBroker implements MessageBrokerAdapter {
       consumers: {
         add(stream: string, config: unknown): Promise<unknown>;
         info(stream: string, name: string): Promise<{ config: ConsumerIdentity }>;
+        delete(stream: string, name: string): Promise<unknown>;
       };
     };
 
-    // Ensure durable consumer exists. The raw queue is recorded as consumer
-    // metadata so a later process can tell which queue created the name.
+    // A group's consumer is durable and records its raw queue as metadata, so
+    // a later process can tell which queue created the name. A queue-less
+    // group (`<defaultQueue>.<topic>`, M119a) starts at new messages when it
+    // is first created, as a new Kafka group does; an explicit queue keeps the
+    // server's delivery policy. The reply inbox is ephemeral: unique per
+    // process, reaped by the server after `inactive_threshold`, deleted on close.
+    const consumerConfig = {
+      name: consumerName,
+      filter_subject: topic,
+      ack_policy: 'explicit',
+      ...(transient
+        ? {
+            deliver_policy: 'new',
+            inactive_threshold: INBOX_INACTIVE_THRESHOLD_NS,
+          }
+        : {
+            durable_name: consumerName,
+            metadata: { [QUEUE_METADATA_KEY]: queue },
+            ...(options?.queue === undefined ? { deliver_policy: 'new' } : {}),
+          }),
+    };
     try {
-      await jsmTyped.consumers.add(this.#streamName, {
-        name: consumerName,
-        filter_subject: topic,
-        durable_name: consumerName,
-        ack_policy: 'explicit',
-        metadata: { [QUEUE_METADATA_KEY]: queue },
-      });
+      await jsmTyped.consumers.add(this.#streamName, consumerConfig);
     } catch (err) {
       // The server answers an IDENTICAL config idempotently, so this arm is
       // reached only when a consumer of this name exists with a different
       // config — another queue, another topic, or one created before M101b
       // without the metadata. Attaching blindly would let two independent
       // queues (or two topics) split one consumer's deliveries.
-      if (!isConsumerExistsError(err)) {
-        throw err;
-      }
+      if (transient || !isConsumerExistsError(err)) throw err;
       const { config } = await jsmTyped.consumers.info(this.#streamName, consumerName);
-      const recordedQueue = config.metadata?.[QUEUE_METADATA_KEY];
-      const owner = recordedQueue ?? config.durable_name ?? consumerName;
+      const owner = config.metadata?.[QUEUE_METADATA_KEY] ?? config.durable_name ?? consumerName;
       if (owner !== queue || config.filter_subject !== topic) {
         throw new NatsConsumerNameCollisionError(queue, owner, consumerName);
       }
     }
-    this.#consumerQueues.set(consumerName, queue);
+    if (!transient) this.#consumerQueues.set(consumerName, queue);
 
     const realJsTyped = realJs as unknown as {
       consumers: {
@@ -697,8 +753,8 @@ export class NatsBroker implements MessageBrokerAdapter {
       consume(options: { callback: (msg: unknown) => void }): Promise<unknown>;
     };
 
-    const subscription = await consumerTyped.consume({
-      callback: (msg) => {
+    const consumeOptions = {
+      callback: (msg: unknown) => {
         const msgTyped = msg as unknown as {
           data: Uint8Array;
           seq: number;
@@ -772,30 +828,121 @@ export class NatsBroker implements MessageBrokerAdapter {
           fail(error);
         }
       },
-    });
+    };
+    const subscription = await consumerTyped.consume(consumeOptions);
 
+    const deleteConsumer = async (): Promise<void> => {
+      try {
+        await withDeadline(() => jsmTyped.consumers.delete(this.#streamName, consumerName), {
+          timeoutMs: 2000,
+          onTimeout: () => new Error('NATS inbox delete exceeded 2000 ms'),
+          timing: resolveProbeTiming(this.#runtime),
+        });
+      } catch (error) {
+        this.#reportLifecycleError('inbox delete', error);
+      }
+    };
     const activeConsumer: ActiveConsumer = {
       id: subscriptionId,
       consumer,
       subscription,
+      active: true,
+      close: async () => {
+        if (!activeConsumer.active) return;
+        activeConsumer.active = false;
+        activeConsumer.cancelRetry?.();
+        this.#stopConsumer(activeConsumer.subscription);
+        this.#activeConsumers.delete(subscriptionId);
+        if (transient) await deleteConsumer();
+      },
     };
     this.#activeConsumers.set(subscriptionId, activeConsumer);
 
-    return {
-      unsubscribe: (): Promise<void> => {
-        const consumer = this.#activeConsumers.get(subscriptionId);
-        if (consumer) {
-          try {
-            const realSub = consumer.subscription as unknown as { stop(): void };
-            realSub.stop();
-          } catch {
-            // Ignore errors
-          }
-          this.#activeConsumers.delete(subscriptionId);
-        }
-        return Promise.resolve();
-      },
+    const startConsuming = async (): Promise<unknown> => {
+      const replacement = await realJsTyped.consumers.get(this.#streamName, consumerName);
+      return await (replacement as typeof consumerTyped).consume(consumeOptions);
     };
+    const recover = async (): Promise<void> => {
+      this.#stopConsumer(activeConsumer.subscription);
+      while (activeConsumer.active) {
+        try {
+          await jsmTyped.consumers.add(this.#streamName, consumerConfig);
+          const replacement = await startConsuming();
+          if (!activeConsumer.active) {
+            this.#stopConsumer(replacement);
+            await deleteConsumer();
+            return;
+          }
+          activeConsumer.subscription = replacement;
+          void watch(replacement);
+          return;
+        } catch (error) {
+          this.#reportLifecycleError('inbox recovery', error);
+          if (!activeConsumer.active) return;
+          await new Promise<void>((resolve) => {
+            const timer = this.#runtime.setTimeout(() => {
+              delete activeConsumer.cancelRetry;
+              resolve();
+            }, this.#reconnect.reconnectTimeWait);
+            activeConsumer.cancelRetry = () => {
+              this.#runtime.clearTimeout(timer);
+              delete activeConsumer.cancelRetry;
+              resolve();
+            };
+          });
+        }
+      }
+    };
+    const watch = async (handle: unknown): Promise<void> => {
+      const messages = handle as { status?: () => Promise<AsyncIterable<{ type: string }>> };
+      if (typeof messages.status !== 'function') return;
+      try {
+        // nats 2.29 resolves the status iterator asynchronously, just like consume().
+        for await (const event of await messages.status()) {
+          if (!activeConsumer.active || activeConsumer.subscription !== handle) return;
+          if (event.type === 'consumer_not_found' || event.type === 'consumer_deleted') {
+            await recover();
+            return;
+          }
+        }
+      } catch (error) {
+        this.#reportLifecycleError('inbox status', error);
+      }
+    };
+    if (transient) void watch(subscription);
+    return { unsubscribe: activeConsumer.close };
+  }
+
+  /**
+   * Stops a consume handle. `stop()` is a `ConsumerMessages` member, so the
+   * SUBSCRIPTION handle is what carries it — the `Consumer` has only
+   * `info`/`delete`/`next`/`fetch`/`consume`, and calling it there raised a
+   * swallowed `TypeError` that left the callbacks running.
+   *
+   * @param handle - The `ConsumerMessages` handle `consume()` resolved to
+   */
+  #stopConsumer(handle: unknown): void {
+    try {
+      (handle as { stop(): void }).stop();
+    } catch (error) {
+      this.#reportLifecycleError('consumer stop', error);
+    }
+  }
+
+  /**
+   * Reports a consumer-lifecycle failure (stop, inbox delete, recovery, the
+   * leaked-consumer sweep) to the logger. Never throws: a failing logger must
+   * not interrupt shutdown or recovery.
+   *
+   * @param operation - The lifecycle step that failed, named in the log line
+   * @param error - The failure, rendered through `describeError`
+   */
+  #reportLifecycleError(operation: string, error: unknown): void {
+    try {
+      this.#logger?.error(`NatsBroker ${operation} failed: ${describeError(error)}`);
+    } catch {
+      // Last-resort logging must not interrupt shutdown or recovery.
+    }
   }
 
   /** Subscribes through the header-aware internal path. @internal */

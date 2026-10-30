@@ -48,6 +48,9 @@ await app.start({ port: 3000 });
 Nothing else changes. `ws.room('lobby').broadcast(data)` and `sse.channel('news').publish(msg)` now
 reach clients on every replica.
 
+The memory, messaging, and Redis transports expose `handlerErrors` as the most recent 100 subscriber
+errors, oldest first. Delivery continues to other subscribers when a handler throws.
+
 ## Transports
 
 | `transport`   | Crosses processes | Dependencies                   | Notes                                                                         |
@@ -85,6 +88,14 @@ first error of an outage at `warn`, identical repeats at `debug`, the recovery a
 of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
 listener: it belongs to the caller. Set `connectionErrorReporter` to route them elsewhere.
 
+**node-redis.** To use node-redis instead of ioredis, pass two adapters —
+`client: fromNodeRedis(base)` and `subscriber: fromNodeRedis(base.duplicate())`, where
+`base = createClient({ url })` from `redis` — mirroring the two connections the transport builds.
+When the backplane starts it connects an injected client that has not connected yet
+(`status === 'wait'`, a lazy ioredis client included), so its health reports the publisher's state
+from the start. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 ## Options
 
 | Option                    | Applies to         | Default                  | Description                                                                                                                                                       |
@@ -103,15 +114,27 @@ listener: it belongs to the caller. Set `connectionErrorReporter` to route them 
 
 ## Diagnostics (M98l)
 
+Subscriber failures, both synchronous throws and returned promise rejections, are isolated and
+reported through the application logger. The first failure per handler warns, further failures debug
+with a running `repeats` count, and successful completion logs one recovery at info and rearms the
+warning. Messages use common's `describeError`; metadata includes the frame kind and name, never its
+data. The logger is read at call time and sink failures are swallowed.
+
+Set `onHandlerError: (error, frame) => { ... }` on the memory, messaging or Redis options to receive
+every failure instead of default logging. A throwing hook is swallowed. Direct transport
+constructors accept an optional trailing `IRealtimeHandlerErrorReporter`; with no reporter they
+retain their bounded history only. `handlerErrors` keeps the most recent 100 failures in either
+mode, including asynchronous rejections.
+
 `RealtimeBackplanePlugin({ transport: 'redis', url, diagnostics: { enabled: true, alias: 'fanout' } })`
 counts, for the local diagnostics connector's `GET /v1/realtime` (`@setu-ts/diagnostics-plugin`),
 how many publications resolved or rejected (with the duration of the last one) and how many arriving
 frames reached the local handlers. A publication's success means the transport's `publish()`
 resolved — never that a peer received it — and a receive is counted only after the transport's own
-frame-shape and own-origin filters admitted the frame; a receive where any local handler threw is
-`failed`. A backplane reports no gauges. No frame, room or channel name, payload, `exceptId` or
-origin is ever captured. A `'custom'` transport is never observed and its options accept no
-`diagnostics` field.
+frame-shape and own-origin filters admitted the frame; a receive where any local handler threw
+synchronously is `failed`. An async outcome is unknown when this count is recorded. A backplane
+reports no gauges. No frame, room or channel name, payload, `exceptId` or origin is ever captured. A
+`'custom'` transport is never observed and its options accept no `diagnostics` field.
 
 Without the option the plugin registers an inert `disabled` source and nothing is attached to the
 transport. Observation never changes a result: a rejected publish still rejects with the same
@@ -184,6 +207,12 @@ reports `'unknown'`. `/ready` therefore remains 200 for this shared dependency c
 
 `data` reports `{ transport, origin, reachable }`, where `reachable` is `true`, `false`, or
 `'unknown'`.
+
+**Bounded probe (M119b, V10-20).** The reachability check is now cached for 5 s and bounded at 2 s.
+A check that does not answer within the bound reports `reachable: 'unknown'` and the status stays
+`up`; previously the unbounded Redis `PING` outlived the health indicator's 5 s deadline and read
+`down`, taking the replica out of rotation for a paused Redis. A transport without a probe still
+reports `'unknown'`.
 
 ## Exports
 

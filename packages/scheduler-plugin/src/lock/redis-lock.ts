@@ -95,7 +95,10 @@ async function loadIoredis(): Promise<typeof import('ioredis').Redis> {
     const mod = await import('ioredis');
     return mod.Redis;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('ioredis', { cause: error });
+    throw new OptionalDependencyUnavailableError('ioredis', {
+      requiredBy: '@setu-ts/scheduler-plugin',
+      cause: error,
+    });
   }
 }
 

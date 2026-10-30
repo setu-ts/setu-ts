@@ -8,6 +8,7 @@ import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';
 import { listSeamSpecs } from '../../../src/seams/registry.ts';
+import { FUNCTIONAL_CONTROLLERS_SEAM } from '../../../src/seams/http.ts';
 import type { SeamSpec } from '../../../src/seams/seam-spec.ts';
 import { seamSpecFor } from '../schematics/_shared.ts';
 import { deriveNames } from '../../../src/utils/names.ts';
@@ -19,9 +20,10 @@ const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
 /** A directory stat. */
 const DIR_STAT: StatResult = { isFile: false, isDirectory: true, size: 0 };
 /** A stat rejection shaped like a real runtime's missing-path error. */
-const MISSING = new Error('NotFound');
+// The shape the real adapters throw for a vanished path (`filesystem-errors.ts`).
+const MISSING = Object.assign(new Error('gone'), { code: 'ENOENT' });
 
-const ROUTES = seamSpecFor('route')!;
+const ROUTES = FUNCTIONAL_CONTROLLERS_SEAM;
 const PLUGINS = seamSpecFor('plugin')!;
 const MIDDLEWARE = seamSpecFor('middleware')!;
 
@@ -60,7 +62,13 @@ function fsWith(
 ): IFileSystem {
   const { stats = {}, sources = {}, spec = ROUTES } = options;
   return {
-    readdir: () => (entries instanceof Error ? Promise.reject(entries) : Promise.resolve(entries)),
+    realPath: (path) => Promise.resolve(path),
+    readdir: (path) =>
+      !/\/src\/[^/]+$/.test(path)
+        ? Promise.resolve([])
+        : entries instanceof Error
+          ? Promise.reject(entries)
+          : Promise.resolve(entries),
     stat: (path: string) => {
       const entry = path.slice(path.lastIndexOf('/') + 1);
       const result = stats[entry];
@@ -87,21 +95,23 @@ describe('readArtifactNames', () => {
   it('refuses hostile artifact names in flat and module families, never importing them', async () => {
     const hostile = ["q'y", 'Bad_Name', '9lives', 'x\nforged', 'x\u001b[31m'];
     for (const name of hostile) {
-      const flat = await readArtifactNames(fsWith([`${name}.routes.ts`]), '/app', ROUTES);
+      const flat = await readArtifactNames(fsWith([`${name}.controller.ts`]), '/app', ROUTES);
       expect(flat.names).toEqual([]);
-      expect(flat.skipped.map((skip) => skip.path)).toEqual([`${ROUTES.dir}/${name}.routes.ts`]);
+      expect(flat.skipped.map((skip) => skip.path)).toEqual([
+        `${ROUTES.dir}/${name}.controller.ts`,
+      ]);
       expect(flat.adopted).toEqual([]);
     }
     const fs = createFakeFs(
       Object.fromEntries(
         hostile.map((name) => [
-          `/app/src/modules/orders/${name}.routes.ts`,
+          `/app/src/modules/orders/${name}.controller.ts`,
           wellFormed(ROUTES, name),
         ]),
       ),
     );
     const scoped = await scanModuleArtifacts(fs, '/app', 'orders');
-    expect(scoped.artifacts['route']).toEqual([]);
+    expect(scoped.artifacts['controller']).toEqual([]);
     expect(scoped.skipped).toHaveLength(hostile.length);
     expect(ROUTES.renderBarrel(scoped.artifacts)).not.toContain("q'y");
   });
@@ -109,10 +119,12 @@ describe('readArtifactNames', () => {
   // file there; a link to `/dev/zero` read forever. Neither the barrel nor an
   // artifact is opened unless stat reports a regular file under the cap.
   it('never opens a barrel or artifact that is not a regular file under the cap', async () => {
-    const base = fsWith(['user.routes.ts', 'huge.routes.ts'], {
+    const base = fsWith(['user.controller.ts', 'huge.controller.ts', 'pipe.controller.ts'], {
       stats: {
         'index.ts': { isFile: false, isDirectory: false, size: 0 },
-        'huge.routes.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+        'huge.controller.ts': { isFile: true, isDirectory: false, size: 1024 * 1024 + 1 },
+        // A FIFO or a link to a device: neither a file nor a directory.
+        'pipe.controller.ts': { isFile: false, isDirectory: false, size: 0 },
       },
     });
     const opened: string[] = [];
@@ -125,14 +137,19 @@ describe('readArtifactNames', () => {
     };
     const scan = await readArtifactNames(fs, '/app', ROUTES);
     expect(scan.names).toEqual(['user']);
-    expect(opened).toEqual(['user.routes.ts']);
+    expect(opened).toEqual(['user.controller.ts']);
+    // Left out of the barrel, as before, but reported rather than silently dropped.
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/huge.controller.ts`, reason: 'too-large' },
+      { path: `${ROUTES.dir}/pipe.controller.ts`, reason: 'not-a-file' },
+    ]);
   });
 
   it('returns names sorted, with the suffix stripped', async () => {
     // Enumeration order is filesystem-defined; the sort is what makes the regenerated
     // barrel byte-identical between two machines holding the same artifacts.
     const scan = await readArtifactNames(
-      fsWith(['user.routes.ts', 'billing.routes.ts', 'order.routes.ts']),
+      fsWith(['user.controller.ts', 'billing.controller.ts', 'order.controller.ts']),
       '/app',
       ROUTES,
     );
@@ -142,7 +159,7 @@ describe('readArtifactNames', () => {
 
   it('excludes an entry whose suffix does not match', async () => {
     const scan = await readArtifactNames(
-      fsWith(['user.routes.ts', 'notes.md', 'helper.ts']),
+      fsWith(['user.controller.ts', 'notes.md', 'helper.ts']),
       '/app',
       ROUTES,
     );
@@ -164,8 +181,8 @@ describe('readArtifactNames', () => {
     // A directory cannot be imported, so admitting one would make the barrel name a
     // module that does not exist.
     const scan = await readArtifactNames(
-      fsWith(['user.routes.ts', 'legacy.routes.ts'], {
-        stats: { 'legacy.routes.ts': DIR_STAT },
+      fsWith(['user.controller.ts', 'legacy.controller.ts'], {
+        stats: { 'legacy.controller.ts': DIR_STAT },
       }),
       '/app',
       ROUTES,
@@ -173,10 +190,16 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not a rejection: nothing is wrong with an unrelated directory.
     expect(scan.skipped).toEqual([]);
+    // Nor an unreadable artifact: `setu check` must not fail a project over it.
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('excludes a bare suffix, which would derive an empty symbol name', async () => {
-    const scan = await readArtifactNames(fsWith(['.routes.ts', 'user.routes.ts']), '/app', ROUTES);
+    const scan = await readArtifactNames(
+      fsWith(['.controller.ts', 'user.controller.ts']),
+      '/app',
+      ROUTES,
+    );
     expect(scan.names).toEqual(['user']);
   });
 
@@ -189,8 +212,8 @@ describe('readArtifactNames', () => {
 
   it('skips one unreadable entry and keeps the rest', async () => {
     const scan = await readArtifactNames(
-      fsWith(['user.routes.ts', 'gone.routes.ts'], {
-        stats: { 'gone.routes.ts': MISSING },
+      fsWith(['user.controller.ts', 'gone.controller.ts'], {
+        stats: { 'gone.controller.ts': MISSING },
       }),
       '/app',
       ROUTES,
@@ -198,18 +221,22 @@ describe('readArtifactNames', () => {
     expect(scan.names).toEqual(['user']);
     // Not reported: the filesystem moved under us, the artifact is not at fault.
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([]);
   });
 
   it('skips an entry whose source cannot be read', async () => {
     const scan = await readArtifactNames(
-      fsWith(['user.routes.ts', 'locked.routes.ts'], {
-        sources: { 'locked.routes.ts': new Error('EACCES') },
+      fsWith(['user.controller.ts', 'locked.controller.ts'], {
+        sources: { 'locked.controller.ts': new Error('EACCES') },
       }),
       '/app',
       ROUTES,
     );
     expect(scan.names).toEqual(['user']);
     expect(scan.skipped).toEqual([]);
+    expect(scan.unreadable).toEqual([
+      { path: `${ROUTES.dir}/locked.controller.ts`, reason: 'unclassifiable' },
+    ]);
   });
 
   // The regression that motivated the export check. `middleware` and `metric` each gained
@@ -278,18 +305,20 @@ describe('readArtifactNames', () => {
 
     it('reports a project-relative path, which is what a message should name', async () => {
       const scan = await readArtifactNames(
-        fsWith(['user.routes.ts'], { sources: { 'user.routes.ts': 'export const X = 1;' } }),
+        fsWith(['user.controller.ts'], {
+          sources: { 'user.controller.ts': 'export const X = 1;' },
+        }),
         '/some/deep/project',
         ROUTES,
       );
-      expect(scan.skipped[0]?.path).toBe('src/controllers/user.routes.ts');
+      expect(scan.skipped[0]?.path).toBe('src/controllers/user.controller.ts');
     });
 
     it('accepts the named-re-export form as well as a declaration', async () => {
       const scan = await readArtifactNames(
-        fsWith(['user.routes.ts'], {
+        fsWith(['user.controller.ts'], {
           sources: {
-            'user.routes.ts': 'function impl() {}\nexport { impl as registerUserRoutes };',
+            'user.controller.ts': 'function impl() {}\nexport { impl as registerUserRoutes };',
           },
         }),
         '/app',
@@ -302,8 +331,8 @@ describe('readArtifactNames', () => {
       // A doc comment or a call naming the symbol must not admit the file — that would put
       // an unresolvable import in the developer's barrel.
       const scan = await readArtifactNames(
-        fsWith(['user.routes.ts'], {
-          sources: { 'user.routes.ts': '// see registerUserRoutes\nregisterUserRoutes();' },
+        fsWith(['user.controller.ts'], {
+          sources: { 'user.controller.ts': '// see registerUserRoutes\nregisterUserRoutes();' },
         }),
         '/app',
         ROUTES,
@@ -350,11 +379,13 @@ describe('scanArtifacts', () => {
 
   it('aggregates rejections across families', async () => {
     const scan = await scanArtifacts(
-      fsWith(['broken.routes.ts'], { sources: { 'broken.routes.ts': 'export const X = 1;' } }),
+      fsWith(['broken.controller.ts'], {
+        sources: { 'broken.controller.ts': 'export const X = 1;' },
+      }),
       '/app',
       [ROUTES],
     );
     expect(scan.skipped).toHaveLength(1);
-    expect(scan.artifacts['route']).toEqual([]);
+    expect(scan.artifacts['controller']).toEqual([]);
   });
 });

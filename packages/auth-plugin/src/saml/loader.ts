@@ -28,7 +28,10 @@ export async function importSamlModule(): Promise<unknown> {
   try {
     return await import('@node-saml/node-saml');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError(SAML_SPECIFIER, { cause: error });
+    throw new OptionalDependencyUnavailableError(SAML_SPECIFIER, {
+      requiredBy: '@setu-ts/auth-plugin',
+      cause: error,
+    });
   }
 }
 

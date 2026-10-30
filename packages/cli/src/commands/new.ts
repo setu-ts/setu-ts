@@ -8,6 +8,7 @@
  * @module
  */
 
+import { planNodeDevtool } from '../devtool/npm-manifest.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
 import type { ParsedArgs } from '../args.ts';
@@ -15,6 +16,8 @@ import { stringFlag } from '../args.ts';
 import type { Prompter } from '../prompt.ts';
 import { resolveNewChoices } from './new-interactive.ts';
 import {
+  readArmFlag,
+  redisClientRefusal,
   brokerComposeFiles,
   brokerEnvVariables,
   standaloneOverlayRefusal,
@@ -43,6 +46,7 @@ import {
 } from '../constants.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { resolveLoggerChoice, withLogger } from '../templates/logger.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import {
   cliInvocation,
@@ -69,7 +73,14 @@ import {
 } from '../workspace/runtime-profile.ts';
 import { workspaceRootFiles } from '../workspace/root-files.ts';
 import type { PortProbe } from '../workspace/port-probe.ts';
-import { deriveNames, escapeName, isPathSegmentSafe, PROJECT_NAME_RULE } from '../utils/names.ts';
+import {
+  deriveNames,
+  escapeName,
+  isPathSegmentSafe,
+  isWorkerNameSafe,
+  PROJECT_NAME_RULE,
+  WORKER_NAME_RULE,
+} from '../utils/names.ts';
 import {
   findExisting,
   reportDryRunPlan,
@@ -82,6 +93,7 @@ import {
 } from '../utils/file-writer.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 import { runAgentsCommand } from './agents.ts';
+import { runExampleNew } from '../examples/new.ts';
 
 /**
  * Everything `runNewCommand` reaches the outside world through.
@@ -109,6 +121,8 @@ export interface NewDependencies {
   readonly ask?: Prompter;
   /** Cooperative interruption signal checked at prompts and writes. */
   readonly interrupt?: AbortSignal;
+  /** Downloads example files; defaults to globalThis.fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -203,6 +217,14 @@ function planWorkspace(
     };
   }
 
+  if (args.flags['logger'] !== undefined) {
+    return {
+      ok: false,
+      message:
+        '--logger applies to an application, not a workspace root. Use setu generate app <name> --template rest --logger <name>.',
+    };
+  }
+
   if (args.flags['depends-on'] !== undefined) {
     return { ok: false, message: dependsOnRefusal() };
   }
@@ -278,7 +300,10 @@ function readTransport(args: ParsedArgs):
     };
   }
 
-  const spec = getTransport(named);
+  const spec = getTransport(
+    named,
+    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis',
+  );
   if (spec === undefined) {
     // An own-key read: the table is a plain object, so `constructor` or
     // `toString` would otherwise take the alias branch and be suggested back.
@@ -344,56 +369,6 @@ function dependsOnRefusal(): string {
     `--depends-on applies to \`${PROGRAM_NAME} generate ${APP_VERB} <name>\`: it names an ` +
     `existing workspace member this service waits for, and only a workspace has members.`
   );
-}
-
-/**
- * Reads and validates one standalone transport-backend flag.
- *
- * The accepted set is DERIVED from the registry (`listBrokers`/`listQueues`), so
- * help text, refusal text and validation cannot drift from the arms that exist.
- * `memory` is always accepted: it states the default the plugin already takes
- * and rewrites nothing.
- *
- * @param args - The parsed arguments
- * @param flag - Which flag is being read
- * @returns The selected spec (undefined when the flag is absent), or the refusal
- */
-function readArmFlag(
-  args: ParsedArgs,
-  flag: 'broker' | 'queue',
-):
-  | { readonly ok: true; readonly spec?: TransportSpec }
-  | {
-      readonly ok: false;
-      readonly message: string;
-    } {
-  const raw = args.flags[flag];
-  if (raw === undefined) return { ok: true };
-
-  const accepted = flag === 'broker' ? listBrokers() : listQueues();
-  if (typeof raw !== 'string') {
-    return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
-  }
-
-  const spec = getTransport(raw);
-  const hasArm =
-    spec !== undefined &&
-    (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
-  if (spec === undefined || (raw !== 'memory' && !hasArm)) {
-    // The two failures are told apart, because "no such transport" and "this
-    // transport has no arm for this flag" are different mistakes.
-    const prefix =
-      spec === undefined
-        ? `Unknown ${flag} "${escapeName(raw)}".`
-        : flag === 'broker'
-          ? `"${raw}" declares no message-broker wiring.`
-          : `"${raw}" declares no queue wiring.`;
-    return {
-      ok: false,
-      message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
-    };
-  }
-  return { ok: true, spec };
 }
 
 /**
@@ -463,7 +438,12 @@ async function planProject(
   args: ParsedArgs,
   probe?: PortProbe,
 ): Promise<
-  | { readonly ok: true; readonly files: readonly GeneratedFile[]; readonly notice?: string }
+  | {
+      readonly ok: true;
+      readonly files: readonly GeneratedFile[];
+      readonly notice?: string;
+      readonly logger?: string;
+    }
   | {
       readonly ok: false;
       readonly message: string;
@@ -522,7 +502,11 @@ async function planProject(
   //
   // The HOST, not the template: `--style class-based` resolves to the
   // template's precomputed variant, and the alias resolves to itself.
-  const host = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const resolved = resolveHost(choice.host ?? MINIMAL_HOST, runtime);
+  const loggerChoice = resolveLoggerChoice(args, runtime, resolved);
+  if (!loggerChoice.ok) return loggerChoice;
+  const host =
+    loggerChoice.logger === undefined ? resolved : withLogger(resolved, loggerChoice.logger);
   const configured = envFile.path === undefined ? host : withEnvFile(host, envFile.path);
   if (configured === undefined) {
     return {
@@ -554,9 +538,7 @@ async function planProject(
     return { ok: false, message: '--devtool-port requires --devtool.' };
   }
   if (devtoolRequested) {
-    // Refused before anything is resolved: the listener refuses every
-    // non-Deno `listen`, so a devtool-enabled non-Deno project would fail at
-    // startup rather than degrade.
+    // Refuse unsupported listener runtimes before any files are planned.
     const runtimeRefusal = devtoolRuntimeRefusal(runtime, 'scaffold');
     if (runtimeRefusal !== undefined) return { ok: false, message: runtimeRefusal };
     // A starter factory owns its construction, and kernel diagnostics reach
@@ -579,6 +561,7 @@ async function planProject(
     return {
       ok: true,
       files: projectFiles(name, runtime, overlaid),
+      ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
       ...(notice === undefined ? {} : { notice }),
     };
   }
@@ -591,10 +574,19 @@ async function planProject(
       message: 'No bindable standalone devtool port remains between 4919 and 5019.',
     };
   }
-  const devHost = withDevtool(overlaid, devtoolPort);
+  const devHost = withDevtool(overlaid, devtoolPort, runtime);
+  const files = [...projectFiles(name, runtime, devHost)];
+  if (runtime === 'node') {
+    const index = files.findIndex((file) => file.path === 'package.json');
+    const manifest = files[index]!;
+    const plan = planNodeDevtool(manifest.contents);
+    if (!plan.ok) return plan;
+    if (plan.contents !== undefined) files[index] = { ...manifest, contents: plan.contents };
+  }
   return {
     ok: true,
-    files: projectFiles(name, runtime, devHost),
+    files,
+    ...(loggerChoice.logger === undefined ? {} : { logger: loggerChoice.logger }),
     ...(notice === undefined ? {} : { notice }),
   };
 }
@@ -630,6 +622,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.log('');
     deps.log('Options:');
     deps.log(`  --template <name>   ${TEMPLATES.join(' | ')}`);
+    deps.log('  --example <app>     Start a standalone Node project from a runnable example');
     deps.log('  --style <name>      Code style for a styleable template: functional | class-based');
     deps.log('  --env-file <path>   Dotenv path for a ConfigPlugin-backed template (default .env)');
     deps.log(`  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (default node)`);
@@ -645,6 +638,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
         `(default ${DEFAULT_TRANSPORT})`,
     );
     deps.log('  --transport-url <url>  Broker endpoint, for the broker transports');
+    deps.log('  --redis-client <name>  ioredis | node-redis (default ioredis; Redis arms only)');
     deps.log(
       `  --broker <name>     Message broker for a standalone project: ` +
         `${listBrokers().join(' | ')} (default memory)`,
@@ -653,9 +647,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
       `  --queue <name>      Job queue backend for a standalone project: ` +
         `${listQueues().join(' | ')} (default memory)`,
     );
+    deps.log('  --logger <name>     console | pino (default pino; console on Cloudflare Workers)');
     deps.log(
       '  --devtool           Emit the development entry for the local diagnostics connector ' +
-        '(Deno only)',
+        '(Deno or Node)',
     );
     deps.log(
       `  --devtool-port <n>  The loopback port the connector binds (default ${DEFAULT_DEVTOOL_PORT})`,
@@ -672,6 +667,8 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.error(usage);
     return EXIT_USAGE;
   }
+
+  if (args.flags['example'] !== undefined) return runExampleNew(rawName, args, deps);
 
   const workspace = args.flags['workspace'] === true;
 
@@ -699,7 +696,24 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     return EXIT_USAGE;
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'node';
+  const redisRefusal = redisClientRefusal(
+    chosen,
+    runtime,
+    ['broker', 'queue', 'transport'].some((flag) => chosen.flags[flag] === 'redis'),
+  );
+  if (redisRefusal !== undefined) {
+    deps.error(redisRefusal);
+    return EXIT_USAGE;
+  }
 
+  // Checked on the name as TYPED: `deriveNames` folds whitespace, so a bare CR,
+  // LF or TAB would otherwise become `-` and scaffold silently, although the
+  // rule says no control character (M119h audit F3; create-cloudflare refuses
+  // such a name rather than converting it).
+  if (/\p{Cc}/u.test(rawName)) {
+    deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
+    return EXIT_USAGE;
+  }
   const names = deriveNames(rawName);
   // The project name becomes a filesystem path (`joinPath(dir, kebab)`) and never
   // an identifier, so it passes the PATH rules every name-taking verb shares — a
@@ -713,12 +727,21 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     deps.error(`Invalid project name: "${escapeName(rawName)}". ${PROJECT_NAME_RULE}`);
     return EXIT_USAGE;
   }
+  // `wrangler.toml` carries the kebab as the Worker's `name`, and wrangler
+  // refuses a name outside `[a-z0-9-]` — a narrower rule than the portable path
+  // one above, which admits `.` and Unicode letters. Checked after it so a
+  // Workers project gets the reason that actually applies.
+  if (runtime === 'cloudflare-workers' && !isWorkerNameSafe(names.kebab)) {
+    deps.error(`Invalid Workers project name: "${escapeName(rawName)}". ${WORKER_NAME_RULE}`);
+    return EXIT_USAGE;
+  }
   const projectName = names.kebab;
 
   // The alias notice, logged once, before anything else — informational, never
   // an error: the alias is byte-identical and stays. Only the standalone plan
   // carries one: a workspace root refuses --template, so it can never be an alias.
   let planNotice: string | undefined;
+  let planLogger: string | undefined;
   let plan:
     | { readonly ok: true; readonly files: readonly GeneratedFile[] }
     | {
@@ -729,7 +752,10 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     plan = planWorkspace(projectName, runtime, chosen);
   } else {
     const projectPlan = await planProject(projectName, runtime, chosen, deps.portAvailable);
-    if (projectPlan.ok) planNotice = projectPlan.notice;
+    if (projectPlan.ok) {
+      planNotice = projectPlan.notice;
+      planLogger = projectPlan.logger;
+    }
     plan = projectPlan;
   }
   if (!plan.ok) {
@@ -772,6 +798,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   }));
 
   if (args.flags['dry-run'] === true) {
+    if (planLogger !== undefined) deps.log(`Logger: ${planLogger}`);
     const code = await reportDryRunPlan(deps, files);
     return code;
   }
@@ -821,12 +848,19 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
   deps.log(`  cd ${projectName}`);
   deps.log(
     runtime === 'deno'
-      ? '  deno task start'
+      ? '  deno task start:dev'
       : runtime === 'cloudflare-workers'
         ? '  npm install && npx wrangler dev'
         : runtime === 'bun'
-          ? '  bun install && bun run start'
-          : '  npm install && npm start',
+          ? '  bun install && bun run start:dev'
+          : '  npm install && npm run start:dev',
   );
+  // `dev` runs main.dev.ts, which exits without the launcher's session pair, so
+  // it is named as the launcher's command rather than printed as a next step.
+  if (chosen.flags['devtool'] !== undefined) {
+    deps.log(
+      `  With the devtool, the launcher runs ${runtime === 'deno' ? '`deno task dev`' : '`npm run dev`'} and supplies the session credentials`,
+    );
+  }
   return EXIT_OK;
 }

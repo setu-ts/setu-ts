@@ -245,3 +245,128 @@ describe('ResponseBuilder', () => {
     });
   });
 });
+
+/** The headers a response ends with, as sorted pairs, read through the public snapshot. */
+function headerPairs(response: ResponseBuilder): [string, string][] {
+  const snapshot = response.snapshot();
+  const init = snapshot.responseInit?.headers;
+  const headers = init !== undefined ? new Headers(init) : snapshot.headers;
+  return [...headers.entries()];
+}
+
+/** Applies a record the slow way: one header() call per entry. */
+function viaHeader(record: Readonly<Record<string, string>>): ResponseBuilder {
+  const response = new ResponseBuilder();
+  for (const name of Object.keys(record)) response.header(name, record[name]!);
+  return response;
+}
+
+const SECURITY = { 'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer' };
+
+describe('ResponseBuilder.setHeaders', () => {
+  const records: readonly (readonly [string, () => Readonly<Record<string, string>>])[] = [
+    ['a frozen plain record (templated)', () => Object.freeze({ ...SECURITY })],
+    ['an unfrozen record', () => ({ ...SECURITY })],
+    [
+      'a frozen null-prototype record (templated)',
+      () => Object.freeze(Object.assign(Object.create(null) as Record<string, string>, SECURITY)),
+    ],
+    [
+      'a frozen record with an accessor (never templated)',
+      () =>
+        Object.freeze(
+          Object.defineProperty({ 'X-Frame-Options': 'DENY' }, 'Referrer-Policy', {
+            get: () => 'no-referrer',
+            enumerable: true,
+          }) as Record<string, string>,
+        ),
+    ],
+    [
+      'a frozen record with a class prototype (never templated)',
+      () => Object.freeze(Object.assign(Object.create({ inherited: 'x' }) as object, SECURITY)),
+    ],
+  ];
+
+  it.each(records)('sets the same headers as header() per entry for %s', (_label, make) => {
+    const record = make();
+    for (let round = 0; round < 2; round++) {
+      const response = new ResponseBuilder().setHeaders(record) as ResponseBuilder;
+      response.json({ ok: true });
+      const expected = viaHeader(record);
+      expected.json({ ok: true });
+      expect(headerPairs(response)).toEqual(headerPairs(expected));
+    }
+  });
+
+  it('gives every response its own copy of a templated record', () => {
+    const record = Object.freeze({ ...SECURITY });
+    const first = new ResponseBuilder();
+    first.setHeaders(record);
+    first.header('x-only-first', '1');
+    const second = new ResponseBuilder();
+    second.setHeaders(record);
+    expect(second.snapshot().headers.has('x-only-first')).toBe(false);
+    expect(first.snapshot().headers.get('x-frame-options')).toBe('DENY');
+  });
+
+  it('honours an unfrozen record changed between calls', () => {
+    const record: Record<string, string> = { 'X-Frame-Options': 'DENY' };
+    new ResponseBuilder().setHeaders(record);
+    record['X-Frame-Options'] = 'SAMEORIGIN';
+    const response = new ResponseBuilder();
+    response.setHeaders(record);
+    expect(response.snapshot().headers.get('x-frame-options')).toBe('SAMEORIGIN');
+  });
+
+  it('applies on top of headers already set, and lets later calls override', () => {
+    const record = Object.freeze({ ...SECURITY });
+    const response = new ResponseBuilder();
+    response.header('x-before', '1');
+    response.setHeaders(record);
+    response.header('x-frame-options', 'SAMEORIGIN');
+    response.text('done');
+    const headers = response.snapshot().headers;
+    expect(headers.get('x-before')).toBe('1');
+    expect(headers.get('referrer-policy')).toBe('no-referrer');
+    expect(headers.get('x-frame-options')).toBe('SAMEORIGIN');
+    expect(headers.get('content-type')).toBe('text/plain; charset=utf-8');
+  });
+
+  it('applies a templated record after a terminal built-in header', () => {
+    const response = new ResponseBuilder();
+    response.json({});
+    response.setHeaders(Object.freeze({ ...SECURITY }));
+    expect(response.snapshot().headers.get('content-type')).toBe('application/json; charset=utf-8');
+    expect(response.snapshot().headers.get('x-frame-options')).toBe('DENY');
+  });
+
+  it.each([
+    ['a frozen', true],
+    ['an unfrozen', false],
+  ] as const)(
+    'refuses %s record with an invalid value exactly as header() does',
+    (_label, frozen) => {
+      const raw = { 'x-ok': 'yes', 'x-bad': 'a\r\nInjected: 1' };
+      const record = frozen ? Object.freeze(raw) : raw;
+      let viaSetHeaders: unknown;
+      const response = new ResponseBuilder();
+      try {
+        response.setHeaders(record);
+      } catch (error) {
+        viaSetHeaders = error;
+      }
+      let viaHeaderCall: unknown;
+      const reference = new ResponseBuilder();
+      try {
+        reference.header('x-ok', 'yes').header('x-bad', 'a\r\nInjected: 1');
+      } catch (error) {
+        viaHeaderCall = error;
+      }
+      expect(viaSetHeaders).toBeInstanceOf(TypeError);
+      expect((viaSetHeaders as Error).message).toBe((viaHeaderCall as Error).message);
+      expect(headerPairs(response)).toEqual(headerPairs(reference));
+      // Refused again on a second use: nothing invalid was cached.
+      expect(() => new ResponseBuilder().setHeaders(record)).toThrow(TypeError);
+    },
+  );
+});

@@ -193,22 +193,35 @@ export async function connect(options: { hostname?: string; port: number }) {
   };
 }
 
-/** Real HTTP listener using Node's adapter of the web Fetch API. */
+/**
+ * Real HTTP listener using Node's adapter of the web Fetch API.
+ *
+ * @throws {Error} If the listener cannot bind its requested address.
+ */
 export async function serveHttp(
   options: { port?: number; hostname?: string; onListen?: (address: { port: number }) => void },
   handler: (request: Request) => Response | Promise<Response>,
 ) {
   const { serve } = await import('@hono/node-server');
-  const { promise, resolve: ready } = Promise.withResolvers<{ port: number }>();
+  const { promise, resolve: ready, reject: failed } = Promise.withResolvers<{ port: number }>();
   const server = serve(
     {
       fetch: handler,
       port: options.port ?? 0,
       hostname: options.hostname ?? '127.0.0.1',
+      // A test helper must not replace the global Request/Response: on the Deno
+      // lane, Deno.serve refuses a Response built from node-server's class.
+      overrideGlobalObjects: false,
     },
     (address) => ready({ port: address.port }),
   );
-  const addr = await promise;
+  server.once('error', failed);
+  let addr: { port: number };
+  try {
+    addr = await promise;
+  } finally {
+    server.removeListener('error', failed);
+  }
   options.onListen?.(addr);
   return {
     addr,

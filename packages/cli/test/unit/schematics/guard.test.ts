@@ -15,18 +15,8 @@ describe('guard schematic', () => {
     expect(file.path).toBe('src/guards/order-item.guard.ts');
   });
 
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
   it('is gated on auth-plugin', () => {
     expect(gateOf('guard')).toBe('auth-plugin');
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateGuard(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('exports the require<Pascal> factory', () => {

@@ -143,7 +143,10 @@ const defaultNodeServeHost: NodeServeHost = {
     try {
       mod = await import('@hono/node-server');
     } catch (error) {
-      throw new OptionalDependencyUnavailableError('@hono/node-server', { cause: error });
+      throw new OptionalDependencyUnavailableError('@hono/node-server', {
+        requiredBy: '@setu-ts/runtime',
+        cause: error,
+      });
     }
     // node-server's own `Request`/`Response` are installed as globals, which
     // is its default and what every Hono-on-Node deployment already runs.

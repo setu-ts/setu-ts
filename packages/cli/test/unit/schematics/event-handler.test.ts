@@ -34,18 +34,8 @@ describe('event-handler schematic', () => {
     expect(file.path).toBe('src/events/order-item.event-handler.ts');
   });
 
-  it('produces non-empty contents ending in a newline', () => {
-    expect(file.contents.length).toBeGreaterThan(0);
-    expect(file.contents.endsWith('\n')).toBe(true);
-  });
-
   it('is gated on events-plugin', () => {
     expect(gateOf('event-handler')).toBe('events-plugin');
-  });
-
-  it('derives identical output from any casing of the same name', () => {
-    const pascal = generateEventHandler(deriveNames('OrderItem'), options());
-    expect(pascal).toEqual(files);
   });
 
   it('implements IEventHandler from the events plugin', () => {

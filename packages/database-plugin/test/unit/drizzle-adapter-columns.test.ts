@@ -300,7 +300,7 @@ describe('DrizzleAdapter table registry', () => {
     });
     await adapter.connect();
     expect(() => adapter.createDataSource('TenantFlag')).toThrow(
-      'Drizzle table \'TenantFlag\' has no "id" column required by the database repository.',
+      'set entities.TenantFlag.primaryKey',
     );
     expect(seen).toEqual([]);
   });
@@ -468,7 +468,7 @@ describe('DrizzleAdapter per-entity primaryKey override', () => {
     });
     await adapter.connect();
     expect(() => adapter.createDataSource('TenantFlag')).toThrow(
-      'Drizzle table \'TenantFlag\' has no "id" column required by the database repository.',
+      'set entities.TenantFlag.primaryKey',
     );
   });
 
@@ -556,7 +556,7 @@ describe('DrizzleAdapter findPage — keyset predicate in emitted SQL', () => {
     const token = encodeCursor({
       orderedValues: ['first'],
       keyValues: ['i1'],
-      sortFingerprint: 'created_at:desc',
+      sortFingerprint: JSON.stringify(['Event', ['id'], 'created_at:desc']),
     });
     await findPage({
       where: {},
@@ -823,7 +823,7 @@ describe('M113g eager key and payload columns', () => {
     });
     await adapter.connect();
     const tx = await adapter.beginTransaction();
-    expect(() => tx.createDataSource('Broken')).toThrow('has no "id" column');
+    expect(() => tx.createDataSource('Broken')).toThrow('has no column "id" for its primary key');
     await tx.rollback();
   });
   for (const method of ['create', 'update', 'updateWhere'] as const) {
@@ -906,6 +906,39 @@ describe('M113g eager key and payload columns', () => {
       await repo.findAll({ select: ['id', 'name'], orderBy: { name: 'asc' }, where: { id: '5' } }),
     ).toEqual([{ id: '5', name: 'Ada' }]);
     expect(seen).toHaveLength(3);
+    await adapter.disconnect();
+  });
+});
+
+describe('M119e column resolution', () => {
+  it('resolves properties first, SQL names only when unique, and no absent column', async () => {
+    const { fieldForColumn, FIELD_FOR_COLUMN } =
+      await import('../../src/adapters/drizzle/field-for-column.ts');
+    const table = pgTable('mapped', { id: text('id'), tenantId: text('tenant_id') });
+    expect(fieldForColumn(table, 'tenantId')).toBe('tenantId');
+    expect(fieldForColumn(table, 'tenant_id')).toBe('tenantId');
+    expect(fieldForColumn(table, 'missing')).toBeUndefined();
+    const ambiguous = {
+      [Symbol.for('drizzle:Columns')]: {
+        first: { name: 'tenant_id' },
+        second: { name: 'tenant_id' },
+      },
+    };
+    expect(fieldForColumn(ambiguous, 'tenant_id')).toBeUndefined();
+    for (const columns of [undefined, null, [], 1]) {
+      expect(fieldForColumn({ id: {}, [Symbol.for('drizzle:Columns')]: columns }, 'id')).toBe('id');
+    }
+    expect(fieldForColumn({ nothing: null, primitive: 1, unnamed: {} }, 'no')).toBeUndefined();
+    const db = drizzle(() => Promise.resolve({ rows: [] }));
+    const adapter = new DrizzleAdapter({
+      drizzleInstance: createDrizzleDatabase(db, (database, work) => database.transaction(work)),
+      drizzleTables: { User: table },
+    });
+    await adapter.connect();
+    const source = adapter.createDataSource('User') as ReturnType<
+      typeof adapter.createDataSource
+    > & { [FIELD_FOR_COLUMN]: (name: string) => string | undefined };
+    expect(source[FIELD_FOR_COLUMN]('tenant_id')).toBe('tenantId');
     await adapter.disconnect();
   });
 });

@@ -56,6 +56,12 @@ The cookie strategy's trade-off is real and worth stating plainly: a stolen cook
 it expires, because nothing server-side is consulted. If you need to log a specific user out right
 now, use a store.
 
+**Ending every session of one user** — after a password change, or from a "sign out everywhere"
+button — needs neither strategy's revocation. `@setu-ts/auth-plugin`'s `signIn.sessionStamp` records
+a digest of a stamp kept on your user record and compares it on every request, so bumping the stamp
+ends all of that user's sessions on the cookie strategy too. See the auth plugin's
+[Ending every session of a user](https://github.com/setu-ts/setu-ts/blob/main/packages/auth-plugin/README.md#ending-every-session-of-a-user).
+
 Sessions also use whole-payload snapshot commits. Two overlapping requests that each change session
 state can therefore lose one change on both the cookie and store strategies; a store improves
 revocation, not concurrent-write merging. Keep writes to one session in one request, and keep state
@@ -276,6 +282,8 @@ non-string value never reaches the comparison)), `ignoreMethods` (default `GET`/
 `true`). `exclude` is only for a separately-mounted non-browser protocol surface such as
 Connect/gRPC — never use it for an application form route.
 
+<!-- version:history -->
+
 **A bearer API beside forms needs no exclusion** (M113e). A request carrying
 `Authorization: Bearer <token>` skips form CSRF when a bearer (header-credential) strategy
 authenticated it AND it restored no session — the session is new — so a JWT- or
@@ -295,7 +303,10 @@ session or the credential source is missing). `Basic` credentials are NOT exempt
 re-send cached Basic credentials automatically. `exemptBearer: false` verifies every unsafe request,
 the behaviour before 0.10.0. A request the bearer rule exempts also gets no browser session:
 whatever its handler writes to the session is not committed and no `Set-Cookie` is sent (M113e, L4),
-so it cannot plant a session in a browser whose cookie no longer restores.
+so it cannot plant a session in a browser whose cookie no longer restores. **This holds even on a
+path listed in `csrf.exclude`**: the bearer rule is checked first, so a bearer→cookie "exchange"
+login route issues no cookie and logs nothing (V10-14). For such a route set `exemptBearer: false`,
+which commits the session as releases before 0.10.0 did.
 
 ### What `SameSite` does not separate
 

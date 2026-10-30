@@ -176,7 +176,10 @@ export async function createLazyClientLoader(url: string): Promise<MongoClientLo
   try {
     mod = (await import('mongodb')) as unknown as MongoSdkModule;
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('mongodb', { cause: error });
+    throw new OptionalDependencyUnavailableError('mongodb', {
+      requiredBy: '@setu-ts/database-plugin',
+      cause: error,
+    });
   }
   return {
     createClient: (): Promise<IMongoClient> => Promise.resolve(new mod.MongoClient(url)),

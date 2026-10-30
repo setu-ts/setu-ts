@@ -435,6 +435,14 @@ export interface ConsumerRetryOptions {
  */
 export interface RedisStreamsMessagingOptions extends MessagingCommonOptions {
   /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647.
+   * Zero disables the bound; an expired publish may still be delivered.
+   * Consumer reads are unaffected.
+   * @defaultValue 15000
+   * @since 0.11.0
+   */
+  publishTimeoutMs?: number;
+  /**
    * Consumer retry policy. maxAttempts includes the initial delivery (default 5).
    * delaysMs defaults to [30000, 60000, 300000, 600000]; a nonempty,
    * nondecreasing list of positive integer milliseconds ≤2147483647.
@@ -526,6 +534,14 @@ export interface RabbitMqMessagingOptions extends MessagingCommonOptions {
  */
 export interface NatsMessagingOptions extends MessagingCommonOptions {
   /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647.
+   * Zero disables the bound; an expired publish may still be delivered.
+   * Consumer reads are unaffected.
+   * @defaultValue 15000
+   * @since 0.11.0
+   */
+  publishTimeoutMs?: number;
+  /**
    * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
    * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
    * Invalid values throw RangeError at construction; an injected client with this option
@@ -575,6 +591,11 @@ export interface NatsMessagingOptions extends MessagingCommonOptions {
    * ```
    */
   streamSubjects?: readonly string[];
+  /**
+   * Shared queue-less group prefix; the group is `<defaultQueue>.<topic>`.
+   * A newly created group starts at new messages; later subscribers resume it.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
 }
 
@@ -784,6 +805,14 @@ export type MessagingPluginOptions =
  * @since 0.1.0
  */
 export interface RedisStreamsOptions {
+  /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647.
+   * Zero disables the bound; an expired publish may still be delivered.
+   * Consumer reads are unaffected.
+   * @defaultValue 15000
+   * @since 0.11.0
+   */
+  publishTimeoutMs?: number;
   /** Shared retry shape used by the Redis plugin arm. */
   consumerRetry?: RedisStreamsMessagingOptions['consumerRetry'];
   /** Reclaim interval; see RedisStreamsMessagingOptions. */
@@ -856,6 +885,14 @@ export interface RabbitMqOptions {
  */
 export interface NatsOptions {
   /**
+   * Publish acknowledgement bound in ms, from 0 through 2147483647.
+   * Zero disables the bound; an expired publish may still be delivered.
+   * Consumer reads are unaffected.
+   * @defaultValue 15000
+   * @since 0.11.0
+   */
+  publishTimeoutMs?: number;
+  /**
    * Lazy connection reconnect policy. Defaults: maxAttempts -1 (forever), waitMs 2000.
    * maxAttempts must be an integer >= -1; waitMs an integer 1–2147483647.
    * Invalid values throw RangeError at construction; an injected client with this option
@@ -881,7 +918,11 @@ export interface NatsOptions {
    * @since 0.5.0
    */
   streamSubjects?: readonly string[];
-  /** Default consumer group name. */
+  /**
+   * Shared queue-less group prefix; the group is `<defaultQueue>.<topic>`.
+   * A newly created group starts at new messages; later subscribers resume it.
+   * @defaultValue 'messaging-consumers'
+   */
   defaultQueue?: string;
   /** Optional logger for error reporting. */
   logger?: { error: (msg: string) => void };

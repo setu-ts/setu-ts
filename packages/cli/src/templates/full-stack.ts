@@ -21,6 +21,7 @@ import {
   seamsFor,
 } from './seam.ts';
 import { renderConfigOptions } from './env-file.ts';
+import { FULL_STACK_UI_FILES } from './full-stack-ui-files.ts';
 import { FULL_STACK_APP_FILES, FULL_STACK_README_SECTION } from './full-stack-app-files.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
 import {
@@ -33,6 +34,8 @@ import {
   FULL_STACK_NPM_DEV_DEPENDENCIES,
   FULL_STACK_TSCONFIG_OPTIONS,
 } from './full-stack-build-files.ts';
+import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
+import { defaultLogger } from './logger.ts';
 
 /**
  * Framework packages the emitted `app/` tree imports.
@@ -72,7 +75,7 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const discovery =
     serviceEndpoints === undefined
       ? ''
-      : `\n      serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
+      : `\n        serviceDiscovery: { provider: 'static', services: ${serviceEndpoints} },`;
   const config =
     runtime === 'cloudflare-workers'
       ? ''
@@ -108,54 +111,69 @@ function fullStackArgs(context: AppFactoryRenderContext): string {
   const reactRouterArm =
     runtime === 'cloudflare-workers'
       ? `...(${moduleArm} ? { serverBuild: ssr.serverBuild } : {
-          // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
-          // and a relative specifier there would resolve against the PLUGIN's
-          // module rather than this project.
-          serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-        }),`
+            // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
+            // and a relative specifier there would resolve against the PLUGIN's
+            // module rather than this project.
+            serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+          }),`
       : `...(${moduleArm} ? { serverBuild: ssr.serverBuild } : {
-          // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
-          // and a relative specifier there would resolve against the PLUGIN's
-          // module rather than this project.
-          serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
-          ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),
-        }),`;
+            // Absolute, deliberately: the plugin does \`await import(serverBuildPath)\`,
+            // and a relative specifier there would resolve against the PLUGIN's
+            // module rather than this project.
+            serverBuildPath: new URL('./build/server/index.js', import.meta.url).href,
+            ...(ssr === undefined ? { assetsDir: './build/client/assets' } : ssr),
+          }),
+          // The production entry passes the module, and the socket server then
+          // serves the client bundle the page loads itself (M120).
+          ...('serverBuild' in (ssr ?? {}) ? { assetsDir: './build/client/assets' } : {}),`;
 
   // The call wraps onto its own line and the body sits two spaces deeper than
   // the single-line form: this argument is long enough that Prettier wraps the
   // call, and a generated project must pass its OWN \`prettier --check\` (M63).
   return `
-    (config): FullStackStarterOptions => ({
-      reactRouter: {
-        // M113d §3.10: the arm is chosen at runtime. On Workers the entry passes
-        // the compiled server build as a MODULE — a bundled Worker cannot resolve
-        // \`new URL(…, import.meta.url)\` against the application. On the socket
-        // targets — and for \`setu commands\`, which loads this config without
-        // the entry — the path arm is unchanged.
-        ${reactRouterArm}
-        populateLoadContext: (ctx, context) => {
-          // The bridge between the kernel request context and a React Router
-          // loader: getSession() needs the kernel context, which a loader never
-          // sees. The keys come from contextKeyFor(), so the copy of
-          // context-keys.server.ts inlined into the server build resolves to the
-          // same key objects this module holds.
-          context.set(sessionContext, getSession(ctx));
-          context.set(csrfContext, getCsrfToken(ctx));
-          context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
-          context.set(secretsContext, ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS));
+    (config): FullStackStarterOptions => {
+      const trustedProxies = config.get<string>('TRUSTED_PROXIES', { default: '' })
+        .split(',').map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+      return {
+        reactRouter: {
+          // Production entries pass the compiled server build as a MODULE so
+          // bundling cannot relocate a path relative to import.meta.url.
+          // Config callers without the entry (tests and setu commands) keep
+          // the absolute path fallback; development supplies the Vite runtime.
+          ${reactRouterArm}
+          populateLoadContext: (ctx, context) => {
+            // The bridge between the kernel request context and a React Router
+            // loader: getSession() needs the kernel context, which a loader never
+            // sees. The keys come from contextKeyFor(), so the copy of
+            // context-keys.server.ts inlined into the server build resolves to the
+            // same key objects this module holds.
+            context.set(sessionContext, getSession(ctx));
+            context.set(csrfContext, getCsrfToken(ctx));
+            context.set(loggerContext, ctx.services.get<ILogger>(CAPABILITIES.LOGGER));
+            context.set(secretsContext, ctx.services.get<ISecretManager>(CAPABILITIES.SECRETS));
+          },
         },
-      },
-      session: {
-        secret: config.getOrThrow<string>('SESSION_SECRET'),
-        csrf: ${csrf},
-      },
-      // Opted in by the scaffold, with the probe and scrape paths excluded so a
-      // kubelet does not write a log line per poll. The plugin's own default
-      // (off) is unchanged.
-      logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },${discovery}
-      // Preserve Origin on native form posts; send no cross-origin referrer.
-      httpSecurity: { headers: { referrerPolicy: 'same-origin' } },${context.swaggerAssets === 'cdn' ? "\n      openapi: { swagger: { assets: 'cdn' } }," : ''}
-    }),
+        session: {
+          secret: config.getOrThrow<string>('SESSION_SECRET'),
+          csrf: ${csrf},
+        },
+        // Opted in by the scaffold, with the probe and scrape paths excluded so a
+        // kubelet does not write a log line per poll. The plugin's own default
+        // (off) is unchanged.
+        logger: {
+          transport: '${context.logger ?? defaultLogger(runtime)}',
+          requestLogging: true,
+          excludePaths: ['/live', '/ready', '/health', '/metrics'],
+        },${context.messaging === undefined ? '' : `\n        messaging: ${context.messaging},`}${context.queue === undefined ? '' : `\n        queue: ${context.queue},`}${discovery}
+        // Preserve Origin on native form posts; send no cross-origin referrer.
+        httpSecurity: {
+          headers: { referrerPolicy: 'same-origin' },
+          ...(trustedProxies.length > 0
+            ? { ipSecurity: { trustProxy: true, trustedProxies } }
+            : {}),
+        },${context.swaggerAssets === 'cdn' ? "\n        openapi: { swagger: { assets: 'cdn' } }," : ''}
+      };
+    },
     { env${config} },
   `;
 }
@@ -195,7 +213,8 @@ const FULL_STACK_SEAMS = seamsFor(new Set<string>());
  *
  * Registers no plugins of its own: `appFactory` supplies the whole set, and
  * the starter adds the error-handler middleware itself, so `middleware` is
- * empty rather than duplicating it.
+ * empty rather than duplicating it. A non-empty TRUSTED_PROXIES CIDR list
+ * enables forwarded identity and public-origin trust for TLS proxy deployments.
  */
 export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   name: 'full-stack',
@@ -208,11 +227,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
     args: fullStackArgs,
     // The REST starter underneath registers these unconditionally; listed here
     // because the factory hides them from the plugin list the README reads.
-    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin'],
+    composes: ['health-plugin', 'metrics-plugin', 'openapi-plugin', 'logger-plugin'],
     parameter: {
       name: 'ssr',
       type: "{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>",
-      doc: 'The development SSR runtime `dev.ts` supplies; on Workers the entry passes the compiled server build module.',
+      doc: 'The Vite runtime start:dev supplies; production entries pass the compiled server build module.',
       readOn: ['deno', 'node', 'bun', 'cloudflare-workers'],
     },
   },
@@ -236,6 +255,7 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   ],
   files: [
     ...FULL_STACK_APP_FILES,
+    ...FULL_STACK_UI_FILES,
     ...buildFullStackBuildFiles(FULL_STACK_APP_FRAMEWORK_PACKAGES),
     ...seamFiles(FULL_STACK_SEAMS),
   ],
@@ -245,11 +265,28 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
   setupCalls: [...seamSetupCalls(FULL_STACK_SEAMS), ...seamPluginRegistrations(FULL_STACK_SEAMS)],
   extraTasks: FULL_STACK_CHECK_TASK,
   manifest: {
-    readmeSection: FULL_STACK_README_SECTION,
+    readmeSection: (cli) =>
+      FULL_STACK_README_SECTION(cli) +
+      `
+## Behind a TLS proxy
+
+React Router actions answer 400 behind TLS termination unless the proxy is trusted. Set
+TRUSTED_PROXIES to a comma-separated list of your proxies (for example, 10.0.0.0/8). This trusts
+their forwarded client IP, host and protocol headers. Leave it empty for direct access. List IPv4
+proxies as addresses or CIDRs, and IPv6 proxies as single addresses: an IPv6 CIDR is compared
+literally and matches nothing. Never use 0.0.0.0/0, which trusts every IPv4 client's forwarded
+headers, so any client can choose its own address and origin.
+`,
     envFilePath: '.env',
     // `fullStackArgs` emits `config.getOrThrow<string>('SESSION_SECRET')`, so
     // without this the template scaffolds a project that throws at startup.
     envVariables: [
+      {
+        name: 'TRUSTED_PROXIES',
+        description:
+          'Your proxies (IPv4 CIDRs or single IPv6 addresses), comma-separated; trusts their forwarded client IP, host and protocol, fixing TLS-proxy action 400s. Never 0.0.0.0/0: it trusts every client.',
+        develop: '',
+      },
       {
         name: 'SESSION_SECRET',
         description: 'Signs and encrypts session cookies. Use a long random value in production.',
@@ -270,7 +307,11 @@ export const FULL_STACK_TEMPLATE: TemplateDefinition = {
       generatedDirs: ['.react-router'],
       devEntry: FULL_STACK_DEV_ENTRY,
     },
-    npmDependencies: { ...FULL_STACK_NPM_DEPENDENCIES, 'swagger-ui-dist': '^5', zod: '^4' },
+    npmDependencies: {
+      ...FULL_STACK_NPM_DEPENDENCIES,
+      'swagger-ui-dist': SWAGGER_UI_DIST_VERSION,
+      zod: '^4.6.6',
+    },
     // The test packages are merged in because `setu generate module` is ungated
     // since M65: this template can emit a `<name>.test.ts` too, and a host
     // that emits a test file must declare what that file imports.

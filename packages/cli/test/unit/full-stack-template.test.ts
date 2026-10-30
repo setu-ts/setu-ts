@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { TargetRuntime } from '../../src/constants.ts';
 import { FULL_STACK_TEMPLATE } from '../../src/templates/full-stack.ts';
+import { projectFiles, resolveHost } from '../../src/templates/project-files.ts';
 import { FULL_STACK_APP_FILES } from '../../src/templates/full-stack-app-files.ts';
 import {
   FULL_STACK_NPM_DEPENDENCIES,
@@ -24,7 +25,48 @@ import {
   FULL_STACK_TSCONFIG_OPTIONS,
 } from '../../src/templates/full-stack-build-files.ts';
 import { FULL_STACK_APP_FRAMEWORK_PACKAGES } from '../../src/templates/full-stack.ts';
-import { getTemplate } from '../../src/templates/registry.ts';
+import { getTemplate, listTemplates } from '../../src/templates/registry.ts';
+import { withBrokerArgs, withQueueArgs } from '../../src/templates/broker.ts';
+import { transportSpec } from '../../src/workspace/transport.ts';
+import { workspaceProfile } from '../../src/workspace/runtime-profile.ts';
+
+it('renders both transport options after logger on every starter-composed template', () => {
+  for (const template of listTemplates().filter((entry) => entry.appFactory !== undefined)) {
+    const host = resolveHost(template, 'deno');
+    const args = (resolved: typeof host) =>
+      projectFiles('portal', 'deno', resolved).find((file) => file.path === 'setu.config.ts')!
+        .contents;
+    expect(args(host)).not.toContain('messaging:');
+    expect(args(host)).not.toContain('queue:');
+    const spec = transportSpec('redis');
+    const connected = args(
+      withQueueArgs(
+        withBrokerArgs(host, spec, workspaceProfile('deno')),
+        spec,
+        workspaceProfile('deno'),
+      ),
+    );
+    expect(connected).toContain("messaging: {\n          broker: 'redis-streams'");
+    expect(connected).toContain("queue: {\n          adapter: 'redis'");
+    expect(connected.indexOf('messaging:')).toBeGreaterThan(connected.indexOf('logger:'));
+    expect(connected.indexOf('queue:')).toBeGreaterThan(connected.indexOf('messaging:'));
+  }
+});
+
+it('passes the same static server-build module from every socket entry', () => {
+  const entries = ['node', 'bun', 'deno'].map((runtime) => {
+    const target = runtime as TargetRuntime;
+    const files = projectFiles('probe', target, resolveHost(FULL_STACK_TEMPLATE, target));
+    const config = JSON.parse(files.find((file) => file.path === 'tsconfig.json')!.contents) as {
+      compilerOptions: { allowJs?: boolean };
+    };
+    expect(config.compilerOptions.allowJs).toBe(true);
+    return files.find((file) => file.path === 'main.ts')!.contents;
+  });
+  expect(new Set(entries).size).toBe(1);
+  expect(entries[0]).toContain("import * as serverBuild from './build/server/index.js'");
+  expect(entries[0]).toContain('createApp(undefined, undefined, { serverBuild })');
+});
 
 /** Every path the template emits. */
 const paths = (FULL_STACK_TEMPLATE.files ?? []).map((file) => file.path);
@@ -37,6 +79,16 @@ function contentsOf(path: string): string {
 }
 
 describe('full-stack template | registration', () => {
+  it('explains shared module identity without the retired JSR rationale', () => {
+    for (const runtime of ['node', 'bun', 'deno'] as const) {
+      const files = projectFiles('app', runtime, resolveHost(FULL_STACK_TEMPLATE, runtime));
+      for (const path of ['vite.config.ts', 'dev.ts']) {
+        const source = files.find((file) => file.path === path)!.contents;
+        expect(source).not.toContain('JSR');
+        expect(source).toContain('identity');
+      }
+    }
+  });
   it('is reachable by name', () => {
     expect(getTemplate('full-stack')).toBe(FULL_STACK_TEMPLATE);
   });
@@ -135,7 +187,7 @@ describe('full-stack template | the React Router middleware example', () => {
   it('explains both layers in the README section it contributes', () => {
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
     const section = typeof render === 'string' ? render : render('npx @setu-ts/cli@0.9.0');
-    expect(section.startsWith('## Middleware\n')).toBe(true);
+    expect(section).toContain('## Middleware\n');
     expect(section).toContain('`npx @setu-ts/cli@0.9.0 generate middleware <name>`');
     expect(section).toContain('`export const middleware = [...]`');
     expect(section).toContain('`app/middleware/require-user.server.ts`');
@@ -175,9 +227,8 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
   });
 
   it('imports framework VALUES only from server-only modules', () => {
-    // The client bundle inlines what it imports and cannot resolve a JSR
-    // specifier, so a framework value import outside a `.server.ts` module
-    // fails the build outright. Server-only modules may import them, because
+    // The client bundle inlines its imports; keep server framework values in
+    // `.server.ts` modules. Server-only modules may import them, because
     // the server build treats framework packages as external — which is also
     // what keeps context keys identical across that boundary. Type imports are
     // erased and are fine anywhere.
@@ -204,7 +255,7 @@ describe('full-stack template | what the plugins own is NOT reimplemented', () =
     // Single-quoted: the generated project's own `fmt` config sets
     // `singleQuote`, so double-quoted JSX would make it fail `deno fmt --check`
     // on a file the CLI just wrote.
-    expect(login).toContain(`<Form method='post'>`);
+    expect(login).toContain(`<Form method='post' className='grid gap-4'>`);
     // The action writes to the session, which is what the plugin commits onto
     // the response — otherwise the login would not stick.
     expect(login).toContain('getSession(context)');
@@ -249,12 +300,24 @@ describe('full-stack template | the runtime-dependent argument', () => {
     }
   });
 
+  it('serves assets from the production serverBuild arm on Deno, Node and Bun (M120)', () => {
+    // M120 review: the production entry passes `{ serverBuild }`, and that arm
+    // once set no assetsDir — the page rendered, every /assets/*.js was a 404.
+    // The substring check above passed throughout, because the path arm has it.
+    for (const runtime of ['deno', 'node', 'bun'] as const) {
+      expect(argsFor(runtime)).toContain(
+        "...('serverBuild' in (ssr ?? {}) ? { assetsDir: './build/client/assets' } : {}),",
+      );
+    }
+    expect(argsFor('cloudflare-workers')).not.toContain("'serverBuild' in (ssr ?? {})");
+  });
+
   it('opts into request logging with the probe and scrape paths excluded (M113h §3.9)', () => {
     // The scaffold opts in; `LoggerPlugin`'s own default stays off. The excluded
     // paths are the ones a kubelet probes and Prometheus scrapes.
     for (const runtime of ['deno', 'node', 'bun', 'cloudflare-workers'] as const) {
-      expect(argsFor(runtime)).toContain(
-        "logger: { requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'] },",
+      expect(argsFor(runtime).replace(/\s+/g, ' ')).toContain(
+        `logger: { transport: '${runtime === 'cloudflare-workers' ? 'console' : 'pino'}', requestLogging: true, excludePaths: ['/live', '/ready', '/health', '/metrics'], },`,
       );
     }
   });
@@ -415,7 +478,7 @@ describe('full-stack template | manifest contributions', () => {
   it('reads declared library identities and documents the server-only boundary', () => {
     const vite = contentsOf('vite.config.ts');
     expect(vite).toContain("new URL('../../libs/', import.meta.url)");
-    expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc'])");
+    expect(vite).toContain("for (const file of ['deno.json', 'deno.jsonc', 'package.json'])");
     expect(vite).toContain('workspaceLibraries.push(manifest.name)');
     const render = FULL_STACK_TEMPLATE.manifest!.readmeSection!;
     expect(typeof render === 'string' ? render : render('cli')).toContain(
@@ -428,17 +491,24 @@ describe('full-stack vite.config.ts | executed', () => {
   // PR #415 review: a library named only in deno.jsonc, and an exported subpath
   // of a declared package, must both stay external to the SSR build. Executes the
   // emitted file against stub `vite` modules so the predicate is run, not read.
-  it('externalizes deno.jsonc libraries and exported subpaths, and nothing else', async () => {
+  it('externalizes deno.json, deno.jsonc and package.json libraries and exported subpaths, and nothing else', async () => {
     const root = await tempDir({ prefix: 'setu-vite-config-' });
     try {
       const app = `${root}/apps/web`;
       await nodeFs.mkdir(app, { recursive: true });
       await nodeFs.writeFile(`${app}/vite.config.ts`, contentsOf('vite.config.ts'));
       await nodeFs.writeFile(`${app}/vite.ts`, 'export const defineConfig = (c: unknown) => c;\n');
+      await nodeFs.writeFile(`${app}/tw.ts`, 'export default () => ({});\n');
       await nodeFs.writeFile(`${app}/rr.ts`, 'export const reactRouter = () => ({});\n');
       await nodeFs.writeFile(
         `${app}/deno.json`,
-        JSON.stringify({ imports: { vite: './vite.ts', '@react-router/dev/vite': './rr.ts' } }),
+        JSON.stringify({
+          imports: {
+            vite: './vite.ts',
+            '@react-router/dev/vite': './rr.ts',
+            '@tailwindcss/vite': './tw.ts',
+          },
+        }),
       );
       const library = async (name: string, file: string, text: string) => {
         await nodeFs.mkdir(`${root}/libs/${name}`, { recursive: true });
@@ -454,6 +524,8 @@ describe('full-stack vite.config.ts | executed', () => {
       await library('both', 'deno.json', '{ "name": "@custom/json-wins" }');
       await library('both', 'deno.jsonc', '{ "name": "@custom/jsonc-loses" }');
       await library('broken', 'deno.jsonc', '{ "name": ');
+      // A Node or Bun workspace library declares its name in package.json.
+      await library('npm', 'package.json', '{ "name": "@custom/npm-lib" }');
       const ids = [
         '@setu-ts/common',
         '@setu-ts/common/sub',
@@ -465,6 +537,8 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/json-wins',
         '@custom/jsonc-loses',
         '@custom/plainer',
+        '@custom/npm-lib',
+        '@custom/npm-lib/sub',
         'react',
       ];
       await nodeFs.writeFile(
@@ -490,6 +564,8 @@ describe('full-stack vite.config.ts | executed', () => {
         '@custom/jsonc',
         '@custom/jsonc/deep/path',
         '@custom/json-wins',
+        '@custom/npm-lib',
+        '@custom/npm-lib/sub',
       ]);
     } finally {
       await nodeFs.rm(root, { recursive: true });
@@ -537,5 +613,73 @@ describe('full-stack gRPC csrf exclusion', () => {
         FULL_STACK_TEMPLATE.appFactory!.args!({ runtime: 'deno', grpcBasePath }),
       ).toThrow('must be a single plain path segment');
     }
+  });
+});
+
+describe('full-stack styling foundation (M123)', () => {
+  it('emits a shadcn-ready project with copied MIT components', () => {
+    const config = JSON.parse(contentsOf('components.json'));
+    expect(config).toMatchObject({
+      style: 'new-york',
+      rsc: false,
+      tsx: true,
+      iconLibrary: 'lucide',
+      tailwind: { config: '', css: 'app/app.css', baseColor: 'neutral', cssVariables: true },
+      aliases: {
+        components: '~/components',
+        utils: '~/lib/utils',
+        ui: '~/components/ui',
+        lib: '~/lib',
+        hooks: '~/hooks',
+      },
+    });
+    for (const name of ['button', 'card']) {
+      const source = contentsOf(`app/components/ui/${name}.tsx`);
+      expect(source).toContain(`https://ui.shadcn.com/r/styles/new-york-v4/${name}.json`);
+      expect(source).toContain('shadcn/ui, MIT licence');
+      // Registry imports unchanged: the only edit to a copied source is its header.
+      expect(source).toContain("import { cn } from 'cn';");
+      expect(source).not.toContain('~/lib/utils');
+    }
+    expect(contentsOf('app/components/layouts/AppLayout.tsx')).toContain(
+      "import { cn } from 'cn';",
+    );
+    expect(paths).not.toContain('app/lib/utils.ts');
+    expect(contentsOf('vite.config.ts')).toContain('plugins: [tailwindcss(), reactRouter()]');
+    expect(FULL_STACK_NPM_DEPENDENCIES).not.toHaveProperty('clsx');
+    expect(FULL_STACK_NPM_DEPENDENCIES).not.toHaveProperty('tailwind-merge');
+    const pins = {
+      cn: '^0.5.0',
+      'class-variance-authority': '^0.7.1',
+      'radix-ui': '^1.8.1',
+    };
+    const deno = projectFiles('shop', 'deno', resolveHost(FULL_STACK_TEMPLATE, 'deno'));
+    const imports = JSON.parse(deno.find((file) => file.path === 'deno.json')!.contents).imports;
+    for (const [name, range] of Object.entries(pins)) {
+      expect(FULL_STACK_NPM_DEPENDENCIES[name]).toBe(range);
+      expect(imports[name]).toBe(`npm:${name}@${range}`);
+    }
+  });
+  it('emits the fixed shell, reset effect and early theme script', () => {
+    const root = contentsOf('app/root.tsx');
+    expect(root).toContain("<html lang='en' suppressHydrationWarning>");
+    expect(root).toMatch(/<head>\s*<script dangerouslySetInnerHTML=\{\{ __html: THEME_SCRIPT \}\}/);
+    const layout = contentsOf('app/components/layouts/AppLayout.tsx');
+    for (const hook of ['frame', 'header', 'sidebar', 'content'])
+      expect(layout).toContain(`data-shell='${hook}'`);
+    expect(layout).toContain('flex h-dvh flex-col overflow-hidden');
+    expect(layout).toContain('content.current.scrollTop = 0');
+    expect(layout).toContain('}, [pathname])');
+    expect(layout).toContain('overflow-x-auto');
+    expect(layout).toContain('bg-accent text-accent-foreground');
+    expect(contentsOf('app/components/layouts/LoginLayout.tsx')).toContain('<Card>');
+    for (const route of ['_index', 'products._index'])
+      expect(contentsOf(`app/routes/_app/${route}.tsx`)).toContain('<Card>');
+    expect(contentsOf('app/routes/_auth/login.tsx')).toContain("<Button type='submit'>");
+    expect(contentsOf('app/components/theme-toggle.tsx')).toContain("variant='ghost'");
+    expect(contentsOf('app/components/theme-toggle.tsx')).toContain(
+      "media.removeEventListener('change', apply)",
+    );
+    expect(contentsOf('app/app.css')).toContain('--primary:');
   });
 });

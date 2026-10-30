@@ -1,25 +1,18 @@
 /**
- * The domain-module barrel seam shared by the templates that can host modules.
+ * The manifests and decorator wiring shared by the templates that can host modules.
  *
- * A scaffolded project imports the two barrel arrays into `setu.config.ts` and
- * hands them to `DecoratorPlugin`, so `setu generate module` wires a module in by
- * regenerating one CLI-owned file and never editing the developer's config.
- *
- * Emitted from scaffold time, deliberately: a project that gains the seam only
- * once its first module is generated would need `setu.config.ts` edited at that
- * moment, which is the write this whole design exists to avoid.
+ * A fresh project starts flat: its config registers `src/controllers/` and, in
+ * class-based style, `src/services/`. Nothing about modules is scaffolded. The
+ * first `setu g module` writes `src/modules/index.ts` and switches the config's
+ * registration lines (`utils/modular-registration.ts`), so a project has one
+ * layout at a time and never an empty second home for routes.
  *
  * @module
  */
 
-import type { GeneratedFile } from '../utils/file-writer.ts';
-import { MODULES_DIR } from '../utils/module-scanner.ts';
-import { MODULES_EXPORT, renderModuleBarrel } from '../schematics/module-barrel.ts';
-import type { LocalImport, TemplateManifest, Wiring } from './registry.ts';
+import type { TemplateManifest, Wiring } from './registry.ts';
 import { TEST_DEPENDENCY_MANIFEST } from './test-deps.ts';
-
-/** Specifier the generated `setu.config.ts` imports the barrel from. */
-const BARREL_SPECIFIER = `./${MODULES_DIR}/index.ts`;
+import { SWAGGER_UI_DIST_VERSION } from './swagger-version.ts';
 
 /**
  * Manifest additions every functional module-hosting template merges in.
@@ -35,8 +28,8 @@ export const FUNCTIONAL_MODULE_MANIFEST: TemplateManifest = {
   // Without this the project scaffolds, starts, and answers 500 on `/health` —
   // the path the generated Kubernetes probes point at.
   denoPermissions: ['--allow-sys', '--allow-read'],
-  npmDependencies: { 'swagger-ui-dist': '^5', zod: '^4' },
-  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4' },
+  npmDependencies: { 'swagger-ui-dist': SWAGGER_UI_DIST_VERSION, zod: '^4.6.6' },
+  denoImports: { ...TEST_DEPENDENCY_MANIFEST.denoImports, zod: 'npm:zod@^4.6.6' },
 };
 
 /** Manifest additions unique to the class-based module composition. */
@@ -51,35 +44,19 @@ export const CLASS_BASED_MODULE_MANIFEST: TemplateManifest = {
 };
 
 /**
- * The empty aggregate barrel a fresh project starts with.
- *
- * Rendered by the same function `setu generate module` uses, so the scaffolded
- * file and every regeneration of it can never drift apart in shape.
- */
-export const MODULE_SEAM_FILES: readonly GeneratedFile[] = [
-  { path: `${MODULES_DIR}/index.ts`, contents: renderModuleBarrel([]) },
-];
-
-/** The `setu.config.ts` import that brings the activation barrel into scope. */
-export const MODULE_SEAM_LOCAL_IMPORT: LocalImport = {
-  symbols: [MODULES_EXPORT],
-  from: BARREL_SPECIFIER,
-};
-
-/**
- * Rewrites a wiring list so the `decorator-plugin` entry passes the barrel
- * activation list, alongside standalone controller and service seam entries.
+ * Rewrites a wiring list so the `decorator-plugin` entry passes the flat
+ * controller, service and ingress barrels.
  *
  * Takes the list rather than mutating a shared constant so the class-based
  * template can apply it to its own set without changing the REST baseline.
  *
  * @param wirings - The template's plugin wirings
- * @param extraControllers - Identifiers listed before the barrel spread
- * @param extraServices - Identifiers listed before the barrel spread
+ * @param extraControllers - Identifiers listed in the controller class list
+ * @param extraServices - Identifiers listed in the service class list
  * @param extraIngress - Identifiers listed in the ingress class list
  * @returns The list with the decorator wiring's `args` replaced
  */
-export function withModuleSeam(
+export function withDecoratorSeams(
   wirings: readonly Wiring[],
   extraControllers: readonly string[] = [],
   extraServices: readonly string[] = [],
@@ -114,14 +91,11 @@ export function withModuleSeam(
  * @returns The argument source, without the enclosing parentheses
  */
 function renderDecoratorArgs(controllers: string, services: string, ingress: string): string {
-  const inline =
-    `{ controllers: [${controllers}], services: [${services}], ingress: [${ingress}], ` +
-    `modules: [...${MODULES_EXPORT}] }`;
+  const inline = `{ controllers: [${controllers}], services: [${services}], ingress: [${ingress}] }`;
   // 6 spaces of array indent + `DecoratorPlugin(` + `),` is 24 characters of overhead.
   if (inline.length <= 76) return inline;
   return (
     `{\n        controllers: [${controllers}],\n        services: [${services}],\n` +
-    `        ingress: [${ingress}],\n` +
-    `        modules: [...${MODULES_EXPORT}],\n      }`
+    `        ingress: [${ingress}],\n      }`
   );
 }

@@ -39,7 +39,7 @@ export const OUTBOUND_HTTP_DIAGNOSTICS_TOKEN = 'outbound-http-diagnostics';
  *
  * @internal
  */
-export const SDK_VERSION = '0.10.0';
+export const SDK_VERSION = '0.11.0';
 
 /**
  * The fixed, value-free construction and registration refusals.

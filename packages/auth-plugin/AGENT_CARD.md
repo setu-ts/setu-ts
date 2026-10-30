@@ -19,9 +19,9 @@ export function registerOrderRoutes(router: IRouterApi): void {
 }
 ```
 
-## Sign a token after verifying credentials
+## Sign after verifying credentials
 
-Configure `local.verify` to check your application's credential store first.
+Configure `local.verify` to check credentials first.
 
 ```ts
 import { CAPABILITIES } from '@setu-ts/common';
@@ -40,11 +40,11 @@ if (principal === null) {
 
 ## Behaviour the types do not show
 
-- Passive authentication runs globally at priority 300 by default; guards belong on routes.
-- An absent principal yields 401. An authenticated caller denied a role or permission gets 403;
-  without `rbac` those authorization guards return 501.
-- Token verification rejects at or after `exp`, with no clock tolerance.
-- `local` alone cannot authenticate subsequent requests; configure a passive strategy too.
+- Passive authentication defaults to priority 300; put guards on routes.
+- Missing principal: 401; denied role/permission: 403; no `rbac`: those guards return 501.
+- `requireAuth({ signInPage })` redirects unauthenticated browser navigations there with `returnTo`
+  (except that page itself); APIs keep 401.
+- Tokens expire at `exp`, with no tolerance. `local` needs a passive strategy for later requests.
 
 ## Other options
 
@@ -52,3 +52,5 @@ if (principal === null) {
 - `definePolicy` and `requirePolicy` evaluate application policies; scoped guards use `scopedRbac`.
 - `signIn.mfa` and `signIn.passkeys` add factors; `RefreshTokenService` and `rateLimitMiddleware`
   are standalone helpers.
+- `signIn` with `providers: []` is password-only; `signIn.sessionStamp` reads the user record's
+  stamp. Changing it ends every session of that user.

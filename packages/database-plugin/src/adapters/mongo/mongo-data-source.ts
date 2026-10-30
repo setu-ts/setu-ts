@@ -409,7 +409,10 @@ export function createMongoDataSource(
 
       // 3. Sort-fingerprint guard — a cross-sort cursor would return a
       //    silently wrong page.
-      const fingerprint = sortFingerprint(normalized.orderBy);
+      const fingerprint = sortFingerprint(normalized.orderBy, {
+        entity,
+        keyColumns: target.primaryKey,
+      });
       if (decoded !== null && decoded.sortFingerprint !== fingerprint) {
         return Promise.reject(
           new InvalidCursorError(`Entity '${target.collection}': cursor fingerprint mismatch.`),

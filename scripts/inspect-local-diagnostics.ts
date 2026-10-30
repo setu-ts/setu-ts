@@ -2,6 +2,7 @@
 /* eslint-disable no-console -- console output is the script's purpose (AI_GUIDELINES §11.6) */
 /**
  * Runnable public consumer for the local diagnostics connector (M98b).
+ * Runs directly in the invoking Node or Deno runtime.
  *
  * Generates a fresh session ID/key pair IN MEMORY (the trusted-launcher
  * role), composes a small explicitly instrumented application whose local
@@ -23,7 +24,6 @@
  */
 
 import { createApplication } from '../packages/kernel/src/index.ts';
-import { run } from './lib/run.ts';
 import { RuntimePlugin } from '../packages/runtime/src/index.ts';
 import {
   createDiagnosticsClient,
@@ -32,15 +32,6 @@ import {
 
 /** The fixed demo route, also the label allowlist entry. */
 async function main(): Promise<void> {
-  if (!('Deno' in globalThis)) {
-    const result = await run(
-      'deno',
-      ['run', '--allow-read', '--allow-env', '--allow-net=127.0.0.1', import.meta.filename],
-      { inherit: true },
-    );
-    process.exitCode = result.code;
-    return;
-  }
   const DEMO_ROUTE = '/items';
 
   /**

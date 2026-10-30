@@ -1,11 +1,14 @@
 /**
  * Renders failures for broker logger options, whose error sink accepts text.
  *
+ * `describeError` lives in `@setu-ts/common` so every package renders a thrown
+ * value the same way; it is re-exported here for this package's own callers.
+ * `describeLogText` bounds an application-supplied line to the same budget.
+ *
  * @module
  */
 
-import { serializeError } from '@setu-ts/common';
-import type { SerializedError } from '@setu-ts/common';
+export { describeError } from '@setu-ts/common';
 
 /** Maximum Unicode code points emitted to a broker's string logger sink. */
 const MAX_DESCRIPTION_LENGTH = 8192;
@@ -27,19 +30,6 @@ interface DescriptionBudget {
 }
 
 /**
- * Renders a thrown value, including its safe classifier fields, cause chain,
- * and aggregate members, as a single diagnostic line.
- *
- * @param value - The value the broker caught
- * @returns A one-line diagnostic safe for the broker's string logger sink
- */
-export function describeError(value: unknown): string {
-  const budget = createDescriptionBudget();
-  describeSerializedError(serializeError(value), budget);
-  return `${budget.segments.join('')}${budget.truncated ? TRUNCATION_MARKER : ''}`;
-}
-
-/**
  * Normalizes and bounds a complete diagnostic for a broker's string log sink.
  *
  * @param value - Diagnostic text, including application-supplied names
@@ -51,7 +41,7 @@ export function describeLogText(value: string): string {
   return `${budget.segments.join('')}${budget.truncated ? TRUNCATION_MARKER : ''}`;
 }
 
-/** Creates the shared budget for error rendering and complete diagnostics. */
+/** Creates the shared budget for complete diagnostics. */
 function createDescriptionBudget(): DescriptionBudget {
   return {
     segments: [],
@@ -59,43 +49,6 @@ function createDescriptionBudget(): DescriptionBudget {
     pendingWhitespace: false,
     truncated: false,
   };
-}
-
-/** Appends one serialized failure while preserving the shared output budget. */
-function describeSerializedError(error: SerializedError, budget: DescriptionBudget): void {
-  if (!append(budget, error.name) || !append(budget, ': ') || !append(budget, error.message)) {
-    return;
-  }
-
-  if (error.classifiers !== undefined) {
-    if (!append(budget, ' (')) return;
-    let first = true;
-    for (const [key, value] of Object.entries(error.classifiers)) {
-      if ((!first && !append(budget, ', ')) || !append(budget, key) || !append(budget, '=')) return;
-      if (!append(budget, String(value))) return;
-      first = false;
-    }
-    if (!append(budget, ')')) return;
-  }
-
-  if (error.errors !== undefined && error.errors.length > 0) {
-    if (!append(budget, ' [')) return;
-    for (let index = 0; index < error.errors.length; index++) {
-      if (index > 0 && !append(budget, '; ')) return;
-      describeSerializedError(error.errors[index], budget);
-      if (budget.truncated) return;
-    }
-    if (!append(budget, ']')) return;
-  }
-
-  if (error.omittedErrorCount !== undefined) {
-    if (!append(budget, ` [${error.omittedErrorCount} aggregate error(s) omitted]`)) return;
-  }
-
-  if (error.cause !== undefined) {
-    if (!append(budget, ' <- ')) return;
-    describeSerializedError(error.cause, budget);
-  }
 }
 
 /** Appends normalized text until the total description budget is spent. */

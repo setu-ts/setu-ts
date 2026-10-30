@@ -10,8 +10,6 @@ import {
   ERROR_RESPONDER_STATE_KEY,
   errorResponderOf,
   isPromiseLike,
-  parseFormBody,
-  parseJsonBody,
   respondWithError,
   serializeError,
   setUpgradeIntent,
@@ -20,8 +18,9 @@ import type {
   CliCommandHandler,
   DecoratorHandler,
   EnvVarSpec,
-  FormBody,
   HealthIndicatorFn,
+  HttpMethod,
+  HealthIndicatorOptions,
   IApplication,
   IConfig,
   IContainer,
@@ -56,8 +55,9 @@ import type { RouteEntry } from '../router/router.ts';
 import { isPathDecodable } from '../router/route-matcher.ts';
 import { LifecycleManager } from '../lifecycle/lifecycle-manager.ts';
 import { createRequestContext } from '../context/request-context.ts';
+import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
-import { coerceInjectBody } from './inject-body.ts';
+import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
 import { compileLabelAllowlists } from '../diagnostics/projection.ts';
@@ -593,10 +593,18 @@ class Application implements IKernelApplication {
       router: this.#router,
       lifecycle: this.#lifecycle,
       health: {
-        register(name: string, indicator: HealthIndicatorFn): void {
+        register(
+          name: string,
+          indicator: HealthIndicatorFn,
+          options?: HealthIndicatorOptions,
+        ): void {
           registry.register(
             CAPABILITIES.HEALTH_INDICATOR,
-            { name, check: indicator },
+            {
+              name,
+              check: indicator,
+              ...(options?.readiness !== undefined && { readiness: options.readiness }),
+            },
             { multi: true },
           );
         },
@@ -987,54 +995,14 @@ class Application implements IKernelApplication {
       raw = undefined;
     }
 
-    // The form read is memoized like `json()`'s: the in-flight promise is
-    // cached (a rejection with it), so two middleware reading the same
-    // injected body trigger one parse, and a body that is not a form keeps
-    // rejecting identically on a retry.
-    let form: Promise<FormBody> | undefined;
-
-    const syntheticRequest: IRequest = {
-      ...(request.ip !== undefined ? { ip: request.ip } : {}),
-      method: request.method as IRequest['method'],
-      url: fullUrl,
-      get path() {
-        return new URL(fullUrl).pathname;
-      },
+    const syntheticRequest = new InjectedRequest(
+      request.method as HttpMethod,
+      fullUrl,
       headers,
-      ...(raw !== undefined ? { raw } : {}),
-      json<T>(): Promise<T> {
-        // The shared parse (X37-1): a malformed body rejects with the
-        // `400`-branded MalformedRequestBodyError, so `inject()` observes the
-        // same failure the served path produces. The empty-body arm keeps its
-        // `{}` default — an in-process inject that sent no body is not a
-        // malformed body.
-        return Promise.resolve().then(
-          () =>
-            parseJsonBody(
-              bodyBytes === undefined ? '{}' : new TextDecoder().decode(bodyBytes),
-            ) as T,
-        );
-      },
-      text(): Promise<string> {
-        return Promise.resolve(bodyBytes === undefined ? '' : new TextDecoder().decode(bodyBytes));
-      },
-      bytes(): Promise<Uint8Array> {
-        return Promise.resolve(bodyBytes ?? new Uint8Array(0));
-      },
-      formData(): Promise<FormBody> {
-        // The shared parse (M94b): a non-form content-type rejects with the
-        // `415`-branded UnsupportedFormEncodingError, so an injected request
-        // observes what a served request observes. A `Uint8Array` or an
-        // `ArrayBuffer` sets NO default content type (M95c §3.9), so an
-        // injected multipart in those shapes must supply its own — exactly
-        // what a served request requires. A `Blob` supplies it from `.type`
-        // (M99c), as the platform does.
-        form ??= Promise.resolve().then(() =>
-          parseFormBody(bodyBytes ?? new Uint8Array(0), headers.get('content-type')),
-        );
-        return form;
-      },
-    };
+      bodyBytes,
+      request.ip,
+      raw,
+    );
 
     const response = await this.#handleRequest(syntheticRequest);
     const snapshot = response.snapshot();
@@ -1043,6 +1011,10 @@ class Application implements IKernelApplication {
     // draining the live stream, which would consume it. Say so explicitly
     // rather than reporting `body: null`, which reads as "empty response".
     if (snapshot.streaming) {
+      // Cancel the unread body first: a response with deferred cleanup settles
+      // only when its stream ends or is cancelled, so an abandoned body would
+      // never run that cleanup or release its in-flight count.
+      await snapshot.body.cancel().catch(() => undefined);
       throw new Error(
         'inject() cannot read a streaming response body. Call app.fetch() with a web Request ' +
           'and read the returned Response body stream instead.',
@@ -1145,20 +1117,14 @@ class Application implements IKernelApplication {
     try {
       const pending = this.#runRequest(ctx, handle, path, request);
       if (pending === undefined) {
-        this.#inFlight--;
-        this.#completeRequest(ctx, 'ok');
-        return ctx.response as ResponseBuilder;
+        return this.#settleRequest(ctx, handle, 'ok');
       }
       return pending.then(
-        () => {
-          this.#inFlight--;
-          this.#completeRequest(ctx, 'ok');
-          return ctx.response as ResponseBuilder;
-        },
-        (error: unknown) => this.#failRequest(error, ctx),
+        () => this.#settleRequest(ctx, handle, 'ok'),
+        (error: unknown) => this.#failRequest(error, ctx, handle),
       );
     } catch (error) {
-      return this.#failRequest(error, ctx);
+      return this.#failRequest(error, ctx, handle);
     }
   }
 
@@ -1667,11 +1633,15 @@ class Application implements IKernelApplication {
    * @param ctx - The live request context
    * @returns The response, directly or once the hooks have run
    */
-  #failRequest(error: unknown, ctx: IRequestContext): ResponseBuilder | Promise<ResponseBuilder> {
+  #failRequest(
+    error: unknown,
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
     const err = error instanceof Error ? error : new Error(String(error));
     const hooks = this.#lifecycle.getErrorHooks();
     if (hooks.length === 0) {
-      return this.#finishFailure(err, ctx);
+      return this.#finishFailure(err, ctx, handle);
     }
     const parentOperationId = this.#collector?.requestOperationIdOf(ctx);
     return (async () => {
@@ -1682,7 +1652,7 @@ class Application implements IKernelApplication {
           this.#reportSuppressedHookError(hookError);
         }
       }
-      return this.#finishFailure(err, ctx);
+      return this.#finishFailure(err, ctx, handle);
     })();
   }
 
@@ -1699,17 +1669,57 @@ class Application implements IKernelApplication {
    * @param ctx - The live request context
    * @returns The response builder carrying the 500
    */
-  #finishFailure(err: Error, ctx: IRequestContext): ResponseBuilder {
-    // Decrement FIRST: the original body did this in a `finally`, so a throw
-    // from the reporting or responder call could not leak the counter and
-    // stall the shutdown drain. Ordering it ahead of both preserves that.
-    this.#inFlight--;
-    this.#reportUnhandledError(err, ctx);
-    respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
-    // Recorded AFTER the response is final, so the status in the record is
-    // the status that was actually served.
-    this.#completeRequest(ctx, 'error');
-    return ctx.response as ResponseBuilder;
+  #finishFailure(
+    err: Error,
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
+    try {
+      this.#reportUnhandledError(err, ctx);
+      respondWithError(ctx, { status: 500, title: 'Internal Server Error' });
+    } catch (failure) {
+      // A throwing responder must still release the request — its cleanups
+      // and its in-flight count — or the shutdown drain stalls until its
+      // deadline. The throw itself still surfaces, as it did before M125.
+      void this.#settleRequest(ctx, handle, 'error');
+      throw failure;
+    }
+    return this.#settleRequest(ctx, handle, 'error');
+  }
+
+  /** Settles generic cleanup before releasing the request from shutdown drain. */
+  #settleRequest(
+    ctx: IRequestContext,
+    handle: RequestContextHandle,
+    outcome: DiagnosticsEventOutcome,
+  ): ResponseBuilder | Promise<ResponseBuilder> {
+    const response = ctx.response as ResponseBuilder;
+    const cleanups = handle.takeDeferred();
+    if (cleanups === undefined) {
+      this.#inFlight--;
+      this.#completeRequest(ctx, outcome);
+      return response;
+    }
+    const body = response.streamingBody;
+    if (body === undefined) {
+      const pending = runDeferred(cleanups, this.#registry);
+      if (pending === undefined) {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      }
+      return pending.then(() => {
+        this.#inFlight--;
+        this.#completeRequest(ctx, outcome);
+        return response;
+      });
+    }
+    const complete = (): void => {
+      this.#inFlight--;
+      this.#completeRequest(ctx, outcome);
+    };
+    response.stream(wrapDeferredStream(body, cleanups, this.#registry, complete));
+    return response;
   }
 
   /**

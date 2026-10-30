@@ -81,22 +81,6 @@ export function legacyLayoutNotice(files: readonly string[]): readonly string[] 
 export const CONFIG_MODULE = 'setu.config.ts';
 
 /**
- * Reads a project's `setu.config.ts`.
- *
- * @param fs - The filesystem to read through
- * @param dir - The project directory
- * @returns The source, or an empty string when the file is absent
- */
-export async function readConfigModule(fs: IFileSystem, dir: string): Promise<string> {
-  try {
-    return new TextDecoder().decode(await fs.readFile(joinPath(dir, CONFIG_MODULE)));
-  } catch {
-    // Absent: a bare directory, or a project that keeps its wiring elsewhere.
-    return '';
-  }
-}
-
-/**
  * Renders the migration notice for a config still calling the registrar with
  * only a router.
  *

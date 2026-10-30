@@ -46,7 +46,10 @@ export async function setupStrategy(
       ...options.issuer,
     },
   ]);
-  const keySet = new IssuerKeySet(compiled, runtime, fake.http, () => {});
+  const keySet = new IssuerKeySet(compiled, runtime, fake.http, {
+    failed: () => {},
+    recovered: () => {},
+  });
   const strategy = new IssuerStrategy({
     bindings: [{ issuer: compiled, keySet }],
     runtime,

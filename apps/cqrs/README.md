@@ -7,3 +7,5 @@ handler.
 pnpm --dir apps/cqrs run start
 pnpm --dir apps/cqrs run smoke
 ```
+
+Read the [example deep dive](../../docs/examples.md#cqrs) for the concept and source walkthrough.

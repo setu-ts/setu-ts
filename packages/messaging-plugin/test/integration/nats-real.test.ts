@@ -20,9 +20,204 @@ import { CAPABILITIES } from '@setu-ts/common';
 import type { IPlugin } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
-import { MessagingPlugin, NatsConsumerNameCollisionError } from '../../src/index.ts';
+import {
+  MessagingPlugin,
+  NatsConsumerNameCollisionError,
+  PublishTimeoutError,
+} from '../../src/index.ts';
+import { run as runProcess } from '../../../../test/node-helpers.ts';
 
 const natsUrl = process.env['NATS_URL'];
+
+describe('M119a REAL NATS delivery bounds', { skip: natsUrl === undefined }, () => {
+  async function fixture() {
+    const nats = await import('nats');
+    const url = natsUrl!;
+    const suffix = crypto.randomUUID().replaceAll('-', '');
+    const scope = `m119a.${suffix}`;
+    const streamName = `M119A_${suffix}`;
+    const conn = await nats.connect({ servers: url });
+    const jsm = await conn.jetstreamManager();
+    const apps: ReturnType<typeof createApplication>[] = [];
+    const boot = async (publishTimeoutMs = 15000) => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MessagingPlugin({
+            broker: 'nats',
+            url,
+            streamName,
+            publishTimeoutMs,
+            streamSubjects: [`${scope}.>`, `rr.req.${scope}.>`, 'rr.inbox.>'],
+          }),
+        ],
+      });
+      apps.push(app);
+      await app.start();
+      return { app, broker: app.services.get<IMessageBroker>(CAPABILITIES.MESSAGING) };
+    };
+    return {
+      url,
+      scope,
+      streamName,
+      jsm,
+      boot,
+      async close() {
+        for (const app of apps) await app.stop();
+        await jsm.streams.delete(streamName).catch(() => {});
+        await conn.close();
+      },
+    };
+  }
+
+  it('queue-less respond across three boots runs each request once and leaves one request consumer', async () => {
+    const f = await fixture();
+    let calls = 0;
+    try {
+      for (let boot = 0; boot < 3; boot++) {
+        const { app, broker } = await f.boot();
+        await broker.respond(`${f.scope}.echo`, (message) => {
+          calls++;
+          return message;
+        });
+        expect(await broker.request(`${f.scope}.echo`, { boot }, { timeoutMs: 10000 })).toEqual({
+          boot,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        await app.stop();
+        const consumers = await f.jsm.consumers.list(f.streamName).next();
+        expect(
+          consumers.filter((c) => c.config.filter_subject === `rr.req.${f.scope}.echo`),
+        ).toHaveLength(1);
+        expect(consumers.filter((c) => c.name.startsWith('rr_2einbox_2e'))).toEqual([]);
+        expect(calls).toBe(boot + 1);
+      }
+    } finally {
+      await f.close();
+    }
+  }, 45000);
+
+  it('two replicas split queue-less deliveries without duplicates', async () => {
+    const f = await fixture();
+    try {
+      const a = await f.boot();
+      const b = await f.boot();
+      const deliveries: number[][] = [[], []];
+      const topic = `${f.scope}.orders`;
+      await a.broker.subscribe<number>(topic, (id) => {
+        deliveries[0]!.push(id);
+      });
+      await b.broker.subscribe<number>(topic, (id) => {
+        deliveries[1]!.push(id);
+      });
+      for (let id = 0; id < 20; id++) await a.broker.publish(topic, id);
+      await waitFor(() => deliveries.flat().length >= 20, 'shared deliveries');
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(deliveries.flat().sort((a, b) => a - b)).toEqual(
+        Array.from({ length: 20 }, (_, i) => i),
+      );
+      expect(deliveries.every((received) => received.length > 0)).toBe(true);
+      expect(await f.jsm.consumers.list(f.streamName).next()).toHaveLength(1);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('recreates a deleted running inbox and removes it on app.stop()', async () => {
+    const f = await fixture();
+    try {
+      const { app, broker } = await f.boot();
+      await broker.respond(`${f.scope}.echo`, (message) => message);
+      expect(await broker.request(`${f.scope}.echo`, 1, { timeoutMs: 10000 })).toBe(1);
+      const inbox = (await f.jsm.consumers.list(f.streamName).next()).find((c) =>
+        c.name.startsWith('rr_2einbox_2e'),
+      )!;
+      expect(inbox.config.durable_name).toBeUndefined();
+      expect(inbox.config.inactive_threshold).toBe(300_000_000_000);
+      await f.jsm.consumers.delete(f.streamName, inbox.name);
+      const deadline = performance.now() + 15000;
+      let recovered = false;
+      while (performance.now() < deadline) {
+        recovered = await f.jsm.consumers.info(f.streamName, inbox.name).then(
+          () => true,
+          () => false,
+        );
+        if (recovered) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      expect(recovered).toBe(true);
+      expect(await broker.request(`${f.scope}.echo`, 2, { timeoutMs: 10000 })).toBe(2);
+      await app.stop();
+      expect(
+        (await f.jsm.consumers.list(f.streamName).next()).filter((c) =>
+          c.name.startsWith('rr_2einbox_2e'),
+        ),
+      ).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  }, 40000);
+
+  it('adds an inactive threshold to a pre-created leaked durable', async () => {
+    const f = await fixture();
+    const name = `messaging-${crypto.randomUUID()}`;
+    try {
+      await f.jsm.streams.add({ name: f.streamName, subjects: [`${f.scope}.>`] });
+      const { AckPolicy } = await import('nats');
+      await f.jsm.consumers.add(f.streamName, {
+        name,
+        durable_name: name,
+        filter_subject: `${f.scope}.old`,
+        ack_policy: AckPolicy.Explicit,
+        metadata: { 'setu.queue': name },
+      });
+      await f.boot();
+      let threshold = 0;
+      const deadline = performance.now() + 5000;
+      while (performance.now() < deadline) {
+        threshold = (await f.jsm.consumers.info(f.streamName, name)).config.inactive_threshold ?? 0;
+        if (threshold > 0) break;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      expect(threshold).toBe(300_000_000_000);
+    } finally {
+      await f.close();
+    }
+  });
+
+  it('a paused NATS server rejects publish with PublishTimeoutError', async () => {
+    const f = await fixture();
+    let container = '';
+    let paused = false;
+    try {
+      const { broker } = await f.boot(200);
+      // Under `ci:local` the backend publishes nothing on the host; its shard
+      // labels identify it instead (the other outage suites' lookup).
+      const port = new URL(f.url).port || '4222';
+      const shard = process.env['SETU_CI_SHARD'];
+      const filters = shard
+        ? ['--filter', `label=setu.ci.shard=${shard}`, '--filter', `label=setu.ci.port.${port}=1`]
+        : ['--filter', `publish=${port}`];
+      const result = await runProcess('docker', { args: ['ps', '-q', ...filters] });
+      expect(result.success).toBe(true);
+      container = new TextDecoder().decode(result.stdout).trim().split('\n')[0]!;
+      expect(container).not.toBe('');
+      const pause = await runProcess('docker', { args: ['pause', container] });
+      expect(pause.success).toBe(true);
+      paused = true;
+      const started = performance.now();
+      const error = await broker.publish(`${f.scope}.paused`, {}).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(PublishTimeoutError);
+      expect(error).toMatchObject({ topic: `${f.scope}.paused`, timeoutMs: 200 });
+      expect(performance.now() - started).toBeGreaterThanOrEqual(190);
+      expect(performance.now() - started).toBeLessThan(1500);
+    } finally {
+      if (paused)
+        expect((await runProcess('docker', { args: ['unpause', container] })).success).toBe(true);
+      await f.close();
+    }
+  });
+});
 
 /** Loopback form: the manifest's scoped net grant covers 127.0.0.1/localhost. */
 function toIpv4(url: string): string {

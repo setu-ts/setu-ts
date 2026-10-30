@@ -148,6 +148,16 @@ describe('readTraceSourceBatch — the exact source validator', () => {
 });
 
 describe('trace projection and the wire validator', () => {
+  it('accepts redis instrumentation in a source batch and its wire projection', () => {
+    const instrumentation = ['http', 'fetch', 'ioredis', 'redis', 'amqplib', 'kafkajs'];
+    const validated = readTraceSourceBatch(sourceBatch(0, { instrumentation }), INSTANCE, 0, 128);
+    expect(validated).not.toBeNull();
+    expect(validated!.instrumentation).toEqual(instrumentation);
+    const projected = projectTraceBatch(validated!, INSTANCE);
+    expect(projected.instrumentation).toEqual(instrumentation);
+    expect(isTraceBatchProjection(JSON.parse(JSON.stringify(projected)))).toBe(true);
+  });
+
   it('projects a validated batch and the projection passes the wire validator', () => {
     const validated = readTraceSourceBatch(
       sourceBatch(3, {

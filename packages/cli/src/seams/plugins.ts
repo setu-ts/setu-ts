@@ -13,6 +13,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -23,7 +24,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated plugin, ready to register. */
 export const GENERATED_PLUGINS_EXPORT = 'GENERATED_PLUGINS';
@@ -56,7 +56,7 @@ function renderPluginsBarrel(artifacts: SeamArtifacts): string {
     .filter((line) => line !== '')
     .join('\n\n');
 
-  const entries = names.map((name) => `${deriveNames(name).pascal}Plugin()`);
+  const entries = names.map((name) => `${artifactNames(name).pascal}Plugin()`);
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +

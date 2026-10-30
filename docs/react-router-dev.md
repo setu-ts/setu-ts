@@ -1,5 +1,29 @@
 # React Router development mode (HMR) with `@setu-ts/react-router-plugin`
 
+## In a scaffolded project
+
+Create a full-stack project:
+
+```bash
+npm create @setu-ts my-app -- --template full-stack
+cd my-app && npm install && npm run start:dev
+```
+
+Use `npm run start:dev`, `bun run start:dev` or `deno task start:dev` while editing. The application
+serves pages and API routes on one application port. Vite runs in-process on its own port, and one
+proxy route forwards client URLs under `/__vite/`. Route edits reach the next request without
+restarting the application; the browser gets Hot Module Replacement and React Fast Refresh. No
+production build runs in this loop.
+
+For production, Node runs `npm run build` then `npm start`; Bun runs `bun run build` then
+`bun run start`. Deno runs `deno task start`, which builds first. These entries use the compiled
+frontend; Node also builds the service entry.
+
+Cloudflare Workers projects have no `dev.ts`: `npm run dev` runs `wrangler dev`, which builds the
+client and server first, without hot module replacement. `npm run deploy` ships the Worker.
+
+## Wiring it by hand (an existing application)
+
 The plugin's production path imports a compiled `ServerBuild` once, at `register()` time, so a
 rebuild needs a process restart. This guide sets up a development loop where editing a route file
 changes the rendered output with **no restart**, and the browser gets Vite's Hot Module Replacement
@@ -10,27 +34,20 @@ app-level configuration.
 
 The mechanism below was verified end-to-end against a running kernel app on **Deno 2.9.4**, **Vite
 7.3.6** and **react-router 8.3.0**, and verified again on **Deno 2.9.6**, **Vite 8.3.1** and
-**react-router 8.4.0**, the versions `setu new --template full-stack` resolves today. Where a
-plausible-looking approach does not work, it is called out explicitly rather than omitted.
+**react-router 8.4.0**, the versions resolved by `setu new --template full-stack` in that run. Where
+a plausible-looking approach does not work, it is called out explicitly rather than omitted.
 
-> **A project scaffolded by `setu new --template full-stack` already has this loop:** run
-> `deno task dev`, `npm run dev` or `bun run dev`. Its `dev.ts` is the wiring below, plus
-> `viteDevExternals`, which the loop needs whenever a route imports a `@setu-ts` package at run
-> time, as the skeleton's `app/lib/context-keys.server.ts` does. Without it Vite's development SSR
-> runner resolves imports through `node_modules`, so on Deno, where the package is a JSR import,
-> every page answers `500` with `Cannot find module '@setu-ts/react-router-plugin'`. Marking the
-> package external in `environments.ssr.resolve.external` does not help: the runner still resolves
-> the external through `node_modules`. On Node and Bun those packages are in `node_modules`, which
-> Vite externalises already, so the same `dev.ts` runs unchanged; it was verified on all three
-> runtimes. A Cloudflare Workers project gets no `dev.ts`: the entry runs Vite in-process and binds
-> sockets.
+The scaffold's `dev.ts` contains the wiring below plus `viteDevExternals`. That plugin keeps
+framework packages and workspace libraries resolved by the server runtime, so a route module and the
+entry share one module instance. Context keys from `contextKeyFor()` match by identity: the keys a
+loader reads must be the same keys `setu.config.ts` sets.
 
 > **Not related to `deno desktop --hmr`.** Deno 2.9.4 added `--hmr` support for React Router, but it
 > is scoped to the `deno desktop` command, which detects `@react-router/dev` in `package.json` and
 > shells out to `deno task dev` — React Router's own Vite dev server, with the plugin and your
 > kernel app out of the picture entirely. It is not a mechanism this plugin can use.
 
-## How it works
+### How it works
 
 Two facts drive the design:
 
@@ -45,9 +62,9 @@ Two facts drive the design:
 
 The app then needs exactly one extra route: a proxy for the URLs Vite owns.
 
-## Setup
+### Setup
 
-### 1. Pin the versions React Router requires
+#### 1. Pin the versions React Router requires
 
 ```jsonc
 // package.json
@@ -84,7 +101,7 @@ at install time:
 { "nodeModulesDir": "auto" }
 ```
 
-### 2. Namespace Vite's URLs with `base`
+#### 2. Namespace Vite's URLs with `base`
 
 ```typescript
 // vite.config.ts
@@ -110,7 +127,7 @@ become `/__vite/app/root.tsx`, `/__vite/@react-router/critical.css`, and so on.
 The React Router Vite plugin also **requires a real config file**: passing `configFile: false` to
 `createServer` fails with `The React Router Vite plugin requires the use of a Vite config file`.
 
-### 3. Wire the dev seam
+#### 3. Wire the dev seam
 
 ```typescript
 import * as vite from 'vite';
@@ -172,7 +189,7 @@ rejects any context that is not a real `RouterContextProvider` instance with a 5
 that returns only a handler cannot work. See the Notes section of PUBLIC_API.md for the full
 rationale.
 
-### 4. Add the single proxy route
+#### 4. Add the single proxy route
 
 ```typescript
 app.router.get(`${BASE}*`, async (ctx) => {
@@ -204,7 +221,7 @@ static segments descending, then wildcards ascending, then registration index, a
 its own path always outranks a wildcard. A second bare `/*` is not shadowed either — the kernel
 refuses a duplicate `METHOD path`, naming the plugin that registered it first.
 
-## The HMR WebSocket needs nothing from you
+### The HMR WebSocket needs nothing from you
 
 Vite's HMR client connects back to **Vite's own port**, not the app's. That is deliberate and worth
 being explicit about:
@@ -214,7 +231,7 @@ being explicit about:
 - If the browser cannot reach Vite's port directly (containers, remote dev), set `server.hmr.port` /
   `server.hmr.clientPort` in the Vite config rather than trying to route the socket through the app.
 
-## Production
+### Production
 
 Nothing changes: build with `react-router build`, then register the plugin with the compiled build
 and let it use the default loader.
@@ -239,7 +256,7 @@ not register, so those pages answer `500` in this loop. Pass the same `loadReque
 forwards its `reactRouter` option to the plugin unchanged. Vite stays an app-level `devDependency`
 and is never imported by the plugin (AI_GUIDELINES §12.2).
 
-## Notes on `entry.server.tsx` under Deno
+### Notes on `entry.server.tsx` under Deno
 
 Deno's own framework documentation states that React Router's default server entry targets Node and
 that a Deno-compatible `app/entry.server.tsx` is needed before building for `deno desktop`. **That
@@ -251,20 +268,20 @@ Treat a custom entry as something to reach for when you hit an actual Node-only 
 prerequisite. If you do write one, it is app-level and invisible to the plugin, which consumes only
 the compiled build.
 
-## Verified behavior summary
+### Verified behavior summary
 
-| Step                                                      | Result                                    |
-| --------------------------------------------------------- | ----------------------------------------- |
-| `import 'vite'` under Deno                                | works (requires `nodeModulesDir`)         |
-| A route importing `@setu-ts/*` at run time, on Deno       | **500** unless `viteDevExternals` is used |
-| The same route with `viteDevExternals`, on Deno           | 200, context keys shared                  |
-| `@react-router/dev/vite` under Deno                       | works                                     |
-| `vite.createServer()` in-process                          | works (real config file required)         |
-| `ssrLoadModule('virtual:react-router/server-build')`      | returns the `ServerBuild`                 |
-| SSR through the build thunk on the app port               | 200 HTML                                  |
-| Client modules under `base`, proxied through the app port | 200 `text/javascript`                     |
-| Vite HMR client reachable through the app port            | 200                                       |
-| Editing a route file, then re-requesting                  | new output, **no restart**                |
-| `server.origin` rewriting emitted module URLs             | **does not work** — use `base`            |
-| `configFile: false`                                       | **rejected** by the React Router plugin   |
-| Mismatched `react` / `react-dom` patch versions           | **throws** at `ssrLoadModule`             |
+| Step                                                                             | Result                                    |
+| -------------------------------------------------------------------------------- | ----------------------------------------- |
+| `import 'vite'` under Deno                                                       | works (requires `nodeModulesDir`)         |
+| A route importing `@setu-ts/*` at run time, on Deno in the recorded verification | **500** unless `viteDevExternals` is used |
+| The same route with `viteDevExternals`, on Deno                                  | 200, context keys shared                  |
+| `@react-router/dev/vite` under Deno                                              | works                                     |
+| `vite.createServer()` in-process                                                 | works (real config file required)         |
+| `ssrLoadModule('virtual:react-router/server-build')`                             | returns the `ServerBuild`                 |
+| SSR through the build thunk on the app port                                      | 200 HTML                                  |
+| Client modules under `base`, proxied through the app port                        | 200 `text/javascript`                     |
+| Vite HMR client reachable through the app port                                   | 200                                       |
+| Editing a route file, then re-requesting                                         | new output, **no restart**                |
+| `server.origin` rewriting emitted module URLs                                    | **does not work** — use `base`            |
+| `configFile: false`                                                              | **rejected** by the React Router plugin   |
+| Mismatched `react` / `react-dom` patch versions                                  | **throws** at `ssrLoadModule`             |

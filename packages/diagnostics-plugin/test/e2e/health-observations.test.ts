@@ -23,6 +23,7 @@ import { HealthPlugin } from '@setu-ts/health-plugin';
 
 import { createDiagnosticsClient, DiagnosticsPlugin } from '../../src/index.ts';
 import { TEST_KEY_BYTES, TEST_SESSION_ID } from '../fixtures/helpers.ts';
+import { unusedPort } from '../../../../test/node-helpers.ts';
 
 const CANARY_DATA = 'canary-data-secret-0001';
 const CANARY_ERROR = 'canary-error-message-0002';
@@ -65,12 +66,8 @@ async function startHealthDiagnosticsApplication(): Promise<{
   connectorPort: number;
   httpPort: number;
 }> {
-  const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const httpPort = (probe.addr as Deno.NetAddr).port;
-  probe.close();
-  const connectorProbe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-  const connectorPort = (connectorProbe.addr as Deno.NetAddr).port;
-  connectorProbe.close();
+  const httpPort = await unusedPort();
+  const connectorPort = await unusedPort();
 
   const app = createApplication({
     plugins: [
@@ -170,9 +167,7 @@ describe('Health observations e2e (M98d canary)', () => {
   });
 
   it('keeps a healthy scheduled indicator fresh while another one hangs (real timers)', async () => {
-    const connectorProbe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const connectorPort = (connectorProbe.addr as Deno.NetAddr).port;
-    connectorProbe.close();
+    const connectorPort = await unusedPort();
     const calls = { hung: 0, ok: 0 };
     const app = createApplication({
       plugins: [
@@ -247,9 +242,7 @@ describe('Health observations e2e (M98d canary)', () => {
   });
 
   it('answers an unsupported health read through the connector when no health plugin is present', async () => {
-    const probe = Deno.listen({ port: 0, hostname: '127.0.0.1' });
-    const connectorPort = (probe.addr as Deno.NetAddr).port;
-    probe.close();
+    const connectorPort = await unusedPort();
     const app = createApplication({
       plugins: [
         RuntimePlugin(),

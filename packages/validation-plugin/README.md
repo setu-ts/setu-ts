@@ -3,11 +3,10 @@
 Zod-compatible request validation. Registers a validation service under `CAPABILITIES.VALIDATION`
 (`'validation'`) and ships middleware helpers for body, query, params, headers, and cookies.
 
-Schemas are duck-typed through `safeParse`, so any Zod-compatible validator works. Both **zod v3
-(`>=3.24.0 <4`) and zod v4 (`>=4.4.0 <5`)** are supported (each provides public `safeParse`); there
-is no version pin on the plugin — an application uses whichever major it installs, and
-`@setu-ts/openapi-plugin` recognizes either when documenting routes. `pnpm run check:compat`
-exercises each declared major independently.
+Schemas are duck-typed through the public `safeParse` method. The supported Zod range is
+**`>=4.6.6 <5`**, and validation is tested with Zod 4 only. The plugin does not import Zod;
+applications install their own supported version. `pnpm run check:compat` exercises validation and
+OpenAPI generation with Zod 4.
 
 ## Installation
 
@@ -57,12 +56,12 @@ app.router.post('/users', {
 });
 ```
 
-`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — for Zod
-3 and 4 alike, and it is inferred from the schema you pass, so the type follows the schema instead
-of being restated in the handler. `value(ctx)` returns the stored value only when that validator ran
-on the request; it throws a `TypeError` naming the target otherwise — when the validator is not in
-the route's chain, or a later validator for the same target overwrote it — a programming error that
-`errorHandler` masks to a 500. The old read still works and is unchanged:
+`ValidatedOutput<S>` is the schema's parsed output type — coercions and defaults included — and it
+is inferred from the schema you pass, so the type follows the schema instead of being restated in
+the handler. `value(ctx)` returns the stored value only when that validator ran on the request; it
+throws a `TypeError` naming the target otherwise — when the validator is not in the route's chain,
+or a later validator for the same target overwrote it — a programming error that `errorHandler`
+masks to a 500. The old read still works and is unchanged:
 `ctx.state.get(validatedStateKey('body'))` keeps carrying the parsed value, and the
 `@ValidateBody`/`@ValidateQuery`/`@ValidateParams` resolvers read through it.
 

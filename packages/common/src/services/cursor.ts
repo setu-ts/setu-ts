@@ -267,15 +267,23 @@ export function keysetPredicate(
  * different fingerprint and is refused by name rather than served a silently
  * wrong page.
  *
+ * With scope, binds the entity, key columns and sort. This is a correctness
+ * check, not an authorization boundary. Scoped adapter paths refuse old unscoped cursors.
+ *
  * @param orderBy - The resolved sort specification
- * @returns A stable fingerprint string (`'field:direction'` pairs joined by
- *   commas, in `orderBy` declaration order)
+ * @param scope - Entity and resolved key columns (since 0.11.0); omit for legacy output
+ * @returns Without scope, a stable fingerprint string (`'field:direction'` pairs joined by
+ *   commas, in `orderBy` declaration order); with scope, JSON of entity, key columns and that string
  * @since 0.2.0
  */
-export function sortFingerprint(orderBy: Readonly<Record<string, OrderDirection>>): string {
-  return Object.entries(orderBy)
+export function sortFingerprint(
+  orderBy: Readonly<Record<string, OrderDirection>>,
+  scope?: { readonly entity: string; readonly keyColumns: readonly string[] },
+): string {
+  const pairs = Object.entries(orderBy)
     .map(([field, direction]) => `${field}:${direction}`)
     .join(',');
+  return scope === undefined ? pairs : JSON.stringify([scope.entity, scope.keyColumns, pairs]);
 }
 
 /**

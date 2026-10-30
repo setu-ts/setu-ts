@@ -23,6 +23,20 @@ npm install @setu-ts/runtime
 deno add npm:@setu-ts/runtime
 ```
 
+## Local diagnostics listener
+
+`RuntimePlugin` provides `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` for an explicitly activated local
+diagnostics connector on Deno and Node. It binds one additional `127.0.0.1` port (1024–65535), keeps
+the application listener separate, and exposes only an idempotent `close()` handle. Bun and Workers
+refuse before binding.
+
+Node uses `node:http` directly, preserves raw request-target spellings, checks duplicate singleton
+header lines, and applies explicit parser/time limits and a 32-connection cap. Parser errors answer
+a fixed bare `400` with no body. A port conflict rejects startup; shutdown destroys open
+connections. See
+[the protocol](https://github.com/setu-ts/setu-ts/blob/main/docs/diagnostics-protocol.md#transport)
+for the refusal families and trust limits.
+
 ## What's Inside
 
 | Area            | Exports                                                                                |
@@ -111,6 +125,8 @@ Node 22, Bun and Deno are unaffected, as are real-socket uploads and `inject()`.
 cancels oversized bodies to enforce the read bound.
 
 ### Reporting a failed WebSocket handshake
+
+<!-- version:history -->
 
 `HttpAdapterOptions` accepts `reportError?: (record: Readonly<Record<string, unknown>>) => void`
 (`@since 0.10.0`). `RuntimePlugin` supplies one resolved at CALL time: the registered logger's

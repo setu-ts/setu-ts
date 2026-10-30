@@ -17,7 +17,7 @@ import type { IDiagnosticsSource } from './services/diagnostics.ts';
 import type { Constructor, IContainer } from './container.ts';
 import type { ILogger } from './services/logger.ts';
 import type { IConfig } from './services/config.ts';
-import type { HealthIndicatorFn } from './services/health.ts';
+import type { HealthIndicatorFn, HealthIndicatorOptions } from './services/health.ts';
 import type { MetricConfig } from './services/metrics.ts';
 
 /**
@@ -210,8 +210,9 @@ export interface IHealthApi {
    *
    * @param name - Indicator name, unique per application
    * @param indicator - Function producing the health check result
+   * @param options - Readiness membership; absent means included
    */
-  register(name: string, indicator: HealthIndicatorFn): void;
+  register(name: string, indicator: HealthIndicatorFn, options?: HealthIndicatorOptions): void;
 }
 
 /**

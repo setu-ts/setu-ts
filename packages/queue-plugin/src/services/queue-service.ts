@@ -274,6 +274,10 @@ export class QueueService implements IQueue {
    * also carries `backlog`, the sum of each successfully-read name's
    * `ready + processing` — unfinished work; `dead` is terminal and stays
    * visible per name.
+   * A probe that does not answer reports `up` with unknown reachability and
+   * skips depth reads: a timeout is not positive evidence of an outage.
+   *
+   * @returns The cached, bounded health indicator
    */
   createHealthIndicator(): HealthIndicatorFn {
     const probe = this.#buildProbe();
@@ -294,6 +298,9 @@ export class QueueService implements IQueue {
       // — so an outage would fill the log with depth failures that say nothing
       // the `reachable: false` beside them does not.
       const reachable = await probe();
+      if (reachable === undefined) {
+        return { status: 'up', data: { adapter: adapterName, reachable: 'unknown' } };
+      }
       if (reachable === false) {
         return { status: 'down', data: { adapter: adapterName, reachable: false } };
       }
@@ -335,14 +342,15 @@ export class QueueService implements IQueue {
    * optional `isHealthy` (M90b). `undefined` when the adapter cannot probe —
    * the indicator then reports `reachable: 'unknown'`.
    */
-  #buildProbe(): (() => Promise<boolean>) | undefined {
+  #buildProbe(): (() => Promise<boolean | undefined>) | undefined {
     const isHealthy = this.#adapter.isHealthy;
     if (typeof isHealthy !== 'function') {
       return undefined;
     }
     const adapter = this.#adapter;
-    return createCachedProbe({
+    return createCachedProbe<boolean | undefined>({
       probe: () => isHealthy.call(adapter),
+      fallback: undefined,
       ttlMs: PROBE_TTL_MS,
       timeoutMs: PROBE_TIMEOUT_MS,
       hrtime: this.#runtime.hrtime.bind(this.#runtime),

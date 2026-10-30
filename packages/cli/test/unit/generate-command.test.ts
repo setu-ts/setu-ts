@@ -279,7 +279,7 @@ describe('runGenerateCommand', () => {
     it('allows a functional module when decorators are absent', async () => {
       const h = harness();
       expect(await h.run(['module', 'widget'])).toBe(0);
-      expect(h.fs.read('/app/src/modules/widget/widget.routes.ts')).toContain(
+      expect(h.fs.read('/app/src/modules/widget/widget.controller.ts')).toContain(
         'registerWidgetRoutes',
       );
     });
@@ -628,7 +628,7 @@ describe('runGenerateCommand', () => {
     it('accepts a reserved word, which schematics always affix', async () => {
       const h = harness();
       expect(await h.run(['route', 'class'])).toBe(0);
-      expect(h.fs.read('/app/src/controllers/class.routes.ts')).toContain(
+      expect(h.fs.read('/app/src/controllers/class.controller.ts')).toContain(
         'export function registerClassRoutes',
       );
     });
@@ -670,7 +670,7 @@ describe('runGenerateCommand', () => {
     expect(reported).toContain('unreachable');
     // It reports and does not refuse: the developer needs the generator to work
     // inside the project they are migrating.
-    expect(h.fs.writes).toContain('/app/src/controllers/billing.routes.ts');
+    expect(h.fs.writes).toContain('/app/src/controllers/billing.controller.ts');
   });
 
   it('stays silent in a project that has no legacy directory', async () => {
@@ -700,7 +700,10 @@ describe('runGenerateCommand', () => {
     ]);
     expect(h.out.text()).toContain('readiness: { migrations: MIGRATION_NAMES }');
     expect(h.out.text()).toContain('./src/migrations/index.ts');
-    expect(h.out.text()).toContain('setu_migrations table: https://');
+    expect(h.out.text()).toContain(
+      `setu_migrations table: https://github.com/setu-ts/setu-ts/blob/v${VERSION}/packages/database-plugin/README.md#migrations-and-readiness`,
+    );
+    expect(h.out.text()).not.toContain('/tree/develop/');
   });
 
   it('prints no migration hint for other schematics or dry runs', async () => {
@@ -791,9 +794,9 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
   const handWired = {
     '/app/deno.json': DENO_MANIFEST('kernel'),
     '/app/setu.config.ts':
-      "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';\n" +
+      "import { registerAdminRoutes } from './src/controllers/admin.controller.ts';\n" +
       'export function createApp() { registerAdminRoutes(app.router); }\n',
-    '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+    '/app/src/controllers/admin.controller.ts': 'export function registerAdminRoutes(): void {}\n',
   };
 
   it('leaves a hand-registered module out of the barrel and reports why', async () => {
@@ -809,7 +812,7 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     // had not touched.
     expect(barrel).not.toContain('registerAdminRoutes');
     const report = h.err.lines.join('\n');
-    expect(report).toContain('src/controllers/admin.routes.ts');
+    expect(report).toContain('src/controllers/admin.controller.ts');
     expect(report).toContain('setu.config.ts');
   });
 
@@ -817,14 +820,15 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     const h = harness({
       '/app/deno.json': DENO_MANIFEST('kernel'),
       '/app/setu.config.ts': 'export function createApp() {}\n',
-      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+      '/app/src/controllers/admin.controller.ts':
+        'export function registerAdminRoutes(): void {}\n',
     });
 
     const code = await h.run(['route', 'report']);
 
     expect(code).toBe(0);
     expect(h.fs.read('/app/src/controllers/index.ts')).toContain('registerAdminRoutes');
-    expect(h.err.lines.join('\n')).toContain('Adopted src/controllers/admin.routes.ts');
+    expect(h.err.lines.join('\n')).toContain('Adopted src/controllers/admin.controller.ts');
   });
 
   it('reports no adoption into a barrel this command does not write', async () => {
@@ -834,7 +838,8 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     const h = harness({
       '/app/deno.json': DENO_MANIFEST('kernel'),
       '/app/setu.config.ts': 'export function createApp() {}\n',
-      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+      '/app/src/controllers/admin.controller.ts':
+        'export function registerAdminRoutes(): void {}\n',
     });
 
     expect(await h.run(['plugin', 'audit'])).toBe(0);
@@ -848,7 +853,8 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     const h = harness({
       '/app/deno.json': DENO_MANIFEST('kernel'),
       '/app/setu.config.ts': 'export function createApp() {}\n',
-      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+      '/app/src/controllers/admin.controller.ts':
+        'export function registerAdminRoutes(): void {}\n',
     });
     const load = () =>
       Promise.resolve({
@@ -866,12 +872,14 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     const seed = {
       '/app/deno.json': DENO_MANIFEST('kernel'),
       '/app/setu.config.ts': 'export function createApp() {}\n',
-      '/app/src/controllers/admin.routes.ts': 'export function registerAdminRoutes(): void {}\n',
+      '/app/src/controllers/admin.controller.ts':
+        'export function registerAdminRoutes(): void {}\n',
     };
     // Refused: the planned route module already exists, so nothing is written.
     const refused = harness({
       ...seed,
-      '/app/src/controllers/report.routes.ts': 'export function registerReportRoutes(): void {}\n',
+      '/app/src/controllers/report.controller.ts':
+        'export function registerReportRoutes(): void {}\n',
     });
     expect(await refused.run(['route', 'report'])).toBe(1);
     expect(refused.err.lines.join('\n')).not.toContain('Adopted');
@@ -880,7 +888,7 @@ describe('runGenerateCommand — adopted and hand-wired artifacts (M70g, X4-4/F2
     expect(await dry.run(['route', 'report', '--dry-run'])).toBe(0);
     expect(dry.err.lines.join('\n')).not.toContain('Adopted ');
     expect(dry.err.lines.join('\n')).toContain(
-      'Would adopt src/controllers/admin.routes.ts into src/controllers/index.ts',
+      'Would adopt src/controllers/admin.controller.ts into src/controllers/index.ts',
     );
     expect(dry.fs.has('/app/src/controllers/index.ts')).toBe(false);
   });

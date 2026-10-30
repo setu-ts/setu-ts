@@ -16,6 +16,7 @@
     "types": ["node", "deno"],
     "paths": {
       "@setu-ts/common": ["../../../packages/common/src/index.ts"],
+      "redis": ["../../../packages/common/node_modules/redis/dist/index.d.ts"],
       "@setu-ts/kernel": ["../../../packages/kernel/src/index.ts"],
       "@setu-ts/runtime": ["../../../packages/runtime/src/index.ts"],
       "@setu-ts/exceptions": ["../../../packages/exceptions/src/index.ts"],
@@ -57,6 +58,10 @@
       "@std/expect": ["./shims/std-expect.ts"],
       "bun:test": ["./shims/bun-test.ts"],
       "cloudflare:workers": ["./shims/cloudflare-workers.ts"],
+      "pg": ["../../../packages/database-plugin/node_modules/@types/pg/index.d.ts"],
+      "@prisma/adapter-pg": [
+        "../../../packages/database-plugin/node_modules/@prisma/adapter-pg/dist/index.d.ts"
+      ],
       "@setu-ts/localization-plugin/format": [
         "../../../packages/localization-plugin/src/format/index.ts"
       ],

@@ -6,6 +6,7 @@
  *
  * @module
  */
+import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
 import type { IPrincipal, IRequest, ISessionService } from '@setu-ts/common';
@@ -16,6 +17,7 @@ import { SessionPlugin } from '@setu-ts/session-plugin';
 import { AuthPlugin } from '../../src/index.ts';
 import { AuthSessionStrategy } from '../../src/strategies/auth-session-strategy.ts';
 import { AUTH_SESSION_KEY } from '../../src/sign-in/auth-session-service.ts';
+import type { SessionStamp } from '../../src/interfaces/index.ts';
 import { buildSignInApp, CookieJar, json } from '../fixtures/sign-in-app.ts';
 import type { BuildOptions, SignInHarness } from '../fixtures/sign-in-app.ts';
 
@@ -78,6 +80,113 @@ describe('auth-session strategy', () => {
       },
     });
     expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+  });
+
+  it('re-checks a password-only sign-in with no provider (V10-65)', async () => {
+    // M124 §3.1: `providers: []` without mfa or passkeys is accepted, and the
+    // per-request re-read still runs.
+    let active = true;
+    await passwordLogin({
+      signIn: { providers: [], refreshPrincipal: (stored) => (active ? stored : null) },
+    });
+    expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+    active = false;
+    expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+    // Only the logout route is registered for an empty provider list.
+    const login = await harness.app.fetch(new Request('http://localhost/auth/idp/login'));
+    expect(login.status).toBe(404);
+    await login.body?.cancel();
+  });
+
+  describe('session stamp (M124 §3.3)', () => {
+    it('ends the session when the user stamp changes, and keeps it while it matches', async () => {
+      let stamp: string | null = 'v1';
+      await passwordLogin({ signIn: { providers: [], sessionStamp: () => stamp } });
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+      stamp = 'v2';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      stamp = null;
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+    });
+
+    it('matches a user with no stamp only while the user still has none', async () => {
+      let stamp: string | null = null;
+      await passwordLogin({ signIn: { providers: [], sessionStamp: () => stamp } });
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+      stamp = 'v1';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+    });
+
+    it('fails closed when the reader throws or returns a non-string', async () => {
+      let mode: 'ok' | 'throw' | 'number' = 'ok';
+      await passwordLogin({
+        signIn: {
+          providers: [],
+          sessionStamp: () => {
+            if (mode === 'throw') {
+              throw new Error('user store down');
+            }
+            return mode === 'number' ? (7 as unknown as string) : 'v1';
+          },
+        },
+      });
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+      mode = 'throw';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      mode = 'number';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      mode = 'ok';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+    });
+
+    it('reads the stamp from the principal refreshPrincipal returned, after the re-read', async () => {
+      const users = new Map([['alice', { version: 'v1', active: true }]]);
+      const order: string[] = [];
+      await passwordLogin({
+        signIn: {
+          providers: [],
+          refreshPrincipal: (stored) => {
+            order.push('refresh');
+            const user = users.get(stored.id);
+            return user?.active === true
+              ? { id: stored.id, roles: ['user'], claims: { sessionVersion: user.version } }
+              : null;
+          },
+          sessionStamp: (principal) => {
+            order.push('stamp');
+            // At sign-in the fixture's principal carries no claim: read the record.
+            const claim = principal.claims?.sessionVersion;
+            return typeof claim === 'string' ? claim : (users.get(principal.id)?.version ?? null);
+          },
+        },
+      });
+      order.length = 0;
+      const me = await json(await jar.fetch(harness.app, '/me'));
+      expect(me.user).toEqual({
+        id: 'alice',
+        roles: ['user'],
+        claims: { sessionVersion: 'v1', amr: ['pwd'] },
+      });
+      expect(order).toEqual(['refresh', 'stamp']);
+      users.set('alice', { version: 'v2', active: true });
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      // A revoked principal is anonymous before the stamp is ever read.
+      users.set('alice', { version: 'v1', active: false });
+      order.length = 0;
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      expect(order).toEqual(['refresh']);
+    });
+
+    it('keeps the current session through a re-sign-in after a bump', async () => {
+      let stamp = 'v1';
+      await passwordLogin({ signIn: { providers: [], sessionStamp: () => stamp } });
+      stamp = 'v2';
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(401);
+      // The application's password-change handler signs the session in again.
+      await jar.fetch(harness.app, '/password-login', { method: 'POST' });
+      expect((await jar.fetch(harness.app, '/me')).status).toBe(200);
+    });
   });
 
   it('the session id held before a password sign-in no longer carries an identity (store)', async () => {
@@ -143,12 +252,53 @@ describe('auth-session strategy', () => {
 describe('AuthSessionStrategy edge cases', () => {
   const request = { headers: new Headers() } as IRequest;
 
-  function strategy(data: Record<string, unknown> | null): AuthSessionStrategy {
+  /**
+   * A strategy over a fake session holding `data`, with the stamp check when
+   * `sessionStamp` is given.
+   */
+  function strategy(
+    data: Record<string, unknown> | null,
+    sessionStamp?: SessionStamp,
+  ): AuthSessionStrategy {
     const sessionService = {
       fromHeaders: () => Promise.resolve(data === null ? null : { id: 's', data }),
     } as unknown as ISessionService;
-    return new AuthSessionStrategy({ sessionService });
+    return new AuthSessionStrategy({
+      sessionService,
+      ...(sessionStamp === undefined
+        ? {}
+        : { sessionStamp: { read: sessionStamp, subtle: crypto.subtle } }),
+    });
   }
+
+  it('reads a record written before sessionStamp was configured as having no stamp', async () => {
+    const legacy = { [AUTH_SESSION_KEY]: { principal: { id: 'u' }, methods: ['pwd'], at: 1 } };
+    expect((await strategy(legacy, () => null).authenticate(request))?.id).toBe('u');
+    expect(await strategy(legacy, () => 'v1').authenticate(request)).toBeNull();
+  });
+
+  it('compares the digest, so a record holding the raw stamp does not match', async () => {
+    const raw = {
+      [AUTH_SESSION_KEY]: { principal: { id: 'u' }, methods: ['pwd'], at: 1, stamp: 'v1' },
+    };
+    expect(await strategy(raw, () => 'v1').authenticate(request)).toBeNull();
+    const hashed = {
+      [AUTH_SESSION_KEY]: {
+        principal: { id: 'u' },
+        methods: ['pwd'],
+        at: 1,
+        stamp: createHash('sha256').update('v1').digest('base64url'),
+      },
+    };
+    expect((await strategy(hashed, () => 'v1').authenticate(request))?.id).toBe('u');
+  });
+
+  it('is anonymous for a record whose stamp is not a string', async () => {
+    const corrupt = {
+      [AUTH_SESSION_KEY]: { principal: { id: 'u' }, methods: ['pwd'], at: 1, stamp: 7 },
+    };
+    expect(await strategy(corrupt).authenticate(request)).toBeNull();
+  });
 
   it('is anonymous for an unopenable session and for a session with no record', async () => {
     expect(await strategy(null).authenticate(request)).toBeNull();

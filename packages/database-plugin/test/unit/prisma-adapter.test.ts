@@ -675,9 +675,13 @@ describe('PrismaAdapter', () => {
   describe('findPage — keyset cursor pagination (§3.8)', () => {
     /** Build the sort fingerprint in the format every minted cursor carries. */
     function fingerprintOf(orderBy: Record<string, string>): string {
-      return Object.entries(orderBy)
-        .map(([field, dir]) => `${field}:${dir}`)
-        .join(',');
+      return JSON.stringify([
+        'User',
+        ['id'],
+        Object.entries(orderBy)
+          .map(([field, dir]) => `${field}:${dir}`)
+          .join(','),
+      ]);
     }
 
     it('pages against the recorded arguments: take is limit+1 and no skip is sent', async () => {

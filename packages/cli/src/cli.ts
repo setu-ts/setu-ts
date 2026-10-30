@@ -5,12 +5,14 @@
  */
 
 import type { IFileSystem } from '@setu-ts/common';
+import { DuplicateArtifactNameError } from './utils/artifact-scanner.ts';
 import { parseArgs } from './args.ts';
 import { escapeName, escapeTerminalControls, hasControlCharacter } from './utils/names.ts';
 import { builtInFlagRefusal, builtInPositionalRefusal } from './flags.ts';
 import {
   APP_VERB,
   CONFIG_MODULE,
+  EXIT_ERROR,
   EXIT_INTERRUPTED,
   EXIT_OK,
   EXIT_USAGE,
@@ -18,6 +20,9 @@ import {
   TARGET_RUNTIMES,
   VERSION,
 } from './constants.ts';
+import { runBuildCommand } from './commands/build.ts';
+import { runCheckCommand } from './commands/check.ts';
+import { runSyncCommand } from './commands/sync.ts';
 import { runGenerateCommand } from './commands/generate.ts';
 import { runAddCommand } from './commands/add.ts';
 import { runAgentsCommand } from './commands/agents.ts';
@@ -30,6 +35,7 @@ import { listSchematics } from './schematics/registry.ts';
 import type { ModuleLoader } from './schematics/custom.ts';
 import type { AppLoader } from './app-loader.ts';
 import type { PortProbe } from './workspace/port-probe.ts';
+import type { CommandRunner } from './utils/run-command.ts';
 import {
   dispatchPluginCommand,
   type PluginCommandDependencies,
@@ -50,6 +56,17 @@ export interface CliDependencies {
   readonly fs: IFileSystem;
   /** The working directory commands resolve relative paths against (absolute). */
   readonly cwd: string;
+  /**
+   * The shell's logical working directory, when it is absolute and its real path
+   * equals the real path of {@linkcode cwd} — the shell's `pwd -L` rule.
+   *
+   * `cwd` is physical, so from inside a symlinked workspace member it names the
+   * link target and the workspace is invisible. This lets a command notice that
+   * the logical path is a listed member and REFUSE to write through the link; it
+   * never authorizes a write. Omit it when the shell supplies no such path
+   * (Windows, a forged or stale `PWD`, or a programmatic caller).
+   */
+  readonly logicalCwd?: string;
   /** Wall-clock milliseconds, for timestamped output. */
   readonly now: () => number;
   /** Writes a line of normal output. */
@@ -65,6 +82,8 @@ export interface CliDependencies {
   readonly loadApp?: AppLoader;
   /** Checks whether a workspace port can bind before the CLI assigns it. */
   readonly portAvailable?: PortProbe;
+  /** Runs `docker`, `kind`, `kubectl` and `git` for `setu workspace build|deploy` (M122). */
+  readonly runCommand?: CommandRunner;
   /**
    * Asks the questions `setu new` already accepts as flags.
    *
@@ -76,6 +95,8 @@ export interface CliDependencies {
   readonly ask?: Prompter;
   /** Cooperative interruption signal supplied by the process boundary. */
   readonly interrupt?: AbortSignal;
+  /** Downloads version-tagged example files; defaults to globalThis.fetch. */
+  readonly fetch?: typeof globalThis.fetch;
 }
 
 /**
@@ -97,10 +118,15 @@ function printHelp(log: (message: string) => void): void {
   log(`  generate, g <schematic> <name> Generate code from a schematic`);
   log(`  generate, g ${APP_VERB} <name>          Add a service to a workspace`);
   log(`  add <plugin>                   Install a Setu-TS package into this project`);
+  log(`  build                          Bundle a Node service for production`);
+  log(`  check                          Check CLI-owned wiring (read-only)`);
+  log(`  sync                           Rewrite CLI-managed barrels`);
   log(`  agents                         Write or check this project's AGENTS.md brief`);
   log(`  adopt                          Convert this project into a workspace`);
   log(`  devtool enable [member]        Enable the local diagnostics connector`);
   log(`  workspace ports --reallocate    Reassign workspace ports that are currently bindable`);
+  log(`  workspace build                 Build every member's container image`);
+  log(`  workspace deploy                Build, ship and roll out every member to Kubernetes`);
   log(`  commands                       List commands this app's plugins provide`);
   log('');
   log('Options:');
@@ -225,12 +251,14 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
           ...(deps.ask === undefined ? {} : { ask: deps.ask }),
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+          ...(deps.fetch === undefined ? {} : { fetch: deps.fetch }),
         });
 
       case 'generate':
       case 'g':
         return await runGenerateCommand(rest, {
           fs: deps.fs,
+          ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
           cwd: deps.cwd,
           now: deps.now,
           log: deps.log,
@@ -248,6 +276,15 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
         });
+
+      case 'build':
+        return await runBuildCommand(rest, deps);
+
+      case 'check':
+        return await runCheckCommand(rest, deps);
+
+      case 'sync':
+        return await runSyncCommand(rest, deps);
 
       case 'agents':
         return await runAgentsCommand(rest, deps);
@@ -280,6 +317,8 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
           error: deps.error,
           ...(deps.portAvailable === undefined ? {} : { portAvailable: deps.portAvailable }),
           ...(deps.interrupt === undefined ? {} : { interrupt: deps.interrupt }),
+          ...(deps.runCommand === undefined ? {} : { runCommand: deps.runCommand }),
+          now: deps.now,
         });
 
       case 'commands':
@@ -297,6 +336,10 @@ export async function runCli(argv: readonly string[], rawDeps: CliDependencies):
         return await dispatchPluginCommand(command, rest, pluginCommandDeps(deps));
     }
   } catch (cause) {
+    if (cause instanceof DuplicateArtifactNameError) {
+      deps.error(cause.message);
+      return EXIT_ERROR;
+    }
     if (cause instanceof InterruptedError) {
       deps.error('Interrupted; the files this run wrote were removed.');
       return EXIT_INTERRUPTED;

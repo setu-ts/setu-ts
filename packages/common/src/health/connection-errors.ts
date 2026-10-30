@@ -13,13 +13,18 @@
  *
  * This module is the one implementation every package that builds such a
  * client attaches through. It reports the FIRST error of a run at `warn`,
- * consecutive repeats of the same message at `debug` with a running count, and
- * the recovery at `info` — so an outage is one warning, not fifty, and its end
- * is visible. It is a log channel only: whether the backend is reachable is
- * still answered by each package's `isHealthy` probe, which this does not touch.
+ * consecutive repeats of the same rendered error at `debug` with a running
+ * count, and the recovery at `info` — so an outage is one warning, not fifty,
+ * and its end is visible. Each error is rendered by {@linkcode describeError}:
+ * its name, message, safe classifiers, aggregate members, and cause chain reach
+ * the line, never its stack. An `AggregateError` from a multi-address client is
+ * therefore readable instead of an empty message. It is a log channel only:
+ * whether the backend is reachable is still answered by each package's
+ * `isHealthy` probe, which this does not touch.
  *
  * @since 0.8.0
  */
+import { describeError } from '../errors/describe-error.ts';
 import type { ILogger } from '../services/logger.ts';
 
 /**
@@ -63,10 +68,12 @@ export interface ConnectionErrorReporterOptions {
 export interface ConnectionErrorReporter {
   /**
    * Reports one connection error. The first error of a run, or one whose
-   * message differs from the previous error, logs at `warn`; a repeat of the
-   * previous message logs at `debug` with a `repeats` count.
+   * rendered description differs from the previous error, logs at `warn`; a
+   * repeat of the previous description logs at `debug` with a `repeats` count.
    *
-   * @param error - The emitted error (any value; only its message is logged)
+   * @param error - The emitted error (any value; rendered by `describeError`,
+   *   which includes name, message, classifiers, aggregate members, and cause,
+   *   and never the stack)
    */
   report(error: unknown): void;
   /**
@@ -77,13 +84,10 @@ export interface ConnectionErrorReporter {
   recovered(): void;
 }
 
-/** Extracts a loggable message without letting a hostile value throw. */
+/** Renders a loggable description without letting a hostile value throw. */
 function messageOf(error: unknown): string {
   try {
-    if (error instanceof Error) {
-      return error.message;
-    }
-    return String(error);
+    return describeError(error);
   } catch {
     return 'unrepresentable error value';
   }

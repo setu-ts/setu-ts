@@ -345,13 +345,16 @@ async function assertRestServesAndCaches(project: string): Promise<void> {
 
 describe("the CLI's Workers templates build and boot on workerd", () => {
   it(
-    'generated feature module bundles and type-checks without emitting tests',
+    'generated feature module bundles and type-checks with its generated tests',
     { timeout: CASE_TIMEOUT_MS, skip },
     async () => {
       const project = await scaffold('rest');
-      expect(await run(['generate', 'module', 'invoices'], project)).toBe(0);
+      expect(await run(['generate', 'module', 'invoices', '--adopt-controllers'], project)).toBe(0);
       const files = await nodeFs.readdir(`${project}/src/modules/invoices`);
-      expect(files.some((file) => file.endsWith('.test.ts'))).toBe(false);
+      // V10-23: Workers modules run under `tsx --test` like every other target,
+      // so both test files are emitted and `tsc --noEmit` must accept them.
+      expect(files).toContain('invoices.test.ts');
+      expect(files).toContain('invoices.e2e.test.ts');
       expect(await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8')).toContain(
         'registerModules(app.router, app.services)',
       );

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueueService } from '../../src/services/queue-service.ts';
 import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
@@ -17,6 +17,32 @@ class FailingAckQueue extends MemoryQueue {
 }
 
 describe('QueueService', () => {
+  it('an unanswered probe reports unknown and skips depth reads', async () => {
+    const runtime = new FakeRuntimeServices(0);
+    const adapter = new MemoryQueue();
+    const healthy = vi.spyOn(adapter, 'isHealthy').mockImplementation(() => new Promise(() => {}));
+    const depths = vi.spyOn(adapter, 'depths');
+    const service = new QueueService(adapter, runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    service.process('work', async () => {});
+    await service.connect();
+    try {
+      const indicator = service.createHealthIndicator();
+      const result = indicator();
+      await runtime.advanceMs(2000);
+      expect(await result).toEqual({
+        status: 'up',
+        data: { adapter: 'MemoryQueue', reachable: 'unknown' },
+      });
+      expect(await indicator()).toEqual(await result);
+      expect(healthy).toHaveBeenCalledTimes(1);
+      expect(depths).not.toHaveBeenCalled();
+    } finally {
+      await service.disconnect();
+    }
+  });
   let runtime: FakeRuntimeServices;
   let adapter: MemoryQueue;
   let service: QueueService;

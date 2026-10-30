@@ -37,6 +37,66 @@ export interface ToolchainProseRules {
 export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
   allowlist: [
     {
+      path: 'docs/deployment.md',
+      category: 'deno-target',
+      reason: 'Gives the root test command of a generated Deno workspace (M122).',
+    },
+    {
+      path: 'scripts/check-deploy.ts',
+      category: 'deno-target',
+      reason: "Proves a generated Deno workspace's root test task runs each member once (M122).",
+    },
+    {
+      path: 'packages/cli/src/commands/add-view.ts',
+      category: 'deno-target',
+      reason: 'Emits CSS build and watch tasks for supported Deno view projects.',
+    },
+    {
+      path: 'packages/cli/test/unit/add-view.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts generated Deno view CSS tasks and preserves existing tasks.',
+    },
+    {
+      path: 'docs/mvc.md',
+      category: 'deno-target',
+      reason: 'Documents generated Deno view build, start and CSS watcher tasks.',
+    },
+    {
+      path: 'packages/cli/test/unit/project-files-check.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts frontend-first check tasks for supported Deno applications.',
+    },
+    {
+      path: 'packages/cli/test/unit/dockerfile.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts the generated Deno image build-task gate before cache.',
+    },
+    {
+      path: 'packages/cli/src/workspace/compose.ts',
+      category: 'deno-target',
+      reason: 'Generated Deno application build and task instructions.',
+    },
+    {
+      path: 'packages/cli/test/unit/workspace/compose.test.ts',
+      category: 'deno-target',
+      reason: 'Generated Deno application build and task instructions.',
+    },
+    {
+      path: 'packages/cli/test/unit/project-files-scripts.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts supported Deno application development and build tasks.',
+    },
+    {
+      path: 'packages/cli/src/commands/build.ts',
+      category: 'deno-target',
+      reason: 'Build refusal names the supported Deno application start task.',
+    },
+    {
+      path: 'packages/cli/test/unit/build-command.test.ts',
+      category: 'deno-target',
+      reason: 'Asserts Deno application guidance from the Node-only build command.',
+    },
+    {
       path: 'packages/cli/test/unit/agents/render-brief.test.ts',
       category: 'deno-target',
       reason: 'Asserts commands rendered for supported Deno application projects.',
@@ -90,7 +150,18 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
     {
       path: 'docs/upgrading.md',
       category: 'legacy-pin',
-      reason: 'Recognizes or explains migration of pre-0.9 JSR pins.',
+      reason:
+        'Recognizes or explains migration of pre-0.9 JSR pins; names a third-party npm ' +
+        'package whose deno.json import keeps the required npm: prefix.',
+      allowNpmRef: true,
+    },
+    {
+      path: 'packages/openapi-plugin/README.md',
+      category: 'deno-target',
+      reason:
+        'Names swagger-ui-dist, a third-party npm package whose deno.json import keeps the ' +
+        'required npm: prefix.',
+      allowNpmRef: true,
     },
     {
       path: 'packages/cli/README.md',
@@ -109,11 +180,6 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
     },
     {
       path: 'packages/cli/src/commands/app.ts',
-      category: 'deno-target',
-      reason: 'Commands emitted for or exercised against supported Deno projects.',
-    },
-    {
-      path: 'packages/cli/src/commands/devtool.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
@@ -208,6 +274,22 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       reason: 'Commands emitted for or exercised against supported Deno projects.',
     },
     {
+      path: 'packages/cli/test/fixtures/redis-develop-outputs.json',
+      category: 'fixture',
+      reason:
+        'Exact pre-M117 ioredis scaffold output, Deno projects included, captured from develop.',
+    },
+    {
+      path: 'packages/cli/test/fixtures/dev-entry-0.10.0-member.txt',
+      category: 'fixture',
+      reason: 'Exact pre-M126 Deno output captured before changing the renderer.',
+    },
+    {
+      path: 'packages/cli/test/fixtures/dev-entry-0.10.0-standalone.txt',
+      category: 'fixture',
+      reason: 'Exact pre-M126 Deno output captured before changing the renderer.',
+    },
+    {
       path: 'packages/cli/test/fixtures/dev-entry-0.8.0-member.txt',
       category: 'legacy-pin',
       reason: 'Recognizes or explains migration of pre-0.9 JSR pins.',
@@ -256,6 +338,11 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       path: 'packages/cli/test/unit/generate-command.test.ts',
       category: 'deno-target',
       reason: 'Commands emitted for or exercised against supported Deno projects.',
+    },
+    {
+      path: 'packages/cli/test/unit/generate-inactive-module.test.ts',
+      category: 'deno-target',
+      reason: 'Builds Deno projects for the feature-scoped generation command tests.',
     },
     {
       path: 'packages/cli/test/unit/generate-module-command.test.ts',
@@ -372,7 +459,17 @@ export const TOOLCHAIN_PROSE_RULES: ToolchainProseRules = {
       allowJsrUrl: true,
     },
   ],
-  generatedDenoTasks: ['build', 'check', 'dev', 'install', 'proto:gen', 'start', 'test'],
+  generatedDenoTasks: [
+    'build',
+    'check',
+    'css',
+    'css:watch',
+    'dev',
+    'install',
+    'proto:gen',
+    'start',
+    'test',
+  ],
   rootScripts: [],
   appScripts: {},
 };

@@ -20,14 +20,21 @@ const SERVICE_UNKNOWN = 3;
 const SERVICE_NAMES = ['pkg.Svc', 'grpc.health.v1.Health'];
 
 function healthServiceReporting(status: HealthStatus): IHealthService {
+  const report = (): Promise<HealthReport> =>
+    Promise.resolve({ status, timestamp: 'now', checks: {} });
   return {
-    check: () =>
-      Promise.resolve({ status, info: {}, details: {}, timestamp: 0 } as unknown as HealthReport),
-  } as unknown as IHealthService;
+    registerIndicator(): void {},
+    check: report,
+    checkReady: report,
+    checkLive: report,
+  };
 }
 
 function healthServiceThrowing(): IHealthService {
-  return { check: () => Promise.reject(new Error('probe failed')) } as unknown as IHealthService;
+  return {
+    ...healthServiceReporting('up'),
+    checkReady: () => Promise.reject(new Error('probe failed')),
+  };
 }
 
 /** Drives the real `Check` method rather than only the helper. */
@@ -56,6 +63,14 @@ describe('mapHealthStatus', () => {
 });
 
 describe('resolveServingStatus', () => {
+  it('reads readiness when full health is down and the readiness group is empty', async () => {
+    const service = {
+      ...healthServiceReporting('up'),
+      check: healthServiceReporting('down').check,
+    };
+    expect(await resolveServingStatus(service, SERVICE_NAMES, '')).toBe('serving');
+    expect(await check(createHealthService(service, SERVICE_NAMES), {})).toBe(SERVING);
+  });
   it('answers serving with no health capability registered', async () => {
     expect(await resolveServingStatus(undefined, SERVICE_NAMES, '')).toBe('serving');
   });

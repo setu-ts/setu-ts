@@ -15,6 +15,8 @@ import { runCli } from './cli.ts';
 import { EXIT_ERROR } from './constants.ts';
 import { createTerminalPrompter } from './prompt.ts';
 import { createLineReader } from './terminal-line.ts';
+import { logicalCwdFor } from './utils/logical-cwd.ts';
+import { createCommandRunner, type CommandRunner } from './utils/run-command.ts';
 
 /** @ignore Runtime capabilities used by the executable boundary. */
 export interface MainRuntime {
@@ -36,6 +38,8 @@ export interface MainProcess {
   readonly log: (message: string) => void;
   readonly error: (message: string) => void;
   readonly portAvailable: (port: number) => Promise<boolean>;
+  /** Runs an external tool for `setu workspace build|deploy` (M122). */
+  readonly runCommand?: CommandRunner;
   /** Releases anything the host opened for the run (the terminal reader). */
   readonly dispose?: () => void;
 }
@@ -53,17 +57,21 @@ export async function runMain(runtime: MainRuntime, host: MainProcess): Promise<
   const prompter = host.isTerminal()
     ? createTerminalPrompter(host.isTerminal, host.prompt, host.log, interruption.signal)
     : undefined;
+  const cwd = host.cwd();
+  const logicalCwd = logicalCwdFor(cwd);
 
   try {
     return await runCli(host.args, {
       fs: runtime.fs,
-      cwd: host.cwd(),
+      cwd,
+      ...(logicalCwd === undefined ? {} : { logicalCwd }),
       now: runtime.now,
       log: host.log,
       error: host.error,
       interrupt: interruption.signal,
       ...(prompter === undefined ? {} : { ask: prompter }),
       portAvailable: host.portAvailable,
+      ...(host.runCommand === undefined ? {} : { runCommand: host.runCommand }),
     });
   } finally {
     host.dispose?.();
@@ -97,6 +105,7 @@ export function nodeProcess(onInterrupt: () => void = emitInterrupt): MainProces
     log: (message) => console.log(message),
     error: (message) => console.error(message),
     portAvailable: (port) => portIsFree(port),
+    runCommand: createCommandRunner(),
     dispose: () => reader.close(),
   };
 }

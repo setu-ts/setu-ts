@@ -6,7 +6,9 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import { httpStatusHintOf } from '@setu-ts/common';
 import { ServiceDiscoveryService } from '../../src/services/service-discovery-service.ts';
+import { createProvider } from '../../src/providers/provider-factory.ts';
 import { resolveOptions, type ServiceDiscoveryPluginOptions } from '../../src/options.ts';
 import { DiscoveryUnavailableError } from '../../src/errors.ts';
 import {
@@ -114,7 +116,7 @@ describe('ServiceDiscoveryService — cache', () => {
     expect(service.degraded).toBe(false);
   });
 
-  it('throws DiscoveryUnavailableError carrying the cause on a cold failure', async () => {
+  it('throws DiscoveryUnavailableError carrying the cause and a 503 hint on a cold failure', async () => {
     const { service, provider } = setup();
     const cause = new Error('connection refused');
     provider.failWith(cause);
@@ -125,7 +127,44 @@ describe('ServiceDiscoveryService — cache', () => {
     } catch (error) {
       expect((error as Error).cause).toBe(cause);
       expect((error as Error).message).toContain('billing');
+      // M119g, V10-34: only this throw is branded, so the kernel answers a named
+      // 503 instead of a masked 500. The detail carries no service name.
+      expect(httpStatusHintOf(error)).toEqual({
+        status: 503,
+        title: 'Service Unavailable',
+        detail: 'Service discovery is temporarily unavailable.',
+      });
     }
+  });
+
+  it('passes a provider configuration error through unbranded on a cold failure', async () => {
+    const { service, provider } = setup();
+    const misconfigured = new DiscoveryUnavailableError(
+      "Service 'billing' exposes several ports (http, grpc); set the 'portName' option to choose one.",
+    );
+    provider.failWith(misconfigured);
+    let thrown: unknown;
+    try {
+      await service.resolve('billing');
+    } catch (error) {
+      thrown = error;
+    }
+    expect(thrown).toBe(misconfigured);
+    expect(httpStatusHintOf(thrown)).toBeUndefined();
+  });
+
+  it('does not brand a configuration error with a status hint', () => {
+    const runtime = createFakeRuntime();
+    const resolved = resolveOptions({ provider: 'dns', mode: 'srv' });
+    let thrown: unknown;
+    try {
+      createProvider({ provider: 'dns', mode: 'srv' }, resolved, runtime);
+    } catch (error) {
+      thrown = error;
+    }
+    // A misconfiguration is the operator's to fix, so it stays an unmasked 500.
+    expect(thrown).toBeInstanceOf(DiscoveryUnavailableError);
+    expect(httpStatusHintOf(thrown)).toBeUndefined();
   });
 });
 

@@ -9,6 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { encodeBase64Url } from '../../src/utils/base64url.ts';
 import { MAX_PENDING_ENTRIES } from '../../src/sign-in/pending-state.ts';
 import { MAX_RETURN_TO_BYTES } from '../../src/sign-in/return-to.ts';
+import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
+import { recordingLogger } from '../fixtures/scoped.ts';
 import {
   buildSignInApp,
   CLIENT_ID,
@@ -143,5 +145,70 @@ describe('sign-in login route', () => {
     }
     const session = await json(await jar.fetch(harness.app, '/_session'));
     expect((session.pending as unknown[]).length).toBe(MAX_PENDING_ENTRIES);
+  });
+
+  it('warns once per provider-unavailable reason, debugs repeats, and warns again after recovery (M119g, V10-62)', async () => {
+    const runtime = createFakeRuntime();
+    const logger = recordingLogger();
+    harness = await buildSignInApp({ runtime, logger });
+    const jar = new CookieJar();
+    const unavailable = (reason: string): string =>
+      `auth-plugin: signIn['idp'] provider unavailable (${reason})`;
+
+    // A spoofed document: discovery rejects it before any endpoint is read.
+    harness.state.discovery = discoveryDocument({ issuer: 'https://spoofed.test' });
+    let response = await jar.fetch(harness.app, '/auth/idp/login');
+    expect(response.status).toBe(503);
+    await response.body?.cancel();
+    expect(logger.records.filter((record) => record.level === 'warn')).toEqual([
+      expect.objectContaining({ message: unavailable('discovery-issuer-mismatch') }),
+    ]);
+
+    // A second login during the cooldown is the same reason: debug, not warn.
+    response = await jar.fetch(harness.app, '/auth/idp/login');
+    expect(response.status).toBe(503);
+    await response.body?.cancel();
+    expect(logger.records.filter((record) => record.level === 'warn')).toHaveLength(1);
+    expect(
+      logger.records.filter(
+        (record) =>
+          record.level === 'debug' && record.message === unavailable('discovery-issuer-mismatch'),
+      ),
+    ).toHaveLength(1);
+
+    // Recovery clears the state, so the next outage is a state change again.
+    runtime.setHrtime(600_001);
+    harness.state.discovery = discoveryDocument();
+    response = await jar.fetch(harness.app, '/auth/idp/login');
+    expect(response.status).toBe(302);
+    await response.body?.cancel();
+
+    // A different reason after recovery warns, naming the endpoint check.
+    runtime.setHrtime(1_200_002);
+    harness.state.discovery = discoveryDocument({
+      authorization_endpoint: 'http://attacker.example/authorize',
+    });
+    response = await jar.fetch(harness.app, '/auth/idp/login');
+    expect(response.status).toBe(503);
+    await response.body?.cancel();
+    expect(logger.records.filter((record) => record.level === 'warn')).toEqual([
+      expect.objectContaining({ message: unavailable('discovery-issuer-mismatch') }),
+      expect.objectContaining({ message: unavailable('discovery-endpoint-invalid') }),
+    ]);
+  });
+
+  it('still answers 503 provider-unavailable when the warn sink throws', async () => {
+    const logger = recordingLogger();
+    logger.warn = () => {
+      throw new Error('log sink down');
+    };
+    harness = await buildSignInApp({ logger });
+    harness.state.discovery = discoveryDocument({ issuer: 'https://spoofed.test' });
+    const response = await new CookieJar().fetch(harness.app, '/auth/idp/login');
+    expect(response.status).toBe(503);
+    expect(await json(response)).toEqual({
+      error: 'Service Unavailable',
+      detail: 'provider-unavailable',
+    });
   });
 });

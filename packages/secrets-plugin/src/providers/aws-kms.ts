@@ -102,6 +102,7 @@ export async function loadAwsModule(): Promise<AwsSdkModule> {
     return (await import('@aws-sdk/client-secrets-manager')) as unknown as AwsSdkModule;
   } catch (error) {
     throw new OptionalDependencyUnavailableError('@aws-sdk/client-secrets-manager', {
+      requiredBy: '@setu-ts/secrets-plugin',
       cause: error,
     });
   }

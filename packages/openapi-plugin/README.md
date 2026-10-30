@@ -5,22 +5,19 @@ OpenAPI 3.1 generation from registered routes, plus Swagger UI. Registers an `IO
 
 ## Zod version support
 
-Both **zod v3 and zod v4** are supported: `>=3.24.0 <4` and `>=4.4.0 <5`. The plugin imports
-neither: each schema is recognized by duck typing (`toJSONSchema` marks a zod v4 schema), so an
-application may use either major — or both in one process. `pnpm run check:compat` exercises each
-declared major independently.
+The supported Zod range is **`>=4.6.6 <5`**. The plugin does not import Zod: each schema is
+recognized by its public `toJSONSchema` method. `pnpm run check:compat` exercises Zod 4.
 
-- **Zod v3** is converted by the historical `_def.typeName` recursion.
 - **Zod v4** is converted wholesale through `schema.toJSONSchema()` (JSON Schema draft 2020-12,
   which OpenAPI 3.1 speaks natively) and adapted: the dialect `$schema` key is dropped, reused
   schemas land in `components/schemas` with their pointers rewritten, and a recursive schema's
   root-cycle pointer forces the schema into `components` so no bare `#` ref survives.
-- **A type union is always `anyOf`, on both majors and every supported zod v4.** Draft 2020-12
-  permits two spellings and zod changed which one it emits inside the supported range — 4.5
-  collapses a union of bare types to `"type": ["string", "null"]` where 4.4 emitted `anyOf` — so the
-  transformer normalizes the collapsed form back. One schema therefore yields one document whichever
-  in-range zod the application installs, and the result still converts down to OpenAPI 3.0, where a
-  `type` array is not legal.
+- **A type union is always `anyOf`, on every supported zod v4.** Draft 2020-12 permits two spellings
+  and zod changed which one it emits across v4 releases — 4.5 collapses a union of bare types to
+  `"type": ["string", "null"]` where 4.4 emitted `anyOf` — so the transformer normalizes the
+  collapsed form back. One schema therefore yields one document whichever in-range zod the
+  application installs, and the result still converts down to OpenAPI 3.0, where a `type` array is
+  not legal.
 - **Unrepresentable nodes degrade, never throw.** A type zod cannot represent in JSON Schema
   (`z.date()`, `z.bigint()`, …) becomes an empty schema, and the operation that owns it carries a
   machine-readable `x-setu-unrepresentable` extension naming the operation and the reason:
@@ -34,6 +31,13 @@ declared major independently.
   ```
 
   The extension is absent when every schema is representable, so valid documents are unchanged.
+  Nothing is logged when a node degrades: the document is built on the first `getSpec()` /
+  `/openapi.json` request, not at startup, so inspect it (or test for `x-setu-unrepresentable`) in
+  CI. For dates, `z.iso.datetime()` represents a date-time in JSON Schema.
+
+- **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
+  `{}` with the existing `not a recognized zod schema` diagnostic in `x-setu-unrepresentable`.
+  Upgrade Zod to `>=4.6.6 <5` before regenerating documents.
 
 Zod schemas are transformed to OpenAPI schema objects, and a schema reused across request and
 response bodies — including one nested inside another — is hoisted into `components` and referenced
@@ -81,9 +85,13 @@ await app.start({ port: 3000 });
 ## Options
 
 Swagger defaults to self-hosting. Install `swagger-ui-dist` (supported range `^5`) in the
-application and grant filesystem read access on Deno. Registration awaits the tiny
-`swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files once.
-The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
+application and grant filesystem read access on Deno. On Deno, add
+`"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
+workspace, the member's — as generated members do — or the root's), run `deno install` from the
+workspace root, and keep `--allow-read` on the start task: the optional import resolves from the
+installed `node_modules`, so an entry with no install still fails at startup. Registration awaits
+the tiny `swagger-ui-dist/absolute-path.js` helper and reads only the three fixed distribution files
+once. The routes `/docs/swagger-ui.css`, `/docs/swagger-ui-bundle.js`, and
 `/docs/swagger-ui-standalone-preset.js` serve the package bytes with CSS/JavaScript content types
 and `Cache-Control: public, max-age=3600`; changing `endpoint` moves all four UI routes. Delivery
 routes are excluded from the generated spec; in the external modes no asset route exists, so only
@@ -93,6 +101,12 @@ the page endpoint is.
 and `{}` select `'self'`; `false` disables the UI. Missing `swagger-ui-dist` fails startup with
 `OptionalDependencyUnavailableError`: install it or set `swagger: { assets: 'cdn' }`. Runtimes
 without `runtime.fs`, including Workers, must choose `'cdn'` or `{ baseUrl }`.
+
+The `'cdn'` and `{ baseUrl }` modes add Subresource Integrity hashes computed for
+`swagger-ui-dist@5.33.3`, so a `{ baseUrl }` that serves your own copy must serve **exactly that
+release**; any other version's files fail the hash check and the page renders blank (V10-36). A
+project generated by `setu` installs `5.33.3` exactly (M119c). `'self'` adds no hashes and works
+with any 5.x release.
 
 `swagger-ui-dist` depends on `@scarf/scarf`, whose npm `postinstall` sends install analytics
 (platform, Node version, dependency data) unless the root `package.json` sets
@@ -150,7 +164,11 @@ client as `getHealth`, `getLive`, `getReady` and `getMetrics`. Pass `[]` to docu
 ## Deriving request schemas from validation middleware
 
 ```typescript
+import { z } from 'zod';
 import { validateBody, validateQuery } from '@setu-ts/validation-plugin';
+
+const PlaceOrderSchema = z.object({ sku: z.string(), qty: z.number().int() });
+const ListQuerySchema = z.object({ page: z.number().int().optional() });
 
 app.router.post('/orders', {
   middleware: [validateBody(PlaceOrderSchema), validateQuery(ListQuerySchema)],
@@ -208,8 +226,8 @@ Distinct ids can still sanitize to the same SDK method: declared `getUsers` besi
 `GET /users` (derived `get-users`) is valid OpenAPI, but `@setu-ts/sdk` refuses it with
 `Duplicate operation name`. Choose ids that also yield distinct TypeScript names when generating
 clients. See
-[the upgrade guide](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md#unreleased) for
-generated-name changes.
+[the upgrade guide](https://github.com/setu-ts/setu-ts/blob/main/docs/upgrading.md#declared-apioperation-ids-and-descriptions-0100)
+for generated-name changes.
 
 ## Documenting authentication
 
@@ -237,6 +255,8 @@ actually enforces. `deriveSecurity` closes that: every guard `@setu-ts/auth-plug
 with `RouteSecurityMetadata`, and the generator reads the brand off the route's middleware.
 
 ```typescript
+import { publicRoute } from '@setu-ts/auth-plugin';
+
 OpenApiPlugin({
   securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } },
   deriveSecurity: { scheme: 'bearerAuth' },
@@ -257,6 +277,8 @@ On a decorated controller, `@Public` produces the same empty `security` array, s
 available without writing a schema:
 
 ```typescript
+import { Controller, Post, Public } from '@setu-ts/decorator-plugin';
+
 @Controller('/auth')
 class AuthController {
   @Public()

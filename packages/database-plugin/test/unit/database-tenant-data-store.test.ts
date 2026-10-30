@@ -427,3 +427,60 @@ describe('createDatabaseTenantDataStore (M101c, V8-8)', () => {
     expect(service.repos.get('Patient')!.calls[0].arg).toEqual({ where: { org_id: 'a' } });
   });
 });
+
+describe('M119e resolved tenant field', () => {
+  it('caches resolution and uses it for every read, stamp, strip and write predicate', async () => {
+    const { ENTITY_FIELD_RESOLVER } =
+      await import('../../src/adapters/drizzle/field-for-column.ts');
+    const { store, service, repo } = storeWith([{ id: '1', tenantId: 'a', name: 'old' }]);
+    const resolutions: string[] = [];
+    Object.assign(service, {
+      [ENTITY_FIELD_RESOLVER]: (entity: string, column: string) => {
+        resolutions.push(`${entity}:${column}`);
+        return 'tenantId';
+      },
+    });
+    await store.findAll('a', 'Patient');
+    expect(repo().calls.pop()?.arg).toEqual({ where: { tenantId: 'a' } });
+    await store.find('a', 'Patient', { tenantId: 'b' });
+    expect(repo().calls.pop()?.arg).toEqual({ where: { tenantId: 'a' } });
+    expect(await store.findById('a', 'Patient', '1')).toMatchObject({ tenantId: 'a' });
+    expect(await store.findById('b', 'Patient', '1')).toBeNull();
+    await store.create('a', 'Patient', { id: '2', tenantId: 'b' });
+    expect(repo().calls.pop()?.arg).toMatchObject({ tenantId: 'a' });
+    await store.update('a', 'Patient', '1', { name: 'new', tenantId: 'b' });
+    expect(repo().calls.pop()?.arg).toMatchObject({ data: { name: 'new' } });
+    const conditional: IRepository<Record<string, unknown>, EntityKey> = repo();
+    conditional.updateWhere = (id, where, data) => {
+      expect(where).toEqual({ tenantId: 'a' });
+      expect(data).toEqual({ name: 'conditional' });
+      return Promise.resolve({ id, ...data, tenantId: 'a' });
+    };
+    conditional.deleteWhere = (id, where) => {
+      expect(id).toBe('1');
+      expect(where).toEqual({ tenantId: 'a' });
+      return Promise.resolve(true);
+    };
+    await store.update('a', 'Patient', '1', { name: 'conditional', tenantId: 'b' });
+    expect(await store.delete('a', 'Patient', '1')).toBe(true);
+    expect(resolutions).toEqual(['Patient:tenant_id']);
+  });
+  it('fails unresolved columns before all repository I/O', async () => {
+    const { ENTITY_FIELD_RESOLVER } =
+      await import('../../src/adapters/drizzle/field-for-column.ts');
+    const { TenantColumnUnresolvedError } = await import('../../src/errors.ts');
+    const { store, service, repo } = storeWith();
+    Object.assign(service, { [ENTITY_FIELD_RESOLVER]: () => undefined });
+    for (const call of [
+      () => store.findAll('a', 'Patient'),
+      () => store.find('a', 'Patient', {}),
+      () => store.findById('a', 'Patient', '1'),
+      () => store.create('a', 'Patient', {}),
+      () => store.update('a', 'Patient', '1', { name: 'x' }),
+      () => store.delete('a', 'Patient', '1'),
+    ]) {
+      await expect(call()).rejects.toThrow(TenantColumnUnresolvedError);
+    }
+    expect(repo().calls).toEqual([]);
+  });
+});

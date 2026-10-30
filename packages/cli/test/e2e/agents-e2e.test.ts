@@ -6,6 +6,7 @@ import { createNodeRuntimeServices } from '@setu-ts/runtime';
 import { runCli } from '../../src/cli.ts';
 import { detectPlugins } from '../../src/utils/plugin-detector.ts';
 import { ADDABLE, RUNTIME_RESTRICTIONS } from '../../src/commands/add.ts';
+import { TOOLING_PACKAGES } from '../../src/agents/package-data.ts';
 import { npmInstall, startOverlay, type RegistryOverlay } from '../fixtures/node-project.ts';
 
 const root = resolve('.tmp/agents-e2e');
@@ -28,9 +29,12 @@ async function verify(project: string, member = false): Promise<readonly string[
   expect(await run(['agents'], project)).toBe(0);
   const text = await readFile(`${project}/AGENTS.md`, 'utf8');
   const installed = await detectPlugins(fs, project);
+  const agentPackages = [...installed].filter((pkg) => !TOOLING_PACKAGES.has(pkg));
   const before = text.split('## Not installed')[0];
   const rows = [...before.matchAll(/^\| @setu-ts\/([\w-]+) \|/gm)].map((m) => m[1]);
-  expect(rows.sort()).toEqual([...installed].sort());
+  expect(installed.has('cli')).toBe(true);
+  expect(rows).not.toContain('cli');
+  expect(rows.sort()).toEqual(agentPackages.sort());
   const absent = [...text.split('## Not installed')[1].matchAll(/^- `([^`]+)`/gm)].map((m) => m[1]);
   expect(absent).toEqual(
     [...ADDABLE]
@@ -41,11 +45,12 @@ async function verify(project: string, member = false): Promise<readonly string[
       .map(([name]) => name),
   );
   expect(text).toContain(installed.has('decorator-plugin') ? 'TC39 decorators' : 'router.get');
-  if (installed.has('messaging-plugin')) expect(text).toContain('versioned topics');
+  if (installed.has('messaging-plugin'))
+    expect(text).toContain('versioned integration-event topics');
   expect(before).toContain('@setu-ts/cache-plugin');
   expect(text.split('## Not installed')[1]).not.toContain('`cache`');
   const missing: string[] = [];
-  for (const pkg of installed) {
+  for (const pkg of agentPackages) {
     const row = before.split('\n').find((line) => line.startsWith(`| @setu-ts/${pkg} |`))!;
     const path = row.split('|').at(-2)!.trim();
     expect(path).toBe(`${member ? '../../' : ''}node_modules/@setu-ts/${pkg}/AGENT_CARD.md`);

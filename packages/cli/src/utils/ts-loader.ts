@@ -88,7 +88,10 @@ export const importProjectModule: ProjectModuleLoader = async (url, root) => {
   try {
     tsx = await import('tsx/esm/api');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('tsx', { cause: error });
+    throw new OptionalDependencyUnavailableError('tsx', {
+      requiredBy: '@setu-ts/cli',
+      cause: error,
+    });
   }
   const { tsImport } = tsx;
   const tsconfig = nearestTsconfig(url, root);

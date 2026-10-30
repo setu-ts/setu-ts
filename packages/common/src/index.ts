@@ -35,12 +35,22 @@ export type { AuthorizationFailure } from './errors/authorization-responder.ts';
 // Error serialization for structured logging (M70f, X2-5)
 export { causeMessage, serializeError } from './errors/serialize-error.ts';
 export type { SerializedError } from './errors/serialize-error.ts';
+// One bounded diagnostic line for string-only log sinks (M119g)
+export { describeError } from './errors/describe-error.ts';
+export { dispatchRealtimeFrame } from './realtime/dispatch.ts';
+export { createRealtimeHandlerErrorReporter } from './realtime/handler-errors.ts';
+export type {
+  IRealtimeHandlerErrorReporter,
+  RealtimeHandlerErrorReporterOptions,
+} from './realtime/handler-errors.ts';
 // Malformed request body (M90f, X37-1) — the one 400-branded parse failure
 // every `IRequest.json()` producer rejects with
 export { MalformedRequestBodyError } from './errors/malformed-body.ts';
 // Duplicate key — the 409 every database backend's unique-violation maps onto
 export { DuplicateKeyError } from './errors/duplicate-key.ts';
 export { PrimaryKeyChangeError, assertPrimaryKeyUnchanged } from './errors/primary-key-change.ts';
+export { UnknownPayloadFieldError } from './errors/unknown-payload-field.ts';
+export { InvalidFieldValueError } from './errors/invalid-field-value.ts';
 export { InvalidCursorError } from './errors/invalid-cursor.ts';
 export { OptionalDependencyUnavailableError } from './errors/optional-dependency.ts';
 // HTTP status hint (M89b, X19-1) — how a package that cannot import
@@ -100,6 +110,7 @@ export type {
 
 // Request identity and cross-package state keys
 export {
+  installRequestIdentityGuard,
   replaceLocale,
   replacePrincipal,
   replaceTenant,
@@ -203,7 +214,11 @@ export type {
   ProviderOptions,
   ServiceScope,
   ValueProvider,
+  InjectionToken,
+  ContainerToken,
+  InjectEntry,
 } from './container.ts';
+export { createToken } from './container.ts';
 
 // Plugin contract
 export type {
@@ -241,6 +256,7 @@ export type {
 export type {
   HealthCheckResult,
   HealthIndicatorFn,
+  HealthIndicatorOptions,
   HealthReport,
   IHealthIndicator,
   IHealthService,
@@ -710,3 +726,13 @@ export type {
   ReconnectMode,
   ReconnectSupervisorOptions,
 } from './reconnect/reconnect-supervisor.ts';
+
+export { fromNodeRedis } from './redis/node-redis-adapter.ts';
+export type {
+  NodeRedisClientLike,
+  NodeRedisClientFactory,
+  NodeRedisAdapterOptions,
+  NodeRedisAdapter,
+} from './redis/node-redis-adapter.ts';
+/** Strict dotenv parser shared by config loading and workspace deploy (M122). */
+export { parseEnv } from './env-file.ts';

@@ -45,7 +45,7 @@ app.register(
       methods: ['GET', 'POST', 'PUT', 'DELETE'],
       // Omit `allowedHeaders` and an allowed origin's preflight echoes whatever
       // the browser asked for. List them here to allow only those.
-      allowedHeaders: ['content-type', 'authorization', 'idempotency-key'],
+      allowedHeaders: ['content-type', 'authorization', 'idempotency-key', 'x-csrf-token'],
       exposedHeaders: ['idempotent-replayed'],
       maxAge: 86400,
     },
@@ -169,12 +169,24 @@ only: a browser cannot send the target's real public origin cross-site, and a tr
 passes a client's `X-Forwarded-Host` through would otherwise publish a host the attacker then
 matches. This comparison grants no proxy trust to IP resolution, cookies or public URLs.
 
-| Option            | Type            | Default | Description                                                      |
-| ----------------- | --------------- | ------- | ---------------------------------------------------------------- |
-| `enabled?`        | `boolean`       | `true`  | Toggle CSRF                                                      |
-| `trustedOrigins?` | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                    |
-| `customHeader?`   | `string`        | —       | Required custom header for unsafe methods                        |
-| `exclude?`        | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test |
+**`Origin: null` is accepted only with `Sec-Fetch-Site: same-origin`** (M119c, V10-1). Under this
+plugin's default `Referrer-Policy: no-referrer`, a browser sends `Origin: null` on a same-origin
+HTML form POST, so before 0.11.0 every such form answered 403 unless `referrerPolicy` was changed.
+The browser also sends `Sec-Fetch-Site: same-origin`, which page script cannot set, so that pair is
+accepted — the Fetch Metadata rule Go's `CrossOriginProtection` and Hono's `secFetchSite` use. A
+`null` origin with any other `Sec-Fetch-Site` value, or without the header (older browsers), is
+still refused: a sandboxed frame, a `data:` or `file:` page and a cross-site redirect all report
+`cross-site`. `trustedOrigins: ['null']` is never implied. To refuse every `null` origin as before
+0.11.0, set `csrf: { acceptNullOriginSameOrigin: false }` (and send a real origin with
+`headers: { referrerPolicy: 'same-origin' }`).
+
+| Option                        | Type            | Default | Description                                                                           |
+| ----------------------------- | --------------- | ------- | ------------------------------------------------------------------------------------- |
+| `enabled?`                    | `boolean`       | `true`  | Toggle CSRF                                                                           |
+| `trustedOrigins?`             | `string[]`      | `[]`    | Additional trusted origins beyond self-origin                                         |
+| `customHeader?`               | `string`        | —       | Required custom header for unsafe methods                                             |
+| `exclude?`                    | `PathPattern[]` | `[]`    | Paths exempt from the CSRF check, checked before the method test                      |
+| `acceptNullOriginSameOrigin?` | `boolean`       | `true`  | Accept `Origin: null` with `Sec-Fetch-Site: same-origin`; `false` refuses it (0.11.0) |
 
 **`exclude` is for a protocol endpoint, not an application route.** An excluded path is checked
 FIRST — before the method test — and is never inspected. Use it only where the endpoint's own
@@ -224,22 +236,36 @@ already how a bare address and an IPv6 CIDR are handled.
 Node, Deno and Bun populate `IRequest.ip` with the **socket peer**, which behind a proxy is the
 proxy. Without `trustProxy`, that peer is published as `CLIENT_IP_STATE_KEY`. With `trustedProxies`,
 the peer is appended to the chain before walking right to left: a direct client cannot choose its
-identity by forging `X-Forwarded-For`. IPv4-mapped peers such as `::ffff:10.1.2.3` become
-`10.1.2.3`; native IPv6 proxies must be listed literally. IPv6 CIDR expansion is not supported.
-`proxyHops` and the leftmost default keep their header-only selection and do not check the peer;
-prefer `trustedProxies` for stable proxy addresses.
+identity by forging `X-Forwarded-For`. Every published address is normalized: an IPv4-mapped peer or
+hop such as `::ffff:10.1.2.3` (or its hexadecimal spelling `::ffff:a01:203`) becomes `10.1.2.3`, and
+an IPv6 address is published in canonical lowercase compressed form (`2001:DB8:0::1` becomes
+`2001:db8::1`). Native IPv6 proxies must be listed literally; a literal is normalized the same way
+before comparison. IPv6 CIDR expansion is not supported. `proxyHops` and the leftmost default keep
+their header-only selection and do not check the peer; prefer `trustedProxies` for stable proxy
+addresses.
+
+Every examined `X-Forwarded-For` or custom `ipHeader` entry must be an IP address. Numeric ports are
+stripped from IPv4 and bracketed IPv6 entries; an unbracketed IPv6 entry never carries a port. An
+invalid entry is a boundary: resolution stops with `CLIENT_IP_STATE_KEY` set to `undefined`, without
+falling back to the socket peer, and the origin stays the URL origin.
 
 `forwardedHeader: 'forwarded'` reads only RFC 7239 `Forwarded`, including quoted IPv6 addresses and
 ports, and ignores every `X-Forwarded-*` header. The default reads `X-Forwarded-*` only. A malformed
-`Forwarded` header (or one over 8 KiB or 64 elements) contributes no hops and no forwarded origin,
-so the walk still checks the socket peer: a client connecting directly stays identified by its own
-address, and a trusted proxy sending one yields no client. Likewise in the default family a
-`proxyHops` header too short for the declared chain, or a chain of only trusted proxies, yields no
-client rather than the proxy's own address, and in `trustedProxies` mode so does a request from a
-trusted proxy carrying no forwarding header (or an empty one) in either family. This describes
-`CLIENT_IP_STATE_KEY` only: `defaultRateLimitKey` in `@setu-ts/auth-plugin` then falls back to
-`IRequest.ip`, the socket peer, so such requests share the proxy's rate-limit bucket. `unknown` and
-obfuscated `for` values stop the trust walk without a client.
+`Forwarded` element is a **boundary**, not a void: the elements to its right were written by later
+hops and are still read, while the trust walk stops at the boundary and never continues left of it,
+so it cannot cross into client-written text. Everything left of the boundary is one unreadable
+entry. An oversized field (over 8 KiB or 64 elements) is read from the right within those bounds
+instead of voiding the field, so a trusted proxy that appends its element still resolves the client
+behind a padded or malformed prefix. A trusted proxy that writes a comma inside a quoted value to
+the right of malformed input loses that element to the boundary and resolves no client (fail
+closed). A direct client stays identified by its own address, and a boundary with only trusted
+entries to its right yields no client rather than the proxy's own address. Likewise in the default
+family a `proxyHops` header too short for the declared chain, or a chain of only trusted proxies,
+yields no client rather than the proxy's own address, and in `trustedProxies` mode so does a request
+from a trusted proxy carrying no forwarding header (or an empty one) in either family. This
+describes `CLIENT_IP_STATE_KEY` only: `defaultRateLimitKey` in `@setu-ts/auth-plugin` then falls
+back to `IRequest.ip`, the socket peer, so such requests share the proxy's rate-limit bucket.
+`unknown` and obfuscated `for` values stop the trust walk without a client.
 
 IP security also publishes the public origin for `requestOriginOf(ctx)` and `publicRequestUrl(ctx)`
 from `@setu-ts/common`. Forwarded origin components are believed only in `trustedProxies` mode, when

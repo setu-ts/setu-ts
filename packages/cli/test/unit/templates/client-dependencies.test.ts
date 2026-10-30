@@ -16,15 +16,29 @@ import { getTemplate } from '../../../src/templates/registry.ts';
 describe('CLIENT_RANGES', () => {
   // A project installs the client the plugin will `import()`; a range outside
   // the plugin's own peer range is a version the plugin was never built against.
-  it('pins every client at exactly the range the framework declares for it', () => {
+  it('uses framework ranges except the reviewed OpenTelemetry compatibility bounds', () => {
+    const otel: Readonly<Record<string, string>> = {
+      '@opentelemetry/api': '~1.9.0',
+      '@opentelemetry/sdk-trace-base': '^2.9.0',
+      '@opentelemetry/resources': '^2.9.0',
+      '@opentelemetry/context-async-hooks': '^2.0.0',
+    };
+    for (const [name, range] of Object.entries(otel)) expect(CLIENT_RANGES[name]).toBe(range);
     for (const [name, range] of Object.entries(CLIENT_RANGES)) {
-      expect(EXTERNAL_RANGES[name], name).toBe(range);
+      expect(otel[name] ?? EXTERNAL_RANGES[name], name).toBe(range);
     }
   });
 });
 
 describe('withClientDependencies', () => {
   const host = resolveHost(getTemplate('microservice')!, 'node');
+
+  it('declares node-redis at the framework range for npm and Deno', () => {
+    expect(CLIENT_RANGES['redis']).toBe(EXTERNAL_RANGES['redis']);
+    const out = withClientDependencies(host, ['redis']);
+    expect(out.extraDependencies['redis']).toBe('6.x');
+    expect(out.extraImports['redis']).toBe('npm:redis@6.x');
+  });
 
   it('returns the host itself when nothing is selected', () => {
     expect(withClientDependencies(host, [])).toBe(host);

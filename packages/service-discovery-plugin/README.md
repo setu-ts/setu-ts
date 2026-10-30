@@ -54,7 +54,10 @@ const url = await discovery.resolveUrl('billing', '/invoices'); // http://10.0.0
 | `'custom'`     | Your own `DiscoveryProvider`       | Whatever you implement      | Yours               |
 
 ¹ Workers needs an explicit `token`, since it has no file system to read the projected
-service-account token from.
+service-account token from. So does any process outside a pod (a developer machine, a VM): without
+`token` the provider reads `/var/run/secrets/kubernetes.io/serviceaccount/token`, and since M119c a
+missing file is reported by one startup warning and a `DiscoveryUnavailableError` that name `token`
+and `apiServer` (V10-44), rather than a silent `down`.
 
 The `'dns'` arm needs `IRuntimeServices.dns`, which Cloudflare Workers does not supply — its network
 access is `fetch`, which resolves names internally and exposes no lookup surface. Configuring it
@@ -127,7 +130,7 @@ const call = resilience.wrap(
       throw error;
     }
   },
-  { retry: { maxAttempts: 3 } },
+  { retry: { limit: 3, delay: 100, backoff: 'exponential' } },
 );
 ```
 
@@ -149,6 +152,8 @@ than the freshness mechanism for watched ones.
 ## Self-registration (Consul only)
 
 ```typescript
+import { ServiceDiscoveryPlugin } from '@setu-ts/service-discovery-plugin';
+
 ServiceDiscoveryPlugin({
   provider: 'consul',
   address: 'http://127.0.0.1:8500',
@@ -218,7 +223,7 @@ working while the pod is still healthy.
 | `watchIntervalMs`  | static, dns        | `30_000`                     | Absent from the push-based arms               |
 | `services`         | static             | —                            | Unknown name resolves to `[]`                 |
 | `address`          | consul             | —                            | Agent base URL                                |
-| `token`            | consul             | —                            | Sent as `X-Consul-Token`                      |
+| `token`            | consul, kubernetes | — / projected token file     | Consul: `X-Consul-Token`; Kubernetes: bearer  |
 | `datacenter`       | consul             | —                            | Sent as `?dc=`                                |
 | `waitSeconds`      | consul             | `30`                         | Clamped to Consul's maximum of `600`          |
 | `namespace`        | kubernetes         | —                            | Required                                      |
@@ -248,6 +253,18 @@ Registered as `service-discovery`. Since M70c it composes three facts:
 
 `data` reports
 `{ provider, cachedServices, watchedServices, ejectedInstances, degraded, reachable, everResolved }`.
+
+## Errors
+
+`DiscoveryUnavailableError` is thrown when discovery cannot answer. Its **cold-outage** instance — a
+backend read failed and nothing is cached — carries a `503 Service Unavailable` status hint (M119g),
+so `errorHandler` answers a named 503 with the fixed detail "Service discovery is temporarily
+unavailable." rather than a masked 500. Configuration failures are not branded: the `'dns'` arm on a
+runtime with no resolver and the `'kubernetes'` arm with neither a token nor `IRuntimeServices.fs`
+are refused at startup, and a multi-port service with no `portName` fails its lookup with an
+unbranded `DiscoveryUnavailableError` that is answered as a 500 — a misconfiguration is the
+operator's to fix, not a temporary outage. `SelfRegistrationNotSupportedError` is thrown at
+`register()` when `selfRegistration` is configured on a provider with no registration API.
 
 ## Related documentation
 

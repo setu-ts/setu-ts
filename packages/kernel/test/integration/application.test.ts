@@ -18,6 +18,45 @@ function runtimePlugin(env: Record<string, string | undefined> = {}): IPlugin {
 }
 
 describe('Application integration', () => {
+  it('stores health readiness only when the contributor supplies it', async () => {
+    const app = createApplication({
+      plugins: [
+        runtimePlugin(),
+        {
+          name: 'readiness-contributor',
+          version: '1.0.0',
+          register(ctx): void {
+            ctx.health.register('default', () => Promise.resolve({ status: 'up' }));
+            ctx.health.register('empty', () => Promise.resolve({ status: 'up' }), {});
+            ctx.health.register('excluded', () => Promise.resolve({ status: 'down' }), {
+              readiness: false,
+            });
+            ctx.health.register('included', () => Promise.resolve({ status: 'up' }), {
+              readiness: true,
+            });
+          },
+        },
+      ],
+    });
+    await app.start();
+    try {
+      const entries = app.services.getAll<{ name: string; readiness?: boolean }>(
+        CAPABILITIES.HEALTH_INDICATOR,
+      );
+      expect(entries.map((entry) => entry.name)).toEqual([
+        'default',
+        'empty',
+        'excluded',
+        'included',
+      ]);
+      expect(entries[2].readiness).toBe(false);
+      expect(entries[3].readiness).toBe(true);
+      expect(Object.hasOwn(entries[0], 'readiness')).toBe(false);
+      expect(Object.hasOwn(entries[1], 'readiness')).toBe(false);
+    } finally {
+      await app.stop();
+    }
+  });
   it('should throw when no runtime plugin is registered', async () => {
     const app = createApplication({
       plugins: [{ name: 'no-runtime', version: '1.0.0', register() {} }],

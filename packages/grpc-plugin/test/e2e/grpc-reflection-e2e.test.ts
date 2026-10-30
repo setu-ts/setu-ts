@@ -218,7 +218,7 @@ describe('gRPC health bridged to a registered health capability', () => {
       provides: [CAPABILITIES.HEALTH],
       register(ctx: { services: { register: (t: string, s: unknown) => void } }) {
         ctx.services.register(CAPABILITIES.HEALTH, {
-          check: () => Promise.resolve({ status: reported, info: {}, details: {} }),
+          checkReady: () => Promise.resolve({ status: reported, timestamp: 'now', checks: {} }),
         } as unknown as IHealthService);
       },
     };

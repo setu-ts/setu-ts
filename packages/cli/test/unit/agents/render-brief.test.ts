@@ -1,8 +1,76 @@
 import { describe, expect, it } from 'vitest';
 import { renderBrief } from '../../../src/agents/render.ts';
 import { agentFacts } from '../../fixtures/agent-facts.ts';
+import { gatherFacts } from '../../../src/agents/facts.ts';
+import { runCli } from '../../../src/cli.ts';
+import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
 describe('project brief rendering', () => {
+  for (const runtime of ['node', 'bun', 'deno', 'cloudflare-workers'] as const) {
+    for (const template of ['rest', 'full-stack']) {
+      it(`glosses real ${runtime}/${template} development commands`, async () => {
+        const fs = createFakeFs();
+        expect(
+          await runCli(['new', 'app', '--template', template, '--runtime', runtime], {
+            fs,
+            cwd: '/work',
+            now: () => 0,
+            log: () => {},
+            error: () => {},
+          }),
+        ).toBe(0);
+        const facts = await gatherFacts(fs, '/work/app');
+        const text = renderBrief(facts).split('## Schematics')[0]!;
+        const runner = runtime === 'deno' ? 'deno task' : runtime === 'bun' ? 'bun run' : 'npm run';
+        if (runtime === 'cloudflare-workers') {
+          for (const name of ['start', 'start:dev', 'start:debug'])
+            expect(text).not.toContain(`\`${runner} ${name}\``);
+          expect(text).toContain(
+            `\`npm run dev\` — development loop on workerd${template === 'full-stack' ? ' (builds first)' : '\n'}`,
+          );
+        } else {
+          expect(text).toContain(
+            `\`${runner} start:dev\` — development loop; use this while editing`,
+          );
+          expect(text).toContain(
+            `\`${runner} start:debug\` — development entry with the inspector`,
+          );
+          expect(text).toContain(
+            `\`${runner} start\` — production entry${runtime === 'node' ? '; on Node, run build first' : '\n'}`,
+          );
+          expect(facts.commands.slice(0, 3)).toEqual(['start', 'start:dev', 'start:debug']);
+          expect(facts.commandBodies['start:dev']).toBeTruthy();
+          if (runtime === 'deno' && template === 'full-stack')
+            expect(text).toContain(
+              '`deno task dev` — development entry that does not restart on server edits; prefer start:dev',
+            );
+          else expect(text).not.toContain(`\`${runner} dev\``);
+        }
+      });
+    }
+  }
+  it('recognizes a generated Deno devtool entry by its script body', async () => {
+    const fs = createFakeFs();
+    expect(
+      await runCli(['new', 'app', '--runtime', 'deno', '--devtool'], {
+        fs,
+        cwd: '/work',
+        now: () => 0,
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    expect(renderBrief(await gatherFacts(fs, '/work/app'))).toContain(
+      '`deno task dev` — development entry for a devtool session',
+    );
+  });
+  it('leaves an unrecognized dev script without a gloss when no start:dev exists', () => {
+    for (const commandBodies of [{}, { dev: 'custom-dev' }]) {
+      expect(renderBrief(agentFacts({ commands: ['dev'], commandBodies }))).toContain(
+        '- `npm run dev`\n',
+      );
+    }
+  });
   it('F1 omits injected dependency keys, dot segments and marker payloads', () => {
     // Audit P1 payload, plus the path-segment regression.
     const bad = [

@@ -8,12 +8,14 @@
 import type {
   IMessageBroker,
   IRealtimeBackplane,
+  IRealtimeHandlerErrorReporter,
   ISubscription,
   RealtimeFrame,
   RealtimeFrameHandler,
 } from '@setu-ts/common';
+import { dispatchRealtimeFrame } from '@setu-ts/common';
 import { realtimeObserverOf } from '../diagnostics/realtime-observations.ts';
-import { dispatchFrame } from './dispatch.ts';
+import { createTransportHandlerReporter } from './handler-errors.ts';
 
 /**
  * Narrows an arriving broker payload to a {@linkcode RealtimeFrame}.
@@ -57,8 +59,9 @@ export class MessagingBackplane implements IRealtimeBackplane {
   readonly #broker: IMessageBroker;
   readonly #topic: string;
   readonly #handlers = new Set<RealtimeFrameHandler>();
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   readonly #handlerErrors: Error[] = [];
+  readonly #handlerReporter: IRealtimeHandlerErrorReporter;
   #subscription: ISubscription | undefined;
 
   /**
@@ -84,11 +87,18 @@ export class MessagingBackplane implements IRealtimeBackplane {
    * @param broker - The broker resolved from `CAPABILITIES.MESSAGING`
    * @param origin - This instance's identity
    * @param topic - The topic every instance shares
+   * @param reporter - Optional subscriber failure and recovery sink; history is always retained
    */
-  constructor(broker: IMessageBroker, origin: string, topic: string) {
+  constructor(
+    broker: IMessageBroker,
+    origin: string,
+    topic: string,
+    reporter?: IRealtimeHandlerErrorReporter,
+  ) {
     this.#broker = broker;
     this.origin = origin;
     this.#topic = topic;
+    this.#handlerReporter = createTransportHandlerReporter(this.#handlerErrors, reporter);
     // Captured into a local before the guard: the delegation below must call
     // the member through its OWNER, and a `const` local keeps the narrowed
     // function type inside the closure.
@@ -98,7 +108,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
     }
   }
 
-  /** Errors thrown by subscribers during delivery, oldest first. */
+  /** The most recent 100 errors thrown by subscribers during delivery, oldest first. */
   get handlerErrors(): readonly Error[] {
     return this.#handlerErrors;
   }
@@ -118,9 +128,7 @@ export class MessagingBackplane implements IRealtimeBackplane {
       // subscription, so one consumer throwing must not starve the other,
       // and this loop runs inside the broker's delivery callback where
       // nothing above would catch a throw.
-      const delivered = dispatchFrame(this.#handlers, message, (error) => {
-        this.#handlerErrors.push(error instanceof Error ? error : new Error(String(error)));
-      });
+      const delivered = dispatchRealtimeFrame(this.#handlers, message, this.#handlerReporter);
       // M98l: counted only after the shape and own-origin filters.
       realtimeObserverOf(this)?.observe('backplane-receive', delivered);
     });

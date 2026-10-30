@@ -50,6 +50,7 @@ import type {
   OutboxRelayOptions,
 } from '../../src/index.ts';
 import { FaultStore } from '../fixtures/outbox.ts';
+import { REDIS_CLIENTS, redisOptions } from '../../../common/test/fixtures/redis-clients.ts';
 
 const postgresUrl = process.env['OUTBOX_POSTGRES_URL'];
 const rabbitUrl = process.env['RABBITMQ_URL'];
@@ -109,20 +110,21 @@ const transports: readonly (Transport & { readonly ignore: boolean })[] = [
     ignore: postgresUrl === undefined || rabbitUrl === undefined,
     messaging: () => ({ broker: 'rabbitmq', url: rabbitUrl! }),
     // RabbitMQ maps `deduplicationId` onto the AMQP `message-id` property.
-    deduplicationId: (metadata) => metadata?.messageId,
+    deduplicationId: (metadata: MessageMetadata | undefined) => metadata?.messageId,
   },
-  {
-    name: 'Redis Streams',
+  ...REDIS_CLIENTS.map((redisVariant) => ({
+    name: `Redis Streams ${redisVariant}`,
     ignore: postgresUrl === undefined || redisUrl === undefined,
     messaging: () => ({
       broker: 'redis-streams',
-      url: redisUrl!,
+      ...redisOptions(redisVariant, redisUrl!),
       defaultQueue: `m107-${crypto.randomUUID().slice(0, 8)}`,
       pollIntervalMs: 10,
       blockSizeMs: 10,
     }),
-    deduplicationId: (metadata) => metadata?.headers?.['x-setu-deduplication-id'],
-  },
+    deduplicationId: (metadata: MessageMetadata | undefined) =>
+      metadata?.headers?.['x-setu-deduplication-id'],
+  })),
 ];
 
 /** Builds one "process": runtime, optional scheduler, Drizzle over the schema, messaging + outbox. */

@@ -120,15 +120,21 @@ via plugins.
 
 As of Milestone 22, Hono is used as the **internal routing engine** inside the kernel `Router`
 class. Route matching is delegated to a `new Hono({ strict: false })` instance constructed with
-Hono's `LinearRouter`; the kernel's custom `(ctx, next)` middleware pipeline runs **inside** the
-Hono dispatch, and the application's `#handleRequest` method calls `router.match()` which maps
-Hono's matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map
-so `getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own
-deterministic tie-break on top of Hono's match result: more static segments first, then FEWER `*`
-wildcard segments, then earliest registration order. The wildcard key is what stops an application
-catch-all (`GET /*`) from owning every single-segment route registered after it — before M70g a `*`
-counted as a static segment, so `/*` tied with `/openapi.json` and won merely by registering first.
-The rule compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
+Hono's `TrieRouter` (M22 chose `LinearRouter`; `TrieRouter` replaced it in 0.11.0 because it returns
+the same full candidate set without re-parsing every pattern per request). The kernel calls the
+router directly, so it applies `LinearRouter`'s trailing-slash rule itself: a request may carry one
+extra trailing slash (`/users/` reaches `/users`), a static route registered with a trailing slash
+answers only that spelling, and a parameter pattern is registered without its trailing slash, which
+was never significant. For a slash-terminated request it matches both spellings and ranks the
+candidates together. The kernel's custom `(ctx, next)` middleware pipeline runs **inside** the Hono
+dispatch, and the application's `#handleRequest` method calls `router.match()` which maps Hono's
+matched route back to `{ definition, params }`. The kernel maintains its own `RouteEntry` map so
+`getAll()`/`listRoutes()` introspection is unchanged, and the kernel applies its own deterministic
+tie-break on top of Hono's match result: more static segments first, then FEWER `*` wildcard
+segments, then earliest registration order. The wildcard key is what stops an application catch-all
+(`GET /*`) from owning every single-segment route registered after it — before M70g a `*` counted as
+a static segment, so `/*` tied with `/openapi.json` and won merely by registering first. The rule
+compares counts rather than positions, so `/a/*` loses to `/:x/b` on `/a/b`; that limit is
 documented in `Router.match` and pinned by a test.
 
 `listRoutes()` and the kernel-diagnostics route projection are two DIFFERENT surfaces and neither
@@ -926,10 +932,10 @@ during its own `register()` call.
 The RuntimePlugin also provides `CAPABILITIES.LOCAL_DIAGNOSTICS_LISTENER` (M98b): a runtime-owned
 factory that binds exactly one additional IPv4-loopback listener for the local diagnostics
 connector. The application's own `IHttpAdapter` is stateful and cannot serve a second handler, so
-this factory owns a private server through the same injectable Deno serve seam — and exposes no
-adapter, host, or handle to its consumer, which supplies only a normalized-request protocol handler.
-Non-Deno platforms refuse every `listen` before any bind, and the plugin registers a close hook so
-shutdown and failed-startup paths release the port.
+this factory owns a private server through an injectable Deno serve or Node HTTP seam — and exposes
+no adapter, host, or handle to its consumer, which supplies only a normalized-request protocol
+handler. Bun, Workers and unknown platforms refuse every `listen` before any bind, and the plugin
+registers a close hook so shutdown and failed-startup paths release the port.
 
 The `RuntimePlugin` auto-detects the runtime at startup:
 
@@ -1635,7 +1641,7 @@ application registers `MessagingPlugin` **or** the Cloudflare `messaging` arm, n
 
 | Aspect               | Detail                                                                                                                                  |
 | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| **Purpose**          | React Router v7 framework-mode SSR embedded as a plugin                                                                                 |
+| **Purpose**          | React Router 8 framework-mode SSR embedded as a plugin                                                                                |
 | **Responsibilities** | File-based routing; SSR via `loadRequestHandler`; static asset serving over `runtime.fs` with symlink-safe containment                  |
 | **Dependencies**     | `common`, `kernel`, `runtime`                                                                                                           |
 | **Public API**       | `ReactRouterPlugin()`; `SsrService`                                                                                                     |
@@ -2874,7 +2880,7 @@ The framework minimizes object allocations:
 
 - Request context is reused where possible (pooled in high-throughput scenarios).
 - Middleware chain is pre-compiled, not rebuilt per request.
-- Route matching uses Hono's LinearRouter with candidate ranking.
+- Route matching uses Hono's TrieRouter, compiled once at registration, with candidate ranking.
 - Service instances are cached (singleton scope by default).
 
 ### Lazy Loading

@@ -6,6 +6,8 @@
 
 import { formatForTarget } from '../utils/prettier-format.ts';
 import type { IFileSystem } from '@setu-ts/common';
+import { diagnoseProject, type ProjectDiagnosis } from '../diagnostics/diagnose.ts';
+import { refuseDuplicateNames, renderGenerateFindings } from '../diagnostics/render.ts';
 import type { ParsedArgs } from '../args.ts';
 import { stringFlag } from '../args.ts';
 import {
@@ -40,40 +42,39 @@ import {
   type GeneratedFile,
   joinPath,
   resolveDir,
+  withFileTransaction,
   writeFiles,
 } from '../utils/file-writer.ts';
 import {
   CUSTOM_SCHEMATIC,
   getSchematic,
   listSchematics,
+  type DerivedNames,
   type Schematic,
   type SchematicOptions,
 } from '../schematics/registry.ts';
+import { readBarrel } from '../diagnostics/barrel-drift.ts';
+import { planModuleSwitch, type IModuleSwitch } from '../utils/module-switch.ts';
+import { pruneAdoptedDirectories } from '../workspace/adopt.ts';
+import {
+  withModuleDeclarationEntry,
+  type ModuleDeclarationProperty,
+} from '../utils/module-declaration.ts';
 import {
   CUSTOM_SCHEMATIC_DIR,
   isCustomSchematicName,
   loadCustomSchematic,
   type ModuleLoader,
 } from '../schematics/custom.ts';
-import { scanModules, scanModuleArtifacts } from '../utils/module-scanner.ts';
-import { generatorMode } from '../utils/generator-mode.ts';
-import { REGISTER_MODULES_EXPORT } from '../seams/modules.ts';
 import { serviceSeamToken } from '../seams/services.ts';
-import { type AdoptedArtifact, scanArtifacts } from '../utils/artifact-scanner.ts';
+import type { AdoptedArtifact } from '../utils/artifact-scanner.ts';
 import { findNameConflict } from '../utils/name-conflicts.ts';
-import { scanSeamSpecs } from '../seams/registry.ts';
-import { decoratorExportFor, decoratorKeyFor } from '../templates/seam.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
-import { maskSourceCode } from '../devtool/sources.ts';
+import { repositoryFileUrl } from '../utils/repository-links.ts';
 import { readMigrationNames } from '../utils/migration-scanner.ts';
-import {
-  legacyLayoutNotice,
-  legacyRegistrarNotice,
-  readConfigModule,
-  readLegacyHttpFiles,
-} from '../utils/legacy-layout.ts';
 import { interruptionMessage } from '../utils/interruption.ts';
 
+import { createCommandRunner, type CommandRunner } from '../utils/run-command.ts';
+import { kernelShadows, readPagePaths } from '../utils/react-router-routes.ts';
 import { cliInvocation } from '../templates/project-files.ts';
 
 /**
@@ -82,6 +83,8 @@ import { cliInvocation } from '../templates/project-files.ts';
 export interface GenerateDependencies {
   /** The filesystem to detect plugins on and write generated files through. */
   readonly fs: IFileSystem;
+  /** Runs the installed React Router route-tree command. */
+  readonly runCommand?: CommandRunner;
   /** The project directory to operate on (absolute). */
   readonly cwd: string;
   /** Wall-clock milliseconds, for timestamped output. */
@@ -139,7 +142,12 @@ function printSchematics(installed: ReadonlySet<string>, log: (message: string) 
   log(
     `  --runtime <target>  ${TARGET_RUNTIMES.join(' | ')} (detected from the project by default)`,
   );
-  log('  --module <name>     Place a service, route, controller or schema inside a feature module');
+  log(
+    '  --module <name>     Place a controller, route, service, sse or schema inside a feature module;',
+  );
+  log('                      required for the first four once the project has modules');
+  log('  --adopt-controllers The first module only: move src/controllers/ and src/services/');
+  log('                      into it, rewriting imports and keeping their URLs');
 }
 
 /**
@@ -230,6 +238,13 @@ export async function runGenerateCommand(
   }
 
   const schematicName = args.positionals[0];
+  const adoptControllers = args.flags['adopt-controllers'] === true;
+  if (adoptControllers && schematicName !== 'module') {
+    deps.error(
+      '--adopt-controllers applies only to `g module`, which moves the flat controllers and services into the new module.',
+    );
+    return EXIT_USAGE;
+  }
   if (schematicName === undefined) {
     // Informational, exactly like the `--help` branch above: the listing is
     // ordinary output (identical text, same log sink), so an error exit
@@ -329,7 +344,7 @@ export async function runGenerateCommand(
   const module = typeof moduleFlag === 'string' ? deriveNames(moduleFlag).kebab : undefined;
   if (
     module !== undefined &&
-    !['service', 'route', 'controller', 'schema'].includes(schematicName)
+    !['service', 'route', 'controller', 'sse', 'schema'].includes(schematicName)
   ) {
     const artifact = getSchematic(schematicName)
       ?.factory(names, { runtime, plugins: installed, now: deps.now })
@@ -339,6 +354,21 @@ export async function runGenerateCommand(
       `--module places a feature file; ${schematicName} is app-wide and lives in ${directory}.`,
     );
     return EXIT_USAGE;
+  }
+
+  // Read unconditionally, like `detectPlugins` above: the `module` schematic
+  // needs it to render its aggregate barrel, and branching on the schematic name
+  // here would put a second dispatch beside the registry.
+  const diagnosis = await diagnoseProject(
+    deps.fs,
+    dir,
+    installed,
+    module === undefined ? undefined : { module },
+  );
+  if (refuseDuplicateNames(diagnosis, deps.error)) return EXIT_ERROR;
+
+  if (schematicName === 'job' && diagnosis.starter?.arms.has('queue-plugin') === true) {
+    requiredPlugin = 'queue-plugin';
   }
 
   // Resolve project-owned code and plugin gates only after the target has been
@@ -356,6 +386,11 @@ export async function runGenerateCommand(
       `The "${schematicName}" schematic requires @setu-ts/${requiredPlugin}, ` +
         `which is not installed in ${escapeName(dir)}.`,
     );
+    if (diagnosis.starter?.arms.has(requiredPlugin) === true) {
+      deps.error(
+        `${diagnosis.starter.symbol} already runs ${requiredPlugin}; add installs its package and wires the generated handlers into setu.config.ts.`,
+      );
+    }
     deps.error(
       `Run \`${cliInvocation(runtime)} add ${requiredPlugin.replace(
         /-plugin$/,
@@ -369,15 +404,24 @@ export async function runGenerateCommand(
     deps.error(`Could not resolve schematic: ${escapeName(schematicName)}`);
     return EXIT_ERROR;
   }
-  // Read unconditionally, like `detectPlugins` above: the `module` schematic
-  // needs it to render its aggregate barrel, and branching on the schematic name
-  // here would put a second dispatch beside the registry.
-  const mode = generatorMode(installed);
-  const moduleScan = await scanModules(deps.fs, dir, mode);
-  const modules = moduleScan.names;
-  const legacyModules = moduleScan.skipped
-    .filter((skip) => skip.kind === 'legacy')
-    .map((skip) => skip.name);
+  const { mode, modules, legacyModules } = diagnosis;
+  const scan = diagnosis;
+  // One home for routes and services (§4.8): a flat project has none in
+  // modules, and a modular one has none outside them.
+  if (PLACED_SCHEMATICS.includes(schematicName)) {
+    if (module !== undefined && modules.length === 0) {
+      deps.error(
+        `This project has no modules; run \`${cliInvocation(runtime)} g module ${escapeName(module)}\` first, or drop --module.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (module === undefined && diagnosis.layout !== 'flat') {
+      deps.error(
+        `This project uses modules; pass --module <name> (existing: ${modules.map(escapeName).join(', ')}).`,
+      );
+      return EXIT_USAGE;
+    }
+  }
   if (module !== undefined) {
     if (!modules.includes(module)) {
       deps.error(
@@ -387,109 +431,9 @@ export async function runGenerateCommand(
       );
       return EXIT_ERROR;
     }
-    if (mode === 'class-based' && schematicName === 'route') {
-      deps.error('route --module is functional-only; use top-level g route instead.');
-      return EXIT_USAGE;
-    }
   }
-  for (const path of moduleScan.rejected) {
-    deps.error(
-      `Skipped ${escapeName(path)}: its name is not a kebab-case identifier, so it cannot be ` +
-        'listed in the activation barrel. Rename the directory.',
-    );
-  }
-  for (const skip of moduleScan.skipped) {
-    deps.error(
-      `Skipped ${escapeName(skip.path)}: it is missing ${escapeName(
-        String(skip.missing),
-      )}, so it cannot be listed in the ${mode === 'class-based' ? 'MODULES' : 'registerModules'} activation barrel.`,
-    );
-    deps.error(
-      `  Add ${escapeName(
-        String(skip.missing),
-      )}${skip.kind === 'legacy' ? ' with @Module(...)' : ' as an export'} or delete and regenerate the module.`,
-    );
-  }
-  // Same reasoning as `modules`: the migration runner lists every migration in
-  // order, and a schematic performs no I/O.
   const migrations = await readMigrationNames(deps.fs, dir);
-  // Same reasoning, for the ten families that regenerate a seam barrel. One `readdir`
-  // per family against paths that usually do not exist; a custom schematic reads it
-  // too, so it cannot be gated on a built-in name.
-  const scan =
-    module === undefined || mode === 'class-based'
-      ? await scanArtifacts(deps.fs, dir, scanSeamSpecs(installed))
-      : await scanModuleArtifacts(deps.fs, dir, module);
-
-  // A candidate the scan rejected is reported, never silently dropped. This is the path
-  // an artifact generated before its family gained a second export takes: the barrel
-  // cannot name a symbol the file does not export, so the artifact is left out and the
-  // developer is told to regenerate it — rather than getting a barrel that will not
-  // compile, or one that quietly omits their work.
-  for (const skip of scan.skipped) {
-    if (skip.invalidName === true) {
-      deps.error(
-        `Skipped ${escapeName(skip.path)}: its name is not a kebab-case identifier, so it cannot be listed in the barrel. Rename the file.`,
-      );
-      continue;
-    }
-    deps.error(
-      `Skipped ${escapeName(skip.path)}: it does not export ${escapeName(
-        skip.missing.join(', '),
-      )}, ` + `so it cannot be listed in the generated barrel and nothing registers it.`,
-    );
-    // "Regenerate it" was the advice, and it could not be followed: the artifact
-    // is not `managed`, so `setu generate` refuses to overwrite it and the
-    // developer is told to run a command that then refuses — the M65 loop, found
-    // by review after A2 made `health-indicator` mode-aware. An alpha.8 project
-    // generated its indicator as a class; a functional project now expects a
-    // value, so the file is dropped and its health check stops running.
-    //
-    // ADD comes first, and renaming is only offered as an alternative, because
-    // M70d made rename a dead end for four of the five families it touched: the
-    // missing symbol is now a FACTORY, and renaming a class to a factory's name
-    // produces a barrel entry that is a class constructor where the option wants
-    // an instance or a function — `TS2322`, so the project stops compiling
-    // (probed). Leading with the route that works keeps this from being the M65
-    // dead-end advice in a new disguise.
-    deps.error(
-      `  Add that export to the file — or rename an existing one — ` +
-        `or delete the file and run this schematic again.`,
-    );
-  }
-
-  // The half that breaks the boot: adopted AND already registered by hand is a
-  // duplicate `METHOD path`, which the kernel has refused since M68. The developer's
-  // own wiring wins and the barrel steps aside, rather than the command reporting
-  // success and leaving the application unable to start.
-  for (const wired of scan.manual) {
-    deps.error(
-      `Skipped ${escapeName(wired.path)}: ${escapeName(
-        wired.symbol,
-      )} is already registered by hand in ` +
-        `${escapeName(
-          wired.wiredIn,
-        )}, so listing it in the generated barrel would register it twice.`,
-    );
-    deps.error(`  Remove the manual registration to let the barrel own it, or leave it as it is.`);
-  }
-
-  // E8 merged `src/routes/` into `src/controllers/`, and a project that predates the
-  // merge is invisible to every other check here: the scan above reads the NEW
-  // directory, so a file in the old one is never scanned and never skipped, and
-  // `setu.config.ts` still imports the old barrel because it is the developer's file.
-  // Without this the generator reports `created` and leaves the artifact unreachable —
-  // the M60 defect class, reintroduced for upgrading projects by the fix for it.
-  for (const line of legacyLayoutNotice(await readLegacyHttpFiles(deps.fs, dir))) {
-    deps.error(line);
-  }
-
-  // The registry parameter is optional so a pre-M84 config still COMPILES, which
-  // is what keeps existing projects working — but it also means the compiler no
-  // longer reports the gap, and a generated SSE controller throws at startup.
-  for (const line of legacyRegistrarNotice(await readConfigModule(deps.fs, dir))) {
-    deps.error(line);
-  }
+  renderGenerateFindings(diagnosis, deps.error);
 
   // Refused BEFORE the schematic runs, and before `--dry-run` prints: a plan whose
   // output cannot work is not a plan worth printing. Both collisions this catches were
@@ -498,7 +442,7 @@ export async function runGenerateCommand(
     schematicName,
     names.kebab,
     installed,
-    module !== undefined && mode === 'class-based' ? {} : scan.artifacts,
+    scan.artifacts,
     module === undefined ? modules : [],
     module,
   );
@@ -511,6 +455,32 @@ export async function runGenerateCommand(
     deps.error(`If both existed, ${escapeName(conflict.consequence)}.`);
     deps.error(`Choose a different name, or ${escapeName(conflict.remedy)}.`);
     return EXIT_ERROR;
+  }
+
+  if (
+    installed.has('react-router-plugin') &&
+    ['route', 'controller', 'module'].includes(schematicName)
+  ) {
+    const base = `/${module === undefined ? '' : `${module}/`}${names.kebab}`;
+    const pages = await readPagePaths(dir, deps.runCommand ?? createCommandRunner());
+    if (!pages.ok) {
+      deps.error(
+        `Notice: cannot check React Router pages (${escapeName(pages.reason)}); check ${base} and ${base}/:id against app/routes.ts and app/routes/ by hand.`,
+      );
+    } else {
+      const page = pages.paths.find((path) => kernelShadows(base, path));
+      if (page !== undefined) {
+        deps.error(
+          `Cannot generate ${schematicName} "${names.kebab}": its kernel routes ${base} and ${base}/:id would take precedence over the React Router page ${escapeName(page)} (${escapeName(pages.files.get(page)!)}).`,
+        );
+        deps.error(
+          schematicName === 'module'
+            ? `Choose another module name: a module's routes are mounted at /<module name>.`
+            : `Choose another name, or place the ${schematicName} in a module: setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematicName} ${names.kebab} --module api (which yields /api/${names.kebab}).`,
+        );
+        return EXIT_ERROR;
+      }
+    }
   }
 
   const options: SchematicOptions = {
@@ -534,6 +504,77 @@ export async function runGenerateCommand(
       )}`,
     );
     return EXIT_ERROR;
+  }
+
+  // A class controller or service generated into a class-based module joins the
+  // module's own `@Module` declaration, as the NestJS CLI does. A declaration the
+  // editor cannot read exactly is left alone and the line to add is printed.
+  let declarationAdvice: string | undefined;
+  const declaration =
+    module !== undefined && mode === 'class-based'
+      ? moduleDeclarationTarget(schematicName, names)
+      : undefined;
+  if (module !== undefined && declaration !== undefined) {
+    const path = `src/modules/${module}/${module}.module.ts`;
+    const read = await readBarrel(deps.fs, joinPath(dir, path));
+    const edit =
+      read.kind === 'source'
+        ? withModuleDeclarationEntry(
+            read.source,
+            declaration.property,
+            declaration.symbol,
+            declaration.specifier,
+          )
+        : ({ kind: 'unreadable' } as const);
+    if (edit.kind === 'edited')
+      generated = [...generated, { path, contents: edit.source, managed: true }];
+    else if (edit.kind === 'unreadable')
+      declarationAdvice = `Add ${declaration.symbol} to @Module({ ${declaration.property} }) in ${path}; the CLI edits only a plain array literal there.`;
+  }
+
+  // The first module switches the project from flat to modular (§4.7): it takes
+  // the flat controllers and services with it, or refuses.
+  let moduleSwitch: IModuleSwitch | undefined;
+  // The switch's config and importer edits are the developer's files with only
+  // their import lines changed, so they are written verbatim, never reformatted.
+  const verbatim = new Set<string>();
+  if (schematicName === 'module' && modules.length === 0) {
+    let planned: Awaited<ReturnType<typeof planModuleSwitch>>;
+    try {
+      planned = await planModuleSwitch({
+        fs: deps.fs,
+        dir,
+        module: names.kebab,
+        mode,
+        adopt: adoptControllers,
+        artifacts: scan.artifacts,
+        generated,
+        cli: cliInvocation(runtime),
+      });
+    } catch (cause) {
+      // A linked directory under src/ or an unreadable file: nothing was written.
+      deps.error(
+        `Cannot plan the switch to modules: ${escapeName(cause instanceof Error ? cause.message : String(cause))}. Nothing was changed.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (planned.kind === 'refused') {
+      for (const line of planned.lines) deps.error(line);
+      return EXIT_ERROR;
+    }
+    moduleSwitch = planned.plan;
+    const replaced = new Map(moduleSwitch.writes.map((file) => [file.path, file]));
+    for (const file of moduleSwitch.writes)
+      if (!generated.some((own) => own.path === file.path)) verbatim.add(joinPath(dir, file.path));
+    generated = [
+      ...generated.map((file) => replaced.get(file.path) ?? file),
+      ...moduleSwitch.writes.filter((file) => !generated.some((own) => own.path === file.path)),
+    ];
+  } else if (adoptControllers) {
+    deps.error(
+      '--adopt-controllers applies only to the first module, which switches a flat project to modules.',
+    );
+    return EXIT_USAGE;
   }
 
   // Root every path at the target directory before touching the filesystem, so
@@ -578,7 +619,13 @@ export async function runGenerateCommand(
 
   const dryRun = args.flags['dry-run'] === true;
   if (!dryRun) {
-    const existing = await findExisting(deps.fs, files);
+    const existing = await findExisting(deps.fs, [
+      ...files,
+      ...(moduleSwitch?.moves ?? []).map((move) => ({
+        path: joinPath(dir, move.to),
+        contents: '',
+      })),
+    ]);
     if (existing.length > 0) {
       deps.error('Refusing to overwrite existing files:');
       for (const path of existing) deps.error(`  ${escapeName(path)}`);
@@ -587,21 +634,57 @@ export async function runGenerateCommand(
   }
 
   try {
-    const formatted = await formatForTarget(files, runtime, dir, deps.error);
+    const formatted = [
+      ...(await formatForTarget(
+        files.filter((file) => !verbatim.has(file.path)),
+        runtime,
+        dir,
+        deps.error,
+      )),
+      ...files.filter((file) => verbatim.has(file.path)),
+    ];
     if (dryRun) {
-      const code = await reportDryRunPlan(deps, formatted);
+      // A move onto an existing file is refused by the real run, so the dry run says so.
+      const blocked = new Set(
+        await findExisting(
+          deps.fs,
+          (moduleSwitch?.moves ?? []).map((move) => ({
+            path: joinPath(dir, move.to),
+            contents: '',
+          })),
+        ),
+      );
+      for (const move of moduleSwitch?.moves ?? [])
+        if (!blocked.has(joinPath(dir, move.to)))
+          deps.log(`would move ${escapeName(move.from)} -> ${escapeName(move.to)}`);
+      for (const path of moduleSwitch?.removes ?? []) deps.log(`would remove ${escapeName(path)}`);
+      for (const path of blocked) deps.error(`WOULD REFUSE: ${escapeName(path)} already exists`);
+      const planned = await reportDryRunPlan(deps, formatted);
+      const code = blocked.size > 0 ? EXIT_ERROR : planned;
       reportAdoptions(adoptions, 'Would adopt', deps.error);
+      renderGenerateFindings(
+        moduleSwitch?.writes.some((file) => file.path === 'setu.config.ts') === true
+          ? withoutRegistrationWiring(diagnosis)
+          : diagnosis,
+        deps.error,
+        { dryRun: true, ...(module === undefined ? {} : { module }) },
+      );
       return code;
     }
-    const outcomes = await writeFiles(
-      deps.fs,
-      formatted,
-      deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
-    );
+    const write = (fs: IFileSystem): ReturnType<typeof writeFiles> =>
+      writeFiles(
+        fs,
+        formatted,
+        deps.interrupt === undefined ? { root: dir } : { root: dir, signal: deps.interrupt },
+      );
+    const outcomes =
+      moduleSwitch === undefined
+        ? await write(deps.fs)
+        : await applyModuleSwitch(deps, dir, moduleSwitch, write);
     for (const outcome of outcomes) deps.log(`${outcome.outcome} ${escapeName(outcome.path)}`);
     if (schematicName === 'migration' && customName === undefined) {
       deps.log(
-        'Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: https://github.com/setu-ts/setu-ts/tree/develop/packages/database-plugin#migrations-and-readiness',
+        `Add readiness: { migrations: MIGRATION_NAMES } from ./src/migrations/index.ts to DatabasePlugin(...) and create the setu_migrations table: ${repositoryFileUrl('packages/database-plugin/README.md#migrations-and-readiness')}`,
       );
     }
     if (installed.has('validation-plugin') && ['module', 'schema'].includes(schematicName)) {
@@ -617,7 +700,7 @@ export async function runGenerateCommand(
       }
       if (!hasZod)
         deps.log(
-          `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4' : runtime === 'bun' ? 'bun add zod@^4' : 'npm install zod@^4'}`,
+          `Install Zod: ${runtime === 'deno' ? 'deno add npm:zod@^4.6.6' : runtime === 'bun' ? 'bun add zod@^4.6.6' : 'npm install zod@^4.6.6'}`,
         );
     }
     // After the write, so a refused or failed run never reports a claim it did not
@@ -630,14 +713,22 @@ export async function runGenerateCommand(
     // existed, or a starter-composed one whose decorators arm was never filled in.
     // The CLI cannot edit that config (M101g), so it prints the exact line instead
     // of letting the file appear wired when nothing registers it.
-    await reportUnwiredSeams(deps.fs, dir, generated, installed, deps.error);
-    if (module !== undefined && mode === 'class-based' && schematicName !== 'schema') {
-      deps.log(
-        `Add ${names.pascal}${schematicName === 'service' ? 'Service' : 'Controller'} to @Module({ ${schematicName === 'service' ? 'providers' : 'controllers'} }) in src/modules/${module}/${module}.module.ts`,
-      );
-      if (schematicName === 'service') {
-        deps.log(`Inject it with @Inject('${serviceSeamToken(`${module}.${names.kebab}`)}').`);
-      }
+    // The switch rewrote the config's registration lines, so the wiring read
+    // before the write is stale: read the project again.
+    renderGenerateFindings(
+      moduleSwitch === undefined ? diagnosis : await diagnoseProject(deps.fs, dir, installed),
+      deps.error,
+      {
+        generated: generated.map((file) => file.path),
+        ...(module === undefined ? {} : { module }),
+      },
+    );
+    // Only a `--module` run asks whether the module is active; a run that wrote
+    // the activation barrel is covered by the wiring projection above, so the two
+    // never print for the same run.
+    if (declarationAdvice !== undefined) deps.log(declarationAdvice);
+    if (module !== undefined && mode === 'class-based' && schematicName === 'service') {
+      deps.log(`Inject it with @Inject('${serviceSeamToken(`${module}.${names.kebab}`)}').`);
     }
   } catch (cause) {
     const interrupted = interruptionMessage(cause);
@@ -652,82 +743,6 @@ export async function runGenerateCommand(
   }
 
   return EXIT_OK;
-}
-
-/**
- * Reports each generated decorator or jobs barrel `setu.config.ts` does not reference.
- *
- * The command owns the barrel but not the config, and M101g limits what it may
- * edit there to text it can classify. A starter-composed config owns
- * `DecoratorPlugin` behind its own `decorators` arm, so that form is named in
- * the report instead of an inline call the config does not have.
- *
- * Strings and comments are masked before the search, so a mention there does
- * not count as wired. An unclassifiable config is reported: the mask cannot
- * prove the mention is code, and a false report is recoverable while a silent
- * unwired barrel is not. A config that cannot be read reports nothing, because
- * there is no file to point at.
- *
- * @param fs - The filesystem to read the config through
- * @param dir - The project directory
- * @param generated - The files this run wrote, relative to the project
- * @param installed - The `@setu-ts` packages detected in the project
- * @param error - The command's error channel
- */
-async function reportUnwiredSeams(
-  fs: IFileSystem,
-  dir: string,
-  generated: readonly GeneratedFile[],
-  installed: ReadonlySet<string>,
-  error: (message: string) => void,
-): Promise<void> {
-  const written = new Set(generated.map((file) => file.path));
-  const seams = new Map<
-    string,
-    { readonly key: 'controllers' | 'services' | 'ingress' | 'processors'; readonly symbol: string }
-  >();
-  for (const spec of scanSeamSpecs(installed)) {
-    if (!written.has(spec.barrel) || seams.has(spec.barrel)) continue;
-    if (spec.barrel === 'src/jobs/index.ts') {
-      seams.set(spec.barrel, { key: 'processors', symbol: 'QUEUE_PROCESSORS' });
-      continue;
-    }
-    const key = decoratorKeyFor(spec);
-    const symbol = decoratorExportFor(spec);
-    if (key === undefined || symbol === undefined) continue;
-    seams.set(spec.barrel, { key, symbol });
-  }
-  const functionalModules =
-    !installed.has('decorator-plugin') && written.has('src/modules/index.ts');
-  if (seams.size === 0 && !functionalModules) return;
-
-  const config = await readConfigModule(fs, dir);
-  if (config === '') return;
-  const code = maskSourceCode(config);
-  const starter = composingStarter(config);
-  if (
-    functionalModules &&
-    (code === undefined || !new RegExp(`\\b${REGISTER_MODULES_EXPORT}\\b`).test(code))
-  ) {
-    error(`setu.config.ts does not reference ${REGISTER_MODULES_EXPORT}; add:`);
-    error(`  import { ${REGISTER_MODULES_EXPORT} } from './src/modules/index.ts';`);
-    error(`  ${REGISTER_MODULES_EXPORT}(app.router, app.services);`);
-  }
-
-  for (const [barrel, { key, symbol }] of seams) {
-    // Unclassifiable (`undefined`) fails toward reporting.
-    if (code !== undefined && new RegExp(`\\b${symbol}\\b`).test(code)) continue;
-    if (key === 'processors') {
-      error(`Pass the barrel to QueuePlugin: QueuePlugin({ processors: [...${symbol}] })`);
-    } else if (starter !== undefined) {
-      error(`${starter.symbol} owns DecoratorPlugin; merge the barrel into its decorators arm:`);
-      error(`  decorators: { ${key}: [...${symbol}] }`);
-    } else {
-      error(`setu.config.ts does not reference ${symbol}; add it to DecoratorPlugin:`);
-      error(`  ${key}: [...${symbol}]`);
-    }
-    error(`  import { ${symbol} } from './${barrel}';`);
-  }
 }
 
 /**
@@ -749,4 +764,106 @@ function reportAdoptions(
     );
     error(`  Remove any manual registration of it, or rename the file.`);
   }
+}
+
+/**
+ * The declaration array a class generated into a class-based module joins.
+ *
+ * `g route` writes a function controller, which the module's managed index
+ * registers instead, so it has no declaration entry.
+ *
+ * @param schematicName - The schematic being run
+ * @param names - The artifact's derived names
+ * @returns The property, class and import specifier, or undefined
+ */
+function moduleDeclarationTarget(
+  schematicName: string,
+  names: DerivedNames,
+): { property: ModuleDeclarationProperty; symbol: string; specifier: string } | undefined {
+  if (schematicName === 'service')
+    return {
+      property: 'providers',
+      symbol: `${names.pascal}Service`,
+      specifier: `./${names.kebab}.service.ts`,
+    };
+  if (schematicName === 'controller' || schematicName === 'sse')
+    return {
+      property: 'controllers',
+      symbol: `${names.pascal}Controller`,
+      specifier: `./${names.kebab}.controller.ts`,
+    };
+  return undefined;
+}
+
+/** Schematics whose artifact lives in `src/controllers`/`src/services` or in a module. */
+const PLACED_SCHEMATICS: readonly string[] = ['controller', 'route', 'service', 'sse'];
+
+/**
+ * Applies the flat-to-modular switch and the module's files as one transaction:
+ * a failure anywhere restores every moved, removed and written file.
+ *
+ * @param deps - The command's filesystem, interrupt and log
+ * @param dir - The project root
+ * @param plan - The planned switch
+ * @param write - Writes the module's files through the journaled filesystem
+ * @returns The write outcomes
+ */
+async function applyModuleSwitch(
+  deps: GenerateDependencies,
+  dir: string,
+  plan: IModuleSwitch,
+  write: (fs: IFileSystem) => ReturnType<typeof writeFiles>,
+): ReturnType<typeof writeFiles> {
+  const encoder = new TextEncoder();
+  // Reported only once everything is written: a failure restores every move.
+  const done: string[] = [];
+  const outcomes = await withFileTransaction(
+    deps.fs,
+    async (fs) => {
+      for (const move of plan.moves) {
+        const to = joinPath(dir, move.to);
+        await fs.mkdir(to.slice(0, to.lastIndexOf('/')), { recursive: true });
+        await fs.writeFile(
+          to,
+          typeof move.contents === 'string' ? encoder.encode(move.contents) : move.contents,
+        );
+        await fs.rm(joinPath(dir, move.from));
+        done.push(`moved ${escapeName(move.from)} -> ${escapeName(move.to)}`);
+      }
+      for (const path of plan.removes) {
+        await fs.rm(joinPath(dir, path));
+        done.push(`removed ${escapeName(path)}`);
+      }
+      await pruneAdoptedDirectories(fs, dir, plan.prune);
+      if (plan.exampleAdopted)
+        done.push(
+          "moved the scaffold's untouched greeting example into the module; its routes keep their URLs",
+        );
+      return await write(fs);
+    },
+    deps.interrupt,
+  );
+  for (const line of done) deps.log(line);
+  return outcomes;
+}
+
+/**
+ * Drops the registration-line wiring findings a planned config switch resolves,
+ * so a dry run does not report lines the real run would write.
+ *
+ * @param diagnosis - The diagnosis read before the switch
+ * @returns The diagnosis without those findings
+ */
+function withoutRegistrationWiring(diagnosis: ProjectDiagnosis): ProjectDiagnosis {
+  const switched = (finding: ProjectDiagnosis['findings'][number]): boolean =>
+    finding.kind === 'unwired' &&
+    ['src/modules/index.ts', 'src/controllers/index.ts', 'src/services/index.ts'].includes(
+      finding.barrel,
+    );
+  return {
+    ...diagnosis,
+    findings: diagnosis.findings.filter((finding) => !switched(finding)),
+    generateWiring: diagnosis.generateWiring.filter((finding) => !switched(finding)),
+    moduleWiring: diagnosis.moduleWiring.filter((finding) => !switched(finding)),
+  };
 }

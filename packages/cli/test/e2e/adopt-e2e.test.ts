@@ -231,6 +231,7 @@ describe('setu adopt on a real scaffold', () => {
     expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
 
     const project = `${root}/svc`;
+    await nodeFs.rm(`${project}/.dockerignore`);
     await nodeFs.symlink(`${root}/missing-dockerignore`, `${project}/.dockerignore`);
     const before = await snapshotTree(project);
 
@@ -249,6 +250,7 @@ describe('setu adopt on a real scaffold', () => {
     expect(await run(['new', 'svc', '--template', 'rest', '--runtime', 'deno'])).toBe(0);
 
     const project = `${root}/svc`;
+    await nodeFs.rm(`${project}/.dockerignore`);
     await nodeFs.symlink(`${root}/missing-dockerignore`, `${project}/.dockerignore`);
     const before = await snapshotTree(project);
 

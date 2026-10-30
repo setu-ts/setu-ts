@@ -13,11 +13,11 @@ import { describe, expect, it } from 'vitest';
 import type { IFileSystem, StatResult } from '@setu-ts/common';
 
 import { readArtifactNames, scanArtifacts } from '../../../src/utils/artifact-scanner.ts';
-import { FUNCTIONAL_ROUTES_SEAM } from '../../../src/seams/http.ts';
+import { FUNCTIONAL_CONTROLLERS_SEAM } from '../../../src/seams/http.ts';
 import { FUNCTIONAL_SERVICES_SEAM } from '../../../src/seams/services.ts';
 
 const FILE_STAT: StatResult = { isFile: true, isDirectory: false, size: 12 };
-const ROUTES = FUNCTIONAL_ROUTES_SEAM;
+const ROUTES = FUNCTIONAL_CONTROLLERS_SEAM;
 
 /**
  * A filesystem double over an explicit path → contents map.
@@ -33,6 +33,7 @@ const ROUTES = FUNCTIONAL_ROUTES_SEAM;
 function fsWith(entries: readonly string[], files: Readonly<Record<string, string>>): IFileSystem {
   const relative = (path: string): string => path.replace(/^\/app\//, '');
   return {
+    realPath: (path) => Promise.resolve(path),
     readdir: () => Promise.resolve(entries),
     stat: () => Promise.resolve(FILE_STAT),
     readFile: (path: string) => {
@@ -52,13 +53,13 @@ const reportModule = 'export function registerReportRoutes(): void {}';
 
 /** A barrel already naming one artifact — what an earlier `generate` wrote. */
 const barrelNaming = (symbols: readonly string[]): string =>
-  symbols.map((s) => `import { ${s} } from './x.routes.ts';`).join('\n');
+  symbols.map((s) => `import { ${s} } from './x.controller.ts';`).join('\n');
 
 describe('artifact adoption', () => {
   it('reports a file the existing barrel does not already name', async () => {
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts'], {
-        'src/controllers/admin.routes.ts': adminModule,
+      fsWith(['admin.controller.ts'], {
+        'src/controllers/admin.controller.ts': adminModule,
         'src/controllers/index.ts': barrelNaming(['registerReportRoutes']),
       }),
       '/app',
@@ -67,7 +68,7 @@ describe('artifact adoption', () => {
 
     expect(scan.names).toEqual(['admin']);
     expect(scan.adopted).toEqual([
-      { path: 'src/controllers/admin.routes.ts', barrel: 'src/controllers/index.ts' },
+      { path: 'src/controllers/admin.controller.ts', barrel: 'src/controllers/index.ts' },
     ]);
   });
 
@@ -75,8 +76,8 @@ describe('artifact adoption', () => {
     // The claim happened on some earlier run. Reporting it again on every generate
     // would make the diagnostic noise rather than news.
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts'], {
-        'src/controllers/admin.routes.ts': adminModule,
+      fsWith(['admin.controller.ts'], {
+        'src/controllers/admin.controller.ts': adminModule,
         'src/controllers/index.ts': barrelNaming(['registerAdminRoutes']),
       }),
       '/app',
@@ -89,12 +90,12 @@ describe('artifact adoption', () => {
 
   it('reports every artifact when no barrel exists yet', async () => {
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts'], { 'src/controllers/admin.routes.ts': adminModule }),
+      fsWith(['admin.controller.ts'], { 'src/controllers/admin.controller.ts': adminModule }),
       '/app',
       ROUTES,
     );
 
-    expect(scan.adopted.map((a) => a.path)).toEqual(['src/controllers/admin.routes.ts']);
+    expect(scan.adopted.map((a) => a.path)).toEqual(['src/controllers/admin.controller.ts']);
   });
 });
 
@@ -104,16 +105,16 @@ describe('manual-wiring skip', () => {
     // an unrelated `setu generate route report` adopts the file and the app stops
     // booting with `Route 'GET /login' is already registered`.
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts', 'report.routes.ts'], {
-        'src/controllers/admin.routes.ts': adminModule,
-        'src/controllers/report.routes.ts': reportModule,
+      fsWith(['admin.controller.ts', 'report.controller.ts'], {
+        'src/controllers/admin.controller.ts': adminModule,
+        'src/controllers/report.controller.ts': reportModule,
       }),
       '/app',
       ROUTES,
       {
         path: 'setu.config.ts',
         source:
-          "import { registerAdminRoutes } from './src/controllers/admin.routes.ts';\n" +
+          "import { registerAdminRoutes } from './src/controllers/admin.controller.ts';\n" +
           'registerAdminRoutes(app.router);',
       },
     );
@@ -121,7 +122,7 @@ describe('manual-wiring skip', () => {
     expect(scan.names).toEqual(['report']);
     expect(scan.manual).toEqual([
       {
-        path: 'src/controllers/admin.routes.ts',
+        path: 'src/controllers/admin.controller.ts',
         symbol: 'registerAdminRoutes',
         wiredIn: 'setu.config.ts',
       },
@@ -132,7 +133,7 @@ describe('manual-wiring skip', () => {
     // A scaffolded config imports `registerGeneratedRoutes`, never a per-artifact
     // symbol — which is exactly why the per-artifact symbol is a reliable signal.
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts'], { 'src/controllers/admin.routes.ts': adminModule }),
+      fsWith(['admin.controller.ts'], { 'src/controllers/admin.controller.ts': adminModule }),
       '/app',
       ROUTES,
       {
@@ -147,7 +148,7 @@ describe('manual-wiring skip', () => {
 
   it('matches whole identifiers only', async () => {
     const scan = await readArtifactNames(
-      fsWith(['admin.routes.ts'], { 'src/controllers/admin.routes.ts': adminModule }),
+      fsWith(['admin.controller.ts'], { 'src/controllers/admin.controller.ts': adminModule }),
       '/app',
       ROUTES,
       { path: 'setu.config.ts', source: 'registerAdminRoutesLegacy(app.router);' },
@@ -161,8 +162,8 @@ describe('manual-wiring skip', () => {
 describe('scanArtifacts aggregation', () => {
   it('reads the wiring module once and aggregates both new lists', async () => {
     let configReads = 0;
-    const base = fsWith(['admin.routes.ts'], {
-      'src/controllers/admin.routes.ts': adminModule,
+    const base = fsWith(['admin.controller.ts'], {
+      'src/controllers/admin.controller.ts': adminModule,
       'setu.config.ts': 'registerAdminRoutes(app.router);',
     });
     const fs: IFileSystem = {

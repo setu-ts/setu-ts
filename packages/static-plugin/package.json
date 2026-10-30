@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/static-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Static files with conditional requests, Range, precompressed sidecars, and SPA fallback",
   "repository": {
     "type": "git",

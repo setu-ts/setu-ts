@@ -34,24 +34,24 @@ describe('generateModule', () => {
           ]),
         );
         expect(files.some((file) => file.path.endsWith('.schemas.ts'))).toBe(validation);
-        const routes = source(`invoices.${style === 'class-based' ? 'controller' : 'routes'}.ts`);
+        const routes = source('invoices.controller.ts');
         expect(routes).toContain("'/invoices'");
         expect(routes).toContain('status(201)');
         // A missing record answers in the application's error format: thrown
         // through `errorHandler` when `exceptions` is installed, otherwise the
         // kernel's own `{ error, detail }` shape — never a hand-rolled body.
-        const missing = 'Invoices ${id} was not found.';
+        const missing = 'Invoices not found.';
         if (exceptions) {
           expect(routes).toContain("import { notFound } from '@setu-ts/exceptions';");
-          expect(
-            routes.match(/throw notFound\(`Invoices \$\{id\} was not found\.`\);/g),
-          ).toHaveLength(2);
+          expect(routes.match(/throw notFound\('Invoices not found\.'\);/g)).toHaveLength(2);
         } else {
           expect(routes).not.toContain('@setu-ts/exceptions');
           expect(
-            routes.split(`.status(404).json({ error: 'Not Found', detail: \`${missing}\` })`),
+            routes.split(`.status(404).json({ error: 'Not Found', detail: '${missing}' })`),
           ).toHaveLength(3);
         }
+        // The caller's id is not echoed into the detail (V10-35).
+        expect(routes).not.toContain('${id}');
         expect(routes).not.toContain("json({ message: 'Not found' })");
         expect(routes).not.toMatch(/\bas\s+(?:z\.|Record|Create|Update|List)/);
         if (validation) {
@@ -105,10 +105,27 @@ describe('generateModule', () => {
       });
     }
   }
-  it('omits tests on Workers in either style', () => {
+  it('emits Workers tests that boot the real Worker in either style', () => {
     for (const plugins of [[], ['decorator-plugin', 'validation-plugin']]) {
       const files = generateModule(names, { ...options(plugins), runtime: 'cloudflare-workers' });
-      expect(files.some((file) => file.path.includes('test'))).toBe(false);
+      const contentsOf = (path: string): string =>
+        files.find((file) => file.path === path)!.contents;
+      expect(files.map((file) => file.path)).toEqual(
+        expect.arrayContaining([
+          'src/modules/invoices/invoices.test.ts',
+          'src/modules/invoices/invoices.e2e.test.ts',
+          'test/support/server.ts',
+        ]),
+      );
+      const test = contentsOf('src/modules/invoices/invoices.test.ts');
+      expect(test).toContain("import { startTestServer } from '../../../test/support/server.ts';");
+      expect(test).toContain("await fetch(server.baseUrl + '/invoices')");
+      expect(test).not.toContain('createTestApp');
+      expect(test).toContain("from 'node:test'");
+      const server = files.find((file) => file.path === 'test/support/server.ts')!;
+      expect(server.managed).toBe(true);
+      expect(server.contents).toContain('createTestHarness');
+      expect(contentsOf('src/modules/invoices/invoices.e2e.test.ts')).toContain('startTestServer');
     }
   });
   it('keeps activation idempotent and accepts old custom schematic options', () => {

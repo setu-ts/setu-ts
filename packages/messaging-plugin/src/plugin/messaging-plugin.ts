@@ -164,7 +164,13 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
   // Refused HERE, before any application exists, like every other bound
   // (the M90a/M101a rule) — not at `start()`, where a typo would surface as a
   // boot failure far from the line that caused it.
-  if (brokerType === 'kafka' || brokerType === 'pubsub' || brokerType === 'rabbitmq') {
+  if (
+    brokerType === 'kafka' ||
+    brokerType === 'pubsub' ||
+    brokerType === 'rabbitmq' ||
+    brokerType === 'redis-streams' ||
+    brokerType === 'nats'
+  ) {
     resolvePublishTimeoutMs((options as { publishTimeoutMs?: number }).publishTimeoutMs);
   }
   if (brokerType === 'nats') resolveNatsReconnect(options as NatsOptions);
@@ -330,6 +336,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         });
       } else if (brokerType === 'redis-streams') {
         const opts = options as {
+          publishTimeoutMs?: number;
           url?: string;
           client?: IRedisStreamsClient;
           defaultQueue?: string;
@@ -341,6 +348,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
           consumerIdleSweepMs?: number;
         };
         const redisOptions: RedisStreamsOptions = {};
+        if (opts.publishTimeoutMs !== undefined)
+          redisOptions.publishTimeoutMs = opts.publishTimeoutMs;
         if (opts.url !== undefined) redisOptions.url = opts.url;
         if (opts.client !== undefined) redisOptions.client = opts.client;
         if (opts.defaultQueue !== undefined) redisOptions.defaultQueue = opts.defaultQueue;
@@ -386,6 +395,7 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         broker = new RabbitMqBroker(ctx.runtime, serializer, rabbitOptions);
       } else if (brokerType === 'nats') {
         const opts = options as {
+          publishTimeoutMs?: number;
           url?: string;
           client?: INatsConnection;
           streamName?: string;
@@ -396,6 +406,8 @@ export function MessagingPlugin(options: MessagingPluginOptions = {}): IPlugin {
         };
         const natsOptions: NatsOptions = {};
         if (opts.reconnect !== undefined) natsOptions.reconnect = opts.reconnect;
+        if (opts.publishTimeoutMs !== undefined)
+          natsOptions.publishTimeoutMs = opts.publishTimeoutMs;
         if (opts.url !== undefined) natsOptions.url = opts.url;
         if (opts.client !== undefined) natsOptions.client = opts.client;
         if (opts.streamName !== undefined) natsOptions.streamName = opts.streamName;

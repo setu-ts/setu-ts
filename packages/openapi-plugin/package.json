@@ -1,6 +1,6 @@
 {
   "name": "@setu-ts/openapi-plugin",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "OpenAPI 3.1 generated from routes, with a Zod transformer and Swagger UI",
   "repository": {
     "type": "git",
@@ -60,7 +60,6 @@
     "swagger-ui-dist": "^5",
     "typescript": "6.0.3",
     "vitest": "5.0.3",
-    "zod-v3": "npm:zod@^3.24.0",
-    "zod-v4": "npm:zod@^4.4.0"
+    "zod-v4": "npm:zod@^4.6.6"
   }
 }

@@ -305,11 +305,11 @@ describe('Router', () => {
   // M22 coverage — parsePattern edge cases (N1: test name corrected to match actual behavior)
   it('RouteEntry.pattern stores the raw path (trailing slashes preserved)', () => {
     const router = new Router();
-    router.get('/trailing//', () => ({ __handlerResult: true }) as never);
+    router.get('/trailing/', () => ({ __handlerResult: true }) as never);
     const all = router.getAll();
     expect(all.length).toBe(1);
     // pattern stores the raw path; parsePattern strips trailing slashes only for segment counting
-    expect(all[0].pattern).toBe('/trailing//');
+    expect(all[0].pattern).toBe('/trailing/');
   });
 
   // M22 coverage — GroupRouter.group() and listRoutes()

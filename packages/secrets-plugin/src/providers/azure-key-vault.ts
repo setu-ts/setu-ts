@@ -111,13 +111,19 @@ export async function loadAzureModule(): Promise<AzureSdkModule> {
   try {
     secretsMod = await import('@azure/keyvault-secrets');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@azure/keyvault-secrets', { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/keyvault-secrets', {
+      requiredBy: '@setu-ts/secrets-plugin',
+      cause: error,
+    });
   }
   let identityMod: typeof import('@azure/identity');
   try {
     identityMod = await import('@azure/identity');
   } catch (error) {
-    throw new OptionalDependencyUnavailableError('@azure/identity', { cause: error });
+    throw new OptionalDependencyUnavailableError('@azure/identity', {
+      requiredBy: '@setu-ts/secrets-plugin',
+      cause: error,
+    });
   }
   return {
     SecretClient: secretsMod.SecretClient,

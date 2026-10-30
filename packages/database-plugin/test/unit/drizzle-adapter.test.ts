@@ -594,3 +594,31 @@ describe('DrizzleAdapter', () => {
     });
   });
 });
+
+describe('M119e primary-key configuration', () => {
+  it('fails connect for explicit missing keys but permits a query-only id-less table', async () => {
+    const { MissingKeyColumnError } = await import('../../src/errors.ts');
+    const db = createFakeDrizzleInstance();
+    const configured = createDrizzleDatabase(db, (database, work) => database.transaction(work));
+    const table = { code: { name: 'code' } };
+    for (const primaryKey of ['missing', ['code', 'missing']]) {
+      const options: import('../../src/interfaces/index.ts').DrizzleAdapterOptions = {
+        drizzleInstance: configured,
+        drizzleTables: { Item: table },
+        entities: { Item: { primaryKey } },
+      };
+      const adapter = new DrizzleAdapter(options);
+      await expect(adapter.connect()).rejects.toThrow(MissingKeyColumnError);
+    }
+    const options: import('../../src/interfaces/index.ts').DrizzleAdapterOptions = {
+      drizzleInstance: configured,
+      drizzleTables: { Item: table },
+      entities: { Absent: { primaryKey: 'missing' }, Item: {} },
+    };
+    const adapter = new DrizzleAdapter(options);
+    await adapter.connect();
+    expect(() => adapter.createDataSource('Item')).toThrow(MissingKeyColumnError);
+    expect(() => adapter.createDataSource('Item')).toThrow('set entities.Item.primaryKey');
+    await adapter.disconnect();
+  });
+});

@@ -24,6 +24,7 @@ import { standaloneOverlayRefusal } from '../templates/broker.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
 import { resolveHost } from '../templates/project-files.ts';
 import { resolveTemplateChoice } from '../templates/choice.ts';
+import { defaultLogger, hasLogger } from '../templates/logger.ts';
 import { getTemplate, listTemplates } from '../templates/registry.ts';
 import { getTransport, listBrokers, listQueues, listTransports } from '../workspace/transport.ts';
 
@@ -205,6 +206,33 @@ export async function resolveNewChoices(
           listQueues().map((name) => ({
             value: name,
             label: getTransport(name)?.description ?? name,
+          })),
+        ))
+      )
+        return { kind: 'cancelled' };
+    }
+    if (flags['broker'] === 'redis' || flags['queue'] === 'redis') {
+      if (
+        !(await ask('redis-client', 'Redis client?', [
+          { value: 'ioredis', label: 'ioredis' },
+          { value: 'node-redis', label: 'node-redis' },
+        ]))
+      )
+        return { kind: 'cancelled' };
+    }
+    if (hasLogger(host)) {
+      const choices =
+        runtime === 'cloudflare-workers' ? ['console'] : [defaultLogger(runtime), 'console'];
+      if (
+        !(await ask(
+          'logger',
+          'Logger?',
+          choices.map((name) => ({
+            value: name,
+            label:
+              name === 'pino'
+                ? 'Pino — structured JSON output'
+                : 'Console — portable console output',
           })),
         ))
       )

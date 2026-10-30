@@ -20,12 +20,37 @@ describe('the scaffolded application smoke test', () => {
         const files = projectFiles('probe', runtime, resolveHost(host, runtime));
         const test = files.find((file) => file.path === 'test/app.test.ts');
         if (runtime === 'cloudflare-workers') {
-          expect(test).toBeUndefined();
-          expect(files.find((file) => file.path === 'deno.json')!.contents).toContain(
-            'deno test -A --permit-no-files',
+          expect(test?.contents).toContain("from 'node:test'");
+          expect(test?.contents).toContain(
+            "import { startTestServer } from './support/server.ts';",
           );
+          expect(test?.contents).toContain('const server = await startTestServer();');
+          expect(test?.contents).toContain('await fetch(server.baseUrl + ');
+          expect(
+            files.find((file) => file.path === 'test/e2e/app.e2e.test.ts')?.contents,
+          ).toContain('startTestServer');
+          const deno = files.find((file) => file.path === 'deno.json')!.contents;
+          expect(deno).not.toContain('deno test');
           expect(files.find((file) => file.path === 'README.md')!.contents).toContain(
-            'platform environment',
+            'npm run test:e2e',
+          );
+          const parsed = JSON.parse(files.find((file) => file.path === 'package.json')!.contents);
+          const buildsFirst = host.manifest?.npmBuild !== undefined;
+          expect(parsed.scripts.test.startsWith('npm run build && ')).toBe(buildsFirst);
+          expect(
+            parsed.scripts.test.endsWith("tsx --test --test-force-exit '**/!(*.e2e).test.ts'"),
+          ).toBe(true);
+          expect(
+            parsed.scripts['test:e2e'].endsWith("tsx --test --test-force-exit '**/*.e2e.test.ts'"),
+          ).toBe(true);
+          expect(parsed.devDependencies.tsx).toBe('^4.20.0');
+          expect(parsed.devDependencies['@types/node']).toBe('^24.0.0');
+          expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
+          const tsconfig = JSON.parse(
+            files.find((file) => file.path === 'tsconfig.json')!.contents,
+          );
+          expect(tsconfig.compilerOptions.types).toEqual(
+            expect.arrayContaining(['@cloudflare/workers-types', 'node']),
           );
           return;
         }
@@ -62,9 +87,7 @@ describe('the scaffolded application smoke test', () => {
           // twice by a later add.
           expect(parsed.devDependencies['@setu-ts/testing']).toBe(`^${VERSION}`);
           expect(parsed.dependencies['@setu-ts/testing']).toBeUndefined();
-          expect(
-            parsed.scripts.test.startsWith(`${runtime === 'bun' ? 'bun' : 'npm'} run build && `),
-          ).toBe(buildsFirst);
+          expect(parsed.scripts.test.startsWith('react-router build && ')).toBe(buildsFirst);
         }
       });
     }
@@ -354,8 +377,8 @@ describe('class-based template', () => {
     // The showcase classes are no longer named individually: E4 moved them into
     // the seam directories, so `APP_CONTROLLERS`/`APP_SERVICES` already carry
     // them and a second literal entry would register each one twice. Order is
-    // still load-bearing — the standalone barrels come before the module one, so
-    // `setu g controller` and `setu g module` both ADD to this registration.
+    // A new project is flat: `setu g module` replaces the controller and service
+    // barrels with `modules: [...MODULES]` when it switches the project.
     const decorator = resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins.find(
       (w) => w.pkg === 'decorator-plugin',
     );
@@ -364,7 +387,6 @@ describe('class-based template', () => {
         '        controllers: [...APP_CONTROLLERS],\n' +
         '        services: [...APP_SERVICES],\n' +
         '        ingress: [...INGRESS_HANDLERS],\n' +
-        '        modules: [...MODULES],\n' +
         '      }',
     );
   });
@@ -431,7 +453,7 @@ describe('class-based template', () => {
     expect(imported).toContain('APP_CONTROLLERS');
     expect(imported).toContain('APP_SERVICES');
     expect(imported).toContain('INGRESS_HANDLERS');
-    expect(imported).toContain('MODULES');
+    expect(imported).not.toContain('MODULES');
   });
 
   it('reaches the showcase through the seam barrels, not an explicit path', () => {
@@ -470,8 +492,7 @@ describe('class-based template', () => {
       // In the seam directories, under the seam naming convention (E4).
       'src/services/greeting.service.ts',
       'src/controllers/greeting.controller.ts',
-      'src/modules/index.ts',
-      // ONE HTTP barrel, shared by the controller and route kinds since E8.
+      // ONE HTTP barrel, for class controllers and function controllers alike.
       'src/controllers/index.ts',
       'src/services/index.ts',
       'src/middleware/index.ts',

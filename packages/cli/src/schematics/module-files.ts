@@ -129,7 +129,10 @@ export class ${p}Service {
  * error shape, `{ error, detail }`, directly.
  */
 function notFoundStatement(pascal: string, exceptions: boolean): string {
-  const detail = `\`${pascal} \${id} was not found.\``;
+  // A fixed detail: the caller-supplied id reached the Problem Details body and
+  // the warn log, so a hostile value was rendered back to its sender. The
+  // request logger already records the path.
+  const detail = `'${pascal} not found.'`;
   return exceptions
     ? `throw notFound(${detail});`
     : `return ctx.response.status(404).json({ error: 'Not Found', detail: ${detail} });`;

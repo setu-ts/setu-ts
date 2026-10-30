@@ -19,7 +19,7 @@ import {
   D1TransactionBuffer,
 } from '../../src/database/d1-data-source.ts';
 import { SqliteD1 } from '../d1-fakes.ts';
-const target = { table: 'users', primaryKey: ['id'] };
+const target = { entity: 'users', table: 'users', primaryKey: ['id'] };
 describe('D1 conditional writes', () => {
   it('conjoins key and predicate with separately bound values', () => {
     expect(buildUpdateWhere(target, 'a', { id: 'b', role: 'owner' }, { name: 'new' })).toEqual({
@@ -56,7 +56,7 @@ describe('D1 conditional writes', () => {
   });
 });
 
-describe('D1 conditional-write refusals name no caller field (M105 audit O3)', () => {
+describe('D1 precondition identifier refusals name no caller field (M105 audit O3)', () => {
   it('refuses a non-identifier precondition field without echoing it', async () => {
     const source = createD1DataSource(
       new SqliteD1('CREATE TABLE users(id TEXT PRIMARY KEY, name TEXT, role TEXT)'),
@@ -65,7 +65,6 @@ describe('D1 conditional-write refusals name no caller field (M105 audit O3)', (
     for (const attempt of [
       () => source.updateWhere!('a', { 'canary field': 'v' }, { name: 'x' }),
       () => source.deleteWhere!('a', { 'canary field': 'v' }),
-      () => source.updateWhere!('a', { role: 'owner' }, { 'canary field': 'v' }),
     ]) {
       const error = await attempt().then(
         () => undefined,

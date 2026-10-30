@@ -7,6 +7,14 @@ import * as nodeFs from 'node:fs/promises';
 import { NODE_SOURCE_ARGS, run as runProcess, tempDir } from '../../../../../test/node-helpers.ts';
 
 describe('migration schematic', () => {
+  it('documents compiled production and source development commands on Node', () => {
+    const runner = generateMigration(deriveNames('initial'), {
+      ...options(),
+      runtime: 'node',
+    }).find((file) => file.path.endsWith('/run.ts'))!.contents;
+    expect(runner).toContain('node dist/src/migrations/run.js');
+    expect(runner).toContain('npx tsx src/migrations/run.ts');
+  });
   const files = generateMigration(deriveNames('add-orders'), options());
   const [file] = files;
 

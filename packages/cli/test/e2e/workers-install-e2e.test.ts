@@ -56,7 +56,7 @@ async function npmAvailable(): Promise<boolean> {
 const onCi = process.env['CI'] === 'true';
 const hasNpm = await npmAvailable();
 
-/** The generated `package.json` of a Workers project, minus `@setu-ts/*`. */
+/** The generated `package.json` of a Workers project, minus every `@setu-ts/*` entry. */
 function workersManifest(template: string): Record<string, unknown> {
   const host = resolveHost(getTemplate(template)!, 'cloudflare-workers');
   const file = projectFiles('edge', 'cloudflare-workers', host).find(
@@ -64,10 +64,13 @@ function workersManifest(template: string): Record<string, unknown> {
   );
   if (file === undefined) throw new Error(`${template}: no package.json emitted`);
   const manifest = JSON.parse(file.contents) as Record<string, unknown>;
-  const dependencies = (manifest['dependencies'] ?? {}) as Record<string, string>;
-  manifest['dependencies'] = Object.fromEntries(
-    Object.entries(dependencies).filter(([name]) => !name.startsWith('@setu-ts/')),
-  );
+  // Both sections: a Workers project also pins `@setu-ts/cli` as a devDependency.
+  for (const section of ['dependencies', 'devDependencies']) {
+    const entries = (manifest[section] ?? {}) as Record<string, string>;
+    manifest[section] = Object.fromEntries(
+      Object.entries(entries).filter(([name]) => !name.startsWith('@setu-ts/')),
+    );
+  }
   return manifest;
 }
 

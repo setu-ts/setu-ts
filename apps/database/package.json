@@ -11,7 +11,7 @@
     "@setu-ts/database-plugin": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/validation-plugin": "workspace:^",
-    "zod": "^3.24.0"
+    "zod": "^4.6.6"
   },
   "devDependencies": {},
   "scripts": {

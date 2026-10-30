@@ -98,6 +98,7 @@ export class LaunchDarklyProvider implements FlagProvider {
   readonly #config: LaunchDarklyProviderConfig;
   readonly #logger: ILogger | undefined;
   readonly #fallbackValue: boolean;
+  readonly #maxCachedContexts: number;
 
   /** Per-context snapshots, keyed by `userId` (or the anonymous key). */
   readonly #snapshots = new Map<string, ILaunchDarklyFlagsState>();
@@ -112,11 +113,18 @@ export class LaunchDarklyProvider implements FlagProvider {
   /**
    * @param config - The provider configuration
    * @param logger - Optional logger for background-refill failures
+   * @param maxCachedContexts - Positive integer snapshot limit, default 10,000;
+   * least recently used contexts are evicted
+   * @throws {RangeError} When maxCachedContexts is not a positive integer
    */
-  constructor(config: LaunchDarklyProviderConfig, logger?: ILogger) {
+  constructor(config: LaunchDarklyProviderConfig, logger?: ILogger, maxCachedContexts = 10_000) {
+    if (!Number.isInteger(maxCachedContexts) || maxCachedContexts <= 0) {
+      throw new RangeError('feature-flags: maxCachedContexts must be a positive integer');
+    }
     this.#config = config;
     this.#logger = logger;
     this.#fallbackValue = config.fallbackValue ?? false;
+    this.#maxCachedContexts = maxCachedContexts;
   }
 
   /**
@@ -135,6 +143,9 @@ export class LaunchDarklyProvider implements FlagProvider {
       this.#scheduleRefill(key, context);
       return this.#fallbackValue;
     }
+    // Map insertion order is recency order; a read makes this entry newest.
+    this.#snapshots.delete(key);
+    this.#snapshots.set(key, snapshot);
 
     // An unknown flag reads back as null, and a non-boolean variation is not a
     // boolean flag; the committed contract says both evaluate to `false`.
@@ -297,7 +308,13 @@ export class LaunchDarklyProvider implements FlagProvider {
       // context); caching it would pin every flag to the fallback until the
       // next update event.
       if (state.valid) {
+        this.#snapshots.delete(key);
         this.#snapshots.set(key, state);
+        if (this.#snapshots.size > this.#maxCachedContexts) {
+          // The map is non-empty because its positive cap has been exceeded.
+          const oldest = this.#snapshots.keys().next().value as string;
+          this.#snapshots.delete(oldest);
+        }
       }
     } catch (error) {
       this.#logger?.warn('launchdarkly: snapshot refresh failed', {
