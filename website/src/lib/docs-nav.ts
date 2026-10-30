@@ -59,6 +59,7 @@ export const DOCS_NAV: DocsNavGroup[] = [
     items: [
       { slug: 'runtime-deployment', label: 'Runtime deployment' },
       { slug: 'deployment', label: 'Docker & Kubernetes' },
+      { slug: 'serverless', label: 'Lambda & Azure Functions' },
       { slug: 'telemetry-collector-fanout', label: 'Telemetry fan-out' },
       { slug: 'messaging-emulators', label: 'Messaging emulators' },
     ],

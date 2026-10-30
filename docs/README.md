@@ -109,6 +109,9 @@ building production-ready applications with our plugin-first, runtime-independen
   - Cloudflare Workers deployment
   - Streaming and SSE
   - Runtime-specific resources
+- [Serverless: AWS Lambda and Azure Functions](./serverless.md)
+  - Lambda Web Functions, classic Lambda and Azure Functions recipes
+  - Queue and timer handlers over a booted application
 
 ## API Reference
 
