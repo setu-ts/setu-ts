@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { siteSection } from '../src/lib/site-section.ts';
 import { exampleStart, insertAfterTitle, tryItHtml } from '../src/lib/example-start.ts';
-import { APPS, PACKAGES, PACKAGE_NAVIGATION } from '../src/lib/repository.ts';
+import { APPS, EXAMPLE_NAVIGATION, PACKAGES, PACKAGE_NAVIGATION } from '../src/lib/repository.ts';
+import { EXAMPLES_REPOSITORY_ROUTE } from '../src/lib/docs-links.ts';
 import { EXAMPLES, EXCLUDED_EXAMPLES } from '../../packages/cli/src/examples/catalog.ts';
 
 describe('siteSection', () => {
@@ -92,5 +93,21 @@ describe('PACKAGE_NAVIGATION', () => {
   it('lists every published package exactly once', () => {
     const hrefs = PACKAGE_NAVIGATION.flatMap((group) => group.items.map((item) => item.href));
     expect(hrefs.sort()).toEqual(PACKAGES.map((pkg) => `/packages/${pkg.slug}/`).sort());
+  });
+});
+
+describe('EXAMPLE_NAVIGATION', () => {
+  it('lists the guide, the repository page and every example once', () => {
+    const hrefs = EXAMPLE_NAVIGATION.flatMap((group) => group.items.map((item) => item.href));
+    expect(hrefs).toEqual([
+      '/docs/examples/',
+      EXAMPLES_REPOSITORY_ROUTE,
+      ...APPS.map((app) => `/examples/${app}/`),
+    ]);
+  });
+
+  it('keeps the repository page route free of any example', () => {
+    expect(EXAMPLES_REPOSITORY_ROUTE).toBe('/examples/repository/');
+    expect(APPS).not.toContain('repository');
   });
 });

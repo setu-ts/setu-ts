@@ -3,6 +3,9 @@
  * Rendered reading stays on the site; unrendered source retains its GitHub target.
  */
 
+/** Where `apps/README.md` renders: running the examples inside a repository clone. */
+export const EXAMPLES_REPOSITORY_ROUTE = '/examples/repository/';
+
 /** The public repository used for source links. */
 export const GITHUB_BASE = 'https://github.com/setu-ts/setu-ts';
 
@@ -48,8 +51,10 @@ export function rewriteHref(
   if (path === '') return href;
   const joined = normalizeJoined(github ? '' : sourceDirectory, path);
   if (joined === '/README.md') return withAnchor('/', anchor);
-  if (joined === '/apps' || joined === '/apps/README.md')
-    return withAnchor('/docs/examples/', anchor);
+  if (joined === '/apps') return withAnchor('/docs/examples/', anchor);
+  // apps/README.md is how the examples run inside the repository: its own page, not the
+  // examples landing page, so the guide's links to it do not point back at the guide.
+  if (joined === '/apps/README.md') return withAnchor(EXAMPLES_REPOSITORY_ROUTE, anchor);
   const rootRoutes: Readonly<Record<string, string>> = {
     '/CHANGELOG.md': '/changelog/',
     '/ARCHITECTURE.md': '/architecture/',

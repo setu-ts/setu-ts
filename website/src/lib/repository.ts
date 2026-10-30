@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { PUBLISHED_PACKAGES } from '../../../scripts/release-packages.ts';
+import { EXAMPLES_REPOSITORY_ROUTE } from './docs-links.ts';
 
 /** Repository inputs are read in place; only Astro's output/cache receives rendered content. */
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
@@ -58,6 +59,21 @@ export const PACKAGE_NAVIGATION = PACKAGE_GROUPS.map((group) => ({
 export const APPS = TRACKED_FILES.filter((file) => /^apps\/[^/]+\/README\.md$/.test(file)).map(
   (file) => file.split('/')[1],
 );
+
+/**
+ * The examples sidebar: the guide, how the examples run in a repository clone, then
+ * every example. The repository page lives at `EXAMPLES_REPOSITORY_ROUTE`.
+ */
+export const EXAMPLE_NAVIGATION = [
+  {
+    label: 'Examples',
+    items: [
+      { label: 'Guide and learning path', href: '/docs/examples/' },
+      { label: 'Running in the repository', href: EXAMPLES_REPOSITORY_ROUTE },
+      ...APPS.map((app) => ({ label: app, href: `/examples/${app}/` })),
+    ],
+  },
+];
 
 /** Expands the guide's ordered reading list, sorting tracked files within directory entries. */
 export function exampleFiles(guide: string, app: string, tracked: readonly string[]): string[] {

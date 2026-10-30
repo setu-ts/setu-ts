@@ -2,7 +2,7 @@
 import { getCollection } from 'astro:content';
 import { Code } from 'astro:components';
 import RepositoryArticle from '../../components/RepositoryArticle.astro';
-import { APPS, EXAMPLE_FILES, readSource } from '../../lib/repository';
+import { APPS, EXAMPLE_FILES, EXAMPLE_NAVIGATION, readSource } from '../../lib/repository';
 import { fileAnchor } from '../../lib/docs-links';
 import { insertAfterTitle, tryItHtml } from '../../lib/example-start';
 export async function getStaticPaths() {
@@ -17,15 +17,7 @@ const files = EXAMPLE_FILES[app].map((path) => ({ path, source: readSource(`apps
   html={insertAfterTitle(entry.rendered.html, tryItHtml(app))}
   directory={`apps/${app}`}
   breadcrumbs={[{ label: 'Examples', href: '/docs/examples/' }]}
-  section={[
-    {
-      label: 'Examples',
-      items: [
-        { label: 'Guide and learning path', href: '/docs/examples/' },
-        ...APPS.map((name) => ({ label: name, href: `/examples/${name}/` })),
-      ],
-    },
-  ]}
+  section={EXAMPLE_NAVIGATION}
 >
   <article class="prose">
     <h2>Read, in order</h2>
