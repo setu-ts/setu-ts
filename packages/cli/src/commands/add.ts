@@ -1887,27 +1887,13 @@ export async function runAddCommand(
       if (file.path === 'setu.config.ts') configSource = file.contents;
     }
     for (const line of plan.notes) deps.log(escapeName(line));
-    // The page reaches the router only through the barrel or module index, so a
-    // config that never calls its registrar leaves /ui unregistered.
-    // Read inside the generated factory when it is recognized, so a call in some
-    // other function does not count; the full-stack async factory is read whole.
-    const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
-    const factory = configSource === undefined ? undefined : factoryScope(configSource);
-    const body =
-      factory === undefined
-        ? (maskSourceCode(configSource ?? '') ?? '')
-        : factory.code.slice(factory.start, factory.end);
+    // The page reaches the router only through the barrel or module index, so the
+    // config must import that registrar from it and call it in the factory.
     if (
       plan.files.some((file) => file.path.endsWith(VIEWS_CONTROLLER)) &&
-      configSource !== undefined &&
-      !callsIdentifier(body, registrar)
-    ) {
-      deps.log(`setu.config.ts does not call ${registrar}, so /ui is not registered; add:`);
-      deps.log(
-        `  import { ${registrar} } from './${module === undefined ? 'src/controllers' : 'src/modules'}/index.ts';`,
-      );
-      deps.log(`  ${registrar}(app.router, app.services);`);
-    }
+      configSource !== undefined
+    )
+      for (const line of viewRegistrationAdvice(configSource, module)) deps.log(line);
   }
 
   if (edits.length === 0 && alreadyPresent) {
@@ -2137,4 +2123,50 @@ function printAddHelp(log: (message: string) => void): void {
   log('The full specifier works too, so `add auth` and `add @setu-ts/auth-plugin`');
   log('are the same command. This writes the manifest and does not install for');
   log("you; it prints the project's install command (deno, npm or bun) to run.");
+}
+
+/**
+ * The lines `setu add view` prints when the config may not register the views
+ * controller: it must import the registrar from the barrel or module index the
+ * controller joined, and call it inside the generated factory.
+ *
+ * @param config - The current `setu.config.ts`
+ * @param module - The module the controller joined, or undefined for a flat project
+ * @returns Nothing when the registration is in place, otherwise the guidance
+ */
+export function viewRegistrationAdvice(config: string, module: string | undefined): string[] {
+  const registrar = module === undefined ? 'registerGeneratedRoutes' : 'registerModules';
+  const specifier = `./${module === undefined ? 'src/controllers' : 'src/modules'}/index.ts`;
+  const visible = maskComments(config);
+  const factory = factoryScope(config);
+  // undefined when the config cannot be classified: the call cannot be verified.
+  const body =
+    factory === undefined ? maskSourceCode(config) : factory.code.slice(factory.start, factory.end);
+  const sources = [...(visible ?? '').matchAll(/\bimport\s*\{([^}]*)\}\s*from\s*(['"])([^'"]+)\2/g)]
+    .filter((match) =>
+      match[1]!.split(',').some((name) => name.trim().split(/\s+as\s+/)[0] === registrar),
+    )
+    .map((match) => match[3]!);
+  const imported = sources.includes(specifier);
+  const call = `  ${registrar}(app.router, app.services);`;
+  const importLine = `  import { ${registrar} } from '${specifier}';`;
+  if (visible === undefined || body === undefined)
+    return [
+      `Cannot verify that setu.config.ts calls ${registrar}, which registers /ui; it needs:`,
+      importLine,
+      call,
+    ];
+  const elsewhere = sources.find((source) => source !== specifier);
+  if (!imported && elsewhere !== undefined)
+    return [
+      `setu.config.ts imports ${registrar} from ${escapeName(elsewhere)}, but /ui is registered through ${specifier}; import it from there:`,
+      importLine,
+      ...(callsIdentifier(body, registrar) ? [] : [call]),
+    ];
+  if (callsIdentifier(body, registrar)) return [];
+  return [
+    `setu.config.ts does not call ${registrar}, so /ui is not registered; add:`,
+    ...(imported ? [] : [importLine]),
+    call,
+  ];
 }

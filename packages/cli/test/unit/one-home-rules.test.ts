@@ -114,9 +114,9 @@ describe('setu add view placement', () => {
     );
     expect(await h.run(['add', 'view'])).toBe(0);
     expect(h.out.text()).toContain(
+      // The config still imports it, so only the call is suggested.
       [
         'setu.config.ts does not call registerGeneratedRoutes, so /ui is not registered; add:',
-        "  import { registerGeneratedRoutes } from './src/controllers/index.ts';",
         '  registerGeneratedRoutes(app.router, app.services);',
       ].join('\n'),
     );
@@ -131,6 +131,17 @@ describe('setu add view placement', () => {
     );
     expect(await elsewhere.run(['add', 'view'])).toBe(0);
     expect(elsewhere.out.text()).toContain('setu.config.ts does not call registerGeneratedRoutes');
+    // A config the reader cannot classify is reported as unverified, not as missing the call.
+    const unread = await project('functional', false);
+    await unread.fs.writeFile(
+      '/app/setu.config.ts',
+      encode(`const note = \`x\`;\n${unread.fs.read('/app/setu.config.ts')}`),
+    );
+    expect(await unread.run(['add', 'view'])).toBe(0);
+    expect(unread.out.text()).toContain(
+      'Cannot verify that setu.config.ts calls registerGeneratedRoutes, which registers /ui; it needs:',
+    );
+    expect(unread.out.text()).not.toContain('does not call registerGeneratedRoutes');
     const wired = await project('functional', false);
     expect(await wired.run(['add', 'view'])).toBe(0);
     expect(wired.out.text()).not.toContain('does not call registerGeneratedRoutes');
