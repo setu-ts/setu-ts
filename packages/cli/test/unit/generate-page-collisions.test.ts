@@ -54,7 +54,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
         expect(h.err.text()).toContain(
           schematic === 'module'
             ? "Choose another module name: a module's routes are mounted at /<module name>."
-            : `setu g module api, then setu g ${schematic} products --module api (which yields /api/products)`,
+            : `setu g module api (with --adopt-controllers if the project has controllers), then setu g ${schematic} products --module api (which yields /api/products)`,
         );
       });
     }
@@ -67,7 +67,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     expect(await h.run(['g', 'controller', 'orders'])).toBe(1);
     expect(h.err.text()).toContain('app/routes/_app/orders.tsx');
     expect(h.err.text()).toContain(
-      'setu g module api, then setu g controller orders --module api (which yields /api/orders)',
+      'setu g module api (with --adopt-controllers if the project has controllers), then setu g controller orders --module api (which yields /api/orders)',
     );
     expect(h.err.text()).not.toContain('products');
   });
@@ -75,7 +75,7 @@ describe('generation refuses kernel routes that shadow React Router pages', () =
     const h = harness();
     expect(await h.run(['g', 'module', 'api'])).toBe(0);
     expect(await h.run(['g', 'route', 'products', '--module', 'api'])).toBe(0);
-    expect(h.fs.read('/app/src/modules/api/products.routes.ts')).toContain('/api/products');
+    expect(h.fs.read('/app/src/modules/api/products.controller.ts')).toContain('/api/products');
   });
   it('continues with a notice naming the paths to inspect when the CLI fails', async () => {
     const h = harness(undefined, () =>

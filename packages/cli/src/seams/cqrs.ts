@@ -2,7 +2,7 @@
  * The CQRS handler seam — the one barrel two schematics share.
  *
  * `CqrsPluginOptions` carried only `behaviors` before this milestone, so a generated
- * handler's only site was an imperative `commandBus.register(type, handler)` call —
+ * handler's only site was an explicit `commandBus.register(type, handler)` call —
  * and `IApplication` has no `lifecycle` member, so application code has no phase in
  * which to make it. The plugin therefore gains `commandHandlers` and `queryHandlers`
  * as pure additions, shaped as `{ type, handler }` pairs because that is exactly
@@ -21,6 +21,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -32,7 +33,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /**
  * Symbols the barrel imports from one command-handler module.
@@ -105,14 +105,14 @@ function renderCqrsBarrel(artifacts: SeamArtifacts): string {
   // lives in the developer-owned artifact module where a dependency can be wired
   // in by taking `services`.
   const commandEntries = commands.map((name) => {
-    const n = deriveNames(name);
+    const n = artifactNames(name);
     return renderRegistrationEntry([
       `type: ${n.screaming}_COMMAND`,
       `handler: create${n.pascal}CommandHandler`,
     ]);
   });
   const queryEntries = queries.map((name) => {
-    const n = deriveNames(name);
+    const n = artifactNames(name);
     return renderRegistrationEntry([
       `type: ${n.screaming}_QUERY`,
       `handler: create${n.pascal}QueryHandler`,

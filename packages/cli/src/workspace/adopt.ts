@@ -136,7 +136,11 @@ export type AdoptPlan =
  * @param prefix - The relative prefix accumulated so far
  * @returns Relative paths of the files found
  */
-async function walk(fs: IFileSystem, root: string, prefix: string): Promise<readonly string[]> {
+export async function walkProjectFiles(
+  fs: IFileSystem,
+  root: string,
+  prefix: string,
+): Promise<readonly string[]> {
   const found: string[] = [];
   for (const entry of await fs.readdir(joinPath(root, prefix))) {
     const relative = prefix === '' ? entry : joinPath(prefix, entry);
@@ -145,7 +149,7 @@ async function walk(fs: IFileSystem, root: string, prefix: string): Promise<read
     await assertInsideProject(fs, root, joinPath(root, relative));
     const stat = await fs.stat(joinPath(root, relative));
     if (stat.isDirectory) {
-      found.push(...(await walk(fs, root, relative)));
+      found.push(...(await walkProjectFiles(fs, root, relative)));
     } else {
       found.push(relative);
     }
@@ -211,7 +215,7 @@ export async function planAdoption(
     // left to escape as an uncaught error that prints the raw path.
     let nested: readonly string[];
     try {
-      nested = await walk(fs, project, entry);
+      nested = await walkProjectFiles(fs, project, entry);
     } catch (cause) {
       return {
         ok: false,
@@ -497,7 +501,7 @@ export async function pruneAdoptedDirectories(
     const path = joinPath(project, directory);
     try {
       if (!(await fs.stat(path)).isDirectory) continue;
-      const remaining = await walk(fs, project, directory);
+      const remaining = await walkProjectFiles(fs, project, directory);
       if (remaining.length > 0) {
         kept.push(directory);
         continue;

@@ -114,7 +114,14 @@ for (const template of ['rest', 'class-based', 'microservice']) {
     }
     expect(exercised).toBeGreaterThanOrEqual(4);
 
-    expect((await run(['generate', 'module', 'orders', '--dir', project])).code).toBe(0);
+    // The first module takes the flat controllers and services with it, and
+    // switches the config's registration lines.
+    expect(
+      (await run(['generate', 'module', 'orders', '--dir', project, '--adopt-controllers'])).code,
+    ).toBe(0);
+    const modularConfig = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
+    expect(modularConfig).not.toContain('registerGeneratedRoutes');
+    expect((await check()).code).toBe(0);
     const activationPath = `${project}/src/modules/index.ts`;
     const activation = await nodeFs.readFile(activationPath, 'utf8');
     await nodeFs.writeFile(activationPath, '');
@@ -138,7 +145,7 @@ for (const template of ['rest', 'class-based', 'microservice']) {
     expect((await check()).code).toBe(0);
     await nodeFs.writeFile(
       `${project}/setu.config.ts`,
-      `${config}\nconst label = \`unclassifiable\`;`,
+      `${modularConfig}\nconst label = \`unclassifiable\`;`,
     );
     expect((await check()).code).toBe(0);
     expect((await run(['check', '--strict', '--dir', project])).code).toBe(1);

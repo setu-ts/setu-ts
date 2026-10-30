@@ -70,8 +70,9 @@ describe('--style class-based on a styleable template (C1)', () => {
     const config = h.fs.read('/work/svc/setu.config.ts');
     expect(config).not.toContain('DecoratorPlugin');
     expect(config).not.toContain('DiPlugin');
-    const service = h.fs.read('/work/svc/src/modules/greeting/greeting.service.ts');
+    const service = h.fs.read('/work/svc/src/services/greeting.service.ts');
     expect(service).not.toContain('@Injectable');
+    expect(h.fs.has('/work/svc/src/modules/index.ts')).toBe(false);
   });
 
   it('composes with microservice too', async () => {

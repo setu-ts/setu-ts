@@ -30,12 +30,7 @@ import type {
   Wiring,
 } from './registry.ts';
 import { DI_WIRING } from './di.ts';
-import {
-  CLASS_BASED_MODULE_MANIFEST,
-  MODULE_SEAM_FILES,
-  MODULE_SEAM_LOCAL_IMPORT,
-  withModuleSeam,
-} from './module-seam.ts';
+import { CLASS_BASED_MODULE_MANIFEST, withDecoratorSeams } from './module-seam.ts';
 import { decoratorSeamExtras, seamsFor } from './seam.ts';
 
 /** The code style a styleable template can be scaffolded in. */
@@ -115,17 +110,16 @@ export function composeHost(recipe: TemplateRecipe, style: TemplateStyle): Templ
     const extras = decoratorSeamExtras(seams);
     const showcase = recipe.showcase?.['class-based'];
     return {
-      plugins: withModuleSeam(
+      plugins: withDecoratorSeams(
         [...recipe.plugins, DECORATOR_WIRING],
         extras.controllers,
         extras.services,
         extras.ingress,
       ).concat([DI_WIRING]),
       middleware: recipe.middleware,
-      localImports: [MODULE_SEAM_LOCAL_IMPORT],
       seams,
       seamArtifacts: showcase?.seeded ?? {},
-      files: [...(showcase?.files ?? []), ...MODULE_SEAM_FILES],
+      files: showcase?.files ?? [],
       manifest: { ...CLASS_BASED_MODULE_MANIFEST, envFilePath: '.env' },
       ...(showcase?.routes === undefined ? {} : { routes: showcase.routes }),
       ...(recipe.runtimeSwaps === undefined ? {} : { runtimeSwaps: recipe.runtimeSwaps }),

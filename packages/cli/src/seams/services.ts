@@ -17,6 +17,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -27,7 +28,6 @@ import {
   seamNames,
 } from './seam-spec.ts';
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 
 /** Barrel export naming every generated standalone service. */
 export const APP_SERVICES_EXPORT = 'APP_SERVICES';
@@ -81,7 +81,7 @@ function renderServicesBarrel(artifacts: SeamArtifacts): string {
     .filter((line) => line !== '')
     .join('\n\n');
 
-  const entries = names.map((name) => `${deriveNames(name).pascal}Service`);
+  const entries = names.map((name) => `${artifactNames(name).pascal}Service`);
 
   return assembleSeamBarrel(header, imports, [
     `/**\n` +
@@ -147,8 +147,8 @@ function renderFunctionalServicesBarrel(artifacts: SeamArtifacts): string {
   // a branch no code path takes.
   const body = names
     .map((name) => {
-      const derived = deriveNames(name);
-      return `export { ${functionalServiceSymbol(derived)} } from './${derived.kebab}.service.ts';`;
+      const derived = artifactNames(name);
+      return `export { ${functionalServiceSymbol(derived)} } from './${name}.service.ts';`;
     })
     .join('\n');
 

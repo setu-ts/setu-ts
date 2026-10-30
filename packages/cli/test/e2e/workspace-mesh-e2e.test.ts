@@ -515,12 +515,14 @@ describe('a three-service workspace — end to end', () => {
         expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
       }
       // Functional members have only the seams their composition can consume.
-      for (const seam of ['controllers', 'middleware', 'plugins', 'modules']) {
+      for (const seam of ['controllers', 'middleware', 'plugins']) {
         expect((await nodeFs.stat(`${dir}/src/${seam}/index.ts`)).isFile()).toBe(true);
       }
+      // A member starts flat, like any project: the first module switches it.
+      await expect(nodeFs.stat(`${dir}/src/modules`)).rejects.toThrow();
       expect((await nodeFs.stat(`${dir}/${DISCOVERY_MODULE}`)).isFile()).toBe(true);
       expect(await nodeFs.readFile(`${dir}/setu.config.ts`, 'utf8')).toContain(
-        'registerModules(app.router, app.services)',
+        'registerGeneratedRoutes(app.router, app.services)',
       );
       for (const file of ['test/support/server.ts', 'test/e2e/app.e2e.test.ts']) {
         expect((await nodeFs.stat(`${dir}/${file}`)).isFile()).toBe(true);
@@ -539,9 +541,10 @@ describe('a three-service workspace — end to end', () => {
     expect(await run(['g', 'app', 'orders', '--template', 'class-based', '--dir', ws])).toBe(0);
 
     const project = `${ws}/apps/orders`;
-    expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
     expect(await run(['g', 'service', 'pricing', '--dir', project])).toBe(0);
     expect(await run(['g', 'controller', 'invoice', '--dir', project])).toBe(0);
+    // The first module adopts them, keeping /invoice where it was.
+    expect(await run(['g', 'module', 'widget', '--dir', project, '--adopt-controllers'])).toBe(0);
 
     // The container is registered (since M70d with `autoRegister: true`, E3),
     // and the decorated artifacts are wired.
@@ -559,8 +562,8 @@ describe('a three-service workspace — end to end', () => {
         `${project}/main.ts`,
         `${project}/setu.config.ts`,
         `${project}/src/modules/widget/widget.controller.ts`,
-        `${project}/src/services/pricing.service.ts`,
-        `${project}/src/controllers/invoice.controller.ts`,
+        `${project}/src/modules/widget/pricing.service.ts`,
+        `${project}/src/modules/widget/invoice.controller.ts`,
       ],
       stdout: 'piped',
       stderr: 'piped',

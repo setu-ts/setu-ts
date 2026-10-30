@@ -13,6 +13,23 @@ import {
 } from '../../../src/schematics/module-barrel.ts';
 
 describe('renderModuleBarrel', () => {
+  it('registers each declared module, and only declared modules, through registerModules', () => {
+    const empty = renderModuleBarrel([]);
+    expect(empty).toContain(
+      'export function registerModules(router: IRouterApi, services?: IServiceRegistry): void {\n  void router;\n  void services;\n}',
+    );
+    const source = renderModuleBarrel(['user', 'billing-account'], ['legacy']);
+    expect(source).toContain("import { registerUserModule } from './user/index.ts';");
+    expect(source).toContain(
+      "import { registerBillingAccountModule } from './billing-account/index.ts';",
+    );
+    expect(source).toContain(
+      '{\n  registerBillingAccountModule(router, services);\n  registerUserModule(router, services);\n}',
+    );
+    // A module without a declaration has no managed index to call.
+    expect(source).not.toContain('registerLegacyModule');
+  });
+
   it('emits an empty activation list for a project with no modules', () => {
     const source = renderModuleBarrel([]);
 
@@ -55,7 +72,7 @@ describe('renderModuleBarrel', () => {
     // over an existing module passes that name twice.
     const source = renderModuleBarrel(['user', 'user']);
 
-    expect(source.match(/UserModule/g)?.length).toBe(2); // one import, one array entry
+    expect(source.match(/\bUserModule\b/g)?.length).toBe(2); // one import, one array entry
     expect(source.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
   });
 
@@ -79,7 +96,7 @@ describe('renderModuleBarrel', () => {
     // Without this import the emitted barrel references an undeclared type and
     // the generated project fails to compile.
     expect(renderModuleBarrel(['user'])).toContain(
-      "import type { Constructor } from '@setu-ts/common';",
+      "import type { Constructor, IRouterApi, IServiceRegistry } from '@setu-ts/common';",
     );
   });
 
@@ -94,8 +111,11 @@ describe('renderModuleBarrel', () => {
     );
     expect(source).toContain(`export const ${LEGACY_SERVICES_EXPORT}: readonly Constructor[] = [`);
     expect(source).toContain('UsersController');
-    expect(source).toContain('OrdersController');
     expect(source).toContain('UsersService');
-    expect(source).toContain('OrdersService');
+    // A declared module is reached through its declaration and index only, so
+    // removing its own controller or service never breaks the barrel.
+    expect(source).not.toContain('OrdersController');
+    expect(source).not.toContain('OrdersService');
+    expect(source).not.toContain('./orders/orders.controller.ts');
   });
 });

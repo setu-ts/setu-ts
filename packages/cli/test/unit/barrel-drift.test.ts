@@ -11,13 +11,11 @@ it('compares declaration name sets across formatting, reordering and quote style
     [barrel]: `// import { bad } from './bad.controller.ts';
 import {
   registerTwoRoutes,
-} from "./two.routes.ts";
+} from "./two.controller.ts";
 export { registerOneRoutes } from './one.controller.ts';
 const text = "; import { x } from './fake.controller.ts';";`,
   });
-  expect(await diagnoseBarrels(fs, '/app', specs, { controller: ['one'], route: ['two'] })).toEqual(
-    [],
-  );
+  expect(await diagnoseBarrels(fs, '/app', specs, { controller: ['one', 'two'] })).toEqual([]);
 });
 
 it('reads default, namespace and re-export declarations across line breaks', async () => {

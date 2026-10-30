@@ -15,10 +15,19 @@
  * @module
  */
 
-import { planViewSetup } from './add-view.ts';
+import { planViewSetup, VIEWS_CONTROLLER } from './add-view.ts';
+import { diagnoseProject } from '../diagnostics/diagnose.ts';
+import {
+  CONTROLLERS_SEAM,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+  HTTP_SEAM_DIR,
+  withControllerArtifact,
+} from '../seams/http.ts';
+import { renderModuleIndex } from '../seams/modules.ts';
 import { formatForTarget } from '../utils/prettier-format.ts';
+import { afterLastImport } from '../utils/import-placement.ts';
 import type { IFileSystem } from '@setu-ts/common';
-import { escapeName } from '../utils/names.ts';
+import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
   EXIT_ERROR,
@@ -1019,7 +1028,6 @@ function barrelImportPlan(
 ): { text: string; at: number } | undefined {
   const visible = maskComments(source);
   if (visible === undefined) return undefined;
-  const without = maskImportDeclarations(visible);
   const missing: string[] = [];
   for (const item of imports) {
     const mentioned = visible.includes(`'${item.from}'`) || visible.includes(`"${item.from}"`);
@@ -1043,25 +1051,8 @@ function barrelImportPlan(
       missing.push(`import { ${item.symbols.join(', ')} } from '${item.from}';`);
     }
   }
-  let at = 0;
-  for (let i = 0; i < visible.length; i++) if (visible[i] !== without[i]) at = i + 1;
-  // maskImportDeclarations blanks only the clause through `from`, not its specifier.
-  // Finish that statement before choosing the end of its line as the insertion point.
-  if (at > 0) {
-    const specifier = /^[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[ \t]*;?/.exec(
-      visible.slice(at),
-    );
-    if (specifier === null) return undefined;
-    at += specifier[0].length;
-    const lineEnd = source.indexOf('\n', at);
-    at = lineEnd < 0 ? source.length : lineEnd;
-  }
-  // Side-effect imports carry no `from` clause, but can still be the last import.
-  for (const match of visible.matchAll(
-    /^[ \t]*import[ \t]*(?:'(?:\\.|[^'\\\r\n])*'|"(?:\\.|[^"\\\r\n])*")[^\r\n]*/gm,
-  )) {
-    at = Math.max(at, match.index + match[0].length);
-  }
+  const at = afterLastImport(source, visible);
+  if (at === undefined) return undefined;
   return { text: missing.length === 0 ? '' : `\n${missing.join('\n')}`, at };
 }
 
@@ -1302,6 +1293,18 @@ export async function runAddCommand(
     deps.error(
       `\`@setu-ts/diagnostics-plugin\` is installed and wired by \`${cliInvocation('deno')} devtool enable\`.`,
     );
+    return EXIT_USAGE;
+  }
+  const moduleFlag = args.flags['module'];
+  if (moduleFlag !== undefined && bare !== 'view-plugin') {
+    deps.error('--module applies only to `setu add view`, which writes a controller.');
+    return EXIT_USAGE;
+  }
+  if (
+    moduleFlag !== undefined &&
+    (typeof moduleFlag !== 'string' || !isKebabIdentifier(moduleFlag))
+  ) {
+    deps.error('Option --module requires a valid module name.');
     return EXIT_USAGE;
   }
   const restriction = RUNTIME_RESTRICTIONS.get(bare);
@@ -1669,6 +1672,50 @@ export async function runAddCommand(
   }
 
   if (bare === 'view-plugin') {
+    // The example page is a controller, so it follows the controller rule: a
+    // flat project keeps it in src/controllers/, a modular one in a module.
+    const diagnosis = await diagnoseProject(deps.fs, dir, await detectPlugins(deps.fs, dir));
+    const module = typeof moduleFlag === 'string' ? moduleFlag : undefined;
+    if (module !== undefined && diagnosis.modules.length === 0) {
+      deps.error(
+        `This project has no modules; drop --module, or run \`${cliInvocation(runtime)} g module ${escapeName(module)}\` first.`,
+      );
+      return EXIT_ERROR;
+    }
+    if (module === undefined && diagnosis.layout !== 'flat') {
+      deps.error(
+        `This project uses modules; pass --module <name> to place the views controller (existing: ${diagnosis.modules.map(escapeName).join(', ')}).`,
+      );
+      return EXIT_USAGE;
+    }
+    if (module !== undefined && !diagnosis.modules.includes(module)) {
+      deps.error(
+        `Unknown module "${escapeName(module)}". Admitted modules: ${diagnosis.modules.map(escapeName).join(', ')}.`,
+      );
+      return EXIT_ERROR;
+    }
+    const views = VIEWS_CONTROLLER.slice(0, -'.controller.ts'.length);
+    const controllerDir = module === undefined ? HTTP_SEAM_DIR : `src/modules/${module}`;
+    const registration =
+      module === undefined
+        ? {
+            path: (diagnosis.mode === 'class-based'
+              ? CONTROLLERS_SEAM
+              : FUNCTIONAL_CONTROLLERS_SEAM
+            ).barrel,
+            contents: (diagnosis.mode === 'class-based'
+              ? CONTROLLERS_SEAM
+              : FUNCTIONAL_CONTROLLERS_SEAM
+            ).renderBarrel(withControllerArtifact(diagnosis.artifacts, views, 'function')),
+          }
+        : {
+            path: `${controllerDir}/index.ts`,
+            contents: renderModuleIndex(
+              diagnosis.mode,
+              deriveNames(module),
+              withControllerArtifact(diagnosis.moduleArtifacts.get(module), views, 'function'),
+            ),
+          };
     const existing = new Map<string, string>();
     for (const path of [
       'package.json',
@@ -1680,7 +1727,7 @@ export async function runAddCommand(
       'src/views/styles.css',
       'src/views/layout.tsx',
       'src/views/home.tsx',
-      'src/views/routes.ts',
+      `${controllerDir}/${VIEWS_CONTROLLER}`,
     ]) {
       const fullPath = joinPath(dir, path);
       const pending = edits.find((edit) => edit.path === fullPath);
@@ -1710,6 +1757,8 @@ export async function runAddCommand(
           factoryCallsProvider(configSource, 'view-plugin', 'ViewPlugin')),
       wireStatic: (source, args) =>
         configRetargeted ? undefined : withPluginWiring(source, 'static-plugin', undefined, args),
+      controllerDir,
+      registration,
     });
     for (const file of plan.files) createOnlyPaths.add(joinPath(dir, file.path));
     for (const file of [...plan.files, ...plan.manifestEdits, ...plan.configEdits]) {
@@ -1927,13 +1976,15 @@ function printPermissionNote(specifier: string, log: (message: string) => void):
  * @param log - Output sink
  */
 function printAddHelp(log: (message: string) => void): void {
-  log(`Usage: ${PROGRAM_NAME} add <plugin> [--dir <path>] [--dry-run]`);
+  log(`Usage: ${PROGRAM_NAME} add <plugin> [--dir <path>] [--dry-run] [--module <name>]`);
   log('');
   log('Adds a Setu-TS package to this project, pinned to the version of the CLI');
   log("that added it — so a project's framework packages stay on one version.");
   log('');
   log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
   log('Workspace members use their workspace transport; existing configuration is preserved.');
+  log('add view writes its page controller to src/controllers/, or with --module <name> into');
+  log('that module; a project with modules requires --module.');
   log('');
   log('Available:');
   for (const name of addableNames()) {

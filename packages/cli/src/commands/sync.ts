@@ -2,12 +2,15 @@
 import { stringFlag, type ParsedArgs } from '../args.ts';
 import { forEachProject, type ICheckDependencies } from './check.ts';
 import { diagnoseProject } from '../diagnostics/diagnose.ts';
-import { renderCheckFindings } from '../diagnostics/render.ts';
+import { refuseDuplicateNames, renderCheckFindings } from '../diagnostics/render.ts';
 import { readSilence } from '../diagnostics/silence.ts';
 import { detectPlugins } from '../utils/plugin-detector.ts';
 import { detectTargetRuntime } from '../utils/runtime-detector.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
-import { renderFunctionalModuleBarrel, renderFunctionalModuleIndex } from '../seams/modules.ts';
+import { renderFunctionalModuleBarrel, renderModuleIndex } from '../seams/modules.ts';
+import { readBarrel } from '../diagnostics/barrel-drift.ts';
+import { withRelocatedDeclarationImports } from '../utils/module-declaration.ts';
+import { walkProjectFiles } from '../workspace/adopt.ts';
 import { renderModuleBarrel } from '../schematics/module-barrel.ts';
 import { deriveNames, escapeName } from '../utils/names.ts';
 import {
@@ -36,6 +39,7 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
       try {
         const installed = await detectPlugins(deps.fs, dir);
         const diagnosis = await diagnoseProject(deps.fs, dir, installed);
+        if (refuseDuplicateNames(diagnosis, deps.error)) return EXIT_ERROR;
         // Hand registrations are read from `setu.config.ts`; without it the scan cannot
         // tell which artifacts a barrel must leave out, and a rewrite could register one
         // twice. So nothing is written, whatever a silence entry says about E012.
@@ -54,14 +58,19 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
         // A barrel whose family holds an artifact that could not be read is left as
         // it is: rewriting it from the scan would drop an import nobody can verify
         // (M118 audit F7). The E013 finding printed below names the file.
-        const unreadable = diagnosis.findings.flatMap((finding) =>
-          finding.kind === 'artifact-unreadable' ? [finding.path] : [],
+        const issues = diagnosis.findings.flatMap((finding) =>
+          finding.kind === 'artifact-unreadable' ? [finding] : [],
         );
+        const unreadable = issues.map((issue) => issue.path);
         const held = new Set(
           scanSeamSpecs(installed)
             .filter((spec) =>
-              unreadable.some(
-                (path) => path.startsWith(`${spec.dir}/`) && path.endsWith(spec.suffix),
+              issues.some(({ path, reason }) =>
+                ['unsafe-directory', 'depth-limit', 'unreadable-directory'].includes(reason)
+                  ? path === spec.dir ||
+                    spec.dir.startsWith(`${path}/`) ||
+                    path.startsWith(`${spec.dir}/`)
+                  : path.startsWith(`${spec.dir}/`) && path.endsWith(spec.suffix),
               ),
             )
             .map((spec) => spec.barrel),
@@ -74,7 +83,14 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
           )
             plan(spec.barrel, spec.renderBarrel(diagnosis.artifacts));
         }
-        if (diagnosis.presentBarrels.has('src/modules/index.ts') || diagnosis.modules.length > 0)
+        if (
+          (diagnosis.presentBarrels.has('src/modules/index.ts') || diagnosis.modules.length > 0) &&
+          !issues.some(
+            ({ path, reason }) =>
+              reason === 'unsafe-directory' &&
+              (path === 'src/modules' || path.startsWith('src/modules/')),
+          )
+        )
           plan(
             'src/modules/index.ts',
             diagnosis.mode === 'class-based'
@@ -85,11 +101,25 @@ export async function runSyncCommand(args: ParsedArgs, deps: ICheckDependencies)
           if (!unreadable.some((path) => path.startsWith(`src/modules/${module}/`)))
             plan(
               `src/modules/${module}/index.ts`,
-              renderFunctionalModuleIndex(deriveNames(module), {
-                controller: artifacts.controller,
-                route: artifacts.route,
-              }),
+              renderModuleIndex(diagnosis.mode, deriveNames(module), artifacts),
             );
+        // A class controller or service moved within its module (into a subfolder,
+        // say) leaves the module's own declaration importing the old path.
+        if (diagnosis.mode === 'class-based')
+          for (const module of diagnosis.modules) {
+            const moduleDir = `src/modules/${module}`;
+            if (unreadable.some((path) => path.startsWith(`${moduleDir}/`))) continue;
+            const declaration = `${moduleDir}/${module}.module.ts`;
+            const read = await readBarrel(deps.fs, joinPath(dir, declaration));
+            if (read.kind !== 'source') continue;
+            const relocated = withRelocatedDeclarationImports(
+              read.source,
+              (await walkProjectFiles(deps.fs, dir, moduleDir)).map((path) =>
+                path.slice(moduleDir.length + 1),
+              ),
+            );
+            if (relocated !== undefined) plan(declaration, relocated);
+          }
         const formatted = await formatForTarget(
           [...files.values()],
           await detectTargetRuntime(deps.fs, dir),

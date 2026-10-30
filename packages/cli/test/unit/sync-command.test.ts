@@ -111,8 +111,7 @@ it('renders both activation modes and functional internal barrels while preservi
           {
             path: '/app/src/modules/orders/index.ts',
             contents: renderFunctionalModuleIndex(deriveNames('orders'), {
-              controller: [],
-              route: ['orders'],
+              controller: ['orders'],
             }),
           },
         ],

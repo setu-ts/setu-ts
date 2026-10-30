@@ -19,6 +19,9 @@ export const FINDING_IDS = {
   'silence-unmatched': 'setu.W004',
   'config-unreadable': 'setu.E012',
   'artifact-unreadable': 'setu.E013',
+  'mixed-layout': 'setu.E014',
+  'unresolved-import': 'setu.E015',
+  'duplicate-name': 'setu.E016',
 } as const;
 
 /** Looks up an identity without parsing rendered prose. */
@@ -34,5 +37,7 @@ export function findingPath(finding: Finding): string {
   if ('barrel' in finding) return finding.barrel;
   if (finding.kind === 'module-inactive') return `src/modules/${finding.module}`;
   if (finding.kind === 'legacy-layout') return 'src/routes';
+  if (finding.kind === 'mixed-layout') return 'src/modules';
+  if (finding.kind === 'duplicate-name') return finding.paths[0]!;
   return finding.kind === 'silence-unmatched' ? '.setu-ts/check.json' : 'setu.config.ts';
 }

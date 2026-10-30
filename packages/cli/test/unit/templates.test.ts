@@ -377,8 +377,8 @@ describe('class-based template', () => {
     // The showcase classes are no longer named individually: E4 moved them into
     // the seam directories, so `APP_CONTROLLERS`/`APP_SERVICES` already carry
     // them and a second literal entry would register each one twice. Order is
-    // still load-bearing — the standalone barrels come before the module one, so
-    // `setu g controller` and `setu g module` both ADD to this registration.
+    // A new project is flat: `setu g module` replaces the controller and service
+    // barrels with `modules: [...MODULES]` when it switches the project.
     const decorator = resolveHost(CLASS_BASED_TEMPLATE, 'deno').plugins.find(
       (w) => w.pkg === 'decorator-plugin',
     );
@@ -387,7 +387,6 @@ describe('class-based template', () => {
         '        controllers: [...APP_CONTROLLERS],\n' +
         '        services: [...APP_SERVICES],\n' +
         '        ingress: [...INGRESS_HANDLERS],\n' +
-        '        modules: [...MODULES],\n' +
         '      }',
     );
   });
@@ -454,7 +453,7 @@ describe('class-based template', () => {
     expect(imported).toContain('APP_CONTROLLERS');
     expect(imported).toContain('APP_SERVICES');
     expect(imported).toContain('INGRESS_HANDLERS');
-    expect(imported).toContain('MODULES');
+    expect(imported).not.toContain('MODULES');
   });
 
   it('reaches the showcase through the seam barrels, not an explicit path', () => {
@@ -493,8 +492,7 @@ describe('class-based template', () => {
       // In the seam directories, under the seam naming convention (E4).
       'src/services/greeting.service.ts',
       'src/controllers/greeting.controller.ts',
-      'src/modules/index.ts',
-      // ONE HTTP barrel, shared by the controller and route kinds since E8.
+      // ONE HTTP barrel, for class controllers and function controllers alike.
       'src/controllers/index.ts',
       'src/services/index.ts',
       'src/middleware/index.ts',

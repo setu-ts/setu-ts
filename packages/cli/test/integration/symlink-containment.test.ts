@@ -213,6 +213,6 @@ describe('commands refuse to follow a link inside a project', () => {
     expect(await runGenerateCommand(parseArgs(['route', 'billing']), generated.deps)).toBe(0);
     expect(generated.out.text()).not.toContain('symbolic link');
     expect(out.text()).not.toContain('symbolic link');
-    await nodeFs.stat(`${base}/real/shop/src/controllers/billing.routes.ts`);
+    await nodeFs.stat(`${base}/real/shop/src/controllers/billing.controller.ts`);
   });
 });

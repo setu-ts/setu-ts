@@ -2418,7 +2418,10 @@ describe('setu add view styling (M123)', () => {
       expect(manifest[runtime === 'deno' ? 'imports' : 'dependencies'].hono).toBe(
         runtime === 'deno' ? 'npm:hono@^4.12.30' : '^4.12.30',
       );
-      expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
+      expect(h.read('/app/shop/src/controllers/views.controller.ts')).toContain("router.get('/ui'");
+      expect(h.read('/app/shop/src/controllers/index.ts')).toContain(
+        "import { registerViewsRoutes } from './views.controller.ts';",
+      );
       expect(h.read('/app/shop/src/views/home.tsx')).toContain('bg-primary');
       const before = h.read(`/app/shop/${path}`);
       h.out.length = 0;
@@ -2427,7 +2430,7 @@ describe('setu add view styling (M123)', () => {
       expect(h.out.some((line) => /^(created|updated) /.test(line))).toBe(false);
     });
   }
-  it('wires the example route when ViewPlugin was registered by an earlier add', async () => {
+  it('writes the views controller again on a re-run, keeping one ViewPlugin', async () => {
     const h = harness();
     expect(
       await runNewCommand(parseArgs(['shop', '--template', 'rest', '--runtime', 'node']), {
@@ -2438,25 +2441,18 @@ describe('setu add view styling (M123)', () => {
       }),
     ).toBe(0);
     expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
-    // The 0.10.0 shape: ViewPlugin() registered, no example route and no views.
-    const config = h
-      .read('/app/shop/setu.config.ts')
-      .replace("import { registerViewRoutes } from './src/views/routes.ts';\n", '')
-      .replace(/\n\s*registerViewRoutes\(app\.router\);/, '');
-    expect(config).toContain('ViewPlugin()');
-    expect(config).not.toContain('registerViewRoutes');
-    await h.fs.writeFile('/app/shop/setu.config.ts', new TextEncoder().encode(config));
-    for (const file of ['layout.tsx', 'home.tsx', 'routes.ts', 'styles.css'])
-      await h.fs.rm(`/app/shop/src/views/${file}`);
+    for (const file of ['src/views/layout.tsx', 'src/views/home.tsx', 'src/views/styles.css'])
+      await h.fs.rm(`/app/shop/${file}`);
+    await h.fs.rm('/app/shop/src/controllers/views.controller.ts');
 
     expect(await h.run(['view', '--dir', '/app/shop'])).toBe(0);
-    const rewired = h.read('/app/shop/setu.config.ts');
-    expect(rewired).toContain("import { registerViewRoutes } from './src/views/routes.ts';");
-    expect(rewired).toMatch(
-      /registerGeneratedRoutes\(app\.router, app\.services\);\n\s*registerViewRoutes\(app\.router\);/,
+    const config = h.read('/app/shop/setu.config.ts');
+    expect(config.match(/ViewPlugin\(\)/g)).toHaveLength(1);
+    expect(config).not.toContain('registerViewRoutes');
+    expect(h.read('/app/shop/src/controllers/views.controller.ts')).toContain("router.get('/ui'");
+    expect(h.read('/app/shop/src/controllers/index.ts')).toContain(
+      "import { registerViewsRoutes } from './views.controller.ts';",
     );
-    expect(rewired.match(/ViewPlugin\(\)/g)).toHaveLength(1);
-    expect(h.read('/app/shop/src/views/routes.ts')).toContain("router.get('/ui'");
   });
   it('refuses an unreadable view file by name, before writing anything', async () => {
     const h = harness();
@@ -2499,8 +2495,9 @@ describe('setu add view styling (M123)', () => {
     for (const path of [
       'src/views/layout.tsx',
       'src/views/home.tsx',
-      'src/views/routes.ts',
       'src/views/styles.css',
+      'src/controllers/views.controller.ts',
+      'src/controllers/index.ts',
       'tsconfig.json',
       'setu.config.ts',
       'package.json',

@@ -141,11 +141,8 @@ export function seamLocalImports(seams: readonly SeamSpec[]): readonly LocalImpo
 export function seamSetupCalls(seams: readonly SeamSpec[]): readonly string[] {
   const schematics = new Set(seams.map((spec) => spec.schematic));
   const calls: string[] = [];
-  // Either kind reaches the router through this one call: in a functional
-  // project a `.controller.ts` registers imperatively exactly as a `.routes.ts`
-  // does, so gating on `route` alone would leave a functional project's
-  // controllers wired by nothing.
-  if (schematics.has('route') || schematics.has('controller')) {
+  // Function controllers share the controller family in every project style.
+  if (schematics.has('controller')) {
     calls.push(`${REGISTER_ROUTES_EXPORT}(app.router, app.services);`);
   }
   if (schematics.has('middleware')) {
@@ -203,10 +200,10 @@ export function seamPluginRegistrations(seams: readonly SeamSpec[]): readonly st
  * Rewrites a wiring list so each plugin whose options carry a seam receives it.
  *
  * Takes the list rather than mutating a shared constant so every template applies it to
- * its own set — the technique `withModuleSeam` already uses for the decorator wiring.
+ * its own set — the technique `withDecoratorSeams` already uses for the decorator wiring.
  *
  * The decorator wiring is deliberately NOT touched here: it is owned by
- * `withModuleSeam`, which composes the module barrel with a template's own example
+ * `withDecoratorSeams`, which composes the module barrel with a template's own example
  * classes, and two functions rewriting the same `args` would silently overwrite one
  * another. {@linkcode decoratorSeamExtras} is how this module contributes to it instead.
  *
@@ -295,7 +292,7 @@ export function decoratorExportFor(spec: SeamSpec): string | undefined {
  * The extra controller and service identifiers the decorator wiring must name, beyond
  * the module barrel.
  *
- * Returned as a pair for `withModuleSeam`'s two positional lists, so the standalone
+ * Returned as a pair for `withDecoratorSeams`'s two positional lists, so the standalone
  * controller and service barrels are spread alongside the module ones rather than
  * replacing them.
  *

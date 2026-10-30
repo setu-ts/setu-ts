@@ -5,7 +5,7 @@ import { runAddCommand } from '../../../src/commands/add.ts';
 import { parseArgs } from '../../../src/args.ts';
 import { createFakeFs } from '../../fixtures/fake-fs.ts';
 
-const LAST_IMPORT = "import { registerModules } from './src/modules/index.ts';";
+const LAST_IMPORT = "import { GENERATED_PLUGINS } from './src/plugins/index.ts';";
 const CONFIG_PATH = '/app/shop/setu.config.ts';
 const REDIS_ARM = `        queue: {
           processors: [...QUEUE_PROCESSORS],
@@ -87,7 +87,7 @@ for (const [label, order] of [
 for (const semicolon of [';', '']) {
   it(`inserts after a multi-line last import with ${semicolon === '' ? 'no' : 'a'} semicolon`, async () => {
     const h = await scaffold();
-    const multiline = `import {\n  registerModules,\n  registerModules as other,\n} from './src/modules/index.ts'${semicolon}`;
+    const multiline = `import {\n  GENERATED_PLUGINS,\n  GENERATED_PLUGINS as other,\n} from './src/plugins/index.ts'${semicolon}`;
     await h.fs.writeFile(
       CONFIG_PATH,
       new TextEncoder().encode(h.base.replace(LAST_IMPORT, multiline)),
@@ -95,13 +95,13 @@ for (const semicolon of [';', '']) {
     expect(await h.add(['events'])).toBe(0);
     const formattedBase = h.base.replace(
       LAST_IMPORT,
-      "import { registerModules, registerModules as other } from './src/modules/index.ts';",
+      "import { GENERATED_PLUGINS, GENERATED_PLUGINS as other } from './src/plugins/index.ts';",
     );
     // Expected output is authored independently of the editor and of its formatter.
     const wanted = formattedBase
       .replace(
-        "from './src/modules/index.ts';",
-        "from './src/modules/index.ts';\nimport { EVENT_HANDLERS } from './src/events/index.ts';",
+        "from './src/plugins/index.ts';",
+        "from './src/plugins/index.ts';\nimport { EVENT_HANDLERS } from './src/events/index.ts';",
       )
       .replace(
         '      return {\n',
