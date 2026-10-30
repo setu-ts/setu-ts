@@ -14,9 +14,9 @@ const cases = [
     name: 'scan reports and legacy notices in order',
     seed: {
       '/app/deno.json': manifest(),
-      '/app/src/modules/Bad/bad.routes.ts': '',
-      '/app/src/modules/Bad/Bad.routes.ts': '',
-      '/app/src/modules/orders/orders.routes.ts': '',
+      '/app/src/modules/Bad/bad.controller.ts': '',
+      '/app/src/modules/Bad/Bad.controller.ts': '',
+      '/app/src/modules/orders/orders.controller.ts': '',
       '/app/src/controllers/Bad.controller.ts': '',
       '/app/src/controllers/broken.controller.ts': '',
       '/app/src/controllers/manual.controller.ts': 'export function registerManualRoutes() {}',
@@ -112,12 +112,12 @@ const cases = [
     name: 'functional module target and inactive warning',
     seed: {
       '/app/deno.json': manifest(),
-      '/app/src/modules/orders/orders.routes.ts': 'export function registerOrdersRoutes() {}',
+      '/app/src/modules/orders/orders.controller.ts': 'export function registerOrdersRoutes() {}',
       '/app/src/modules/orders/index.ts': 'export function registerOrdersModule() {}',
     },
     argv: ['generate', 'controller', 'summary', '--module', 'orders', '--dry-run'],
     expected: [
-      "Would adopt src/modules/orders/orders.routes.ts into src/modules/orders/index.ts: it matches this family's naming convention, so the generated barrel registers it.",
+      "Would adopt src/modules/orders/orders.controller.ts into src/modules/orders/index.ts: it matches this family's naming convention, so the generated barrel registers it.",
       '  Remove any manual registration of it, or rename the file.',
       'Module "orders" is not activated in src/modules/index.ts, so its routes are unreachable; add:',
       "  import { registerOrdersModule } from './orders/index.ts';",

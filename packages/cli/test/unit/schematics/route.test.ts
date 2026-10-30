@@ -9,7 +9,7 @@ describe('route schematic', () => {
 
   it('emits the route module plus its seam barrel', () => {
     expect(files.map((f) => f.path)).toEqual([
-      'src/controllers/order-item.routes.ts',
+      'src/controllers/order-item.controller.ts',
       'src/controllers/index.ts',
     ]);
   });
@@ -46,8 +46,8 @@ describe('route schematic', () => {
     ).toBe(true);
   });
 
-  it('emits it at src/controllers/order-item.routes.ts', () => {
-    expect(file.path).toBe('src/controllers/order-item.routes.ts');
+  it('emits it at src/controllers/order-item.controller.ts', () => {
+    expect(file.path).toBe('src/controllers/order-item.controller.ts');
   });
 
   it('exports the register function', () => {

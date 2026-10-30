@@ -16,12 +16,20 @@ function fresh(runtime: TargetRuntime, classBased = false) {
     ).map((file) => [file.path, file.contents]),
   );
 }
-function plan(existing: Map<string, string>, runtime: TargetRuntime = 'node', ready = true) {
+const REGISTRATION = { path: 'src/controllers/index.ts', contents: '// regenerated barrel\n' };
+function plan(
+  existing: Map<string, string>,
+  runtime: TargetRuntime = 'node',
+  ready = true,
+  controllerDir = 'src/controllers',
+) {
   return planViewSetup({
     runtime,
     existing,
     viewPluginRegistered: ready,
     wireStatic: (source, args) => withPluginWiring(source, 'static-plugin', undefined, args),
+    controllerDir,
+    registration: REGISTRATION,
   });
 }
 function apply(existing: Map<string, string>, result: ReturnType<typeof plan>) {
@@ -43,13 +51,29 @@ describe('add view planner', () => {
       expect(result.files.map((file) => file.path)).toEqual([
         'src/views/layout.tsx',
         'src/views/home.tsx',
-        'src/views/routes.ts',
         ...(workers ? [] : ['src/views/styles.css']),
+        'src/controllers/views.controller.ts',
       ]);
+      // The page is a function controller, registered through the barrel.
+      expect(result.configEdits).toContainEqual(REGISTRATION);
       expect(after.get('src/views/layout.tsx')).toContain("data-shell='frame'");
       expect(after.get('src/views/layout.tsx')!.includes('/assets/app.css')).toBe(!workers);
       expect(after.get('src/views/home.tsx')).toContain('bg-primary');
-      expect(after.get('src/views/routes.ts')).toContain("router.get('/ui'");
+      expect(after.get('src/controllers/views.controller.ts')).toBe(
+        [
+          "import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';",
+          "import { renderView } from '@setu-ts/view-plugin';",
+          "import { Home } from '../views/home.tsx';",
+          '',
+          '/** Registers the example server-rendered page: a function controller. */',
+          'export function registerViewsRoutes(router: IRouterApi, services?: IServiceRegistry): void {',
+          '  void services;',
+          "  router.get('/ui', (ctx) => renderView(ctx, Home, {}));",
+          '}',
+          '',
+        ].join('\n'),
+      );
+      expect(after.get('setu.config.ts')).not.toContain('registerViewRoutes');
       const compiler = JSON.parse(after.get(runtime === 'deno' ? 'deno.json' : 'tsconfig.json')!);
       expect(compiler.compilerOptions).toMatchObject({
         jsx: 'react-jsx',
@@ -75,9 +99,6 @@ describe('add view planner', () => {
         expect(scripts['start:dev'].startsWith(call)).toBe(true);
         expect(after.get('setu.config.ts')).toContain(
           "StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })",
-        );
-        expect(after.get('setu.config.ts')).toContain(
-          'registerGeneratedRoutes(app.router, app.services);\n  registerViewRoutes(app.router);',
         );
         expect(after.get('.gitignore')).toMatch(/^build\/$/m);
       }
@@ -107,10 +128,13 @@ describe('add view planner', () => {
         'start:dev': 'deno task css && custom',
       };
       existing.set(path, JSON.stringify(manifest));
-      for (const file of ['layout.tsx', 'home.tsx', 'routes.ts', 'styles.css'])
+      for (const file of ['layout.tsx', 'home.tsx', 'styles.css'])
         existing.set(`src/views/${file}`, 'hand edited');
+      existing.set('src/controllers/views.controller.ts', 'hand edited');
       const result = plan(existing, runtime);
       expect(result.files).toEqual([]);
+      // A hand-written views controller keeps its own registration.
+      expect(result.configEdits).not.toContainEqual(REGISTRATION);
       const after = apply(existing, result);
       expect(JSON.parse(after.get(compilerPath)!).compilerOptions).toEqual(
         compiler.compilerOptions,
@@ -178,43 +202,18 @@ describe('add view planner', () => {
     existing.set('.gitignore', 'node_modules/');
     expect(apply(existing, plan(existing)).get('.gitignore')).toBe('node_modules/\nbuild/\n');
   });
-  it('accepts both route styles', () => {
-    expect(apply(fresh('node', true), plan(fresh('node', true))).get('setu.config.ts')).toContain(
-      'registerViewRoutes(app.router);',
+  it('writes the controller into a module, importing the views from there', () => {
+    const result = plan(fresh('node', true), 'node', true, 'src/modules/shop');
+    const controller = result.files.find(
+      (file) => file.path === 'src/modules/shop/views.controller.ts',
     );
+    expect(controller?.contents).toContain("import { Home } from '../../views/home.tsx';");
+    expect(result.files.some((file) => file.path.startsWith('src/controllers/'))).toBe(false);
   });
-  const anchor = 'registerGeneratedRoutes(app.router, app.services);';
-  for (const [name, transform] of [
-    ['absent', (s: string) => s.replace(anchor, '')],
-    ['repeated', (s: string) => s.replace(anchor, anchor + '\n  ' + anchor)],
-    ['already referenced', (s: string) => s + '\nvoid registerViewRoutes;'],
-    ['commented anchor', (s: string) => s.replace(anchor, '// ' + anchor)],
-    [
-      'unrecognized factory',
-      (s: string) => s.replace('export function createApp', 'export async function createApp'),
-    ],
-    ['inline statement', (s: string) => s.replace('  ' + anchor, '  void 0; ' + anchor)],
-    [
-      'starter composed',
-      (s: string) =>
-        "import { createFullStackAppFromConfig } from '@setu-ts/full-stack-starter';\n" + s,
-    ],
-    [
-      'already imported path',
-      (s: string) => "import * as views from './src/views/routes.ts';\n" + s,
-    ],
-  ] as const) {
-    it(`prints the route guidance for ${name}`, () => {
-      const existing = fresh('node');
-      existing.set('setu.config.ts', transform(existing.get('setu.config.ts')!));
-      const after = apply(existing, plan(existing)).get('setu.config.ts')!;
-      expect(after).not.toContain("import { registerViewRoutes } from './src/views/routes.ts'");
-    });
-  }
-  it('does not insert the route when ViewPlugin was not inserted', () => {
-    const existing = fresh('node');
-    expect(apply(existing, plan(existing, 'node', false)).get('setu.config.ts')).not.toContain(
-      'registerViewRoutes(app.router)',
+  it('says the controller needs ViewPlugin when it was not registered', () => {
+    const notes = plan(fresh('node'), 'node', false).notes.join('\n');
+    expect(notes).toContain(
+      'Register ViewPlugin() in setu.config.ts; src/controllers/views.controller.ts renders /ui through it.',
     );
   });
 });
@@ -244,16 +243,9 @@ it('preserves non-string scripts and fills partial compiler options', () => {
   }
 });
 
-it('prints the exact registration lines for existing conflicting references', () => {
+it('prints the exact StaticPlugin registration for an existing conflicting reference', () => {
   const existing = fresh('node');
-  existing.set(
-    'setu.config.ts',
-    existing.get('setu.config.ts')! + '\nvoid StaticPlugin;\nvoid registerViewRoutes;\n',
-  );
+  existing.set('setu.config.ts', existing.get('setu.config.ts')! + '\nvoid StaticPlugin;\n');
   const notes = plan(existing).notes.join('\n');
   expect(notes).toContain("StaticPlugin({ root: './build/assets', urlPrefix: '/assets' })");
-  expect(notes).toContain(
-    'registerViewRoutes(app.router); after registerGeneratedRoutes(app.router, app.services);',
-  );
-  expect(notes).toContain('requires ViewPlugin() registered first');
 });

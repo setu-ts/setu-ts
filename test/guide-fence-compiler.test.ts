@@ -90,14 +90,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // refusal text fence. Three more since M118: the wiring-check section shows a
     // shell fence, a text fence of its output and a JSON silence-file fence, and its
     // re-audit added the pinned CI invocation as a fourth shell fence. One more
-    // since M117: the Redis-client section shows a shell fence.
-    // site/--example adds one shell fence.
-    total: 23,
+    // since M117: the Redis-client section shows a shell fence. One fewer since the
+    // controllers redesign: one module tree serves both styles. site/--example adds one.
+    total: 22,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 22,
+    skipped: 21,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -265,12 +265,13 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M117: +1 skipped shell fence in docs/cli.md's Redis-client section.
   // M119i: setup, full-stack create and npm tsconfig add three non-TS fences.
   // site/--example adds two shell fences.
-  total: 311,
+  // Controllers redesign: -1 skipped fence in docs/cli.md (one module tree).
+  total: 310,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 82,
+  skipped: 81,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

@@ -34,7 +34,7 @@ describe('generateModule', () => {
           ]),
         );
         expect(files.some((file) => file.path.endsWith('.schemas.ts'))).toBe(validation);
-        const routes = source(`invoices.${style === 'class-based' ? 'controller' : 'routes'}.ts`);
+        const routes = source('invoices.controller.ts');
         expect(routes).toContain("'/invoices'");
         expect(routes).toContain('status(201)');
         // A missing record answers in the application's error format: thrown

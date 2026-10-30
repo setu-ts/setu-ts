@@ -82,7 +82,11 @@ export function renderBrief(facts: ProjectFacts, member = false): string {
     `| ${facts.runtime === 'cloudflare-workers' ? 'src/index.ts' : 'main.ts'} | Runtime entry |`,
     ...facts.seams.map((path) => `| ${path}/ | Generated artifacts; CLI owns the barrel |`),
     '| test/ | Application tests |',
-    ...facts.directories.map((path) => `| ${path}/ | Project code |`),
+    ...facts.directories.map((path) =>
+      path === 'src/modules'
+        ? `| ${path}/ | Feature modules; CLI owns each index.ts |`
+        : `| ${path}/ | Project code |`,
+    ),
     '\n## Installed packages\n',
     '| Package | CAPABILITIES keys | Description | Card |',
     '| --- | --- | --- | --- |',

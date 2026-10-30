@@ -349,7 +349,7 @@ describe("the CLI's Workers templates build and boot on workerd", () => {
     { timeout: CASE_TIMEOUT_MS, skip },
     async () => {
       const project = await scaffold('rest');
-      expect(await run(['generate', 'module', 'invoices'], project)).toBe(0);
+      expect(await run(['generate', 'module', 'invoices', '--adopt-controllers'], project)).toBe(0);
       const files = await nodeFs.readdir(`${project}/src/modules/invoices`);
       // V10-23: Workers modules run under `tsx --test` like every other target,
       // so both test files are emitted and `tsc --noEmit` must accept them.

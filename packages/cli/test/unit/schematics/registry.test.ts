@@ -90,17 +90,29 @@ describe('schematic registry', () => {
   // Artifact paths only. Two schematics DO share one seam barrel by design —
   // `command-handler` and `query-handler` both regenerate `src/cqrs/index.ts` from both
   // name lists — so a blanket distinctness check would fail on a deliberate property.
-  // What must stay distinct is the artifact each schematic writes: two of those on one
-  // path would silently clobber.
-  it('every registered factory emits a distinct artifact path', () => {
-    const paths = listSchematics().flatMap(({ name }) =>
-      getSchematic(name)!
+  // Artifacts are distinct except where schematics write one family's file: the
+  // controller family and the plugin family. The overwrite guard refuses a second write.
+  it('every registered factory emits a distinct artifact path outside the shared families', () => {
+    const owners = new Map<string, string[]>();
+    for (const { name } of listSchematics()) {
+      for (const file of getSchematic(name)!
         .factory(deriveNames('order-item'), options())
-        .filter((f) => f.managed !== true)
-        .map((f) => f.path),
+        .filter((f) => f.managed !== true)) {
+        owners.set(file.path, [...(owners.get(file.path) ?? []), name]);
+      }
+    }
+    const shared = Object.fromEntries(
+      [...owners]
+        .filter(([, names]) => names.length > 1)
+        .map(([path, names]) => [path, names.sort()]),
     );
-    expect(new Set(paths).size).toBeLessThan(paths.length);
-    expect(paths.filter((path) => path === 'src/controllers/order-item.routes.ts')).toHaveLength(1);
+    // `controller`, `route` and `sse` all write one controller file, and
+    // `ws-route` writes a plugin; generating the same name twice is refused by
+    // the overwrite guard rather than clobbering.
+    expect(shared).toEqual({
+      'src/controllers/order-item.controller.ts': ['controller', 'route', 'sse'],
+      'src/plugins/order-item.plugin.ts': ['plugin', 'ws-route'],
+    });
   });
 
   it('shares seam barrels only where the generated artifacts share a family', () => {

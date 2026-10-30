@@ -92,14 +92,14 @@ const NON_COLLIDING_GROUPS: Readonly<Record<string, readonly string[]>> = {
  * Seam barrels a class-based project carries from scaffold time, before anything is generated.
  *
  * Counted separately from the generated files because they exist whether or not the group
- * under test writes into their directories: `src/modules/index.ts` plus one each for
- * controllers, services, ingress, middleware, plugins, health and metrics.
+ * under test writes into their directories: one each for controllers, services,
+ * ingress, middleware, plugins, health and metrics.
  *
- * EIGHT since M97a: `route` and `controller` share `src/controllers/index.ts`,
- * so the separate `src/routes/index.ts` is gone, while decorated non-HTTP
- * ingress has its own registration barrel.
+ * SEVEN since the project starts flat: there is no `src/modules/index.ts` until
+ * the first `setu g module`, which also removes the controllers and services
+ * barrels (so a module group ends with six).
  */
-const SCAFFOLDED_BARRELS = 8;
+const SCAFFOLDED_BARRELS = 7;
 
 describe('template scaffolding — end to end', () => {
   let root: string;
@@ -414,9 +414,9 @@ describe('template scaffolding — end to end', () => {
     expect(await run(['new', '--runtime', 'deno', 'svc', '--template', 'class-based'])).toBe(0);
     const config = await nodeFs.readFile(`${root}/svc/setu.config.ts`, 'utf8');
 
-    // The args string, rendered into the plugin call. The showcase classes come
-    // first, then the standalone barrels, then the module barrel — so `setu g controller`
-    // and `setu g module` both add to this registration rather than replacing it.
+    // The args string, rendered into the plugin call: the flat controller, service
+    // and ingress barrels. The first `setu g module` replaces the first two with
+    // `modules: [...MODULES]`.
     // Broken across lines because the single-line form runs past 110 characters inside
     // the plugin array once all three sources are named.
     expect(config).toContain(
@@ -424,7 +424,6 @@ describe('template scaffolding — end to end', () => {
         '        controllers: [...APP_CONTROLLERS],\n' +
         '        services: [...APP_SERVICES],\n' +
         '        ingress: [...INGRESS_HANDLERS],\n' +
-        '        modules: [...MODULES],\n' +
         '      }),',
     );
     // DiPlugin is what puts @Injectable classes on the container path. Since
@@ -437,7 +436,8 @@ describe('template scaffolding — end to end', () => {
     expect(config).toContain("from './src/controllers/index.ts'");
     expect(config).toContain("from './src/services/index.ts'");
     expect(config).toContain("from './src/ingress/index.ts'");
-    expect(config).toContain("from './src/modules/index.ts'");
+    // A new project starts flat; the first `setu g module` switches it to modules.
+    expect(config).not.toContain("from './src/modules/index.ts'");
   });
 
   // X5-2. TypeScript does NOT apply excess-property checking to an object
@@ -499,7 +499,7 @@ describe('template scaffolding — end to end', () => {
       // A deliberate type error in the generated artifact. Before X5-8 this was
       // clean under `check:app` (which globbed `app/` only) AND under
       // `deno check main.ts setu.config.ts` (which never reached `src/`).
-      const path = `${project}/src/controllers/widget.routes.ts`;
+      const path = `${project}/src/controllers/widget.controller.ts`;
       const original = await nodeFs.readFile(path, 'utf8');
       await nodeFs.writeFile(
         path,
@@ -584,10 +584,14 @@ describe('template scaffolding — end to end', () => {
       if (schematics.includes('job')) {
         expect(await run(['add', 'queue', '--dir', project])).toBe(0);
       }
+      let first = true;
       for (const { name, accepted } of HOSTILE_NAMES) {
         if (!accepted) continue;
         for (const schematic of schematics) {
-          expect(await run(['g', schematic, name, '--dir', project])).toBe(0);
+          // The first module takes the scaffold's greeting example with it.
+          const adopt = schematic === 'module' && first ? ['--adopt-controllers'] : [];
+          if (schematic === 'module') first = false;
+          expect(await run(['g', schematic, name, '--dir', project, ...adopt])).toBe(0);
         }
       }
 
@@ -603,7 +607,9 @@ describe('template scaffolding — end to end', () => {
       // this group generated into them — plus the two entry points.
       const perName = group === 'module' ? MODULE_FILES_PER_NAME : schematics.length;
       // The class-based template adds its greeting service and controller.
-      expect(sources.length).toBe(perName * accepted + SCAFFOLDED_BARRELS + 4);
+      expect(sources.length).toBe(
+        perName * accepted + SCAFFOLDED_BARRELS - (group === 'module' ? 1 : 0) + 4,
+      );
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, sources);
@@ -665,7 +671,7 @@ describe('setu generate module, end to end', () => {
     expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
-    expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
+    expect(await run(['g', 'module', 'user', '--dir', project, '--adopt-controllers'])).toBe(0);
     expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
 
     // The barrel names both modules — the second generate did not drop the first.
@@ -696,21 +702,18 @@ describe('setu generate module, end to end', () => {
     expect(await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based'])).toBe(0);
     const project = `${root}/shop`;
 
-    expect(await run(['g', 'module', 'user', '--dir', project])).toBe(0);
+    expect(await run(['g', 'module', 'user', '--dir', project, '--adopt-controllers'])).toBe(0);
 
     const config = await nodeFs.readFile(`${project}/setu.config.ts`, 'utf8');
-    // The seam must not have displaced the template's own example classes.
-    // E4: the showcase reaches the config through APP_CONTROLLERS rather than
-    // by name, so the assertion is that BOTH registration paths are present —
-    // the standalone barrel (which carries the showcase) and the module barrel.
-    expect(config).toContain('...APP_CONTROLLERS');
+    // The first module switched the config: the showcase now lives in the
+    // module and reaches DecoratorPlugin through its declaration.
+    expect(config).not.toContain('APP_CONTROLLERS');
     expect(config).toContain('...MODULES');
+    expect(config).toContain('registerModules(app.router, app.services);');
 
     const sources = [
       `${project}/main.ts`,
       `${project}/setu.config.ts`,
-      `${project}/src/controllers/greeting.controller.ts`,
-      `${project}/src/services/greeting.service.ts`,
       ...(await moduleSources(project)),
     ];
     await useWorkspacePackages(project);
@@ -722,14 +725,14 @@ describe('setu generate module, end to end', () => {
   it('regenerates the barrel without refusing, and lists each module once', async () => {
     await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
-    await run(['g', 'module', 'user', '--dir', project]);
+    await run(['g', 'module', 'user', '--dir', project, '--adopt-controllers']);
 
     // A second module rewrites the barrel — the managed-file exemption is what
     // makes this exit 0 rather than refusing on an existing path.
     expect(await run(['g', 'module', 'billing', '--dir', project])).toBe(0);
 
     const barrel = await nodeFs.readFile(`${project}/src/modules/index.ts`, 'utf8');
-    expect(barrel.match(/UserModule/g)?.length).toBe(2); // import + array entry
+    expect(barrel.match(/\bUserModule\b/g)?.length).toBe(2); // import + array entry
     expect(barrel.match(/from '\.\/user\/user\.module\.ts'/g)?.length).toBe(1);
   });
 
@@ -751,7 +754,7 @@ describe('setu generate module, end to end', () => {
     it(`type-checks the module test it generates into a ${label} project`, async () => {
       expect(await run(argv)).toBe(0);
       const project = `${root}/bare`;
-      expect(await run(['g', 'module', 'widget', '--dir', project])).toBe(0);
+      expect(await run(['g', 'module', 'widget', '--dir', project, '--adopt-controllers'])).toBe(0);
 
       await useWorkspacePackages(project);
       const { code, stderr } = await denoCheck(project, [
@@ -848,6 +851,7 @@ await app.stop();
     it(`serves requests from generated modules on --template ${template}`, async () => {
       expect(await run(['new', '--runtime', 'deno', 'shop', '--template', template])).toBe(0);
       const project = `${root}/shop`;
+      // The untouched greeting example moves in without --adopt-controllers.
       expect(await run(['g', 'module', 'orders', '--dir', project])).toBe(0);
       expect(await run(['g', 'module', 'order-item', '--dir', project])).toBe(0);
       await useWorkspacePackages(project);
@@ -882,7 +886,7 @@ await app.stop();
   it('still refuses to overwrite a module that already exists', async () => {
     await run(['new', '--runtime', 'deno', 'shop', '--template', 'class-based']);
     const project = `${root}/shop`;
-    await run(['g', 'module', 'user', '--dir', project]);
+    await run(['g', 'module', 'user', '--dir', project, '--adopt-controllers']);
     err = [];
 
     expect(await run(['g', 'module', 'user', '--dir', project])).toBe(1);

@@ -205,7 +205,9 @@ pm2 start npm --name my-app -- start
 
 #### Serverless
 
-Use a serverless adapter for your platform (Vercel, AWS Lambda, etc.).
+AWS Lambda (Web Functions and classic event-driven functions) and Azure Functions each take a short
+entry file rather than an adapter package: see
+[Serverless: AWS Lambda and Azure Functions](./serverless.md).
 
 ### Limitations
 

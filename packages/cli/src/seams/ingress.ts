@@ -7,6 +7,7 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { SeamArtifacts, SeamSpec } from './seam-spec.ts';
 import {
@@ -45,7 +46,7 @@ function modulePath(schematic: string, kebab: string): string {
 function renderIngressBarrel(artifacts: SeamArtifacts): string {
   const names = seamNames(artifacts, 'ingress');
   const imports = renderSeamImports(names, importSymbols, (kebab) => modulePath('ingress', kebab));
-  const classes = names.map((name) => importSymbols(deriveNames(name))[0]);
+  const classes = names.map((name) => importSymbols(artifactNames(name))[0]);
 
   return assembleSeamBarrel(
     seamHeader('setu generate job / ws-route / event-handler / command-handler / query-handler', [

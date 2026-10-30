@@ -74,7 +74,13 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
     ].filter((key) => Object.hasOwn(commandBodies, key)),
     commandBodies,
     schematics: availableSchematics(installed).map((entry) => entry.name),
-    seams: [...new Set(seamsFor(installed).map((seam) => seam.dir))],
+    // A project with modules keeps its controllers and services there, so the
+    // flat homes are not part of its map.
+    seams: [...new Set(seamsFor(installed).map((seam) => seam.dir))].filter(
+      (path) =>
+        !directories.includes('src/modules') ||
+        (path !== 'src/controllers' && path !== 'src/services'),
+    ),
     directories,
   };
 }

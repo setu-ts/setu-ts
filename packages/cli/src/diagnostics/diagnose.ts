@@ -1,17 +1,24 @@
 /** The read-only owner of generated-project diagnostics. @module */
 import type { IFileSystem } from '@setu-ts/common';
-import type { ArtifactScanAll } from '../utils/artifact-scanner.ts';
-import { scanArtifacts } from '../utils/artifact-scanner.ts';
+import type { ArtifactScanAll, UnreadableArtifact } from '../utils/artifact-scanner.ts';
+import { DuplicateArtifactNameError, scanArtifacts } from '../utils/artifact-scanner.ts';
+import { lexImportSpecifiers } from '../utils/import-specifiers.ts';
+import { normalizeRelative } from '../utils/artifact-path.ts';
 import { scanModuleArtifacts, scanModules } from '../utils/module-scanner.ts';
 import { generatorMode, type GeneratorMode } from '../utils/generator-mode.ts';
 import { scanSeamSpecs } from '../seams/registry.ts';
-import { FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM } from '../seams/http.ts';
+import {
+  CONTROLLERS_SEAM,
+  FUNCTION_CONTROLLER_ARTIFACTS,
+  FUNCTIONAL_CONTROLLERS_SEAM,
+} from '../seams/http.ts';
 import { legacyRegistrarNotice, readLegacyHttpFiles } from '../utils/legacy-layout.ts';
 import { joinPath } from '../utils/file-writer.ts';
 import { diagnoseBarrels, readBarrel } from './barrel-drift.ts';
 import { moduleActive, moduleSymbol, withoutImports } from './modules.ts';
 import { maskSourceCode } from '../devtool/sources.ts';
 import { wiringFinding, wiringSites } from './wiring.ts';
+import { flatArtifactFiles, projectLayout, type ProjectLayout } from '../utils/project-layout.ts';
 import { composingStarter } from '../utils/starter-arms.ts';
 
 /** Typed findings carry facts; renderers own prose and exit policy. */
@@ -66,7 +73,7 @@ export type Finding =
   | {
       readonly kind: 'artifact-unreadable';
       readonly path: string;
-      readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
+      readonly reason: UnreadableArtifact['reason'];
     }
   | {
       readonly kind: 'config-unreadable';
@@ -74,10 +81,14 @@ export type Finding =
       readonly reason: 'not-a-file' | 'too-large' | 'unclassifiable';
     }
   | { readonly kind: 'check-config-invalid'; readonly path: string; readonly entry: string }
+  | { readonly kind: 'mixed-layout'; readonly files: readonly string[] }
+  | { readonly kind: 'unresolved-import'; readonly path: string; readonly specifier: string }
+  | { readonly kind: 'duplicate-name'; readonly family: string; readonly paths: readonly string[] }
   | { readonly kind: 'silence-unmatched'; readonly entry: string };
 
 /** Raw generator inputs plus read-only diagnostics and legacy reporting projections. */
 export interface ProjectDiagnosis {
+  readonly layout: ProjectLayout;
   readonly starter?: NonNullable<ReturnType<typeof composingStarter>>;
   readonly artifacts: ArtifactScanAll['artifacts'];
   readonly adopted: ArtifactScanAll['adopted'];
@@ -120,11 +131,27 @@ export async function diagnoseProject(
   };
   const mode = generatorMode(installed);
   const modules = await scanModules(fs, dir, mode);
+  const layout = await projectLayout(fs, dir, modules);
   const specs = scanSeamSpecs(installed);
-  const scan =
-    options?.module === undefined || mode === 'class-based'
-      ? await scanArtifacts(scanFs, dir, specs)
-      : await scanModuleArtifacts(scanFs, dir, options.module);
+  const duplicates: Finding[] = [];
+  // Two files of one family with one base name would bind one symbol twice. The
+  // scan refuses rather than alias them; the diagnosis reports it as E016 and
+  // carries an empty scan, so generate and sync refuse instead of writing a
+  // barrel that would drop a file.
+  const guarded = async (read: () => Promise<ArtifactScanAll>): Promise<ArtifactScanAll> => {
+    try {
+      return await read();
+    } catch (cause) {
+      if (!(cause instanceof DuplicateArtifactNameError)) throw cause;
+      duplicates.push({ kind: 'duplicate-name', family: cause.family, paths: cause.paths });
+      return { artifacts: {}, skipped: [], adopted: [], manual: [], unreadable: [] };
+    }
+  };
+  const scan = await guarded(() =>
+    options?.module === undefined
+      ? scanArtifacts(scanFs, dir, specs)
+      : scanModuleArtifacts(scanFs, dir, options.module, mode),
+  );
   const findings: Finding[] = [
     ...modules.rejected.map((path) => ({ kind: 'module-rejected' as const, path })),
     ...modules.skipped.map((skip) => ({
@@ -147,11 +174,18 @@ export async function diagnoseProject(
       findings.push({ kind: 'artifact-unreadable', ...unreadable });
   };
   addScan(scan);
+  for (const issue of modules.unreadable ?? [])
+    findings.push({ kind: 'artifact-unreadable', ...issue });
   const legacy = await readLegacyHttpFiles(fs, dir);
   if (legacy.length > 0) findings.push({ kind: 'legacy-layout', files: legacy });
   if (legacyRegistrarNotice(config).length > 0) findings.push({ kind: 'legacy-registrar' });
-  // `generate` reports what it always reported; an unreadable artifact is check's.
-  const generateFindings = findings.filter((finding) => finding.kind !== 'artifact-unreadable');
+  // File-read failures remain check's; incomplete directory walks are also
+  // reported by generate, so a skipped subfolder never disappears silently.
+  const generateFindings = findings.filter(
+    (finding) =>
+      finding.kind !== 'artifact-unreadable' ||
+      ['unsafe-directory', 'depth-limit', 'unreadable-directory'].includes(finding.reason),
+  );
   findings.push(...(await diagnoseBarrels(fs, dir, specs, scan.artifacts)));
   const presentBarrels = new Set<string>();
   let hasSeams = false;
@@ -182,6 +216,17 @@ export async function diagnoseProject(
     const finding = wiringFinding(config, barrel, site.symbols, site.site);
     if (finding !== undefined) findings.push(finding);
   }
+  // A class-based module index registers the module's function controllers,
+  // so a class-based config needs registerModules beside MODULES.
+  if (mode === 'class-based' && config !== '' && presentBarrels.has('src/modules/index.ts')) {
+    const finding = wiringFinding(
+      config,
+      'src/modules/index.ts',
+      ['registerModules'],
+      'registerModules',
+    );
+    if (finding !== undefined) findings.push(finding);
+  }
   if (configRead.kind === 'unreadable')
     findings.push({ kind: 'config-unreadable', path: 'setu.config.ts', reason: configRead.reason });
   else if (config === '' && wiredBarrels.length > 0)
@@ -194,39 +239,62 @@ export async function diagnoseProject(
     if (activation.kind !== 'source' || !moduleActive(activation.source, symbol, mode))
       findings.push({ kind: 'module-inactive', module, symbol, mode });
     else if (config !== '' && options?.module === module) {
-      const symbol = mode === 'class-based' ? 'MODULES' : 'registerModules';
+      // A class-based config needs both: MODULES for the class controllers and
+      // registerModules for each module's function controllers.
       const code = withoutImports(maskSourceCode(config));
-      if (code === undefined || !new RegExp(`\\b${symbol}\\b`).test(code))
-        moduleWiring.push({
-          kind: 'unwired',
-          barrel: 'src/modules/index.ts',
-          symbols: [symbol],
-          site: mode === 'class-based' ? 'modules' : 'registerModules',
-          outcome: code === undefined ? 'unclassifiable' : 'unwired',
-        });
+      const required: readonly (readonly [symbol: string, site: string])[] =
+        mode === 'class-based'
+          ? [
+              ['MODULES', 'modules'],
+              ['registerModules', 'registerModules'],
+            ]
+          : [['registerModules', 'registerModules']];
+      for (const [symbol, site] of required)
+        if (code === undefined || !new RegExp(`\\b${symbol}\\b`).test(code))
+          moduleWiring.push({
+            kind: 'unwired',
+            barrel: 'src/modules/index.ts',
+            symbols: [symbol],
+            site,
+            outcome: code === undefined ? 'unclassifiable' : 'unwired',
+          });
     }
-    if (mode !== 'functional') continue;
-    const internal = await scanModuleArtifacts(scanFs, dir, module);
+    const internal = await guarded(() => scanModuleArtifacts(scanFs, dir, module, mode));
+    if (options?.module === undefined) {
+      addScan(internal);
+      for (const issue of internal.unreadable)
+        if (['unsafe-directory', 'depth-limit', 'unreadable-directory'].includes(issue.reason))
+          generateFindings.push({ kind: 'artifact-unreadable', ...issue });
+    }
     moduleArtifacts.set(module, internal.artifacts);
-    if (options?.module === undefined) addScan(internal);
     const moduleDir = `src/modules/${module}`;
+    // A class-based index lists only the module's function controllers; its
+    // class controllers are listed by the module's own `@Module` declaration.
+    const family =
+      mode === 'functional'
+        ? FUNCTIONAL_CONTROLLERS_SEAM
+        : { ...CONTROLLERS_SEAM, schematic: FUNCTION_CONTROLLER_ARTIFACTS };
     findings.push(
       ...(await diagnoseBarrels(
         fs,
         dir,
-        [FUNCTIONAL_CONTROLLERS_SEAM, FUNCTIONAL_ROUTES_SEAM].map((spec) => ({
-          ...spec,
-          dir: moduleDir,
-          barrel: `${moduleDir}/index.ts`,
-        })),
+        [{ ...family, dir: moduleDir, barrel: `${moduleDir}/index.ts` }],
         internal.artifacts,
       )),
     );
   }
+  if (layout === 'mixed') {
+    // Reported by generate too: it is why a top-level generator now refuses.
+    const mixed: Finding = { kind: 'mixed-layout', files: await flatArtifactFiles(fs, dir) };
+    findings.push(mixed);
+    generateFindings.push(mixed);
+  }
+  findings.push(...duplicates, ...(await unresolvedImports(fs, dir, modules.names, mode, config)));
   const starter = composingStarter(config);
   return {
     ...(starter === undefined ? {} : { starter }),
     mode,
+    layout,
     artifacts: scan.artifacts,
     adopted: scan.adopted,
     modules: modules.names,
@@ -241,4 +309,57 @@ export async function diagnoseProject(
     presentBarrels,
     hasSeams,
   };
+}
+
+/**
+ * Finds relative imports the CLI wrote that no longer resolve (E015): in the
+ * barrels and module indexes it owns, in class-based module declarations it
+ * edits, and in the config's registration lines. A moved or deleted file
+ * otherwise surfaces only as a type error or a failed boot.
+ *
+ * @param fs - The filesystem to read through
+ * @param dir - The project root
+ * @param modules - The admitted modules
+ * @param mode - The project's generator mode
+ * @param config - The config text, empty when absent
+ * @returns One finding per unresolved specifier
+ */
+async function unresolvedImports(
+  fs: IFileSystem,
+  dir: string,
+  modules: readonly string[],
+  mode: GeneratorMode,
+  config: string,
+): Promise<readonly Finding[]> {
+  const files = [
+    'src/controllers/index.ts',
+    'src/services/index.ts',
+    'src/modules/index.ts',
+    ...modules.flatMap((module) => [
+      `src/modules/${module}/index.ts`,
+      ...(mode === 'class-based' ? [`src/modules/${module}/${module}.module.ts`] : []),
+    ]),
+  ];
+  const findings: Finding[] = [];
+  const check = async (path: string, source: string, only?: RegExp): Promise<void> => {
+    const lexed = lexImportSpecifiers(source);
+    if (lexed.kind !== 'ok') return;
+    const base = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
+    for (const span of lexed.spans) {
+      if (!span.value.startsWith('./') && !span.value.startsWith('../')) continue;
+      if (only !== undefined && !only.test(span.value)) continue;
+      try {
+        await fs.stat(joinPath(dir, normalizeRelative(`${base}/${span.value}`)));
+      } catch {
+        findings.push({ kind: 'unresolved-import', path, specifier: span.value });
+      }
+    }
+  };
+  for (const path of files) {
+    const read = await readBarrel(fs, joinPath(dir, path));
+    if (read.kind === 'source') await check(path, read.source);
+  }
+  // Only the registration lines: the barrels under src/ the CLI wires in.
+  if (config !== '') await check('setu.config.ts', config, /^\.\/src\/.*\/index\.ts$/);
+  return findings;
 }

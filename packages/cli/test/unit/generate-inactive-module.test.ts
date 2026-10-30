@@ -43,6 +43,15 @@ const CONFIG_FUNCTIONAL_WIRED = [
 
 /** A class-based config that passes the aggregate array to `DecoratorPlugin`. */
 const CONFIG_CLASS_WIRED = [
+  "import { MODULES, registerModules } from './src/modules/index.ts';",
+  '',
+  'export const config = DecoratorPlugin({ modules: [...MODULES] });',
+  'registerModules(app.router, app.services);',
+  '',
+].join('\n');
+
+/** A class-based config with the class controllers wired but not the function ones. */
+const CONFIG_CLASS_NO_REGISTRAR = [
   "import { MODULES } from './src/modules/index.ts';",
   '',
   'export const config = DecoratorPlugin({ modules: [...MODULES] });',
@@ -152,7 +161,7 @@ describe('setu generate --module reports an inactive module', () => {
     expect(step.err).toContain(INACTIVE_HEADER);
     expect(step.err).toContain("  import { registerOrdersModule } from './orders/index.ts';");
     expect(step.err).toContain('  registerOrdersModule(router, services);');
-    expect(step.writes).toContain('/app/src/modules/orders/summary.routes.ts');
+    expect(step.writes).toContain('/app/src/modules/orders/summary.controller.ts');
   });
 
   it('reports a module that is imported by the barrel but no longer called or listed', async () => {
@@ -228,7 +237,7 @@ describe('setu generate --module reports an inactive module', () => {
     expect(step.err).toContain("  import { registerOrdersModule } from './orders/index.ts';");
     expect(step.err).toContain('  registerOrdersModule(router, services);');
     expect(step.writes).toEqual([]);
-    expect(h.fs.has('/app/src/modules/orders/summary.routes.ts')).toBe(false);
+    expect(h.fs.has('/app/src/modules/orders/summary.controller.ts')).toBe(false);
   });
 
   it('names the config import when the barrel is active but the config is not wired', async () => {
@@ -373,6 +382,19 @@ describe('setu generate --module reports an inactive module', () => {
       'setu.config.ts does not reference MODULES; add it to DecoratorPlugin:',
     );
     expect(step.err).not.toContain(INACTIVE_HEADER);
+  });
+
+  it('names registerModules when a class-based config wires only MODULES', async () => {
+    // A class-based module registers its function controllers from its managed
+    // index, so the config needs registerModules beside MODULES.
+    const h = classHarness(CONFIG_CLASS_NO_REGISTRAR);
+    expect((await runStep(h, ['module', 'orders'])).code).toBe(0);
+
+    const step = await runStep(h, ['route', 'audit', '--module', 'orders']);
+
+    expect(step.code).toBe(0);
+    expect(step.err).toContain('setu.config.ts does not reference registerModules; add:');
+    expect(step.err).not.toContain('does not reference MODULES');
   });
 
   it('stays silent for a wired class-based config', async () => {

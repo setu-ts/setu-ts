@@ -264,10 +264,14 @@ describe('interrupted scaffolding on the real filesystem', () => {
             ? Promise.reject(new Error('read-only barrel'))
             : fs.writeFile(path, data),
       });
-      expect(await failing.run(['generate', 'module', 'orders'])).toBe(1);
+      // The first module also moves the flat greeting example and removes the
+      // flat barrels; a failed barrel write must restore all of it.
+      const adopt = ['generate', 'module', 'orders', '--adopt-controllers'];
+      expect(await failing.run(adopt)).toBe(1);
+      expect(failing.err.text()).toContain('read-only barrel');
       expect(failing.err.text()).not.toContain('rollback incomplete');
       expect(await snapshot(project)).toEqual(before);
-      expect(await cli(project, fs).run(['generate', 'module', 'orders'])).toBe(0);
+      expect(await cli(project, fs).run(adopt)).toBe(0);
       expect(await nodeFs.readFile(barrel, 'utf8')).toContain('Orders');
     });
   });

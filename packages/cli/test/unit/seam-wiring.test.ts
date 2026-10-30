@@ -52,17 +52,17 @@ describe('seam selection', () => {
     const bare = seamsFor(new Set())
       .map((s) => s.schematic)
       .sort();
-    // `controller` is ungated since M70h/E8 and appears here in its functional
-    // shape, sharing the `route` barrel rather than adding one.
-    expect(bare).toEqual(['controller', 'middleware', 'plugin', 'route']);
+    // `controller` is ungated since M70h/E8 and is the one route-registering
+    // family: class controllers and function controllers share its barrel.
+    expect(bare).toEqual(['controller', 'middleware', 'plugin']);
   });
 
   it('selects the functional seams, not the decorator-gated ones, for a functional host', () => {
     // A FUNCTIONAL host installs every backing plugin except the decorator, so
     // the mode is functional. The decorator-gated seams (the class-based
     // `service` barrel and `ingress`) are dropped by the gate, while
-    // `controller` and `route` are swapped to their functional shapes, which
-    // are ungated and selected. No single host selects EVERY seam: a functional
+    // `controller` admits only function controllers, and is ungated and
+    // selected. No single host selects EVERY seam: a functional
     // one lacks the decorator, and a class-based one routes command/query/event
     // through ingress instead (§3.4).
     const functional = new Set(
@@ -77,7 +77,6 @@ describe('seam selection', () => {
     // The functional shapes and the plugin-gated seams are present.
     for (const schematic of [
       'controller',
-      'route',
       'middleware',
       'plugin',
       'health-indicator',
@@ -109,11 +108,11 @@ describe('seam selection', () => {
   });
 
   it('always selects the three ungated seams, whatever the host installs', () => {
-    // `route`, `middleware` and `plugin` declare no `requiresPlugin`, because their
-    // registration sites are the app itself rather than a plugin's options.
+    // `controller`, `middleware` and `plugin` declare no `requiresPlugin`, because
+    // their registration sites are the app itself rather than a plugin's options.
     for (const installed of [new Set<string>(), new Set(['cqrs-plugin'])]) {
       const selected = seamsFor(installed).map((s) => s.schematic);
-      expect(selected).toContain('route');
+      expect(selected).toContain('controller');
       expect(selected).toContain('middleware');
       expect(selected).toContain('plugin');
     }
@@ -152,7 +151,7 @@ describe('seam selection', () => {
     expect(seamPluginSpreads([seamSpecFor('health-indicator')!])).toEqual([]);
   });
 
-  it('leaves the decorator wiring to withModuleSeam, and contributes extras instead', () => {
+  it('leaves the decorator wiring to withDecoratorSeams, and contributes extras instead', () => {
     // Two functions rewriting the same `args` would silently overwrite one another, so
     // `withPluginOptionSeams` must not touch `decorator-plugin`.
     const wirings = [{ pkg: 'decorator-plugin', symbol: 'DecoratorPlugin', args: 'KEEP' }];
@@ -266,7 +265,6 @@ describe('seam hosts', () => {
     expect(barrels(fullStack)).toEqual([
       'src/controllers/index.ts',
       'src/middleware/index.ts',
-      'src/modules/index.ts',
       'src/plugins/index.ts',
     ]);
     expect(fullStack.setupCalls ?? []).toContain(

@@ -60,6 +60,8 @@ describe('feature module generated tasks', () => {
       try {
         expect(await run(['new', 'shop', '--template', 'rest', '--runtime', target])).toBe(0);
         for (const args of [
+          // The scaffold's untouched (on npm targets, Prettier-formatted)
+          // greeting example moves in without --adopt-controllers.
           ['module', 'invoices'],
           ['service', 'pricing', '--module', 'invoices'],
           ['route', 'summary', '--module', 'invoices'],
@@ -178,9 +180,11 @@ describe('feature module generated tasks', () => {
           const response = await fetch(`${origin}/other`);
           expect(response.status).toBe(200);
           expect(await response.json()).toEqual({ items: [] });
+          // The greeting example was adopted into the deleted module, so it went
+          // with it.
           const greeting = await fetch(`${origin}/greetings/Setu`);
-          expect(greeting.status).toBe(200);
-          expect(await greeting.json()).toEqual({ message: 'Hello, Setu!' });
+          expect(greeting.status).toBe(404);
+          await greeting.body?.cancel();
         };
         if (target === 'deno') await withGeneratedServer(project, afterDelete);
         else {

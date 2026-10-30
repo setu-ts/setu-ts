@@ -5,7 +5,7 @@
  */
 import type { MiddlewareWiring, TemplateDefinition, Wiring } from './registry.ts';
 import { FUNCTIONAL_MODULE_MANIFEST } from './module-seam.ts';
-import { REST_SHOWCASE, REST_SHOWCASE_FILES, restShowcaseFiles } from './rest-showcase.ts';
+import { REST_SHOWCASE, REST_SHOWCASE_FILES } from './rest-showcase.ts';
 import { CLASS_BASED_SHOWCASE_EXAMPLE, GREETING_ROUTES } from './class-based-showcase.ts';
 import type { TemplateRecipe } from './style.ts';
 import { composeHost } from './style.ts';
@@ -102,12 +102,11 @@ export const REST_RECIPE: TemplateRecipe = {
     },
   },
   showcase: {
-    // The functional showcase reaches its plain service by a direct import,
-    // exactly as the functional generators do.
+    // The functional showcase is a function controller reaching its plain
+    // service by a direct import, exactly as the functional generators do.
     functional: {
       files: REST_SHOWCASE_FILES,
-      filesForRuntime: restShowcaseFiles,
-      seeded: { modules: [REST_SHOWCASE] },
+      seeded: { controller: [REST_SHOWCASE], service: [REST_SHOWCASE] },
       routes: GREETING_ROUTES,
     },
     // The class-based showcase is a decorated controller and an injected

@@ -1,8 +1,7 @@
 /** Pure, additive setup for server-rendered views. Existing user choices always win. */
 import type { TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
-import { composingStarter } from '../utils/starter-arms.ts';
-import { factoryScope, maskComments, referencesIdentifier } from '../devtool/sources.ts';
+import { maskComments, referencesIdentifier } from '../devtool/sources.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import {
   renderThemeScript,
@@ -22,6 +21,13 @@ interface IViewSetupInput {
   readonly viewPluginRegistered: boolean;
   /** Reuses the command's classified insertion, without a circular import. */
   readonly wireStatic: (source: string, args: string) => string | undefined;
+  /**
+   * Where the example page's function controller goes: `src/controllers/` in a
+   * flat project, the `--module` directory in a modular one.
+   */
+  readonly controllerDir: string;
+  /** The controllers barrel or module index, regenerated to register the controller. */
+  readonly registration: GeneratedFile;
 }
 
 interface IViewSetupPlan {
@@ -29,36 +35,6 @@ interface IViewSetupPlan {
   readonly manifestEdits: readonly GeneratedFile[];
   readonly configEdits: readonly GeneratedFile[];
   readonly notes: readonly string[];
-}
-
-/** Adds a route only at the single generated registration statement in the app factory. */
-function withRouteRegistration(source: string): string | undefined {
-  const scope = factoryScope(source);
-  const visible = maskComments(source);
-  if (
-    scope === undefined ||
-    visible === undefined ||
-    composingStarter(source) !== undefined ||
-    referencesIdentifier(visible, 'registerViewRoutes') ||
-    visible.includes('./src/views/routes.ts')
-  )
-    return undefined;
-  const code = scope.code.slice(scope.start, scope.end);
-  const statements = [
-    ...code.matchAll(/\bregisterGeneratedRoutes\(app\.router,\s*app\.services\);/g),
-  ];
-  if (statements.length !== 1) return undefined;
-  const statement = statements[0]!;
-  const end = scope.start + statement.index + statement[0].length;
-  const lineStart = source.lastIndexOf('\n', scope.start + statement.index) + 1;
-  const indent = source.slice(lineStart, scope.start + statement.index);
-  if (indent.trim() !== '') return undefined;
-  return (
-    "import { registerViewRoutes } from './src/views/routes.ts';\n" +
-    source.slice(0, end) +
-    `\n${indent}registerViewRoutes(app.router);` +
-    source.slice(end)
-  );
 }
 
 /** Narrows plain JSON objects, refusing arrays and primitives at every edited level. */
@@ -213,7 +189,6 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
   const viewFiles: GeneratedFile[] = [
     { path: 'src/views/layout.tsx', contents: renderLayout(workers) },
     { path: 'src/views/home.tsx', contents: HOME },
-    { path: 'src/views/routes.ts', contents: ROUTES },
     ...(workers
       ? []
       : [
@@ -226,6 +201,14 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
   for (const file of viewFiles) {
     if (existing.has(file.path)) note(file.path);
     else files.push(file);
+  }
+  // The page is served by a function controller, registered like every other
+  // controller: through the barrel or module index `setu.config.ts` already calls.
+  const controllerPath = `${input.controllerDir}/${VIEWS_CONTROLLER}`;
+  if (existing.has(controllerPath)) note(controllerPath);
+  else {
+    files.push({ path: controllerPath, contents: renderViewsController(input.controllerDir) });
+    configEdits.push(input.registration);
   }
   let config = existing.get('setu.config.ts');
   const original = config;
@@ -253,18 +236,9 @@ export function planViewSetup(input: IViewSetupInput): IViewSetupPlan {
         });
     }
   } else notes.push('CSS on Workers is served through Wrangler static assets; see docs/mvc.md.');
-  const routes =
-    input.viewPluginRegistered && !workers && config !== undefined
-      ? withRouteRegistration(config)
-      : undefined;
-  if (routes !== undefined) config = routes;
-  else if (referencesIdentifier(maskComments(config ?? '') ?? '', 'registerViewRoutes'))
-    note(
-      "setu.config.ts registerViewRoutes(app.router); after registerGeneratedRoutes(app.router, app.services); import { registerViewRoutes } from './src/views/routes.ts'; requires ViewPlugin() registered first",
-    );
-  else
+  if (!input.viewPluginRegistered)
     notes.push(
-      "Register registerViewRoutes(app.router); after registerGeneratedRoutes(app.router, app.services); with import { registerViewRoutes } from './src/views/routes.ts'; the route needs ViewPlugin() registered first. Existing registration or config shape was preserved.",
+      `Register ViewPlugin() in setu.config.ts; ${controllerPath} renders /ui through it.`,
     );
   if (config !== original && config !== undefined)
     configEdits.push({ path: 'setu.config.ts', contents: config });
@@ -293,15 +267,28 @@ export function Home() {
   );
 }
 `;
-const ROUTES = `import type { IRouterApi } from '@setu-ts/common';
-import { renderView } from '@setu-ts/view-plugin';
-import { Home } from './home.tsx';
+/** The example page's controller file name. */
+export const VIEWS_CONTROLLER = 'views.controller.ts';
 
-/** Registers the example page separately from generated module routes. */
-export function registerViewRoutes(router: IRouterApi): void {
+/**
+ * Renders the example page's function controller.
+ *
+ * @param dir - The directory it is written into, which decides the import path
+ * @returns The controller source
+ */
+function renderViewsController(dir: string): string {
+  const up = '../'.repeat(dir.split('/').length - 1);
+  return `import type { IRouterApi, IServiceRegistry } from '@setu-ts/common';
+import { renderView } from '@setu-ts/view-plugin';
+import { Home } from '${up}views/home.tsx';
+
+/** Registers the example server-rendered page: a function controller. */
+export function registerViewsRoutes(router: IRouterApi, services?: IServiceRegistry): void {
+  void services;
   router.get('/ui', (ctx) => renderView(ctx, Home, {}));
 }
 `;
+}
 
 function renderLayout(workers: boolean): string {
   return `import type { Child } from 'hono/jsx';

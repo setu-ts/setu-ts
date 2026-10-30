@@ -14,9 +14,9 @@
  *
  * @module
  */
+import { artifactNames } from '../utils/artifact-path.ts';
 
 import type { DerivedNames } from '../utils/names.ts';
-import { deriveNames } from '../utils/names.ts';
 import { GENERATED_LINE_WIDTH } from '../templates/root-settings.ts';
 
 /**
@@ -25,7 +25,9 @@ import { GENERATED_LINE_WIDTH } from '../templates/root-settings.ts';
  * Keyed by SCHEMATIC rather than by directory because two schematics can share one
  * barrel — `command-handler` and `query-handler` both live in `src/cqrs/` and both
  * appear in `src/cqrs/index.ts` — and that barrel has to list each kind under its
- * own export.
+ * own export. A family with an alternative shape also records that shape
+ * under its declared metadata key; the primary family list still contains
+ * every admitted artifact.
  */
 export type SeamArtifacts = Readonly<Record<string, readonly string[]>>;
 
@@ -46,11 +48,11 @@ export interface SeamSpec {
    */
   readonly suffix: string;
   /**
-   * The symbols the barrel imports FROM one artifact module.
+   * The symbols the barrel imports from the default shape of one artifact.
    *
    * Read by two callers deliberately, so they cannot disagree: `renderBarrel` names
    * these in the import it emits, and `readArtifactNames` requires the file to export
-   * every one of them before admitting it.
+   * every one of them, or the declared alternative shape, before admitting it.
    *
    * Splitting those two was a real defect. `middleware` and `metric` each gained a
    * second export in M60, and a project that generated one of them earlier got a
@@ -61,6 +63,21 @@ export interface SeamSpec {
    * @returns The symbols, in the order the import should name them
    */
   readonly importSymbols: (names: DerivedNames) => readonly string[];
+  /**
+   * An alternative export shape within this family. The scan records the paths
+   * admitted by that shape under `artifactsKey`, alongside the full family list.
+   * This is shape metadata, not another suffix or registration family.
+   */
+  readonly alternative?: {
+    readonly artifactsKey: string;
+    readonly importSymbols: (names: DerivedNames) => readonly string[];
+    /**
+     * The barrel lists only this shape. A class-based module index registers its
+     * function controllers; its class controllers are listed by the `@Module`
+     * declaration, so the scan must not report them as adopted into the index.
+     */
+    readonly onlyShapeInBarrel?: boolean;
+  };
   /** The barrel's path, relative to the project root. */
   readonly barrel: string;
   /**
@@ -281,9 +298,9 @@ export function seamHeader(command: string, wiring: readonly string[]): string {
  * of its own, so the symbols this emits are exactly the ones the scanner requires the
  * file to export.
  *
- * @param names - Artifact names (kebab-case), already sorted
+ * @param names - Family-relative artifact paths without suffixes, already sorted
  * @param symbols - The spec's `importSymbols`
- * @param module - Maps an artifact's kebab name to the specifier to import from
+ * @param module - Maps an artifact's relative path to its import specifier
  * @returns The import statements, one per line, or `''` when there are none
  */
 export function renderSeamImports(
@@ -292,7 +309,7 @@ export function renderSeamImports(
   module: (kebab: string) => string,
 ): string {
   if (names.length === 0) return '';
-  return names.map((name) => renderImport(symbols(deriveNames(name)), module(name))).join('\n');
+  return names.map((name) => renderImport(symbols(artifactNames(name)), module(name))).join('\n');
 }
 
 /**

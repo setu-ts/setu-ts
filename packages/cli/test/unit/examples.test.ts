@@ -203,9 +203,9 @@ describe('example scaffolding', () => {
     expect(h.fs.writes).toEqual([]);
     // Interrupted while a download is in flight: fetch rejects with its own AbortError.
     const controller = new AbortController();
-    const midway = harness({}, async (_input, init) => {
+    const midway = harness({}, (_input, init) => {
       controller.abort();
-      throw init?.signal?.reason ?? new Error('aborted');
+      return Promise.reject(init?.signal?.reason ?? new Error('aborted'));
     });
     expect(
       await midway.run(['new', 'demo', '--example', 'minimal'], { interrupt: controller.signal }),
@@ -216,7 +216,7 @@ describe('example scaffolding', () => {
   });
   it('bounds every download with a timeout signal combined with the interrupt', async () => {
     const signals: (AbortSignal | null | undefined)[] = [];
-    const h = harness({}, async (input, init) => {
+    const h = harness({}, (input, init) => {
       signals.push(init?.signal);
       return repositoryFetch(input, init);
     });
@@ -227,9 +227,9 @@ describe('example scaffolding', () => {
     ).toBe(0);
     expect(signals.length).toBeGreaterThan(0);
     expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(true);
-    const timedOut = harness({}, async () => {
-      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
-    });
+    const timedOut = harness({}, () =>
+      Promise.reject(new DOMException('The operation was aborted due to timeout', 'TimeoutError')),
+    );
     expect(await timedOut.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
     expect(timedOut.err.text()).toContain('due to timeout');
     expect(timedOut.err.text()).toContain('Nothing was written');

@@ -16,7 +16,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'generate',
     packages: [],
     applies: () => true,
-    text: 'Use setu generate first, then edit. Follow printed registration guidance, including class-based module membership. Never edit CLI-owned src/*/index.ts barrels: generation rewrites them.',
+    text: 'Use setu generate, then edit; follow printed guidance. Never edit CLI-owned index.ts files. Kernel routes live only in *.controller.ts: src/controllers/ (services: src/services/); after the first setu g module, only src/modules/<name>/ (--module). Moved one? setu sync.',
   },
   {
     id: 'services',
@@ -35,7 +35,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'functional',
     packages: [],
     applies: (f) => f.style === 'functional',
-    text: 'Routes: router.get or `RouteDefinition` (middleware, handler). Return ctx.response.json(value); status(code) chains. `MiddlewareFunction`: (ctx, next); await next() or respond and return. Features: src/modules/<name>/; schemas: <name>.schemas.ts. Bind const body = validateBody(S); use body as middleware, read body.value(ctx).',
+    text: 'Routes: router.get or `RouteDefinition` (middleware, handler). Return ctx.response.json(value); status(code) chains. `MiddlewareFunction`: (ctx, next); await next() or respond and return. Schemas: <name>.schemas.ts. Bind const body = validateBody(S); use body as middleware, read body.value(ctx).',
   },
   {
     id: 'class-based',
@@ -89,13 +89,13 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
     id: 'full-stack',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime !== 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Dev: start:dev (Vite in-process; no build). Production: built output (Node: build, start; Deno start builds; Bun: frontend build, start). Style: Tailwind, app/components/ui/, cn from cn to merge classes. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
+    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Dev: start:dev (Vite in-process; no build). Production: Node build then start; Deno start builds; Bun build then start. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs /api/.',
   },
   {
     id: 'full-stack-workers',
     packages: ['react-router-plugin'],
     applies: (f) => f.installed.has('react-router-plugin') && f.runtime === 'cloudflare-workers',
-    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind and app/components/ui/; merge classes with cn from cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/.',
+    text: 'Routes: app/routes/. Loaders use service context keys from setu.config.ts; no module-level caches. Develop: dev script (wrangler dev builds client and server first; no in-process Vite loop). Ship: deploy script. Style: Tailwind, app/components/ui/, cn. Kernel routes beat pages (setu generate refuses collisions); prefix APIs with /api/.',
   },
   {
     id: 'messaging',
@@ -104,7 +104,7 @@ export const RULE_BLOCKS: readonly IRuleBlock[] = [
       ['messaging-plugin', 'full-stack-starter', 'microservice-starter'].some((pkg) =>
         f.installed.has(pkg),
       ),
-    text: 'Publish versioned integration-event topics via `CAPABILITIES.MESSAGING`. Consumers: `MessagingPlugin` options, or the starter’s messaging option in setu.config.ts. setu add messaging --broker <name> edits setu.config.ts when it can; otherwise add the line it prints.',
+    text: 'Publish versioned integration-event topics via `CAPABILITIES.MESSAGING`. Consumers: `MessagingPlugin` options or the starter’s messaging option. setu add messaging --broker <name> edits setu.config.ts when it can, else prints the line.',
   },
   {
     id: 'workers',
