@@ -30,7 +30,11 @@ describe('renderDevEntry', () => {
         ),
         'utf8',
       );
-      expect(devEntryVariants(4919, member)).toContain(source);
+      // The capture pins the CLI it was written by; renderings pin the running one.
+      expect(devEntryVariants(4919, member)).toContain(
+        source.replaceAll('@setu-ts/cli@0.10.0', `@setu-ts/cli@${VERSION}`),
+      );
+      // Recognition itself normalizes the version, so the raw capture still matches.
       expect(isDevEntry(source, 4919, member)).toBe(true);
       expect(devEntryPort(source, member)).toBe(4919);
     });

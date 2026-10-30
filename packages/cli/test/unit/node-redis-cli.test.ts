@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { VERSION } from '../../src/version.ts';
 import baseline from '../fixtures/redis-develop-outputs.json' with { type: 'json' };
 import { redisDefaultOutputs } from '../fixtures/redis-default-outputs.ts';
 import { createFakeFs } from '../fixtures/fake-fs.ts';
@@ -206,7 +207,17 @@ describe('node-redis CLI', () => {
         `      QueuePlugin({\n        processors: [...QUEUE_PROCESSORS],\n        adapter: 'redis',\n        ${joined},\n      }),\n`,
       ],
     };
-    const expected: Record<string, string> = { ...baseline };
+    // The capture pins the framework at the release it was taken on; generated output
+    // pins the running CLI's version, so only that version token is normalized.
+    const expected: Record<string, string> = Object.fromEntries(
+      Object.entries(baseline).map(([path, text]) => [
+        path,
+        text.replace(
+          /(@setu-ts\/[a-z0-9-]+@\^?|"@setu-ts\/[a-z0-9-]+": "\^?)0\.10\.0/g,
+          `$1${VERSION}`,
+        ),
+      ]),
+    );
     for (const [path, [before, after]] of Object.entries(relaid)) {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);
