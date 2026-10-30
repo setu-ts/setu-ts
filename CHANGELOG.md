@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Start a project from an example (#528, `@setu-ts/cli`).** `setu new <name> --example <app>`
+  (also `npm create @setu-ts <name> -- --example <app>`) downloads an offered example from the CLI's
+  GitHub release tag and rewrites it into a standalone Node project. Dry-run fetches nothing; failed
+  downloads write nothing. See [Examples](docs/examples.md#before-you-start).
+
 - **node-redis as a supported Redis client (M117, #525, 0.11.0, `@setu-ts/common`, the Redis-backed
   plugins, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`).** `fromNodeRedis(client, options?)` wraps a
   node-redis (`redis` v5/v6) client so every Redis-backed plugin's `client` option takes it: cache,
@@ -226,6 +231,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Agent brief development guidance (M119i, #528, `@setu-ts/cli`).** Briefs list and gloss
+  development commands, distinguish Workers from socket full-stack development, and include
+  messaging guidance for starter compositions. Workspace roots name the member development entry and
+  production start. Existing projects re-run `setu agents`; `setu agents --check` reports their old
+  briefs stale.
 - **`IRedisLockClient.eval` returns `Promise<unknown>` (M117, #525, 0.11.0,
   `@setu-ts/scheduler-plugin`).** It declared `Promise<number | string | null>`, which one adapter
   serving the queue's and idempotency's scripts could not honestly satisfy; the lock ignores the
@@ -489,6 +499,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Full-stack workspace libraries on Node and Bun stay external (#528, `@setu-ts/cli`).** The
+  generated `vite.config.ts` read a library's name only from `deno.json` or `deno.jsonc`, so a Node
+  or Bun library (named in `package.json`) was bundled as a second copy whose module state the
+  server did not share. It now reads `package.json` too. In an existing project, add
+  `'package.json'` to the file list in its `readLibraryManifest`.
+
 - **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, #525, 0.11.0,
   `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
   line however long its options were — a Redis connection read, a nested `options: { … }`, a seam
@@ -587,6 +603,19 @@ All notable changes to this project are documented here. The format follows
   is now refused at boot (see the BREAKING entry above); the second registers as a class provider
   with optional `inject` entries.
 
+- **Documentation that matches the code (M119i, #528).** The upgrade guide, guides, READMEs, agent
+  cards and `PUBLIC_API.md` now state what the code does: links into the released `0.10.0` sections
+  (V10-7), generated Kubernetes probes (V10-8), `swagger-ui-dist` on Deno (V10-15), the Workers
+  full-stack `allowJs` repair (V10-16), which 4xx paths log (V10-39), the module-scoped service
+  token `<module>.<name>-service` (V10-38), three missing 0.10.0 upgrade entries (V10-46, V10-47,
+  V10-48), the service-discovery `RetryPolicy` example (V10-12), the request logger's unscrubbed
+  path (V10-40), the agent cards' `setu add` wording (V10-43), React Router 8 (V10-56),
+  unrepresentable Zod types (V10-57), the worker-pool overshoot (V9-29) and the resilience timeout.
+  Every package README is now compiled by the fence gate, and absolute repository links and links to
+  a heading a release renames are checked. The folded documentation adds M124 auth and M121 starter
+  card guidance, scaffold-first development and getting-started paths, module-identity explanations,
+  npm plugin publishing, a learning path and source walkthroughs for every example with app README
+  pointers, and a homepage create command and current package count.
 - **Prisma input refusals are named 400s (M119e, 0.11.0, `@setu-ts/database-plugin`).** Unknown
   payload arguments become `UnknownPayloadFieldError`; other validation errors and known-request
   `P2007` errors become `InvalidFieldValueError`. Conditional writes use the same mapping, replacing
@@ -1072,7 +1101,7 @@ All notable changes to this project are documented here. The format follows
   `get-users` remain valid OpenAPI, but the SDK refuses their sanitized method-name collision with
   `Duplicate operation name`. **Migration:** check existing declarations, choose distinct nonblank
   ids, regenerate clients and update callers and references to renamed types, components and
-  diagnostics. See `docs/upgrading.md` Unreleased.
+  diagnostics. See `docs/upgrading.md`, `## 0.10.0`.
 
 - **Environment secrets use the config snapshot as a fallback (V9-77, #485, 0.10.0,
   `@setu-ts/secrets-plugin`).** The default `EnvProvider` reads the environment first, then string
@@ -1526,14 +1555,15 @@ All notable changes to this project are documented here. The format follows
   the module's `index.ts`, mounting a module-scoped route or controller at `/<module>/<name>`;
   class-based mode writes the file and prints the `@Module({ providers | controllers })` line to add
   — it never edits the declaration — registering a module-scoped service under the token
-  `<module>-<name>-service`. Every other schematic is app-wide and refuses the flag. A new `schema`
-  schematic (requires `validation-plugin`) writes `src/shared/schemas/<name>.schemas.ts` — or
-  `src/modules/<module>/<name>.schemas.ts` with `--module` — and never edits an existing file; a
-  second run is the ordinary overwrite refusal. `SchematicOptions` gains the optional
-  `targetModule?` and `moduleArtifacts?` fields for custom schematics. `zod` is declared by every
-  template that installs `validation-plugin`, `setu add validation` adds it on every runtime, and
-  `g module`/`g schema` print the runtime's install command (`npm install zod@^4`, `bun add zod@^4`,
-  `deno add npm:zod@^4`) in a project that lacks it.
+  `<module>.<name>-service` (for example `billing.invoice-service`). Every other schematic is
+  app-wide and refuses the flag. A new `schema` schematic (requires `validation-plugin`) writes
+  `src/shared/schemas/<name>.schemas.ts` — or `src/modules/<module>/<name>.schemas.ts` with
+  `--module` — and never edits an existing file; a second run is the ordinary overwrite refusal.
+  `SchematicOptions` gains the optional `targetModule?` and `moduleArtifacts?` fields for custom
+  schematics. `zod` is declared by every template that installs `validation-plugin`,
+  `setu add validation` adds it on every runtime, and `g module`/`g schema` print the runtime's
+  install command (`npm install zod@^4`, `bun add zod@^4`, `deno add npm:zod@^4`) in a project that
+  lacks it.
 - **Generated e2e tests and the `test:e2e` task (M114, `@setu-ts/cli`).** `setu new` emits
   `test/support/server.ts` (CLI-owned; boots the real `createApp()` on a free loopback port) and
   `test/e2e/app.e2e.test.ts` on every socket target; `setu g module` adds
@@ -9846,7 +9876,9 @@ are never hard dependencies. Each is injected through plugin options or imported
 Milestones 0–33 and 41–46. See [ROADMAP.md](ROADMAP.md) for scope per milestone and
 [PUBLIC_API.md](PUBLIC_API.md) for the full exported surface.
 
-[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.8.0...HEAD
+[unreleased]: https://github.com/setu-ts/setu-ts/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.10.0
+[0.9.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.9.0
 [0.8.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.8.0
 [0.7.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.7.0
 [0.6.0]: https://github.com/setu-ts/setu-ts/releases/tag/v0.6.0

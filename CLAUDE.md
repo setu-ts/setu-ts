@@ -710,7 +710,11 @@ here.
   with its own command bound and RESP3 normalization, node-redis outage classification, a `redis`
   trace arm, and `--redis-client` scaffolds through a generated `src/node-redis.ts`) — complete (PR
   #525).
-- **Next milestone** — M119i (documentation that does not match the code, or is missing).
+- **Milestone 119i** (docs + agent cards + `packages/cli` agent briefs + website — documentation
+  that does not match the code, or is missing; V10-7…V10-57 rows plus the folded scope: development
+  commands in briefs, scaffold-first guides, npm plugin publishing, example walkthroughs) — complete
+  (PR #528).
+- **Next milestone** — none scheduled in ROADMAP.md.
 
 ## Verification (run before declaring any work done)
 

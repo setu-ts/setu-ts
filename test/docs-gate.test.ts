@@ -1034,6 +1034,91 @@ describe('documentation gate — local links and anchors', () => {
   });
 });
 
+describe('documentation gate — release-breaking links (M119i)', () => {
+  it('rule 1: accepts a repo blob link to an existing file', async () => {
+    const source = '[api](https://github.com/setu-ts/setu-ts/blob/main/PUBLIC_API.md)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rule 1: accepts a repo tree link to a directory that has a README', async () => {
+    const source = '[common](https://github.com/setu-ts/setu-ts/tree/main/packages/common)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rule 1: refuses a repo blob link to a missing file', async () => {
+    const source = '[gone](https://github.com/setu-ts/setu-ts/blob/main/no-such-file.md)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('does not resolve'))).toBe(true);
+  });
+
+  it('rule 1: refuses a repo blob link whose anchor matches no heading', async () => {
+    const source =
+      '[changelog](https://github.com/setu-ts/setu-ts/blob/main/CHANGELOG.md#no-such-heading)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('matches no heading'))).toBe(true);
+  });
+
+  it('rule 2: accepts a link to upgrading.md without the unreleased anchor', async () => {
+    // Source at the repo root so the bare `docs/upgrading.md` link resolves.
+    const source = '[upgrading](docs/upgrading.md)';
+    const findings = await checkLocalLinks('test.md', source, []);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rule 2: refuses a link to upgrading.md#unreleased', async () => {
+    const source = '[unreleased](docs/upgrading.md#unreleased)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('#unreleased'))).toBe(true);
+  });
+
+  it('rule 2: refuses a link to CHANGELOG.md#unreleased', async () => {
+    const source = '[unreleased](CHANGELOG.md#unreleased)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('#unreleased'))).toBe(true);
+  });
+
+  it('rule 3: accepts a released section that names upgrading.md without Unreleased', () => {
+    const source = '## [0.9.0]\n\n- see docs/upgrading.md for the migration\n';
+    const findings = checkDocument('CHANGELOG.md', source);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rule 3: accepts the Unreleased section even when it names upgrading.md and Unreleased', () => {
+    const source = '## [Unreleased]\n\n- the Unreleased section names docs/upgrading.md\n';
+    const findings = checkDocument('CHANGELOG.md', source);
+    expect(findings.length).toBe(0);
+  });
+
+  it('rule 2: refuses a same-file #unreleased link inside CHANGELOG.md and upgrading.md', async () => {
+    const source = '## [Unreleased]\n\nSee [above](#unreleased).\n';
+    for (const file of ['CHANGELOG.md', 'docs/upgrading.md']) {
+      const findings = await checkLocalLinks(file, source, []);
+      expect(findings.some((f) => f.message.includes('"#unreleased" is refused'))).toBe(true);
+    }
+    // Elsewhere a bare #unreleased is an ordinary same-file anchor.
+    expect(await checkLocalLinks('docs/test.md', source, [])).toEqual([]);
+  });
+
+  it('rule 1: decodes a repository link once, so a literal percent sign does not throw', async () => {
+    const source = '[odd](https://github.com/setu-ts/setu-ts/blob/main/no%25such.md)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('does not resolve'))).toBe(true);
+  });
+
+  it('rule 3: ignores a fenced example inside a released section', () => {
+    const source = '## [0.9.0]\n\n```md\nsee docs/upgrading.md (Unreleased)\n```\n';
+    expect(checkDocument('CHANGELOG.md', source)).toEqual([]);
+  });
+
+  it('rule 3: refuses a released section that names upgrading.md and Unreleased', () => {
+    const source = '## [0.9.0]\n\n- breaking; see docs/upgrading.md (Unreleased)\n';
+    const findings = checkDocument('CHANGELOG.md', source);
+    expect(findings.some((f) => f.message.includes('Unreleased'))).toBe(true);
+  });
+});
+
 describe('documentation gate — script subprocess integration', () => {
   it('check-docs.ts main() exits 0 on a single good file', async () => {
     const cmd = runProcess(process.execPath, [

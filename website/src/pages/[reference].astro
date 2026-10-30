@@ -1,0 +1,11 @@
+---
+import { getCollection } from 'astro:content';
+import RepositoryArticle from '../components/RepositoryArticle.astro';
+export async function getStaticPaths() {
+  const entries = await getCollection('repository');
+  return ['CHANGELOG', 'ARCHITECTURE', 'PUBLIC_API'].map((name) => ({ params: { reference: name.toLowerCase().replace('_', '-') }, props: { entry: entries.find((entry) => entry.id === `${name}.md`)! } }));
+}
+const { entry } = Astro.props;
+if (!entry?.rendered) throw new Error('Missing repository reference');
+---
+<RepositoryArticle html={entry.rendered.html} directory="" />

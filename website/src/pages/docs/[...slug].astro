@@ -15,6 +15,7 @@ import {
   rewriteDocsHtml,
 } from '../../lib/docs-links';
 import { NAV_SLUGS } from '../../lib/docs-nav';
+import { EXAMPLE_FILES } from '../../lib/repository';
 
 type DocEntry = CollectionEntry<'docs'>;
 
@@ -47,7 +48,7 @@ if (!rendered || typeof rendered.html !== 'string') {
   throw new Error(`docs/${entry.id}.md produced no rendered HTML from the glob loader`);
 }
 
-const html = rewriteDocsHtml(rendered.html, entry.id);
+const html = rewriteDocsHtml(rendered.html, 'docs', EXAMPLE_FILES);
 
 // Astro's build-time link check matches ROUTE PATTERNS, not emitted pages — a link to
 // a docs page that no entry produced would pass it. Validate the rewritten /docs/

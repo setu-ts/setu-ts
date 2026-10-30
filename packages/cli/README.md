@@ -47,6 +47,16 @@ It loads a project's TypeScript — `setu.config.ts` for plugin commands, a cust
 
 ## Scaffolding a project
 
+`setu new my-app --example rest-api` downloads a runnable example from the GitHub tag matching this
+CLI's version and creates a standalone Node project. Run `cd my-app && npm install`, then
+`npm run smoke` (the example's proof, which exits), then `npm start` (which serves until stopped).
+`--dry-run` lists paths without fetching; downloads all finish before writing. Examples keep their
+own composition and refuse composition flags such as `--template` and `--workspace`; only
+`--runtime node` is accepted. See
+[the example options](https://setu-ts.dev/docs/cli/#start-from-an-example) and
+[walkthroughs](https://setu-ts.dev/docs/examples/). The template scaffolds below generate their own
+project structure.
+
 ```bash
 setu new my-app                                  # Node, minimal (runtime plugin only)
 setu new my-app --runtime deno                   # node (default) | deno | bun | cloudflare-workers — see below
@@ -346,6 +356,7 @@ install, and `setu generate --help` lists only what is available here.
 | `--dry-run`             | Prints `would create <path>` per file and writes absolutely nothing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--dir <path>`          | Operate on this directory instead of the working directory.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `--runtime <target>`    | On `new`, the entry shape and manifest (default `node`); on `generate`, passed to the schematic, detected from the project when omitted.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--example <app>`       | `new` only: download an offered example as a standalone Node project at the CLI release tag. Dry-run fetches nothing. Refuses template, workspace and composition overrides.                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--template <name>`     | `new` only: choose a scaffold composition. Omitted yields the functional minimal plugin set.                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--env-file <path>`     | `new`, `generate app`: choose the emitted dotenv path for ConfigPlugin-backed non-Workers templates.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `--broker <name>`       | `new` and `add messaging`: the standalone project's message broker (`memory`, `redis`, `rabbitmq`, `nats`, `kafka`, `pubsub`, `service-bus`). Rewrites the template's `MessagingPlugin` wiring, adds the connection variable to the dotenv pair, and emits `docker/compose.yaml` starting the broker. Refused wherever it would be a silent no-op: Cloudflare Workers and templates registering no messaging. Full-stack receives starter options through config reads; `add` preserves existing options, creates only missing Compose files, and leaves dotenv unchanged. |
@@ -445,7 +456,7 @@ retains the entry's recorded port, including while the connector runs. `--devtoo
 explicitly. `ports --reallocate` updates an untouched CLI entry along with the manifest; an edited
 entry refuses the whole operation before writing. Production images exclude the entry and remove the
 development connector pin before installing the remaining import map. See the
-[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-image-is-the-members-only-dependency-source-at-runtime)
+[deployment recipe](https://github.com/setu-ts/setu-ts/blob/main/docs/deployment.md#the-deno-image-is-the-members-only-dependency-source-at-runtime)
 for the complete build sequence and JSONC support.
 
 ## Controllers and modules
@@ -567,6 +578,9 @@ setu db:migrate up 3   # positionals after the name reach the handler
 
 ```typescript
 import type { IPlugin, IPluginContext } from '@setu-ts/common';
+
+// Your migration runner, invoked with the first positional (or `latest`).
+const migrate = (target: string): Promise<void> => Promise.resolve();
 
 export const MigrationsPlugin: IPlugin = {
   name: 'migrations',

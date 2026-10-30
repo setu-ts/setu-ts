@@ -1,7 +1,7 @@
 # @setu-ts/audit-plugin — record immutable audit events
 
-**Add it:** `setu add audit` installs and registers `AuditPlugin()` in `setu.config.ts` with
-in-memory storage. It provides `CAPABILITIES.AUDIT` (`IAuditLogger`).
+**Add it:** `setu add audit` adds and registers `AuditPlugin()` in `setu.config.ts` with in-memory
+storage. It provides `CAPABILITIES.AUDIT` (`IAuditLogger`).
 
 ## Record a completed operation
 

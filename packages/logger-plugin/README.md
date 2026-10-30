@@ -118,6 +118,12 @@ middleware skips building arrival metadata; if no level is readable, it delegate
 `debug()`. Slow requests still add a `warn` entry and thrown errors retain their predicted
 completion status. Durations use the monotonic clock (`runtime.hrtime()`), never a wall-clock epoch.
 
+The request logger records `method` and the concrete `path` (no query string) on receive and on a
+slow request — the path as the client sent it, not a route template. The database-plugin scrub
+covers database errors only, so an identifier in a path segment reaches the log. To keep it out:
+`excludePaths` (skips the request's records), a `redaction` field redactor for `path`, or `redact`
+(which replaces the default secret patterns, so re-list them).
+
 The scaffolded templates opt in with `requestLogging: true` and exclude `/live`, `/ready`, `/health`
 and `/metrics`, so probe traffic writes no line. The plugin's own default stays `false`.
 

@@ -1,7 +1,7 @@
 # @setu-ts/static-plugin — files and single-page applications
 
-**Add it:** `setu add static` installs it and prints `StaticPlugin({ root })`; put that registration
-in `setu.config.ts`. It provides `CAPABILITIES.STATIC_FILES` (`IStaticFiles`).
+**Add it:** `setu add static` adds it and prints `StaticPlugin({ root })`; put that registration in
+`setu.config.ts`. It provides `CAPABILITIES.STATIC_FILES` (`IStaticFiles`).
 
 ## Serve built assets beside API routes
 

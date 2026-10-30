@@ -1,8 +1,8 @@
 # @setu-ts/grpc-plugin — Connect and gRPC-Web services
 
-**Add it:** `setu add grpc` installs it and prints `GrpcPlugin({ services: [] })` for
-`setu.config.ts`; install `@connectrpc/connect` and `@bufbuild/protobuf` too. It provides
-`CAPABILITIES.GRPC` (`IGrpcService`).
+**Add it:** `setu add grpc` adds it and prints `GrpcPlugin({ services: [] })` for `setu.config.ts`;
+install `@connectrpc/connect` and `@bufbuild/protobuf` too. It provides `CAPABILITIES.GRPC`
+(`IGrpcService`).
 
 ## Serve generated service descriptors
 

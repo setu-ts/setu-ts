@@ -20,6 +20,14 @@ describe('composition-specific rule blocks', () => {
       ['functional', 'deno-tests', 'full-stack', 'messaging'],
     ],
     ['cloudflare-workers', 'class-based', ['decorator-plugin'], ['class-based', 'workers']],
+    [
+      'cloudflare-workers',
+      'functional',
+      ['react-router-plugin'],
+      ['functional', 'full-stack-workers', 'workers'],
+    ],
+    ['node', 'functional', ['full-stack-starter'], ['functional', 'node-tests', 'messaging']],
+    ['bun', 'functional', ['microservice-starter'], ['functional', 'bun-tests', 'messaging']],
   ] as const) {
     it(`${runtime} ${style}: selects exactly its ordered applicable rules`, () => {
       const facts = agentFacts({ runtime, style, installed: new Set(plugins) });
@@ -30,6 +38,12 @@ describe('composition-specific rule blocks', () => {
       ).toEqual([...always, ...expected].sort());
     });
   }
+  it('gives Workers the dev script instead of the socket development entry', () => {
+    const text = RULE_BLOCKS.find((r) => r.id === 'full-stack-workers')!.text;
+    expect(text).toContain('dev script');
+    expect(text).toContain('wrangler dev');
+    expect(text).not.toContain('start:dev');
+  });
   it('tells agents to add a listed package rather than hand-write it, only while one is listed', () => {
     const rule = RULE_BLOCKS.find((r) => r.id === 'add-first')!;
     expect(rule.text).toContain('Never hand-write what a package under Not installed provides');

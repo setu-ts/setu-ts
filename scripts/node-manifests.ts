@@ -573,6 +573,7 @@ export function renderRootPackageJson(): string {
         'fmt:check':
           'pnpm exec prettier --check . && deno fmt --no-config --line-width=100 --single-quote --check packages/sdk/test/fixtures/generated-client.ts packages/sdk/test/fixtures/inline-shapes-client.ts packages/sdk/test/fixtures/name-collision-client.ts packages/sdk/test/fixtures/params-client.ts packages/sdk/test/fixtures/redirect-client.ts',
         'docs:exports': 'node scripts/generate-package-exports.ts',
+        'examples:manifest': 'node scripts/generate-example-manifest.ts',
         'test:deno-lane': 'node scripts/test-deno-lane.ts',
         'test:tooling': 'SETU_TEST_MEMBER=tooling vitest run',
         'test:tooling:coverage': 'SETU_TEST_MEMBER=tooling vitest run --coverage',

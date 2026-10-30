@@ -19,6 +19,7 @@ export type ProjectFacts = {
   readonly style: GeneratorMode;
   readonly runtime: TargetRuntime;
   readonly commands: readonly string[];
+  readonly commandBodies: Readonly<Record<string, string>>;
   readonly schematics: readonly string[];
   readonly seams: readonly string[];
   readonly directories: readonly string[];
@@ -32,7 +33,7 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
   if (project.kind !== 'project') throw new Error(`${dir}: not a project`);
   const runtime = await detectTargetRuntime(fs, dir);
   const installed = await detectPlugins(fs, dir);
-  const commands = new Set<string>();
+  const commandBodies: Record<string, string> = {};
   for (const manifest of project.manifests) {
     const read = await readJsonManifest(fs, manifest.path);
     if (read.kind !== 'ok') throw new Error(`Cannot read ${manifest.path}`);
@@ -43,7 +44,7 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
     const entries = record[runtime === 'deno' ? 'tasks' : 'scripts'];
     if (typeof entries === 'object' && entries !== null) {
       for (const [key, value] of Object.entries(entries)) {
-        if (typeof value === 'string') commands.add(key);
+        if (typeof value === 'string') commandBodies[key] = value;
       }
     }
   }
@@ -60,9 +61,18 @@ export async function gatherFacts(fs: IFileSystem, dir: string): Promise<Project
     installed,
     style: generatorMode(installed),
     runtime,
-    commands: ['start', 'check', 'test', 'test:e2e', 'dev', 'build', 'db:migrate'].filter((key) =>
-      commands.has(key),
-    ),
+    commands: [
+      'start',
+      'start:dev',
+      'start:debug',
+      'check',
+      'test',
+      'test:e2e',
+      'dev',
+      'build',
+      'db:migrate',
+    ].filter((key) => Object.hasOwn(commandBodies, key)),
+    commandBodies,
     schematics: availableSchematics(installed).map((entry) => entry.name),
     // A project with modules keeps its controllers and services there, so the
     // flat homes are not part of its map.

@@ -1,6 +1,6 @@
 # @setu-ts/di-plugin — constructor injection and service scopes
 
-**Add it:** `setu add di` installs it; add `DiPlugin()` to `setu.config.ts` yourself. It provides
+**Add it:** `setu add di` adds it; add `DiPlugin()` to `setu.config.ts` yourself. It provides
 `CAPABILITIES.DI_CONTAINER` (`IContainer`).
 
 ## Register dependencies and resolve a scoped service per request

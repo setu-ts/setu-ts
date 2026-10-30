@@ -474,6 +474,9 @@ importers:
       '@setu-ts/service-discovery-plugin':
         specifier: workspace:^
         version: link:../../packages/service-discovery-plugin
+      ioredis:
+        specifier: 5.x
+        version: 5.11.1
       tsx:
         specifier: ^4.20.6
         version: 4.23.15
@@ -547,6 +550,9 @@ importers:
       '@setu-ts/sse-plugin':
         specifier: workspace:^
         version: link:../../packages/sse-plugin
+      ioredis:
+        specifier: 5.x
+        version: 5.11.1
       tsx:
         specifier: ^4.20.6
         version: 4.23.15

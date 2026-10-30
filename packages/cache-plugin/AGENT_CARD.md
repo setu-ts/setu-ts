@@ -1,6 +1,6 @@
 # @setu-ts/cache-plugin — response and value caching
 
-**Add it:** `setu add cache` installs it and inserts `CachePlugin()` (in-memory store) into
+**Add it:** `setu add cache` adds it and inserts `CachePlugin()` (in-memory store) into
 `setu.config.ts`. It provides `CAPABILITIES.CACHE` (`ICacheStore`) and a health indicator.
 
 ## Cache a route's response

@@ -1,6 +1,6 @@
 # @setu-ts/sse-plugin — stream server events to browsers
 
-**Add it:** `setu add sse` installs it and wires `SsePlugin()` in a recognized functional config. It
+**Add it:** `setu add sse` adds it and wires `SsePlugin()` in a recognized functional config. It
 provides `CAPABILITIES.SSE` (`ISseService`).
 
 ## Subscribe a browser to a channel

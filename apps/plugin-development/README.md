@@ -8,3 +8,6 @@ pnpm --dir apps/plugin-development run start
 pnpm --dir apps/plugin-development run smoke
 pnpm --dir apps/plugin-development run test
 ```
+
+Read the [example deep dive](../../docs/examples.md#plugin-development) for the concept and source
+walkthrough.

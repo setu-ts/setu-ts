@@ -20,6 +20,8 @@
 import { access, cp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { rewriteHref } from '../src/lib/docs-links.ts';
+import { EXAMPLE_FILES } from '../src/lib/repository.ts';
 
 const websiteRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const repoRoot = path.dirname(websiteRoot);
@@ -96,7 +98,13 @@ async function integrateApiHtml(directory) {
     if (integrated === withContentBoundary) {
       throw new Error(`graft: API page ${target} has no closing head tag.`);
     }
-    await writeFile(target, integrated);
+    await writeFile(
+      target,
+      integrated.replace(
+        /(<(?:a|link|area)\b[^>]*\shref=")(https:\/\/github\.com\/setu-ts\/setu-ts\/[^"]*)(")/gi,
+        (_match, before, href, after) => `${before}${rewriteHref(href, '', EXAMPLE_FILES)}${after}`,
+      ),
+    );
   }
 }
 

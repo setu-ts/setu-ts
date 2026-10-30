@@ -9,3 +9,6 @@ unchanged.
 pnpm --dir apps/database run start
 pnpm --dir apps/database run smoke
 ```
+
+Read the [example deep dive](../../docs/examples.md#database) for the concept and source
+walkthrough.

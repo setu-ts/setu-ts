@@ -366,6 +366,12 @@ kbd {
   flex-wrap: wrap;
 }
 
+.site-footer-notice {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.85rem;
+}
+
 /* ---- Landing ---- */
 
 .hero {

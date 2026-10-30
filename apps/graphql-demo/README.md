@@ -75,3 +75,6 @@ The app is a private pnpm workspace member. `pnpm run check:apps` runs its `chec
 scripts; the root formatter and linter also cover it. The interop suite remains a separate manual
 check: run `pnpm --dir apps/graphql-demo run interop` when changing the GraphQL transports. Release
 scripts publish framework packages, not this app.
+
+Read the [example deep dive](../../docs/examples.md#graphql-demo) for the concept and source
+walkthrough.

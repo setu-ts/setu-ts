@@ -127,7 +127,7 @@ const queue = app.services.get<IQueue>(CAPABILITIES.QUEUE);
 queue.process<{ to: string }>(
   'send-welcome',
   async (job) => {
-    await mailer.send(job.data);
+    await mailer.send({ to: job.data.to, subject: 'Welcome', text: 'Welcome!' });
   },
   { concurrency: 5 },
 );
@@ -136,7 +136,9 @@ queue.process<{ to: string }>(
 // An unmatched trigger FAILS the invocation. A logger adds a structured
 // warning naming the registered expressions; it never changes the outcome.
 const cron = new WorkersCron({ logger });
-cron.on('0 3 * * *', () => queue.add('rebuild-reports', {}));
+cron.on('0 3 * * *', async () => {
+  await queue.add('rebuild-reports', {});
+});
 
 export default {
   fetch: app.fetch,

@@ -12,23 +12,51 @@ how to add the plugins most applications need.
 
 ## Two ways to start
 
-**Scaffold a project with the CLI** if you want a working layout, tests, configuration, and a
-Dockerfile in one step:
+**Scaffold a project** if you want a working layout, tests, configuration, and a Dockerfile in one
+step:
 
 ```bash
 # Create a REST application on Node (add --runtime deno, bun, or cloudflare-workers to change target)
-npx @setu-ts/cli new my-app --template rest
-cd my-app && npm install && npm start
+npm create @setu-ts my-app -- --template rest
+cd my-app && npm install && npm run start:dev
 ```
 
-`npm create @setu-ts my-app -- --template rest` is the same command, and
+The equivalent create forms are `pnpm create @setu-ts my-app --template rest` and
+`bun create @setu-ts my-app --template rest` (neither needs `--`).
+`npx @setu-ts/cli new my-app --template rest` runs the same generator;
 `npm install --global @setu-ts/cli` makes it `setu new my-app --template rest`.
 
-The generated project's README lists its commands. See the [CLI guide](./cli.md) for templates and
-code generation.
+After `cd my-app`, a Bun target runs `bun install && bun run start:dev`; a Deno target runs
+`deno task start:dev`; Workers runs `npm install && npx wrangler dev`. Use the development entry
+while editing. For a Node production run, use `npm run build && npm start`.
+
+To start from a runnable example instead, use `npm create @setu-ts my-app -- --example rest-api`,
+then `cd my-app && npm install`. `npm run smoke` runs that example's proof and exits; `npm start`
+serves it until you stop it. This creates a standalone Node project and downloads from GitHub at the
+CLI's release tag; see [Examples](./examples.md#before-you-start).
+
+The template-generated project's README lists its commands. See the [CLI guide](./cli.md) for
+templates and code generation.
 
 **Build it by hand** if you want to see every moving part. The rest of this guide does that — it is
 three packages and about ten lines of code.
+
+### A full-stack project
+
+```bash
+npm create @setu-ts my-app -- --template full-stack
+cd my-app && npm install && npm run start:dev
+```
+
+The full-stack development entry runs Vite in the application process and serves route edits without
+a production build. Node uses `npm run start:dev`, Bun `bun run start:dev`, and Deno
+`deno task start:dev`. Workers uses `npm run dev`: Wrangler builds the client and server first,
+without the in-process Vite loop or hot module replacement.
+
+Production uses built output: Node runs `npm run build` then `npm start`; Bun runs `bun run build`
+then `bun run start`; Deno's `deno task start` builds first. Workers ships with `npm run deploy`.
+See [React Router development](./react-router-dev.md#in-a-scaffolded-project) for the loop and
+[production builds](./cli.md#production-build-setu-build) for the service build.
 
 ## Installation
 

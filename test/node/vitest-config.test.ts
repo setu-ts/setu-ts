@@ -129,6 +129,7 @@ it('widens tooling and preserves the frozen pre-retirement script coverage set',
     'scripts/release-shape.ts',
     'scripts/test-partition-rules.ts',
     'scripts/publication-hold.ts',
+    'scripts/generate-example-manifest.ts',
   ];
   // The frozen inventory plus the helpers M111e2 added, which meet the same bar.
   expect([...(configurationFor('tooling').test?.coverage?.include ?? [])].sort()).toEqual(

@@ -287,7 +287,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: PORTABLE,
   },
   'react-router-plugin': {
-    description: 'React Router v7 framework-mode SSR with file-based routing, as a plugin',
+    description: 'React Router 8 framework-mode SSR with file-based routing, as a plugin',
     runtimeCompat: PORTABLE,
   },
   'worker-pool-plugin': {

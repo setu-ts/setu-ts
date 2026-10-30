@@ -377,6 +377,11 @@ health bridge.
   refusing every `null` origin, set `csrf: { acceptNullOriginSameOrigin: false }`.
 - **Swagger UI `{ baseUrl }`:** install `swagger-ui-dist` at exactly `5.33.3`
   (`npm install swagger-ui-dist@5.33.3 --save-exact`); a newer release fails the integrity hashes.
+  On Deno, add `"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's
+  `deno.json` (in a workspace, the member's — as generated members do — or the root's), run
+  `deno install` from the workspace root, and keep `--allow-read` on the start task. The plugin's
+  optional import resolves from the installed `node_modules`, so an entry with no install still
+  fails at startup.
 - **Telemetry peers:** install
   `@opentelemetry/api@~1.9.0 @opentelemetry/sdk-trace-base@^2.9.0 @opentelemetry/resources@^2.9.0 @opentelemetry/context-async-hooks@^2.0.0`;
   unpinned names fail with ERESOLVE today.
@@ -789,9 +794,13 @@ Programmatic health reports stay full and the gRPC bridge is unchanged; diagnost
 indicator `data` and are unaffected.
 
 **V9-49:** Swagger UI now self-hosts its assets. Install `swagger-ui-dist` (`^5`) in applications
-that use `OpenApiPlugin` or a starter with Swagger enabled. Deno tasks also need `--allow-read`.
-Otherwise startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets
-instead, set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
+that use `OpenApiPlugin` or a starter with Swagger enabled. On Deno, add
+`"swagger-ui-dist": "npm:swagger-ui-dist@5.33.3"` to the `imports` of the app's `deno.json` (in a
+workspace, the member's — as generated members do — or the root's), run `deno install` from the
+workspace root, and keep `--allow-read` on the start task: the plugin's optional import resolves
+from the installed `node_modules`, so an entry with no install still fails at startup. Otherwise
+startup fails with `OptionalDependencyUnavailableError`. To use the pinned external assets instead,
+set `OpenApiPlugin({ swagger: { assets: 'cdn' } })`, or a starter's
 `openapi: { swagger: { assets: 'cdn' } }`. Workers needs that external mode or
 `assets: { baseUrl: '/assets' }`; the starters select the CDN there when no Swagger asset mode is
 chosen; a custom base must serve the exact 5.33.3 files for SRI to pass. Fresh CLI projects declare
@@ -801,9 +810,12 @@ existing npm project, it pulls in `@scarf/scarf`, whose `postinstall` sends inst
 projects do. In a workspace the setting belongs in the root `package.json`, the one npm is run from;
 a member's own setting is ignored.
 
-Handled 4xx now logs once at `warn`; handled 5xx logs once at `error`. Completion logs report the
-responder's status rule; a custom `respond` hook choosing another status is not reflected there.
-Without a logger, handled 5xx and kernel unhandled errors reach the runtime's default error sink.
+Errors thrown into `errorHandler` log once: `warn` below 500, `error` at 500 and above. The
+responder terminals — an unmatched route's 404, a guard's 401/403, validation's 400/415, and the
+kernel's pre-pipeline refusals — write the response and log nothing beyond the request logger's
+completion record. Completion logs report the responder's status rule; a custom `respond` hook
+choosing another status is not reflected there. Without a logger, handled 5xx and kernel unhandled
+errors reach the runtime's default error sink.
 
 ### `principalAuthorityIsGlobal`, `exemptBearer`, anonymous sessions and `needsRehash` (M113e)
 
@@ -935,6 +947,10 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
 
 - In `src/index.ts`, add `import * as serverBuild from '../build/server/index.js';` and call
   `createApp(env, waitUntil, undefined, { serverBuild })`.
+- In `tsconfig.json`, add `"allowJs": true` to `compilerOptions`. The entry now imports the compiled
+  server build, which has no declarations, so `tsc --noEmit` reports TS7016 on it without the flag;
+  fresh scaffolds set it for this reason. Verify with the project's `check` script,
+  `npm run build && tsc --noEmit`.
 - In `setu.config.ts`, give `createApp` a second `_waitUntil` parameter and widen the `ssr`
   parameter to
   `{ serverBuild: unknown } | Pick<ReactRouterPluginOptions, 'loadRequestHandler' | 'mode'>`. In the
@@ -989,6 +1005,26 @@ Worker cannot resolve. Scaffolding a new project is simplest. To repair an exist
   and concurrent first starts can miss messages. A member crashing before the join takes its start
   offsets with it. Admin/metadata failures warn once per subscription with topic/group and remain
   non-fatal.
+
+### `ReactRouterPluginOptions` is a union type (0.10.0, `@setu-ts/react-router-plugin`)
+
+`ReactRouterPluginOptions` changed from an `interface` to a union `type`
+(`ReactRouterPathOptions | ReactRouterModuleOptions`, exactly one arm required). An application that
+does `interface X extends ReactRouterPluginOptions` no longer compiles (TS2312); use
+`type X = ReactRouterPluginOptions & { … }` instead. A caller passing `serverBuildPath` is
+unaffected.
+
+### The SDK generator prefixes operations named `client` or `encodeURIComponent` (0.10.0, `@setu-ts/sdk`)
+
+An operation whose method name is `client` or `encodeURIComponent` is emitted as `_client` or
+`_encodeURIComponent`; before, `client` was a duplicate identifier and `encodeURIComponent` shadowed
+the global every generated path calls. Callers of those operations change after regenerating.
+
+### `agents` is a built-in CLI command (0.10.0, `@setu-ts/cli`)
+
+Built-in verbs are matched before any plugin-registered command and always win, so a plugin command
+named `agents` is no longer reachable. No in-repo plugin registers one; rename the plugin command if
+yours does, following the `plugin:command` convention (`ICliApi.register`).
 
 <!-- version:history -->
 

@@ -10,3 +10,5 @@ pnpm --dir apps/grpc run start
 
 Its smoke check sends a real Connect JSON RPC through the plugin's interception seam and verifies
 the decoded Echo response alongside the ordinary HTTP route.
+
+Read the [example deep dive](../../docs/examples.md#grpc) for the concept and source walkthrough.

@@ -726,15 +726,19 @@ app.middleware.add(
 The middleware resolves `CAPABILITIES.LOGGER` on each request, creates a child logger bound to
 `requestId`, and logs:
 
-- `request received` at `debug` (method, path). Set `level: 'debug'` to emit this arrival entry; its
-  metadata is not built when the child's exposed level excludes debug. With no readable level, the
-  middleware calls `debug()` and lets the logger filter.
+- `request received` at `debug` (method, path — the concrete path as the client sent it, not a route
+  template). Set `level: 'debug'` to emit this arrival entry; its metadata is not built when the
+  child's exposed level excludes debug. With no readable level, the middleware calls `debug()` and
+  lets the logger filter.
 - One `request completed` at `info` (method, path, status, duration in ms), including a request that
   threw: the status is the one `errorHandler`'s responder predicts through `statusFor` (`500`
   without it), so a custom `respond` hook that chooses another status is not reflected
 - Slow request warning when duration exceeds `slowRequestThreshold`
 
-It does not log the error itself; `errorHandler` logs it once (V9-80).
+It does not log the error itself; `errorHandler` logs it once (V9-80). The database-plugin scrub
+covers database errors only, so an identifier in a path segment reaches the log; keep it out with
+`excludePaths`, a `redaction` field redactor for `path`, or `redact` (which replaces the default
+secret patterns, so re-list them).
 
 ---
 
@@ -4723,7 +4727,7 @@ package README's "What `SameSite` does not separate".
 
 ## ReactRouterPlugin() (`@setu-ts/react-router-plugin`)
 
-Embeds **React Router v7 framework mode** as a first-party plugin so a Setu-TS application can serve
+Embeds **React Router 8 framework mode** as a first-party plugin so a Setu-TS application can serve
 a React frontend with Server-Side Rendering (SSR) and file-based routing. React Router's
 framework-mode `createRequestHandler` is mounted behind a kernel catch-all route; static client
 assets are served over `runtime.fs?.readFile`.
@@ -4907,13 +4911,13 @@ Environment API, and neither a top-level `ssr.external` nor `environments.ssr.re
 reaches that build. `setu new --template full-stack` emits all of this already.
 
 Development mode needs the same guarantee from Vite's dev SSR runner, which loads route modules
-itself. Unaided it cannot resolve a JSR import at all, and it would inline a package mapped to a
-local path as a second copy. `viteDevExternals` keeps those packages external there too, resolved by
-the runtime.
+itself. `viteDevExternals` keeps framework packages and workspace libraries external, resolved by
+the server runtime, so route modules and the entry share one module instance. Context keys from
+`contextKeyFor()` match by identity; a second copy would read different keys.
 
 The same externalisation is what lets a **server-only** module (`*.server.ts`) import a framework
 package by value at all. Client-reachable modules must stick to `import type`, which is erased: the
-client bundle has to inline what it imports and cannot resolve a JSR specifier.
+client bundle has to inline what it imports; server framework packages must stay on the server.
 
 ### Notes
 
@@ -5104,8 +5108,12 @@ worker the pool terminates (on a timeout, a startup deadline or a hand-over) lea
 once, but on Deno `Worker.terminate()` does not stop a thread that never yields: a timed-out
 CPU-bound task keeps its thread, memory and CPU until its code returns. Measured on Deno with
 `maxWorkers: 1`: five timed-out busy-loop tasks left 0 slots and four extra threads at about 500%
-CPU. Node and Bun were not measured. Treat a task timeout as a correctness bound rather than a
-resource bound for CPU-bound code that can loop, and have long tasks check a deadline and return.
+CPU. A slot is released to the budget before its thread has exited, and the next waiter spawns at
+once, so at a hand-over the terminated thread and its replacement can briefly be alive together:
+measured on Node 24 with 20 ms sampling and `maxWorkers: 3`, a cold first burst peaked at 6 threads
+in 3 of 3 runs, one burst above the bound for about 0.7 s. Treat a task timeout as a correctness
+bound rather than a resource bound for CPU-bound code that can loop, and have long tasks check a
+deadline and return.
 
 **Task granularity:** a measured trivial round trip takes about 7–17 µs. Batch very small work so
 serialization and scheduling do not cost more than the computation.
@@ -9985,7 +9993,10 @@ method; the plugin does not import Zod.
   ```
 
   `at` names the operationId, so the affected route is identifiable without diffing documents. The
-  extension is absent when every schema is representable.
+  extension is absent when every schema is representable. Nothing is logged when a node degrades:
+  the document is built on the first `getSpec()` / `/openapi.json` request, not at startup, so
+  inspect it (or test for `x-setu-unrepresentable`) in CI. For dates, `z.iso.datetime()` represents
+  a date-time in JSON Schema.
 
 - **Schemas without `toJSONSchema`, including Zod 3 schemas, are unrecognized.** They degrade to
   `{}` and report the existing `not a recognized zod schema` diagnostic through
@@ -10251,6 +10262,7 @@ Any casing of the name produces identical output: `setu g controller user-profil
 | Option                                          | Commands                                              | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | ----------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--runtime deno\|node\|bun\|cloudflare-workers` | `new`, `generate`                                     | On `new`, selects the entry shape and manifest and defaults to `node`. On `generate`, passes `SchematicOptions.runtime` to the schematic (read by custom schematics) and otherwise detects the target from the existing project's manifest. An unknown value is a usage error (`2`) on both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `--example <app>`                               | `new`                                                 | Downloads a standalone Node example from the CLI release tag on GitHub. Dry-run lists paths without fetching. Refuses composition flags and non-Node runtimes; unknown or excluded examples exit 1 with alternatives.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `--workspace`                                   | `new`                                                 | Creates a monorepo root instead of a project: a root manifest whose member globs are `apps/*` and `libs/*` (a `deno.json` `workspace` array, or a `package.json` `workspaces` one under `--runtime node\|bun`), plus a `setu.workspace.json`, with no member. Both globs are written once, so neither a service nor a library ever rewrites the root. Refuses `--template`, and `--runtime cloudflare-workers` — each Worker is its own deploy unit — rather than ignoring them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--port <n>`                                    | `new --workspace`, `generate app`, `adopt`            | On `new --workspace`, the base port: the first member binds it and each later one takes the next free number above the highest in use. On `generate app`, the port THIS member binds instead of the allocated one — refused when another member already holds it. Defaults to `3000`. A usage error on a standalone `new`, or when it is not an integer 1–65535.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `--env-file <path>`                             | `new`, `generate app`                                 | ConfigPlugin-backed Deno, Node, and Bun templates emit that gitignored dotenv file plus a tracked `<path>.example`, and use it as `ConfigPlugin({ envFilePath, envFileOptional: true })`. The file is optional because it is gitignored: the project still starts on a fresh clone, in CI, and in a container, reading configuration from the environment. A template that needs a value names it in both files — `full-stack` emits `SESSION_SECRET`, with a development value in the ignored file and an empty one in the committed example. Refused by minimal templates, workspace roots, and Cloudflare Workers, which read request bindings rather than a filesystem. Plugin construction precedes ConfigPlugin registration, so construction-time values must come from this environment source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
@@ -10349,9 +10361,9 @@ manifest cannot be parsed, `2` for an unknown package name, a missing argument, 
 Writes or checks the project's agent brief: `AGENTS.md` in the project directory. The CLI owns one
 section, delimited by `<!-- setu-agents:begin -->` and `<!-- setu-agents:end -->`, and regenerates
 it from the project's real state — the installed `@setu-ts/*` packages, style, runtime, the scripts
-its manifest defines, and the schematics available to it. The line after `begin` reads "Generated by
-`setu agents` from this project's manifests. Edits between these markers are overwritten." Every
-byte outside the markers is preserved, so a developer-owned preamble survives a rewrite.
+its manifest defines, and the schematics available to it. The line after `begin` reads
+"`setu agents` reads manifests and overwrites these markers' contents." Every byte outside the
+markers is preserved, so a developer-owned preamble survives a rewrite.
 
 The marker arrangements have one behaviour each: an absent file is created containing only the
 section; a file with no markers gets the section at the top, one blank line, then its existing
@@ -10931,7 +10943,8 @@ admitted module: in functional mode the file lands in `src/modules/<name>/` and 
 CLI-owned `index.ts` is regenerated to register it, with a module-scoped route or controller
 mounting at `/<module>/<name>`; in class-based mode the file is written and the
 `@Module({ providers | controllers })` line to add is printed — the declaration is never edited —
-and a module-scoped service registers under the token `<module>-<name>-service`.
+and a module-scoped service registers under the token `<module>.<name>-service` (for example
+`billing.invoice-service`).
 
 A host template declares `@std/testing` and `@std/expect` so the emitted test runs with no further
 setup — as a `deno.json` import on Deno and Cloudflare Workers. Node and Bun declare neither: their
@@ -11154,6 +11167,10 @@ makes `--dry-run` exact.
 `modules` is optional so that a harness written before it existed still compiles; `setu generate`
 always supplies it. `targetModule` and `moduleArtifacts` are optional for the same
 published-interface reason, and are supplied only when `--module` names an admitted module.
+`GeneratedFile.bytes`, when present, supplies exact binary contents instead of encoding `contents`.
+`CliDependencies.fetch` optionally injects the example downloader; it defaults to
+`globalThis.fetch`.
+
 `GeneratedFile` carries an optional `managed` flag — see "Overwrite protection".
 
 ### Programmatic API
@@ -11164,7 +11181,7 @@ published-interface reason, and are supplied only when `--module` names an admit
 | `CliDependencies`  | type      | The boundary bundle `runCli` requires, including optional prompting, interruption and the verified logical working directory.                            |
 | `deriveNames`      | function  | Produces the five naming forms every schematic uses.                                                                                                     |
 | `DerivedNames`     | type      | The result of `deriveNames`.                                                                                                                             |
-| `GeneratedFile`    | type      | `{ path, contents, managed? }` — one file a schematic asks to create.                                                                                    |
+| `GeneratedFile`    | type      | `{ path, contents, managed?, bytes? }` — one file a schematic asks to create.                                                                            |
 | `Schematic`        | type      | `(names, options) => readonly GeneratedFile[]`.                                                                                                          |
 | `SchematicOptions` | type      | The second parameter of every schematic (`runtime`/`plugins`/`now`/`modules?`, and with `--module` the optional `targetModule?` and `moduleArtifacts?`). |
 | `PROGRAM_NAME`     | const     | `'setu'` — interpolated into every usage string.                                                                                                         |
