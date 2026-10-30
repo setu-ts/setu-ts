@@ -8,6 +8,7 @@ import { EXAMPLE_MANIFEST } from './manifest.ts';
 import {
   exampleTsconfig,
   rewriteExamplePackage,
+  rewriteExampleReadme,
   rewriteExampleSource,
   rewriteSmokeHelper,
 } from './rewrite.ts';
@@ -22,6 +23,9 @@ import {
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { interruptionMessage, throwIfInterrupted } from '../utils/interruption.ts';
 import { runAgentsCommand } from '../commands/agents.ts';
+
+/** How long one example file may take to download, body included, before the run gives up. */
+export const FETCH_TIMEOUT_MS = 30_000;
 
 /** Flags that cannot alter an example's fixed composition. */
 const CONFLICTS = [
@@ -114,10 +118,12 @@ export async function runExampleNew(
         const source =
           path === 'smoke-helpers.ts' ? 'apps/smoke-helpers.ts' : `apps/${example}/${path}`;
         currentUrl = `https://raw.githubusercontent.com/setu-ts/setu-ts/v${VERSION}/${source}`;
-        const response = await fetchFile(
-          currentUrl,
-          deps.interrupt === undefined ? {} : { signal: deps.interrupt },
-        );
+        // The timeout stays attached while the body is read, so a stalled body is bounded too.
+        const timeout = AbortSignal.timeout(FETCH_TIMEOUT_MS);
+        const response = await fetchFile(currentUrl, {
+          signal:
+            deps.interrupt === undefined ? timeout : AbortSignal.any([deps.interrupt, timeout]),
+        });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         if (EXAMPLE_MANIFEST[example].binary.includes(path)) {
           file = { path, contents: '', bytes: new Uint8Array(await response.arrayBuffer()) };
@@ -125,8 +131,7 @@ export async function runExampleNew(
           let contents = await response.text();
           if (path === 'package.json') contents = rewriteExamplePackage(contents, names.kebab);
           else if (path === 'smoke-helpers.ts') contents = rewriteSmokeHelper(contents);
-          else if (path === 'README.md')
-            contents += `\nWalkthrough: https://setu-ts.dev/examples/${example}/\n`;
+          else if (path === 'README.md') contents = rewriteExampleReadme(contents, example);
           else contents = rewriteExampleSource(contents);
           file = { path, contents };
         }
@@ -134,7 +139,10 @@ export async function runExampleNew(
       files.push({ ...file, path: joinPath(root, path) });
     }
   } catch (cause) {
-    const interrupted = interruptionMessage(cause);
+    // An interrupt during a download surfaces as fetch's own AbortError, not InterruptedError.
+    const interrupted =
+      interruptionMessage(cause) ??
+      (deps.interrupt?.aborted === true ? 'Interrupted; nothing was written.' : undefined);
     if (interrupted !== undefined) {
       deps.error(interrupted);
       return EXIT_INTERRUPTED;
@@ -163,7 +171,8 @@ export async function runExampleNew(
     return interrupted === undefined ? EXIT_ERROR : EXIT_INTERRUPTED;
   }
   deps.log(`Created ${names.kebab} from ${example}. Next:`);
-  deps.log(`  cd ${names.kebab} && npm install && npm start`);
-  deps.log('  npm run smoke');
+  deps.log(`  cd ${names.kebab} && npm install`);
+  deps.log("  npm run smoke   # the example's own proof; exits when done");
+  deps.log('  npm start       # serves until stopped');
   return EXIT_OK;
 }

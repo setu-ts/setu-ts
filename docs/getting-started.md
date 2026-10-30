@@ -31,9 +31,9 @@ After `cd my-app`, a Bun target runs `bun install && bun run start:dev`; a Deno 
 while editing. For a Node production run, use `npm run build && npm start`.
 
 To start from a runnable example instead, use `npm create @setu-ts my-app -- --example rest-api`,
-then `cd my-app && npm install && npm start`. `npm run smoke` runs that example's proof. This
-creates a standalone Node project and downloads from GitHub at the CLI's release tag; see
-[Examples](./examples.md#before-you-start).
+then `cd my-app && npm install`. `npm run smoke` runs that example's proof and exits; `npm start`
+serves it until you stop it. This creates a standalone Node project and downloads from GitHub at the
+CLI's release tag; see [Examples](./examples.md#before-you-start).
 
 The template-generated project's README lists its commands. See the [CLI guide](./cli.md) for
 templates and code generation.

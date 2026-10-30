@@ -6,10 +6,11 @@ import { createArgs } from '../../../create/src/index.ts';
 import { createFakeFs, createRecorder } from '../fixtures/fake-fs.ts';
 import { EXAMPLES, EXCLUDED_EXAMPLES, exampleTemplate } from '../../src/examples/catalog.ts';
 import { EXAMPLE_MANIFEST } from '../../src/examples/manifest.ts';
-import { examplePaths } from '../../src/examples/new.ts';
+import { examplePaths, FETCH_TIMEOUT_MS } from '../../src/examples/new.ts';
 import {
   exampleTsconfig,
   rewriteExamplePackage,
+  rewriteExampleReadme,
   rewriteExampleSource,
   rewriteSmokeHelper,
 } from '../../src/examples/rewrite.ts';
@@ -66,8 +67,9 @@ describe('example scaffolding', () => {
       expect(h.fs.read(`${prefix}smoke-helpers.ts`)).not.toContain('source-register');
       expect(h.fs.read(`${prefix}README.md`)).toContain('https://setu-ts.dev/examples/grpc/');
       expect(h.fs.read(`${prefix}.gitignore`)).toBe('node_modules\ndist\n.env\n');
-      expect(h.out.text()).toContain('cd demo && npm install && npm start');
-      expect(h.out.text()).toContain('npm run smoke');
+      expect(h.out.text()).toContain('cd demo && npm install');
+      // The smoke check exits; `npm start` serves until stopped, so it comes last.
+      expect(h.out.text().indexOf('npm run smoke')).toBeLessThan(h.out.text().indexOf('npm start'));
       expect(h.fs.writes.map((path) => path.slice(prefix.length)).sort()).toEqual(
         [...examplePaths('grpc')].sort(),
       );
@@ -199,6 +201,39 @@ describe('example scaffolding', () => {
       await h.run(['new', 'demo', '--example', 'minimal'], { interrupt: AbortSignal.abort() }),
     ).toBe(130);
     expect(h.fs.writes).toEqual([]);
+    // Interrupted while a download is in flight: fetch rejects with its own AbortError.
+    const controller = new AbortController();
+    const midway = harness({}, async (_input, init) => {
+      controller.abort();
+      throw init?.signal?.reason ?? new Error('aborted');
+    });
+    expect(
+      await midway.run(['new', 'demo', '--example', 'minimal'], { interrupt: controller.signal }),
+    ).toBe(130);
+    expect(midway.err.text()).toContain('Interrupted; nothing was written.');
+    expect(midway.err.text()).not.toContain('Failed to fetch');
+    expect(midway.fs.writes).toEqual([]);
+  });
+  it('bounds every download with a timeout signal combined with the interrupt', async () => {
+    const signals: (AbortSignal | null | undefined)[] = [];
+    const h = harness({}, async (input, init) => {
+      signals.push(init?.signal);
+      return repositoryFetch(input, init);
+    });
+    expect(
+      await h.run(['new', 'demo', '--example', 'minimal'], {
+        interrupt: new AbortController().signal,
+      }),
+    ).toBe(0);
+    expect(signals.length).toBeGreaterThan(0);
+    expect(signals.every((signal) => signal instanceof AbortSignal && !signal.aborted)).toBe(true);
+    const timedOut = harness({}, async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    });
+    expect(await timedOut.run(['new', 'demo', '--example', 'minimal'])).toBe(1);
+    expect(timedOut.err.text()).toContain('due to timeout');
+    expect(timedOut.err.text()).toContain('Nothing was written');
+    expect(FETCH_TIMEOUT_MS).toBe(30_000);
   });
   it('supports optional agents and the help inventory', async () => {
     const h = harness();
@@ -207,7 +242,7 @@ describe('example scaffolding', () => {
     expect(await h.run(['new', '--help'])).toBe(0);
     expect(h.out.text()).toContain('--example <app>');
   });
-  it('rewrites only workspace ranges and helper import paths', () => {
+  it('rewrites only workspace ranges, helper import paths and README repository references', async () => {
     const source = JSON.stringify({
       name: 'old',
       dependencies: { a: 'workspace:^', b: '^1' },
@@ -223,6 +258,34 @@ describe('example scaffolding', () => {
       "import './smoke-helpers.ts'; import './other.ts';",
     );
     expect(rewriteSmokeHelper('no loader')).toBe('no loader');
+    const readme = rewriteExampleReadme(
+      [
+        '# rest-api',
+        '',
+        'Run from the repository root after installing dependencies:',
+        '',
+        'pnpm --dir apps/rest-api run start',
+        'REDIS_URL=x pnpm --dir apps/rest-api run smoke',
+        '',
+        'See the [deep dive](../../docs/examples.md#rest-api) and [CLI](../../docs/cli.md).',
+        '',
+      ].join('\n'),
+      'rest-api',
+    );
+    expect(readme).toContain('Run after `npm install`:');
+    expect(readme).toContain('\nnpm run start\nREDIS_URL=x npm run smoke\n');
+    expect(readme).toContain('](https://setu-ts.dev/docs/examples/#rest-api)');
+    expect(readme).toContain('](https://setu-ts.dev/docs/cli/)');
+    expect(readme).not.toMatch(/apps\/rest-api|\.\.\/\.\.\//);
+    expect(readme.endsWith('Walkthrough: https://setu-ts.dev/examples/rest-api/\n')).toBe(true);
+    // Every offered README comes out free of repository commands and repository-relative links.
+    for (const example of EXAMPLES) {
+      const text = rewriteExampleReadme(
+        await readFile(new URL(`apps/${example}/README.md`, root), 'utf8'),
+        example,
+      );
+      expect(text, example).not.toMatch(/pnpm --dir apps\/|\]\(\.\.?\//);
+    }
     expect(EXAMPLE_MANIFEST.minimal.smokeHelper).toBe(false);
   });
   it('reports an agents write failure and rolls back an interrupted file batch', async () => {

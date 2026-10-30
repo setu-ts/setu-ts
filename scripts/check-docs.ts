@@ -674,6 +674,8 @@ export function checkDocument(file: string, source: string): readonly Finding[] 
   if (file.endsWith('CHANGELOG.md')) {
     let inReleasedSection = false;
     for (const [index, line] of lines.entries()) {
+      // A fenced example is not release guidance, whatever it names.
+      if (fenced[index] === true) continue;
       const section = line.match(/^##\s+\[(\d+\.\d+\.\d+)\]/);
       if (/^##\s/.test(line)) {
         inReleasedSection = section !== null;
@@ -943,9 +945,8 @@ export async function checkLocalLinks(
         /^https:\/\/github\.com\/setu-ts\/setu-ts\/(?:blob|tree)\/[^/]+\/(.+?)(?:#(.+))?$/,
       );
       if (repoLink) {
-        const repoPath = decodeURIComponent(repoLink[1] as string);
-        const repoAnchor = repoLink[2] !== undefined ? decodeURIComponent(repoLink[2]) : null;
-        link = `/${repoPath}${repoAnchor !== null ? `#${repoAnchor}` : ''}`;
+        // Kept encoded: the resolution below decodes the link once, as for any other link.
+        link = `/${repoLink[1] as string}${repoLink[2] !== undefined ? `#${repoLink[2]}` : ''}`;
       }
 
       // Skip external links and mailto/tel. A bare `#anchor` is a same-file
@@ -975,6 +976,18 @@ export async function checkLocalLinks(
 
       // A bare anchor with no path is a same-file anchor.
       if (!linkPath) {
+        // Rule 2 applies inside the two files whose `Unreleased` heading is renamed, too.
+        if (
+          anchor === 'unreleased' &&
+          (file.endsWith('docs/upgrading.md') || file.endsWith('CHANGELOG.md'))
+        ) {
+          findings.push({
+            file,
+            line: index + 1,
+            message: `Link to "#unreleased" is refused: that heading is renamed at each release, so the link breaks on the next publish.`,
+          });
+          continue;
+        }
         if (anchor !== null && anchor !== '') {
           const headings = collectHeadings(lines, scanFences(lines).fenced);
           const anchorSet = new Set(headings.map((h) => h.anchor));

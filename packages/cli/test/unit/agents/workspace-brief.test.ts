@@ -87,7 +87,9 @@ describe('workspace briefs', () => {
       );
       expect(text).toContain(`cd apps/<member> && ${runner} start\` — production entry`);
       expect(text).toContain(
-        `${runner} dev\` — every member's development entry, in dependency order`,
+        runtime === 'deno'
+          ? `${runner} dev\` — every member's \`start\` task (no file watching), in dependency order`
+          : `${runner} dev\` — every member's \`start:dev\` loop, in dependency order`,
       );
     },
   );

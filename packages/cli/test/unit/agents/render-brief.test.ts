@@ -42,7 +42,7 @@ describe('project brief rendering', () => {
           expect(facts.commandBodies['start:dev']).toBeTruthy();
           if (runtime === 'deno' && template === 'full-stack')
             expect(text).toContain(
-              '`deno task dev` — development entry without file watching; prefer start:dev',
+              '`deno task dev` — development entry that does not restart on server edits; prefer start:dev',
             );
           else expect(text).not.toContain(`\`${runner} dev\``);
         }

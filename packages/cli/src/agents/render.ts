@@ -46,7 +46,7 @@ function commandGloss(name: string, facts: ProjectFacts): string {
         return `development loop on workerd${facts.commands.includes('build') ? ' (builds first)' : ''}`;
       if (body.includes('main.dev.ts')) return 'development entry for a devtool session';
       return facts.commands.includes('start:dev')
-        ? 'development entry without file watching; prefer start:dev'
+        ? 'development entry that does not restart on server edits; prefer start:dev'
         : '';
     }
     default:
@@ -110,7 +110,12 @@ export function renderWorkspaceRoot(workspace: WorkspaceManifest, version: strin
     [
       introduction(version),
       '## Commands\n',
-      `- \`${profile.runScript('dev')}\` — every member's development entry, in dependency order`,
+      // The Deno runner starts each member's `start` task; the Node and Bun runners `start:dev`.
+      `- \`${profile.runScript('dev')}\` — ${
+        workspace.runtime === 'deno'
+          ? "every member's `start` task (no file watching)"
+          : "every member's `start:dev` loop"
+      }, in dependency order`,
       `- \`${profile.testFromRoot}\` — every member's tests`,
       `- \`${profile.runScript('build')}\` — every member's image (\`setu workspace build\`)`,
       `- \`${profile.runScript('deploy')}\` — build, ship and roll out to Kubernetes; secrets in \`k8s/secrets/<member>/.env\``,

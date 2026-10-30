@@ -13,7 +13,11 @@ export function readSource(file: string): string {
   return readFileSync(resolve(REPO_ROOT, file), 'utf8');
 }
 
-const { stdout } = await promisify(execFile)('git', ['ls-files', '-z'], { cwd: REPO_ROOT });
+// Node's default 1 MiB output cap would reject a large tree and fail every importer.
+const { stdout } = await promisify(execFile)('git', ['ls-files', '-z'], {
+  cwd: REPO_ROOT,
+  maxBuffer: 64 * 1024 * 1024,
+});
 /** Tracked paths exclude installed dependencies and generated output. */
 export const TRACKED_FILES = stdout.split('\0').filter(Boolean);
 

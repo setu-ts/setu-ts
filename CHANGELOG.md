@@ -478,6 +478,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **Full-stack workspace libraries on Node and Bun stay external (#528, `@setu-ts/cli`).** The
+  generated `vite.config.ts` read a library's name only from `deno.json` or `deno.jsonc`, so a Node
+  or Bun library (named in `package.json`) was bundled as a second copy whose module state the
+  server did not share. It now reads `package.json` too. In an existing project, add
+  `'package.json'` to the file list in its `readLibraryManifest`.
+
 - **`setu add` on Deno writes a call the project's own `deno fmt` keeps (M117, #525, 0.11.0,
   `@setu-ts/cli`).** The provider call `setu add` inserts into `setu.config.ts` was written on one
   line however long its options were — a Redis connection read, a nested `options: { … }`, a seam

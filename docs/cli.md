@@ -34,8 +34,9 @@ setu new my-app --dry-run                      # print the plan, write nothing
 
 ```bash
 setu new my-app --example rest-api
-cd my-app && npm install && npm start
-npm run smoke
+cd my-app && npm install
+npm run smoke                                  # the example's own proof; exits when done
+npm start                                      # serves until stopped
 setu new my-app --example rest-api --dry-run
 ```
 

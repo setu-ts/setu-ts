@@ -780,7 +780,7 @@ import {
 } from '@setu-ts/database-plugin';
 
 const users = pgTable('users', { id: text('id'), teamId: integer('team_id') });
-const teams = pgTable('teams', { id: text('id'), name: text('name') });
+const teams = pgTable('teams', { id: integer('id'), name: text('name') });
 
 const drizzleDatabase = createDrizzleDatabase(drizzleDb, (database, work) =>
   database.transaction(work),

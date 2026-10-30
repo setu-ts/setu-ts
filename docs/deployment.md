@@ -483,7 +483,9 @@ an HTTP probe against a member that serves neither path would fail readiness for
 `prometheus.io/path` annotations. `setu generate app --template <name>` records both flags, because
 every named template registers `HealthPlugin` and `MetricsPlugin`; `setu adopt` records each from
 the installed health or metrics plugin, or from a starter package, which registers both. To switch a
-TCP member to HTTP probes, add `HealthPlugin` and `healthProbes: true` to its record.
+TCP member to HTTP probes, add `HealthPlugin` and `healthProbes: true` to its record. Deploy applies
+`k8s/members.yaml` as written, and only `setu generate app`, `setu adopt` and
+`setu workspace ports --reallocate` rewrite that file, so change the member's probes there as well.
 
 ### Build, test and deploy from the root
 

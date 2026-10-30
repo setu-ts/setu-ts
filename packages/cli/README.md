@@ -48,10 +48,11 @@ It loads a project's TypeScript — `setu.config.ts` for plugin commands, a cust
 ## Scaffolding a project
 
 `setu new my-app --example rest-api` downloads a runnable example from the GitHub tag matching this
-CLI's version and creates a standalone Node project. Run `cd my-app && npm install && npm start`,
-then `npm run smoke`. `--dry-run` lists paths without fetching; downloads all finish before writing.
-Examples keep their own composition and refuse composition flags such as `--template` and
-`--workspace`; only `--runtime node` is accepted. See
+CLI's version and creates a standalone Node project. Run `cd my-app && npm install`, then
+`npm run smoke` (the example's proof, which exits), then `npm start` (which serves until stopped).
+`--dry-run` lists paths without fetching; downloads all finish before writing. Examples keep their
+own composition and refuse composition flags such as `--template` and `--workspace`; only
+`--runtime node` is accepted. See
 [the example options](https://setu-ts.dev/docs/cli/#start-from-an-example) and
 [walkthroughs](https://setu-ts.dev/docs/examples/). The template scaffolds below generate their own
 project structure.

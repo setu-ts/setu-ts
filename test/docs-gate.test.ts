@@ -1091,6 +1091,27 @@ describe('documentation gate — release-breaking links (M119i)', () => {
     expect(findings.length).toBe(0);
   });
 
+  it('rule 2: refuses a same-file #unreleased link inside CHANGELOG.md and upgrading.md', async () => {
+    const source = '## [Unreleased]\n\nSee [above](#unreleased).\n';
+    for (const file of ['CHANGELOG.md', 'docs/upgrading.md']) {
+      const findings = await checkLocalLinks(file, source, []);
+      expect(findings.some((f) => f.message.includes('"#unreleased" is refused'))).toBe(true);
+    }
+    // Elsewhere a bare #unreleased is an ordinary same-file anchor.
+    expect(await checkLocalLinks('docs/test.md', source, [])).toEqual([]);
+  });
+
+  it('rule 1: decodes a repository link once, so a literal percent sign does not throw', async () => {
+    const source = '[odd](https://github.com/setu-ts/setu-ts/blob/main/no%25such.md)';
+    const findings = await checkLocalLinks('docs/test.md', source, []);
+    expect(findings.some((f) => f.message.includes('does not resolve'))).toBe(true);
+  });
+
+  it('rule 3: ignores a fenced example inside a released section', () => {
+    const source = '## [0.9.0]\n\n```md\nsee docs/upgrading.md (Unreleased)\n```\n';
+    expect(checkDocument('CHANGELOG.md', source)).toEqual([]);
+  });
+
   it('rule 3: refuses a released section that names upgrading.md and Unreleased', () => {
     const source = '## [0.9.0]\n\n- breaking; see docs/upgrading.md (Unreleased)\n';
     const findings = checkDocument('CHANGELOG.md', source);

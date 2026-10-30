@@ -91,9 +91,12 @@ try {
   // Standalone projects and workspaces without libraries have no externals here.
 }
 
-/** Reads a member's manifest; Deno accepts deno.json first, then deno.jsonc. */
+/**
+ * Reads a library's manifest: deno.json, then deno.jsonc (Deno), then package.json (Node and
+ * Bun), so a library is kept external on every runtime.
+ */
 function readLibraryManifest(directory: URL): { name?: unknown } | undefined {
-  for (const file of ['deno.json', 'deno.jsonc']) {
+  for (const file of ['deno.json', 'deno.jsonc', 'package.json']) {
     let text: string;
     try {
       text = readFileSync(new URL(file, directory), 'utf8');

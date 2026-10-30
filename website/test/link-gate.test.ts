@@ -23,6 +23,22 @@ it('extracts links outside code fences, including reference definitions and HTML
     ),
   ).toEqual(['./a.md', './b.md', './c.md', 'https://example.com']);
 });
+it('strips fences by CommonMark rules: longer closers and indented fences', () => {
+  expect(
+    markdownLinks(
+      [
+        '```md',
+        '[in-code](./x.md)',
+        '````',
+        '[between](./between.md)',
+        '  ~~~',
+        '  [indented-code](./y.md)',
+        '  ~~~',
+        '``` not`a`fence [inline](./z.md)',
+      ].join('\n'),
+    ),
+  ).toEqual(['./between.md', './z.md']);
+});
 it('checks emitted routes and rejects missing routes and rendered reading left on GitHub', async () => {
   await mkdir(scratch, { recursive: true });
   const dist = await mkdtemp(`${scratch}/dist-`);

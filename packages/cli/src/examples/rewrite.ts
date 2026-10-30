@@ -98,3 +98,26 @@ export function rewriteSmokeHelper(source: string): string {
       'Node/tsx arguments for a child example using installed packages.',
     );
 }
+
+/**
+ * Points an example README at the standalone project instead of the repository it came from.
+ * Repository commands become the project's own npm scripts, and links into the repository's
+ * guides become their pages on the website.
+ * @param source - The downloaded README.
+ * @param example - The example it describes.
+ * @returns The README for the standalone project, ending with a link to its walkthrough.
+ */
+export function rewriteExampleReadme(source: string, example: string): string {
+  const rewritten = source
+    .replaceAll(`pnpm --dir apps/${example} run `, 'npm run ')
+    .replaceAll(
+      'Run from the repository root after installing dependencies:',
+      'Run after `npm install`:',
+    )
+    .replace(
+      /\]\(\.\.\/\.\.\/docs\/([\w-]+)\.md(#[^)]*)?\)/g,
+      (_match, page: string, anchor: string | undefined) =>
+        `](https://setu-ts.dev/docs/${page}/${anchor ?? ''})`,
+    );
+  return `${rewritten.trimEnd()}\n\nCreated from the Setu-TS \`${example}\` example. Walkthrough: https://setu-ts.dev/examples/${example}/\n`;
+}

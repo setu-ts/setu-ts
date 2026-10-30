@@ -15389,7 +15389,7 @@ the letter adds every package README with a compilable fence to the gate, and a 
 
 - [ ] M119a–M119i, each closing its rows on a published re-run
 - [ ] `smoke/DEFECTS.md` rows V10-1…V10-63 and the three V9 remainders updated as each letter ships
-- [ ] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
+- [x] **ROADMAP.md** — this section and the Progress Tracking rows `119`–`119i`
 
 ---
 
@@ -16361,7 +16361,7 @@ patch by construction and gains nothing new here.
 | 116       | ✅     | cli + every published plugin package — agent briefs: `setu agents` and a shipped card per package                                                                                                                                                                                         |
 | 117       | ✅     | cache + queue + messaging + realtime-backplane + scheduler + idempotency + auth + common + telemetry + cli — node-redis as a supported Redis client                                                                                                                                       |
 | 118       | ✅     | cli — `setu check`: a read-only wiring gate for generated projects, run by their `check` script, CI and (M120) build                                                                                                                                                                      |
-| 119       | ✅     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
+| 119       | ⬜     | the `v0.10.0` smoke closeout — V10-1…V10-63 plus three V9 remainders, grouped by shape into M119a–M119i                                                                                                                                                                                   |
 | 119a      | ✅     | messaging-plugin — message delivery that repeats (NATS replay, V10-13 High), and calls with no bound                                                                                                                                                                                      |
 | 119b      | ✅     | mail + health + realtime-backplane + queue + database — readiness that drains replicas for a shared or fan-out problem                                                                                                                                                                    |
 | 119c      | ✅     | cli + http-security + session + openapi + telemetry + service-discovery — safe framework, broken default                                                                                                                                                                                  |

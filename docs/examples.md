@@ -10,8 +10,9 @@ To start a project from an example without cloning the repository:
 
 ```bash
 npm create @setu-ts my-app -- --example rest-api
-cd my-app && npm install && npm start
-npm run smoke
+cd my-app && npm install
+npm run smoke   # the example's own proof; exits when done
+npm start       # serves until stopped
 ```
 
 `--example` creates a standalone Node project, fetching the example from the GitHub release tag
@@ -21,6 +22,11 @@ and fetches nothing. Offered examples are `minimal`, `rest-api`, `database`, `di
 `realtime`. The Redis-backed smoke checks can exit `77` when Redis is unavailable. For `full-stack`,
 use `--template full-stack`; the other excluded examples need repository scripts or source. See
 [the CLI guide](./cli.md#start-from-an-example) for the flag restrictions.
+
+An example is a teaching project, not a production starting point. Some carry fixed demonstration
+values: `rest-api` signs and verifies its tokens with the fixed `DEMO_JWT_SECRET` in
+`src/auth/demo-token.ts`, so anyone could forge a token for a copy deployed unchanged. Replace such
+values with configuration (for example a secret read through `ConfigPlugin`) before deploying.
 
 Install Node 24, then clone and prepare the repository:
 

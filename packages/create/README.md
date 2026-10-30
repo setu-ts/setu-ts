@@ -20,8 +20,9 @@ The project targets Node by default; pass `--runtime deno`, `--runtime bun` or
 [CLI README](https://github.com/setu-ts/setu-ts/tree/main/packages/cli) for every template and flag.
 
 `--example` downloads a standalone Node example from the GitHub tag matching the CLI version. Run
-`cd demo && npm install && npm start`, then `npm run smoke`; see
-[the examples](https://setu-ts.dev/docs/examples/) for the offered names and prerequisites.
+`cd demo && npm install`, then `npm run smoke` (which exits), then `npm start` (which serves until
+stopped); see [the examples](https://setu-ts.dev/docs/examples/) for the offered names and
+prerequisites.
 
 ## Exports
 
