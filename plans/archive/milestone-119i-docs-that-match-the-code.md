@@ -1,10 +1,11 @@
 # Milestone 119i — Documentation That Does Not Match the Code, or Is Missing (docs, agent cards, two doc gates)
 
-> **Status:** Reopened 2026-10-30. §3.1–§3.17 are implemented (commits `166491dc`, `a0df90b1`); §0.1
-> and §3.18–§3.27 fold in the held documentation batch and the agent-brief fixes, by the
-> maintainer's decision. Branch: `docs/m119i-docs-that-match-the-code` (a **docs** letter of M119,
-> so one `docs/…` branch). `develop` and `main` are protected — all work stays on this branch until
-> it merges via a single PR.
+> **Status:** Complete 2026-10-30 (folded scope in `5f357e57`). Reopened 2026-10-30. §3.1–§3.17 are
+> implemented (commits `166491dc`, `a0df90b1`); §0.1 and §3.18–§3.27 fold in the held documentation
+> batch and the agent-brief fixes, by the maintainer's decision. Branch:
+> `docs/m119i-docs-that-match-the-code` (a **docs** letter of M119, so one `docs/…` branch).
+> `develop` and `main` are protected — all work stays on this branch until it merges via a single
+> PR.
 
 ## 0. Objective & scope
 
