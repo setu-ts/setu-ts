@@ -50,6 +50,7 @@ const INSTRUMENTATION: ReadonlySet<string> = new Set<TraceInstrumentationKind>([
   'http',
   'fetch',
   'ioredis',
+  'redis',
   'amqplib',
   'kafkajs',
 ]);

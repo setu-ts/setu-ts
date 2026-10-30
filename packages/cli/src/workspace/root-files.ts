@@ -232,6 +232,7 @@ ${wrapProse('Full-stack Bun members also run `bun run build` before starting. No
         runtime: profile.runtime,
         basePort,
         transport: transport.name,
+        ...(transport.redisClient === undefined ? {} : { redisClient: transport.redisClient }),
         // Recorded only when it differs from the transport's own default, so
         // the manifest states a choice rather than restating a constant that
         // already lives in the CLI.

@@ -9,89 +9,102 @@
 import { describe, expect, it } from 'vitest';
 import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import type { IRedisQueueClient, StoredJob } from '../../src/interfaces/index.ts';
+import {
+  REDIS_CLIENTS,
+  redisOptions,
+  nodeClient,
+} from '../../../common/test/fixtures/redis-clients.ts';
 
-const url = process.env['REDIS_URL'];
+describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
+  const url = process.env['REDIS_URL'];
 
-const job = (name: string, id: string): StoredJob<{ n: number }> => ({
-  id,
-  name,
-  data: { n: 7 },
-  attempts: 0,
-  maxAttempts: 3,
-  availableAtMs: 100,
-});
-
-describe('RedisQueue Lua transitions against live Redis', { skip: url === undefined }, () => {
-  it('requeues and dead-letters with retention through real scripts', async () => {
-    const name = `m101a:${crypto.randomUUID()}`;
-    const queue = new RedisQueue({ url: url!, deadLetterTtlMs: 60_000 });
-    const { Redis } = await import('ioredis');
-    const inspect = new Redis(url!);
-    try {
-      await queue.connect();
-      await queue.enqueue(job(name, 'a'));
-      const [first] = await queue.reserve(name, 5, 100);
-      expect(first.id).toBe('a');
-
-      await queue.requeue(name, 'a', 150, 1, first.claimToken);
-      expect(await inspect.zscore(`queue:${name}:ready`, 'a')).toBe('150');
-      expect(await inspect.zcard(`queue:${name}:processing`)).toBe(0);
-      const again = await queue.reserve<{ n: number }>(name, 5, 150);
-      expect(again[0]).toMatchObject({ id: 'a', attempts: 1, data: { n: 7 } });
-
-      await queue.deadLetter(name, 'a', 200, again[0].claimToken);
-      expect(await inspect.zrange(`queue:${name}:dead`, 0, -1)).toEqual(['a']);
-      expect(await inspect.hget(`queue:${name}:jobs`, 'a')).toBeNull();
-      expect(await inspect.hget(`queue:${name}:dead:jobs`, 'a')).not.toBeNull();
-      expect(await inspect.ttl(`queue:${name}:dead`)).toBeGreaterThan(0);
-    } finally {
-      await inspect.del(
-        `queue:${name}:ready`,
-        `queue:${name}:processing`,
-        `queue:${name}:dead`,
-        `queue:${name}:jobs`,
-        `queue:${name}:dead:jobs`,
-      );
-      inspect.disconnect();
-      await queue.disconnect();
-    }
+  const job = (name: string, id: string): StoredJob<{ n: number }> => ({
+    id,
+    name,
+    data: { n: 7 },
+    attempts: 0,
+    maxAttempts: 3,
+    availableAtMs: 100,
   });
 
-  it('a reserve script applied after a local timeout leaves the job in processing', async () => {
-    const name = `m101a:${crypto.randomUUID()}`;
-    const { Redis } = await import('ioredis');
-    const real = new Redis(url!, { lazyConnect: true });
-    let armed = false;
-    // The server runs the script; the client then reports a timeout, as
-    // `commandTimeout` does when the server answers too late.
-    const client = new Proxy(real, {
-      get(target, prop, receiver) {
-        const value = Reflect.get(target, prop, receiver);
-        if (prop === 'eval' && typeof value === 'function') {
-          return async (...args: unknown[]) => {
-            const result = await value.apply(target, args);
-            if (armed) {
-              armed = false;
-              throw new Error('Command timed out');
-            }
-            return result;
-          };
-        }
-        return typeof value === 'function' ? value.bind(target) : value;
-      },
-    }) as unknown as IRedisQueueClient;
-    const queue = new RedisQueue({ client });
-    try {
-      await queue.connect();
-      await queue.enqueue(job(name, 'b'));
-      armed = true;
-      await expect(queue.reserve(name, 5, 100)).rejects.toThrow('Command timed out');
-      expect(await real.zcard(`queue:${name}:ready`)).toBe(0);
-      expect(await real.zrange(`queue:${name}:processing`, 0, -1)).toEqual(['b']);
-      expect(await real.hget(`queue:${name}:jobs`, 'b')).not.toBeNull();
-    } finally {
-      await real.del(`queue:${name}:ready`, `queue:${name}:processing`, `queue:${name}:jobs`);
-      await queue.disconnect();
-    }
+  describe('RedisQueue Lua transitions against live Redis', { skip: url === undefined }, () => {
+    it('requeues and dead-letters with retention through real scripts', async () => {
+      const name = `m101a:${crypto.randomUUID()}`;
+      const queue = new RedisQueue({
+        ...redisOptions(redisVariant, url!),
+        deadLetterTtlMs: 60_000,
+      });
+      const { Redis } = await import('ioredis');
+      const inspect = new Redis(url!);
+      try {
+        await queue.connect();
+        await queue.enqueue(job(name, 'a'));
+        const [first] = await queue.reserve(name, 5, 100);
+        expect(first.id).toBe('a');
+
+        await queue.requeue(name, 'a', 150, 1, first.claimToken);
+        expect(await inspect.zscore(`queue:${name}:ready`, 'a')).toBe('150');
+        expect(await inspect.zcard(`queue:${name}:processing`)).toBe(0);
+        const again = await queue.reserve<{ n: number }>(name, 5, 150);
+        expect(again[0]).toMatchObject({ id: 'a', attempts: 1, data: { n: 7 } });
+
+        await queue.deadLetter(name, 'a', 200, again[0].claimToken);
+        expect(await inspect.zrange(`queue:${name}:dead`, 0, -1)).toEqual(['a']);
+        expect(await inspect.hget(`queue:${name}:jobs`, 'a')).toBeNull();
+        expect(await inspect.hget(`queue:${name}:dead:jobs`, 'a')).not.toBeNull();
+        expect(await inspect.ttl(`queue:${name}:dead`)).toBeGreaterThan(0);
+      } finally {
+        await inspect.del(
+          `queue:${name}:ready`,
+          `queue:${name}:processing`,
+          `queue:${name}:dead`,
+          `queue:${name}:jobs`,
+          `queue:${name}:dead:jobs`,
+        );
+        inspect.disconnect();
+        await queue.disconnect();
+      }
+    });
+
+    it('a reserve script applied after a local timeout leaves the job in processing', async () => {
+      const name = `m101a:${crypto.randomUUID()}`;
+      const { Redis } = await import('ioredis');
+      const real = new Redis(url!, { lazyConnect: true });
+      let armed = false;
+      // The server runs the script; the client then reports a timeout, as
+      // `commandTimeout` does when the server answers too late.
+      const targetClient = redisVariant === 'ioredis' ? real : nodeClient(redisVariant, url!);
+      const client = new Proxy(targetClient, {
+        get(target, prop, receiver) {
+          const value = Reflect.get(target, prop, receiver);
+          if (prop === 'eval' && typeof value === 'function') {
+            return async (...args: unknown[]) => {
+              const result = await value.apply(target, args);
+              if (armed) {
+                armed = false;
+                throw new Error('Command timed out');
+              }
+              return result;
+            };
+          }
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      }) as unknown as IRedisQueueClient;
+      const queue = new RedisQueue({ client });
+      try {
+        await queue.connect();
+        await queue.enqueue(job(name, 'b'));
+        armed = true;
+        await expect(queue.reserve(name, 5, 100)).rejects.toThrow('Command timed out');
+        expect(await real.zcard(`queue:${name}:ready`)).toBe(0);
+        expect(await real.zrange(`queue:${name}:processing`, 0, -1)).toEqual(['b']);
+        expect(await real.hget(`queue:${name}:jobs`, 'b')).not.toBeNull();
+      } finally {
+        await real.del(`queue:${name}:ready`, `queue:${name}:processing`, `queue:${name}:jobs`);
+        await queue.disconnect();
+        // On the node-redis variants `real` only inspects; the queue closed its own client.
+        if (targetClient !== real) real.disconnect();
+      }
+    });
   });
 });

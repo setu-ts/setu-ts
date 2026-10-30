@@ -20,6 +20,7 @@
 import type { Wiring } from '../templates/registry.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import type { WorkspaceRuntimeProfile } from './runtime-profile.ts';
+import { nodeRedisClientCall } from '../templates/node-redis.ts';
 import {
   PROTO_DEV_DEPENDENCIES,
   PROTO_IMPORTS,
@@ -55,6 +56,9 @@ export const TRANSPORTS = [
 
 /** An inter-service transport accepted by `--transport`. */
 export type TransportName = (typeof TRANSPORTS)[number];
+
+/** Redis client selected by a scaffold; ioredis remains the default. @since 0.11.0 */
+export type RedisClient = 'ioredis' | 'node-redis';
 
 /** The transport a workspace uses when `--transport` is not given. */
 export const DEFAULT_TRANSPORT: TransportName = 'http';
@@ -132,6 +136,8 @@ export interface ComposeBacking {
  * What a transport contributes to every member of the workspace.
  */
 export interface TransportSpec {
+  /** Explicit node-redis selection, omitted for the default ioredis arm. */
+  readonly redisClient?: 'node-redis';
   /** The `--transport` value that selects it. */
   readonly name: TransportName;
   /** One line for `--help` and the workspace README. */
@@ -694,13 +700,19 @@ export function renderConfigConnection(
  * field.
  *
  * @param name - The `--transport` value
+ * @param redisClient - Which Redis driver to render, defaulting to ioredis
  * @returns Its spec, or undefined when no such transport exists
  */
-export function getTransport(name: string): TransportSpec | undefined {
+export function getTransport(
+  name: string,
+  redisClient: RedisClient = 'ioredis',
+): TransportSpec | undefined {
   // `Object.hasOwn` rather than a bare index, so an inherited property name
   // (`constructor`, `__proto__`, `toString`) misses cleanly instead of
   // returning something off `Object.prototype`.
-  return Object.hasOwn(TRANSPORT_SPECS, name) ? TRANSPORT_SPECS[name as TransportName] : undefined;
+  return Object.hasOwn(TRANSPORT_SPECS, name)
+    ? transportSpec(name as TransportName, redisClient)
+    : undefined;
 }
 
 /**
@@ -710,10 +722,29 @@ export function getTransport(name: string): TransportSpec | undefined {
  * transport the reader has accepted needs no "cannot happen" branch here.
  *
  * @param name - A validated transport name
+ * @param redisClient - Which Redis driver to render, defaulting to ioredis
  * @returns Its spec
  */
-export function transportSpec(name: TransportName): TransportSpec {
-  return TRANSPORT_SPECS[name];
+export function transportSpec(
+  name: TransportName,
+  redisClient: RedisClient = 'ioredis',
+): TransportSpec {
+  const spec = TRANSPORT_SPECS[name];
+  if (name !== 'redis' || redisClient === 'ioredis') return spec;
+  const client = nodeRedisClientCall;
+  return {
+    ...spec,
+    redisClient: 'node-redis',
+    messagingClients: ['redis'],
+    queueClients: ['redis'],
+    messagingArgs: (connection) => `{ broker: 'redis-streams', client: ${client(connection)} }`,
+    queueArgs: (connection) => `{ adapter: 'redis', client: ${client(connection)} }`,
+    cacheArgs: (connection) => `{ store: 'redis', options: { client: ${client(connection)} } }`,
+    schedulerArgs: (connection) =>
+      `{ distributedLock: { enabled: true, storage: 'redis', client: ${client(connection)} } }`,
+    backplaneArgs: (connection) =>
+      `{ transport: 'redis', client: ${client(connection)}, subscriber: ${client(connection)} }`,
+  };
 }
 
 /**

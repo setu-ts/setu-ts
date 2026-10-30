@@ -26,6 +26,30 @@ describe('isConnectionFaultCode', () => {
 });
 
 describe('isConnectionFault', () => {
+  it.each([
+    'The client is closed',
+    'The client is offline',
+    'Socket closed unexpectedly',
+    'Connection timeout',
+    "Socket timeout timeout. Expecting data, but didn't receive any in 300ms.",
+    "Socket timeout timeout. Expecting data, but didn't receive any in 1700ms.",
+  ])('recognises measured node-redis outage: %s', (message) => {
+    expect(isConnectionFault(new Error(message))).toBe(true);
+    expect(isConnectionFault(new Error('wrapper', { cause: new Error(message) }))).toBe(true);
+    expect(isConnectionFault(Object.assign(new Error(message), { name: 'SimpleError' }))).toBe(
+      false,
+    );
+  });
+
+  it.each([
+    'prefix The client is closed',
+    "Socket timeout timeout. Expecting data, but didn't receive any in 300ms.x",
+    "Socket timeout timeout. Expecting data, but didn't receive any in -1ms.",
+    "Socket timeout timeout. Expecting data, but didn't receive any in 1.5ms.",
+    'WRONGTYPE Operation against a key holding the wrong kind of value',
+  ])('refuses near-miss node-redis messages: %s', (message) => {
+    expect(isConnectionFault(new Error(message))).toBe(false);
+  });
   it.each(CODES)('recognises code and errno %s', (code) => {
     expect(isConnectionFault({ code })).toBe(true);
     expect(isConnectionFault({ errno: code })).toBe(true);

@@ -51,6 +51,7 @@
     "mongodb": "npm:mongodb@^6.21.0",
     "nats": "npm:nats@2.x",
     "nats/lib/jetstream/jsutil.js": "npm:nats@2.x/lib/jetstream/jsutil.js",
+    "redis": "npm:redis@6.x",
     "vitest": "npm:vitest@5.0.3"
   }
 }

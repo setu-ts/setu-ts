@@ -17,6 +17,7 @@ import type { Prompter } from '../prompt.ts';
 import { resolveNewChoices } from './new-interactive.ts';
 import {
   readArmFlag,
+  redisClientRefusal,
   brokerComposeFiles,
   brokerEnvVariables,
   standaloneOverlayRefusal,
@@ -296,7 +297,10 @@ function readTransport(args: ParsedArgs):
     };
   }
 
-  const spec = getTransport(named);
+  const spec = getTransport(
+    named,
+    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis',
+  );
   if (spec === undefined) {
     // An own-key read: the table is a plain object, so `constructor` or
     // `toString` would otherwise take the alias branch and be suggested back.
@@ -630,6 +634,7 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
         `(default ${DEFAULT_TRANSPORT})`,
     );
     deps.log('  --transport-url <url>  Broker endpoint, for the broker transports');
+    deps.log('  --redis-client <name>  ioredis | node-redis (default ioredis; Redis arms only)');
     deps.log(
       `  --broker <name>     Message broker for a standalone project: ` +
         `${listBrokers().join(' | ')} (default memory)`,
@@ -685,6 +690,15 @@ export async function runNewCommand(args: ParsedArgs, deps: NewDependencies): Pr
     return EXIT_USAGE;
   }
   const runtime: TargetRuntime = runtimeFlag ?? 'node';
+  const redisRefusal = redisClientRefusal(
+    chosen,
+    runtime,
+    ['broker', 'queue', 'transport'].some((flag) => chosen.flags[flag] === 'redis'),
+  );
+  if (redisRefusal !== undefined) {
+    deps.error(redisRefusal);
+    return EXIT_USAGE;
+  }
 
   // Checked on the name as TYPED: `deriveNames` folds whitespace, so a bare CR,
   // LF or TAB would otherwise become `-` and scaffold silently, although the

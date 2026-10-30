@@ -89,13 +89,14 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // reminder line `setu add` prints. One more since M119h: the symlinked-member
     // refusal text fence. Three more since M118: the wiring-check section shows a
     // shell fence, a text fence of its output and a JSON silence-file fence, and its
-    // re-audit added the pinned CI invocation as a fourth shell fence.
-    total: 21,
+    // re-audit added the pinned CI invocation as a fourth shell fence. One more
+    // since M117: the Redis-client section shows a shell fence.
+    total: 22,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 20,
+    skipped: 21,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -259,13 +260,14 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // Examples layout cleanup: +2 skipped fences in docs/examples.md.
   // M119h: +1 skipped text fence in docs/cli.md's `setu agents` section.
   // M118: +4 skipped fences in docs/cli.md's wiring-check section.
+  // M117: +1 skipped shell fence in docs/cli.md's Redis-client section.
   // M119i: setup, full-stack create and npm tsconfig add three non-TS fences.
-  total: 308,
+  total: 309,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 79,
+  skipped: 80,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

@@ -30,6 +30,7 @@
     "ioredis": "npm:ioredis@5.x",
     "mongodb": "npm:mongodb@^6.21.0",
     "pg": "npm:pg@^8.0.0",
+    "redis": "npm:redis@6.x",
     "vitest": "npm:vitest@5.0.3",
     "zod-v4": "npm:zod@^4.6.6"
   }

@@ -12,7 +12,10 @@ import type {
 } from '../interfaces/index.ts';
 import type { IRuntimeServices } from '@setu-ts/common';
 import { loadFetchInstrumentation, loadHttpInstrumentation } from './http-instrumentation.ts';
-import { loadIORedisInstrumentation } from './database-instrumentation.ts';
+import {
+  loadIORedisInstrumentation,
+  loadRedisInstrumentation,
+} from './database-instrumentation.ts';
 import { loadAmqplibInstrumentation, loadKafkaJsInstrumentation } from './queue-instrumentation.ts';
 
 /** Outcome of enabling a single instrumentation. */
@@ -85,11 +88,12 @@ export interface InstrumentationLoaders {
   readonly http: InstrumentationLoader;
   readonly fetch: InstrumentationLoader;
   readonly ioredis: InstrumentationLoader;
+  readonly redis: InstrumentationLoader;
   readonly amqplib: InstrumentationLoader;
   readonly kafkajs: InstrumentationLoader;
 }
 
-/** Platform check — all five instrumentations target Node internals. */
+/** Platform check — all instrumentations target Node internals. */
 export function isInstrumentationSupported(_kind: InstrumentationKind, platform: string): boolean {
   return platform === 'node';
 }
@@ -124,6 +128,7 @@ export async function buildInstrumentationRegistry(
     http: loadHttpInstrumentation,
     fetch: loadFetchInstrumentation,
     ioredis: loadIORedisInstrumentation,
+    redis: loadRedisInstrumentation,
     amqplib: loadAmqplibInstrumentation,
     kafkajs: loadKafkaJsInstrumentation,
   },
@@ -246,6 +251,11 @@ export async function buildInstrumentationRegistry(
   const ioredisCfg = config?.ioredis;
   if (ioredisCfg !== undefined) {
     dispatch('ioredis', ioredisCfg, loaders.ioredis);
+  }
+
+  const redisCfg = config?.redis;
+  if (redisCfg !== undefined) {
+    dispatch('redis', redisCfg, loaders.redis);
   }
 
   const amqplibCfg = config?.amqplib;

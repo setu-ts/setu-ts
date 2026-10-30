@@ -77,6 +77,14 @@ export interface IRedisBackplaneClient {
    */
   ping?(): Promise<unknown>;
   /**
+   * Opens a caller-owned lazy connection. The backplane awaits this at start
+   * only when an injected client's status is `'wait'`, before subscribing.
+   *
+   * @returns Resolves when the client is connected
+   * @since 0.11.0
+   */
+  connect?(): Promise<unknown>;
+  /**
    * M70c: the `ioredis` connection state (`'ready'` when usable). Optional for
    * the same reason as {@linkcode ping}.
    *

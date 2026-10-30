@@ -36,6 +36,12 @@ first error of an outage at `warn`, identical repeats at `debug`, the recovery a
 of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
 listener: it belongs to the caller.
 
+**node-redis.** To use node-redis instead of ioredis, pass
+`QueuePlugin({ adapter: 'redis', client: fromNodeRedis(createClient({ url })) })` (`fromNodeRedis`
+from `@setu-ts/common`, `createClient` from `redis`, installed in your application). The adapter
+provides `eval`, so every transition still runs as one script. See
+[Using node-redis](https://github.com/setu-ts/setu-ts/blob/main/packages/common/README.md#using-node-redis-0110).
+
 ### RabbitMQ Adapter
 
 ```typescript

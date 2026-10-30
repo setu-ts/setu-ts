@@ -416,7 +416,7 @@ export interface IRedisLockClient {
   /** Quit the connection */
   quit(): Promise<void>;
   /** EVAL script numkeys keys... argv... */
-  eval(script: string, numkeys: number, ...keysAndArgs: string[]): Promise<number | string | null>;
+  eval(script: string, numkeys: number, ...keysAndArgs: string[]): Promise<unknown>;
 }
 
 /**

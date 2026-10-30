@@ -19,9 +19,11 @@
     "@opentelemetry/instrumentation-http": "npm:@opentelemetry/instrumentation-http@^0.220.0",
     "@opentelemetry/instrumentation-ioredis": "npm:@opentelemetry/instrumentation-ioredis@^0.68.0",
     "@opentelemetry/instrumentation-kafkajs": "npm:@opentelemetry/instrumentation-kafkajs@^0.29.0",
+    "@opentelemetry/instrumentation-redis": "npm:@opentelemetry/instrumentation-redis@^0.69.0",
     "@opentelemetry/instrumentation-undici": "npm:@opentelemetry/instrumentation-undici@^0.30.0",
     "@opentelemetry/resources": "npm:@opentelemetry/resources@^2.9.0",
     "@opentelemetry/sdk-trace-base": "npm:@opentelemetry/sdk-trace-base@^2.9.0",
+    "redis": "npm:redis@6.x",
     "vitest": "npm:vitest@5.0.3"
   }
 }
