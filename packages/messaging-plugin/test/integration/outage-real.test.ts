@@ -51,7 +51,9 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         const elapsed = performance.now() - started;
         expect(error).toBeInstanceOf(PublishTimeoutError);
         expect(error).toMatchObject({ topic: 'm119a.paused', timeoutMs: 2000 });
-        expect(elapsed).toBeGreaterThanOrEqual(2000);
+        // A timer may fire a fraction of a millisecond before performance.now()
+        // reads the full bound (measured: 1999.7 ms on the v0.11.0 release run).
+        expect(elapsed).toBeGreaterThanOrEqual(2000 - 5);
         expect(elapsed).toBeLessThan(3000);
       } finally {
         if (paused) await docker(['unpause', container]);
