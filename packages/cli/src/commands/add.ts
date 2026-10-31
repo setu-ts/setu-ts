@@ -2036,12 +2036,23 @@ export function withEnvVariable(
 ): string | undefined {
   const variable = variables[0];
   if (variable === undefined) return undefined;
-  const name = variable.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  // A leading BOM would otherwise hide an assignment on the first line from `^`.
-  const assigned = new RegExp(`^[ \\t]*#?[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=`, 'm');
-  if (assigned.test(text.replace(/^\uFEFF/, ''))) {
+  // A line scan, not a regular expression built from the name: nothing here can
+  // backtrack, whatever a developer's file holds. A leading BOM is ignored.
+  const assigns = (line: string): boolean => {
+    let rest = line.trimStart();
+    if (rest.startsWith('#')) rest = rest.slice(1).trimStart();
+    if (/^export[ \t]/.test(rest)) rest = rest.slice('export'.length).trimStart();
+    return (
+      rest.startsWith(variable.name) && rest.slice(variable.name.length).trimStart().startsWith('=')
+    );
+  };
+  if (
+    text
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .some(assigns)
+  )
     return undefined;
-  }
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
   const separator = text === '' || text.endsWith('\n') ? '' : newline;
   return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;

@@ -57,6 +57,8 @@ describe('configuredEnvFilePath', () => {
     const source = `{ envFilePath: '.env', envFileOptional: true }`;
     expect(configuredEnvFilePath(source)).toBe('.env');
     expect(configuredEnvFilePath(`{ envFilePath: 'name.env' }`)).toBe('name.env');
+    expect(configuredEnvFilePath(`{ envFilePath: "config/app.env" }`)).toBe('config/app.env');
+    expect(configuredEnvFilePath(`{ envFilePath: "../.env" }`)).toBeUndefined();
   });
 
   it('returns a valid multi-segment path, leaving the move decision to the caller', () => {

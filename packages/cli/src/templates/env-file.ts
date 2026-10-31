@@ -83,8 +83,11 @@ export function readEnvFilePath(
  * @returns The validated relative path, or `undefined` when none is declared or it is unusable
  */
 export function configuredEnvFilePath(configSource: string): string | undefined {
-  const configured = /\benvFilePath:\s*'([^']+)'/.exec(configSource)?.[1];
-  if (configured === undefined) return undefined;
-  const parsed = readEnvFilePath({ 'env-file': configured });
+  // Either quote style: a formatter configured for double quotes rewrites the
+  // generated single-quoted literal, and the app still reads the same file.
+  const configured = /\benvFilePath:\s*(?:'([^']+)'|"([^"]+)")/.exec(configSource);
+  const path = configured?.[1] ?? configured?.[2];
+  if (path === undefined) return undefined;
+  const parsed = readEnvFilePath({ 'env-file': path });
   return parsed.ok ? parsed.path : undefined;
 }

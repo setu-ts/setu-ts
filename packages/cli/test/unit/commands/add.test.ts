@@ -420,6 +420,12 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     expect(withEnvVariable('REDIS_URL_OLD=x\n', row, 'y')).toContain('\nREDIS_URL=y\n');
     expect(withEnvVariable('A=1\n', [], 'y')).toBeUndefined();
     expect(withEnvVariable('\uFEFFREDIS_URL=x\n', row, 'y')).toBeUndefined();
+    // Long whitespace-only lines are answered at once (no backtracking).
+    const padded = `${' '.repeat(200_000)}\n${'\t'.repeat(200_000)}\n`;
+    const started = performance.now();
+    expect(withEnvVariable(padded, row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(withEnvVariable('exported=1\nREDIS_URLX=1\n', row, 'y')).toContain('\nREDIS_URL=y\n');
   });
 
   it('writes to the configured env file and its example, and keeps a value the developer set', async () => {
