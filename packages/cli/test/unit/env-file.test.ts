@@ -59,6 +59,16 @@ describe('configuredEnvFilePath', () => {
     expect(configuredEnvFilePath(`{ envFilePath: 'name.env' }`)).toBe('name.env');
     expect(configuredEnvFilePath(`{ envFilePath: "config/app.env" }`)).toBe('config/app.env');
     expect(configuredEnvFilePath(`{ envFilePath: "../.env" }`)).toBeUndefined();
+    // A commented-out declaration never wins over the active one.
+    expect(
+      configuredEnvFilePath(`// envFilePath: "old.env"\nConfigPlugin({ envFilePath: '.env' })`),
+    ).toBe('.env');
+    expect(configuredEnvFilePath(`/* envFilePath: 'old.env' */ { envFilePath: 'app.env' }`)).toBe(
+      'app.env',
+    );
+    expect(configuredEnvFilePath(`{ url: 'redis://host', envFilePath: 'app.env' } // note`)).toBe(
+      'app.env',
+    );
   });
 
   it('returns a valid multi-segment path, leaving the move decision to the caller', () => {

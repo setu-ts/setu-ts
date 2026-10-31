@@ -85,7 +85,10 @@ export function readEnvFilePath(
 export function configuredEnvFilePath(configSource: string): string | undefined {
   // Either quote style: a formatter configured for double quotes rewrites the
   // generated single-quoted literal, and the app still reads the same file.
-  const configured = /\benvFilePath:\s*(?:'([^']+)'|"([^"]+)")/.exec(configSource);
+  // Comments removed first, so a commented-out declaration (`// envFilePath: 'old.env'`)
+  // never wins over the active one. `://` inside a string is not a line comment.
+  const active = configSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+  const configured = /\benvFilePath:\s*(?:'([^']+)'|"([^"]+)")/.exec(active);
   const path = configured?.[1] ?? configured?.[2];
   if (path === undefined) return undefined;
   const parsed = readEnvFilePath({ 'env-file': path });
