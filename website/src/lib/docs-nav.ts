@@ -54,10 +54,6 @@ export const DOCS_NAV: DocsNavGroup[] = [
     ],
   },
   {
-    label: 'Examples',
-    items: [{ slug: 'examples', label: 'Runnable examples' }],
-  },
-  {
     label: 'Deploying',
     items: [
       { slug: 'runtime-deployment', label: 'Runtime deployment' },

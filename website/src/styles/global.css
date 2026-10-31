@@ -708,7 +708,13 @@ kbd {
 }
 
 .docs-sidebar {
-  padding: 1.5rem 0 2rem;
+  position: sticky;
+  top: 4rem;
+  align-self: start;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.5rem 0.75rem 2rem 0;
   border-right: 1px solid var(--border);
 }
 
@@ -834,6 +840,53 @@ kbd {
 .docs-content {
   padding: 1.5rem 0 2rem;
   min-width: 0;
+}
+
+.breadcrumbs {
+  margin: 1.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.breadcrumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.breadcrumbs li + li::before {
+  content: '›';
+  margin-right: 0.35rem;
+}
+
+.breadcrumbs [aria-current='page'] {
+  color: var(--fg);
+}
+
+.try-it {
+  margin: 1rem 0 1.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--accent);
+  border-radius: 0.6rem;
+  background: var(--accent-soft);
+}
+
+.try-it-title {
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 0.35rem;
+}
+
+.try-it pre {
+  margin: 0.6rem 0;
+}
+
+.try-it-note {
+  font-size: 0.85rem;
+  color: var(--muted);
 }
 
 .edit-page {

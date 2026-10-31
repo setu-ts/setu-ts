@@ -39,6 +39,11 @@ describe('rewriteHref', () => {
 
   it('routes app directories locally', () => {
     expect(rewriteHref('../apps/full-stack', 'docs')).toBe('/examples/full-stack/');
+    expect(rewriteHref('../apps/', 'docs')).toBe('/docs/examples/');
+  });
+
+  it('routes the apps README to its own page, not back to the examples guide', () => {
+    expect(rewriteHref('../apps/README.md#ci', 'docs')).toBe('/examples/repository/#ci');
   });
 
   it('routes grafted API reference links to the public API tree', () => {

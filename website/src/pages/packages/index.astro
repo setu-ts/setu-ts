@@ -1,11 +1,11 @@
 ---
 import DocsLayout from '../../layouts/DocsLayout.astro';
-import { PACKAGES } from '../../lib/repository';
+import { PACKAGES, PACKAGE_GROUPS, PACKAGE_NAVIGATION } from '../../lib/repository';
 ---
-<DocsLayout title="Packages — Setu-TS">
+<DocsLayout title="Packages — Setu-TS" section={PACKAGE_NAVIGATION}>
   <article class="prose">
     <h1>Packages</h1>
-    {['Core', 'Plugins', 'Starters', 'Tools'].map((group) => <section>
+    {PACKAGE_GROUPS.map((group) => <section>
       <h2>{group}</h2>
       <ul>{PACKAGES.filter((pkg) => pkg.group === group).map((pkg) => <li>
         <a href={`/packages/${pkg.slug}/`}>{pkg.name}</a> — {pkg.description}

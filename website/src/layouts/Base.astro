@@ -1,5 +1,6 @@
 ---
 import '../styles/global.css';
+import { siteSection } from '../lib/site-section';
 
 interface Props {
   title: string;
@@ -9,7 +10,8 @@ interface Props {
 const { title, description = 'Plugin-first enterprise backend framework built on Hono.' } =
   Astro.props;
 const canonical = Astro.site ? new URL(Astro.url.pathname, Astro.site).href : Astro.url.pathname;
-const isDocs = Astro.url.pathname.startsWith('/docs');
+const section = siteSection(Astro.url.pathname);
+const current = (entry: typeof section) => (section === entry ? 'page' : undefined);
 const softwareApplicationSchema = {
   '@context': 'https://schema.org',
   '@type': 'SoftwareApplication',
@@ -83,9 +85,9 @@ const softwareApplicationSchema = {
             class="site-search"
             placeholder="Search docs"
           ></pagefind-modal-trigger>
-          <a href="/docs/" aria-current={isDocs ? 'page' : undefined}>Docs</a>
-          <a href="/api/">API</a>
-          <a href="/docs/examples/">Examples</a>
+          <a href="/docs/" aria-current={current('docs')}>Docs</a>
+          <a href="/api/" aria-current={current('api')}>API</a>
+          <a href="/docs/examples/" aria-current={current('examples')}>Examples</a>
           <a href="https://github.com/setu-ts/setu-ts">GitHub</a>
           <button
             id="theme-toggle"
@@ -140,9 +142,9 @@ const softwareApplicationSchema = {
             <span class="visually-hidden">Open navigation</span>
           </summary>
           <div class="mobile-navigation-panel">
-            <a href="/docs/" aria-current={isDocs ? 'page' : undefined}>Docs</a>
-            <a href="/api/">API</a>
-            <a href="/docs/examples/">Examples</a>
+            <a href="/docs/" aria-current={current('docs')}>Docs</a>
+            <a href="/api/" aria-current={current('api')}>API</a>
+            <a href="/docs/examples/" aria-current={current('examples')}>Examples</a>
             <a href="https://github.com/setu-ts/setu-ts">GitHub</a>
             <button
               class="theme-toggle mobile-theme-toggle"

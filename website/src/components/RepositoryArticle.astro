@@ -1,13 +1,20 @@
 ---
-import DocsLayout from '../layouts/DocsLayout.astro';
+import DocsLayout, { type Breadcrumb } from '../layouts/DocsLayout.astro';
+import type { SectionNavigationGroup } from './SectionNavigation.astro';
 import { extractDescription, extractTableOfContents, extractTitle, rewriteDocsHtml } from '../lib/docs-links';
 import { EXAMPLE_FILES } from '../lib/repository';
-interface Props { html: string; directory: string; title?: string }
-const { html: source, directory, title: suppliedTitle } = Astro.props;
+interface Props {
+  html: string;
+  directory: string;
+  title?: string;
+  breadcrumbs?: Breadcrumb[];
+  section?: SectionNavigationGroup[];
+}
+const { html: source, directory, title: suppliedTitle, breadcrumbs = [], section } = Astro.props;
 const html = rewriteDocsHtml(source, directory, EXAMPLE_FILES);
 const title = suppliedTitle ?? extractTitle(html) ?? 'Setu-TS';
 ---
-<DocsLayout title={`${title} — Setu-TS`} description={extractDescription(html)} tableOfContents={extractTableOfContents(html)}>
+<DocsLayout title={`${title} — Setu-TS`} description={extractDescription(html)} tableOfContents={extractTableOfContents(html)} breadcrumbs={breadcrumbs} {...(section ? { section } : {})}>
   <article class="prose" set:html={html} />
   <slot />
 </DocsLayout>

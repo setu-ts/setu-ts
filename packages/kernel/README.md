@@ -1,9 +1,5 @@
 # @setu-ts/kernel
 
-Unhandled HTTP errors use the registered logger, or `runtime.reportError` when no logger is
-registered. The last-resort runtime sink receives the serialized error, request id, method, and
-path; the client still receives an opaque 500 response. An injected runtime may omit the sink.
-
 Plugin kernel for the Setu-TS framework: plugin registry, service registry, middleware pipeline,
 router, and application lifecycle.
 
@@ -121,10 +117,15 @@ and the CLI's command discovery rely on.
 ## Rules
 
 - No runtime-specific APIs — all timers, UUIDs, and clocks go through `IRuntimeServices`.
-- No `console.*` — the kernel has no logger; it never logs.
+- No `console.*` — the kernel writes no output of its own. It reports through the registered logger,
+  or through `runtime.reportError` when none is registered (see the unhandled-error rule below).
 - Listening requires both `CAPABILITIES.HTTP_ADAPTER` and a `port` option; otherwise `start()` skips
   server creation (so `inject()` and tests need no server).
 - The kernel emits only bare 404/500 JSON; error formatting belongs to the exceptions package.
+- An unhandled HTTP error is reported through the registered logger, or `runtime.reportError` when
+  no logger is registered. That last-resort runtime sink receives the serialized error, request id,
+  method, and path; the client still receives an opaque 500 response. An injected runtime may omit
+  the sink.
 - A runtime provider is mandatory — `start()` fails fast if no plugin provides
   `CAPABILITIES.RUNTIME`.
 - A failed `start()` can be corrected and retried only when it failed before any plugin registered
