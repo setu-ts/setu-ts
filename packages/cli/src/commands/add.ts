@@ -1756,7 +1756,10 @@ export async function runAddCommand(
       updated.push(file);
     }
     deps.log(`Connection: ${variable} (local default ${localDefault}).`);
-    if (updated.length > 0) deps.log(`  Added ${variable} to ${updated.join(' and ')}.`);
+    if (updated.length > 0) {
+      const verb = args.flags['dry-run'] === true ? 'Would add' : 'Added';
+      deps.log(`  ${verb} ${variable} to ${updated.join(' and ')}.`);
+    }
     if (lacking.length > 0) {
       deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
     }
@@ -2034,7 +2037,9 @@ export function withEnvVariable(
   const variable = variables[0];
   if (variable === undefined) return undefined;
   const name = variable.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  if (new RegExp(`^[ \\t]*#?[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=`, 'm').test(text)) {
+  // A leading BOM would otherwise hide an assignment on the first line from `^`.
+  const assigned = new RegExp(`^[ \\t]*#?[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=`, 'm');
+  if (assigned.test(text.replace(/^\uFEFF/, ''))) {
     return undefined;
   }
   const newline = text.includes('\r\n') ? '\r\n' : '\n';

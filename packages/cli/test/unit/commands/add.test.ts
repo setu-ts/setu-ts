@@ -217,6 +217,9 @@ export function createApp(): IKernelApplication {
           expect(h.fs.writes.length).toBe(beforeDryRun);
           expect(h.out.join('\n')).toContain('docker/compose.yaml');
           expect(h.out.join('\n')).toContain('setu.config.ts');
+          expect(h.out.join('\n')).toContain(
+            `Would add ${spec.connection!.variable} to .env and .env.example.`,
+          );
           expect(await h.run(args), h.err.join('\n')).toBe(0);
           const config = h.read('/app/portal/setu.config.ts');
           expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
@@ -416,6 +419,7 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     // A longer name that merely starts with the variable is not an assignment of it.
     expect(withEnvVariable('REDIS_URL_OLD=x\n', row, 'y')).toContain('\nREDIS_URL=y\n');
     expect(withEnvVariable('A=1\n', [], 'y')).toBeUndefined();
+    expect(withEnvVariable('\uFEFFREDIS_URL=x\n', row, 'y')).toBeUndefined();
   });
 
   it('writes to the configured env file and its example, and keeps a value the developer set', async () => {
