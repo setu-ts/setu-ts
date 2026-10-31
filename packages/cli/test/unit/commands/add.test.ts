@@ -16,6 +16,7 @@ import {
   resolveAddablePackage,
   runAddCommand,
   withDependency,
+  withEnvVariable,
   withPluginWiring,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
@@ -195,7 +196,7 @@ export function createApp(): IKernelApplication {
     for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
       for (const flag of ['broker', 'queue'] as const) {
         if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
-        it(`adds standalone ${runtime} ${flag} ${spec.name} and preserves Compose and dotenv on re-add`, async () => {
+        it(`adds standalone ${runtime} ${flag} ${spec.name}, appends its dotenv rows once, and preserves both on re-add`, async () => {
           const h = harness();
           expect(
             await runNewCommand(
@@ -225,15 +226,26 @@ export function createApp(): IKernelApplication {
           for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
             [])
             expect(manifest).toContain(client);
-          expect(h.read('/app/portal/.env')).toBe(env);
+          // X91-9: the variable `setu new --broker` writes is appended where absent,
+          // with the local default in .env and empty in the tracked example.
+          const { variable, localDefault } = spec.connection!;
+          const envAfter = h.read('/app/portal/.env');
+          expect(envAfter.startsWith(env)).toBe(true);
+          expect(envAfter.match(new RegExp(`^${variable}=`, 'gm'))?.length).toBe(1);
+          expect(envAfter).toContain(`\n${variable}=${localDefault}\n`);
+          const example = h.read('/app/portal/.env.example');
+          expect(example.match(new RegExp(`^${variable}=$`, 'gm'))?.length).toBe(1);
+          expect(h.out.join('\n')).toContain(`Added ${variable} to .env and .env.example.`);
           const compose = h.read('/app/portal/docker/compose.yaml');
           const beforeReAdd = h.fs.writes.length;
           expect(await h.run(args)).toBe(0);
           expect(h.read('/app/portal/setu.config.ts')).toBe(config);
           expect(h.read('/app/portal/docker/compose.yaml')).toBe(compose);
+          expect(h.read('/app/portal/.env')).toBe(envAfter);
+          expect(h.read('/app/portal/.env.example')).toBe(example);
           expect(h.fs.writes.length).toBe(beforeReAdd);
           expect(h.out.join('\n')).toContain(
-            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+            `Connection: ${variable} (local default ${localDefault}).`,
           );
         });
       }
@@ -369,6 +381,92 @@ export function createApp(): IKernelApplication {
       `Run ${cliInvocation('node')} generate app <name> --template full-stack.`,
     );
     expect(h.fs.writes.length).toBe(before);
+  });
+});
+
+describe('the connection variable in the dotenv pair (X91-9)', () => {
+  const row = [
+    { name: 'REDIS_URL', description: 'Where the redis transport connects.', develop: '' },
+  ];
+
+  it('appends the row once, keeping the file and its line endings', () => {
+    expect(withEnvVariable('# Local\nA=1\n', row, 'redis://127.0.0.1:6379')).toBe(
+      '# Local\nA=1\n\n# Where the redis transport connects.\nREDIS_URL=redis://127.0.0.1:6379\n',
+    );
+    expect(withEnvVariable('A=1', row, '')).toBe(
+      'A=1\n\n# Where the redis transport connects.\nREDIS_URL=\n',
+    );
+    expect(withEnvVariable('A=1\r\n', row, '')).toBe(
+      'A=1\r\n\r\n# Where the redis transport connects.\r\nREDIS_URL=\r\n',
+    );
+    expect(withEnvVariable('', row, 'x')).toBe(
+      '\n# Where the redis transport connects.\nREDIS_URL=x\n',
+    );
+  });
+
+  it('leaves any existing assignment alone, set, exported or commented out', () => {
+    for (const text of [
+      'REDIS_URL=redis://cache:6379\n',
+      'export REDIS_URL=redis://cache:6379\n',
+      '  REDIS_URL = x\n',
+      '# REDIS_URL=\n',
+    ]) {
+      expect(withEnvVariable(text, row, 'redis://127.0.0.1:6379'), text).toBeUndefined();
+    }
+    // A longer name that merely starts with the variable is not an assignment of it.
+    expect(withEnvVariable('REDIS_URL_OLD=x\n', row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(withEnvVariable('A=1\n', [], 'y')).toBeUndefined();
+  });
+
+  it('writes to the configured env file and its example, and keeps a value the developer set', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(
+        parseArgs([
+          'portal',
+          '--runtime',
+          'node',
+          '--template',
+          'full-stack',
+          '--env-file',
+          'config/app.env',
+        ]),
+        { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+      ),
+    ).toBe(0);
+    await h.fs.writeFile(
+      '/app/portal/config/app.env',
+      new TextEncoder().encode(
+        `${h.read('/app/portal/config/app.env')}REDIS_URL=redis://cache:6380\n`,
+      ),
+    );
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(h.read('/app/portal/config/app.env').match(/^REDIS_URL=/gm)).toEqual(['REDIS_URL=']);
+    expect(h.read('/app/portal/config/app.env')).toContain('REDIS_URL=redis://cache:6380');
+    expect(h.read('/app/portal/config/app.env.example')).toMatch(/^REDIS_URL=$/m);
+    expect(h.out.join('\n')).toContain('Added REDIS_URL to config/app.env.example.');
+  });
+
+  it('names the files it could not find instead of creating them', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    await h.fs.rm('/app/portal/.env');
+    expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(
+      await h.fs.readFile('/app/portal/.env').then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(h.out.join('\n')).toContain('No .env here; set REDIS_URL where the app reads it.');
+    expect(h.read('/app/portal/.env.example')).toMatch(/^REDIS_URL=$/m);
   });
 });
 

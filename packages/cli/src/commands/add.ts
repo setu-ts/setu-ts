@@ -48,8 +48,11 @@ import {
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
+import { configuredEnvFilePath } from '../templates/env-file.ts';
+import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
+  brokerEnvVariables,
   missingComposeServices,
   readArmFlag,
   redisClientRefusal,
@@ -1730,9 +1733,33 @@ export async function runAddCommand(
   }
 
   if (selected?.connection !== undefined) {
-    deps.log(
-      `  ${selected.connection.variable}=${selected.connection.localDefault} (local default; .env files are unchanged).`,
-    );
+    const { variable, localDefault } = selected.connection;
+    // The dotenv pair `setu new --broker` writes, appended here only where the
+    // variable is absent: an existing value (or a file the project removed) is the
+    // developer's, and a re-add finds the row and writes nothing.
+    const envFile = (configSource && configuredEnvFilePath(configSource)) || '.env';
+    const updated: string[] = [];
+    const lacking: string[] = [];
+    for (const [file, value] of [
+      [envFile, localDefault],
+      [`${envFile}.example`, ''],
+    ] as const) {
+      const path = joinPath(dir, file);
+      const text = await readExistingText(deps.fs, path);
+      if (text === undefined) {
+        lacking.push(file);
+        continue;
+      }
+      const appended = withEnvVariable(text, brokerEnvVariables(selected), value);
+      if (appended === undefined) continue;
+      edits.push({ path, contents: appended });
+      updated.push(file);
+    }
+    deps.log(`Connection: ${variable} (local default ${localDefault}).`);
+    if (updated.length > 0) deps.log(`  Added ${variable} to ${updated.join(' and ')}.`);
+    if (lacking.length > 0) {
+      deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
+    }
     const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
     const existingCompose = await readExistingText(deps.fs, composePath);
     // Every file is create-only: an existing Compose file is never rewritten, so a
@@ -1984,6 +2011,35 @@ export async function runAddCommand(
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
   await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
+}
+
+/**
+ * Appends a connection variable's dotenv row to an existing file, unless the file
+ * already assigns it.
+ *
+ * Mirrors what `setu new --broker` writes (the description comment, then
+ * `NAME=value`) and never touches an existing assignment, commented or not — so a
+ * value the developer changed survives and a re-add writes nothing.
+ *
+ * @param text - The current file contents
+ * @param variables - The connection variable row (empty for an arm without one)
+ * @param value - The value to write: the local default, or empty for the example
+ * @returns The new contents, or undefined when there is nothing to add
+ */
+export function withEnvVariable(
+  text: string,
+  variables: readonly EnvVariable[],
+  value: string,
+): string | undefined {
+  const variable = variables[0];
+  if (variable === undefined) return undefined;
+  const name = variable.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (new RegExp(`^[ \\t]*#?[ \\t]*(?:export[ \\t]+)?${name}[ \\t]*=`, 'm').test(text)) {
+    return undefined;
+  }
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const separator = text === '' || text.endsWith('\n') ? '' : newline;
+  return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
 }
 
 /** An add is successful even when its advisory brief reminder cannot be read. */
