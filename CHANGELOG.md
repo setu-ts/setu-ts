@@ -15,7 +15,7 @@ All notable changes to this project are documented here. The format follows
   left alone, so a re-add writes nothing; a dotenv file the project does not have is named instead
   of created. Previously both files were left without the variable and the hint printed as an
   unlabelled line. `docs/cli.md` also no longer says `add` installs the client: it records it in the
-  manifest (X91-9, V11-14).
+  manifest (X91-9, V11-14; #537).
 
 ## [0.11.0] — 2026-10-30
 
