@@ -16089,6 +16089,298 @@ through the `dev` script, and teardown across the npm/shell/tsx/node chain.
 
 ---
 
+## Milestone 127: A Registry of Real Tenants
+
+**Package(s):** `packages/common` (the `ITenantRegistry` port), `packages/multi-tenancy-plugin` (the
+`tenants` option, the middleware step, the cache, `lookupTenant`), `packages/database-plugin`
+(`createDatabaseTenantRegistry`); `apps/multi-tenant`; docs.
+
+**Source:** the CMS demo planned against published `0.11.0` (2026-10-31), which had to write its own
+known-tenant resolver; the design is in the maintainer's working note
+`hono-enterprise-plans/next-release-framework-gaps.md` (gap 1), every fact in it read from the
+`0.11.0` source.
+
+**The problem.** A tenant is whatever the request names. The shipped resolvers return `some({ id })`
+from a trimmed header, the left-most host label, a path segment or an unverified JWT claim, and
+nothing compares it with a list of tenants that exist (`multi-tenancy-plugin/src/resolvers/*`,
+`middleware/tenant-middleware.ts:121-190`). Column isolation stops this becoming a data leak, but
+every write under an invented tenant creates rows, a typo looks like an empty site instead of an
+error, and anyone can mint unlimited tenants — rows, cache keys and per-tenant rate-limit buckets.
+Finbuckle.MultiTenant on ASP.NET Core requires a tenant store for this reason.
+
+**Decisions the plan takes:**
+
+1. **A registry port in common:** `ITenantRegistry.lookup(id): Promise<Option<ITenant>>`, `none()`
+   meaning "does not exist or is not active". The returned `ITenant` replaces the resolver's bare
+   `{ id }`, so `name` and `metadata` reach `ctx.request.tenant`.
+2. **One option, `tenants`,** taking an array of ids or tenants (an internal static registry built
+   once at `register()`, duplicates and empty ids refused), an `ITenantRegistry`, or a
+   `RegistryFactory` resolved in `onInit` (the `dataStore` arm). Omitted: today's behaviour.
+   `unknownTenantStatus` (default 404).
+3. **The middleware step** between resolution and `replaceTenant`: a hit replaces the tenant; a miss
+   answers `Unknown Tenant` with `unknownTenantStatus` and runs nothing downstream; a registry that
+   throws answers 503 and never falls open. No detail echoes the caller-supplied id. Excluded paths
+   still bypass the lookup; the lookup runs before the session tenant-binding check.
+4. **`createDatabaseTenantRegistry({ entity, idField, activeField? })`** in database-plugin, a
+   `RegistryFactory` like `createDatabaseTenantDataStore()`; a falsy `activeField` is a miss.
+5. **A bounded positive-hit cache** for non-static registries: TTL (default 30 s) plus an entry AND
+   a byte bound, because the key is a request-supplied string. Misses are not cached.
+6. **Non-HTTP ingress:** `IMultiTenancyService.lookupTenant(id)` so queue, scheduler and messaging
+   handlers validate a payload's tenant through the same registry.
+
+**Gate:** the short-circuit test (a miss runs no handler), the 503-on-throw test, the cache bounds,
+`createDatabaseTenantRegistry` on memory and Drizzle, and `apps/multi-tenant` on
+`tenants: ['acme', 'globex']` with its smoke asserting an unknown tenant answers 404. The change
+crosses a trust boundary, so the milestone is **security-audited** by a fresh agent before it merges
+(CLAUDE.md, `.roo/skills/security-audit/SKILL.md`).
+
+---
+
+## Milestone 128: Optimistic Locking, and the Database Plugin Under Faults
+
+**Package(s):** `packages/database-plugin`, `packages/common` (optional tenant-store members),
+`packages/multi-tenancy-plugin` (delegation); docs.
+
+**Source:** the CMS demo (gap 2 of the working note) and, folded in by the maintainer's decision of
+2026-11-01, the database-plugin fault group from the `0.11.0` smoke programme
+(`smoke/X94-X95-FINDINGS.md`, `smoke/CMS-DEMO-FINDINGS.md`, grouped in `smoke/OPEN-AFTER-0110.md` as
+G1). Closes **X94-1 (High)**, **X94-2**, **V11-5** and **X94-3**.
+
+### Part A — the fault rows (first: it holds the programme's only High)
+
+- **X94-1 (High)** — a connection lost while a Drizzle × PostgreSQL Unit-of-Work transaction is open
+  crashes the Node process: the `pg` `Client` checked out inside `db.transaction(...)` has no
+  `'error'` listener, so `57P01` is an unhandled `'error'` event. Reproduced in isolation; the same
+  kill during a plain query answers 500 and the process lives; Prisma over `@prisma/adapter-pg`
+  survived the identical phase. M119e's listener covers idle pool clients only.
+- **X94-2** — outage-time driver errors answer a generic 500 on every backend (pg 57P01 and
+  "Connection terminated unexpectedly", Prisma P1001/P2028/P2039, MongoDB wait-queue / pool-cleared
+  / `NotWritablePrimary`, `SQLITE_BUSY`), while the pool-timeout path of the same outages is already
+  a 503/504. `errors/classify.ts` lacks those anchors.
+- **V11-5** — `IDatabaseService.transaction()` classifies EVERY error its work throws as a driver
+  error, so an inbox handler's refused HTTP call is reported as a database fault.
+- **X94-3** — `getRepository()` rebuilds its data source and wrapper on every call
+  (`services/database-service.ts:261-266`: `_createDataSource`, `wrapDataSource`'s spread and ~10
+  closures, `new InternalRepo`): ~1.0 µs CPU per request on Drizzle, ~1.8 µs on Prisma — the whole
+  point-read gap measured against NestJS 12 (Fastify) and Hono. Fetched once, Setu uses less CPU
+  than both.
+
+### Part B — optimistic locking
+
+Every app re-derives read-version → `updateWhere(id, { version }, …)` → re-read on `null` to tell
+404 from 409, and the tenant repository cannot do it at all (`ITenantRepository.update` has no
+precondition). Decisions:
+
+1. **`updateVersioned` / `deleteVersioned`**, free functions over `updateWhere`/`deleteWhere` taking
+   the structural minimum (`{ updateWhere?, findById }`), so one implementation serves
+   `IRepository`, unit-of-work repositories and tenant repositories. The helper owns the version
+   field (default `version`) and refuses before any I/O on an invalid expected version, a `data`
+   that already sets the field, or a repository without conditional writes (the existing
+   `conditional-write` 501).
+2. **`VersionConflictError`** (409 hint) and, if absent, `EntityNotFoundError` (404 hint), each
+   carrying the entity but no ids or values.
+3. **Optional `updateWhere?`/`deleteWhere?`** on `ITenantDataStore` and `ITenantRepository`;
+   `DatabaseTenantDataStore` merges the caller's precondition into the tenant-column precondition it
+   already builds, refusing a `where` that names the tenant column; `MemoryTenantDataStore` too.
+4. **Not in scope:** a per-entity version-field declaration in adapter options.
+
+**Decisions the plan takes for Part A:** where the transaction-scoped client gets its listener (and
+what the request in flight answers), the new classifier anchors per driver with the set kept as test
+data, how `transaction()` tells the work's own errors from the driver's, and how `getRepository`
+memoizes per entity without sharing a tenant- or transaction-scoped repository and while keeping the
+closed-service refusal.
+
+**Gate:** the X94-1 reproduction (kill the backend during an open Drizzle transaction) on a real
+PostgreSQL — the process lives and the request answers 503; the classifier table per driver; the
+versioned row added to `conditional-write-conformance.test.ts` across all eight adapters and a
+transaction table as data; the 409 Problem Details field by field; and the database benchmark
+(`~/setu-benchmarks/2026-10-31-db/`) re-run for the X94-3 before/after.
+
+---
+
+## Milestone 129: `setu client` — the Typed Client as a Command
+
+**Package(s):** `packages/cli`, `packages/common` (`IOpenApiService` promoted from openapi-plugin),
+`packages/openapi-plugin`; docs and agent briefs.
+
+**Source:** the CMS demo (gap 3 of the working note): every project writes the same script around
+`generateOpenApiClient`, and the generated file drifts from the API with nothing to catch it.
+
+**Decisions the plan takes** (the verb, flags and exit codes are compared with Kiota, Orval and
+openapi-typescript before they are fixed — the repository rule):
+
+1. **Load the document** by booting the project the way plugin commands already do (`loadApp`, a
+   no-port `start()`, `getSpec()`, `stop()` in a `finally`), or from `--from <file|url>` for Workers
+   projects and apps whose start needs a live database. A named refusal when openapi-plugin is not
+   registered.
+2. **Generate with the project's own `@setu-ts/sdk`**, lazily imported and awaited inside a
+   `try`/`catch`; the CLI gains no sdk dependency.
+3. **Write a managed file** through the CLI's write-safety path, with `--dry-run`.
+4. **`--check`** regenerates in memory and exits 1 on drift — a CI gate beside `setu check`.
+
+**Gate:** an e2e that scaffolds a REST project, adds openapi and sdk, runs `setu client`,
+type-checks the output, calls an endpoint through it, then changes a route and asserts `--check`
+exits 1.
+
+---
+
+## Milestone 130: The Full-Stack Template — Kernel Modules Behind the Pages
+
+**Package(s):** `packages/react-router-plugin` (`getService`), `packages/cli` (the full-stack
+template, `setu g module --page`, `setu check`), `packages/starters/full-stack-starter`; docs. Also
+the full-stack half of the `0.11.0` smoke group G5.
+
+**Source:** the CMS demo (gap 4 of the working note) and the maintainer's structure decisions of
+2026-11-01; the generated-output rows of `smoke/OPEN-AFTER-0110.md` G5.
+
+**The problem.** A loader cannot see the kernel request, so each kernel service a page needs is
+wired by hand in four places (a context key, a `context.set` in `populateLoadContext`, an accessor,
+usually a page-side adapter). The template keeps business logic page-side across `app/services/`,
+`app/features/` and `app/models/`, and "services" means one thing in `app/` and another in `src/`.
+The CMS demo's shortcut — one key exposing the whole kernel request (`getKernel(context)`) — defeats
+the explicitness the keys exist for.
+
+**Decided (maintainer, 2026-11-01):**
+
+1. **Kernel modules own business logic.** `src/modules/<name>/` holds the service, its types and its
+   `/api` routes; pages call the same service in process — no HTTP hop — so one service feeds the
+   pages and the public API.
+2. **`app/` is `routes/`, `components/`, `lib/` (client-safe) and `server/` (server-only page glue:
+   guards such as `requireUser`, session / CSRF / current-user access).** `app/models/`,
+   `app/features/`, `app/services/` and `app/config/` go.
+3. **Loaders reach services with `getService<T>(context, TOKEN)`**, bound to the current request's
+   tenant and principal; `app/` imports only TYPES from `src/` (a `~kernel/*` alias), and a lint
+   rule refuses value imports from it. Values that are not services (session, CSRF token, current
+   user) keep explicit keys.
+
+**Decisions the plan takes:** how `getService` binds to the request (M125's per-request scope is the
+expected seam), how a functional-style module exposes a request-bound service, how token modules are
+allowed through the lint rule, `setu g module <name> --page`, and keeping the `contextKeyFor()`
+identity rule across the separately bundled SSR build.
+
+**Smoke rows folded in (G5's template half):** X85-1 (`components.json` declares `lucide` but
+nothing installs `lucide-react`), X91-6 and V11-7 (`/openapi.json` lists the page catch-all `/*`,
+`/assets/*` and the dev-only `/__vite/*`), X91-7 (no `handleError`: every unknown URL prints a stack
+trace to stderr), X85-3 (the dev HMR socket through the app port fails on Node and Deno, logged at
+error), X85-2 (Bun reloads the document on a component edit), V11-19 (a "Deploying to Cloudflare
+Workers" README section in every non-Workers full-stack project), X91-5 (generated POST routes
+answer 403 to plain API clients, unexplained) and X91-2 (`g module` writes full-stack tests without
+a CSRF token).
+
+**Gate:** the scaffold e2e boots a full-stack project, `setu g module articles --page`, requests the
+page signed in and asserts the data came from the module's service; a template baseline asserts no
+hand edit to `setu.config.ts` is needed for a page to use a module's service; the folded rows each
+re-checked.
+
+---
+
+## Milestone 131: The `v0.11.0` Smoke Closeout
+
+**Source:** the `v0.11.0` smoke programme, run 2026-10-31 against the published npm artifacts — the
+regression run (`smoke/V0110-REGRESSION.md`: 59 of 66 V10 rows closed, 7 partial, one regression),
+Part 19's X85 steps 6–7 (`smoke/X83-X86-FINDINGS.md`), Part 20's X87–X93
+(`smoke/X87-X93-FINDINGS.md`), Part 21's soaks (`smoke/X94-X95-FINDINGS.md`) and the CMS demo
+(`smoke/CMS-DEMO-FINDINGS.md`). Grouped in `smoke/OPEN-AFTER-0110.md`. The database group is M128
+and the full-stack template group is M130; V10-33 and V10-45 remain as documented contracts (no row
+work), and V10-63's idempotency half is a re-check, not a defect. The rest is four letters, by the
+maintainer's choice of 2026-11-01 (fewer, larger letters than M119's nine), **regression first**.
+
+| Letter    | Kind   | Shape                                                             | Rows                                                                                                                                                    | Packages                                                                                                                                                               |
+| --------- | ------ | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **M131a** | design | Redis, node-redis and readiness — **holds the regression V11-10** | V11-10, X88-1, X88-2, X88-3, X88-4, X88-5, X88-6, X88-7, X88-8, X88-9, X88-10, V11-11                                                                   | `queue`, `cache`, `scheduler`, `realtime-backplane`, `idempotency`, `messaging`, `notification`, `health`, `telemetry`, `logger`, `common`, `cli`                      |
+| **M131b** | fix    | kernel, runtime and plugin contracts                              | X92-1, X95b-1, X92-2, X87-3, X90-2, X90-3, X90-4, X90-5, X90-6, V11-13, X89-1, V10-2 remainder, V11-6, X92-3, X92-4, V11-1, V11-12                      | `runtime`, `kernel`, `exceptions`, `di`, `decorator`, `resilience`, `auth`, `messaging`, `openapi`, `sdk`, `diagnostics`, `react-router`, `full-stack-starter`, `view` |
+| **M131c** | fix    | CLI gates, generators and workspace deploy                        | X91-1, X91-3, V11-8 (= X89-2), X93-10, X87-1, V11-15, X91-4, V10-27 remainder, X87-2, X87-4, X87-5, X87-6, V10-50 remainder, V11-3, V11-4, V11-9, X93-8 | `cli`                                                                                                                                                                  |
+| **M131d** | docs   | documentation, examples and the website                           | X90-1, X93-1, X93-2, V11-18, V10-16 remainder, X89-3, V11-14, V11-16, V11-17, X91-8, X93-3…X93-7, X93-9, V11-2                                          | `docs/`, `apps/`, READMEs, agent cards, the website, CHANGELOG                                                                                                         |
+
+**Sequence.** M131a first: **V11-10** is the only regression in `0.11.0` — a STOPPED Redis now reads
+`up` with `reachable: 'unknown'` on the queue indicator, because M119b mapped every unanswered probe
+to `up` and ioredis queues commands for a stopped server, so a refused connection times out like a
+hung one. It may ship ahead of the rest of the letter on its own `fix/…` branch. M131b and M131c can
+start at once; M131d batches the documentation at the end, after the code letters change what the
+docs must say. M128 (the High) is sequenced before every letter here.
+
+### Milestone 131a: Redis, node-redis and Readiness
+
+**Package(s):** `queue-plugin`, `cache-plugin`, `scheduler-plugin`, `realtime-backplane-plugin`,
+`idempotency-plugin`, `messaging-plugin`, `notification-plugin`, `health-plugin`,
+`telemetry-plugin`, `logger-plugin`, `common`, `cli`
+
+- **V11-10 (regression)** — the queue indicator reads `up`/`reachable: 'unknown'` for a STOPPED
+  Redis (0.10.0: `down` at once); the queue-plugin README still promises `down`.
+- **X88-1, X88-2, X88-3** — node-redis from the CLI: `setu add` leaves the Redis-backed plugins in
+  memory and `add queue --queue redis` adds ioredis; the scaffold's `.env` `REDIS_URL` is read
+  before ConfigPlugin loads `.env`; the generated `src/node-redis.ts` passes no `onError`, so an
+  outage logs no reason and a down Redis at boot fails after 15.3 s with a bare "Command timed out".
+- **X88-5** — against a paused Redis, `queue.add()` and backplane `publish()` answer 500 while the
+  work WAS enqueued (a retrying client doubles the job); an uncaught `PublishTimeoutError` is a 500.
+- **X88-4, X88-7, X88-10** — tracing: `instrumentations.ioredis` sees none of the plugins' clients
+  (`await import()` is not patched); Redis Streams poll spans attach to the subscribing request; the
+  node-redis trace arm is missing from the cards and from `setu add telemetry`.
+- **X88-8** — a malformed `REDIS_URL` prints its password to stderr, and redaction misses a password
+  inside a URL string. Touches redaction, so the letter is **security-audited** before it merges.
+- **X88-6, X88-9** — `publishTimeoutMs: 0` is not unbounded on node-redis; the queue logs "recurring
+  scheduling failed" at error on every poll during an outage.
+- **V11-11** — an SMTP outage still fails `/ready` through the `notification` indicator, which
+  probes the mailer with no readiness option (V10-49's remainder).
+
+### Milestone 131b: Kernel, Runtime and Plugin Contracts
+
+**Package(s):** `runtime`, `kernel`, `exceptions`, `di-plugin`, `decorator-plugin`,
+`resilience-plugin`, `auth-plugin`, `messaging-plugin`, `openapi-plugin`, `sdk`,
+`diagnostics-plugin`, `react-router-plugin`, `full-stack-starter`, `view-plugin`
+
+- **X92-1** — on Node a taken app port crashes the process: `NodeHttpAdapter.listen` awaits a
+  `serve()` that returns synchronously and never waits for `listening`/`error` (the M126 note on
+  `@hono/node-server` names the same mechanism). **X92-2**, **X87-3** — a devtool-port conflict and
+  `npm start` without a build end in raw stack traces.
+- **X95b-1** — a client that cancels an upload is logged at error as a 500.
+- **X90-2 … X90-6** — container and kernel contracts: wrong-type typed tokens caught only by `tsc`;
+  boot validation stopping at a decorated controller's subgraph; `IResponse.setHeaders` not atomic;
+  a request scope disposed at send time while a timed-out handler runs; route-pattern refusals as a
+  plain `Error` naming no controller or method.
+- **V11-13** — a retry `limit` below 1 never runs the wrapped function.
+- **X89-1** — a `sessionStamp` change only suspends sessions; reverting the stamp revives them.
+- **V10-2 remainder** — a new Kafka group's first-join seek can still replay delivered messages.
+- **V11-6** — a reused schema is named after the operation slot that first used it.
+- **X92-3, X92-4** — the diagnostics listener's 32-socket eviction can drop a paired request;
+  `setu devtool --help` prints a Deno usage line from the npm CLI.
+- **V11-1, V11-12** — React Router refuses `Origin: null` in a hand-composed full-stack app; the
+  view layout has no doctype.
+
+### Milestone 131c: CLI Gates, Generators and Workspace Deploy
+
+**Package(s):** `packages/cli`
+
+- **X91-3** — `setu check` misses a deleted registration call: an import alone counts as wired.
+- **V11-8 (= X89-2)** — false W001 warnings when the config is merely unclassifiable.
+- **X93-10** — E001 fails `check` and `build` when a service file does not export the placeholder
+  `describe<Name>`.
+- **X91-1** — `g module orders --adopt-controllers` refused when an `orders` controller exists.
+- **X87-1, V11-15, X91-4, V10-27 remainder** — the page-collision check in an npm workspace; a
+  plugin command named `agents` silently overridden; a page and a kernel route on one path; the
+  symlinked-member refusal's wrong second remedy.
+- **X87-2, X87-4, X87-5, X87-6, V10-50 remainder** — workspaces: a full-stack member's dev port; the
+  Deno image shipping dev tooling; no `imagePullSecrets` for an authenticated registry; every
+  member's inspector on 9229; member-nested peers and the OTLP exporter peer.
+- **V11-3, V11-4, V11-9, X93-8** — generated text and briefs: the Workers `setu.config.ts` comment
+  says the CLI loads it under Deno; a Workers scaffold without env variables does not gitignore
+  `.dev.vars`; the agent brief lists no `lint`/`format` commands; `setu new --agents` warns about 12
+  missing cards before the install it then asks for.
+
+### Milestone 131d: Documentation, Examples and the Website
+
+**Package(s):** `docs/`, `apps/` (examples), package READMEs and agent cards, the website, CHANGELOG
+
+- **X90-1, V11-18, V10-16 remainder** — `docs/upgrading.md ## 0.11.0`: the #526 controllers break,
+  the `setu agents --check` break, the Workers full-stack repair's missing `@types/node` step.
+- **X93-1, X93-6** — `--example graphql-demo` lacks `ws`; example READMEs keep repository-only text.
+- **X93-2** — the collector fan-out and container/Kubernetes deployment guides depend on files that
+  live only on GitHub, and never mention `setu build`.
+- **X89-3, V11-14, V11-16, V11-17, X91-8, X93-3 … X93-7, X93-9, V11-2** — the remaining doc and
+  README mismatches, each listed with its fix in `smoke/OPEN-AFTER-0110.md`.
+
+---
+
 ## Versioning Policy From `0.9.0`
 
 **Decision (2026-10-05):** from `0.9.0` on, the **patch** is the normal release (`0.9.1`, `0.9.2`,
@@ -16378,3 +16670,12 @@ patch by construction and gains nothing new here.
 | 124       | ✅     | auth-plugin — session and account lifecycle: password-only `signIn` re-check, `requireAuth({ signInPage })` page redirect vs API 401, `signIn.sessionStamp` signs out all of a user's sessions                                                                                            |
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
 | 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
+| 127       | ⬜     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
+| 128       | ⬜     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
+| 129       | ⬜     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
+| 130       | ⬜     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
+| 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |
+| 131a      | ⬜     | queue + Redis-backed plugins + notification + health + telemetry + logger + cli — Redis, node-redis and readiness (V11-10 regression)                                                                                                                                                     |
+| 131b      | ⬜     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |
+| 131c      | ⬜     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
+| 131d      | ⬜     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
