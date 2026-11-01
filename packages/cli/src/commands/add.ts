@@ -30,6 +30,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
+  CONFIG_MODULE,
   EXIT_ERROR,
   EXIT_INTERRUPTED,
   EXIT_OK,
@@ -45,11 +46,15 @@ import {
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
+import { envFileDeclaration } from '../templates/env-file.ts';
+import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
+  brokerEnvVariables,
   missingComposeServices,
   readArmFlag,
   redisClientRefusal,
@@ -1667,9 +1672,15 @@ export async function runAddCommand(
   const installing = edits.length > 0;
 
   let configSource: string | undefined;
+  // The configuration as read, kept apart from `configSource`: a wiring step that
+  // throws below leaves the text known, and a read that fails for any reason but
+  // absence is not mistaken for a project without a configuration.
+  let configText: string | undefined;
+  let configUnreadable = false;
   let configRetargeted = false;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
+    configText = config;
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
@@ -1689,9 +1700,10 @@ export async function runAddCommand(
         : wired;
     if (imported !== undefined) edits.push({ path: configPath, contents: imported });
     configSource = imported ?? config;
-  } catch {
+  } catch (cause) {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
+    configUnreadable = configText === undefined && !isMissingPath(cause);
   }
 
   // The barrels exist whether or not the config could be rewritten: the printed
@@ -1730,11 +1742,63 @@ export async function runAddCommand(
   }
 
   if (selected?.connection !== undefined) {
-    deps.log(
-      `  ${selected.connection.variable}=${selected.connection.localDefault} (local default; .env files are unchanged).`,
-    );
+    const { variable, localDefault } = selected.connection;
+    // The dotenv pair `setu new --broker` writes, appended here only where the
+    // variable is absent: an existing value (or a file the project removed) is the
+    // developer's, and a re-add finds the row and writes nothing.
+    // The file the app loads, read from its configuration: the last listed one,
+    // because ConfigPlugin lets an earlier file override a later one, so a value
+    // written there never shadows one the developer set. A project with no
+    // configuration keeps the `.env` convention; a configuration that loads no
+    // dotenv file, or names it in a way the CLI cannot read, gets no guess.
+    const declaration =
+      configText !== undefined
+        ? envFileDeclaration(configText)
+        : configUnreadable
+          ? ({ kind: 'unread' } as const)
+          : ({ kind: 'paths', paths: ['.env'] } as const);
+    const envFile =
+      declaration.kind === 'paths' ? declaration.paths[declaration.paths.length - 1] : undefined;
+    const updated: string[] = [];
+    const lacking: string[] = [];
+    if (envFile !== undefined) {
+      for (const [file, value] of [
+        [envFile, localDefault],
+        [`${envFile}.example`, ''],
+      ] as const) {
+        const path = joinPath(dir, file);
+        const text = await readProjectText(deps, path, file);
+        if (text === null) return EXIT_ERROR;
+        if (text === undefined) {
+          lacking.push(file);
+          continue;
+        }
+        const appended = withEnvVariable(text, brokerEnvVariables(selected), value);
+        if (appended === undefined) continue;
+        edits.push({ path, contents: appended });
+        updated.push(file);
+      }
+    }
+    deps.log(`Connection: ${variable} (local default ${localDefault}).`);
+    if (updated.length > 0) {
+      const verb = args.flags['dry-run'] === true ? 'Would add' : 'Added';
+      deps.log(`  ${verb} ${variable} to ${updated.join(' and ')}.`);
+    }
+    if (lacking.length > 0) {
+      deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
+    }
+    if (declaration.kind !== 'paths') {
+      const reason =
+        declaration.kind === 'absent'
+          ? `${CONFIG_MODULE} loads no dotenv file (no envFilePath)`
+          : declaration.kind === 'unread'
+            ? `${CONFIG_MODULE} could not be read`
+            : `${CONFIG_MODULE} names its dotenv file in a form the CLI cannot read`;
+      deps.log(`  ${reason}; set ${variable} where the app reads it.`);
+    }
     const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
-    const existingCompose = await readExistingText(deps.fs, composePath);
+    const existingCompose = await readProjectText(deps, composePath, BROKER_COMPOSE_FILE);
+    if (existingCompose === null) return EXIT_ERROR;
     // Every file is create-only: an existing Compose file is never rewritten, so a
     // service it lacks is printed for the developer to add (PR #519 review).
     for (const file of brokerComposeFiles([selected])) {
@@ -1984,6 +2048,66 @@ export async function runAddCommand(
   if (runtime === 'deno') printPermissionNote(specifier, deps.log);
   await reportAgentsHint(deps, dir, runtime);
   return EXIT_OK;
+}
+
+/**
+ * Appends a connection variable's dotenv row to an existing file, unless the file
+ * already assigns it.
+ *
+ * Mirrors what `setu new --broker` writes (the description comment, then
+ * `NAME=value`) and never touches an existing assignment, commented or not — so a
+ * value the developer changed survives and a re-add writes nothing.
+ *
+ * @param text - The current file contents
+ * @param variables - The connection variable row (empty for an arm without one)
+ * @param value - The value to write: the local default, or empty for the example
+ * @returns The new contents, or undefined when there is nothing to add
+ */
+export function withEnvVariable(
+  text: string,
+  variables: readonly EnvVariable[],
+  value: string,
+): string | undefined {
+  const variable = variables[0];
+  if (variable === undefined) return undefined;
+  // A line scan, not a regular expression built from the name: nothing here can
+  // backtrack, whatever a developer's file holds. A leading BOM is ignored.
+  const assigns = (line: string): boolean => {
+    let rest = line.trimStart();
+    if (rest.startsWith('#')) rest = rest.slice(1).trimStart();
+    if (/^export[ \t]/.test(rest)) rest = rest.slice('export'.length).trimStart();
+    return (
+      rest.startsWith(variable.name) && rest.slice(variable.name.length).trimStart().startsWith('=')
+    );
+  };
+  if (
+    text
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .some(assigns)
+  )
+    return undefined;
+  const newline = text.includes('\r\n') ? '\r\n' : '\n';
+  const separator = text === '' || text.endsWith('\n') ? '' : newline;
+  return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
+}
+
+/**
+ * An existing project file's text, `undefined` when it is absent, or `null` after
+ * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
+ * command fails with its error code before anything is written.
+ */
+async function readProjectText(
+  deps: AddCommandDependencies,
+  path: string,
+  name: string,
+): Promise<string | undefined | null> {
+  try {
+    return await readExistingText(deps.fs, path);
+  } catch (cause) {
+    deps.error(`Cannot read ${escapeName(name)}: ${escapeName(String(cause))}`);
+    return null;
+  }
 }
 
 /** An add is successful even when its advisory brief reminder cannot be read. */

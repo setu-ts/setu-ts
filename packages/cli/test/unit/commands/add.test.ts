@@ -16,6 +16,7 @@ import {
   resolveAddablePackage,
   runAddCommand,
   withDependency,
+  withEnvVariable,
   withPluginWiring,
 } from '../../../src/commands/add.ts';
 import { VERSION } from '../../../src/constants.ts';
@@ -195,7 +196,7 @@ export function createApp(): IKernelApplication {
     for (const spec of listTransports().filter((arm) => arm.connection !== undefined)) {
       for (const flag of ['broker', 'queue'] as const) {
         if ((flag === 'broker' ? spec.messagingArgs : spec.queueArgs) === undefined) continue;
-        it(`adds standalone ${runtime} ${flag} ${spec.name} and preserves Compose and dotenv on re-add`, async () => {
+        it(`adds standalone ${runtime} ${flag} ${spec.name}, appends its dotenv rows once, and preserves both on re-add`, async () => {
           const h = harness();
           expect(
             await runNewCommand(
@@ -216,6 +217,9 @@ export function createApp(): IKernelApplication {
           expect(h.fs.writes.length).toBe(beforeDryRun);
           expect(h.out.join('\n')).toContain('docker/compose.yaml');
           expect(h.out.join('\n')).toContain('setu.config.ts');
+          expect(h.out.join('\n')).toContain(
+            `Would add ${spec.connection!.variable} to .env and .env.example.`,
+          );
           expect(await h.run(args), h.err.join('\n')).toBe(0);
           const config = h.read('/app/portal/setu.config.ts');
           expect(config).toContain(`${flag === 'broker' ? 'messaging' : 'queue'}: {`);
@@ -225,15 +229,26 @@ export function createApp(): IKernelApplication {
           for (const client of (flag === 'broker' ? spec.messagingClients : spec.queueClients) ??
             [])
             expect(manifest).toContain(client);
-          expect(h.read('/app/portal/.env')).toBe(env);
+          // X91-9: the variable `setu new --broker` writes is appended where absent,
+          // with the local default in .env and empty in the tracked example.
+          const { variable, localDefault } = spec.connection!;
+          const envAfter = h.read('/app/portal/.env');
+          expect(envAfter.startsWith(env)).toBe(true);
+          expect(envAfter.match(new RegExp(`^${variable}=`, 'gm'))?.length).toBe(1);
+          expect(envAfter).toContain(`\n${variable}=${localDefault}\n`);
+          const example = h.read('/app/portal/.env.example');
+          expect(example.match(new RegExp(`^${variable}=$`, 'gm'))?.length).toBe(1);
+          expect(h.out.join('\n')).toContain(`Added ${variable} to .env and .env.example.`);
           const compose = h.read('/app/portal/docker/compose.yaml');
           const beforeReAdd = h.fs.writes.length;
           expect(await h.run(args)).toBe(0);
           expect(h.read('/app/portal/setu.config.ts')).toBe(config);
           expect(h.read('/app/portal/docker/compose.yaml')).toBe(compose);
+          expect(h.read('/app/portal/.env')).toBe(envAfter);
+          expect(h.read('/app/portal/.env.example')).toBe(example);
           expect(h.fs.writes.length).toBe(beforeReAdd);
           expect(h.out.join('\n')).toContain(
-            `${spec.connection!.variable}=${spec.connection!.localDefault}`,
+            `Connection: ${variable} (local default ${localDefault}).`,
           );
         });
       }
@@ -369,6 +384,211 @@ export function createApp(): IKernelApplication {
       `Run ${cliInvocation('node')} generate app <name> --template full-stack.`,
     );
     expect(h.fs.writes.length).toBe(before);
+  });
+});
+
+describe('the connection variable in the dotenv pair (X91-9)', () => {
+  const row = [
+    { name: 'REDIS_URL', description: 'Where the redis transport connects.', develop: '' },
+  ];
+
+  it('appends the row once, keeping the file and its line endings', () => {
+    expect(withEnvVariable('# Local\nA=1\n', row, 'redis://127.0.0.1:6379')).toBe(
+      '# Local\nA=1\n\n# Where the redis transport connects.\nREDIS_URL=redis://127.0.0.1:6379\n',
+    );
+    expect(withEnvVariable('A=1', row, '')).toBe(
+      'A=1\n\n# Where the redis transport connects.\nREDIS_URL=\n',
+    );
+    expect(withEnvVariable('A=1\r\n', row, '')).toBe(
+      'A=1\r\n\r\n# Where the redis transport connects.\r\nREDIS_URL=\r\n',
+    );
+    expect(withEnvVariable('', row, 'x')).toBe(
+      '\n# Where the redis transport connects.\nREDIS_URL=x\n',
+    );
+  });
+
+  it('leaves any existing assignment alone, set, exported or commented out', () => {
+    for (const text of [
+      'REDIS_URL=redis://cache:6379\n',
+      'export REDIS_URL=redis://cache:6379\n',
+      '  REDIS_URL = x\n',
+      '# REDIS_URL=\n',
+    ]) {
+      expect(withEnvVariable(text, row, 'redis://127.0.0.1:6379'), text).toBeUndefined();
+    }
+    // A longer name that merely starts with the variable is not an assignment of it.
+    expect(withEnvVariable('REDIS_URL_OLD=x\n', row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(withEnvVariable('A=1\n', [], 'y')).toBeUndefined();
+    expect(withEnvVariable('\uFEFFREDIS_URL=x\n', row, 'y')).toBeUndefined();
+    // Long whitespace-only lines are answered at once (no backtracking).
+    const padded = `${' '.repeat(200_000)}\n${'\t'.repeat(200_000)}\n`;
+    const started = performance.now();
+    expect(withEnvVariable(padded, row, 'y')).toContain('\nREDIS_URL=y\n');
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(withEnvVariable('exported=1\nREDIS_URLX=1\n', row, 'y')).toContain('\nREDIS_URL=y\n');
+  });
+
+  it('writes to the configured env file and its example, and keeps a value the developer set', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(
+        parseArgs([
+          'portal',
+          '--runtime',
+          'node',
+          '--template',
+          'full-stack',
+          '--env-file',
+          'config/app.env',
+        ]),
+        { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+      ),
+    ).toBe(0);
+    await h.fs.writeFile(
+      '/app/portal/config/app.env',
+      new TextEncoder().encode(
+        `${h.read('/app/portal/config/app.env')}REDIS_URL=redis://cache:6380\n`,
+      ),
+    );
+    expect(await h.run(['messaging', '--broker', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(h.read('/app/portal/config/app.env').match(/^REDIS_URL=/gm)).toEqual(['REDIS_URL=']);
+    expect(h.read('/app/portal/config/app.env')).toContain('REDIS_URL=redis://cache:6380');
+    expect(h.read('/app/portal/config/app.env.example')).toMatch(/^REDIS_URL=$/m);
+    expect(h.out.join('\n')).toContain('Added REDIS_URL to config/app.env.example.');
+  });
+
+  it('writes the last listed file of an array, and guesses no file it cannot read', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const retarget = async (h: ReturnType<typeof harness>, value: string): Promise<string> => {
+      const config = h.read('/app/portal/setu.config.ts');
+      expect(config).toContain("envFilePath: '.env'");
+      await h.fs.writeFile(
+        '/app/portal/setu.config.ts',
+        new TextEncoder().encode(config.replace("envFilePath: '.env'", value)),
+      );
+      return h.read('/app/portal/.env');
+    };
+
+    // ConfigPlugin lets an earlier file override a later one: the last is the base.
+    const listed = await scaffold();
+    await retarget(listed, "envFilePath: ['.env.local', '.env']");
+    expect(await listed.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(listed.read('/app/portal/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(listed.out.join('\n')).toContain('Added REDIS_URL to .env and .env.example.');
+
+    for (const [value, reason] of [
+      ['envFilePath: process.env.ENV_FILE', 'names its dotenv file in a form the CLI cannot read'],
+      ["envFileOptional: true, other: '.env'", 'loads no dotenv file (no envFilePath)'],
+    ] as const) {
+      const h = await scaffold();
+      const before = await retarget(h, value);
+      const example = h.read('/app/portal/.env.example');
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+      expect(h.read('/app/portal/.env')).toBe(before);
+      expect(h.read('/app/portal/.env.example')).toBe(example);
+      expect(h.out.join('\n')).toContain(
+        `setu.config.ts ${reason}; set REDIS_URL where the app reads it.`,
+      );
+      expect(h.out.join('\n')).not.toContain('Added REDIS_URL');
+    }
+  });
+
+  it('fails before writing when a dotenv or Compose file cannot be read, and guesses no file for an unreadable config', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const denying = (h: ReturnType<typeof harness>, denied: string): void => {
+      const readFile = h.fs.readFile.bind(h.fs);
+      h.fs.readFile = (path: string) =>
+        path === denied ? Promise.reject(new Error('EACCES: permission denied')) : readFile(path);
+    };
+
+    for (const [denied, name] of [
+      ['/app/portal/.env', '.env'],
+      ['/app/portal/.env.example', '.env.example'],
+    ] as const) {
+      const h = await scaffold();
+      await h.fs.writeFile(
+        '/app/portal/docker/compose.yaml',
+        new TextEncoder().encode('services: {}\n'),
+      );
+      const config = h.read('/app/portal/setu.config.ts');
+      const manifest = h.read('/app/portal/package.json');
+      denying(h, denied);
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+      expect(h.err).toEqual([`Cannot read ${name}: Error: EACCES: permission denied`]);
+      // Nothing of the edit plan was written.
+      expect(h.read('/app/portal/setu.config.ts')).toBe(config);
+      expect(h.read('/app/portal/package.json')).toBe(manifest);
+    }
+
+    const compose = await scaffold();
+    await compose.fs.writeFile(
+      '/app/portal/docker/compose.yaml',
+      new TextEncoder().encode('services: {}\n'),
+    );
+    denying(compose, '/app/portal/docker/compose.yaml');
+    expect(await compose.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+    expect(compose.err).toEqual([
+      'Cannot read docker/compose.yaml: Error: EACCES: permission denied',
+    ]);
+
+    // A configuration that exists but cannot be read is not an absent one: no `.env` guess.
+    const config = await scaffold();
+    const env = config.read('/app/portal/.env');
+    denying(config, '/app/portal/setu.config.ts');
+    expect(await config.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(config.read('/app/portal/.env')).toBe(env);
+    expect(config.out.join('\n')).toContain(
+      'setu.config.ts could not be read; set REDIS_URL where the app reads it.',
+    );
+  });
+
+  it('keeps the .env convention for a project with no configuration', async () => {
+    const h = harness({ '/app/package.json': '{}', '/app/.env': 'A=1\n' });
+    expect(await h.run(['queue', '--queue', 'redis'])).toBe(0);
+    expect(h.read('/app/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(h.out.join('\n')).toContain(
+      'No .env.example here; set REDIS_URL where the app reads it.',
+    );
+  });
+
+  it('names the files it could not find instead of creating them', async () => {
+    const h = harness();
+    expect(
+      await runNewCommand(parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']), {
+        fs: h.fs,
+        cwd: '/app',
+        log: () => {},
+        error: () => {},
+      }),
+    ).toBe(0);
+    await h.fs.rm('/app/portal/.env');
+    expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(
+      await h.fs.readFile('/app/portal/.env').then(
+        () => true,
+        () => false,
+      ),
+    ).toBe(false);
+    expect(h.out.join('\n')).toContain('No .env here; set REDIS_URL where the app reads it.');
+    expect(h.read('/app/portal/.env.example')).toMatch(/^REDIS_URL=$/m);
   });
 });
 

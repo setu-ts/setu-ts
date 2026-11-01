@@ -226,6 +226,24 @@ describe('node-redis CLI', () => {
       expect(expected[path]).toContain(before);
       expected[path] = expected[path]!.replace(before, after);
     }
+    // The second deliberate change (X91-9): `setu add messaging --broker redis` and
+    // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
+    // writes — the local default in `.env`, empty in the tracked example.
+    const description =
+      "# Where the redis transport connects. The default is this project's local " +
+      'development value; deployments set the real endpoint here.';
+    for (const runtime of ['deno', 'node', 'bun']) {
+      for (const command of ['add-messaging', 'add-queue']) {
+        for (const [file, value] of [
+          ['.env', 'redis://127.0.0.1:6379'],
+          ['.env.example', ''],
+        ] as const) {
+          const path = `${runtime}/${command}/work/app/${file}`;
+          expect(expected[path], path).toBeDefined();
+          expected[path] = `${expected[path]}\n${description}\nREDIS_URL=${value}\n`;
+        }
+      }
+    }
     expect(await redisDefaultOutputs()).toEqual(expected);
   });
 

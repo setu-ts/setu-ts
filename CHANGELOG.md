@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** `setu add messaging --broker <arm>` and `setu add queue --queue <arm>` on an existing
+  standalone project now append the connection variable (for example `REDIS_URL`) to the project's
+  dotenv file with its local default and to the tracked `.example` empty, the rows
+  `setu new --broker` writes. A file that already assigns the variable, set or commented out, is
+  left alone, so a re-add writes nothing; a dotenv file the project does not have is named instead
+  of created. The file is the `envFilePath` `setu.config.ts` declares, read past comments and string
+  contents (the last entry of an array); a configuration that declares none, or names it in a form
+  the CLI cannot read, gets a message instead of a write to `.env`. Previously both files were left
+  without the variable and the hint printed as an unlabelled line. `docs/cli.md` also no longer says
+  `add` installs the client: it records it in the manifest (X91-9, V11-14; #537).
+
 ## [0.11.0] — 2026-10-30
 
 ### Added
