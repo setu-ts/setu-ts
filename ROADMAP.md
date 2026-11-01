@@ -16498,35 +16498,55 @@ GET bodies.
    scopes, bound to an existing route; the input schema derives from the route's validation
    metadata, and a route with none is refused at registration. Nothing is exposed automatically —
    every maintained integration the survey read declares tools explicitly, and auto-exposing every
-   route is the pattern their docs warn against. The plan decides whether CQRS commands are a second
+   route is the pattern their docs warn against. The spec's tool-name rules (1–128 characters of
+   `A-Z a-z 0-9 _ - .`, case-sensitive, unique per server) are SHOULDs; the plugin refuses a name
+   outside them, and a duplicate, at registration. A route with a response schema (M97b) supplies an
+   `outputSchema`, and its result is returned as `structuredContent` plus the serialized JSON as
+   text, since a server MUST return structured results that conform. `readOnlyHint` and
+   `idempotentHint` annotations are derived from the method and the idempotency binding, never
+   declared freely; clients treat annotations as untrusted anyway. The tool set is fixed at startup,
+   so the server advertises no `listChanged`. The plan decides whether CQRS commands are a second
    binding target or wait for the command registry to carry schemas.
 3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant.
    The plugin maps the request's verified principal to the SDK's `authInfo` itself (the SDK takes it
    only as a pass-through argument), and a tool call reaches its route via a new public entry on
-   `IApplication` that receives the SDK's `ctx.mcpReq.signal` that carries an `AbortSignal` and
-   allows a streamed body (optional member, per the versioning policy). Guards, validation,
+   `IApplication` that takes an `AbortSignal` (the SDK's `ctx.mcpReq.signal` is passed through) and
+   allows a streamed body (an optional member, per the versioning policy). Guards, validation,
    idempotency and audit run exactly as for an HTTP caller; nothing re-implements them.
 4. **The tool list is filtered** by what the caller's scopes and route guards allow, so a tool the
-   caller cannot call is not advertised; a call to it is still refused by the route. A missing scope
-   answers M132's `insufficient_scope` challenge; the plan reads the SDK's per-tool `scopeChallenge`
-   option and decides whether the plugin uses it or answers before the SDK sees the call.
-5. **Errors:** a route's Problem Details response maps to an MCP tool error carrying only what the
-   redaction seam lets through; a thrown internal error never reaches the model with its stack or
-   message.
-6. **Retries:** with no sessions and no stream resumption, a response lost mid-call cannot be
+   caller cannot call is not advertised; a call to it is still refused by the route. The spec allows
+   a list to vary by the authorization presented, but its `tools/list` response carries a cache hint
+   (`ttlMs`, `cacheScope`, with `public` in its example), so a filtered list must never go out under
+   a shared cache scope; the plan names the scope it sends and tests it. A missing scope answers
+   M132's `insufficient_scope` challenge; the plan reads the SDK's per-tool `scopeChallenge` option
+   and decides whether the plugin uses it or answers before the SDK sees the call.
+5. **Errors, as the spec divides them:** an unknown tool or a request that fails the
+   `CallToolRequest` schema is a JSON-RPC protocol error (`-32602`); input-validation, API and
+   business failures are tool execution errors (`isError: true`), which clients SHOULD show the
+   model so it can correct itself. So a route's 4xx Problem Details (a 400/422 validation refusal,
+   a 409) becomes an `isError` result carrying its `title` and `detail` after the redaction seam,
+   and a 5xx or a thrown internal error becomes a generic error with no stack or message. The
+   mapping is a table the test iterates.
+6. **Rate limiting is a server MUST** in the spec's security considerations (beside validating
+   inputs, access control and sanitising outputs, which the route pipeline already does). A limit on
+   `POST /mcp` counts requests, not tools, so the plan decides how a per-tool or per-principal limit
+   is applied — the route's own limiter running on the in-process dispatch is the default candidate.
+7. **Retries:** with no sessions and no stream resumption, a response lost mid-call cannot be
    recovered, so a client that wants the result calls again. A tool bound to a non-idempotent route
    is therefore refused at registration unless the route is behind the idempotency plugin or the
    declaration says it is safe to repeat.
-7. **Not in this milestone:** resources and prompts beyond what the plan shows a consumer for, the
-   authorization server (M132 is resource-server only), and a tool registry that refuses
-   untrusted-input + private-data + outbound-action compositions (the "lethal trifecta"). That
-   registry is a named follow-on.
+8. **Not in this milestone:** `x-mcp-header` parameter mirroring (optional for servers, and the spec
+   warns against marking sensitive values with it), resources and prompts beyond what the plan shows
+   a consumer for, the authorization server (M132 is resource-server only), and a tool registry that
+   refuses untrusted-input + private-data + outbound-action compositions (the "lethal trifecta").
+   That registry is a named follow-on.
 
 **Gate:** an MCP client (the SDK's own) against a kernel app: list tools as two principals with
 different scopes and assert different lists; call a tool and assert the route's guard, validation,
-tenant and audit each ran (a refused guard short-circuits the handler); a retried call does not
-repeat its side effect; an internal error reaches the client redacted. Runs on Node, Deno, Bun and
-Workers. **Security-audited** by a fresh agent before it merges.
+tenant and audit each ran (a refused guard short-circuits the handler); a validation refusal arrives
+as `isError` and an unknown tool as `-32602`; a filtered list never carries a shared cache scope; a
+retried call does not repeat its side effect; an internal error reaches the client redacted. Runs on
+Node, Deno, Bun and Workers. **Security-audited** by a fresh agent before it merges.
 
 ---
 
