@@ -1853,11 +1853,12 @@ precondition. On a miss the record is read once: absent → `EntityNotFoundError
 detail "The record does not exist."), present → `VersionConflictError` (`409 Conflict`, detail "The
 record was changed after it was read. Reload it and try again."). A delete racing between the write
 and that read is reported as not found. Both refuse before any I/O with
-`UnsupportedQueryFeatureError('write-precondition')` for an expected version that is not a
-non-negative safe integer, an empty `field`, or a `data` that sets the version field, and with
-`'conditional-write'` (`501`) when the repository has no conditional member — which is also what a
-buffered transaction source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle,
-Prisma and MongoDB transactions apply it).
+`UnsupportedQueryFeatureError('write-precondition')` (`400`) for an expected version that is not a
+non-negative safe integer or a `data` that sets the version field (an empty `field` option is a
+configuration fault: a `TypeError`, served as a masked `500`), and with `'conditional-write'`
+(`501`) when the repository has no conditional member — which is also what a buffered transaction
+source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle, Prisma and MongoDB
+transactions apply it).
 
 | Symbol                                                                                                                                                             | Shape                                                                                                                                                                                                              |
 | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

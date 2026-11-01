@@ -511,7 +511,10 @@ guarded suites ran.
   budget is documented (README, PUBLIC_API, upgrading); **L2** (Low) caller-input refusals answered
   a masked 500 → `'write-precondition'` is branded `400` with a fixed detail, in both tenant stores
   too. Also fixed: an empty `where` on `DatabaseTenantDataStore` is refused (O2), and
-  `TenantRepository`'s optional members are `declare`d, so absent means no own property (O3).
+  `TenantRepository`'s optional members are `declare`d, so absent means no own property (O3). The
+  re-audit of `7b5205f5` passed; its observation O7 (the 400 brand also covered the
+  application-supplied `options.field` refusal) was fixed after it: an empty `field` is a
+  `TypeError`, a configuration fault served as a masked 500.
 - **Test homes:** §3.3/§3.4 → `test/unit/database-service-m128.test.ts`; §3.5 type checks →
   `test/unit/versioned-write.test.ts` (`expectTypeOf`); §3.6 →
   `test/integration/versioned-write-status.test.ts` (hints asserted there field by field, not in

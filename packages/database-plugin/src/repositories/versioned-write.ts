@@ -74,8 +74,9 @@ export interface VersionedWriteOptions {
  * @param data - The fields to write; must not set the version field
  * @param options - The version field and the entity name for the errors
  * @returns The updated record, carrying the new version
- * @throws {UnsupportedQueryFeatureError} `'write-precondition'` for an invalid version, field
- *   or payload; `'conditional-write'` (501) when the repository has no conditional update
+ * @throws {UnsupportedQueryFeatureError} `'write-precondition'` (400) for an invalid version or
+ *   payload; `'conditional-write'` (501) when the repository has no conditional update
+ * @throws {TypeError} When `options.field` is empty (a configuration fault)
  * @throws {VersionConflictError} When the record exists at another version (409)
  * @throws {EntityNotFoundError} When the record does not exist (404)
  * @example
@@ -119,8 +120,9 @@ export async function updateVersioned<E, Id>(
  * @param expectedVersion - The version the caller read; a non-negative safe integer
  * @param options - The version field and the entity name for the errors
  * @returns Resolves once the record is deleted
- * @throws {UnsupportedQueryFeatureError} `'write-precondition'` for an invalid version or
- *   field; `'conditional-write'` (501) when the repository has no conditional delete
+ * @throws {UnsupportedQueryFeatureError} `'write-precondition'` (400) for an invalid version;
+ *   `'conditional-write'` (501) when the repository has no conditional delete
+ * @throws {TypeError} When `options.field` is empty (a configuration fault)
  * @throws {VersionConflictError} When the record exists at another version (409)
  * @throws {EntityNotFoundError} When the record does not exist (404)
  * @example
@@ -142,14 +144,17 @@ export async function deleteVersioned<E, Id>(
   throw await missOutcome(repo, id, options?.entity);
 }
 
-/** The version field, refusing an empty name. */
+/**
+ * The version field, refusing an empty name. The field comes from the
+ * application's code, not the request, so this is a configuration fault — a
+ * `TypeError`, served as a masked `500` — never the `400` of a refused
+ * precondition (M128 audit O7).
+ */
 function checkedField(options: VersionedWriteOptions | undefined): string {
   const field = options?.field ?? DEFAULT_FIELD;
   if (typeof field !== 'string' || field === '') {
-    throw new UnsupportedQueryFeatureError(
-      'write-precondition',
-      ADAPTER,
-      'The version field must be a non-empty string.',
+    throw new TypeError(
+      'updateVersioned/deleteVersioned: options.field must be a non-empty string',
     );
   }
   return field;

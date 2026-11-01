@@ -7,6 +7,7 @@
  * @module
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
+import { httpStatusHintOf } from '@setu-ts/common';
 import type { ITenantRepository, WritePrecondition } from '@setu-ts/common';
 import {
   deleteVersioned,
@@ -121,7 +122,6 @@ describe('updateVersioned', () => {
       [Number.NaN, { title: 'x' }, undefined],
       [Number.MAX_SAFE_INTEGER, { title: 'x' }, undefined],
       [1, { title: 'x', version: 9 }, undefined],
-      [1, { title: 'x' }, { field: '' }],
     ] as const) {
       const repo = recordingRepo({ id: 'a', title: 'old', version: 1 });
       await expect(
@@ -129,6 +129,19 @@ describe('updateVersioned', () => {
       ).rejects.toMatchObject({ feature: 'write-precondition' });
       expect(repo.calls).toEqual([]);
     }
+  });
+
+  it('refuses an empty version field as a configuration fault, unbranded (audit O7)', async () => {
+    const repo = recordingRepo({ id: 'a', title: 'old', version: 1 });
+    for (const attempt of [
+      () => updateVersioned(repo, 'a', 1, { title: 'x' }, { field: '' }),
+      () => deleteVersioned(repo, 'a', 1, { field: '' }),
+    ]) {
+      const error = await attempt().catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(TypeError);
+      expect(httpStatusHintOf(error)).toBeUndefined();
+    }
+    expect(repo.calls).toEqual([]);
   });
 
   it('refuses a repository without updateWhere with conditional-write (501)', async () => {
@@ -169,9 +182,6 @@ describe('deleteVersioned', () => {
     );
     const repo = recordingRepo(null);
     await expect(deleteVersioned(repo, 'a', -2)).rejects.toMatchObject({
-      feature: 'write-precondition',
-    });
-    await expect(deleteVersioned(repo, 'a', 1, { field: '' })).rejects.toMatchObject({
       feature: 'write-precondition',
     });
     await expect(
