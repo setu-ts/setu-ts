@@ -22,7 +22,7 @@ All notable changes to this project are documented here. The format follows
   capped there (the RFC 9651 sf-integer maximum). A store result whose `count` is not a non-negative
   whole number, or whose `resetTime` is not finite, answers 429 for a full window (fail closed), and
   `RedisRateLimitStore` re-arms a key it finds without an expiry instead of leaving a counter that
-  never resets (#TBD).
+  never resets (#539).
 
 ### Fixed
 
