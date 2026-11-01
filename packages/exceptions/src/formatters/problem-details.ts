@@ -12,7 +12,7 @@
  *
  * @module
  */
-import type { IRequestContext } from '@setu-ts/common';
+import type { IRequestContext, ProblemTypeInit } from '@setu-ts/common';
 
 import { statusTitle } from '../errors/exceptions.ts';
 import { HttpError } from '../errors/http-error.ts';
@@ -98,6 +98,27 @@ export interface ProblemDetails {
 export const RESPONDER_DETAIL: unique symbol = Symbol('setu.exceptions.responder-detail');
 
 /**
+ * Marks an {@linkcode HttpError} as one the M70f error responder built with a
+ * {@linkcode ProblemTypeInit}, and carries that problem type.
+ *
+ * The responder hands a site's `problem` init to the Problem Details formatters
+ * so they emit its `type` and `title` instead of the status-derived ones and
+ * merge its `extensions`. It cannot travel through `HttpError.details`: that is
+ * a free-form bag an application writes into, so promoting a `details.problem`
+ * would change the body of a thrown error that merely uses the same key name.
+ *
+ * Like {@linkcode RESPONDER_DETAIL}, this marker is a module-private `Symbol`
+ * — not `Symbol.for` — because both writer
+ * ({@linkcode ../middleware/error-responder-impl.ts}) and reader
+ * ({@linkcode buildProblemDetails}) live in this package and import it
+ * directly; a global registry key would expose an internal channel that a
+ * third party could forge.
+ *
+ * @internal
+ */
+export const RESPONDER_PROBLEM: unique symbol = Symbol('setu.exceptions.responder-problem');
+
+/**
  * Resolves the `type` member of a Problem Details body.
  *
  * @param statusCode - The HTTP status code of the occurrence
@@ -130,7 +151,9 @@ function extractErrors(error: HttpError): ProblemDetails['errors'] {
  * - `instance` is the request path when a context is supplied.
  * - `errors` is included when the error carries validation details.
  * - `type` is delegated to `resolveType`, the only member the two supported
- *   specification versions disagree on.
+ *   specification versions disagree on — unless the error was built with a
+ *   {@linkcode ProblemTypeInit}, whose `type` and `title` replace them and
+ *   whose `extensions` are merged in without overriding a core member.
  *
  * @param error - The thrown error to format
  * @param ctx - Optional request context (used for `instance`)
@@ -165,6 +188,27 @@ export function buildProblemDetails(
       ? (error as HttpError & { [RESPONDER_DETAIL]?: unknown })[RESPONDER_DETAIL]
       : undefined;
   const detail = typeof carriedDetail === 'string' ? carriedDetail : error.message;
+  // A responder-built error may also carry a problem type (a rate limiter's
+  // `quota-exceeded`, for instance). Read on the same marker discipline as the
+  // disclosure: only the responder's own error carries it, so a thrown
+  // `HttpError` never acquires a problem type it did not ask for.
+  const carriedProblem =
+    isHttp && RESPONDER_PROBLEM in error
+      ? (error as HttpError & { [RESPONDER_PROBLEM]?: unknown })[RESPONDER_PROBLEM]
+      : undefined;
+  if (isProblemTypeInit(carriedProblem)) {
+    // Extensions never carry a core member's name (RFC 9457 §3.2), even when
+    // that member is absent from this body — see `extensionMembers`.
+    return {
+      ...extensionMembers(carriedProblem.extensions),
+      type: carriedProblem.type,
+      title: carriedProblem.title,
+      status: statusCode,
+      detail,
+      ...(ctx !== undefined && { instance: ctx.request.path }),
+      ...(errors !== undefined && { errors }),
+    };
+  }
 
   return {
     type: resolveType(statusCode, errors !== undefined),
@@ -174,4 +218,49 @@ export function buildProblemDetails(
     ...(ctx !== undefined && { instance: ctx.request.path }),
     ...(errors !== undefined && { errors }),
   };
+}
+
+/**
+ * The Problem Details members the framework owns. An extension is never
+ * emitted under one of these names, even when the core member itself is absent
+ * from a given body (`instance` without a context, `errors` without validation
+ * failures, `stack` unless `errorHandler` adds it), so an extension cannot
+ * stand in for one.
+ */
+const CORE_MEMBERS: ReadonlySet<string> = new Set([
+  'type',
+  'title',
+  'status',
+  'detail',
+  'instance',
+  'errors',
+  'stack',
+]);
+
+/**
+ * Returns a problem's extension members minus any that share a core member's
+ * name. `Object.fromEntries` defines own data properties, so an extension
+ * named `__proto__` stays an ordinary member rather than setting a prototype.
+ */
+function extensionMembers(
+  extensions: Readonly<Record<string, unknown>> | undefined,
+): Record<string, unknown> {
+  if (extensions === undefined) return {};
+  return Object.fromEntries(Object.entries(extensions).filter(([key]) => !CORE_MEMBERS.has(key)));
+}
+
+/**
+ * Narrows the carried marker value to a {@linkcode ProblemTypeInit}.
+ *
+ * The writer always supplies a conforming value; the guard exists because the
+ * property is read through a cast, and a malformed one must fall back to the
+ * status-derived body rather than emit `type: undefined`.
+ */
+function isProblemTypeInit(value: unknown): value is ProblemTypeInit {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as ProblemTypeInit).type === 'string' &&
+    typeof (value as ProblemTypeInit).title === 'string'
+  );
 }

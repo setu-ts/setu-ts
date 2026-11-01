@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **`@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`:** `rateLimitMiddleware` now
+  emits the draft-11 `RateLimit` and `RateLimit-Policy` Structured Field Lists instead of
+  `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` (breaking). The new `policyName` option
+  names the policy in both fields and in the 429's `violated-policies`, and the factory validates
+  `max`, `windowMs` and `policyName` at registration time. Under the Problem Details formats the 429
+  now identifies itself as the IANA `quota-exceeded` problem type. `ErrorResponseInit.problem` and
+  the `ProblemTypeInit` interface were added, honoured by both Problem Details formatters and by
+  status hints, and ignored by the `default` format. `Retry-After` and `t` are now clamped at zero
+  when a store reports a reset that has already passed; `Retry-After` was previously negative
+  (#TBD).
+
 ### Fixed
 
 - **cli:** `setu add messaging --broker <arm>` and `setu add queue --queue <arm>` on an existing

@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultRateLimitKey,
   rateLimitMiddleware,
+  serializeSfString,
 } from '../../src/middleware/rate-limit-middleware.ts';
 import type { RateLimitResult, RateLimitStore } from '../../src/stores/rate-limit-store.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -17,7 +18,7 @@ import { createContext } from '../fixtures/rate-limit-context.ts';
 import { CLIENT_IP_STATE_KEY } from '@setu-ts/common';
 
 describe('rateLimitMiddleware', () => {
-  it('under-limit request calls next and sets RateLimit-* headers', async () => {
+  it('under-limit request calls next and sets the draft-11 header fields', async () => {
     const runtime = createFakeRuntime();
     const middleware = rateLimitMiddleware({ windowMs: 60000, max: 100 });
     const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
@@ -30,9 +31,12 @@ describe('rateLimitMiddleware', () => {
 
     expect(nextCalled).toBe(true);
     expect(captured.status).toBe(200);
-    expect(captured.headers.get('RateLimit-Limit')).toBe('100');
-    expect(captured.headers.get('RateLimit-Remaining')).toBe('99');
-    expect(captured.headers.get('RateLimit-Reset')).toBe('60'); // delta-seconds
+    expect(captured.headers.get('RateLimit-Policy')).toBe('"default";q=100;w=60');
+    expect(captured.headers.get('RateLimit')).toBe('"default";r=99;t=60');
+    // The pre-draft-11 fields are gone.
+    expect(captured.headers.get('RateLimit-Limit')).toBeNull();
+    expect(captured.headers.get('RateLimit-Remaining')).toBeNull();
+    expect(captured.headers.get('RateLimit-Reset')).toBeNull();
     expect(captured.headers.get('Retry-After')).toBeNull(); // only on 429
   });
 
@@ -57,9 +61,11 @@ describe('rateLimitMiddleware', () => {
     expect(downstreamInvocations).toBe(2); // downstream NOT invoked
     expect(third.captured.status).toBe(429);
     expect(third.captured.headers.get('Retry-After')).toBe('60'); // ceil(60000/1000)
-    expect(third.captured.headers.get('RateLimit-Limit')).toBe('2');
-    expect(third.captured.headers.get('RateLimit-Remaining')).toBe('0');
-    expect(third.captured.headers.get('RateLimit-Reset')).toBe('60'); // delta-seconds
+    expect(third.captured.headers.get('RateLimit-Policy')).toBe('"default";q=2;w=60');
+    expect(third.captured.headers.get('RateLimit')).toBe('"default";r=0;t=60');
+    expect(third.captured.headers.get('RateLimit-Limit')).toBeNull();
+    expect(third.captured.headers.get('RateLimit-Remaining')).toBeNull();
+    expect(third.captured.headers.get('RateLimit-Reset')).toBeNull();
     // `detail`, not `message` (M90a §3.7). The 429 now goes through
     // `respondWithError`, so with no `errorHandler` registered it takes that
     // seam's `{ error, detail? }` fallback — the shape M70f converged every
@@ -117,7 +123,7 @@ describe('rateLimitMiddleware', () => {
     expect(nextCount).toBe(2); // user B unaffected
   });
 
-  it('standardHeaders: false omits RateLimit-* on the under-limit path', async () => {
+  it('standardHeaders: false omits both draft-11 fields on the under-limit path', async () => {
     const runtime = createFakeRuntime();
     const middleware = rateLimitMiddleware({
       windowMs: 60000,
@@ -128,9 +134,8 @@ describe('rateLimitMiddleware', () => {
 
     await middleware(ctx, () => Promise.resolve());
 
-    expect(captured.headers.get('RateLimit-Limit')).toBeNull();
-    expect(captured.headers.get('RateLimit-Remaining')).toBeNull();
-    expect(captured.headers.get('RateLimit-Reset')).toBeNull();
+    expect(captured.headers.get('RateLimit')).toBeNull();
+    expect(captured.headers.get('RateLimit-Policy')).toBeNull();
   });
 
   it('standardHeaders: false keeps Retry-After on the 429 path', async () => {
@@ -146,9 +151,112 @@ describe('rateLimitMiddleware', () => {
 
     expect(captured.status).toBe(429);
     expect(captured.headers.get('Retry-After')).toBe('60');
-    expect(captured.headers.get('RateLimit-Limit')).toBeNull();
-    expect(captured.headers.get('RateLimit-Remaining')).toBeNull();
-    expect(captured.headers.get('RateLimit-Reset')).toBeNull();
+    expect(captured.headers.get('RateLimit')).toBeNull();
+    expect(captured.headers.get('RateLimit-Policy')).toBeNull();
+  });
+
+  it('uses a custom policyName in both header fields', async () => {
+    const runtime = createFakeRuntime();
+    const middleware = rateLimitMiddleware({
+      windowMs: 60000,
+      max: 10,
+      policyName: 'per-user',
+    });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await middleware(ctx, () => Promise.resolve());
+
+    expect(captured.headers.get('RateLimit-Policy')).toBe('"per-user";q=10;w=60');
+    expect(captured.headers.get('RateLimit')).toBe('"per-user";r=9;t=60');
+  });
+
+  it('escapes quotes and backslashes in the sf-string policy name', async () => {
+    const runtime = createFakeRuntime();
+    const middleware = rateLimitMiddleware({
+      windowMs: 60000,
+      max: 100,
+      policyName: 'a"b\\c',
+    });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await middleware(ctx, () => Promise.resolve());
+
+    expect(captured.headers.get('RateLimit-Policy')).toBe('"a\\"b\\\\c";q=100;w=60');
+    expect(captured.headers.get('RateLimit')).toBe('"a\\"b\\\\c";r=99;t=60');
+    expect(serializeSfString('a"b\\c')).toBe('"a\\"b\\\\c"');
+  });
+
+  it('rounds the window up to whole seconds', async () => {
+    for (const [windowMs, seconds] of [
+      [1500, 2],
+      [500, 1],
+    ] as const) {
+      const runtime = createFakeRuntime();
+      const middleware = rateLimitMiddleware({ windowMs, max: 10 });
+      const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+      await middleware(ctx, () => Promise.resolve());
+
+      expect(captured.headers.get('RateLimit-Policy')).toBe(`"default";q=10;w=${seconds}`);
+    }
+  });
+
+  it('clamps a reset time in the past to zero in both t and Retry-After', async () => {
+    const runtime = createFakeRuntime();
+    const store: RateLimitStore = {
+      increment: (): Promise<RateLimitResult> =>
+        Promise.resolve({ count: 1, resetTime: runtime.now() - 5000 }),
+      reset: () => Promise.resolve(),
+    };
+    const middleware = rateLimitMiddleware({ windowMs: 60000, max: 0, store });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await middleware(ctx, () => Promise.resolve());
+
+    expect(captured.status).toBe(429);
+    expect(captured.headers.get('RateLimit')).toBe('"default";r=0;t=0');
+    // A negative delta-seconds is not a valid Retry-After (RFC 9110 §10.2.3).
+    expect(captured.headers.get('Retry-After')).toBe('0');
+  });
+
+  it('two stacked limiters append one member each to both List fields', async () => {
+    const runtime = createFakeRuntime();
+    const outer = rateLimitMiddleware({ windowMs: 60000, max: 10, policyName: 'a' });
+    const inner = rateLimitMiddleware({ windowMs: 60000, max: 5, policyName: 'b' });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await outer(ctx, async () => {
+      await inner(ctx, () => Promise.resolve());
+    });
+
+    expect(captured.headers.get('RateLimit-Policy')).toBe('"a";q=10;w=60, "b";q=5;w=60');
+    expect(captured.headers.get('RateLimit')).toBe('"a";r=9;t=60, "b";r=4;t=60');
+  });
+
+  describe('factory-time validation', () => {
+    it('rejects a negative or fractional max', () => {
+      for (const max of [-1, 1.5]) {
+        expect(() => rateLimitMiddleware({ windowMs: 60000, max })).toThrow(
+          new RangeError('rateLimitMiddleware: max must be a non-negative integer'),
+        );
+      }
+    });
+
+    it('rejects a non-positive or non-finite windowMs', () => {
+      for (const windowMs of [0, Number.POSITIVE_INFINITY]) {
+        expect(() => rateLimitMiddleware({ windowMs, max: 1 })).toThrow(
+          new RangeError('rateLimitMiddleware: windowMs must be a positive finite number'),
+        );
+      }
+    });
+
+    it('rejects an empty or non-printable-ASCII policyName', () => {
+      for (const policyName of ['', 'é', 'a\nb']) {
+        expect(() => rateLimitMiddleware({ windowMs: 60000, max: 1, policyName })).toThrow(
+          new TypeError('rateLimitMiddleware: policyName must be non-empty printable ASCII'),
+        );
+      }
+    });
   });
 
   it('default key falls back to anonymous when the request has no IP', async () => {

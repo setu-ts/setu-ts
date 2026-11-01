@@ -13,6 +13,7 @@ import {
   ERROR_TYPE_BASE,
   VALIDATION_TYPE,
 } from '../../src/formatters/problem-details.ts';
+import { buildErrorFromInit } from '../../src/middleware/error-responder-impl.ts';
 import { HttpError } from '../../src/errors/http-error.ts';
 import { notFound, validationError } from '../../src/errors/exceptions.ts';
 import { createFakeContext } from '../fixtures/fake-runtime.ts';
@@ -92,6 +93,103 @@ describe('buildProblemDetails', () => {
     it('is omitted for a generic Error, which has no details to read', () => {
       const body = buildProblemDetails(new Error('x'), undefined, () => ABOUT_BLANK);
       expect('errors' in body).toBe(false);
+    });
+  });
+
+  describe('carried problem type', () => {
+    const PROBLEM = {
+      type: 'https://iana.org/assignments/http-problem-types#quota-exceeded',
+      title: 'Quota Exceeded',
+      extensions: { 'violated-policies': ['default'] },
+    };
+
+    it('uses the problem type and title and merges its extensions', () => {
+      const error = buildErrorFromInit({
+        status: 429,
+        title: 'Too Many Requests',
+        detail: 'Rate limit exceeded',
+        problem: PROBLEM,
+      });
+
+      const body = buildProblemDetails(error, undefined, () => ABOUT_BLANK);
+
+      expect(body.type).toBe(PROBLEM.type);
+      expect(body.title).toBe(PROBLEM.title);
+      expect(body.status).toBe(429);
+      expect(body.detail).toBe('Rate limit exceeded');
+      expect(body['violated-policies']).toEqual(['default']);
+    });
+
+    it('never lets an extension override a core member', () => {
+      const { ctx } = createFakeContext({ request: { path: '/orders/7' } });
+      const error = buildErrorFromInit({
+        status: 429,
+        title: 'Too Many Requests',
+        detail: 'Rate limit exceeded',
+        details: { errors: [{ field: 'x', message: 'core' }] },
+        problem: {
+          type: PROBLEM.type,
+          title: PROBLEM.title,
+          extensions: {
+            type: 'urn:forged:type',
+            title: 'Forged title',
+            status: 200,
+            detail: 'forged detail',
+            instance: '/forged',
+            errors: ['forged'],
+          },
+        },
+      });
+
+      const body = buildProblemDetails(error, ctx, () => ABOUT_BLANK);
+
+      expect(body.type).toBe(PROBLEM.type);
+      expect(body.title).toBe(PROBLEM.title);
+      expect(body.status).toBe(429);
+      expect(body.detail).toBe('Rate limit exceeded');
+      expect(body.instance).toBe('/orders/7');
+      expect(body.errors).toEqual([{ field: 'x', message: 'core' }]);
+    });
+
+    it('drops a core-named extension even when that core member is absent', () => {
+      const extensions: Record<string, unknown> = {
+        instance: '/forged',
+        errors: ['forged'],
+        stack: 'forged stack',
+        'violated-policies': ['default'],
+      };
+      // An own `__proto__` key, as JSON.parse would produce one.
+      Object.defineProperty(extensions, '__proto__', {
+        value: { polluted: true },
+        enumerable: true,
+      });
+      const error = buildErrorFromInit({
+        status: 429,
+        title: 'Too Many Requests',
+        problem: { type: PROBLEM.type, title: PROBLEM.title, extensions },
+      });
+
+      // No context (so no `instance`) and no validation errors (so no `errors`).
+      const body = buildProblemDetails(error, undefined, () => ABOUT_BLANK);
+
+      expect(Object.keys(body).sort()).toEqual(
+        ['__proto__', 'detail', 'status', 'title', 'type', 'violated-policies'].sort(),
+      );
+      expect(Object.getPrototypeOf(body)).toBe(Object.prototype);
+      expect('polluted' in body).toBe(false);
+    });
+
+    it('never acquires a problem type on a thrown HttpError', () => {
+      const thrown = new HttpError(429, 'slow down', {
+        problem: PROBLEM,
+        detail: 'not a responder marker',
+      });
+
+      const body = buildProblemDetails(thrown, undefined, () => ABOUT_BLANK);
+
+      expect(body.type).toBe(ABOUT_BLANK);
+      expect(body.title).toBe('Too Many Requests');
+      expect('violated-policies' in body).toBe(false);
     });
   });
 

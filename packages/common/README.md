@@ -543,6 +543,7 @@ package fits the plugin architecture.
 | `PolicyAbilityInfo`                   | interface |
 | `PolicyDefinition`                    | interface |
 | `ProbeTiming`                         | interface |
+| `ProblemTypeInit`                     | interface |
 | `ProcessOptions`                      | interface |
 | `ProviderOptions`                     | interface |
 | `PublishOptions`                      | interface |

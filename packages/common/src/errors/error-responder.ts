@@ -136,6 +136,26 @@ export interface ErrorResponderTarget {
 }
 
 /**
+ * A problem type an error response should be identified as, carried by an
+ * {@linkcode ErrorResponseInit}.
+ *
+ * The two Problem Details formats (`rfc9457`, `rfc7807`) emit `type` and
+ * `title` from this value instead of deriving them from the status code, and
+ * merge its `extensions` into the body. The framework-default format and the
+ * no-responder fallback ignore it: they are not Problem Details.
+ *
+ * @since 0.12.0
+ */
+export interface ProblemTypeInit {
+  /** Absolute problem type URI, emitted as the Problem Details `type` member. */
+  readonly type: string;
+  /** The problem type's registered title, emitted as the Problem Details `title` member. */
+  readonly title: string;
+  /** Extension members added to the Problem Details body (RFC 9457 §3.2). */
+  readonly extensions?: Readonly<Record<string, unknown>>;
+}
+
+/**
  * The initialization of an error response produced through the responder seam.
  *
  * @since 0.1.0
@@ -152,6 +172,20 @@ export interface ErrorResponseInit {
   readonly detail?: string;
   /** Optional structured details (e.g. a validation `errors` array). */
   readonly details?: Readonly<Record<string, unknown>>;
+  /**
+   * An optional problem type to identify this response as.
+   *
+   * The Problem Details formats (`rfc9457`, `rfc7807`) emit `problem.type` and
+   * `problem.title` instead of the status-derived ones and merge
+   * `problem.extensions` into the body, dropping any extension named after a
+   * core member (`type`, `title`, `status`, `detail`, `instance`, `errors`,
+   * `stack`) even when that member is absent. The
+   * `default` format and the no-responder fallback in
+   * {@linkcode respondWithError} ignore it.
+   *
+   * @since 0.12.0
+   */
+  readonly problem?: ProblemTypeInit;
 }
 
 /**
