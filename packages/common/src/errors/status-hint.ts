@@ -254,10 +254,18 @@ function snapshotProblem(value: unknown): ProblemTypeInit | undefined {
   const extensions = candidate.extensions;
   if (typeof type !== 'string' || type === '') return undefined;
   if (typeof title !== 'string' || title === '') return undefined;
-  const carriedExtensions =
-    typeof extensions === 'object' && extensions !== null && !Array.isArray(extensions)
-      ? (extensions as Readonly<Record<string, unknown>>)
-      : undefined;
+  // Only the classification is guarded: a revoked Proxy throws on the
+  // `Array.isArray` probe, and dropping just `extensions` keeps the rest of the
+  // hint and the problem intact rather than losing the whole response.
+  let carriedExtensions: Readonly<Record<string, unknown>> | undefined;
+  try {
+    carriedExtensions =
+      typeof extensions === 'object' && extensions !== null && !Array.isArray(extensions)
+        ? (extensions as Readonly<Record<string, unknown>>)
+        : undefined;
+  } catch {
+    carriedExtensions = undefined;
+  }
   return Object.freeze(
     carriedExtensions === undefined
       ? { type, title }

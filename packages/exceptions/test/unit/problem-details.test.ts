@@ -193,6 +193,82 @@ describe('buildProblemDetails', () => {
     });
   });
 
+  describe('hostile extensions', () => {
+    const PROBLEM_TYPE = 'https://iana.org/assignments/http-problem-types#quota-exceeded';
+    const CORE_BODY = {
+      type: PROBLEM_TYPE,
+      title: 'Quota Exceeded',
+      status: 429,
+      detail: 'Rate limit exceeded',
+    };
+
+    /** An object whose Proxy has been revoked, so any trap throws. */
+    function revokedObject(): Record<string, unknown> {
+      const { proxy, revoke } = Proxy.revocable<Record<string, unknown>>({}, {});
+      revoke();
+      return proxy;
+    }
+
+    function bodyFor(extensions: Readonly<Record<string, unknown>>): Record<string, unknown> {
+      const error = buildErrorFromInit({
+        status: 429,
+        title: 'Too Many Requests',
+        detail: 'Rate limit exceeded',
+        problem: { type: PROBLEM_TYPE, title: 'Quota Exceeded', extensions },
+      });
+      return buildProblemDetails(error, undefined, () => ABOUT_BLANK);
+    }
+
+    const hostile: Array<[string, Readonly<Record<string, unknown>>]> = [
+      [
+        'a throwing getter',
+        {
+          get hostile(): never {
+            throw new Error('hostile getter');
+          },
+        },
+      ],
+      [
+        'a value whose toJSON throws',
+        {
+          member: {
+            toJSON(): never {
+              throw new Error('hostile toJSON');
+            },
+          },
+        },
+      ],
+      ['a revoked Proxy as the extensions object', revokedObject()],
+      ['a BigInt value', { big: 1n }],
+    ];
+
+    for (const [label, extensions] of hostile) {
+      it(`drops ${label} and still serializes the body`, () => {
+        const body = bodyFor(extensions);
+
+        expect(body, label).toEqual(CORE_BODY);
+        expect(() => JSON.stringify(body), label).not.toThrow();
+      });
+    }
+
+    it('drops extensions whose round-trip is not an object', () => {
+      for (const extensions of [
+        { toJSON: () => undefined },
+        { toJSON: () => 'a string' },
+        { toJSON: () => 5 },
+        { toJSON: () => ['an array'] },
+      ]) {
+        expect(bodyFor(extensions)).toEqual(CORE_BODY);
+      }
+    });
+
+    it('keeps plain extensions (positive control)', () => {
+      const body = bodyFor({ 'violated-policies': ['default'] });
+
+      expect(body).toEqual({ ...CORE_BODY, 'violated-policies': ['default'] });
+    });
+  });
+
   describe('exported constants', () => {
     it('composes the validation type from the error type base', () => {
       expect(VALIDATION_TYPE).toBe(`${ERROR_TYPE_BASE}/validation`);

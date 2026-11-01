@@ -239,6 +239,30 @@ describe('HTTP status hint', () => {
     }
   });
 
+  it('should drop only `extensions` when it is a revoked Proxy', () => {
+    const { proxy, revoke } = Proxy.revocable<Record<string, unknown>>({}, {});
+    revoke();
+    const error = new Error('boom');
+    Object.defineProperty(error, HTTP_STATUS_HINT, {
+      value: {
+        status: 501,
+        title: 'T',
+        detail: 'D',
+        problem: { type: 'urn:example:quota', title: 'Quota Exceeded', extensions: proxy },
+      },
+      configurable: true,
+    });
+
+    const hint = httpStatusHintOf(error);
+
+    expect(hint).toEqual({
+      status: 501,
+      title: 'T',
+      detail: 'D',
+      problem: { type: 'urn:example:quota', title: 'Quota Exceeded' },
+    });
+  });
+
   it('should read a throwing `problem` getter as ABSENT rather than throwing', () => {
     // The nested member is read inside the same `try` as the carrier, so a
     // hostile getter behaves exactly like a hostile carrier.

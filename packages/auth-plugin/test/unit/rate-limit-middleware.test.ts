@@ -219,6 +219,75 @@ describe('rateLimitMiddleware', () => {
     expect(captured.headers.get('Retry-After')).toBe('0');
   });
 
+  it('caps a far-future reset time at the sf-integer maximum in t and Retry-After', async () => {
+    const runtime = createFakeRuntime();
+    const store: RateLimitStore = {
+      increment: (): Promise<RateLimitResult> =>
+        Promise.resolve({ count: 6, resetTime: runtime.now() + 1e20 }),
+      reset: () => Promise.resolve(),
+    };
+    const middleware = rateLimitMiddleware({ windowMs: 30000, max: 5, store });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await middleware(ctx, () => Promise.resolve());
+
+    expect(captured.status).toBe(429);
+    expect(captured.headers.get('RateLimit')).toBe('"default";r=0;t=999999999999999');
+    expect(captured.headers.get('Retry-After')).toBe('999999999999999');
+  });
+
+  it('fails closed when the store result is not a finite whole number', async () => {
+    const cases: Array<[string, (now: number) => RateLimitResult]> = [
+      ['NaN count', (now) => ({ count: Number.NaN, resetTime: now + 30000 })],
+      ['fractional count', (now) => ({ count: 1.5, resetTime: now + 30000 })],
+      ['negative count', (now) => ({ count: -1, resetTime: now + 30000 })],
+      ['infinite count', (now) => ({ count: Number.POSITIVE_INFINITY, resetTime: now + 30000 })],
+      ['NaN resetTime', () => ({ count: 1, resetTime: Number.NaN })],
+      ['infinite resetTime', () => ({ count: 1, resetTime: Number.POSITIVE_INFINITY })],
+    ];
+
+    for (const [label, makeResult] of cases) {
+      const runtime = createFakeRuntime();
+      let nextCalled = false;
+      const store: RateLimitStore = {
+        increment: (): Promise<RateLimitResult> => Promise.resolve(makeResult(runtime.now())),
+        reset: () => Promise.resolve(),
+      };
+      const middleware = rateLimitMiddleware({ windowMs: 30000, max: 5, store });
+      const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+      await middleware(ctx, () => {
+        nextCalled = true;
+        return Promise.resolve();
+      });
+
+      expect(captured.status, label).toBe(429);
+      expect(nextCalled, label).toBe(false);
+      expect(captured.headers.get('RateLimit'), label).toBe('"default";r=0;t=30');
+      expect(captured.headers.get('Retry-After'), label).toBe('30');
+    }
+
+    // Positive control: a readable result still serves the request.
+    const runtime = createFakeRuntime();
+    let nextCalled = false;
+    const store: RateLimitStore = {
+      increment: (): Promise<RateLimitResult> =>
+        Promise.resolve({ count: 1, resetTime: runtime.now() + 30000 }),
+      reset: () => Promise.resolve(),
+    };
+    const middleware = rateLimitMiddleware({ windowMs: 30000, max: 5, store });
+    const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+    await middleware(ctx, () => {
+      nextCalled = true;
+      return Promise.resolve();
+    });
+
+    expect(captured.status).toBe(200);
+    expect(nextCalled).toBe(true);
+    expect(captured.headers.get('RateLimit')).toBe('"default";r=4;t=30');
+  });
+
   it('two stacked limiters append one member each to both List fields', async () => {
     const runtime = createFakeRuntime();
     const outer = rateLimitMiddleware({ windowMs: 60000, max: 10, policyName: 'a' });
@@ -234,19 +303,38 @@ describe('rateLimitMiddleware', () => {
   });
 
   describe('factory-time validation', () => {
-    it('rejects a negative or fractional max', () => {
-      for (const max of [-1, 1.5]) {
+    it('rejects a negative, fractional, or over-ceiling max', () => {
+      for (const max of [-1, 1.5, 1_000_000_000_000_000, Number.MAX_SAFE_INTEGER]) {
         expect(() => rateLimitMiddleware({ windowMs: 60000, max })).toThrow(
-          new RangeError('rateLimitMiddleware: max must be a non-negative integer'),
+          new RangeError('rateLimitMiddleware: max must be an integer from 0 to 999999999999999'),
         );
       }
     });
 
-    it('rejects a non-positive or non-finite windowMs', () => {
-      for (const windowMs of [0, Number.POSITIVE_INFINITY]) {
-        expect(() => rateLimitMiddleware({ windowMs, max: 1 })).toThrow(
-          new RangeError('rateLimitMiddleware: windowMs must be a positive finite number'),
-        );
+    it('accepts max at the sf-integer ceiling and emits it as q', async () => {
+      const runtime = createFakeRuntime();
+      const middleware = rateLimitMiddleware({ windowMs: 60000, max: 999_999_999_999_999 });
+      const { ctx, captured } = createContext(runtime, { ip: '1.2.3.4' });
+
+      await middleware(ctx, () => Promise.resolve());
+
+      expect(captured.status).toBe(200);
+      expect(captured.headers.get('RateLimit-Policy')).toBe('"default";q=999999999999999;w=60');
+    });
+
+    it('rejects a non-positive or non-integer windowMs without echoing the value', () => {
+      const message =
+        'rateLimitMiddleware: windowMs must be a positive integer number of milliseconds';
+      for (const windowMs of [1500.5, 0.5, 1e20, Number.NaN, Number.POSITIVE_INFINITY, -1, 0]) {
+        let caught: unknown;
+        try {
+          rateLimitMiddleware({ windowMs, max: 1 });
+        } catch (error) {
+          caught = error;
+        }
+        expect(caught, String(windowMs)).toBeInstanceOf(RangeError);
+        expect((caught as Error).message, String(windowMs)).toBe(message);
+        expect((caught as Error).message, String(windowMs)).not.toContain(String(windowMs));
       }
     });
 

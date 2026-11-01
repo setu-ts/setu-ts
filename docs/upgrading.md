@@ -34,7 +34,8 @@ RateLimit: "default";r=99;t=60
 non-negative delta-seconds until reset. Both are Lists, so stacked limiters append one member each
 (`"a";q=10;w=60, "b";q=5;w=60`); give each limiter its own `policyName`, because the default name is
 `'default'` for all of them. The factory now refuses a negative or fractional `max`, a non-positive
-or non-finite `windowMs`, and an empty or non-printable-ASCII `policyName`.
+or non-integer `windowMs`, and an empty or non-printable-ASCII `policyName`. A fractional `windowMs`
+is now refused (round it), and so is a `max` above 999999999999999.
 
 Under the Problem Details formats (`rfc9457`, `rfc7807`) the 429's `type` and `title` changed from
 the status-derived values (`about:blank` plus `Too Many Requests` under RFC 9457) to the IANA

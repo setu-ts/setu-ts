@@ -1378,17 +1378,23 @@ RateLimit-Policy: "default";q=100;w=60
 RateLimit: "default";r=99;t=60
 ```
 
-`q` is the quota, `w` the window in whole seconds (rounded up), `r` the remaining budget, and `t`
-the non-negative delta-seconds until reset. `Retry-After` is also delta-seconds. Give two stacked
-limiters distinct `policyName`s — both append to the same two lists, so a shared name makes their
-budgets indistinguishable (`RateLimit-Policy: "a";q=10;w=60, "b";q=5;w=60`).
+`q` is the quota (0 to 999999999999999), `w` the window in whole seconds (rounded up), `r` the
+remaining budget, and `t` the non-negative delta-seconds until reset. `t` and `Retry-After` are
+capped at 999999999999999 (the RFC 9651 sf-integer maximum). Give two stacked limiters distinct
+`policyName`s — both append to the same two lists, so a shared name makes their budgets
+indistinguishable (`RateLimit-Policy: "a";q=10;w=60, "b";q=5;w=60`).
 
-The factory validates its options once and throws before any request: `max` must be a non-negative
-safe integer (`RangeError`), `windowMs` a finite number greater than zero (`RangeError`), and
-`policyName` a non-empty printable-ASCII string (`TypeError`).
+The factory validates its options once and throws before any request: `max` must be an integer from
+0 to 999999999999999 (`RangeError`), `windowMs` a positive integer number of milliseconds
+(`RangeError`), and `policyName` a non-empty printable-ASCII string (`TypeError`).
+
+A store result that is not a finite whole number answers 429 for a full window (fail closed): the
+limiter refuses rather than serves when it cannot read its own counter.
 
 The default store is in-memory (single-process); use `RedisRateLimitStore` for multi-instance
 deployments (pass an ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
+`RedisRateLimitStore` re-arms a key it finds without an expiry, so a lost `PEXPIRE` cannot leave a
+counter that answers 429 for ever.
 
 The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
 configured error format. Under the Problem Details formats (`rfc9457`, `rfc7807`) it identifies
@@ -1479,8 +1485,8 @@ rateLimitMiddleware({
 
 | Option            | Type                     | Default                                               | Description                                                              |
 | ----------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `windowMs`        | `number`                 | -                                                     | Window length in ms.                                                     |
-| `max`             | `number`                 | -                                                     | Max requests per window per key.                                         |
+| `windowMs`        | `number`                 | -                                                     | Window length in ms; a positive integer.                                 |
+| `max`             | `number`                 | -                                                     | Max requests per window per key; 0 to 999999999999999.                   |
 | `store`           | `RateLimitStore`         | `MemoryRateLimitStore`                                | Counter backend.                                                         |
 | `keyGenerator`    | `(ctx) => string`        | principal → client IP → `IRequest.ip` → `'anonymous'` | Caller identity for the counter.                                         |
 | `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |

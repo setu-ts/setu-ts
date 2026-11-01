@@ -29,9 +29,9 @@ import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
  * Options for rate limiting middleware.
  */
 export interface RateLimitOptions {
-  /** Time window in milliseconds. */
+  /** Time window in milliseconds; a positive integer. */
   readonly windowMs: number;
-  /** Max requests per window per key. */
+  /** Max requests per window per key; an integer from 0 to 999999999999999. */
   readonly max: number;
   /** Custom store implementation. If omitted, a MemoryRateLimitStore is built lazily. */
   readonly store?: RateLimitStore;
@@ -107,6 +107,12 @@ export const DEFAULT_RATE_LIMIT_EXCLUDED_PATHS: readonly PathPattern[] = [
 const QUOTA_EXCEEDED_TYPE = 'https://iana.org/assignments/http-problem-types#quota-exceeded';
 
 /**
+ * The largest integer an RFC 9651 `sf-integer` can carry (RFC 9651 §3.3.1:
+ * at most 15 decimal digits).
+ */
+const MAX_SF_INTEGER = 999_999_999_999_999;
+
+/**
  * Serializes a string as an RFC 9651 Structured Fields `sf-string`.
  *
  * Wraps the value in double quotes and escapes each `\` as `\\` and each `"`
@@ -151,11 +157,15 @@ export function serializeSfString(value: string): string {
  */
 export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFunction {
   const { windowMs, max } = options;
-  if (!Number.isSafeInteger(max) || max < 0) {
-    throw new RangeError('rateLimitMiddleware: max must be a non-negative integer');
+  if (!Number.isSafeInteger(max) || max < 0 || max > MAX_SF_INTEGER) {
+    throw new RangeError('rateLimitMiddleware: max must be an integer from 0 to 999999999999999');
   }
-  if (!Number.isFinite(windowMs) || windowMs <= 0) {
-    throw new RangeError('rateLimitMiddleware: windowMs must be a positive finite number');
+  // Redis `PEXPIRE` refuses a fractional value after `INCR` has already created
+  // the key, leaving a counter that never expires.
+  if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw new RangeError(
+      'rateLimitMiddleware: windowMs must be a positive integer number of milliseconds',
+    );
   }
   const policyName = options.policyName ?? 'default';
   if (!/^[\x20-\x7E]+$/.test(policyName)) {
@@ -165,6 +175,10 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
   const message = options.message ?? 'Rate limit exceeded';
   const standardHeaders = options.standardHeaders ?? true;
   // Precomputed once at registration, never per request.
+  //
+  // `w` needs no sf-integer check of its own: `windowMs` is a safe integer, so
+  // `ceil(9007199254740991 / 1000)` has 13 digits, well inside the 15-digit
+  // maximum.
   const windowSeconds = Math.ceil(windowMs / 1000);
   const policyItem = serializeSfString(policyName);
   const policyHeader = `${policyItem};q=${max};w=${windowSeconds}`;
@@ -191,20 +205,32 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
 
     const key = keyGenerator(ctx);
     const result = await store.increment(key, windowMs);
+    const now = runtime.now();
+    // The limiter is an abuse control, so a store it cannot read refuses rather
+    // than serves — it fails closed, like an authorization check. A result that
+    // is not a finite whole number is treated as an exhausted bucket for a full
+    // window, and the ordinary 429 path below answers it.
+    const readable =
+      Number.isSafeInteger(result.count) && result.count >= 0 && Number.isFinite(result.resetTime);
+    const count = readable ? result.count : max + 1;
     // Delta-seconds until the window resets — used for Retry-After AND the
     // draft-11 `t` parameter. Clamped to zero: a store can report a reset that
     // has already passed (clock skew, a Redis key expiring mid-call), and
-    // delta-seconds is non-negative in both RFC 9110 and the draft.
-    const resetAfter = Math.max(0, Math.ceil((result.resetTime - runtime.now()) / 1000));
+    // delta-seconds is non-negative in both RFC 9110 and the draft. Clamped
+    // above at the sf-integer maximum because both fields are RFC 9651
+    // integers.
+    const resetAfter = readable
+      ? Math.min(MAX_SF_INTEGER, Math.max(0, Math.ceil((result.resetTime - now) / 1000)))
+      : Math.min(MAX_SF_INTEGER, windowSeconds);
 
     if (standardHeaders) {
-      const remaining = Math.max(0, max - result.count);
+      const remaining = Math.max(0, max - count);
       ctx.response
         .appendHeader('RateLimit-Policy', policyHeader)
         .appendHeader('RateLimit', `${policyItem};r=${remaining};t=${resetAfter}`);
     }
 
-    if (result.count > max) {
+    if (count > max) {
       // Short-circuit: 429 with headers, no next().
       //
       // The body goes through the error responder seam rather than a raw

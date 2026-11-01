@@ -3333,21 +3333,25 @@ RateLimit-Policy: "default";q=100;w=60
 RateLimit: "default";r=99;t=60
 ```
 
-`q` is the quota, `w` the window in whole seconds (rounded up), `r` the remaining budget, and `t`
-the non-negative delta-seconds until reset. `t` and `Retry-After` are delta-seconds, never epoch
-timestamps. `policyName` (default `'default'`) names the policy in both fields and in the 429's
-`violated-policies`; give stacked limiters distinct names, or their members are indistinguishable
-(`"a";q=10;w=60, "b";q=5;w=60`). The default store is an in-memory fixed-window counter
-(single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for multi-instance
+`q` is the quota (0 to 999999999999999), `w` the window in whole seconds (rounded up), `r` the
+remaining budget, and `t` the non-negative delta-seconds until reset. `t` and `Retry-After` are
+delta-seconds, never epoch timestamps, and both are capped at 999999999999999 (the RFC 9651
+sf-integer maximum). `policyName` (default `'default'`) names the policy in both fields and in the
+429's `violated-policies`; give stacked limiters distinct names, or their members are
+indistinguishable (`"a";q=10;w=60, "b";q=5;w=60`). The default store is an in-memory fixed-window
+counter (single-process); pass `store: new RedisRateLimitStore({ url, runtime })` for multi-instance
 deployments (ioredis is inject-or-lazy: pass `client` to inject, otherwise `ioredis` is lazily
 imported on first use). This limiter's `Retry-After` is the honest case for the header — a fixed
 window genuinely knows when it resets — which is why the framework's other backpressure statuses
 (the resilience shedding errors, X32-7; the database classifications, M90f) deliberately carry none:
 no component there holds an honest horizon, and the asymmetry is recorded beside each.
 
-The factory validates once, before any request: `max` must be a non-negative safe integer
-(`RangeError`), `windowMs` a finite number greater than zero (`RangeError`), and `policyName` a
-non-empty printable-ASCII string (`TypeError`).
+The factory validates once, before any request: `max` must be an integer from 0 to 999999999999999
+(`RangeError`), `windowMs` a positive integer number of milliseconds (`RangeError`), and
+`policyName` a non-empty printable-ASCII string (`TypeError`).
+
+A store result that is not a finite whole number answers 429 for a full window (fail closed): the
+limiter refuses rather than serves when it cannot read its own counter.
 
 The 429 body is written through `respondWithError`, so it uses the application's configured error
 format — including Problem Details under `errorHandler({ format: 'rfc9457' })` — just like a guard
@@ -3372,7 +3376,8 @@ increment a counter or receive `RateLimit`/`RateLimit-Policy` fields.
 
 `RedisRateLimitStore` namespaces keys under `keyPrefix` (default `'setu:ratelimit:'`) so two
 applications sharing one Redis deployment do not count against each other. Pass `''` to use the
-pre-namespacing keys.
+pre-namespacing keys. It re-arms a key it finds without an expiry, so a lost `PEXPIRE` cannot leave
+a counter that answers 429 for ever.
 
 The application constructs `RedisRateLimitStore`, so no plugin supplies its connection-error
 reporter. Pass `connectionErrorReporter` — built with `createConnectionErrorReporter` from

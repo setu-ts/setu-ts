@@ -16,8 +16,12 @@ All notable changes to this project are documented here. The format follows
   now identifies itself as the IANA `quota-exceeded` problem type. `ErrorResponseInit.problem` and
   the `ProblemTypeInit` interface were added, honoured by both Problem Details formatters and by
   status hints, and ignored by the `default` format. `Retry-After` and `t` are now clamped at zero
-  when a store reports a reset that has already passed; `Retry-After` was previously negative
-  (#TBD).
+  when a store reports a reset that has already passed; `Retry-After` was previously negative.
+  `windowMs` must be a positive integer (a fractional value is refused rather than left to a Redis
+  `PEXPIRE` that refuses it), `max` must be at most 999999999999999, and `t`/`Retry-After` are
+  capped there (the RFC 9651 sf-integer maximum). A store result that is not a finite whole number
+  answers 429 for a full window (fail closed), and `RedisRateLimitStore` re-arms a key it finds
+  without an expiry instead of leaving a counter that never resets (#TBD).
 
 ### Fixed
 
