@@ -142,6 +142,14 @@ problem type identified by `https://setu-ts.dev/errors/validation` — the same 
 }
 ```
 
+A response produced through `respondWithError` (or a status hint) may carry a `ProblemTypeInit` as
+`init.problem`. Under both Problem Details formats its `type` and `title` replace the status-derived
+ones and its `extensions` are merged into the body. An extension named after a core member (`type`,
+`title`, `status`, `detail`, `instance`, `errors`, `stack`) is dropped, even when that member is
+absent from the body. The `'default'` format does not read `problem` and stays byte-identical. This
+is how `rateLimitMiddleware` answers `429` as the registered `quota-exceeded` problem type with
+`violated-policies`.
+
 > **`'rfc7807'` is deprecated.** RFC 7807 was obsoleted by RFC 9457 in July 2023. The `'rfc7807'`
 > alias and `rfc7807Formatter` still emit the status-derived `type`
 > (`https://setu-ts.dev/errors/404`) they always did — a deprecated symbol must not silently change

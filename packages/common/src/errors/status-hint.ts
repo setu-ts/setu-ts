@@ -16,7 +16,7 @@
  *
  * @module
  */
-import type { ErrorResponseInit } from './error-responder.ts';
+import type { ErrorResponseInit, ProblemTypeInit } from './error-responder.ts';
 
 /**
  * Key under which an `Error` carries its {@linkcode HttpStatusHint}.
@@ -175,9 +175,9 @@ export function withHttpStatusHint<T extends Error>(error: T, hint: HttpStatusHi
 export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
   if (typeof error !== 'object' || error === null) return undefined;
   // Every read of the carrier and of the brand happens inside this `try`, and
-  // each member is read EXACTLY ONCE into a local. Two reasons, both of which
-  // the documented "a foreign value is treated as absent rather than trusted"
-  // promise depends on:
+  // each member — including the nested `problem` members — is read EXACTLY
+  // ONCE into a local. Two reasons, both of which the documented "a foreign
+  // value is treated as absent rather than trusted" promise depends on:
   //
   //   1. The key is `Symbol.for`, so any package can define it — including as
   //      a throwing getter. Left unguarded that throw escapes `errorHandler`'s
@@ -198,11 +198,13 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
       title?: unknown;
       detail?: unknown;
       details?: unknown;
+      problem?: unknown;
     };
     const status = candidate.status;
     const title = candidate.title;
     const detail = candidate.detail;
     const details = candidate.details;
+    const problem = candidate.problem;
     if (!isConformingStatus(status)) return undefined;
     if (typeof title !== 'string' || typeof detail !== 'string') return undefined;
     // `details` is optional on `ErrorResponseInit`. A non-plain-object value
@@ -213,16 +215,62 @@ export function httpStatusHintOf(error: unknown): HttpStatusHint | undefined {
       typeof details === 'object' && details !== null && !Array.isArray(details)
         ? (details as Readonly<Record<string, unknown>>)
         : undefined;
-    return Object.freeze(
-      carriedDetails === undefined
-        ? { status, title, detail }
-        : { status, title, detail, details: carriedDetails },
-    );
+    // `problem` is optional too, and follows the same drop policy as
+    // `details`: a malformed value (not a plain object, or missing a non-empty
+    // string `type`/`title`) leaves the rest of the hint intact. Its own
+    // members are read once, into locals, for the same stateful-getter reason
+    // every other member is.
+    const carriedProblem = snapshotProblem(problem);
+    return Object.freeze({
+      status,
+      title,
+      detail,
+      ...(carriedDetails === undefined ? {} : { details: carriedDetails }),
+      ...(carriedProblem === undefined ? {} : { problem: carriedProblem }),
+    });
   } catch {
     // A hostile or buggy accessor reads as ABSENT, exactly like a malformed
     // brand: the error then takes the ordinary masked path.
     return undefined;
   }
+}
+
+/**
+ * Snapshots an {@linkcode ErrorResponseInit.problem} value read from a brand.
+ *
+ * Reads each member exactly once and returns a fresh frozen object, or
+ * `undefined` when the value is malformed. `extensions` is optional: a
+ * non-plain-object value drops only that member, keeping the problem.
+ */
+function snapshotProblem(value: unknown): ProblemTypeInit | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as {
+    type?: unknown;
+    title?: unknown;
+    extensions?: unknown;
+  };
+  const type = candidate.type;
+  const title = candidate.title;
+  const extensions = candidate.extensions;
+  if (typeof type !== 'string' || type === '') return undefined;
+  if (typeof title !== 'string' || title === '') return undefined;
+  // Only the classification is guarded: a revoked Proxy throws on the
+  // `Array.isArray` probe, and dropping just `extensions` keeps the rest of the
+  // hint and the problem intact rather than losing the whole response.
+  let carriedExtensions: Readonly<Record<string, unknown>> | undefined;
+  try {
+    carriedExtensions =
+      typeof extensions === 'object' && extensions !== null && !Array.isArray(extensions)
+        ? (extensions as Readonly<Record<string, unknown>>)
+        : undefined;
+  } catch {
+    carriedExtensions = undefined;
+  }
+  return Object.freeze(
+    carriedExtensions === undefined
+      ? { type, title }
+      : { type, title, extensions: carriedExtensions },
+  );
 }
 
 /**

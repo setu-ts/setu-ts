@@ -113,9 +113,11 @@ export const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'setu:ratelimit:';
  * Redis-backed rate limit store implementation.
  *
  * Uses INCR (creates if missing) + PEXPIRE on first increment, then PTTL to
- * derive resetTime. The store holds the runtime clock because PTTL returns a
- * relative ms-remaining value, while the contract's RateLimitResult.resetTime
- * must be an absolute epoch-ms timestamp.
+ * derive resetTime. A key found without a TTL (`PTTL` returns `-1`, or `-2`
+ * when it vanished between commands) is re-armed with a fresh window rather
+ * than left to answer 429 for ever. The store holds the runtime clock because
+ * PTTL returns a relative ms-remaining value, while the contract's
+ * RateLimitResult.resetTime must be an absolute epoch-ms timestamp.
  */
 export class RedisRateLimitStore implements RateLimitStore {
   #client: IRateLimitRedisClient | null = null;
@@ -211,9 +213,18 @@ export class RedisRateLimitStore implements RateLimitStore {
         await client.pexpire(namespaced, windowMs);
       }
 
-      // PTTL returns time-to-live in ms (relative); convert to absolute resetTime
+      // PTTL returns time-to-live in ms (relative); convert to absolute resetTime.
+      // `-1` means the key has no expiry and `-2` that it vanished between
+      // commands. A key left without a TTL (a refused or lost PEXPIRE) would
+      // otherwise answer 429 for ever, so the store re-arms the window instead.
       const pttl = await client.pttl(namespaced);
-      const resetTime = now + pttl;
+      let resetTime: number;
+      if (pttl < 0) {
+        await client.pexpire(namespaced, windowMs);
+        resetTime = now + windowMs;
+      } else {
+        resetTime = now + pttl;
+      }
 
       return { count, resetTime };
     } catch (error) {

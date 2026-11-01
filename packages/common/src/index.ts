@@ -26,6 +26,7 @@ export type {
   ErrorResponderTarget,
   ErrorResponseInit,
   IErrorResponder,
+  ProblemTypeInit,
 } from './errors/error-responder.ts';
 export {
   authorizationFailureInit,

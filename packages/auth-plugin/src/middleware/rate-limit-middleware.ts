@@ -1,8 +1,10 @@
 /**
  * Rate limiting middleware factory.
  *
- * Fixed-window counter with 429 short-circuit, Retry-After and RateLimit-*
- * headers, and a pluggable store (memory or Redis).
+ * Fixed-window counter with 429 short-circuit, Retry-After and the
+ * `RateLimit`/`RateLimit-Policy` fields of
+ * draft-ietf-httpapi-ratelimit-headers-11, and a pluggable store (memory or
+ * Redis).
  *
  * @module
  */
@@ -27,9 +29,9 @@ import { MemoryRateLimitStore } from '../stores/rate-limit-store.ts';
  * Options for rate limiting middleware.
  */
 export interface RateLimitOptions {
-  /** Time window in milliseconds. */
+  /** Time window in milliseconds; a positive integer. */
   readonly windowMs: number;
-  /** Max requests per window per key. */
+  /** Max requests per window per key; an integer from 0 to 999999999999999. */
   readonly max: number;
   /** Custom store implementation. If omitted, a MemoryRateLimitStore is built lazily. */
   readonly store?: RateLimitStore;
@@ -45,8 +47,22 @@ export interface RateLimitOptions {
   readonly keyGenerator?: (ctx: IRequestContext) => string;
   /** Message returned in the 429 body. */
   readonly message?: string;
-  /** Emit standard RateLimit-* headers (default: true). */
+  /**
+   * Emit the `RateLimit` and `RateLimit-Policy` header fields of
+   * draft-ietf-httpapi-ratelimit-headers-11 (default: true).
+   */
   readonly standardHeaders?: boolean;
+  /**
+   * The quota policy name emitted in `RateLimit-Policy`, `RateLimit` and the
+   * 429 body's `violated-policies` extension (default: `'default'`).
+   *
+   * Give two stacked limiters different names: both append one member to each
+   * list field, so a shared name makes the two budgets indistinguishable to a
+   * client.
+   *
+   * @since 0.12.0
+   */
+  readonly policyName?: string;
   /**
    * Paths exempted from the limiter, matched against `IRequest.path`. A string
    * is an EXACT match; a `RegExp` is tested against the path.
@@ -83,11 +99,45 @@ export const DEFAULT_RATE_LIMIT_EXCLUDED_PATHS: readonly PathPattern[] = [
 ];
 
 /**
+ * The IANA-registered problem type a refused request is identified as.
+ *
+ * Not exported from `src/index.ts`: callers receive it in the body, never as a
+ * constant to match on.
+ */
+const QUOTA_EXCEEDED_TYPE = 'https://iana.org/assignments/http-problem-types#quota-exceeded';
+
+/**
+ * The largest integer an RFC 9651 `sf-integer` can carry (RFC 9651 §3.3.1:
+ * at most 15 decimal digits).
+ */
+const MAX_SF_INTEGER = 999_999_999_999_999;
+
+/**
+ * Serializes a string as an RFC 9651 Structured Fields `sf-string`.
+ *
+ * Wraps the value in double quotes and escapes each `\` as `\\` and each `"`
+ * as `\"` (RFC 9651 §4.1.6). Exported from this module — but not from
+ * `src/index.ts` — so the escaping can be unit-tested directly.
+ *
+ * @param value - The raw policy name
+ * @returns The quoted, escaped `sf-string`
+ * @since 0.12.0
+ */
+export function serializeSfString(value: string): string {
+  return `"${value.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`;
+}
+
+/**
  * Rate limiting middleware factory.
  *
  * On each request, increments the counter for the resolved key. If count > max,
- * short-circuits with a 429 response (Retry-After and RateLimit-* headers set,
- * next() NOT called). Otherwise sets the headers and proceeds to next().
+ * short-circuits with a 429 response (`Retry-After`, `RateLimit` and
+ * `RateLimit-Policy` fields set, next() NOT called). Otherwise sets the header
+ * fields and proceeds to next().
+ *
+ * Both header fields are Structured Field Lists (RFC 9651), so each limiter
+ * APPENDS one member: stacking two limiters on one route yields one member per
+ * policy rather than one field overwriting the other.
  *
  * Registered globally — the usage below, and the one the README shows — the
  * limiter sees the operational probes too, so
@@ -107,9 +157,31 @@ export const DEFAULT_RATE_LIMIT_EXCLUDED_PATHS: readonly PathPattern[] = [
  */
 export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFunction {
   const { windowMs, max } = options;
+  if (!Number.isSafeInteger(max) || max < 0 || max > MAX_SF_INTEGER) {
+    throw new RangeError('rateLimitMiddleware: max must be an integer from 0 to 999999999999999');
+  }
+  // Redis `PEXPIRE` refuses a fractional value after `INCR` has already created
+  // the key, leaving a counter that never expires.
+  if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw new RangeError(
+      'rateLimitMiddleware: windowMs must be a positive integer number of milliseconds',
+    );
+  }
+  const policyName = options.policyName ?? 'default';
+  if (!/^[\x20-\x7E]+$/.test(policyName)) {
+    throw new TypeError('rateLimitMiddleware: policyName must be non-empty printable ASCII');
+  }
   const keyGenerator = options.keyGenerator ?? defaultRateLimitKey;
   const message = options.message ?? 'Rate limit exceeded';
   const standardHeaders = options.standardHeaders ?? true;
+  // Precomputed once at registration, never per request.
+  //
+  // `w` needs no sf-integer check of its own: `windowMs` is a safe integer, so
+  // `ceil(9007199254740991 / 1000)` has 13 digits, well inside the 15-digit
+  // maximum.
+  const windowSeconds = Math.ceil(windowMs / 1000);
+  const policyItem = serializeSfString(policyName);
+  const policyHeader = `${policyItem};q=${max};w=${windowSeconds}`;
   // Partitioned once at registration, never per request.
   const isExcluded = createPathMatcher(options.exclude ?? DEFAULT_RATE_LIMIT_EXCLUDED_PATHS);
 
@@ -119,7 +191,8 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void | HandlerResult> => {
     // An exempt path skips the limiter entirely: no counter is incremented, so
     // a probe cannot consume the budget a real caller needs, and no
-    // RateLimit-* headers are written for a request the limit does not govern.
+    // `RateLimit`/`RateLimit-Policy` fields are written for a request the limit
+    // does not govern.
     if (isExcluded(ctx.request.path)) {
       await next();
       return;
@@ -132,18 +205,34 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
 
     const key = keyGenerator(ctx);
     const result = await store.increment(key, windowMs);
-    // Delta-seconds until the window resets — used for Retry-After AND
-    // RateLimit-Reset (the IETF draft defines Reset as delta-seconds).
-    const resetAfter = Math.ceil((result.resetTime - runtime.now()) / 1000);
+    const now = runtime.now();
+    // The limiter is an abuse control, so a store it cannot read refuses rather
+    // than serves — it fails closed, like an authorization check. A `count` that
+    // is not a non-negative whole number, or a `resetTime` that is not finite,
+    // is treated as an exhausted bucket for a full window, and the ordinary 429
+    // path below answers it. A finite fractional `resetTime` is readable: it
+    // only rounds `t` up.
+    const readable =
+      Number.isSafeInteger(result.count) && result.count >= 0 && Number.isFinite(result.resetTime);
+    const count = readable ? result.count : max + 1;
+    // Delta-seconds until the window resets — used for Retry-After AND the
+    // draft-11 `t` parameter. Clamped to zero: a store can report a reset that
+    // has already passed (clock skew, a Redis key expiring mid-call), and
+    // delta-seconds is non-negative in both RFC 9110 and the draft. Clamped
+    // above at the sf-integer maximum because both fields are RFC 9651
+    // integers.
+    const resetAfter = readable
+      ? Math.min(MAX_SF_INTEGER, Math.max(0, Math.ceil((result.resetTime - now) / 1000)))
+      : Math.min(MAX_SF_INTEGER, windowSeconds);
 
     if (standardHeaders) {
+      const remaining = Math.max(0, max - count);
       ctx.response
-        .header('RateLimit-Limit', String(max))
-        .header('RateLimit-Remaining', String(Math.max(0, max - result.count)))
-        .header('RateLimit-Reset', String(resetAfter));
+        .appendHeader('RateLimit-Policy', policyHeader)
+        .appendHeader('RateLimit', `${policyItem};r=${remaining};t=${resetAfter}`);
     }
 
-    if (result.count > max) {
+    if (count > max) {
       // Short-circuit: 429 with headers, no next().
       //
       // The body goes through the error responder seam rather than a raw
@@ -158,6 +247,11 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
         status: 429,
         title: 'Too Many Requests',
         detail: message,
+        problem: {
+          type: QUOTA_EXCEEDED_TYPE,
+          title: 'Quota Exceeded',
+          extensions: { 'violated-policies': [policyName] },
+        },
       });
       return;
     }
