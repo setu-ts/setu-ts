@@ -207,9 +207,11 @@ export function rateLimitMiddleware(options: RateLimitOptions): MiddlewareFuncti
     const result = await store.increment(key, windowMs);
     const now = runtime.now();
     // The limiter is an abuse control, so a store it cannot read refuses rather
-    // than serves — it fails closed, like an authorization check. A result that
-    // is not a finite whole number is treated as an exhausted bucket for a full
-    // window, and the ordinary 429 path below answers it.
+    // than serves — it fails closed, like an authorization check. A `count` that
+    // is not a non-negative whole number, or a `resetTime` that is not finite,
+    // is treated as an exhausted bucket for a full window, and the ordinary 429
+    // path below answers it. A finite fractional `resetTime` is readable: it
+    // only rounds `t` up.
     const readable =
       Number.isSafeInteger(result.count) && result.count >= 0 && Number.isFinite(result.resetTime);
     const count = readable ? result.count : max + 1;

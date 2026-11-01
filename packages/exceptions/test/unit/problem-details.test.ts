@@ -262,6 +262,27 @@ describe('buildProblemDetails', () => {
       }
     });
 
+    it('filters core-member names out of what a bag-level toJSON returns', () => {
+      // The filter must run AFTER the round-trip: a `toJSON` on the bag replaces
+      // the whole bag, so filtering first would let it reintroduce `stack` and
+      // `errors`, which the core spread does not overwrite when absent.
+      const body = bodyFor({
+        ok: 1,
+        toJSON: () => ({
+          stack: 'forged stack',
+          errors: ['forged'],
+          instance: '/forged',
+          status: 200,
+          type: 'urn:forged',
+          title: 'forged',
+          detail: 'forged',
+          extra: 'via-toJSON',
+        }),
+      });
+
+      expect(body).toEqual({ ...CORE_BODY, extra: 'via-toJSON' });
+    });
+
     it('keeps plain extensions (positive control)', () => {
       const body = bodyFor({ 'violated-policies': ['default'] });
 

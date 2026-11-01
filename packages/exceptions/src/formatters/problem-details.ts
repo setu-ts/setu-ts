@@ -246,25 +246,29 @@ const CORE_MEMBERS: ReadonlySet<string> = new Set([
  * `Proxy`, a `BigInt`, or a cycle must drop the extensions rather than make the
  * error response itself throw. The JSON round-trip is deliberate — it runs every
  * `toJSON` and getter HERE, inside the guard, so `errorHandler`'s later
- * `JSON.stringify` of the body cannot throw on an extension. `JSON.parse`
- * defines `__proto__` as an own data property, so an extension named
- * `__proto__` stays an ordinary member rather than setting a prototype.
+ * `JSON.stringify` of the body cannot throw on an extension.
+ *
+ * The core-member filter runs on the round-tripped object, AFTER every
+ * `toJSON` has run: a `toJSON` on the extension bag itself replaces the whole
+ * bag, so filtering before the round-trip would let it reintroduce a core
+ * member's name. `JSON.parse` and `Object.fromEntries` both define own data
+ * properties, so an extension named `__proto__` stays an ordinary member
+ * rather than setting a prototype.
  */
 function extensionMembers(
   extensions: Readonly<Record<string, unknown>> | undefined,
 ): Record<string, unknown> {
   if (extensions === undefined) return {};
   try {
-    const filtered = Object.fromEntries(
-      Object.entries(extensions).filter(([key]) => !CORE_MEMBERS.has(key)),
-    );
-    const serialized = JSON.stringify(filtered);
+    const serialized = JSON.stringify(extensions);
     if (typeof serialized !== 'string') return {};
     const roundTripped: unknown = JSON.parse(serialized);
     if (typeof roundTripped !== 'object' || roundTripped === null || Array.isArray(roundTripped)) {
       return {};
     }
-    return roundTripped as Record<string, unknown>;
+    return Object.fromEntries(
+      Object.entries(roundTripped).filter(([key]) => !CORE_MEMBERS.has(key)),
+    );
   } catch {
     return {};
   }

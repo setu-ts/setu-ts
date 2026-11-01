@@ -19,9 +19,10 @@ All notable changes to this project are documented here. The format follows
   when a store reports a reset that has already passed; `Retry-After` was previously negative.
   `windowMs` must be a positive integer (a fractional value is refused rather than left to a Redis
   `PEXPIRE` that refuses it), `max` must be at most 999999999999999, and `t`/`Retry-After` are
-  capped there (the RFC 9651 sf-integer maximum). A store result that is not a finite whole number
-  answers 429 for a full window (fail closed), and `RedisRateLimitStore` re-arms a key it finds
-  without an expiry instead of leaving a counter that never resets (#TBD).
+  capped there (the RFC 9651 sf-integer maximum). A store result whose `count` is not a non-negative
+  whole number, or whose `resetTime` is not finite, answers 429 for a full window (fail closed), and
+  `RedisRateLimitStore` re-arms a key it finds without an expiry instead of leaving a counter that
+  never resets (#TBD).
 
 ### Fixed
 

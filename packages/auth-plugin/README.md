@@ -1388,8 +1388,9 @@ The factory validates its options once and throws before any request: `max` must
 0 to 999999999999999 (`RangeError`), `windowMs` a positive integer number of milliseconds
 (`RangeError`), and `policyName` a non-empty printable-ASCII string (`TypeError`).
 
-A store result that is not a finite whole number answers 429 for a full window (fail closed): the
-limiter refuses rather than serves when it cannot read its own counter.
+A store result whose `count` is not a non-negative whole number, or whose `resetTime` is not finite,
+answers 429 for a full window (fail closed): the limiter refuses rather than serves when it cannot
+read its own counter.
 
 The default store is in-memory (single-process); use `RedisRateLimitStore` for multi-instance
 deployments (pass an ioredis-compatible `client`, or `ioredis` is lazily imported on first use).

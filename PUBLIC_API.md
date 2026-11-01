@@ -3350,8 +3350,9 @@ The factory validates once, before any request: `max` must be an integer from 0 
 (`RangeError`), `windowMs` a positive integer number of milliseconds (`RangeError`), and
 `policyName` a non-empty printable-ASCII string (`TypeError`).
 
-A store result that is not a finite whole number answers 429 for a full window (fail closed): the
-limiter refuses rather than serves when it cannot read its own counter.
+A store result whose `count` is not a non-negative whole number, or whose `resetTime` is not finite,
+answers 429 for a full window (fail closed): the limiter refuses rather than serves when it cannot
+read its own counter.
 
 The 429 body is written through `respondWithError`, so it uses the application's configured error
 format — including Problem Details under `errorHandler({ format: 'rfc9457' })` — just like a guard
