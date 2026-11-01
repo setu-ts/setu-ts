@@ -504,6 +504,14 @@ guarded suites ran.
 - **§3.2:** the in-flight live case drives a repository statement blocked on a table lock, so it
   pins `57P01` → 503 through the wrapper; the native-handle variant was dropped (unclassified by
   design).
+- **Security audit of `f9e6bd8c` (fresh agent):** all eight §8a obligations held; three findings,
+  all fixed on this branch at the maintainer's direction (2026-11-01): **M1** (Medium) the memory
+  tenant store's `updateWhere`/`deleteWhere` threw synchronously → now `async`, rejecting; **L1**
+  (Low) the repository cache grows per distinct entity name on adapters that build any name → the
+  budget is documented (README, PUBLIC_API, upgrading); **L2** (Low) caller-input refusals answered
+  a masked 500 → `'write-precondition'` is branded `400` with a fixed detail, in both tenant stores
+  too. Also fixed: an empty `where` on `DatabaseTenantDataStore` is refused (O2), and
+  `TenantRepository`'s optional members are `declare`d, so absent means no own property (O3).
 - **Test homes:** §3.3/§3.4 → `test/unit/database-service-m128.test.ts`; §3.5 type checks →
   `test/unit/versioned-write.test.ts` (`expectTypeOf`); §3.6 →
   `test/integration/versioned-write-status.test.ts` (hints asserted there field by field, not in

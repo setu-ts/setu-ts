@@ -35,7 +35,7 @@ async function appWithArticle() {
       const updated = await updateVersioned(
         repo,
         ctx.params['id']!,
-        body.version,
+        Number(body.version),
         { title: body.title },
         { entity: 'Article' },
       );
@@ -58,6 +58,32 @@ const put = (id: string, version: number) => ({
 });
 
 describe('versioned write statuses through errorHandler', () => {
+  it('answers caller input it refuses with 400, never a masked 500 (audit L2)', async () => {
+    const app = await appWithArticle();
+    try {
+      for (const body of [
+        { title: 'x' }, // no version: NaN after a Number() read
+        { title: 'x', version: -1 },
+        { title: 'x', version: 1.5 },
+      ]) {
+        const response = await app.inject({
+          ...put('art-7731', 0),
+          body: JSON.stringify(body),
+        });
+        expect(response.statusCode).toBe(400);
+        expect(response.json()).toEqual({
+          type: 'about:blank',
+          title: 'Bad Request',
+          status: 400,
+          detail: 'The write precondition or its payload is invalid.',
+          instance: '/articles/art-7731',
+        });
+      }
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('answers the current version with the updated row', async () => {
     const app = await appWithArticle();
     try {

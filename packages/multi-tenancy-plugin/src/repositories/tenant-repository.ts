@@ -14,15 +14,18 @@ import type { ITenantDataStore } from '../interfaces/index.ts';
  * Not exported from the barrel — consumers hold it as `ITenantRepository<Entity, Id>` from `common`.
  */
 export class TenantRepository<Entity, Id = string> implements ITenantRepository<Entity, Id> {
-  /** Present only when the store has conditional updates, so absence carries through. */
-  readonly updateWhere?: (
+  /**
+   * Present only when the store has conditional updates, so absence carries
+   * through. `declare`d so no own property exists until the constructor sets it.
+   */
+  declare readonly updateWhere?: (
     id: Id,
     where: WritePrecondition,
     data: Readonly<Record<string, unknown>>,
   ) => Promise<Entity | null>;
 
   /** Present only when the store has conditional deletes. */
-  readonly deleteWhere?: (id: Id, where: WritePrecondition) => Promise<boolean>;
+  declare readonly deleteWhere?: (id: Id, where: WritePrecondition) => Promise<boolean>;
 
   constructor(
     private readonly store: ITenantDataStore,

@@ -37,6 +37,13 @@ All notable changes to this project are documented here. The format follows
 - **database-plugin:** `IDatabaseService.transaction()` no longer classifies an error its own work
   throws, so a refused HTTP call inside an inbox handler is reported as itself rather than as
   `DatabaseUnavailableError`. Repository calls inside the work are still classified (V11-5, M128).
+- **database-plugin, multi-tenancy-plugin:** a refused conditional-write precondition or payload
+  (`UnsupportedQueryFeatureError` with feature `'write-precondition'`: an empty or non-scalar
+  `where`, an invalid expected version, a payload that sets the version field, a tenant-scoped
+  precondition naming the tenant column) answers `400 Bad Request` with the fixed detail "The write
+  precondition or its payload is invalid." instead of a masked `500` logged at error level.
+  `MemoryTenantDataStore`'s refusals reject rather than throwing synchronously, and both tenant
+  stores refuse an empty precondition (M128 security audit).
 - **database-plugin:** `getRepository()` returns one repository per entity instead of rebuilding its
   data source and wrapper on every call, the cost behind the measured point-read gap (X94-3, M128).
 

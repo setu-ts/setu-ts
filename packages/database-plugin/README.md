@@ -281,6 +281,13 @@ export async function editArticle(
   `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write.
 - On a miss the record is read once to choose the error, so a delete that lands in between is
   reported as not found.
+- An invalid expected version (a missing `?version` read with `Number(...)` is `NaN`) or a payload
+  that sets the version field answers `400 Bad Request`, as every refused conditional-write
+  precondition does.
+
+`getRepository(entity)` returns the same repository for every call with that entity name. Pass
+entity names from your code, never from request input: on the memory and MongoDB adapters every new
+name is kept for the service's lifetime.
 
 ## Tenant data-store bridge
 

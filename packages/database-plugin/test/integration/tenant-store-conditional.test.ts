@@ -7,6 +7,7 @@
  * @module
  */
 import { describe, expect, it } from 'vitest';
+import { httpStatusHintOf } from '@setu-ts/common';
 import type { ITenantIsolationStrategy, ITenantRepository } from '@setu-ts/common';
 import {
   DatabaseService,
@@ -103,6 +104,22 @@ describe('DatabaseTenantDataStore conditional writes', () => {
         feature: 'write-precondition',
       });
       expect((error as Error).message).not.toContain('tenant_id');
+    }
+    expect(await store.findById<Article, string>('a', 'Article', own.id)).toMatchObject({
+      title: 'mine',
+    });
+  });
+
+  it('refuses an empty precondition rather than writing unconditionally (audit O2)', async () => {
+    const { store } = await makeStore();
+    const own = await store.create<Article>('a', 'Article', { title: 'mine', version: 1 });
+    for (const attempt of [
+      () => store.updateWhere('a', 'Article', own.id, {}, { title: 'x' }),
+      () => store.deleteWhere('a', 'Article', own.id, {}),
+    ]) {
+      const error = await attempt().catch((e: unknown) => e);
+      expect(error).toMatchObject({ feature: 'write-precondition' });
+      expect(httpStatusHintOf(error)?.status).toBe(400);
     }
     expect(await store.findById<Article, string>('a', 'Article', own.id)).toMatchObject({
       title: 'mine',

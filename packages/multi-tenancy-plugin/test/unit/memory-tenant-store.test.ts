@@ -2,6 +2,7 @@
  * MemoryTenantDataStore tests.
  */
 import { describe, expect, it } from 'vitest';
+import { httpStatusHintOf } from '@setu-ts/common';
 import { MemoryTenantDataStore } from '../../src/stores/memory-tenant-store.ts';
 import { ColumnPerTenant } from '../../src/strategies/column-strategy.ts';
 import { DatabasePerTenant } from '../../src/strategies/database-strategy.ts';
@@ -285,16 +286,26 @@ describe('memory tenant store conditional writes (M128)', () => {
     const store = new MemoryTenantDataStore();
     store.useIsolation(new ColumnPerTenant('org_id'));
     await store.create('a', 'Doc', { id: 'd1', version: 1 });
-    expect(() => store.updateWhere('a', 'Doc', 'd1', {}, { title: 'x' })).toThrow(TypeError);
-    expect(() => store.updateWhere('a', 'Doc', 'd1', { version: 1 }, {})).toThrow(TypeError);
+    await expect(store.updateWhere('a', 'Doc', 'd1', {}, { title: 'x' })).rejects.toBeInstanceOf(
+      TypeError,
+    );
+    await expect(store.updateWhere('a', 'Doc', 'd1', { version: 1 }, {})).rejects.toBeInstanceOf(
+      TypeError,
+    );
+    // A refusal REJECTS: a caller's `.catch` sees it, nothing throws synchronously (audit M1).
     let refusal: unknown;
-    try {
-      store.deleteWhere('a', 'Doc', 'd1', { org_id: 'a' });
-    } catch (error) {
+    const pending = store.deleteWhere('a', 'Doc', 'd1', { org_id: 'a' }).catch((error: unknown) => {
       refusal = error;
-    }
+      return false;
+    });
+    await pending;
     expect(refusal).toBeInstanceOf(TypeError);
     expect((refusal as Error).message).not.toContain('org_id');
+    expect(httpStatusHintOf(refusal)).toEqual({
+      status: 400,
+      title: 'Bad Request',
+      detail: 'The write precondition or its payload is invalid.',
+    });
     expect(await store.findById('a', 'Doc', 'd1')).toMatchObject({ version: 1 });
   });
 

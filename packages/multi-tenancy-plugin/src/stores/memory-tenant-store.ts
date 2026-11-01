@@ -3,7 +3,23 @@
  *
  * @module
  */
-import { checkWritePrecondition, type WritePrecondition } from '@setu-ts/common';
+import {
+  checkWritePrecondition,
+  withHttpStatusHint,
+  type WritePrecondition,
+} from '@setu-ts/common';
+
+/**
+ * A refused precondition: caller input, so `400` with a fixed detail — the
+ * same answer the database-backed store gives (M128 audit L2).
+ */
+function preconditionRefusal(message: string): TypeError {
+  return withHttpStatusHint(new TypeError(message), {
+    status: 400,
+    title: 'Bad Request',
+    detail: 'The write precondition or its payload is invalid.',
+  });
+}
 import type { ITenantDataStore, ITenantIsolationStrategy } from '../interfaces/index.ts';
 import type { MemoryTenantDataStoreOptions } from '../interfaces/index.ts';
 
@@ -181,10 +197,10 @@ export class MemoryTenantDataStore implements ITenantDataStore {
    * stored value (M128). The match and the write run in one synchronous step,
    * so no other call can interleave. A tenant column in `data` is ignored.
    *
-   * @throws {TypeError} For an invalid precondition or payload, or a `where`
-   *   naming the tenant column
+   * Rejects (never throws synchronously) with a `400`-branded `TypeError` for
+   * an invalid precondition or payload, or a `where` naming the tenant column.
    */
-  updateWhere<E, Id>(
+  async updateWhere<E, Id>(
     tenantId: string,
     entity: string,
     id: Id,
@@ -192,30 +208,30 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     data: Readonly<Record<string, unknown>>,
   ): Promise<E | null> {
     const checked = this.checkedPrecondition(where, data);
-    if (!this.matches(tenantId, entity, id, checked.where)) return Promise.resolve(null);
+    if (!this.matches(tenantId, entity, id, checked.where)) return null;
     const column = this.tenantColumn();
     const payload: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(checked.data ?? {})) {
       if (key !== column) payload[key] = value;
     }
-    return this.update<E, Id>(tenantId, entity, id, payload);
+    return await this.update<E, Id>(tenantId, entity, id, payload);
   }
 
   /**
    * Deletes the tenant's record only while every `where` member equals the
    * stored value, in one synchronous step.
    *
-   * @throws {TypeError} As {@linkcode updateWhere}
+   * Rejects as {@linkcode updateWhere} does.
    */
-  deleteWhere<Id>(
+  async deleteWhere<Id>(
     tenantId: string,
     entity: string,
     id: Id,
     where: WritePrecondition,
   ): Promise<boolean> {
     const checked = this.checkedPrecondition(where);
-    if (!this.matches(tenantId, entity, id, checked.where)) return Promise.resolve(false);
-    return this.delete<Id>(tenantId, entity, id);
+    if (!this.matches(tenantId, entity, id, checked.where)) return false;
+    return await this.delete<Id>(tenantId, entity, id);
   }
 
   /** The column a `'column'` strategy stamps, or `undefined` for the other strategies. */
@@ -233,10 +249,10 @@ export class MemoryTenantDataStore implements ITenantDataStore {
     // The one-argument form checks the predicate alone; a delete has no payload.
     const checked =
       data === undefined ? checkWritePrecondition(where) : checkWritePrecondition(where, data);
-    if (!checked.ok) throw new TypeError(checked.problem);
+    if (!checked.ok) throw preconditionRefusal(checked.problem);
     const column = this.tenantColumn();
     if (column !== undefined && Object.hasOwn(checked.where, column)) {
-      throw new TypeError(
+      throw preconditionRefusal(
         'A tenant-scoped precondition must not name the tenant column; the store sets it.',
       );
     }

@@ -55,7 +55,7 @@ import type {
 } from '@setu-ts/common';
 import { ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
 import { TenantColumnUnresolvedError, UnsupportedQueryFeatureError } from '../errors.ts';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, checkWritePrecondition } from '@setu-ts/common';
 import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import type { IDatabaseService } from '../interfaces/index.ts';
 
@@ -374,6 +374,16 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
    * column name.
    */
   #precondition(entity: string, where: WritePrecondition): string {
+    // Checked BEFORE the tenant column joins it: an empty caller precondition
+    // would otherwise become a plain tenant-scoped write (M128 audit O2).
+    const checked = checkWritePrecondition(where);
+    if (!checked.ok) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        checked.problem,
+      );
+    }
     const col = this.#column(entity);
     if (Object.hasOwn(where, col) || Object.hasOwn(where, this.#configuredTenantColumn())) {
       throw new UnsupportedQueryFeatureError(

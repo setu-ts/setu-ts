@@ -102,6 +102,12 @@ export class UnsupportedIsolationLevelError extends Error {
  * decides otherwise, so a mistake here can never invent a caller-facing status
  * for an internal fault. Un-branding is never a regression; branding is.
  */
+/**
+ * The caller-input refusal of a conditional write, answered `400` rather than
+ * the `501` of an unsupported query shape (M128 audit L2).
+ */
+const WRITE_PRECONDITION = 'write-precondition';
+
 const QUERY_SHAPE_FEATURES: ReadonlySet<string> = new Set([
   'attribute-value',
   'composite-key',
@@ -282,6 +288,13 @@ export class UnsupportedMigrationError extends Error {
  * refusal reachable from a `Promise`-returning method rejects rather than
  * throwing synchronously.
  *
+ * The feature `'write-precondition'` is the one caller-INPUT refusal (an
+ * invalid conditional-write predicate or payload, an expected version that is
+ * not a non-negative safe integer, a tenant-scoped precondition naming the
+ * tenant column): it answers `400 Bad Request` with a fixed detail (M128),
+ * since the input usually comes from the request — a version read from a
+ * query string, say.
+ *
  * @example
  * ```typescript
  * import { UnsupportedQueryFeatureError } from '@setu-ts/database-plugin';
@@ -321,7 +334,13 @@ export class UnsupportedQueryFeatureError extends Error {
     // Branded only for a caller-caused query shape — see
     // `QUERY_SHAPE_FEATURES`. A configuration or deployment refusal keeps the
     // masked `500` that is correct for an internal fault.
-    if (QUERY_SHAPE_FEATURES.has(feature)) {
+    if (feature === WRITE_PRECONDITION) {
+      withHttpStatusHint(this, {
+        status: 400,
+        title: 'Bad Request',
+        detail: 'The write precondition or its payload is invalid.',
+      });
+    } else if (QUERY_SHAPE_FEATURES.has(feature)) {
       withHttpStatusHint(this, {
         ...NOT_IMPLEMENTED,
         detail: `Query feature '${feature}' is not supported by the '${adapter}' database adapter.`,

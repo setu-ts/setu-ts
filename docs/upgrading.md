@@ -26,7 +26,10 @@ caught `DatabaseUnavailableError` around a transaction to detect a failed outbou
 call's own error instead. Some outage errors that answered `500` now answer `503` or `504` (see the
 database-plugin README, "What a driver condition returns to the client"); a client that retried only
 on `503` should treat `504` as "outcome unknown" and retry writes only when they are idempotent.
-`getRepository()` may now return the same instance for repeated calls; do not attach state to it.
+`getRepository()` may now return the same instance for repeated calls; do not attach state to it,
+and do not derive the entity name from request input. A refused conditional-write precondition
+(`UnsupportedQueryFeatureError` with feature `'write-precondition'`) now answers `400` instead of
+`500`.
 
 ## 0.11.0
 

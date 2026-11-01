@@ -309,6 +309,9 @@ describe('tenant repository conditional members (M128)', () => {
     const repo = new TenantRepository(base as unknown as ITenantDataStore, 'tenant-a', 'User');
     expect(repo.updateWhere).toBeUndefined();
     expect(repo.deleteWhere).toBeUndefined();
+    // Absent, not an own property holding `undefined` (audit O3).
+    expect('updateWhere' in repo).toBe(false);
+    expect('deleteWhere' in repo).toBe(false);
   });
 
   it('delegates them with the captured tenant and entity, bound to the store', async () => {

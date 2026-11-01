@@ -2697,9 +2697,13 @@ the transaction's next statement answers `503` through the classifier.
 
 **`getRepository()` returns one repository per entity (M128, X94-3).** The outer-scope repository is
 built once and reused, removing the per-call data-source and wrapper construction that was the whole
-point-read gap against NestJS and Hono. It still refuses after `close()`. Transaction-scoped
-repositories are never shared, and a data source reporting a per-call DynamoDB access path is built
-per call while `logQueries` is on, so its log line cannot show another request's path.
+point-read gap against NestJS and Hono. It still refuses after `close()`. The cache holds one entry
+per distinct entity name the application passes, so **pass entity names from code, never from
+request input**: the memory and MongoDB adapters build a repository for any name, and each new name
+is kept for the service's lifetime (Drizzle and Prisma refuse an unknown entity and cache nothing).
+Transaction-scoped repositories are never shared, and a data source reporting a per-call DynamoDB
+access path is built per call while `logQueries` is on, so its log line cannot show another
+request's path.
 
 **Programmatic migrations answer `501 Not Implemented` too.** `UnsupportedMigrationError` names a
 distinct framework-capability refusal rather than pretending a migration is a raw query or a query
@@ -2716,8 +2720,12 @@ answer every request
 twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
 `cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
 `mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
-is not branded** — so a feature name added later keeps its masked `500` until someone decides
-otherwise.
+is not branded**. One feature is branded differently: `write-precondition`, a refused
+conditional-write predicate or payload (including `updateVersioned`'s expected version and a
+tenant-scoped precondition naming the tenant column), is caller input and answers `400 Bad Request`
+with the fixed detail "The write precondition or its payload is invalid." (since M128; it was a
+masked `500`). The memory tenant store's refusals carry the same hint. A feature name added later
+keeps its masked `500` until someone decides otherwise.
 
 The four transaction and concurrency errors — `MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError` and
