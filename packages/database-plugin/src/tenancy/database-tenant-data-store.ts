@@ -328,10 +328,12 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     data: Readonly<Record<string, unknown>>,
   ): Promise<E | null> {
     const { col, where: checked } = this.#precondition(entity, where);
-    const stripped: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(data)) {
-      if (key !== col) stripped[key] = value;
-    }
+    // `Object.fromEntries` defines own data properties: assigning an own
+    // `__proto__` key from JSON would run the prototype setter and drop it,
+    // where the repository's payload check must see it and refuse it.
+    const stripped: Record<string, unknown> = Object.fromEntries(
+      Object.entries(data).filter(([key]) => key !== col),
+    );
     const repo = this.#repo(entity);
     if (repo.updateWhere === undefined) throw conditionalWriteRefusal('updateWhere');
     const updated = await repo.updateWhere(

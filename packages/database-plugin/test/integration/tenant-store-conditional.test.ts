@@ -131,6 +131,28 @@ describe('DatabaseTenantDataStore conditional writes', () => {
     expect(updated).toMatchObject({ title: 'edited', tenant_id: 'a' });
   });
 
+  it('refuses an own __proto__ payload key instead of dropping it (PR #540 review)', async () => {
+    const { store } = await makeStore();
+    const own = await store.create<Article>('a', 'Article', { title: 'mine', version: 1 });
+    // An object value, `null` and a string each reach the store as an own key
+    // from JSON; assignment would set or ignore the prototype instead.
+    for (const json of [
+      '{"__proto__": {"title": "hidden"}, "title": "edited"}',
+      '{"__proto__": null, "title": "edited"}',
+      '{"__proto__": "x", "title": "edited"}',
+    ]) {
+      const payload = JSON.parse(json) as Record<string, unknown>;
+      const error = await store
+        .updateWhere('a', 'Article', own.id, { version: 1 }, payload)
+        .catch((e: unknown) => e);
+      expect(error, json).toMatchObject({ feature: 'write-precondition' });
+      expect(httpStatusHintOf(error)?.status, json).toBe(400);
+    }
+    expect(await store.findById<Article, string>('a', 'Article', own.id)).toMatchObject({
+      title: 'mine',
+    });
+  });
+
   it('refuses an empty precondition rather than writing unconditionally (audit O2)', async () => {
     const { store } = await makeStore();
     const own = await store.create<Article>('a', 'Article', { title: 'mine', version: 1 });
