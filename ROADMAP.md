@@ -16379,6 +16379,268 @@ docs must say. M128 (the High) is sequenced before every letter here.
 - **X89-3, V11-14, V11-16, V11-17, X91-8, X93-3 … X93-7, X93-9, V11-2** — the remaining doc and
   README mismatches, each listed with its fix in `smoke/OPEN-AFTER-0110.md`.
 
+## The AI Layer (M132–M136)
+
+**Source:** the AI-layer survey of 2026-11-01 — six research tracks (model providers, MCP, retrieval
+and vector stores, durable execution, operations and security, and Setu's own seams read from
+source), comparing the Vercel AI SDK, Spring AI, Mastra, LangChain.js, Genkit, `laravel/ai`, the MCP
+TypeScript SDK and its Hono, NestJS, Spring, FastAPI and Cloudflare integrations, the OTel GenAI
+semantic conventions, and Temporal, Inngest, Restate and DBOS. The maintainer accepted its four
+recommendations on 2026-11-01: depend on the AI SDK's provider types, dispatch MCP tool calls
+in-process through the kernel, serve MCP with the official v2 server SDK, and target the cycle after
+`0.12.0`.
+
+**The finding that shapes all five.** Model libraries are plentiful and good; what is missing
+everywhere is identity, tenant isolation, budgets, audit, redaction and side effects that are safe
+to retry — most of which Setu already has. The incidents and defects the survey found share one
+shape: an AI feature built as a second pipeline beside the real one, which then reads across tenants
+or skips row-level security, or a metadata filter that fails open. **Every AI entry point in this
+programme runs through the kernel pipeline as the real principal and tenant**; none adds a parallel
+path.
+
+**Sequence.** M132 first: M133 needs every piece of it, and it stands on its own. M133 and M134 can
+run in parallel after M132. M135 is independent of M133 and M134. M136 builds on M134. None of the
+five changes a required member of a published interface — new contract members are optional, per the
+versioning policy below — so each can ship in a patch release.
+
+**Facts newer than the survey's sources are re-read at plan time.** The MCP `2026-07-28` revision
+(stateless transport, no `Mcp-Session-Id`) and the v2 server SDK's handler signature postdate some
+of the material the survey relied on; M133's plan reads both from the specification text and the SDK
+source before relying on them (the repository rule).
+
+---
+
+## Milestone 132: Resource-Server Authentication for Agents and Tools
+
+**Package(s):** `packages/auth-plugin`, `packages/common` (optional `IPrincipal` members); docs.
+
+**Source:** the AI-layer survey (above), track 02 (MCP authorization) and track 05 (agent identity).
+Useful without any AI feature: these are OAuth resource-server behaviours any API serving
+third-party clients needs.
+
+**The problem.** An MCP server is an OAuth 2.1 resource server, and the specification requires
+behaviours auth-plugin does not have. Scopes are not first-class (`IPrincipal` carries `roles`,
+`permissions` and raw `claims`, `common/src/services/auth.ts:16-25`); a `TrustedIssuer` accepts one
+audience (`auth-plugin/src/interfaces/index.ts:186`); nothing publishes RFC 9728 protected-resource
+metadata or answers a missing scope with a `WWW-Authenticate` challenge; and an agent acting for a
+user cannot be told apart from the user, because nothing reads the RFC 8693 `act` claim.
+
+**Decisions the plan takes:**
+
+1. **Scopes on the principal:** an optional `scopes?: readonly string[]` on `IPrincipal`, parsed
+   from the `scope` (space-separated) or `scp` (array) claim, and a `requireScopes(...)` guard
+   beside `requireAuth`. A missing scope answers **403** with
+   `WWW-Authenticate: Bearer error="insufficient_scope", scope="…"` (RFC 6750 §3.1); a missing or
+   invalid token answers 401 with a challenge naming the resource metadata URL.
+2. **RFC 9728 protected-resource metadata** served at `/.well-known/oauth-protected-resource` (and
+   the path-suffixed form for a resource below the root), built from configuration: the resource
+   identifier, the authorization servers, the supported scopes. Not an authorization server.
+3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and the plan
+   decides whether the configured resource identifier is required among them by default. A token
+   minted for another resource is refused; Setu never forwards an inbound token to an upstream
+   service (MCP forbids token passthrough).
+4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
+   bounded, and a guard option that refuses or requires delegated tokens per route.
+5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata
+   Documents, or ID-JAG (still a draft). The plan records which established resource servers (Spring
+   Security, ASP.NET Core, the MCP SDK's own auth helpers) it compared each behaviour with.
+
+**Gate:** each challenge asserted header by header, forbidden parameters included; the metadata
+document field by field against RFC 9728; a wrong-audience token refused; an `act` token surfaced
+and refused where the route forbids delegation. The change crosses a trust boundary, so the
+milestone is **security-audited** by a fresh agent before it merges.
+
+---
+
+## Milestone 133: `mcp-plugin` — Routes as Model Context Protocol Tools
+
+**Package(s):** new `packages/mcp-plugin`, `packages/common` (an MCP capability token; a public
+in-process dispatch entry on `IApplication`), `packages/kernel` (that entry), `packages/cli`
+(`setu add mcp`, agent card); docs and an example.
+
+**Source:** the AI-layer survey, track 02 and track 06. Distinct from the MCP server M116 deferred
+(listed under M116's "Not in this milestone"): that one would describe the _framework_ to a coding
+agent; this one lets an _application_ expose its own operations to agents.
+
+**The problem.** Agents reach SaaS products through MCP, and every way to add MCP to a Setu app
+today bypasses the framework: a hand-mounted SDK handler runs outside the route's guards,
+validation, tenant resolution, idempotency and audit. The pipeline cannot be re-entered from inside
+a request on the public contract either — `IApplication.fetch` exists (`common/src/plugin.ts:470`),
+but `inject` lives only on the kernel's own application type
+(`kernel/src/application/application.ts:195`) and refuses streams, sets no abort signal and drops
+GET bodies.
+
+**Decisions the plan takes:**
+
+1. **One stateless endpoint,** `POST /mcp` registered as an ordinary kernel route so global
+   middleware (tenant resolution, rate limiting, request logging) runs on it, served by the official
+   v2 server SDK (`@modelcontextprotocol/server`, web Request/Response) as an optional peer, lazily
+   imported and awaited inside a `try`/`catch`. The plan verifies the `2026-07-28` transport and the
+   handler signature from source first, and decides what the plugin answers a client speaking an
+   older revision.
+2. **Tools are declared by hand and opt-in:** a name, a model-facing description and required
+   scopes, bound to an existing route; the input schema derives from the route's validation
+   metadata, and a route with none is refused at registration. Nothing is exposed automatically —
+   every maintained integration the survey read declares tools explicitly, and auto-exposing every
+   route is the pattern their docs warn against. The plan decides whether CQRS commands are a second
+   binding target or wait for the command registry to carry schemas.
+3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant,
+   via a new public entry on `IApplication` that carries an `AbortSignal` and allows a streamed body
+   (optional member, per the versioning policy). Guards, validation, idempotency and audit run
+   exactly as for an HTTP caller; nothing re-implements them.
+4. **The tool list is filtered** by what the caller's scopes and route guards allow, so a tool the
+   caller cannot call is not advertised; a call to it is still refused by the route.
+5. **Errors:** a route's Problem Details response maps to an MCP tool error carrying only what the
+   redaction seam lets through; a thrown internal error never reaches the model with its stack or
+   message.
+6. **Retries:** a stateless client retries with a new request id, so a tool bound to a
+   non-idempotent route is refused at registration unless the route is behind the idempotency plugin
+   or the declaration says it is safe to repeat.
+7. **Not in this milestone:** resources and prompts beyond what the plan shows a consumer for, the
+   authorization server (M132 is resource-server only), and a tool registry that refuses
+   untrusted-input + private-data + outbound-action compositions (the "lethal trifecta"). That
+   registry is a named follow-on.
+
+**Gate:** an MCP client (the SDK's own) against a kernel app: list tools as two principals with
+different scopes and assert different lists; call a tool and assert the route's guard, validation,
+tenant and audit each ran (a refused guard short-circuits the handler); a retried call does not
+repeat its side effect; an internal error reaches the client redacted. Runs on Node, Deno, Bun and
+Workers. **Security-audited** by a fresh agent before it merges.
+
+---
+
+## Milestone 134: `ai-plugin` — Model Calls With Budgets, Telemetry and Redaction
+
+**Package(s):** new `packages/ai-plugin`, `packages/common` (an AI capability token and its
+interfaces), `packages/telemetry-plugin` (GenAI spans and metrics), `packages/testing` (a scripted
+fake model), `packages/cli` (`setu add ai`, agent card); docs and an example.
+
+**Source:** the AI-layer survey, tracks 01 (providers), 05 (cost and security) and 06.
+
+**The problem.** A SaaS application calling a model needs per-tenant spend limits, usage records it
+can bill from, traces that do not capture prompts by default, provider fallback, a test double, and
+streaming to its UI. The AI SDK supplies providers, not any of those, and Setu has no AI token at
+all (`common/src/tokens.ts`).
+
+**Decisions the plan takes:**
+
+1. **Providers are the AI SDK's `LanguageModelV4`** (`@ai-sdk/provider`), a pinned-major optional
+   peer; any AI SDK provider package works, including OpenAI-compatible endpoints for local models.
+   Setu does not write provider adapters. The plan reads the provider interface from the installed
+   package, not memory.
+2. **Setu runs the tool loop itself** (step cap, per-step abort, tool errors returned to the model),
+   as Spring AI 2.0 and `laravel/ai` both moved the loop out of the provider. Tool execution can
+   call a route in-process through M133's dispatch entry, so tools inherit the same pipeline.
+3. **Structured output** validated against a Zod schema, with a named error on a reply that does not
+   parse.
+4. **Streaming to the browser** in the AI SDK's UI message stream format over `sse-plugin`, so the
+   AI SDK's React hooks work unchanged against a Setu route.
+5. **Budgets reserve, then settle:** a budget port that reserves an estimated cost before the call
+   and settles the actual usage after, refusing at reservation when the tenant's budget is spent —
+   the only form that holds under concurrency (gateway limits checked after the fact overshoot). A
+   memory and a Redis implementation; the plan decides the estimate rule and the 429 Problem Details
+   shape.
+6. **One usage record per call,** idempotent on a call id, written through the transactional outbox
+   when the messaging plugin is present, so billing can consume it at least once without double
+   counting.
+7. **Telemetry on the OTel GenAI conventions,** pinned to a named revision because they are still in
+   development; prompt and completion content off by default, and when enabled, passed through the
+   redaction seam before it reaches a span.
+8. **Fallback between providers** through the resilience plugin, retrying only errors the plan
+   classifies as transient.
+9. **A scripted fake model** in `@setu-ts/testing`, replaying tool calls and stream chunks, so an
+   app's AI flows are testable without a network.
+
+**Not in this milestone:** agent frameworks as dependencies (Mastra, Genkit, LangChain.js), prompt
+management, evaluations, and an LLM gateway.
+
+**Gate:** the tool loop against the fake model (step cap, abort mid-stream); two concurrent calls
+over one tenant's last budget — exactly one is admitted; the usage record read back once despite a
+redelivered outbox message; a span with content capture off carries no prompt text, and with it on
+carries the redacted form; the UI message stream consumed by the AI SDK's own client parser; one
+guarded test against a real OpenAI-compatible endpoint. Runs on Node, Deno, Bun and Workers.
+**Security-audited** (redaction and egress) before it merges.
+
+---
+
+## Milestone 135: `vector-store-plugin` — Tenant-Scoped Retrieval
+
+**Package(s):** new `packages/vector-store-plugin`, `packages/common` (a vector-store capability
+token, the store and embedder ports), `packages/cloudflare-plugin` (a Vectorize adapter),
+`packages/cli` (`setu add vector-store`, agent card); docs.
+
+**Source:** the AI-layer survey, track 03.
+
+**The problem.** Retrieval needs similarity search, and the only way to do it in Setu today is raw
+SQL through `query()` or the Drizzle seam (`getDrizzleTransaction`), with tenant isolation left to
+the caller. Every vector abstraction the survey read has shipped a metadata filter that silently
+matched everything when it could not translate a clause, and tenant scope expressed as one more
+filter key inherits that failure.
+
+**Decisions the plan takes:**
+
+1. **A separate plugin and token,** not a database-plugin backend: several strong vector stores are
+   not repository backends, and the query shape (top-k by distance with a filter) is not
+   `IRepository`'s.
+2. **Tenant scope is a required parameter** of every read and write, never a filter key; a store
+   opened without multi-tenancy uses one fixed scope, stated in configuration.
+3. **Filter fields are declared up front** per collection; a filter naming an undeclared field, or
+   one an adapter cannot translate, throws a named error before any I/O. One conformance table runs
+   every filter case across every adapter, as data.
+4. **An embedder port** with an AI SDK embedding-model arm (shared with M134's peer), batching and a
+   dimension check against the collection.
+5. **Adapters, in order:** memory (zero-dependency default), pgvector through Drizzle, then
+   Cloudflare Vectorize. MongoDB Atlas and Cosmos DB vector search are named follow-ons.
+6. **Ingestion** (chunk, embed, upsert) as a queue job with an idempotent document id, so a re-run
+   replaces rather than duplicates.
+
+**Not in this milestone:** a document-loader library, re-ranking, hybrid lexical search.
+
+**Gate:** the filter conformance table on memory and a real PostgreSQL with pgvector; a query under
+tenant A never returns tenant B's rows, asserted on every adapter; an untranslatable filter refused
+before I/O; a re-run ingestion leaves one copy. **Security-audited** (tenant isolation) before it
+merges.
+
+---
+
+## Milestone 136: Durable Agent Runs
+
+**Package(s):** `packages/ai-plugin` (the run primitive), `packages/common` (run contracts),
+`packages/sse-plugin` (a bounded replay log), `packages/database-plugin` (run storage); docs.
+
+**Source:** the AI-layer survey, track 04.
+
+**The problem.** An agent run that lasts longer than a request — tool calls, a human approval, a
+browser that reconnects — loses its state when the process restarts, and a retried step can repeat a
+side effect. `sse-plugin` reads `Last-Event-ID` (`sse-plugin/src/connection/sse-connection.ts:57`)
+but keeps no log to replay from.
+
+**Decisions the plan takes.** Every engine the survey read (Temporal, Inngest, Restate, DBOS,
+Cloudflare Workflows) is at-least-once and keys idempotency on the step, as Setu's idempotency
+plugin already does; none runs on all four Setu runtimes, and recovery across several instances is
+the weak point everywhere. So this is a **narrow primitive — the agent loop over persisted state —
+not a workflow engine**:
+
+1. **A run row with a fenced lease,** so one instance owns a run and a stale owner's writes are
+   refused (the outbox relay's fencing, M107b, is the model).
+2. **The model's reply is persisted before any tool runs,** so a crash between them resumes without
+   a second model call.
+3. **Tool side effects keyed on run id and step,** through the idempotency plugin.
+4. **Approvals as rows** with a timeout and an outcome, so a human-in-the-loop pause survives a
+   restart.
+5. **A bounded SSE replay log** keyed by run, so a reconnecting browser resumes from
+   `Last-Event-ID`.
+6. **A version stamp** on each run, with a documented rule for runs started on older code, and
+   cancellation through an `AbortSignal`.
+7. **Tenant ids on every row,** and reads scoped by them.
+
+General multi-step workflows belong to an engine; the plan decides whether this milestone ships
+adapter guidance or a first adapter, and to which engine.
+
+**Gate:** kill the process between the model reply and the tool call — the run resumes with one
+model call and one side effect; a stale lease holder's write refused; an approval timing out on
+schedule across a restart; a reconnecting client receives exactly the missed chunks.
+
 ---
 
 ## Versioning Policy From `0.9.0`
@@ -16679,3 +16941,8 @@ patch by construction and gains nothing new here.
 | 131b      | ⬜     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |
 | 131c      | ⬜     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
 | 131d      | ⬜     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
+| 132       | ⬜     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
+| 133       | ⬜     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
+| 134       | ⬜     | ai-plugin (new) + common + telemetry + testing + cli — model calls with reserve/settle budgets, usage records, GenAI telemetry and redaction                                                                                                                                              |
+| 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |
+| 136       | ⬜     | ai-plugin + common + sse-plugin + database-plugin — durable agent runs: fenced lease, persisted steps, approvals, SSE replay                                                                                                                                                              |
