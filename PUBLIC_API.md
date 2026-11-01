@@ -1845,6 +1845,43 @@ Through a repository the check runs in `BaseRepository` first, so every backend 
 `UnsupportedQueryFeatureError` feature `'conditional-write'` (HTTP hint 501), before any I/O. Both
 members stay optional for implementors.
 
+**Optimistic locking (M128, since 0.12.0).**
+`updateVersioned(repo, id, expectedVersion, data, options?)` writes `data` with the version field
+set to `expectedVersion + 1` under the precondition `{ [field]: expectedVersion }`, and returns the
+updated row. `deleteVersioned(repo, id, expectedVersion, options?)` deletes under the same
+precondition. On a miss the record is read once: absent → `EntityNotFoundError` (`404 Not Found`,
+detail "The record does not exist."), present → `VersionConflictError` (`409 Conflict`, detail "The
+record was changed after it was read. Reload it and try again."). A delete racing between the write
+and that read is reported as not found. Both refuse before any I/O with
+`UnsupportedQueryFeatureError('write-precondition')` (`400`) for an expected version that is not a
+non-negative safe integer or a `data` that sets the version field (an empty `field` option is a
+configuration fault: a `TypeError`, served as a masked `500`), and with `'conditional-write'`
+(`501`) when the repository has no conditional member — which is also what a buffered transaction
+source answers (memory overlay, D1, DynamoDB, Cosmos and Bigtable; Drizzle, Prisma and MongoDB
+transactions apply it).
+
+| Symbol                                                                                                                                                             | Shape                                                                                                                                                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `updateVersioned<E, Id>(repo: VersionedWritable<E, Id>, id: Id, expectedVersion: number, data: Readonly<Partial<E>>, options?: VersionedWriteOptions): Promise<E>` | function                                                                                                                                                                                                           |
+| `deleteVersioned<E, Id>(repo: VersionedDeletable<E, Id>, id: Id, expectedVersion: number, options?: VersionedWriteOptions): Promise<void>`                         | function                                                                                                                                                                                                           |
+| `VersionedWritable<E, Id>`                                                                                                                                         | `{ updateWhere?(id, where: WritePrecondition, data: Readonly<Partial<E>>): Promise<E \| null>; findById(id): Promise<E \| null> }` — satisfied by `IRepository`, a unit-of-work repository and `ITenantRepository` |
+| `VersionedDeletable<E, Id>`                                                                                                                                        | `{ deleteWhere?(id, where: WritePrecondition): Promise<boolean>; findById(id): Promise<E \| null> }`                                                                                                               |
+| `VersionedWriteOptions`                                                                                                                                            | `{ readonly field?: string /* default 'version' */; readonly entity?: string }` — `entity` is carried by both errors and their logged `message`, never by the served detail                                        |
+| `VersionConflictError`, `EntityNotFoundError`                                                                                                                      | classes; `name`, `readonly entity: string \| undefined`, status hint as above                                                                                                                                      |
+
+**Conditional writes on the tenant path (M128, since 0.12.0).** `ITenantDataStore` (common) gains
+optional `updateWhere?<E, Id>(tenantId, entity, id, where, data)` and
+`deleteWhere?<Id>(tenantId, entity, id, where)`; `ITenantRepository` gains optional
+`updateWhere?(id, where, data)` and `deleteWhere?(id, where)`. Absence means the store has no
+conditional writes. `DatabaseTenantDataStore` merges the caller's `where` with the tenant column
+into one precondition, refuses a `where` naming the tenant column (`'write-precondition'`, without
+echoing the column), ignores a tenant column in `data`, and has no check-then-write fallback: a
+repository without conditional writes answers `'conditional-write'`. `MemoryTenantDataStore`
+implements both in one synchronous step and refuses an invalid precondition or one naming its
+`'column'` strategy's tenant column with a `TypeError`. The multi-tenancy plugin's repository
+exposes the members only when its store has them, so `updateVersioned(tenantRepository, …)` works on
+the tenant path.
+
 | Data source                  | Write mechanism                                                                                   |
 | ---------------------------- | ------------------------------------------------------------------------------------------------- |
 | Memory, outside transactions | Synchronous key lookup, predicate check and mutation                                              |
@@ -2494,45 +2531,47 @@ injection seam, so an application implementing its own facade can name every sig
 
 ### Exports
 
-| Export                                                                                                                                                                                                                                                                                                                  | Kind                               |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `DatabasePlugin`                                                                                                                                                                                                                                                                                                        | factory                            |
-| `DatabaseService`                                                                                                                                                                                                                                                                                                       | class                              |
-| `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                            |
-| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                            |
-| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                            |
-| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                            |
-| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`                                                                                                                                                    | classes                            |
-| `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                              |
-| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                              |
-| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                              |
-| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                                                                                                                                                                                                                           | functions                          |
-| `MongoTransactionUnavailableError`                                                                                                                                                                                                                                                                                      | class                              |
-| `CosmosAdapter`                                                                                                                                                                                                                                                                                                         | class                              |
-| `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`                                                                                                                                                                                                                                                      | classes                            |
-| `CosmosDatabaseOptions`, `CosmosAdapterOptions`, `CosmosAdapterOptionsBase`, `CosmosEntityMapping`                                                                                                                                                                                                                      | types                              |
-| `ICosmosClient`, `ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`, `ICosmosItem`, `ICosmosQueryIterator`                                                                                                                                                                                                           | interfaces (Cosmos injection seam) |
-| `CosmosQuerySpec`, `CosmosQueryParameter`, `CosmosPartitionKeyValue`                                                                                                                                                                                                                                                    | types (Cosmos query seam)          |
-| `CosmosItemResponse`, `CosmosFeedResponse`, `CosmosRequestOptions`, `CosmosAccessCondition`, `CosmosPatchOperation`, `CosmosBatchOperation`, `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`, `CosmosBatchPatchOperation`, `CosmosBatchDeleteOperation`, `CosmosBatchResponse`, `CosmosContainerDefinition` | interfaces (Cosmos operation seam) |
-| `PrismaSqlProvider`                                                                                                                                                                                                                                                                                                     | type                               |
-| `SqlJsonDialect`                                                                                                                                                                                                                                                                                                        | type                               |
-| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`, `withIsolationSupport`                                                                                                                                                                     | functions                          |
-| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                                                                                                                                                                                                                          | types                              |
-| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                                                                                                                                                                                                                        | interfaces                         |
-| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                                                                                                                                                                                                                 | types                              |
-| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`, `DynamoDatabaseOptions`                                                                                                                                                                                             | interfaces                         |
-| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                                                                                                                                                                                                              | types                              |
-| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                                                                                                                                                                                                                         | interfaces                         |
-| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                                                                                                                                                                                                                         | types                              |
-| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                                                                                                                                                                                                               | types                              |
-| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `TransactionIsolationLevel`, `TransactionOptions`                                                                                                                                                                                          | re-exports from `common`           |
-| `DataSource`                                                                                                                                                                                                                                                                                                            | deprecated alias of `IDataSource`  |
-| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                                                                                                                                               | interfaces (Mongo injection seam)  |
-| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                                                                                                                                      | interfaces (Mongo collection seam) |
-| `DynamoAdapterOptions` (union of two arms), `DynamoAdapterOptionsBase`, `DynamoEntityMapping`, `DynamoDateEncoding`, `DynamoIndexMapping`                                                                                                                                                                               | types                              |
-| `IDynamoClient`, `DynamoAttributeValue`, `DynamoAttributeMap`, `DynamoExpressionAttributes`, `DynamoConditionExpression`, and the `Dynamo*CommandInput`/`Output`/`Transact*` command-shape closure                                                                                                                      | interfaces (DynamoDB client seam)  |
-| `DynamoClientConfiguration`, `DynamoClientLoader`, `DynamoCommandConstructor`, `DynamoSdkClient`, `DynamoSdkCommand`, `DynamoSdkModule`                                                                                                                                                                                 | types (DynamoDB SDK seam)          |
-| `createInjectedDynamoLoader`, `createLazyDynamoLoader`                                                                                                                                                                                                                                                                  | functions                          |
+| Export                                                                                                                                                                                                                                                                                                                  | Kind                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| `DatabasePlugin`                                                                                                                                                                                                                                                                                                        | factory                              |
+| `DatabaseService`                                                                                                                                                                                                                                                                                                       | class                                |
+| `BaseRepository`, `UnitOfWork`                                                                                                                                                                                                                                                                                          | classes                              |
+| `MemoryAdapter`, `PrismaAdapter`, `DrizzleAdapter`, `MongoAdapter`, `DynamoAdapter`                                                                                                                                                                                                                                     | classes                              |
+| `PrismaRepository`, `DrizzleRepository`                                                                                                                                                                                                                                                                                 | classes                              |
+| `UnsupportedFilterOperatorError`, `UnsupportedIsolationLevelError`, `UnsupportedMigrationError`, `UnsupportedRawQueryError`, `UnsupportedQueryFeatureError`                                                                                                                                                             | classes                              |
+| `SerializationConflictError`, `DatabaseUnavailableError`, `DatabaseTimeoutError`, `UnknownPayloadFieldError`, `MissingKeyColumnError`, `TenantColumnUnresolvedError`, `VersionConflictError`, `EntityNotFoundError`                                                                                                     | classes                              |
+| `PageOptions`, `Page`                                                                                                                                                                                                                                                                                                   | types                                |
+| `PrismaCompositeKeyOptions`, `DrizzleCompositeKeyOptions`                                                                                                                                                                                                                                                               | types                                |
+| `EntityKey`, `PageResult`, `CursorPayload`, `CursorValue` (re-exported from `common`)                                                                                                                                                                                                                                   | types                                |
+| `encodeCursor`, `decodeCursor`, `keysetPredicate` (re-exported from `common`)                                                                                                                                                                                                                                           | functions                            |
+| `MongoTransactionUnavailableError`                                                                                                                                                                                                                                                                                      | class                                |
+| `updateVersioned`, `deleteVersioned`                                                                                                                                                                                                                                                                                    | functions (optimistic locking, M128) |
+| `VersionedWritable`, `VersionedDeletable`, `VersionedWriteOptions`                                                                                                                                                                                                                                                      | types (M128)                         |
+| `CosmosAdapter`                                                                                                                                                                                                                                                                                                         | class                                |
+| `CosmosTransactionScopeError`, `CosmosConcurrentModificationError`                                                                                                                                                                                                                                                      | classes                              |
+| `CosmosDatabaseOptions`, `CosmosAdapterOptions`, `CosmosAdapterOptionsBase`, `CosmosEntityMapping`                                                                                                                                                                                                                      | types                                |
+| `ICosmosClient`, `ICosmosDatabase`, `ICosmosContainer`, `ICosmosItems`, `ICosmosItem`, `ICosmosQueryIterator`                                                                                                                                                                                                           | interfaces (Cosmos injection seam)   |
+| `CosmosQuerySpec`, `CosmosQueryParameter`, `CosmosPartitionKeyValue`                                                                                                                                                                                                                                                    | types (Cosmos query seam)            |
+| `CosmosItemResponse`, `CosmosFeedResponse`, `CosmosRequestOptions`, `CosmosAccessCondition`, `CosmosPatchOperation`, `CosmosBatchOperation`, `CosmosBatchInsertOperation`, `CosmosBatchReplaceOperation`, `CosmosBatchPatchOperation`, `CosmosBatchDeleteOperation`, `CosmosBatchResponse`, `CosmosContainerDefinition` | interfaces (Cosmos operation seam)   |
+| `PrismaSqlProvider`                                                                                                                                                                                                                                                                                                     | type                                 |
+| `SqlJsonDialect`                                                                                                                                                                                                                                                                                                        | type                                 |
+| `createPrismaDataSource`, `createDrizzleDataSource`, `createDrizzleDatabase`, `getDrizzleDatabase`, `getDrizzleTransaction`, `withIsolationSupport`                                                                                                                                                                     | functions                            |
+| `DrizzleDatabase`, `DrizzleDatabaseIdentity`, `DrizzleTransaction`, `DrizzleTransactionBridge`                                                                                                                                                                                                                          | types                                |
+| `IDatabaseService`, `IRepository`, `IUnitOfWork`                                                                                                                                                                                                                                                                        | interfaces                           |
+| `DatabasePluginOptions`, `BuiltInDatabaseOptions`, `CustomDatabaseOptions`, `DatabaseConnectionOptions`                                                                                                                                                                                                                 | types                                |
+| `MemoryDatabaseOptions`, `PrismaDatabaseOptions`, `DrizzleDatabaseOptions`, `MongoDatabaseOptions`, `DynamoDatabaseOptions`                                                                                                                                                                                             | interfaces                           |
+| `MongoAdapterOptions` (union of two arms), `MongoAdapterOptionsBase`, `MongoEntityMapping`                                                                                                                                                                                                                              | types                                |
+| `PrismaAdapterOptions`, `DrizzleAdapterOptions`                                                                                                                                                                                                                                                                         | interfaces                           |
+| `DatabaseAdapterType`, `DatabaseAdapterOptions`                                                                                                                                                                                                                                                                         | types                                |
+| `FindOptions`, `CountOptions`, `OrderDirection`, `FilterOperator`, `FilterComparison`, `FilterExpression`                                                                                                                                                                                                               | types                                |
+| `IDatabaseAdapter`, `IAdapterTransaction`, `IDataSource`, `NormalizedQuery`, `TransactionIsolationLevel`, `TransactionOptions`                                                                                                                                                                                          | re-exports from `common`             |
+| `DataSource`                                                                                                                                                                                                                                                                                                            | deprecated alias of `IDataSource`    |
+| `IMongoClient`, `IMongoDatabase`, `IMongoObjectId`, `IMongoObjectIdCtor`, `IMongoSession`                                                                                                                                                                                                                               | interfaces (Mongo injection seam)    |
+| `IMongoCollection`, `IMongoCursor`, `IMongoCollectionFindOneAndUpdateOptions`, `MongoOptions`, `MongoWriteOptions`                                                                                                                                                                                                      | interfaces (Mongo collection seam)   |
+| `DynamoAdapterOptions` (union of two arms), `DynamoAdapterOptionsBase`, `DynamoEntityMapping`, `DynamoDateEncoding`, `DynamoIndexMapping`                                                                                                                                                                               | types                                |
+| `IDynamoClient`, `DynamoAttributeValue`, `DynamoAttributeMap`, `DynamoExpressionAttributes`, `DynamoConditionExpression`, and the `Dynamo*CommandInput`/`Output`/`Transact*` command-shape closure                                                                                                                      | interfaces (DynamoDB client seam)    |
+| `DynamoClientConfiguration`, `DynamoClientLoader`, `DynamoCommandConstructor`, `DynamoSdkClient`, `DynamoSdkCommand`, `DynamoSdkModule`                                                                                                                                                                                 | types (DynamoDB SDK seam)            |
+| `createInjectedDynamoLoader`, `createLazyDynamoLoader`                                                                                                                                                                                                                                                                  | functions                            |
 
 `DataSource` is retained under AI_GUIDELINES §9.2 — it is already published. It is now an alias of
 the promoted `IDataSource` (the same type), and will be removed in the next major version.
@@ -2562,14 +2601,14 @@ a sentence without gaining a disclosure channel; a hinted error is exempt from `
 precisely because there is no driver output in its body to mask.
 
 **Driver conditions answer their classified status (M90f, X38-1/X35-2).** `DatabaseService`
-classifies a driver rejection at its four interception sites (the repository wrappers, the
-`beginTransaction()` acquisition, the transaction catch, and `query()`) and throws
-`SerializationConflictError` — answered **`409 Conflict`**, the canonical retry-me signal, for a
-backend-reported write conflict (PostgreSQL SQLSTATE class `40` including `40001`, Prisma's `P2034`
-mapping of it, MongoDB's `TransientTransactionError` label, DynamoDB's
-`TransactionConflictException` name, Bigtable's gRPC `ABORTED`, Cosmos `449`) — or
-`DatabaseUnavailableError` — answered **`503 Service Unavailable`** — for a transiently unreachable
-backend (SQLSTATE class `08`, `57P03`, the node-postgres pool timeout,
+classifies a driver rejection at its interception sites (the repository wrappers, the
+`beginTransaction()` acquisition and `query()`; since M128 the transaction catch no longer
+classifies what the caller's own work throws, see below) and throws `SerializationConflictError` —
+answered **`409 Conflict`**, the canonical retry-me signal, for a backend-reported write conflict
+(PostgreSQL SQLSTATE class `40` including `40001`, Prisma's `P2034` mapping of it, MongoDB's
+`TransientTransactionError` label, DynamoDB's `TransactionConflictException` name, Bigtable's gRPC
+`ABORTED`, Cosmos `449`) — or `DatabaseUnavailableError` — answered **`503 Service Unavailable`** —
+for a transiently unreachable backend (SQLSTATE class `08`, `57P03`, the node-postgres pool timeout,
 `MongoNetworkError`/`MongoServerSelectionError`, gRPC `UNAVAILABLE`, Cosmos `429`/`503`, and the net
 errno `ECONNREFUSED` family the AWS SDK surfaces as a bare error). Both carry the original driver
 error as `cause` — the SQLSTATE and the failing statement stay reachable for the log — and serve a
@@ -2613,6 +2652,60 @@ a DynamoDB `TransactWriteItems` whose cancellation reason sits on a create's `Pu
 memory or Bigtable create) apply nothing when they refuse; any other commit rejection is still
 rethrown unchanged.
 
+<!-- version:history -->
+
+**Outage-time driver errors answer `503` or `504`, and a transaction's own errors stay its own
+(M128, X94-2, V11-5).** The classifier gained the connection-loss signals measured during the
+`0.11.0` X94 outage cells, each mapped by one rule: a server verdict that the statement did not run,
+or a refusal before anything was sent, is `DatabaseUnavailableError` (`503`, "the request was not
+applied"); a connection lost under an in-flight statement, with no verdict, is
+`DatabaseTimeoutError` (`504`, outcome unknown — a retried write must be idempotent).
+
+| Driver        | Signal                                                                                                                                                                                               | Answer   |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| node-postgres | SQLSTATE `57P01` (the server terminated the backend)                                                                                                                                                 | `503`    |
+| node-postgres | `Client has encountered a connection error and is not queryable`, `Client was closed and is not queryable`                                                                                           | `503`    |
+| node-postgres | `Connection terminated unexpectedly`                                                                                                                                                                 | `504`    |
+| Prisma        | `P1001` (server unreachable), `P2028` (transaction could not start in time)                                                                                                                          | `503`    |
+| Prisma        | `P2039` / `P2010` — the driver code under `meta.driverAdapterError.cause.originalCode` is classified (adapter-pg `57P01` → `503`; adapter-mariadb `45028`, `45013`, `1053` → `503`, `45009` → `504`) | per code |
+| mysql2        | `ER_SERVER_SHUTDOWN` → `503`; `PROTOCOL_CONNECTION_LOST` → `504`                                                                                                                                     | as shown |
+| libsql        | `SQLITE_BUSY`                                                                                                                                                                                        | `503`    |
+| MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107` `NotWritablePrimary` (read only under the `mongodb` adapter)                                                                     | `503`    |
+
+The pg message anchors are read only on a cause chain carrying no string code. The mariadb codes are
+read only from Prisma's MySQL adapter cause, since a bare numeric string is not a namespace. MySQL,
+mariadb and libsql rows were measured by probe (CI runs none of them); the PostgreSQL and MongoDB
+rows are pinned by guarded live suites. **Known limitation:** the older connection-fault arms
+(`ECONNRESET`, `EPIPE`, `MongoNetworkError`) still answer `503` even when the connection dropped
+under a write in flight, which the `503` detail's "not applied" does not strictly cover; re-mapping
+them is a separate decision.
+
+`IDatabaseService.transaction()` no longer classifies an error its `work` throws. Repository calls
+inside the work are classified by the repository wrapper as before, so a database fault there still
+answers `409`/`503`/`504`; anything else — an HTTP call refused with `ECONNREFUSED`, an application
+error carrying a `code` — reaches the caller as itself (only bound values of a native Drizzle error
+are scrubbed). Errors from the native Drizzle handles (`getDrizzleDatabase`,
+`getDrizzleTransaction`) stay unclassified in both scopes. Begin-time errors are classified and
+commit-time errors map only a duplicate key, as before.
+
+**A Drizzle connection lost inside a transaction no longer exits the process (M128, X94-1).**
+pg-pool removes its idle `'error'` listener from a client it hands out, and a Drizzle transaction
+holds its client from `pool.connect()`, so a backend killed while a transaction was open raised an
+unhandled `'error'` event. The plugin now gives every checked-out client a listener through
+pg-pool's public `'acquire'` event and removes it on `'release'` (when the pool's idle listener is
+back); the error is logged at `warn` as "Database pool reported a checked-out-connection error", and
+the transaction's next statement answers `503` through the classifier.
+
+**`getRepository()` returns one repository per entity (M128, X94-3).** The outer-scope repository is
+built once and reused, removing the per-call data-source and wrapper construction that was the whole
+point-read gap against NestJS and Hono. It still refuses after `close()`. The cache holds one entry
+per distinct entity name the application passes, so **pass entity names from code, never from
+request input**: the memory and MongoDB adapters build a repository for any name, and each new name
+is kept for the service's lifetime (Drizzle and Prisma refuse an unknown entity and cache nothing).
+Transaction-scoped repositories are never shared, and a data source reporting a per-call DynamoDB
+access path is built per call while `logQueries` is on, so its log line cannot show another
+request's path.
+
 **Programmatic migrations answer `501 Not Implemented` too.** `UnsupportedMigrationError` names a
 distinct framework-capability refusal rather than pretending a migration is a raw query or a query
 shape. Every current adapter lacks programmatic migration support and delegates it to its own CLI,
@@ -2628,8 +2721,12 @@ answer every request
 twice over. The split is an allowlist of `feature` values (`attribute-value`, `composite-key`,
 `cursor-pagination`, `key`, `nested-path`, `offset`, `order-by`/`orderBy`, `row-key`, `update`);
 `mapping`, `endpoint`, `date-encoding` and `transaction` are excluded, and **an unclassified value
-is not branded** — so a feature name added later keeps its masked `500` until someone decides
-otherwise.
+is not branded**. One feature is branded differently: `write-precondition`, a refused
+conditional-write predicate or payload (including `updateVersioned`'s expected version and a
+tenant-scoped precondition naming the tenant column), is caller input and answers `400 Bad Request`
+with the fixed detail "The write precondition or its payload is invalid." (since M128; it was a
+masked `500`). The memory tenant store's refusals carry the same hint. A feature name added later
+keeps its masked `500` until someone decides otherwise.
 
 The four transaction and concurrency errors — `MongoTransactionUnavailableError`,
 `CosmosTransactionScopeError`, `CosmosConcurrentModificationError` and

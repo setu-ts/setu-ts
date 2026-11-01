@@ -110,6 +110,53 @@ const PG_NEW_CONNECTION_TIMEOUT_ANCHOR = 'Connection terminated due to connectio
 /** Client-side pg query bound; the statement may already have run. */
 const PG_QUERY_TIMEOUT_ANCHOR = 'Query read timeout';
 
+/**
+ * The connection-loss signals measured during the X94 outage cells (M128,
+ * plan §3.2), each with the status rule that picks its class: a server
+ * verdict that the statement did not run, or a refusal before anything was
+ * sent, is `'unavailable'` (503, "not applied"); a connection lost while a
+ * statement was in flight, with no verdict, is `'timeout'` (504, outcome
+ * unknown). The full table, with how each row was measured, is the data in
+ * `classify-driver-error.test.ts`.
+ *
+ * String codes: PostgreSQL `57P01` (the server terminated the backend),
+ * Prisma `P1001` (server unreachable) and `P2028` (the transaction could not
+ * start in time), mysql2's `ER_SERVER_SHUTDOWN` and libsql's `SQLITE_BUSY`.
+ */
+const UNAVAILABLE_CODES: ReadonlySet<string> = new Set([
+  '57P01',
+  'P1001',
+  'P2028',
+  'ER_SERVER_SHUTDOWN',
+  'SQLITE_BUSY',
+]);
+
+/** mysql2's code for a connection lost mid-statement — no verdict, so outcome unknown. */
+const MYSQL_CONNECTION_LOST = 'PROTOCOL_CONNECTION_LOST';
+
+/**
+ * Codes the mariadb driver reports through Prisma's MySQL adapter, read only
+ * from that adapter's cause (`kind: 'mysql'`): numeric strings are not a
+ * namespace of their own, and a user `SIGNAL SQLSTATE '45000'`-range value
+ * must not be read as one. `45028` pool timeout, `45013` command on a closed
+ * connection and `1053` server shutdown were refused before running;
+ * `45009`, a socket closed under a statement, was not.
+ */
+const MARIADB_UNAVAILABLE_CODES: ReadonlySet<string> = new Set(['45028', '45013', '1053']);
+const MARIADB_SOCKET_CLOSED = '45009';
+
+/** MongoDB `NotWritablePrimary`: the server refused the write. */
+const MONGO_NOT_WRITABLE_PRIMARY = 10107;
+
+/** node-postgres refuses a statement on a client whose connection already failed. */
+const PG_NOT_QUERYABLE_ANCHORS: ReadonlySet<string> = new Set([
+  'Client has encountered a connection error and is not queryable',
+  'Client was closed and is not queryable',
+]);
+
+/** node-postgres's text for a connection that ended under a statement. */
+const PG_TERMINATED_ANCHOR = 'Connection terminated unexpectedly';
+
 /** The MongoDB error label marking a transaction conflict as retryable. */
 const MONGO_TRANSIENT_TRANSACTION_ERROR = 'TransientTransactionError';
 
@@ -160,7 +207,7 @@ export function classifyDriverError(
     return null;
   }
 
-  const candidates = causeChainMembers(error);
+  const candidates = classificationMembers(error);
 
   // A code or label supplied by a driver is more authoritative than a
   // generic wrapper name or message. Search every cause first: an ORM may
@@ -173,10 +220,64 @@ export function classifyDriverError(
   }
   const hasStringCode = candidates.some(({ code }) => typeof code === 'string');
   for (const members of candidates) {
-    const matched = classifyFallback(members, classifyPgTimeout(members.message, hasStringCode));
+    const matched = classifyFallback(
+      members,
+      classifyPgTimeout(members.message, hasStringCode) ??
+        classifyPgConnectionLoss(members.message, hasStringCode),
+    );
     if (matched !== null) return matched;
   }
   return null;
+}
+
+/**
+ * The classifier's view of a cause chain: every member, plus the driver error
+ * a Prisma driver adapter reports under `meta.driverAdapterError.cause`.
+ *
+ * Prisma 7 wraps a driver failure in its generic codes (`P2039` for a model
+ * query, `P2010` for a raw one) and keeps the driver's own code there as
+ * `originalCode` — measured for both adapter-pg (`'57P01'`) and
+ * adapter-mariadb (`'45009'`, `'45028'`). That code is the backend's
+ * classifier, so it joins the chain as one more member, after the error that
+ * carries it.
+ */
+function classificationMembers(error: unknown): DriverErrorMembers[] {
+  const members: DriverErrorMembers[] = [];
+  for (const node of causeChain(error)) {
+    const own = safeMembers(node);
+    if (own === undefined) continue;
+    members.push(own);
+    const adapterCause = prismaAdapterCause(node);
+    if (adapterCause !== undefined) members.push(adapterCause);
+  }
+  return members;
+}
+
+/** Reads a Prisma driver-adapter cause, guarded, into classifier members. */
+function prismaAdapterCause(node: object): DriverErrorMembers | undefined {
+  try {
+    const meta = (node as { meta?: unknown }).meta;
+    if (typeof meta !== 'object' || meta === null) return undefined;
+    const adapterError = (meta as { driverAdapterError?: unknown }).driverAdapterError;
+    if (typeof adapterError !== 'object' || adapterError === null) return undefined;
+    const cause = (adapterError as { cause?: unknown }).cause;
+    if (typeof cause !== 'object' || cause === null) return undefined;
+    const { originalCode, originalMessage, kind } = cause as {
+      originalCode?: unknown;
+      originalMessage?: unknown;
+      kind?: unknown;
+    };
+    if (typeof originalCode !== 'string') return undefined;
+    return {
+      code: originalCode,
+      name: undefined,
+      labels: undefined,
+      message: originalMessage,
+      ...(kind === 'mysql' ? { namespace: 'mysql-adapter' as const } : {}),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -278,6 +379,17 @@ export function prismaRefusalCause(error: unknown): Error | undefined {
   });
 }
 
+/** pg's connection-loss texts, authoritative only on a chain without string codes. */
+function classifyPgConnectionLoss(
+  message: unknown,
+  hasStringCode: boolean,
+): 'unavailable' | 'timeout' | null {
+  if (hasStringCode || typeof message !== 'string') return null;
+  if (PG_NOT_QUERYABLE_ANCHORS.has(message)) return 'unavailable';
+  if (message === PG_TERMINATED_ANCHOR) return 'timeout';
+  return null;
+}
+
 /** Fixed pg timeout messages are authoritative only on a chain without string codes. */
 function classifyPgTimeout(
   message: unknown,
@@ -338,6 +450,8 @@ type DriverErrorMembers = {
   name: unknown;
   labels: readonly unknown[] | undefined;
   message: unknown;
+  /** Set when the code comes from Prisma's MySQL adapter, whose codes are numeric strings. */
+  namespace?: 'mysql-adapter';
 };
 
 /**
@@ -347,7 +461,7 @@ type DriverErrorMembers = {
  * and messages from wrappers elsewhere in the cause chain.
  */
 function classifyStructured(
-  { code, labels }: DriverErrorMembers,
+  { code, labels, namespace }: DriverErrorMembers,
   adapterType: DatabaseAdapterType | undefined,
 ): DriverErrorClass | null {
   // 1. Numeric codes have backend-local namespaces: Mongo's `10` means
@@ -356,6 +470,7 @@ function classifyStructured(
   //    numeric code still does not veto the Mongo label below.
   if (typeof code === 'number') {
     if (adapterType === 'mongodb' && code === MONGO_DUPLICATE_KEY) return 'duplicate';
+    if (adapterType === 'mongodb' && code === MONGO_NOT_WRITABLE_PRIMARY) return 'unavailable';
     if (adapterType === 'bigtable') {
       if (code === GRPC_ABORTED) return 'conflict';
       if (code === GRPC_UNAVAILABLE) return 'unavailable';
@@ -374,8 +489,14 @@ function classifyStructured(
   //    "Connection Exception"; `57P03` is the server
   //    refusing connections. A matched string code is FINAL: SQLSTATE
   //    classes are the backend's own classifier and outrank any text.
+  if (typeof code === 'string' && namespace === 'mysql-adapter') {
+    if (MARIADB_UNAVAILABLE_CODES.has(code)) return 'unavailable';
+    if (code === MARIADB_SOCKET_CLOSED) return 'timeout';
+  }
   if (typeof code === 'string') {
     if (DUPLICATE_KEY_CODES.has(code)) return 'duplicate';
+    if (UNAVAILABLE_CODES.has(code)) return 'unavailable';
+    if (code === MYSQL_CONNECTION_LOST) return 'timeout';
     if (code === PG_CANNOT_CONNECT_NOW) return 'unavailable';
     if (code === PRISMA_WRITE_CONFLICT) return 'conflict';
     if (code === '40001' || code === '40P01') return 'conflict';
@@ -405,7 +526,12 @@ function classifyFallback(
   //    not classes it could `instanceof`.
   if (typeof name === 'string') {
     if (name === 'TransactionConflictException') return 'conflict'; // DynamoDB
-    if (name === 'MongoNetworkError' || name === 'MongoServerSelectionError') {
+    if (
+      name === 'MongoNetworkError' ||
+      name === 'MongoServerSelectionError' ||
+      name === 'MongoWaitQueueTimeoutError' ||
+      name === 'MongoPoolClearedError'
+    ) {
       return 'unavailable';
     }
     // The AWS SDK's own network failures. These names are generic, which is

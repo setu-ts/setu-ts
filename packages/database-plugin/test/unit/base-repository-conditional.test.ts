@@ -57,7 +57,12 @@ describe('BaseRepository conditional writes', () => {
         (error: unknown) => error,
       )) as UnsupportedQueryFeatureError;
       expect(error.feature).toBe('write-precondition');
-      expect(httpStatusHintOf(error)).toBeUndefined();
+      // Caller input since M128: 400 with a fixed detail, never the masked 500.
+      expect(httpStatusHintOf(error)).toEqual({
+        status: 400,
+        title: 'Bad Request',
+        detail: 'The write precondition or its payload is invalid.',
+      });
     }
     expect(await source.findById('a')).toBeNull();
     expect(io).toBe(0);

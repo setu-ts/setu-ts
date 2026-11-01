@@ -5,6 +5,7 @@
  */
 import type { IRequest, IRequestContext } from '../http.ts';
 import type { Option } from '../option.ts';
+import type { WritePrecondition } from './write-precondition.ts';
 
 /**
  * A resolved tenant.
@@ -40,6 +41,32 @@ export interface ITenantRepository<Entity, Id = string> {
   update(id: Id, data: Readonly<Record<string, unknown>>): Promise<Entity | null>;
   /** Delete a record by its identifier. Returns `true` if a record was deleted. */
   delete(id: Id): Promise<boolean>;
+  /**
+   * Update a record only while it matches `where` as well as the tenant;
+   * `null` when it did not match. Present only when the configured store
+   * supports conditional writes — absence means it does not.
+   *
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @param data - The fields to write
+   * @returns The updated record, or `null`
+   * @since 0.12.0
+   */
+  readonly updateWhere?: (
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ) => Promise<Entity | null>;
+  /**
+   * Delete a record only while it matches `where` as well as the tenant.
+   * Present only when the configured store supports conditional writes.
+   *
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @returns Whether a record was deleted
+   * @since 0.12.0
+   */
+  readonly deleteWhere?: (id: Id, where: WritePrecondition) => Promise<boolean>;
 }
 
 /**
@@ -168,6 +195,43 @@ export interface ITenantDataStore {
   ): Promise<E | null>;
   /** Delete a record. Returns `true` if a record was deleted. */
   delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean>;
+  /**
+   * Update a record only while it belongs to the tenant AND matches `where`,
+   * as one atomic precondition; `null` when it did not match. Optional: a
+   * store without conditional writes omits it.
+   *
+   * @param tenantId - The resolved tenant
+   * @param entity - The entity name
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @param data - The fields to write; a tenant column in it is ignored
+   * @returns The updated record, or `null`
+   * @since 0.12.0
+   */
+  updateWhere?<E, Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E | null>;
+  /**
+   * Delete a record only while it belongs to the tenant AND matches `where`.
+   * Optional, as {@linkcode ITenantDataStore.updateWhere}.
+   *
+   * @param tenantId - The resolved tenant
+   * @param entity - The entity name
+   * @param id - The record's identifier
+   * @param where - An equality precondition; must not name the tenant column
+   * @returns Whether a record was deleted
+   * @since 0.12.0
+   */
+  deleteWhere?<Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+  ): Promise<boolean>;
   /** Gracefully close any connections. */
   close?(): Promise<void>;
 }

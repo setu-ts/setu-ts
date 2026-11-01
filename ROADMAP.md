@@ -16190,10 +16190,11 @@ data, how `transaction()` tells the work's own errors from the driver's, and how
 memoizes per entity without sharing a tenant- or transaction-scoped repository and while keeping the
 closed-service refusal.
 
-**Gate:** the X94-1 reproduction (kill the backend during an open Drizzle transaction) on a real
-PostgreSQL — the process lives and the request answers 503; the classifier table per driver; the
-versioned row added to `conditional-write-conformance.test.ts` across all eight adapters and a
-transaction table as data; the 409 Problem Details field by field; and the database benchmark
+**Gate:** the X94-1 reproduction (kill the backend while a Drizzle transaction is open and idle) on
+a real PostgreSQL — the process lives and the request answers 503 (a kill landing on an in-flight
+statement answers 503 or 504, never a crash); the classifier table per driver; the versioned row
+added to `conditional-write-conformance.test.ts` across all eight adapters and a transaction table
+as data; the 409 Problem Details field by field; and the database benchmark
 (`~/setu-benchmarks/2026-10-31-db/`) re-run for the X94-3 before/after.
 
 ---
@@ -16974,7 +16975,7 @@ patch by construction and gains nothing new here.
 | 125       | ✅     | di-plugin + common + kernel + decorator-plugin — a compiled container and a lazy request scope: typed tokens, boot-time graph validation, the singleton-captures-scoped fix                                                                                                               |
 | 126       | ✅     | runtime + cli — a local diagnostics listener on Node, and the devtool opt-in for Node targets                                                                                                                                                                                             |
 | 127       | ⬜     | common + multi-tenancy-plugin + database-plugin — a registry of real tenants: `tenants` option, Unknown Tenant 404, 503 on registry failure, bounded cache                                                                                                                                |
-| 128       | ⬜     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
+| 128       | ✅     | database-plugin + common + multi-tenancy-plugin — optimistic locking (`updateVersioned`, `VersionConflictError`) and the database plugin under faults (X94-1 High, X94-2, V11-5, X94-3)                                                                                                   |
 | 129       | ⬜     | cli + common + openapi-plugin — `setu client`: the typed client as a command, with a `--check` drift gate                                                                                                                                                                                 |
 | 130       | ⬜     | react-router-plugin + cli + full-stack-starter — the full-stack template: kernel modules behind the pages, `getService`, the template half of smoke group G5                                                                                                                              |
 | 131       | ⬜     | the `v0.11.0` smoke closeout — four letters, regression first                                                                                                                                                                                                                             |

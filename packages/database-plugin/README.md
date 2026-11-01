@@ -238,6 +238,57 @@ isolation through the database service; an omitted declaration is refused rather
 the adapter default. Prisma needs a resolved `provider` for an isolation request: when its client
 provider cannot be detected, set `options.provider` explicitly.
 
+## Optimistic locking
+
+`updateVersioned` and `deleteVersioned` write only while the record still carries the version you
+read, and tell a lost race (`409`) from a missing record (`404`) for you:
+
+```typescript
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+import { updateVersioned, type IDatabaseService } from '@setu-ts/database-plugin';
+
+interface Article {
+  id: string;
+  title: string;
+  version: number;
+}
+
+export async function editArticle(
+  ctx: IRequestContext,
+  db: IDatabaseService,
+): Promise<HandlerResult> {
+  const body = (await ctx.request.json()) as { title: string; version: number };
+  const repo = db.getRepository<Article>('Article');
+  // Writes { title, version: body.version + 1 } only while version === body.version.
+  const article = await updateVersioned(repo, ctx.params['id']!, body.version, {
+    title: body.title,
+  });
+  return ctx.response.json(article);
+}
+```
+
+- A stale version throws `VersionConflictError` (`409 Conflict`, "The record was changed after it
+  was read. Reload it and try again."); a missing record throws `EntityNotFoundError`
+  (`404 Not Found`). With `errorHandler` registered both are served as Problem Details, with no id
+  or version in the body's `detail`. Pass `{ entity: 'Article' }` to have the errors carry the
+  entity for your logs.
+- The helper owns the version field (default `version`, or `{ field: 'lockVersion' }`): `data` must
+  not set it, the expected version must be a non-negative safe integer, and both are refused before
+  any I/O. `create` does not stamp a first version — include `version: 1` yourself.
+- It works with any repository that has `updateWhere` — an outer repository, `uow.getRepository()`
+  and a tenant repository. Inside a transaction it applies on Drizzle, Prisma and MongoDB; the
+  buffered transaction sources (memory, D1, DynamoDB, Cosmos, Bigtable) answer
+  `UnsupportedQueryFeatureError('conditional-write')` (`501`) rather than a non-atomic write.
+- On a miss the record is read once to choose the error, so a delete that lands in between is
+  reported as not found.
+- An invalid expected version (a missing `?version` read with `Number(...)` is `NaN`) or a payload
+  that sets the version field answers `400 Bad Request`, as every refused conditional-write
+  precondition does.
+
+`getRepository(entity)` returns the same repository for every call with that entity name. Pass
+entity names from your code, never from request input: on the memory and MongoDB adapters every new
+name is kept for the service's lifetime.
+
 ## Tenant data-store bridge
 
 `createDatabaseTenantDataStore` is the one shipped `ITenantDataStore` over `IDatabaseService`. Pass
@@ -282,9 +333,15 @@ without them falls back to an ownership read followed by a key-addressed write: 
 deleted and a row from another tenant is created under the same caller-supplied key in between, the
 write lands on that row (a `delete` still reports `true`; an `update` refuses to return the foreign
 row, but has already written it). Generated keys never reuse a key, so let the backend generate
-them, or implement the two members. `DatabaseTenantDataStore` is also exported for an application
-that holds its own `IDatabaseService` and constructs the store directly; its optional second
-constructor argument names the column for a store used outside the multi-tenancy plugin.
+them, or implement the two members.
+
+The bridge also implements the optional `updateWhere` / `deleteWhere` of `ITenantDataStore` (M128),
+so a tenant repository supports conditional writes and `updateVersioned`. Your `where` and the
+tenant column become one precondition; a `where` naming the tenant column is refused; and there is
+no ownership-read fallback — a data source without conditional writes answers `conditional-write`
+instead. `DatabaseTenantDataStore` is also exported for an application that holds its own
+`IDatabaseService` and constructs the store directly; its optional second constructor argument names
+the column for a store used outside the multi-tenancy plugin.
 
 ## Transactional outbox store
 
@@ -1289,6 +1346,34 @@ at `commit()` (D1's batch, a Cosmos transactional batch, a DynamoDB `TransactWri
 by a create's guard, a buffered memory or Bigtable create) is mapped too; every other commit
 rejection is still rethrown unchanged, because its outcome can be unknown.
 
+**Connection loss during an outage (M128).** The connection-loss signals measured during the
+`0.11.0` outage runs are classified by one rule: if the server said the statement did not run, or
+the driver refused before sending it, the answer is `DatabaseUnavailableError` (`503`); if the
+connection dropped under a statement in flight, with no answer, it is `DatabaseTimeoutError`
+(`504`), because a write's outcome is then unknown.
+
+| Driver        | `503` (not applied)                                                                                                          | `504` (outcome unknown)                  |
+| ------------- | ---------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| node-postgres | SQLSTATE `57P01`; `Client has encountered a connection error and is not queryable`; `Client was closed and is not queryable` | `Connection terminated unexpectedly`     |
+| Prisma 7      | `P1001`, `P2028`; under `P2039`/`P2010`, the adapter's `originalCode` `57P01` (pg) or `45028`, `45013`, `1053` (mariadb)     | adapter `originalCode` `45009` (mariadb) |
+| mysql2        | `ER_SERVER_SHUTDOWN`                                                                                                         | `PROTOCOL_CONNECTION_LOST`               |
+| libsql        | `SQLITE_BUSY`                                                                                                                | —                                        |
+| MongoDB       | `MongoWaitQueueTimeoutError`, `MongoPoolClearedError`, code `10107`                                                          | —                                        |
+
+The older `ECONNRESET`/`EPIPE`/`MongoNetworkError` arms still answer `503` even for a write in
+flight; that is a known limitation.
+
+**A Drizzle transaction survives a lost connection (M128).** A pg client checked out for a
+transaction has no `'error'` listener of its own, so a backend killed mid-transaction used to exit
+the process. The plugin attaches one to every checked-out client of the pool behind your
+`drizzleInstance` (through pg-pool's `'acquire'`/`'release'` events) and logs the event at `warn`;
+the transaction's next statement answers `503`.
+
+**Errors your own transaction work throws are not classified (M128).** Inside
+`db.transaction(async (uow) => …)`, repository calls are classified as above; anything else the work
+throws — an HTTP call refused with `ECONNREFUSED`, your own error — reaches you as itself, so a
+refused webhook is no longer reported as "database unavailable".
+
 All four carry the original driver error as `cause` — the SQLSTATE and the failing statement stay
 reachable for the log (M90j) — and none serves driver text: the body's `detail` is a fixed sentence.
 Unlike a `DatabaseUnavailableError`, a `DatabaseTimeoutError` does not say the operation did not
@@ -1463,10 +1548,12 @@ imperative begin/commit.
 | `createPrismaDataSource`                  | function  |
 | `DatabasePlugin`                          | function  |
 | `decodeCursor`                            | function  |
+| `deleteVersioned`                         | function  |
 | `encodeCursor`                            | function  |
 | `getDrizzleDatabase`                      | function  |
 | `getDrizzleTransaction`                   | function  |
 | `keysetPredicate`                         | function  |
+| `updateVersioned`                         | function  |
 | `withIsolationSupport`                    | function  |
 | `BaseRepository`                          | class     |
 | `BigtableAdapter`                         | class     |
@@ -1481,6 +1568,7 @@ imperative begin/commit.
 | `DrizzleAdapter`                          | class     |
 | `DrizzleRepository`                       | class     |
 | `DynamoAdapter`                           | class     |
+| `EntityNotFoundError`                     | class     |
 | `InboxStoreUnavailableError`              | class     |
 | `MemoryAdapter`                           | class     |
 | `MigrationLedgerError`                    | class     |
@@ -1501,6 +1589,7 @@ imperative begin/commit.
 | `UnsupportedMigrationError`               | class     |
 | `UnsupportedQueryFeatureError`            | class     |
 | `UnsupportedRawQueryError`                | class     |
+| `VersionConflictError`                    | class     |
 | `MIGRATION_LEDGER_ENTITY`                 | const     |
 | `BigtableAdapterOptionsBase`              | interface |
 | `BigtableCell`                            | interface |
@@ -1617,6 +1706,9 @@ imperative begin/commit.
 | `PrismaDatabaseOptions`                   | interface |
 | `RoleFields`                              | interface |
 | `TransactionOptions`                      | interface |
+| `VersionedDeletable`                      | interface |
+| `VersionedWritable`                       | interface |
+| `VersionedWriteOptions`                   | interface |
 | `BigtableAdapterOptions`                  | type      |
 | `BigtableFilter`                          | type      |
 | `BigtableMutation`                        | type      |

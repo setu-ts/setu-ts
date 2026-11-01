@@ -714,8 +714,10 @@ here.
   that does not match the code, or is missing; V10-7…V10-57 rows plus the folded scope: development
   commands in briefs, scaffold-first guides, npm plugin publishing, example walkthroughs) — complete
   (PR #528).
-- **Next milestone** — M128 (optimistic locking and the database plugin under faults; holds the only
-  open High, X94-1), then M131a (holds the `0.11.0` regression V11-10); M127, M129, M130 and M131b–d
+- **Milestone 128** (`database-plugin` + `common` + `multi-tenancy-plugin` — `updateVersioned` /
+  `deleteVersioned` with `VersionConflictError` and `EntityNotFoundError`, optional tenant-path
+  conditional writes, and the fault group: X94-1, X94-2, V11-5, X94-3) — complete (PR #540).
+- **Next milestone** — M131a (holds the `0.11.0` regression V11-10); M127, M129, M130 and M131b–d
   are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
