@@ -99,7 +99,7 @@ describe('rateLimitMiddleware exclude (X32-1)', () => {
     expect(store.increments).toEqual(['ip:1.2.3.4']);
   });
 
-  it('an excluded path carries no RateLimit-* headers', async () => {
+  it('an excluded path carries no RateLimit fields', async () => {
     // The limit does not govern the request, so advertising one would be a lie.
     const middleware = rateLimitMiddleware({
       windowMs: 60_000,
@@ -107,8 +107,8 @@ describe('rateLimitMiddleware exclude (X32-1)', () => {
       store: exhaustedStore(),
     });
     const result = await drive(middleware, '/live');
-    expect(result.headers.get('RateLimit-Limit')).toBeNull();
-    expect(result.headers.get('RateLimit-Remaining')).toBeNull();
+    expect(result.headers.get('RateLimit')).toBeNull();
+    expect(result.headers.get('RateLimit-Policy')).toBeNull();
     expect(result.headers.get('Retry-After')).toBeNull();
   });
 

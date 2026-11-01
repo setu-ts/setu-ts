@@ -61,7 +61,13 @@ export function createContext(
       captured.headers.set(name, value);
       return response;
     },
-    appendHeader: () => response,
+    appendHeader: (name: string, value: string) => {
+      // Behave like `Headers.append`: two stacked limiters add one List member
+      // each, so `get` reads `"a";…, "b";…`.
+      const existing = captured.headers.get(name);
+      captured.headers.set(name, existing === null ? value : `${existing}, ${value}`);
+      return response;
+    },
     json: (body: unknown): HandlerResult => {
       captured.body = body;
       return { __handlerResult: true } as unknown as HandlerResult;

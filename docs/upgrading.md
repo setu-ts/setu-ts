@@ -31,6 +31,38 @@ and do not derive the entity name from request input. A refused conditional-writ
 (`UnsupportedQueryFeatureError` with feature `'write-precondition'`) now answers `400` instead of
 `500`.
 
+### Rate limiter now emits draft-11 `RateLimit` fields (`@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`)
+
+If you parsed `RateLimit-Limit`, `RateLimit-Remaining` or `RateLimit-Reset` — or exposed them to
+browser clients through CORS `exposedHeaders` — read the two Structured Field Lists of
+draft-ietf-httpapi-ratelimit-headers-11 instead, and update that list to name `RateLimit` and
+`RateLimit-Policy`:
+
+```
+# before
+RateLimit-Limit: 100
+RateLimit-Remaining: 99
+RateLimit-Reset: 60
+
+# after
+RateLimit-Policy: "default";q=100;w=60
+RateLimit: "default";r=99;t=60
+```
+
+`q` is the quota, `w` the window in whole seconds, `r` the remaining budget, and `t` the
+non-negative delta-seconds until reset. Both are Lists, so stacked limiters append one member each
+(`"a";q=10;w=60, "b";q=5;w=60`); give each limiter its own `policyName`, because the default name is
+`'default'` for all of them. The factory now refuses a negative or fractional `max`, a non-positive
+or non-integer `windowMs`, and an empty or non-printable-ASCII `policyName`. A fractional `windowMs`
+is now refused (round it), and so is a `max` above 999999999999999.
+
+Under the Problem Details formats (`rfc9457`, `rfc7807`) the 429's `type` and `title` changed from
+the status-derived values (`about:blank` plus `Too Many Requests` under RFC 9457) to the IANA
+`quota-exceeded` problem type and `Quota Exceeded`, with a `violated-policies` array naming the
+policy. The `default` format is unchanged. If you build error responses yourself,
+`ErrorResponseInit.problem` (type `ProblemTypeInit`) carries the same override and is honoured by
+both Problem Details formatters and by status hints.
+
 ## 0.11.0
 
 ### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)

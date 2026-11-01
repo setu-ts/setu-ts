@@ -21,6 +21,35 @@ All notable changes to this project are documented here. The format follows
   by `DatabaseTenantDataStore` (one precondition with the tenant column, no check-then-write
   fallback), `MemoryTenantDataStore` and the multi-tenancy plugin's repository.
 
+### Changed
+
+- **Breaking: the rate limiter emits draft-11 header fields and refuses options it used to accept
+  (#539, `@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`).** Each item below is
+  breaking, and none has an option that restores the old behaviour. The migration steps are in
+  `docs/upgrading.md`, Unreleased, "Rate limiter now emits draft-11 `RateLimit` fields".
+  - `rateLimitMiddleware` emits the `RateLimit` and `RateLimit-Policy` Structured Field Lists of
+    draft-ietf-httpapi-ratelimit-headers-11 instead of `RateLimit-Limit`, `RateLimit-Remaining` and
+    `RateLimit-Reset`. A client that read the old fields, or a CORS `exposedHeaders` list naming
+    them, must read the new two instead. The new `policyName` option (default `'default'`) names the
+    policy in both fields and in the 429's `violated-policies`.
+  - The factory now throws at registration where it used to accept the value: `windowMs` must be a
+    positive integer number of milliseconds (round a fractional value; Redis `PEXPIRE` refused one
+    after `INCR` had created the key, leaving a counter that never reset), `max` an integer from 0
+    to 999999999999999, and `policyName` non-empty printable ASCII.
+  - Under the Problem Details formats (`rfc9457`, `rfc7807`) the 429 body's `type` and `title`
+    change from the status-derived values (`about:blank` and `Too Many Requests` under RFC 9457) to
+    `https://iana.org/assignments/http-problem-types#quota-exceeded` and `Quota Exceeded`, with a
+    `violated-policies` member. A client matching the old `type` must match the new one. The
+    `default` format's body is unchanged.
+  - `Retry-After` and `t` are clamped to 0…999999999999999 (the RFC 9651 sf-integer range). A store
+    reporting a reset that had already passed produced a negative `Retry-After`; it is now `0`.
+  - A store result whose `count` is not a non-negative whole number, or whose `resetTime` is not
+    finite, answers 429 for a full window (fail closed); it used to be served. Fix the store.
+
+  Added alongside: `ErrorResponseInit.problem` and the `ProblemTypeInit` interface, honoured by both
+  Problem Details formatters and by status hints and ignored by the `default` format; and
+  `RedisRateLimitStore` re-arms a key it finds without an expiry instead of answering 429 for ever.
+
 ### Fixed
 
 - **database-plugin:** a connection lost while a Drizzle × PostgreSQL transaction was open no longer

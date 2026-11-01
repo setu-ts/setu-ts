@@ -1369,17 +1369,54 @@ await refresh.revoke(next!.refreshToken); // logout
 
 `rateLimitMiddleware(options)` is a standalone fixed-window limiter, independent of `AuthPlugin` and
 registered under no capability token. Over-limit requests are short-circuited with **429**
-(`Retry-After` always set; `RateLimit-Limit`/`RateLimit-Remaining`/`RateLimit-Reset` set unless
-`standardHeaders: false` — `Reset` and `Retry-After` are both delta-seconds). The default store is
-in-memory (single-process); use `RedisRateLimitStore` for multi-instance deployments (pass an
-ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
+(`Retry-After` always set; the draft-11 `RateLimit` and `RateLimit-Policy` fields set unless
+`standardHeaders: false`). Both fields are Structured Field Lists (RFC 9651), and each limiter
+appends one member:
+
+```
+RateLimit-Policy: "default";q=100;w=60
+RateLimit: "default";r=99;t=60
+```
+
+`q` is the quota (0 to 999999999999999), `w` the window in whole seconds (rounded up), `r` the
+remaining budget, and `t` the non-negative delta-seconds until reset. `t` and `Retry-After` are
+capped at 999999999999999 (the RFC 9651 sf-integer maximum). Give two stacked limiters distinct
+`policyName`s — both append to the same two lists, so a shared name makes their budgets
+indistinguishable (`RateLimit-Policy: "a";q=10;w=60, "b";q=5;w=60`).
+
+The factory validates its options once and throws before any request: `max` must be an integer from
+0 to 999999999999999 (`RangeError`), `windowMs` a positive integer number of milliseconds
+(`RangeError`), and `policyName` a non-empty printable-ASCII string (`TypeError`).
+
+A store result whose `count` is not a non-negative whole number, or whose `resetTime` is not finite,
+answers 429 for a full window (fail closed): the limiter refuses rather than serves when it cannot
+read its own counter.
+
+The default store is in-memory (single-process); use `RedisRateLimitStore` for multi-instance
+deployments (pass an ioredis-compatible `client`, or `ioredis` is lazily imported on first use).
+`RedisRateLimitStore` re-arms a key it finds without an expiry, so a lost `PEXPIRE` cannot leave a
+counter that answers 429 for ever.
 
 The 429 body uses `@setu-ts/common`'s error-responder seam, so it follows the application's
-configured error format. The operational paths `/live`, `/ready`, `/health`, `/metrics`,
-`/openapi.json`, and `/docs` are exempt by default through `DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`; an
-`exclude` list replaces the defaults, so spread the constant to extend them. `RedisRateLimitStore`
-prefixes its keys with `'setu:ratelimit:'` by default; set `keyPrefix` per application when several
-share Redis, or `''` to keep pre-M90a keys.
+configured error format. Under the Problem Details formats (`rfc9457`, `rfc7807`) it identifies
+itself as the registered `quota-exceeded` problem:
+
+```json
+{
+  "type": "https://iana.org/assignments/http-problem-types#quota-exceeded",
+  "title": "Quota Exceeded",
+  "status": 429,
+  "detail": "Rate limit exceeded",
+  "instance": "/orders",
+  "violated-policies": ["default"]
+}
+```
+
+The default `'default'` format is unchanged. The operational paths `/live`, `/ready`, `/health`,
+`/metrics`, `/openapi.json`, and `/docs` are exempt by default through
+`DEFAULT_RATE_LIMIT_EXCLUDED_PATHS`; an `exclude` list replaces the defaults, so spread the constant
+to extend them. `RedisRateLimitStore` prefixes its keys with `'setu:ratelimit:'` by default; set
+`keyPrefix` per application when several share Redis, or `''` to keep pre-M90a keys.
 
 `RedisRateLimitStore` is constructed by the application, so no plugin wires its connection errors.
 Pass `connectionErrorReporter` (built with `createConnectionErrorReporter` from `@setu-ts/common`
@@ -1449,12 +1486,13 @@ rateLimitMiddleware({
 
 | Option            | Type                     | Default                                               | Description                                                              |
 | ----------------- | ------------------------ | ----------------------------------------------------- | ------------------------------------------------------------------------ |
-| `windowMs`        | `number`                 | -                                                     | Window length in ms.                                                     |
-| `max`             | `number`                 | -                                                     | Max requests per window per key.                                         |
+| `windowMs`        | `number`                 | -                                                     | Window length in ms; a positive integer.                                 |
+| `max`             | `number`                 | -                                                     | Max requests per window per key; 0 to 999999999999999.                   |
 | `store`           | `RateLimitStore`         | `MemoryRateLimitStore`                                | Counter backend.                                                         |
 | `keyGenerator`    | `(ctx) => string`        | principal → client IP → `IRequest.ip` → `'anonymous'` | Caller identity for the counter.                                         |
 | `message`         | `string`                 | `'Rate limit exceeded'`                               | 429 body message.                                                        |
-| `standardHeaders` | `boolean`                | `true`                                                | Emit `RateLimit-*` headers.                                              |
+| `standardHeaders` | `boolean`                | `true`                                                | Emit the draft-11 `RateLimit` and `RateLimit-Policy` fields.             |
+| `policyName`      | `string`                 | `'default'`                                           | Policy name in both fields and `violated-policies`; use distinct names.  |
 | `exclude`         | `readonly PathPattern[]` | six operational paths                                 | Paths skipped entirely; strings match exactly and regexps test the path. |
 
 `MemoryRateLimitStore` reclaims expired windows on `increment()` with a doubling-threshold sweep
