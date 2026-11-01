@@ -10,6 +10,24 @@ is the union of every section between the version you are on and the one you are
 `## Unreleased` holds entries written as their milestone landed, which is where the knowledge is;
 cutting a release renames that heading to the version and is a rename, not a recall.
 
+## Unreleased
+
+### Optimistic locking and outage statuses (M128, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/multi-tenancy-plugin`)
+
+Replace a hand-written read-version / `updateWhere` / re-read sequence with
+`updateVersioned(repo, id, expectedVersion, data)` (or `deleteVersioned`); it throws
+`VersionConflictError` (`409`) or `EntityNotFoundError` (`404`), so remove your own mapping of a
+`null` result. Records need a numeric version field (default `version`); `create` does not stamp it.
+On the tenant path, a custom `ITenantDataStore` keeps compiling — the new `updateWhere`/
+`deleteWhere` members are optional — but without them `updateVersioned` answers `501`.
+
+An error your own `db.transaction(async (uow) => …)` work throws now reaches you as itself: if you
+caught `DatabaseUnavailableError` around a transaction to detect a failed outbound call, catch the
+call's own error instead. Some outage errors that answered `500` now answer `503` or `504` (see the
+database-plugin README, "What a driver condition returns to the client"); a client that retried only
+on `503` should treat `504` as "outcome unknown" and retry writes only when they are idempotent.
+`getRepository()` may now return the same instance for repeated calls; do not attach state to it.
+
 ## 0.11.0
 
 ### node-redis as a supported Redis client (M117, 0.11.0, `@setu-ts/common`, `@setu-ts/telemetry-plugin`, `@setu-ts/cli`)

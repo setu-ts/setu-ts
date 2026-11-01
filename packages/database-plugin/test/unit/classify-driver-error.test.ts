@@ -485,3 +485,178 @@ describe('M119e measured Prisma input refusals', () => {
     expect(refusedInputOf(valueOnly)).toEqual({ kind: 'value' });
   });
 });
+
+/**
+ * The X94 connection-loss signals (M128, plan §3.2), as data. Each row is the
+ * shape MEASURED on a real backend on 2026-11-01 (or read from the driver's
+ * source, where noted), with the class the status rule gives it: a server
+ * verdict or a refusal before sending → `unavailable` (503, not applied); a
+ * connection lost under an in-flight statement → `timeout` (504, outcome
+ * unknown). The pg and Mongo rows are also pinned by the guarded live suites.
+ */
+const prismaAdapterError = (prismaCode: string, kind: string, originalCode: string) => ({
+  name: 'PrismaClientKnownRequestError',
+  code: prismaCode,
+  meta: { driverAdapterError: { name: 'DriverAdapterError', cause: { kind, originalCode } } },
+});
+const drizzleWrapped = (cause: object) =>
+  Object.assign(new Error('Failed query: select 1\nparams: '), { cause });
+const CONNECTION_LOSS_SIGNALS: readonly {
+  readonly signal: string;
+  readonly error: unknown;
+  readonly adapterType?: DatabaseAdapterType;
+  readonly expected: 'unavailable' | 'timeout';
+}[] = [
+  {
+    signal: 'pg 57P01, in-flight kill',
+    error: drizzleWrapped({ code: '57P01' }),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'pg not queryable after an idle-in-transaction kill',
+    error: drizzleWrapped(
+      new Error('Client has encountered a connection error and is not queryable'),
+    ),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'pg closed client (source: client.js)',
+    error: new Error('Client was closed and is not queryable'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'pg connection ended under a statement',
+    error: drizzleWrapped(new Error('Connection terminated unexpectedly')),
+    expected: 'timeout',
+  },
+  {
+    signal: 'Prisma P1001 unreachable',
+    error: { name: 'PrismaClientKnownRequestError', code: 'P1001' },
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma P2028 transaction start timed out',
+    error: { name: 'PrismaClientKnownRequestError', code: 'P2028' },
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma P2039 over adapter-pg 57P01',
+    error: prismaAdapterError('P2039', 'postgres', '57P01'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma P2010 raw over adapter-pg 57P01',
+    error: prismaAdapterError('P2010', 'postgres', '57P01'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma over mariadb 45028 pool timeout',
+    error: prismaAdapterError('P2039', 'mysql', '45028'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma over mariadb 45013 closed connection',
+    error: prismaAdapterError('P2039', 'mysql', '45013'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma over mariadb 1053 shutdown',
+    error: prismaAdapterError('P2039', 'mysql', '1053'),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Prisma over mariadb 45009 socket closed',
+    error: prismaAdapterError('P2039', 'mysql', '45009'),
+    expected: 'timeout',
+  },
+  {
+    signal: 'mysql2 PROTOCOL_CONNECTION_LOST',
+    error: drizzleWrapped({ code: 'PROTOCOL_CONNECTION_LOST', fatal: true }),
+    expected: 'timeout',
+  },
+  {
+    signal: 'mysql2 ER_SERVER_SHUTDOWN (source: constants/errors.js)',
+    error: { code: 'ER_SERVER_SHUTDOWN', errno: 1053 },
+    expected: 'unavailable',
+  },
+  {
+    signal: 'libsql SQLITE_BUSY',
+    error: Object.assign(new Error('SQLITE_BUSY: database is locked'), {
+      name: 'LibsqlError',
+      code: 'SQLITE_BUSY',
+      cause: { name: 'SqliteError', code: 'SQLITE_BUSY' },
+    }),
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Mongo wait-queue timeout',
+    error: { name: 'MongoWaitQueueTimeoutError' },
+    adapterType: 'mongodb',
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Mongo pool cleared',
+    error: { name: 'MongoPoolClearedError' },
+    adapterType: 'mongodb',
+    expected: 'unavailable',
+  },
+  {
+    signal: 'Mongo NotWritablePrimary 10107',
+    error: { name: 'MongoServerError', code: 10107 },
+    adapterType: 'mongodb',
+    expected: 'unavailable',
+  },
+];
+
+describe('classifyDriverError — X94 connection-loss signals (M128)', () => {
+  for (const { signal, error, adapterType, expected } of CONNECTION_LOSS_SIGNALS) {
+    it(`${signal} → ${expected}`, () => {
+      expect(classifyDriverError(error, adapterType)).toBe(expected);
+    });
+  }
+
+  it('reads mariadb codes only from the MySQL adapter cause', () => {
+    for (const code of ['45028', '45013', '1053', '45009']) {
+      expect(classifyDriverError({ code })).toBeNull();
+      expect(classifyDriverError(prismaAdapterError('P2039', 'postgres', code))).toBeNull();
+    }
+  });
+
+  it('reads Mongo 10107 only under the mongodb adapter', () => {
+    expect(classifyDriverError({ code: 10107 })).toBeNull();
+    expect(classifyDriverError({ code: 10107 }, 'bigtable')).toBeNull();
+  });
+
+  it('a string code outranks the pg message anchors', () => {
+    for (const message of [
+      'Client has encountered a connection error and is not queryable',
+      'Connection terminated unexpectedly',
+    ]) {
+      expect(classifyDriverError(Object.assign(new Error(message), { code: 'XX000' }))).toBeNull();
+    }
+  });
+
+  it('a malformed or hostile adapter cause reads as no signal', () => {
+    const hostile = {
+      name: 'PrismaClientKnownRequestError',
+      code: 'P2039',
+      get meta(): never {
+        throw new Error('getter');
+      },
+    };
+    for (const error of [
+      hostile,
+      { code: 'P2039', meta: null },
+      { code: 'P2039', meta: { driverAdapterError: null } },
+      { code: 'P2039', meta: { driverAdapterError: { cause: null } } },
+      { code: 'P2039', meta: { driverAdapterError: { cause: { originalCode: 57 } } } },
+    ]) {
+      expect(classifyDriverError(error)).toBeNull();
+    }
+  });
+
+  it('isUnansweredConnect is unchanged by the connection-loss anchors', () => {
+    expect(isUnansweredConnect(new Error('Connection terminated unexpectedly'))).toBe(false);
+    expect(isUnansweredConnect(new Error('Client was closed and is not queryable'))).toBe(false);
+  });
+});

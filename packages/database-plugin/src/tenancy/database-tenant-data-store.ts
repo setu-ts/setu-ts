@@ -51,9 +51,10 @@ import type {
   ITenantDataStore,
   ITenantIsolationStrategy,
   RegistryFactory,
+  WritePrecondition,
 } from '@setu-ts/common';
 import { ENTITY_FIELD_RESOLVER } from '../adapters/drizzle/field-for-column.ts';
-import { TenantColumnUnresolvedError } from '../errors.ts';
+import { TenantColumnUnresolvedError, UnsupportedQueryFeatureError } from '../errors.ts';
 import { CAPABILITIES } from '@setu-ts/common';
 import { conditionalDelete, conditionalUpdate } from '../repositories/conditional-write.ts';
 import type { IDatabaseService } from '../interfaces/index.ts';
@@ -307,6 +308,91 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     if (existing === null) return false;
     return this.#repo(entity).delete(id as EntityKey);
   }
+
+  /**
+   * Conditional update within the tenant (M128): the caller's `where` and the
+   * tenant column form ONE precondition, so a version check and the
+   * ownership check cannot be split by a concurrent write. There is no
+   * check-then-write fallback here, unlike {@linkcode update}: a source
+   * without conditional writes answers the `conditional-write` refusal, since
+   * a fallback could not keep the precondition atomic.
+   *
+   * @throws {UnsupportedQueryFeatureError} When `where` names the tenant
+   *   column (`'write-precondition'`), or the source has no conditional update
+   */
+  async updateWhere<E, Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E | null> {
+    const col = this.#precondition(entity, where);
+    const stripped: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(data)) {
+      if (key !== col) stripped[key] = value;
+    }
+    const repo = this.#repo(entity);
+    if (repo.updateWhere === undefined) throw conditionalWriteRefusal('updateWhere');
+    const updated = await repo.updateWhere(
+      id as EntityKey,
+      { ...where, [col]: tenantId },
+      stripped,
+    );
+    if (updated === null) return null;
+    if (updated[col] !== tenantId) {
+      throw new Error(
+        `DatabaseTenantDataStore: the '${entity}' row changed tenant during the conditional ` +
+          `update; the write was not returned`,
+      );
+    }
+    return updated as unknown as E;
+  }
+
+  /**
+   * Conditional delete within the tenant, with the single-precondition and
+   * no-fallback rules of {@linkcode updateWhere}.
+   *
+   * @throws {UnsupportedQueryFeatureError} As {@linkcode updateWhere}
+   */
+  async deleteWhere<Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+  ): Promise<boolean> {
+    const col = this.#precondition(entity, where);
+    const repo = this.#repo(entity);
+    if (repo.deleteWhere === undefined) throw conditionalWriteRefusal('deleteWhere');
+    return await repo.deleteWhere(id as EntityKey, { ...where, [col]: tenantId });
+  }
+
+  /**
+   * The tenant column for a conditional write, refusing a caller precondition
+   * that names it — under its resolved property or its configured column —
+   * since the store sets that member itself. The refusal does not echo the
+   * column name.
+   */
+  #precondition(entity: string, where: WritePrecondition): string {
+    const col = this.#column(entity);
+    if (Object.hasOwn(where, col) || Object.hasOwn(where, this.#configuredTenantColumn())) {
+      throw new UnsupportedQueryFeatureError(
+        'write-precondition',
+        'database-plugin',
+        'A tenant-scoped precondition must not name the tenant column; the store sets it.',
+      );
+    }
+    return col;
+  }
+}
+
+/** The `conditional-write` refusal for a repository without the member (501). */
+function conditionalWriteRefusal(member: string): UnsupportedQueryFeatureError {
+  return new UnsupportedQueryFeatureError(
+    'conditional-write',
+    'database-plugin',
+    `The tenant store's repository lacks ${member}.`,
+  );
 }
 
 /**

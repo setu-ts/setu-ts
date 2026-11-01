@@ -410,3 +410,26 @@ guarded suites ran.
 - The SQLite fd climb after pool exhaustion (X94 observation, not a row) — looked at only if the
   `SQLITE_BUSY` measurement explains it; otherwise left in `smoke/X94-X95-FINDINGS.md`.
 - Per-entity version-field declaration and `create` stamping `version: 1` (ROADMAP decision 4).
+
+## 10. As built (deviations recorded during implementation)
+
+- **CI does not run the database-plugin live-PostgreSQL cells.** `.github/workflows/ci.yml` sets
+  `OUTBOX_POSTGRES_URL`, never `POSTGRES_URL`, so `real-drizzle-adapter.test.ts`,
+  `real-prisma-adapter.test.ts` and `tenant-store-race-real.test.ts` are IGNORED there by design.
+  §3.1's X94-1 gate, the `57P01` and closed-client pins and §3.7's race were run locally against
+  `he-postgres` (127.0.0.1:5434) with a generated Prisma client; the evidence goes in the PR. §3.2's
+  "pinned by guarded real-backend tests (CI runs both)" is corrected to "run locally".
+- **§3.1:** the checked-out listener is removed on pg-pool's `'release'` event (which fires after
+  the idle listener is back), not left permanent: a permanent one double-reported an idle error
+  beside the pool listener (caught by the existing idle-client live test).
+- **§3.2:** the in-flight live case drives a repository statement blocked on a table lock, so it
+  pins `57P01` → 503 through the wrapper; the native-handle variant was dropped (unclassified by
+  design).
+- **Test homes:** §3.3/§3.4 → `test/unit/database-service-m128.test.ts`; §3.5 type checks →
+  `test/unit/versioned-write.test.ts` (`expectTypeOf`); §3.6 →
+  `test/integration/versioned-write-status.test.ts` (hints asserted there field by field, not in
+  `error-status-hints.test.ts`); §3.7 store cases →
+  `test/integration/tenant-store-conditional.test.ts` over a real `DatabaseService` +
+  `MemoryAdapter`. The conformance "applies inside a transaction" set opens real adapter
+  transactions (Drizzle, Prisma, MongoDB fakes); the fake Drizzle table, the Prisma fixture
+  validator and the D1 fixture table gained a `version` column.

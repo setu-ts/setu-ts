@@ -28,6 +28,7 @@ import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { HealthPlugin } from '@setu-ts/health-plugin';
 import { createDrizzleDatabase, DatabasePlugin, DatabaseService } from '../../src/index.ts';
+import { classifyDriverError } from '../../src/errors/classify.ts';
 import {
   DatabaseTimeoutError,
   DatabaseUnavailableError,
@@ -36,6 +37,7 @@ import {
 import {
   DuplicateKeyError,
   encodeCursor,
+  httpStatusHintOf,
   InvalidCursorError,
   PrimaryKeyChangeError,
   sortFingerprint,
@@ -1401,6 +1403,156 @@ describe('M119e live PostgreSQL tenant and pool contract', () => {
       }
     },
   );
+  /**
+   * Boots a plugin app over its own pool and a fresh one-row table, so the
+   * listener is attached by `register()` exactly as in production. The
+   * application name lets the control pool terminate only this app's
+   * connections.
+   */
+  async function x94App(applicationName: string) {
+    const table = `x94_accounts_${crypto.randomUUID().replaceAll('-', '')}`;
+    const accounts = pgTable(table, {
+      id: text('id').primaryKey(),
+      balance: integer('balance').notNull(),
+    });
+    const control = new Pool({ connectionString: livePgUrl! });
+    await control.query(`CREATE TABLE "${table}" (id text PRIMARY KEY, balance integer NOT NULL)`);
+    await control.query(`INSERT INTO "${table}" VALUES ('a', 10)`);
+    const pool = new Pool({
+      connectionString: livePgUrl!,
+      max: 2,
+      application_name: applicationName,
+    });
+    const configured = createDrizzleDatabase(nodePostgresDrizzle(pool), (database, work) =>
+      database.transaction(work),
+    );
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        DatabasePlugin({
+          type: 'drizzle',
+          options: { drizzleInstance: configured, drizzleTables: { Account: accounts } },
+        }),
+      ],
+    });
+    await app.start();
+    return {
+      db: app.services.get<IDatabaseService>(CAPABILITIES.DATABASE),
+      table,
+      pool,
+      control,
+      balance: async () =>
+        (await control.query(`SELECT balance FROM "${table}" WHERE id = 'a'`)).rows,
+      terminate: (state: string) =>
+        control.query(
+          'SELECT pg_terminate_backend(pid) FROM pg_stat_activity ' +
+            'WHERE application_name = $1 AND state = $2',
+          [applicationName, state],
+        ),
+      async stop() {
+        await app.stop();
+        await pool.end();
+        await control.query(`DROP TABLE IF EXISTS "${table}"`);
+        await control.end();
+      },
+    };
+  }
+
+  it(
+    'X94-1: a backend killed during an open Drizzle transaction answers 503 and the process lives',
+    { skip: skipLivePg },
+    async () => {
+      const fixture = await x94App('x94_idle_in_tx');
+      try {
+        let opened!: () => void;
+        const isOpen = new Promise<void>((resolve) => (opened = resolve));
+        let resume!: () => void;
+        const held = new Promise<void>((resolve) => (resume = resolve));
+        const outcome = fixture.db
+          .transaction(async (uow) => {
+            const repo = uow.getRepository<{ id: string; balance: number }>('Account');
+            await repo.update('a', { balance: 9 });
+            opened();
+            await held;
+            await repo.update('a', { balance: 8 });
+          })
+          .then(
+            () => 'committed',
+            (error: unknown) => error,
+          );
+        await isOpen;
+        // The transaction's client is idle in transaction: before the fix
+        // its `'error'` event had no listener and exited the process here.
+        expect((await fixture.terminate('idle in transaction')).rowCount).toBe(1);
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        resume();
+        const error = await outcome;
+        expect(error).toBeInstanceOf(DatabaseUnavailableError);
+        expect(httpStatusHintOf(error)?.status).toBe(503);
+        expect(await fixture.balance()).toEqual([{ balance: 10 }]);
+        expect((await fixture.pool.query('SELECT 1 AS alive')).rows).toEqual([{ alive: 1 }]);
+      } finally {
+        await fixture.stop();
+      }
+    },
+  );
+
+  it(
+    'X94-1/X94-2: a repository statement killed in flight answers 503 (57P01) and the process lives',
+    { skip: skipLivePg },
+    async () => {
+      const fixture = await x94App('x94_in_flight');
+      const locker = await fixture.control.connect();
+      try {
+        await locker.query('BEGIN');
+        await locker.query(`LOCK TABLE "${fixture.table}" IN ACCESS EXCLUSIVE MODE`);
+        const outcome = fixture.db
+          .transaction(async (uow) => {
+            // Blocks on the lock, so the statement is in flight when killed.
+            await uow.getRepository<{ id: string; balance: number }>('Account').findById('a');
+          })
+          .then(
+            () => 'committed',
+            (error: unknown) => error,
+          );
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        expect((await fixture.terminate('active')).rowCount).toBe(1);
+        const error = await outcome;
+        expect(error).toBeInstanceOf(DatabaseUnavailableError);
+        expect(httpStatusHintOf(error)?.status).toBe(503);
+        await locker.query('ROLLBACK');
+        expect((await fixture.pool.query('SELECT 1 AS alive')).rows).toEqual([{ alive: 1 }]);
+      } finally {
+        locker.release();
+        await fixture.stop();
+      }
+    },
+  );
+
+  it(
+    'pins the closed-client anchor: a statement on an ended pg client answers 503',
+    {
+      skip: skipLivePg,
+    },
+    async () => {
+      const fixture = await x94App('x94_closed');
+      try {
+        const client = await fixture.pool.connect();
+        const ended = new Promise<void>((resolve) => client.once('end', () => resolve()));
+        await client.end();
+        await ended;
+        const error = await client.query('SELECT 1').then(
+          () => 'answered',
+          (thrown: unknown) => thrown,
+        );
+        expect(classifyDriverError(error, 'drizzle')).toBe('unavailable');
+        client.release(true);
+      } finally {
+        await fixture.stop();
+      }
+    },
+  );
+
   it('reports a real idle-client termination once and survives', { skip: skipLivePg }, async () => {
     const { attachPoolErrorListener } =
       await import('../../src/adapters/drizzle/pool-error-listener.ts');

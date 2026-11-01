@@ -16190,10 +16190,11 @@ data, how `transaction()` tells the work's own errors from the driver's, and how
 memoizes per entity without sharing a tenant- or transaction-scoped repository and while keeping the
 closed-service refusal.
 
-**Gate:** the X94-1 reproduction (kill the backend during an open Drizzle transaction) on a real
-PostgreSQL — the process lives and the request answers 503; the classifier table per driver; the
-versioned row added to `conditional-write-conformance.test.ts` across all eight adapters and a
-transaction table as data; the 409 Problem Details field by field; and the database benchmark
+**Gate:** the X94-1 reproduction (kill the backend while a Drizzle transaction is open and idle) on
+a real PostgreSQL — the process lives and the request answers 503 (a kill landing on an in-flight
+statement answers 503 or 504, never a crash); the classifier table per driver; the versioned row
+added to `conditional-write-conformance.test.ts` across all eight adapters and a transaction table
+as data; the 409 Problem Details field by field; and the database benchmark
 (`~/setu-benchmarks/2026-10-31-db/`) re-run for the X94-3 before/after.
 
 ---

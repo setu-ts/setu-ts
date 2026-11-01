@@ -294,3 +294,45 @@ describe('tenant repository', () => {
     expect(capturedId).toEqual('prod-1');
   });
 });
+
+describe('tenant repository conditional members (M128)', () => {
+  const base = {
+    findAll: () => Promise.resolve([]),
+    findById: () => Promise.resolve(null),
+    find: () => Promise.resolve([]),
+    create: () => Promise.resolve({}),
+    update: () => Promise.resolve(null),
+    delete: () => Promise.resolve(false),
+  };
+
+  it('omits updateWhere and deleteWhere when the store has none', () => {
+    const repo = new TenantRepository(base as unknown as ITenantDataStore, 'tenant-a', 'User');
+    expect(repo.updateWhere).toBeUndefined();
+    expect(repo.deleteWhere).toBeUndefined();
+  });
+
+  it('delegates them with the captured tenant and entity, bound to the store', async () => {
+    const calls: unknown[][] = [];
+    class Store {
+      readonly #name = 'store';
+      updateWhere(...args: unknown[]): Promise<unknown> {
+        calls.push([this.#name, 'updateWhere', ...args]);
+        return Promise.resolve({ id: '1' });
+      }
+      deleteWhere(...args: unknown[]): Promise<boolean> {
+        calls.push([this.#name, 'deleteWhere', ...args]);
+        return Promise.resolve(true);
+      }
+    }
+    const store = Object.assign(new Store(), base) as unknown as ITenantDataStore;
+    const repo = new TenantRepository<{ id: string }>(store, 'tenant-a', 'User');
+    await expect(repo.updateWhere!('1', { version: 1 }, { title: 't' })).resolves.toEqual({
+      id: '1',
+    });
+    await expect(repo.deleteWhere!('1', { version: 2 })).resolves.toBe(true);
+    expect(calls).toEqual([
+      ['store', 'updateWhere', 'tenant-a', 'User', '1', { version: 1 }, { title: 't' }],
+      ['store', 'deleteWhere', 'tenant-a', 'User', '1', { version: 2 }],
+    ]);
+  });
+});

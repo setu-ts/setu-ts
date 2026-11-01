@@ -247,3 +247,63 @@ describe('memory tenant store', () => {
     });
   });
 });
+
+describe('memory tenant store conditional writes (M128)', () => {
+  it('updates and deletes only while the precondition matches, within the tenant', async () => {
+    const store = new MemoryTenantDataStore();
+    store.useIsolation(new ColumnPerTenant('org_id'));
+    const own = await store.create<{ id: string }>('a', 'Doc', {
+      id: 'd1',
+      title: 't',
+      version: 1,
+    });
+    await store.create('b', 'Doc', { id: 'd1', title: 'other', version: 1 });
+
+    expect(await store.updateWhere('a', 'Doc', own.id, { version: 2 }, { title: 'x' })).toBeNull();
+    expect(
+      await store.updateWhere(
+        'a',
+        'Doc',
+        own.id,
+        { version: 1 },
+        { title: 'v2', version: 2, org_id: 'b' },
+      ),
+    ).toMatchObject({ id: 'd1', title: 'v2', version: 2, org_id: 'a' });
+    expect(
+      await store.updateWhere('a', 'Doc', 'missing', { version: 1 }, { title: 'x' }),
+    ).toBeNull();
+    // Tenant b's row with the same id is untouched.
+    expect(await store.findById('b', 'Doc', 'd1')).toMatchObject({ title: 'other', version: 1 });
+
+    expect(await store.deleteWhere('a', 'Doc', own.id, { version: 1 })).toBe(false);
+    expect(await store.deleteWhere('a', 'Doc', own.id, { version: 2 })).toBe(true);
+    expect(await store.findById('a', 'Doc', 'd1')).toBeNull();
+    expect(await store.findById('b', 'Doc', 'd1')).not.toBeNull();
+  });
+
+  it('refuses an invalid precondition and one naming the tenant column', async () => {
+    const store = new MemoryTenantDataStore();
+    store.useIsolation(new ColumnPerTenant('org_id'));
+    await store.create('a', 'Doc', { id: 'd1', version: 1 });
+    expect(() => store.updateWhere('a', 'Doc', 'd1', {}, { title: 'x' })).toThrow(TypeError);
+    expect(() => store.updateWhere('a', 'Doc', 'd1', { version: 1 }, {})).toThrow(TypeError);
+    let refusal: unknown;
+    try {
+      store.deleteWhere('a', 'Doc', 'd1', { org_id: 'a' });
+    } catch (error) {
+      refusal = error;
+    }
+    expect(refusal).toBeInstanceOf(TypeError);
+    expect((refusal as Error).message).not.toContain('org_id');
+    expect(await store.findById('a', 'Doc', 'd1')).toMatchObject({ version: 1 });
+  });
+
+  it('accepts any key under a strategy without a tenant column', async () => {
+    const store = new MemoryTenantDataStore();
+    store.useIsolation(new SchemaPerTenant());
+    await store.create('a', 'Doc', { id: 'd1', org_id: 'x', version: 1 });
+    expect(
+      await store.updateWhere('a', 'Doc', 'd1', { org_id: 'x' }, { version: 2 }),
+    ).toMatchObject({ version: 2 });
+  });
+});

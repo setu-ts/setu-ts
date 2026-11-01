@@ -89,8 +89,13 @@ tenant: localization's `tenantLocale` at 45, and any cache, rate-limit or featur
 for the session check that also handles late resolution.
 
 `ITenantRepository` offers `findAll()`, `findById`, `find(filter)`, `create`, `update`, and
-`delete`; it has no paging, ordering or expression-filter options. For those, use `IDatabaseService`
-repositories and scope every operation to the verified tenant yourself:
+`delete`, plus `updateWhere(id, where, data)` and `deleteWhere(id, where)` when the configured store
+supports conditional writes (the shipped memory store and `createDatabaseTenantDataStore()` both do,
+since 0.12.0). Those combine your `where` with the tenant into one precondition, so
+`updateVersioned(tenantRepository, id, version, data)` from `@setu-ts/database-plugin` gives
+optimistic locking on the tenant path; a `where` naming the tenant column is refused. It has no
+paging, ordering or expression-filter options. For those, use `IDatabaseService` repositories and
+scope every operation to the verified tenant yourself:
 
 - **Reads:** filter on the tenant column (`findOne({ where: { id, tenantId } })`), never
   `findById(id)` with a client-supplied id.

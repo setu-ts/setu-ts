@@ -618,6 +618,93 @@ export class DatabaseTimeoutError extends Error {
 }
 
 /**
+ * Thrown by {@linkcode updateVersioned} and {@linkcode deleteVersioned} when
+ * the record exists but its version no longer matches the one the caller
+ * read: another write changed it in between (M128). Nothing was written.
+ *
+ * The condition reaches the client as `409 Conflict`. The served `detail` is
+ * a fixed sentence; the entity, when the caller named it, is on
+ * {@linkcode VersionConflictError.entity} and in the logged `message`, and no
+ * id or version value appears in either.
+ *
+ * @example
+ * ```typescript
+ * import { updateVersioned, VersionConflictError } from '@setu-ts/database-plugin';
+ * try {
+ *   await updateVersioned(repo, id, body.version, { title: body.title }, { entity: 'Article' });
+ * } catch (err) {
+ *   if (err instanceof VersionConflictError) {
+ *     // Reload the record and let the user reapply the change.
+ *   }
+ * }
+ * ```
+ * @since 0.12.0
+ */
+export class VersionConflictError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'VersionConflictError';
+
+  /** The entity the write targeted, when the caller named it. */
+  readonly entity: string | undefined;
+
+  /**
+   * @param message - The full diagnostic, safe to log, never served
+   * @param options - The entity the write targeted
+   */
+  constructor(message: string, options?: { entity?: string }) {
+    super(message);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      ...CONFLICT,
+      detail: 'The record was changed after it was read. Reload it and try again.',
+    });
+  }
+}
+
+/**
+ * Thrown by {@linkcode updateVersioned} and {@linkcode deleteVersioned} when
+ * the record does not exist (M128). Nothing was written.
+ *
+ * The condition reaches the client as `404 Not Found`, with a fixed served
+ * `detail`; the entity, when named, is on
+ * {@linkcode EntityNotFoundError.entity} and in the logged `message`.
+ *
+ * @example
+ * ```typescript
+ * import { deleteVersioned, EntityNotFoundError } from '@setu-ts/database-plugin';
+ * try {
+ *   await deleteVersioned(repo, id, version);
+ * } catch (err) {
+ *   if (err instanceof EntityNotFoundError) {
+ *     // Already gone.
+ *   }
+ * }
+ * ```
+ * @since 0.12.0
+ */
+export class EntityNotFoundError extends Error {
+  /** Discriminant for consumers that cannot use `instanceof` across realms. */
+  override readonly name = 'EntityNotFoundError';
+
+  /** The entity the write targeted, when the caller named it. */
+  readonly entity: string | undefined;
+
+  /**
+   * @param message - The full diagnostic, safe to log, never served
+   * @param options - The entity the write targeted
+   */
+  constructor(message: string, options?: { entity?: string }) {
+    super(message);
+    this.entity = options?.entity;
+    withHttpStatusHint(this, {
+      status: 404,
+      title: 'Not Found',
+      detail: 'The record does not exist.',
+    });
+  }
+}
+
+/**
  * A registered Drizzle table lacks a repository key column.
  * This configuration fault has no HTTP status hint.
  * @since 0.11.0

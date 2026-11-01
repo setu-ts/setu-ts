@@ -3,6 +3,7 @@
  *
  * @module
  */
+import { checkWritePrecondition, type WritePrecondition } from '@setu-ts/common';
 import type { ITenantDataStore, ITenantIsolationStrategy } from '../interfaces/index.ts';
 import type { MemoryTenantDataStoreOptions } from '../interfaces/index.ts';
 
@@ -173,6 +174,80 @@ export class MemoryTenantDataStore implements ITenantDataStore {
   delete<Id>(tenantId: string, entity: string, id: Id): Promise<boolean> {
     const scope = this.deriveScope(tenantId);
     return Promise.resolve(this.peekEntityMap(scope, entity)?.delete(String(id)) ?? false);
+  }
+
+  /**
+   * Updates the tenant's record only while every `where` member equals the
+   * stored value (M128). The match and the write run in one synchronous step,
+   * so no other call can interleave. A tenant column in `data` is ignored.
+   *
+   * @throws {TypeError} For an invalid precondition or payload, or a `where`
+   *   naming the tenant column
+   */
+  updateWhere<E, Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+    data: Readonly<Record<string, unknown>>,
+  ): Promise<E | null> {
+    const checked = this.checkedPrecondition(where, data);
+    if (!this.matches(tenantId, entity, id, checked.where)) return Promise.resolve(null);
+    const column = this.tenantColumn();
+    const payload: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(checked.data ?? {})) {
+      if (key !== column) payload[key] = value;
+    }
+    return this.update<E, Id>(tenantId, entity, id, payload);
+  }
+
+  /**
+   * Deletes the tenant's record only while every `where` member equals the
+   * stored value, in one synchronous step.
+   *
+   * @throws {TypeError} As {@linkcode updateWhere}
+   */
+  deleteWhere<Id>(
+    tenantId: string,
+    entity: string,
+    id: Id,
+    where: WritePrecondition,
+  ): Promise<boolean> {
+    const checked = this.checkedPrecondition(where);
+    if (!this.matches(tenantId, entity, id, checked.where)) return Promise.resolve(false);
+    return this.delete<Id>(tenantId, entity, id);
+  }
+
+  /** The column a `'column'` strategy stamps, or `undefined` for the other strategies. */
+  private tenantColumn(): string | undefined {
+    return this.isolationStrategy?.kind === 'column'
+      ? this.isolationStrategy.getTenantColumn()
+      : undefined;
+  }
+
+  /** Validates the precondition (and payload) and refuses one naming the tenant column. */
+  private checkedPrecondition(
+    where: WritePrecondition,
+    data?: Readonly<Record<string, unknown>>,
+  ): { where: WritePrecondition; data: Record<string, unknown> | undefined } {
+    // The one-argument form checks the predicate alone; a delete has no payload.
+    const checked =
+      data === undefined ? checkWritePrecondition(where) : checkWritePrecondition(where, data);
+    if (!checked.ok) throw new TypeError(checked.problem);
+    const column = this.tenantColumn();
+    if (column !== undefined && Object.hasOwn(checked.where, column)) {
+      throw new TypeError(
+        'A tenant-scoped precondition must not name the tenant column; the store sets it.',
+      );
+    }
+    return checked;
+  }
+
+  /** Whether the tenant's stored record exists and equals `where` on every member. */
+  private matches<Id>(tenantId: string, entity: string, id: Id, where: WritePrecondition): boolean {
+    const row = this.peekEntityMap(this.deriveScope(tenantId), entity)?.get(String(id));
+    if (row === undefined) return false;
+    return Object.entries(where).every(([key, value]) => row[key] === value);
   }
 
   close(): Promise<void> {
