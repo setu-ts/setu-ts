@@ -244,9 +244,19 @@ provider cannot be detected, set `options.provider` explicitly.
 read, and tell a lost race (`409`) from a missing record (`404`) for you:
 
 ```typescript
-import { updateVersioned, deleteVersioned } from '@setu-ts/database-plugin';
+import type { HandlerResult, IRequestContext } from '@setu-ts/common';
+import { updateVersioned, type IDatabaseService } from '@setu-ts/database-plugin';
 
-router.put('/articles/:id', async (ctx) => {
+interface Article {
+  id: string;
+  title: string;
+  version: number;
+}
+
+export async function editArticle(
+  ctx: IRequestContext,
+  db: IDatabaseService,
+): Promise<HandlerResult> {
   const body = (await ctx.request.json()) as { title: string; version: number };
   const repo = db.getRepository<Article>('Article');
   // Writes { title, version: body.version + 1 } only while version === body.version.
@@ -254,7 +264,7 @@ router.put('/articles/:id', async (ctx) => {
     title: body.title,
   });
   return ctx.response.json(article);
-});
+}
 ```
 
 - A stale version throws `VersionConflictError` (`409 Conflict`, "The record was changed after it
