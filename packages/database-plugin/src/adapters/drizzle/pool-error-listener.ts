@@ -51,7 +51,8 @@ export function attachPoolErrorListener(
   if (!instrumentedPools.has(client)) {
     instrumentedPools.add(client);
     emitter.on('acquire', (checkedOut) => instrumentCheckedOutClient(checkedOut, warn));
-    emitter.on('release', (_error, released) => releaseCheckedOutClient(released));
+    // pg-pool emits `release(err, client)`; mysql2's pool emits `release(connection)`.
+    emitter.on('release', (first, second) => releaseCheckedOutClient(second ?? first));
   }
   if (emitter.listenerCount('error') !== 0) return false;
   emitter.on('error', (error) =>

@@ -110,6 +110,27 @@ describe('DatabaseTenantDataStore conditional writes', () => {
     });
   });
 
+  it('uses the validated copy of the precondition, never a second read of the caller object', async () => {
+    const { store } = await makeStore();
+    const own = await store.create<Article>('a', 'Article', { title: 'mine', version: 1 });
+    // A Proxy that shows `{ version: 1 }` to the first full read and adds the
+    // tenant column on every read after it.
+    let reads = 0;
+    const shifting = new Proxy({ version: 1 } as Record<string, string | number>, {
+      ownKeys: (target) => (reads++ === 0 ? Reflect.ownKeys(target) : ['version', 'tenant_id']),
+      getOwnPropertyDescriptor: (target, key) =>
+        key === 'tenant_id'
+          ? { value: 'b', enumerable: true, configurable: true, writable: true }
+          : Reflect.getOwnPropertyDescriptor(target, key),
+      get: (target, key) => (key === 'tenant_id' ? 'b' : Reflect.get(target, key)),
+      has: (target, key) => key === 'tenant_id' || Reflect.has(target, key),
+    });
+    const updated = await store.updateWhere<Article, string>('a', 'Article', own.id, shifting, {
+      title: 'edited',
+    });
+    expect(updated).toMatchObject({ title: 'edited', tenant_id: 'a' });
+  });
+
   it('refuses an empty precondition rather than writing unconditionally (audit O2)', async () => {
     const { store } = await makeStore();
     const own = await store.create<Article>('a', 'Article', { title: 'mine', version: 1 });

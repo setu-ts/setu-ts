@@ -327,7 +327,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     where: WritePrecondition,
     data: Readonly<Record<string, unknown>>,
   ): Promise<E | null> {
-    const col = this.#precondition(entity, where);
+    const { col, where: checked } = this.#precondition(entity, where);
     const stripped: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(data)) {
       if (key !== col) stripped[key] = value;
@@ -336,7 +336,7 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     if (repo.updateWhere === undefined) throw conditionalWriteRefusal('updateWhere');
     const updated = await repo.updateWhere(
       id as EntityKey,
-      { ...where, [col]: tenantId },
+      { ...checked, [col]: tenantId },
       stripped,
     );
     if (updated === null) return null;
@@ -361,19 +361,23 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
     id: Id,
     where: WritePrecondition,
   ): Promise<boolean> {
-    const col = this.#precondition(entity, where);
+    const { col, where: checked } = this.#precondition(entity, where);
     const repo = this.#repo(entity);
     if (repo.deleteWhere === undefined) throw conditionalWriteRefusal('deleteWhere');
-    return await repo.deleteWhere(id as EntityKey, { ...where, [col]: tenantId });
+    return await repo.deleteWhere(id as EntityKey, { ...checked, [col]: tenantId });
   }
 
   /**
    * The tenant column for a conditional write, refusing a caller precondition
    * that names it — under its resolved property or its configured column —
    * since the store sets that member itself. The refusal does not echo the
-   * column name.
+   * column name. Everything after the check reads the checker's copy, never
+   * the caller's object again, so what was validated is what is written.
    */
-  #precondition(entity: string, where: WritePrecondition): string {
+  #precondition(
+    entity: string,
+    where: WritePrecondition,
+  ): { readonly col: string; readonly where: WritePrecondition } {
     // Checked BEFORE the tenant column joins it: an empty caller precondition
     // would otherwise become a plain tenant-scoped write (M128 audit O2).
     const checked = checkWritePrecondition(where);
@@ -385,14 +389,17 @@ export class DatabaseTenantDataStore implements ITenantDataStore {
       );
     }
     const col = this.#column(entity);
-    if (Object.hasOwn(where, col) || Object.hasOwn(where, this.#configuredTenantColumn())) {
+    if (
+      Object.hasOwn(checked.where, col) ||
+      Object.hasOwn(checked.where, this.#configuredTenantColumn())
+    ) {
       throw new UnsupportedQueryFeatureError(
         'write-precondition',
         'database-plugin',
         'A tenant-scoped precondition must not name the tenant column; the store sets it.',
       );
     }
-    return col;
+    return { col, where: checked.where };
   }
 }
 

@@ -66,6 +66,21 @@ describe('attachPoolErrorListener', () => {
     }
     expect(() => pool.emit('release', undefined, new EventEmitter())).not.toThrow();
   });
+  it('removes the listener on a mysql2-style release that passes only the connection', () => {
+    const pool = new EventEmitter();
+    attachPoolErrorListener({ $client: pool }, () => {});
+    const connection = new EventEmitter();
+    pool.emit('acquire', connection);
+    expect(connection.listenerCount('error')).toBe(1);
+    // mysql2's pool emits `release(connection)`; pg-pool emits `release(err, client)`.
+    pool.emit('release', connection);
+    expect(connection.listenerCount('error')).toBe(0);
+    // A pg release carrying an error still names the client second.
+    const client = new EventEmitter();
+    pool.emit('acquire', client);
+    pool.emit('release', new Error('broken'), client);
+    expect(client.listenerCount('error')).toBe(0);
+  });
   it('instruments checkouts even when the application owns the pool listener', () => {
     const pool = new EventEmitter();
     pool.on('error', () => {});
