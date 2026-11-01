@@ -225,8 +225,12 @@ full-stack option, and prints the exact configuration when it already exists or 
 edited. An absent `docker/compose.yaml` is created for a standalone selection; an existing one is
 preserved. The connection variable is appended to the project's dotenv file (with its local default)
 and to that file's `.example` (empty) — the rows `setu new --broker` writes — only where the file
-exists and does not already assign it; a file the project does not have is named, not created.
-Without a selection the full-stack starter uses memory. Changing an existing value is a manual edit.
+exists and does not already assign it; a file the project does not have is named, not created. The
+file is the `envFilePath` that `setu.config.ts` declares (the last entry of an array, which
+ConfigPlugin overrides with the earlier ones). When the configuration declares none, or names it in
+a form the CLI cannot read (a variable, a template literal), nothing is written and the command says
+where to set the variable instead. Without a selection the full-stack starter uses memory. Changing
+an existing value is a manual edit.
 
 #### Choosing the Redis client
 

@@ -457,6 +457,51 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     expect(h.out.join('\n')).toContain('Added REDIS_URL to config/app.env.example.');
   });
 
+  it('writes the last listed file of an array, and guesses no file it cannot read', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const retarget = async (h: ReturnType<typeof harness>, value: string): Promise<string> => {
+      const config = h.read('/app/portal/setu.config.ts');
+      expect(config).toContain("envFilePath: '.env'");
+      await h.fs.writeFile(
+        '/app/portal/setu.config.ts',
+        new TextEncoder().encode(config.replace("envFilePath: '.env'", value)),
+      );
+      return h.read('/app/portal/.env');
+    };
+
+    // ConfigPlugin lets an earlier file override a later one: the last is the base.
+    const listed = await scaffold();
+    await retarget(listed, "envFilePath: ['.env.local', '.env']");
+    expect(await listed.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(listed.read('/app/portal/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(listed.out.join('\n')).toContain('Added REDIS_URL to .env and .env.example.');
+
+    for (const [value, reason] of [
+      ['envFilePath: process.env.ENV_FILE', 'names its dotenv file in a form the CLI cannot read'],
+      ["envFileOptional: true, other: '.env'", 'loads no dotenv file (no envFilePath)'],
+    ] as const) {
+      const h = await scaffold();
+      const before = await retarget(h, value);
+      const example = h.read('/app/portal/.env.example');
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+      expect(h.read('/app/portal/.env')).toBe(before);
+      expect(h.read('/app/portal/.env.example')).toBe(example);
+      expect(h.out.join('\n')).toContain(
+        `setu.config.ts ${reason}; set REDIS_URL where the app reads it.`,
+      );
+      expect(h.out.join('\n')).not.toContain('Added REDIS_URL');
+    }
+  });
+
   it('names the files it could not find instead of creating them', async () => {
     const h = harness();
     expect(

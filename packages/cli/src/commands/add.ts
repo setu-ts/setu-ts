@@ -30,6 +30,7 @@ import type { IFileSystem } from '@setu-ts/common';
 import { deriveNames, escapeName, isKebabIdentifier } from '../utils/names.ts';
 import type { ParsedArgs } from '../args.ts';
 import {
+  CONFIG_MODULE,
   EXIT_ERROR,
   EXIT_INTERRUPTED,
   EXIT_OK,
@@ -48,7 +49,7 @@ import {
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
-import { configuredEnvFilePath } from '../templates/env-file.ts';
+import { envFileDeclaration } from '../templates/env-file.ts';
 import type { EnvVariable } from '../templates/registry.ts';
 import {
   brokerComposeFiles,
@@ -1737,23 +1738,35 @@ export async function runAddCommand(
     // The dotenv pair `setu new --broker` writes, appended here only where the
     // variable is absent: an existing value (or a file the project removed) is the
     // developer's, and a re-add finds the row and writes nothing.
-    const envFile = (configSource && configuredEnvFilePath(configSource)) || '.env';
+    // The file the app loads, read from its configuration: the last listed one,
+    // because ConfigPlugin lets an earlier file override a later one, so a value
+    // written there never shadows one the developer set. A project with no
+    // configuration keeps the `.env` convention; a configuration that loads no
+    // dotenv file, or names it in a way the CLI cannot read, gets no guess.
+    const declaration =
+      configSource === undefined
+        ? ({ kind: 'paths', paths: ['.env'] } as const)
+        : envFileDeclaration(configSource);
+    const envFile =
+      declaration.kind === 'paths' ? declaration.paths[declaration.paths.length - 1] : undefined;
     const updated: string[] = [];
     const lacking: string[] = [];
-    for (const [file, value] of [
-      [envFile, localDefault],
-      [`${envFile}.example`, ''],
-    ] as const) {
-      const path = joinPath(dir, file);
-      const text = await readExistingText(deps.fs, path);
-      if (text === undefined) {
-        lacking.push(file);
-        continue;
+    if (envFile !== undefined) {
+      for (const [file, value] of [
+        [envFile, localDefault],
+        [`${envFile}.example`, ''],
+      ] as const) {
+        const path = joinPath(dir, file);
+        const text = await readExistingText(deps.fs, path);
+        if (text === undefined) {
+          lacking.push(file);
+          continue;
+        }
+        const appended = withEnvVariable(text, brokerEnvVariables(selected), value);
+        if (appended === undefined) continue;
+        edits.push({ path, contents: appended });
+        updated.push(file);
       }
-      const appended = withEnvVariable(text, brokerEnvVariables(selected), value);
-      if (appended === undefined) continue;
-      edits.push({ path, contents: appended });
-      updated.push(file);
     }
     deps.log(`Connection: ${variable} (local default ${localDefault}).`);
     if (updated.length > 0) {
@@ -1762,6 +1775,13 @@ export async function runAddCommand(
     }
     if (lacking.length > 0) {
       deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
+    }
+    if (declaration.kind !== 'paths') {
+      deps.log(
+        declaration.kind === 'absent'
+          ? `  ${CONFIG_MODULE} loads no dotenv file (no envFilePath); set ${variable} where the app reads it.`
+          : `  ${CONFIG_MODULE} names its dotenv file in a form the CLI cannot read; set ${variable} where the app reads it.`,
+      );
     }
     const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
     const existingCompose = await readExistingText(deps.fs, composePath);

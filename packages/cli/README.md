@@ -739,9 +739,11 @@ Deno imports (run the printed install command). An absent generated full-stack o
 missing queue transport properties can merge with its processors. Existing values and unfamiliar
 configs receive the exact property to configure manually. With no transport the starter uses memory.
 `add` appends the connection variable to the project's existing dotenv file (local default) and its
-`.example` (empty) only where neither assigns it, preserves existing Compose files, and creates
-broker Compose files only when the project has none. When `docker/compose.yaml` exists without the
-selected broker's service, it prints the service block to add.
+`.example` (empty) only where neither assigns it — the file is the `envFilePath` in `setu.config.ts`
+(an array's last entry), and nothing is guessed when that declaration is absent or not a literal
+path — preserves existing Compose files, and creates broker Compose files only when the project has
+none. When `docker/compose.yaml` exists without the selected broker's service, it prints the service
+block to add.
 
 `setu add react-router` refuses projects without a full-stack factory or existing ReactRouterPlugin.
 Use `setu new <name> --template full-stack` or `setu generate app <name> --template full-stack` in a
