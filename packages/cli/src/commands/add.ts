@@ -46,6 +46,7 @@ import {
   resolveDir,
   writeFiles,
 } from '../utils/file-writer.ts';
+import { isMissingPath } from '../utils/filesystem-errors.ts';
 import { frameworkSpecifier } from '../templates/framework-specifier.ts';
 import { BROKER_COMPOSE_FILE, cliInvocation, resolveHost } from '../templates/project-files.ts';
 import { MINIMAL_HOST } from '../templates/minimal.ts';
@@ -1671,9 +1672,15 @@ export async function runAddCommand(
   const installing = edits.length > 0;
 
   let configSource: string | undefined;
+  // The configuration as read, kept apart from `configSource`: a wiring step that
+  // throws below leaves the text known, and a read that fails for any reason but
+  // absence is not mistaken for a project without a configuration.
+  let configText: string | undefined;
+  let configUnreadable = false;
   let configRetargeted = false;
   try {
     const config = new TextDecoder().decode(await deps.fs.readFile(configPath));
+    configText = config;
     // An import map that points a framework name elsewhere makes the configuration's
     // imports mean something its text does not say: no automatic wiring then.
     configRetargeted = await frameworkImportsRetargeted(deps.fs, dir);
@@ -1693,9 +1700,10 @@ export async function runAddCommand(
         : wired;
     if (imported !== undefined) edits.push({ path: configPath, contents: imported });
     configSource = imported ?? config;
-  } catch {
+  } catch (cause) {
     // `setu add` remains useful for non-scaffolded projects. A missing config
     // simply has no generated ingress composition to activate.
+    configUnreadable = configText === undefined && !isMissingPath(cause);
   }
 
   // The barrels exist whether or not the config could be rewritten: the printed
@@ -1744,9 +1752,11 @@ export async function runAddCommand(
     // configuration keeps the `.env` convention; a configuration that loads no
     // dotenv file, or names it in a way the CLI cannot read, gets no guess.
     const declaration =
-      configSource === undefined
-        ? ({ kind: 'paths', paths: ['.env'] } as const)
-        : envFileDeclaration(configSource);
+      configText !== undefined
+        ? envFileDeclaration(configText)
+        : configUnreadable
+          ? ({ kind: 'unread' } as const)
+          : ({ kind: 'paths', paths: ['.env'] } as const);
     const envFile =
       declaration.kind === 'paths' ? declaration.paths[declaration.paths.length - 1] : undefined;
     const updated: string[] = [];
@@ -1757,7 +1767,8 @@ export async function runAddCommand(
         [`${envFile}.example`, ''],
       ] as const) {
         const path = joinPath(dir, file);
-        const text = await readExistingText(deps.fs, path);
+        const text = await readProjectText(deps, path, file);
+        if (text === null) return EXIT_ERROR;
         if (text === undefined) {
           lacking.push(file);
           continue;
@@ -1777,14 +1788,17 @@ export async function runAddCommand(
       deps.log(`  No ${lacking.join(' or ')} here; set ${variable} where the app reads it.`);
     }
     if (declaration.kind !== 'paths') {
-      deps.log(
+      const reason =
         declaration.kind === 'absent'
-          ? `  ${CONFIG_MODULE} loads no dotenv file (no envFilePath); set ${variable} where the app reads it.`
-          : `  ${CONFIG_MODULE} names its dotenv file in a form the CLI cannot read; set ${variable} where the app reads it.`,
-      );
+          ? `${CONFIG_MODULE} loads no dotenv file (no envFilePath)`
+          : declaration.kind === 'unread'
+            ? `${CONFIG_MODULE} could not be read`
+            : `${CONFIG_MODULE} names its dotenv file in a form the CLI cannot read`;
+      deps.log(`  ${reason}; set ${variable} where the app reads it.`);
     }
     const composePath = joinPath(dir, BROKER_COMPOSE_FILE);
-    const existingCompose = await readExistingText(deps.fs, composePath);
+    const existingCompose = await readProjectText(deps, composePath, BROKER_COMPOSE_FILE);
+    if (existingCompose === null) return EXIT_ERROR;
     // Every file is create-only: an existing Compose file is never rewritten, so a
     // service it lacks is printed for the developer to add (PR #519 review).
     for (const file of brokerComposeFiles([selected])) {
@@ -2076,6 +2090,24 @@ export function withEnvVariable(
   const newline = text.includes('\r\n') ? '\r\n' : '\n';
   const separator = text === '' || text.endsWith('\n') ? '' : newline;
   return `${text}${separator}${newline}# ${variable.description}${newline}${variable.name}=${value}${newline}`;
+}
+
+/**
+ * An existing project file's text, `undefined` when it is absent, or `null` after
+ * reporting why it cannot be used (unreadable, not UTF-8, over 1 MiB), so the
+ * command fails with its error code before anything is written.
+ */
+async function readProjectText(
+  deps: AddCommandDependencies,
+  path: string,
+  name: string,
+): Promise<string | undefined | null> {
+  try {
+    return await readExistingText(deps.fs, path);
+  } catch (cause) {
+    deps.error(`Cannot read ${escapeName(name)}: ${escapeName(String(cause))}`);
+    return null;
+  }
 }
 
 /** An add is successful even when its advisory brief reminder cannot be read. */

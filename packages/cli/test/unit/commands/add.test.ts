@@ -502,6 +502,73 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
     }
   });
 
+  it('fails before writing when a dotenv or Compose file cannot be read, and guesses no file for an unreadable config', async () => {
+    const scaffold = async (): Promise<ReturnType<typeof harness>> => {
+      const h = harness();
+      expect(
+        await runNewCommand(
+          parseArgs(['portal', '--runtime', 'node', '--template', 'full-stack']),
+          { fs: h.fs, cwd: '/app', log: () => {}, error: () => {} },
+        ),
+      ).toBe(0);
+      return h;
+    };
+    const denying = (h: ReturnType<typeof harness>, denied: string): void => {
+      const readFile = h.fs.readFile.bind(h.fs);
+      h.fs.readFile = (path: string) =>
+        path === denied ? Promise.reject(new Error('EACCES: permission denied')) : readFile(path);
+    };
+
+    for (const [denied, name] of [
+      ['/app/portal/.env', '.env'],
+      ['/app/portal/.env.example', '.env.example'],
+    ] as const) {
+      const h = await scaffold();
+      await h.fs.writeFile(
+        '/app/portal/docker/compose.yaml',
+        new TextEncoder().encode('services: {}\n'),
+      );
+      const config = h.read('/app/portal/setu.config.ts');
+      const manifest = h.read('/app/portal/package.json');
+      denying(h, denied);
+      expect(await h.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+      expect(h.err).toEqual([`Cannot read ${name}: Error: EACCES: permission denied`]);
+      // Nothing of the edit plan was written.
+      expect(h.read('/app/portal/setu.config.ts')).toBe(config);
+      expect(h.read('/app/portal/package.json')).toBe(manifest);
+    }
+
+    const compose = await scaffold();
+    await compose.fs.writeFile(
+      '/app/portal/docker/compose.yaml',
+      new TextEncoder().encode('services: {}\n'),
+    );
+    denying(compose, '/app/portal/docker/compose.yaml');
+    expect(await compose.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(1);
+    expect(compose.err).toEqual([
+      'Cannot read docker/compose.yaml: Error: EACCES: permission denied',
+    ]);
+
+    // A configuration that exists but cannot be read is not an absent one: no `.env` guess.
+    const config = await scaffold();
+    const env = config.read('/app/portal/.env');
+    denying(config, '/app/portal/setu.config.ts');
+    expect(await config.run(['queue', '--queue', 'redis', '--dir', '/app/portal'])).toBe(0);
+    expect(config.read('/app/portal/.env')).toBe(env);
+    expect(config.out.join('\n')).toContain(
+      'setu.config.ts could not be read; set REDIS_URL where the app reads it.',
+    );
+  });
+
+  it('keeps the .env convention for a project with no configuration', async () => {
+    const h = harness({ '/app/package.json': '{}', '/app/.env': 'A=1\n' });
+    expect(await h.run(['queue', '--queue', 'redis'])).toBe(0);
+    expect(h.read('/app/.env')).toMatch(/^REDIS_URL=redis:\/\/127\.0\.0\.1:6379$/m);
+    expect(h.out.join('\n')).toContain(
+      'No .env.example here; set REDIS_URL where the app reads it.',
+    );
+  });
+
   it('names the files it could not find instead of creating them', async () => {
     const h = harness();
     expect(
