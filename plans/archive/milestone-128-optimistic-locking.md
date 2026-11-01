@@ -1,7 +1,8 @@
 # Milestone 128 — Optimistic locking, and the database plugin under faults (`@setu-ts/database-plugin`)
 
-> **Status:** Planning. Branch: `feat/m128-optimistic-locking`. `develop` and `main` are protected —
-> all work (implementation + fixes) stays on this one branch until it merges via a single PR.
+> **Status:** Complete (archived). Branch: `feat/m128-optimistic-locking`. `develop` and `main` are
+> protected — all work (implementation + fixes) stays on this one branch until it merges via a
+> single PR.
 
 ## 0. Objective & scope
 
