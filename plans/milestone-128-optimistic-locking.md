@@ -385,6 +385,85 @@ guarded suites ran.
   `benchmark-scope-ask-first`).
 - Fail-without-fix for X94-1, V11-5 and X94-3's identity test.
 
+## 8a. Design security review
+
+> Added after implementation, before the committed-tree audit: the plan as first written named no
+> audit and carried no review, although the tenant-path change crosses the tenancy boundary and the
+> pool listener adds a log line. Written by the planner; the audit runs in a fresh context against
+> it.
+
+- **Reviewed flows:**
+  - **F1 — tenant-scoped conditional write.** An HTTP request whose tenant the multi-tenancy
+    middleware resolved reaches an application handler, which calls `updateWhere` / `deleteWhere` or
+    `updateVersioned` / `deleteVersioned` on the tenant repository; `TenantRepository` delegates to
+    `DatabaseTenantDataStore` (over `IDatabaseService`) or `MemoryTenantDataStore`. The request
+    controls the record id, the precondition values (typically the version from the body) and the
+    update payload's fields and values.
+  - **F2 — versioned-write refusal.** A stale or missing record produces `VersionConflictError` /
+    `EntityNotFoundError`, served by `errorHandler` as Problem Details and logged.
+  - **F3 — checked-out connection error.** A pg client checked out by a Drizzle transaction emits
+    `'error'`; the plugin's listener logs it at `warn` through `describeError`.
+  - **F4 — driver error classification.** A driver rejection (now including Prisma's
+    `meta.driverAdapterError.cause`) is read by `classifyDriverError` and served as a fixed-detail
+    `503` / `504`, the scrubbed driver error kept as `cause`.
+  - **F5 — transaction work errors.** An error the caller's transaction work throws reaches the
+    caller unclassified (only scrubbed).
+  - **F6 — shared outer repository.** `getRepository(entity)` returns one instance per entity for
+    every request and every tenant.
+- **Assets:** another tenant's rows (confidentiality, integrity, existence); the tenant column's
+  integrity (a row must never move between tenants); record ids and version values (not served in a
+  refusal's body); bound statement values, credentials and SQL inside driver errors (never served,
+  never logged unscrubbed); log integrity; process availability.
+- **Attackers:** an authenticated user of tenant A sending arbitrary ids, preconditions and payloads
+  (including the tenant column, `__proto__`, numeric strings, values of the wrong type); a database
+  server or network that fails, terminates connections, or returns hostile error text; an
+  application handler that passes request input into a repository call as documented.
+- **Budgets:** one `warn` per `'error'` event of a checked-out client (no request can trigger one
+  without a database fault); `checkedOutListeners` holds at most one entry per client currently
+  checked out (removed on `'release'`, weakly held); `_repositories` holds one entry per distinct
+  entity name the application passes to `getRepository` — entity names are application constants,
+  and a build that throws (an unknown Drizzle or Prisma entity) caches nothing; no new numeric
+  option is added.
+- **Audit obligations:**
+  1. With two tenants holding rows under the SAME id and version, prove tenant A's `updateWhere`,
+     `deleteWhere`, `updateVersioned` and `deleteVersioned` never change or remove tenant B's row,
+     on `DatabaseTenantDataStore` (memory backend, and real PostgreSQL through Drizzle) and on
+     `MemoryTenantDataStore`; positive control: tenant B's own call succeeds.
+  2. Prove the tenant column cannot be set through `data` (stripped) or named in `where` (refused,
+     message without the column name) — under its resolved property AND its configured column name
+     when the two differ (a Drizzle table whose property is not the column name); positive control:
+     a precondition on another field applies.
+  3. Prove a cross-tenant `updateVersioned` / `deleteVersioned` answers `404`, the same as a missing
+     id, never `409`: no existence oracle across tenants.
+  4. Plant canaries in the record id, the version values, the payload and the entity name, and prove
+     their absence from the `409` / `404` body (`instance` excepted, which is the request path);
+     show the logged line carries no payload value.
+  5. Plant canaries in a driver error's message, `cause` chain and Prisma `meta`, and in a
+     transaction work error; prove none reaches a response body, and that CR/LF/NUL in a checked-out
+     client's error text cannot split the `warn` line.
+  6. Drive hostile values into the precondition and payload on both tenant stores (`__proto__`,
+     `constructor` keys, getters that throw, a revoked `Proxy`, non-finite numbers) and into
+     `classifyDriverError`'s Prisma `meta` path; expected: refused or ignored, never a crash or a
+     widened match.
+  7. Prove a shared outer repository leaks nothing between requests: concurrent tenant A and B
+     operations through `DatabaseTenantDataStore` each see only their rows; positive control: each
+     sees its own.
+  8. Show the pg listener cannot be made to keep a client's listener after release, and that the
+     process survives a terminated backend during an open transaction (live PostgreSQL).
+
+| Threat                                                         | Resolution                                                                                                                             |
+| -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Tenant A writes tenant B's row through a matching precondition | §3.7: the tenant column joins the caller's `where` as one precondition, set LAST in the spread                                         |
+| A row moved between tenants through the payload                | §3.7: the tenant column is stripped from `data` on both stores; the Database store post-checks the returned row's tenant               |
+| The precondition overrides or widens the tenant predicate      | §3.7: a `where` naming the tenant column (property or configured column) is refused before any write                                   |
+| A racy ownership check                                         | §3.7: no check-then-write fallback on the conditional path; a source without conditional writes answers `501`                          |
+| Cross-tenant existence oracle through 409 vs 404               | §3.5: the miss is re-read through the same tenant-scoped `findById`, so a foreign row reads as absent                                  |
+| Ids, versions or entity in a served body                       | §3.6: fixed `detail`; the entity is only on `.entity` and in the logged `message`                                                      |
+| Driver text, SQL or bound values served or logged              | Classified errors serve fixed sentences; causes are scrubbed (`scrubDriverError`); work errors are scrubbed, never reclassified (§3.3) |
+| Log injection through a terminated connection's error          | §3.1: the listener logs `describeError(error)`, which collapses control characters                                                     |
+| Process exit on a lost transaction connection                  | §3.1: every checked-out client carries an `'error'` listener                                                                           |
+| State shared across requests by the cached repository          | §3.4: repositories are stateless; the one stateful diagnostic (Dynamo access path) is not cached while logging                         |
+
 ## 8. Risks & mitigations
 
 - **A message anchor drifts with a driver release** → every message anchor is matched exactly and
