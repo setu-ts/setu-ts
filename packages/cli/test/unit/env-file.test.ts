@@ -69,6 +69,24 @@ describe('configuredEnvFilePath', () => {
     expect(configuredEnvFilePath(`{ url: 'redis://host', envFilePath: 'app.env' } // note`)).toBe(
       'app.env',
     );
+    // Comment markers inside a string literal are not comments.
+    expect(
+      configuredEnvFilePath(
+        `const marker = "foo//bar"; ConfigPlugin({ envFilePath: ".env.local" })`,
+      ),
+    ).toBe('.env.local');
+    expect(
+      configuredEnvFilePath(`const glob = 'src/*'; ConfigPlugin({ envFilePath: 'app.env' }) // */`),
+    ).toBe('app.env');
+    expect(
+      configuredEnvFilePath(
+        "const t = `a//b ${1}`; const q = 'it\\'s //'; ({ envFilePath: \"q.env\" })",
+      ),
+    ).toBe('q.env');
+    // An unterminated comment or string ends the scan without throwing.
+    expect(configuredEnvFilePath(`{ envFilePath: 'a.env' } /* open`)).toBe('a.env');
+    expect(configuredEnvFilePath(`{ envFilePath: 'a.env' }; const s = 'open`)).toBe('a.env');
+    expect(configuredEnvFilePath(`{ envFilePath: 'a.env' } // last line`)).toBe('a.env');
   });
 
   it('returns a valid multi-segment path, leaving the move decision to the caller', () => {

@@ -86,11 +86,45 @@ export function configuredEnvFilePath(configSource: string): string | undefined 
   // Either quote style: a formatter configured for double quotes rewrites the
   // generated single-quoted literal, and the app still reads the same file.
   // Comments removed first, so a commented-out declaration (`// envFilePath: 'old.env'`)
-  // never wins over the active one. `://` inside a string is not a line comment.
-  const active = configSource.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:\\])\/\/.*$/gm, '$1');
+  // never wins over the active one.
+  const active = withoutComments(configSource);
   const configured = /\benvFilePath:\s*(?:'([^']+)'|"([^"]+)")/.exec(active);
   const path = configured?.[1] ?? configured?.[2];
   if (path === undefined) return undefined;
   const parsed = readEnvFilePath({ 'env-file': path });
   return parsed.ok ? parsed.path : undefined;
+}
+
+/**
+ * The source with its `//` and `/* *\/` comments removed and every string
+ * literal kept intact, so a `//` or `/*` inside a quoted string (a URL, a glob)
+ * is not read as a comment. One linear pass; a template literal is treated as a
+ * string up to its closing backtick.
+ *
+ * @param source - TypeScript source text
+ * @returns The source without comments
+ */
+function withoutComments(source: string): string {
+  let out = '';
+  let index = 0;
+  while (index < source.length) {
+    const char = source[index] as string;
+    const next = source[index + 1];
+    if (char === '/' && next === '/') {
+      const end = source.indexOf('\n', index);
+      index = end === -1 ? source.length : end;
+    } else if (char === '/' && next === '*') {
+      const end = source.indexOf('*/', index + 2);
+      index = end === -1 ? source.length : end + 2;
+    } else if (char === "'" || char === '"' || char === '`') {
+      let end = index + 1;
+      while (end < source.length && source[end] !== char) end += source[end] === '\\' ? 2 : 1;
+      out += source.slice(index, end + 1);
+      index = end + 1;
+    } else {
+      out += char;
+      index += 1;
+    }
+  }
+  return out;
 }
