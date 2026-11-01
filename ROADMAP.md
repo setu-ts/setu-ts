@@ -16403,10 +16403,25 @@ run in parallel after M132. M135 is independent of M133 and M134. M136 builds on
 five changes a required member of a published interface — new contract members are optional, per the
 versioning policy below — so each can ship in a patch release.
 
-**Facts newer than the survey's sources are re-read at plan time.** The MCP `2026-07-28` revision
-(stateless transport, no `Mcp-Session-Id`) and the v2 server SDK's handler signature postdate some
-of the material the survey relied on; M133's plan reads both from the specification text and the SDK
-source before relying on them (the repository rule).
+**MCP facts verified from primary sources on 2026-11-01**, because the `2026-07-28` revision and the
+v2 SDK are newer than some of the survey's material. From the specification
+(`modelcontextprotocol.io/specification/2026-07-28`, its changelog, transport, lifecycle and
+authorization pages): protocol-level sessions, the `Mcp-Session-Id` header and the `initialize`
+handshake are removed; every request carries an `MCP-Protocol-Version` header (plus `Mcp-Method`,
+and `Mcp-Name` on `tools/call`), and a version the server does not support answers 400 with an
+`UnsupportedProtocolVersionError`; the transport is a single POST endpoint, the GET stream is gone
+(legacy GET/DELETE SHOULD answer 405) and `Last-Event-ID` resumption is not supported; servers MUST
+publish RFC 9728 metadata, MUST validate that a token's audience is themselves and MUST NOT accept
+or transit other tokens; `insufficient_scope` is a SHOULD; Dynamic Client Registration is deprecated
+in favour of Client ID Metadata Documents. From the published `@modelcontextprotocol/server@2.4.0`
+manifest and the SDK source: `createMcpHandler(factory, options)` builds a server per request and
+returns `{ fetch(request, { authInfo?, parsedBody? }), close, … }`; `authInfo` is pass-through only
+— the SDK never reads it from headers — and a tool callback reads it as `ctx.http?.authInfo`, with
+its abort signal at `ctx.mcpReq.signal`; `registerTool` takes a Standard Schema (Zod 4 works); the
+modern path serves `2026-07-28` and the `legacy: 'stateless' | 'reject'` option (default
+`'stateless'`) serves `2025-11-25` and older; the request body is capped at 4 MiB by default; zod
+`^4.2.0` is a hard dependency and there are no peers. The README names Node, Bun and Deno; Workers
+has a `workerd` export condition but is unproven until M133's gate runs there.
 
 ---
 
@@ -16438,7 +16453,7 @@ user cannot be told apart from the user, because nothing reads the RFC 8693 `act
 3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and the plan
    decides whether the configured resource identifier is required among them by default. A token
    minted for another resource is refused; Setu never forwards an inbound token to an upstream
-   service (MCP forbids token passthrough).
+   service (the MCP authorization page: servers "MUST NOT accept or transit any other tokens").
 4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
    bounded, and a guard option that refuses or requires delegated tokens per route.
 5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata
@@ -16474,28 +16489,34 @@ GET bodies.
 
 1. **One stateless endpoint,** `POST /mcp` registered as an ordinary kernel route so global
    middleware (tenant resolution, rate limiting, request logging) runs on it, served by the official
-   v2 server SDK (`@modelcontextprotocol/server`, web Request/Response) as an optional peer, lazily
-   imported and awaited inside a `try`/`catch`. The plan verifies the `2026-07-28` transport and the
-   handler signature from source first, and decides what the plugin answers a client speaking an
-   older revision.
+   v2 server SDK (`@modelcontextprotocol/server`, `createMcpHandler`) as an optional peer, lazily
+   imported and awaited inside a `try`/`catch`. The plan decides whether pre-`2026-07-28` clients
+   are served (`legacy: 'stateless'`) or refused (`'reject'`), and how the per-request server
+   factory stays cheap: tool definitions and their JSON Schemas are built once at registration
+   (AI_GUIDELINES §14), and the factory only binds them.
 2. **Tools are declared by hand and opt-in:** a name, a model-facing description and required
    scopes, bound to an existing route; the input schema derives from the route's validation
    metadata, and a route with none is refused at registration. Nothing is exposed automatically —
    every maintained integration the survey read declares tools explicitly, and auto-exposing every
    route is the pattern their docs warn against. The plan decides whether CQRS commands are a second
    binding target or wait for the command registry to carry schemas.
-3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant,
-   via a new public entry on `IApplication` that carries an `AbortSignal` and allows a streamed body
-   (optional member, per the versioning policy). Guards, validation, idempotency and audit run
-   exactly as for an HTTP caller; nothing re-implements them.
+3. **In-process dispatch through the route's own pipeline** as the verified principal and tenant.
+   The plugin maps the request's verified principal to the SDK's `authInfo` itself (the SDK takes it
+   only as a pass-through argument), and a tool call reaches its route via a new public entry on
+   `IApplication` that receives the SDK's `ctx.mcpReq.signal` that carries an `AbortSignal` and
+   allows a streamed body (optional member, per the versioning policy). Guards, validation,
+   idempotency and audit run exactly as for an HTTP caller; nothing re-implements them.
 4. **The tool list is filtered** by what the caller's scopes and route guards allow, so a tool the
-   caller cannot call is not advertised; a call to it is still refused by the route.
+   caller cannot call is not advertised; a call to it is still refused by the route. A missing scope
+   answers M132's `insufficient_scope` challenge; the plan reads the SDK's per-tool `scopeChallenge`
+   option and decides whether the plugin uses it or answers before the SDK sees the call.
 5. **Errors:** a route's Problem Details response maps to an MCP tool error carrying only what the
    redaction seam lets through; a thrown internal error never reaches the model with its stack or
    message.
-6. **Retries:** a stateless client retries with a new request id, so a tool bound to a
-   non-idempotent route is refused at registration unless the route is behind the idempotency plugin
-   or the declaration says it is safe to repeat.
+6. **Retries:** with no sessions and no stream resumption, a response lost mid-call cannot be
+   recovered, so a client that wants the result calls again. A tool bound to a non-idempotent route
+   is therefore refused at registration unless the route is behind the idempotency plugin or the
+   declaration says it is safe to repeat.
 7. **Not in this milestone:** resources and prompts beyond what the plan shows a consumer for, the
    authorization server (M132 is resource-server only), and a tool registry that refuses
    untrusted-input + private-data + outbound-action compositions (the "lethal trifecta"). That
