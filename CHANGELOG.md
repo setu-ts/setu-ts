@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Optimistic locking (M128, `@setu-ts/database-plugin`, `@setu-ts/common`,
+- **Optimistic locking (M128, #540, `@setu-ts/database-plugin`, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`).** `updateVersioned(repo, id, expectedVersion, data, options?)`
   and `deleteVersioned(repo, id, expectedVersion, options?)` write only while the record still
   carries the expected version, setting it to `expectedVersion + 1`, and throw the new
@@ -55,26 +55,28 @@ All notable changes to this project are documented here. The format follows
 - **database-plugin:** a connection lost while a Drizzle × PostgreSQL transaction was open no longer
   exits the process. pg-pool leaves a checked-out client without an `'error'` listener, so a
   terminated backend raised an unhandled `'error'` event; every checked-out client now gets one
-  (logged at `warn`), and the transaction answers `503` (X94-1, M128).
+  (logged at `warn`), and the transaction answers `503` (X94-1, M128; #540).
 - **database-plugin:** outage-time driver errors that answered a masked `500` are classified, each
   measured on the real engine: node-postgres `57P01` and "not queryable" → `503`, "Connection
   terminated unexpectedly" → `504`; Prisma `P1001`, `P2028` and the driver code under
   `P2039`/`P2010` (`57P01`; mariadb `45028`, `45013`, `1053` → `503`, `45009` → `504`); mysql2
   `ER_SERVER_SHUTDOWN` → `503`, `PROTOCOL_CONNECTION_LOST` → `504`; libsql `SQLITE_BUSY` → `503`;
   MongoDB `MongoWaitQueueTimeoutError`, `MongoPoolClearedError` and `NotWritablePrimary` → `503`
-  (X94-2, M128).
+  (X94-2, M128; #540).
 - **database-plugin:** `IDatabaseService.transaction()` no longer classifies an error its own work
   throws, so a refused HTTP call inside an inbox handler is reported as itself rather than as
-  `DatabaseUnavailableError`. Repository calls inside the work are still classified (V11-5, M128).
+  `DatabaseUnavailableError`. Repository calls inside the work are still classified (V11-5, M128;
+  #540).
 - **database-plugin, multi-tenancy-plugin:** a refused conditional-write precondition or payload
   (`UnsupportedQueryFeatureError` with feature `'write-precondition'`: an empty or non-scalar
   `where`, an invalid expected version, a payload that sets the version field, a tenant-scoped
   precondition naming the tenant column) answers `400 Bad Request` with the fixed detail "The write
   precondition or its payload is invalid." instead of a masked `500` logged at error level.
   `MemoryTenantDataStore`'s refusals reject rather than throwing synchronously, and both tenant
-  stores refuse an empty precondition (M128 security audit).
+  stores refuse an empty precondition (M128 security audit; #540).
 - **database-plugin:** `getRepository()` returns one repository per entity instead of rebuilding its
-  data source and wrapper on every call, the cost behind the measured point-read gap (X94-3, M128).
+  data source and wrapper on every call, the cost behind the measured point-read gap (X94-3, M128;
+  #540).
 
 - **cli:** `setu add messaging --broker <arm>` and `setu add queue --queue <arm>` on an existing
   standalone project now append the connection variable (for example `REDIS_URL`) to the project's
