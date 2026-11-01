@@ -53,13 +53,14 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 
 ## 2. Committed-doc conflicts — resolved here, shipped as named doc deliverables
 
-| #   | Conflict                                                                                                                       | Resolution (picked side)                                                         | Doc deliverable (same PR)                                                                  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| C1  | queue-plugin README / CHANGELOG / upgrading (M119b): "a stopped broker still reads `down` at once" vs the shipped `up`/unknown | The docs' promise wins (§3.1).                                                   | No doc change needed beyond the CHANGELOG `Fixed` entry; the README sentence becomes true. |
-| C2  | Upgrading (M119b): "A mail outage no longer fails `/ready`" vs `notification` still failing it                                 | The docs win (§3.2).                                                             | notification README: readiness membership and how to opt in.                               |
-| C3  | `docs/cli.md`: "Each Redis-backed plugin gets its own client" vs four `add` commands that cannot wire one                      | The docs win (§3.3).                                                             | `docs/cli.md` gains the new arm flags.                                                     |
-| C4  | Generated `.env` comment ("deployments set the real endpoint here") vs a value nothing reads                                   | The comment wins (§3.4); container images keep reading the platform environment. | Comment rewritten to say what reads it.                                                    |
-| C5  | Telemetry README / card promise ioredis spans vs none for the plugins' clients                                                 | The docs win, with the preload (§3.7).                                           | Telemetry README section "ESM applications: the preload"; card lists `redis`.              |
+| #   | Conflict                                                                                                                                                                        | Resolution (picked side)                                                         | Doc deliverable (same PR)                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| C1  | queue-plugin README / CHANGELOG / upgrading (M119b): "a stopped broker still reads `down` at once" vs the shipped `up`/unknown                                                  | The docs' promise wins (§3.1).                                                   | No doc change needed beyond the CHANGELOG `Fixed` entry; the README sentence becomes true. |
+| C2  | Upgrading (M119b): "A mail outage no longer fails `/ready`" vs `notification` still failing it                                                                                  | The docs win (§3.2).                                                             | notification README: readiness membership and how to opt in.                               |
+| C3  | `docs/cli.md`: "Each Redis-backed plugin gets its own client" vs four `add` commands that cannot wire one                                                                       | The docs win (§3.3).                                                             | `docs/cli.md` gains the new arm flags.                                                     |
+| C4  | Generated `.env` comment ("deployments set the real endpoint here") vs a value nothing reads                                                                                    | The comment wins (§3.4); container images keep reading the platform environment. | Comment rewritten to say what reads it.                                                    |
+| C5  | Telemetry README / card promise ioredis spans vs none for the plugins' clients                                                                                                  | The docs win, with the preload (§3.7).                                           | Telemetry README section "ESM applications: the preload"; card lists `redis`.              |
+| C6  | ROADMAP's M131a package list omits `auth-plugin`, whose rate-limit store also skips the reporter for an injected client (`auth-plugin/src/stores/redis-rate-limit-store.ts:93`) | `auth-plugin` joins the letter for §3.5 only.                                    | ROADMAP M131a package list gains `auth-plugin`.                                            |
 
 ## 3. Design decisions
 
@@ -88,9 +89,11 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 - **Why:** the M119b rule: an indicator over a dependency every replica shares stays out of
   readiness, since draining all replicas cannot fix it. Every notification channel is such a
   dependency, not only email.
-- **Test home:** `notification-plugin/test/integration/readiness.test.ts`: a failing channel makes
-  `/health` report `notification: down` while `/ready` answers 200; with the health override naming
-  `notification`, `/ready` answers 503.
+- **Test home:** `notification-plugin/test/integration/readiness.test.ts` (adds
+  `@setu-ts/health-plugin` as a devDependency, regenerated with
+  `node scripts/node-manifests.ts --write`): a failing channel makes `/health` report
+  `notification: down` while `/ready` answers 200; with the health override naming `notification`,
+  `/ready` answers 503.
 
 ### 3.3 X88-1 — `setu add` puts every Redis-backed plugin on the project's Redis client
 
@@ -109,7 +112,11 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   4. `--redis-client` on `add` stays accepted only with a Redis arm flag, and is refused when it
      disagrees with the inferred client (exit 2, naming both).
 - **Why:** the docs promise one client per plugin; a project must not drift to a second Redis
-  driver. Flags mirror the plugin options so the generated call reads like the flag.
+  driver. Flags mirror the plugin options so the generated call reads like the flag. Compared before
+  fixing them: `nest add`, `rails generate`, `artisan make:*` and `ng add` have no per-backend arm
+  flag to copy (they install a package and leave wiring to options or prompts), so the precedent is
+  this CLI's own `setu add messaging --broker` / `setu add queue --queue` (M121), which name the
+  plugin option the same way.
 - **Test home:** `cli/test/unit/add-redis-arms.test.ts` (each flag × client renders the expected
   call and dependency; disagreement refused); `cli/test/e2e` scaffold case:
   `setu new --broker redis --redis-client node-redis`, then the four adds and
@@ -157,6 +164,11 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   rewrapped: it keeps its name and gains the 504 hint itself.
 - **Why:** a masked 500 tells a client nothing, and the X88-5 runs showed every 500'd job was
   applied; a 504 with that wording tells a retrying client to use an idempotency key.
+- **Measurement gate (implementation step 1):** before the table is fixed, record the thrown
+  `name`/`code`/message of `queue.add`, a backplane publish and a messaging publish on both clients
+  against a stopped server (a closed port) and a paused one, using the throwaway `x88-redis*`
+  containers (never `he-redis`, which is shared). Only measured shapes enter the table; anything
+  unrecognised passes through unchanged.
 - **Test home:** `common/test/unit/backend-fault.test.ts` (the classification as a data table);
   per-plugin unit cases asserting the wrapped class and `cause`; an integration test through
   `errorHandler` asserting the 503/504 Problem Details field by field; guarded real-Redis pause test
@@ -171,7 +183,9 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   `--import ./instrumentation.mjs` in the Node start scripts and the Node production image `CMD`.
   `setu add telemetry` adds `@opentelemetry/instrumentation` as a direct dependency so the hook
   resolves from the project root under any package manager. The telemetry README documents the
-  preload for hand-written projects. No plugin imports `node:module`.
+  preload for hand-written projects. No plugin imports `node:module`. Node only: Deno and Bun
+  scripts are unchanged, since OpenTelemetry's auto-instrumentation records `unsupported platform`
+  there anyway.
 - **Why:** measured (x88-io, 2026-11-02): with `--import` of that preload a bare
   `await import('ioredis')` is wrapped; without it, not; with the hook package missing, the app
   starts and nothing is wrapped. The hook registered before the driver import is what makes a bare
@@ -187,7 +201,11 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 ### 3.8 X88-7 — the Redis Streams poll runs outside any request context
 
 - **Decision:** the broker starts one poll timer and one reclaim timer in `connect()` (startup, no
-  active span) that serve every subscription; `subscribe()` only registers the subscription.
+  active span) that serve every subscription; `subscribe()` only registers the subscription. Each
+  subscription keeps its own in-flight guard, stop flag and drain, so a slow subscription still
+  skips only its own tick, and a subscription added after start is served by the running timers.
+  `connect()` runs inside the plugin's `register()`
+  (`messaging-plugin/src/plugin/messaging-plugin.ts:517`), so the timers carry no request context.
 - **Why:** a timer created inside `subscribe()` inherits the caller's async context, so a handler
   that subscribes lazily parented thousands of poll spans to one request. Creating the timers at
   connect time needs no runtime API.
@@ -206,9 +224,11 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 
 - **Decision:** (a) the default redaction policy in `common` masks URL userinfo in every string
   value (`scheme://user:password@host` → `scheme://***@host`), so logs, traces and audit records are
-  covered by the one seam; (b) the generated `main.ts` catches a failed `app.start()`, writes one
-  line (`describeError` passed through the same masking) to stderr and sets `process.exitCode = 1`
-  (Deno: `Deno.exitCode`), instead of Node's default printer dumping the error's `input`.
+  covered by the one seam. The rule is one linear pattern with no backtracking, applied to string
+  values only and within the redaction seam's existing size bounds, because it runs on every logged
+  string; (b) the generated `main.ts` catches a failed `app.start()`, writes one line
+  (`describeError` passed through the same masking) to stderr and sets `process.exitCode = 1` (Deno:
+  `Deno.exitCode`), instead of Node's default printer dumping the error's `input`.
 - **Why:** the URL is configuration, often holding a password; a malformed one must fail loudly
   without echoing it.
 - **Test home:** `common/test/unit/redaction-url-userinfo.test.ts` (table: credentials masked;
@@ -256,18 +276,18 @@ Ships in minor `0.12.0`.
 
 ## 5. Implementation files
 
-| File                                                                                                                                                       | Purpose                           |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| `queue-plugin/src/adapters/redis-queue.ts`, `queue-plugin/src/services/queue-service.ts`                                                                   | §3.1, §3.6, §3.11                 |
-| `notification-plugin/src/plugin/notification-plugin.ts`                                                                                                    | §3.2                              |
-| `cli/src/commands/add.ts`, `cli/src/templates/{broker,node-redis,project-files,full-stack-build-files}.ts`, a new `cli/src/templates/telemetry-preload.ts` | §3.3, §3.4, §3.7, §3.10b, §3.12   |
-| `cache`, `idempotency`, `realtime-backplane`, `scheduler`, `messaging`, `queue`, `auth` plugin client setup                                                | §3.5 reporter on injected clients |
-| `common/src/redis/node-redis-adapter.ts`                                                                                                                   | §3.5 first-connect rejection      |
-| `common/src/errors/backend-fault.ts` (new), `common/src/index.ts`                                                                                          | §3.6                              |
-| `messaging-plugin/src/brokers/redis-streams-broker.ts`, `messaging-plugin/src/errors.ts`                                                                   | §3.6, §3.8                        |
-| `realtime-backplane-plugin/src/transports/redis-backplane.ts`                                                                                              | §3.6                              |
-| `common/src/redaction/{redactors,policy}.ts`                                                                                                               | §3.10a                            |
-| READMEs, agent cards, `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, `docs/cli.md`                                                                  | §2 deliverables, §3.9             |
+| File                                                                                                                                                                                                                                                                                                                                                                                                                 | Purpose                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| `queue-plugin/src/adapters/redis-queue.ts`, `queue-plugin/src/services/queue-service.ts`                                                                                                                                                                                                                                                                                                                             | §3.1, §3.6, §3.11                 |
+| `notification-plugin/src/plugin/notification-plugin.ts`                                                                                                                                                                                                                                                                                                                                                              | §3.2                              |
+| `cli/src/commands/add.ts`, `cli/src/templates/{broker,node-redis,project-files,full-stack-build-files}.ts`, `cli/src/workspace/compose.ts` (image `CMD` preload), a new `cli/src/templates/telemetry-preload.ts`                                                                                                                                                                                                     | §3.3, §3.4, §3.7, §3.10b, §3.12   |
+| `cache-plugin/src/stores/redis-store.ts`, `idempotency-plugin/src/stores/redis-client.ts`, `realtime-backplane-plugin/src/transports/redis-backplane.ts`, `scheduler-plugin/src/lock/redis-lock.ts`, `messaging-plugin/src/brokers/redis-streams-broker.ts`, `queue-plugin/src/adapters/redis-queue.ts`, `auth-plugin/src/stores/redis-rate-limit-store.ts` (each returns an injected client before attaching today) | §3.5 reporter on injected clients |
+| `common/src/redis/node-redis-adapter.ts`                                                                                                                                                                                                                                                                                                                                                                             | §3.5 first-connect rejection      |
+| `common/src/errors/backend-fault.ts` (new), `common/src/index.ts`                                                                                                                                                                                                                                                                                                                                                    | §3.6                              |
+| `messaging-plugin/src/brokers/redis-streams-broker.ts`, `messaging-plugin/src/errors.ts`                                                                                                                                                                                                                                                                                                                             | §3.6, §3.8                        |
+| `realtime-backplane-plugin/src/transports/redis-backplane.ts`                                                                                                                                                                                                                                                                                                                                                        | §3.6                              |
+| `common/src/redaction/{redactors,policy}.ts`                                                                                                                                                                                                                                                                                                                                                                         | §3.10a                            |
+| READMEs, agent cards, `PUBLIC_API.md`, `CHANGELOG.md`, `docs/upgrading.md`, `docs/cli.md`                                                                                                                                                                                                                                                                                                                            | §2 deliverables, §3.9             |
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
@@ -276,7 +296,7 @@ Ships in minor `0.12.0`.
 | `queue-plugin/test/unit/redis-queue-health.test.ts` (new) + `…/integration/redis-queue-health-real.test.ts` (new, guarded `REDIS_URL`) | `redis-queue.ts`                       | §3.1 table; closed port → `down`; live → `up`.                  |
 | `queue-plugin/test/unit/queue-loop-reporting.test.ts` (new)                                                                            | `queue-service.ts`                     | §3.11 counts; §3.6 `add` wrapping.                              |
 | `notification-plugin/test/integration/readiness.test.ts` (new)                                                                         | `notification-plugin.ts`               | §3.2 membership and override.                                   |
-| `cli/test/unit/{add-redis-arms,start-scripts,telemetry-preload,add-telemetry}.test.ts` (new), scaffold e2e cases                       | `add.ts`, templates                    | §3.3, §3.4, §3.7, §3.10b, §3.12.                                |
+| `cli/test/unit/{add-redis-arms,start-scripts,telemetry-preload,add-telemetry}.test.ts` (new), scaffold e2e cases                       | `add.ts`, templates, `compose.ts`      | §3.3, §3.4, §3.7, §3.10b, §3.12.                                |
 | per-plugin reporter tests (existing files, new injected-client cases)                                                                  | client setup in each plugin            | §3.5 one `warn` per state change for an injected client.        |
 | `common/test/unit/node-redis-adapter.test.ts` (existing) + guarded real boot                                                           | `node-redis-adapter.ts`                | §3.5 first-connect rejection.                                   |
 | `common/test/unit/backend-fault.test.ts` (new) + `common/test/integration/backend-fault-status.test.ts` (new)                          | `backend-fault.ts`                     | §3.6 table; 503/504 Problem Details field by field.             |
