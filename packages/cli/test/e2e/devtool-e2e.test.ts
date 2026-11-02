@@ -385,14 +385,21 @@ async function bootDev(
     stdout: 'piped',
     stderr: 'piped',
   });
+  // Drain both pipes from the start. `status` settles on Node's 'close', which
+  // waits for EOF on stdout and stderr; an unread stream stops pulling at its
+  // high-water mark, so a cold Deno cache's download lines left `stop()`
+  // awaiting a child that had already exited.
+  const drain = async (stream: ReadableStream<Uint8Array> | null): Promise<string> =>
+    stream ? await new Response(stream).text() : '';
+  const stdout = drain(child.stdout);
+  const stderr = drain(child.stderr);
   let exited = false;
   const exiting = child.status.then(() => {
     exited = true;
   });
   const outputOf = async (): Promise<string> => {
-    const { stdout, stderr } = await child.output();
-    const decoder = new TextDecoder();
-    return `${decoder.decode(stderr)}${decoder.decode(stdout)}`;
+    const [out, err] = await Promise.all([stdout, stderr, child.status]);
+    return `${err}${out}`;
   };
   const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
