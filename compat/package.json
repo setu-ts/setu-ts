@@ -61,7 +61,6 @@
     "@setu-ts/view-plugin": "latest",
     "@setu-ts/websocket-plugin": "latest",
     "@setu-ts/worker-pool-plugin": "latest",
-    "@setu-ts/mcp-plugin": "latest",
     "@modelcontextprotocol/server": "^2.4.0"
   }
 }
