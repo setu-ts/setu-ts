@@ -63,14 +63,15 @@ export function mergeInput(path: string, brands: ReadonlyMap<string, unknown>): 
     sources[name] = source;
   };
   const paramProperties = params === undefined ? {} : objectProperties(params);
-  for (const match of path.matchAll(/:([A-Za-z0-9_]+)/g)) {
+  for (const match of path.matchAll(/:([A-Za-z0-9_]+)(\?)?/g)) {
     const name = match[1]!;
     add(
       name,
       Object.hasOwn(paramProperties, name) ? paramProperties[name] : { type: 'string' },
       'path',
     );
-    required.add(name);
+    // The kernel's final `:name?` matches with or without the segment.
+    if (match[2] === undefined) required.add(name);
   }
   for (const [source, schema] of [
     ['query', query],
@@ -99,7 +100,10 @@ export function mergeInput(path: string, brands: ReadonlyMap<string, unknown>): 
       type: 'object',
       properties,
       required: [...required],
-      additionalProperties: body?.additionalProperties ?? false,
+      // Always closed: an argument with no path, query or body property has no
+      // destination in the inner request, so advertising extras would invite a
+      // call the dispatcher refuses.
+      additionalProperties: false,
       ...(defs === undefined ? {} : { $defs: defs }),
     },
     sources: Object.freeze(sources),

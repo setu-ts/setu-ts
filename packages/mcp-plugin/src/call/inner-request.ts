@@ -35,14 +35,20 @@ export async function innerRequest(
     if (source === 'path') {
       const text = String(value);
       if (text === '' || text === '.' || text === '..') throw new UnusableArgumentError();
-      path = path.replace(new RegExp(`:${name}(?=/|$)`, 'g'), encodeURIComponent(text));
+      // `name` comes from the bootstrap pattern scan (`[A-Za-z0-9_]+`), so the
+      // pattern is literal; the optional `?` covers the kernel's final `:name?`.
+      path = path.replace(new RegExp(`:${name}\\??(?=/|$)`, 'g'), encodeURIComponent(text));
     } else if (source === 'query') {
       for (const item of Array.isArray(value) ? value : [value]) query.append(name, String(item));
     } else if (source === 'body') body[name] = value;
     else throw new UnusableArgumentError();
   }
+  const required = Array.isArray(tool.schema.required) ? tool.schema.required : [];
   for (const [name, source] of Object.entries(tool.sources))
-    if (source === 'path' && !Object.hasOwn(args, name)) throw new UnusableArgumentError();
+    if (source === 'path' && !Object.hasOwn(args, name) && required.includes(name))
+      throw new UnusableArgumentError();
+  // An omitted optional final parameter drops its segment, as the route matches without it.
+  path = path.replace(/\/:[A-Za-z0-9_]+\?$/, '') || '/';
   const url = new URL(new URL(call.outer.request.url).origin + path);
   url.search = query.toString();
   const headers = new Headers();
@@ -55,9 +61,11 @@ export async function innerRequest(
   const hasBody =
     tool.hasBody && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(tool.declaration.route.method);
   if (hasBody) headers.set('content-type', 'application/json');
-  if (tool.idempotent)
+  if (tool.idempotencyKeyHeader !== undefined)
+    // The route's own key header (`Idempotency-Key` by default, or a configured
+    // name); set after forwarding so a caller-sent value is replaced.
     headers.set(
-      'idempotency-key',
+      tool.idempotencyKeyHeader,
       await idempotencyKey(tool.declaration.name, args, runtime.subtle),
     );
   return new Request(url, {

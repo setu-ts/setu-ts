@@ -1160,6 +1160,12 @@ export const IDEMPOTENCY_METADATA: unique symbol = Symbol.for('setu.idempotency.
 export interface RouteIdempotencyMetadata {
   /** The middleware deduplicates repeated calls. */
   readonly idempotent: true;
+  /**
+   * The request header the middleware reads its key from (`Idempotency-Key`
+   * unless configured otherwise). Absent when the key comes from a body field
+   * or a function, which an in-process caller such as mcp-plugin cannot supply.
+   */
+  readonly keyHeader?: string;
 }
 
 /** Brands a middleware in place, preserving its behavior and identity.
@@ -1197,7 +1203,8 @@ export function idempotencyMetadataOf(
   return typeof value === 'object' &&
     value !== null &&
     'idempotent' in value &&
-    value.idempotent === true
+    value.idempotent === true &&
+    (!('keyHeader' in value) || typeof value.keyHeader === 'string')
     ? (value as RouteIdempotencyMetadata)
     : undefined;
 }

@@ -12,6 +12,13 @@ npm install @setu-ts/mcp-plugin @modelcontextprotocol/server@^2.4.0
 # Deno: deno add npm:@setu-ts/mcp-plugin npm:@modelcontextprotocol/server@^2.4.0
 ```
 
+The walkthrough below also uses the kernel, runtime, auth, idempotency and validation packages and
+Zod v4:
+
+```bash
+npm install @setu-ts/kernel @setu-ts/runtime @setu-ts/auth-plugin @setu-ts/idempotency-plugin @setu-ts/validation-plugin zod
+```
+
 The SDK is an optional peer, loaded at bootstrap. A missing SDK fails startup with
 `OptionalDependencyUnavailableError` naming `@setu-ts/mcp-plugin`. Input/output schema conversion
 supports Zod `>=4.6.6 <5` through its public `toJSONSchema` API (tested with 4.6.6); Zod v3 is
@@ -167,17 +174,28 @@ re-enter the MCP endpoint.
 Tool output is untrusted model input; prompt-injection defence belongs to the agent host.
 
 Lists vary only by authentication and required OAuth scopes and have explicit private, zero-TTL
-cache hints. Roles, permissions and policy checks remain on the route; such a tool can be visible
-and still refuse a call. A hidden single call is answered 401/403 by the outer request's existing
-Bearer challenge middleware; an unknown name is the SDK's JSON-RPC -32602. Legacy batches cannot
-dispatch hidden tools because only visible tools are registered on their per-request server.
+cache hints. That filtering reads the route's branded guards (`requireAuth()`, `requireScopes()` and
+the other auth-plugin and decorator guards): a route that declares security only through
+`schema.security` passes the startup intent check but carries no brand, so its tool stays listed for
+every caller and its own enforcement decides the call. Roles, permissions and policy checks remain
+on the route; such a tool can be visible and still refuse a call. A hidden single call is answered
+401/403 by the outer request's existing Bearer challenge middleware; an unknown name is the SDK's
+JSON-RPC -32602. Legacy batches cannot dispatch hidden tools because only visible tools are
+registered on their per-request server.
 
 For branded routes the key is `mcp-` plus base64url SHA-256 of canonical JSON
 `[toolName, arguments]`. The idempotency plugin scopes the record by principal and tenant. Two
 intentional identical calls within its TTL replay too. Include a changing argument such as a client
-reference when a separate operation is intended. Forwarding credentials means JWT verification runs
-again on the inner call; issuer key sets remain cached. This trades additional verification work for
-the same HTTP controls.
+reference when a separate operation is intended. The derived key is sent in the header the route
+reads its key from (`Idempotency-Key`, or the header named in `idempotent({ key: { header } })`); a
+route whose key comes from a body field or a function refuses startup, because MCP cannot supply it.
+The replay guarantee is only as durable as the idempotency store: the default in-memory store is per
+process, so a retry that reaches another replica, or arrives after a restart, can run the handler
+again, and a call whose record could not be completed can run again once its lease expires. Use a
+shared store (see the idempotency plugin's README) for multi-replica deployments, and keep handlers
+safe to repeat where those windows matter. Forwarding credentials means JWT verification runs again
+on the inner call; issuer key sets remain cached. This trades additional verification work for the
+same HTTP controls.
 
 Node integration tests and one native Deno proof exercise list and call. The workerd condition has a
 bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is unproven until the

@@ -18,6 +18,8 @@ export interface CompiledTool extends InputSchema {
   readonly outputSchema?: JsonSchema;
   readonly outputValidator?: { safeParse(value: unknown): { readonly success: boolean } };
   readonly idempotent: boolean;
+  /** Header the route reads its idempotency key from; set when `idempotent`. */
+  readonly idempotencyKeyHeader?: string;
   readonly annotations: { readonly readOnlyHint: boolean; readonly idempotentHint: boolean };
   readonly authenticated: boolean;
   readonly requiredScopes: readonly string[];
@@ -50,17 +52,30 @@ export function compileTools(
         throw new McpPluginConfigurationError(`MCP route not registered: ${declaration.name}`);
       const brands = new Map<string, unknown>();
       let idempotent = false;
+      let idempotencyKeyHeader: string | undefined;
+      let unsuppliableKey = false;
       let authenticated = false;
       const scopes = new Set<string>();
       for (const middleware of route.definition.middleware ?? []) {
         const validation = validationMetadataOf(middleware);
         if (validation !== undefined) brands.set(validation.target, validation.schema);
-        idempotent ||= idempotencyMetadataOf(middleware) !== undefined;
+        const idempotency = idempotencyMetadataOf(middleware);
+        if (idempotency !== undefined) {
+          idempotent = true;
+          if (idempotency.keyHeader === undefined) unsuppliableKey = true;
+          else idempotencyKeyHeader = idempotency.keyHeader;
+        }
         const security = securityMetadataOf(middleware);
         authenticated ||= security?.authenticated === true;
         for (const scope of security?.scopes ?? []) scopes.add(scope);
       }
       const method = declaration.route.method;
+      // A body-field or function key source cannot be filled by the derived key,
+      // so a retry would run the handler again: refuse rather than lose safety.
+      if (unsuppliableKey)
+        throw new McpPluginConfigurationError(
+          `MCP cannot supply a body-field or function idempotency key: ${route.method} ${route.path}`,
+        );
       if (idempotent && !authenticated)
         throw new McpPluginConfigurationError(
           `MCP idempotency requires an authenticating security brand: ${route.method} ${route.path}`,
@@ -92,6 +107,7 @@ export function compileTools(
         schema: freezeSchema(input.schema),
         declaration,
         idempotent,
+        ...(idempotencyKeyHeader === undefined ? {} : { idempotencyKeyHeader }),
         authenticated,
         requiredScopes: Object.freeze([...scopes].sort()),
         annotations: Object.freeze({

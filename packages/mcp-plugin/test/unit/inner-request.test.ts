@@ -92,6 +92,7 @@ it('uses query scalars, sends DELETE bodies when branded, and derives branded ke
   const c = {
     ...tool({ middleware }, { ...declaration, route: { method: 'DELETE', path: '/items/:id' } }),
     idempotent: true,
+    idempotencyKeyHeader: 'Idempotency-Key',
   };
   const r = await innerRequest(
     c,
@@ -106,4 +107,34 @@ it('uses query scalars, sends DELETE bodies when branded, and derives branded ke
   const get = await innerRequest(tool(), { id: 'x' }, call, new AbortController().signal, runtime);
   expect(get.headers.has('content-type')).toBe(false);
   expect(get.body).toBeNull();
+});
+
+it('fills a final optional path parameter, or drops its segment when omitted', async () => {
+  const c = tool({}, { ...declaration, route: { method: 'GET', path: '/items/:id?' } });
+  const given = await innerRequest(c, { id: 'a b' }, call, new AbortController().signal, runtime);
+  expect(new URL(given.url).pathname).toBe('/items/a%20b');
+  const omitted = await innerRequest(c, {}, call, new AbortController().signal, runtime);
+  expect(new URL(omitted.url).pathname).toBe('/items');
+});
+
+it("sends the derived key in the route's own header, replacing a caller-sent value", async () => {
+  const c = {
+    ...tool(
+      { middleware: [validate('body', z.object({ x: z.string() }))] },
+      { ...declaration, route: { method: 'PUT', path: '/items' } },
+    ),
+    idempotent: true,
+    idempotencyKeyHeader: 'X-Request-Key',
+  };
+  const outer = {
+    outer: createTestContext({
+      request: {
+        url: 'https://api.test/mcp',
+        headers: new Headers({ 'x-request-key': 'caller-chosen' }),
+      },
+    }),
+  };
+  const r = await innerRequest(c, { x: 'y' }, outer, new AbortController().signal, runtime);
+  expect(r.headers.get('x-request-key')).toMatch(/^mcp-/);
+  expect(r.headers.get('idempotency-key')).toBeNull();
 });

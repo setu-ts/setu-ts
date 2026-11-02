@@ -68,7 +68,7 @@ describe('tool compiler', () => {
       value: 'body',
     });
     expect(compiled.schema.required).toEqual(['id', 'q', 'tags', 'value']);
-    expect(compiled.schema.additionalProperties).toBeDefined();
+    expect(compiled.schema.additionalProperties).toBe(false);
     expect(Object.isFrozen(compiled.schema)).toBe(true);
     expect((compiled.schema.properties as Record<string, unknown>).id).toMatchObject({
       minLength: 2,
@@ -152,12 +152,57 @@ describe('tool compiler', () => {
           middleware: [
             ...middleware,
             withSecurityMetadata<MiddlewareFunction>(() => {}, { authenticated: true }),
-            withIdempotencyMetadata<MiddlewareFunction>(() => {}, { idempotent: true }),
+            withIdempotencyMetadata<MiddlewareFunction>(() => {}, {
+              idempotent: true,
+              keyHeader: 'Idempotency-Key',
+            }),
           ],
         },
         decl,
       ).idempotent,
     ).toBe(true);
+  });
+  it('advertises a closed schema even when the body schema allows extra properties', () => {
+    const middleware = [validate('body', z.object({ value: z.string() }).loose())];
+    expect(tool({ middleware }, post).schema.additionalProperties).toBe(false);
+  });
+  it('treats a final optional path parameter as not required', () => {
+    const compiled = tool({}, { ...declaration, route: { method: 'GET', path: '/items/:id?' } });
+    expect(compiled.sources).toEqual({ id: 'path' });
+    expect(compiled.schema.required).toEqual([]);
+  });
+  it('records the idempotency key header and refuses a key MCP cannot supply', () => {
+    const auth = withSecurityMetadata<MiddlewareFunction>(() => {}, { authenticated: true });
+    const body = validate('body', z.object({ value: z.string() }));
+    const decl = { ...declaration, route: { ...declaration.route, method: 'POST' as const } };
+    const custom = tool(
+      {
+        middleware: [
+          auth,
+          body,
+          withIdempotencyMetadata<MiddlewareFunction>(() => {}, {
+            idempotent: true,
+            keyHeader: 'X-Request-Key',
+          }),
+        ],
+      },
+      decl,
+    );
+    expect(custom.idempotencyKeyHeader).toBe('X-Request-Key');
+    // A body-field or function key source leaves no header in the brand: a retry
+    // through MCP would run the handler again, so startup refuses it.
+    expect(() =>
+      tool(
+        {
+          middleware: [
+            auth,
+            body,
+            withIdempotencyMetadata<MiddlewareFunction>(() => {}, { idempotent: true }),
+          ],
+        },
+        { ...decl, repeatable: true },
+      ),
+    ).toThrow('cannot supply a body-field or function idempotency key');
   });
   it.each(['GET', 'PUT', 'DELETE'] as const)('derives annotations for %s', (method) => {
     const c = tool(
@@ -180,7 +225,7 @@ describe('tool compiler', () => {
     'refuses idempotency without an authenticating brand, even with schema security: %s',
     (authenticated) => {
       const middleware: MiddlewareFunction[] = [
-        withIdempotencyMetadata(() => {}, { idempotent: true }),
+        withIdempotencyMetadata(() => {}, { idempotent: true, keyHeader: 'Idempotency-Key' }),
       ];
       if (authenticated !== undefined)
         middleware.push(withSecurityMetadata(() => {}, { authenticated }));

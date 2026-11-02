@@ -20,15 +20,16 @@ All notable changes to this project are documented here. The format follows
   Common's `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata` and
   `mcpToolMetadataOf` share the marker across both styles. Names are 1–64 characters; every marked
   or listed route must declare security intent, and ambiguous or empty tool sets refuse startup.
-  Idempotency-branded tools require an authenticating security brand. `allowedOrigins` must list
-  every browser UI origin, including same-origin UIs. Common adds optional `IApplication.dispatch`
-  and `DispatchOptions`, implemented by the kernel with IP, abort and streaming support.
-  `DispatchOptions.route` pins the registered route pattern before route middleware runs.
-  `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and
-  `idempotencyMetadataOf` describe both HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY`
-  moves to common without changing its value. `setu add mcp` installs the optional
-  `@modelcontextprotocol/server@^2.4.0` peer. Existing applications need no changes; see
-  `docs/upgrading.md` for opt-in tool safety and replay behavior.
+  Idempotency-branded tools require an authenticating security brand; the brand's `keyHeader` names
+  the header the route reads its key from, the derived key is sent there, and a route keyed by a
+  body field or a function refuses startup. `allowedOrigins` must list every browser UI origin,
+  including same-origin UIs. Common adds optional `IApplication.dispatch` and `DispatchOptions`,
+  implemented by the kernel with IP, abort and streaming support. `DispatchOptions.route` pins the
+  registered route pattern before route middleware runs. `IDEMPOTENCY_METADATA`,
+  `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and `idempotencyMetadataOf` describe both
+  HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY` moves to common without changing its
+  value. `setu add mcp` installs the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing
+  applications need no changes; see `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
 - **Backend faults answer `503` or `504` (M131a, #543, `@setu-ts/common`, `@setu-ts/queue-plugin`,
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports

@@ -20,7 +20,10 @@ it('brands both entry points and shares non-default configuration behavior', asy
     idempotent({ namespace: 'brand-test', required: false }),
     service.middleware({ namespace: 'brand-test', required: false }),
   ]) {
-    expect(idempotencyMetadataOf(middleware)).toEqual({ idempotent: true });
+    expect(idempotencyMetadataOf(middleware)).toEqual({
+      idempotent: true,
+      keyHeader: 'Idempotency-Key',
+    });
     let calls = 0;
     const ctx = createTestContext({ runtime, services, request: { method: 'POST' } });
     await middleware(ctx, () => {
@@ -38,4 +41,16 @@ it('brands both entry points and shares non-default configuration behavior', asy
   });
   expect(downstream).toBe(false);
   expect(control.response.snapshot().status).toBe(401);
+});
+
+it('records the key source in the brand: a header name, or none for body fields and functions', () => {
+  const cases = [
+    [undefined, { idempotent: true, keyHeader: 'Idempotency-Key' }],
+    [{ key: { header: 'X-Request-Key' } }, { idempotent: true, keyHeader: 'X-Request-Key' }],
+    [{ key: { bodyField: 'requestId' } }, { idempotent: true }],
+    [{ key: () => 'k' }, { idempotent: true }],
+  ] as const;
+  for (const [options, expected] of cases) {
+    expect(idempotencyMetadataOf(idempotent(options))).toEqual(expected);
+  }
 });
