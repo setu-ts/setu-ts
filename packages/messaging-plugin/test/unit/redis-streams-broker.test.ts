@@ -1,10 +1,223 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisStreamsClient } from '../fixtures/fake-ioredis-client.ts';
 import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
-import { RequestTimeoutError } from '../../src/errors.ts';
+import { PublishTimeoutError, RequestTimeoutError } from '../../src/errors.ts';
+
+/**
+ * A minimal injected client whose xadd rejects with a caller-supplied error,
+ * standing in for a transport that loses its backend mid-publish.
+ */
+function failingPublishClient(
+  failure: unknown,
+  status?: string,
+  onWrite?: (client: { status?: string; emit(event: string): boolean }) => void,
+): IRedisStreamsClient & EventEmitter {
+  const reject = (): Promise<never> => Promise.reject(failure);
+  const ok = (): Promise<void> => Promise.resolve();
+  const client = Object.assign(new EventEmitter(), {
+    xadd: (): Promise<never> => {
+      onWrite?.(client);
+      return Promise.reject(failure);
+    },
+    xgroup: reject,
+    xreadgroup: reject,
+    xpending: reject,
+    xclaim: reject,
+    xinfo: reject,
+    xack: reject,
+    quit: ok,
+    connect: ok,
+    ...(status === undefined ? {} : { status }),
+  });
+  return client as IRedisStreamsClient & EventEmitter;
+}
+/**
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 504 in
+ * every client state: ioredis rejects commands already sent with the same
+ * error, and a driver writes a queued command as soon as a socket opens, so no
+ * state the framework can observe proves the command was never written (M131a
+ * security audits).
+ */
+const LOST_CONNECTION_CASES = [
+  ['reconnecting', false, 'reconnecting'],
+  ['reconnecting', true, 'reconnecting'],
+  ['reconnecting', false, 'ready'],
+  ['ready', false, 'ready'],
+] as const;
+
+/** Between dispatch and failure: an optional reconnect, then the final state. */
+function during(reconnect: boolean, after: string) {
+  return (client: { status?: string; emit(event: string): boolean }): void => {
+    if (reconnect) client.emit('connect');
+    client.status = after;
+  };
+}
+
+function maxRetries(): Error {
+  const e = new Error(
+    'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+  );
+  e.name = 'MaxRetriesPerRequestError';
+  return e;
+}
+
+describe('RedisStreamsBroker.publish backend-fault wrapping (M131a X88-5)', () => {
+  it.each(LOST_CONNECTION_CASES)(
+    'dispatch %s, reconnect %s, failure %s → 504',
+    async (before, reconnect, after) => {
+      const runtime = createFakeRuntime();
+      const lost = maxRetries();
+      const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+        client: failingPublishClient(lost, before, during(reconnect, after)),
+      });
+      await broker.connect();
+      try {
+        await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+          const e = thrown as Error;
+          return e instanceof BackendOutcomeUnknownError && e.cause === lost;
+        });
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
+
+  it('keeps its error listener through QUIT, then detaches (N-4)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'ready');
+    client.quit = (): Promise<void> => {
+      client.emit('error', new Error('write EPIPE'));
+      return Promise.resolve();
+    };
+    const errors: unknown[] = [];
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      connectionErrorReporter: { report: (e) => errors.push(e), recovered: () => {} },
+    });
+    await broker.connect();
+    await broker.disconnect();
+    expect(errors).toHaveLength(1);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a failed connect and its retry leave one listener pair (N-3)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'wait');
+    let attempts = 0;
+    client.connect = (): Promise<void> =>
+      ++attempts === 1 ? Promise.reject(new Error('refused')) : Promise.resolve();
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await expect(broker.connect()).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(0);
+    await broker.connect();
+    expect(client.listenerCount('error')).toBe(1);
+    await broker.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a rejected QUIT forces a disconnect before detaching (R3-3)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'ready');
+    const order: string[] = [];
+    client.quit = (): Promise<void> => {
+      order.push('quit');
+      return Promise.reject(new Error('Command timed out'));
+    };
+    Object.assign(client, {
+      disconnect: () => {
+        order.push(`disconnect (error listeners ${client.listenerCount('error')})`);
+      },
+    });
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await broker.connect();
+    await expect(broker.disconnect()).rejects.toThrow('Command timed out');
+    expect(order).toEqual(['quit', 'disconnect (error listeners 1)']);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a rejected QUIT on a client without disconnect still rethrows and detaches', async () => {
+    const client = failingPublishClient(new Error('unused'), 'ready');
+    client.quit = (): Promise<void> => Promise.reject(new Error('Command timed out'));
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await broker.connect();
+    await expect(broker.disconnect()).rejects.toThrow('Command timed out');
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a failed connect does not detach a concurrent attempt’s listeners (R3-2)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'wait');
+    let attempts = 0;
+    let release: (() => void) | undefined;
+    client.connect = (): Promise<void> => {
+      attempts++;
+      if (attempts === 1) {
+        return new Promise<void>((_resolve, reject) => {
+          release = () => reject(new Error('refused'));
+        });
+      }
+      return Promise.resolve();
+    };
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    const first = broker.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await broker.connect();
+    release!();
+    await expect(first).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(1);
+    await broker.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('wraps a refusal before any send as BackendUnavailableError (503)', async () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+      code: 'ECONNREFUSED',
+    });
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client: failingPublishClient(refused),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy(
+        (thrown: unknown) => thrown instanceof BackendUnavailableError && thrown.cause === refused,
+      );
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
+  it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
+    const runtime = createFakeRuntime();
+    const timedOut = new Error('Command timed out');
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: failingPublishClient(timedOut),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendOutcomeUnknownError && e.cause === timedOut;
+      });
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
+  it('does not rewrap a PublishTimeoutError (it keeps its name and 504 hint)', async () => {
+    const runtime = createFakeRuntime();
+    const pte = new PublishTimeoutError('timed out', { topic: 's', timeoutMs: 1 });
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: failingPublishClient(pte),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toBe(pte);
+    } finally {
+      await broker.disconnect();
+    }
+  });
+});
 
 /**
  * RedisStreamsBroker unit tests.

@@ -5,7 +5,8 @@
  * @since 0.2.0
  */
 
-import { attachConnectionErrorReporter, dispatchRealtimeFrame } from '@setu-ts/common';
+import { dispatchRealtimeFrame, toBackendFault, watchConnection } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import type {
   IRealtimeBackplane,
   IRealtimeHandlerErrorReporter,
@@ -58,6 +59,8 @@ export class RedisBackplane implements IRealtimeBackplane {
 
   #publisher: IRedisBackplaneClient | undefined;
   #subscriber: IRedisBackplaneClient | undefined;
+  /** Watches on the publisher (first) and subscriber; detached on close. */
+  #watches: ConnectionWatch[] = [];
   #listener: ((channel: string, message: string) => void) | undefined;
   /**
    * The in-flight (or settled) open, so overlapping `connect()` calls join one
@@ -192,14 +195,33 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Injected connections belong to the caller: on failure they are left as
     // they arrived, while connections built here are ours to clean up.
     let owned = false;
+    const reporter = this.#options.connectionErrorReporter;
+    // Publisher first: its watch decides a lost-connection publish (X88-5).
+    // Detached on every path that does not keep the connections.
+    const watches: ConnectionWatch[] = [];
+    const detachAll = (): void => {
+      for (const watch of watches) watch.detach();
+    };
 
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
-      for (const client of [publisher, subscriber]) {
-        if (client.status === 'wait' && typeof client.connect === 'function') {
-          await client.connect();
+      // One reporter for both: the pair fails together, so an outage's
+      // identical errors from the two connections de-duplicate into one warn.
+      // (M131a X88-3) an injected client's outages must be as visible as a
+      // built one's; the attach is structural, so a client without `on` is
+      // left alone.
+      watches.push(watchConnection(publisher, reporter), watchConnection(subscriber, reporter));
+      try {
+        for (const client of [publisher, subscriber]) {
+          if (client.status === 'wait' && typeof client.connect === 'function') {
+            await client.connect();
+          }
         }
+      } catch (error) {
+        // The injected pair stays the caller's; only our listeners come off (N-3).
+        detachAll();
+        throw error;
       }
     } else {
       const module = this.#options.module ?? (await loadRedisModule());
@@ -207,20 +229,20 @@ export class RedisBackplane implements IRealtimeBackplane {
       owned = true;
       const clientOptions =
         this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
-      const reporter = this.#options.connectionErrorReporter;
       publisher = module.create(url, clientOptions);
-      attachConnectionErrorReporter(publisher, reporter);
+      watches.push(watchConnection(publisher, reporter));
       try {
         subscriber = module.create(url, clientOptions);
       } catch (error) {
         // The publisher is already live and no field references it yet, so this
         // is the only chance to close it.
         await this.#discard([publisher]);
+        detachAll();
         throw error;
       }
       // One reporter for both: the pair fails together, so an outage's
       // identical errors from the two connections de-duplicate into one warn.
-      attachConnectionErrorReporter(subscriber, reporter);
+      watches.push(watchConnection(subscriber, reporter));
     }
 
     const listener = (channel: string, message: string): void => {
@@ -235,9 +257,13 @@ export class RedisBackplane implements IRealtimeBackplane {
       await subscriber.subscribe(this.#topic);
     } catch (error) {
       subscriber.off('message', listener);
+      // Detached only after the owned connections are discarded, as close()
+      // does: their QUIT can emit an error that must still reach a listener
+      // (CodeRabbit #543).
       if (owned) {
         await this.#discard([subscriber, publisher]);
       }
+      detachAll();
       throw error;
     }
 
@@ -250,12 +276,14 @@ export class RedisBackplane implements IRealtimeBackplane {
       if (owned) {
         await this.#discard([subscriber, publisher]);
       }
+      detachAll();
       return;
     }
 
     this.#publisher = publisher;
     this.#subscriber = subscriber;
     this.#listener = listener;
+    this.#watches = watches;
     this.#installProbe(publisher, subscriber);
   }
 
@@ -362,7 +390,14 @@ export class RedisBackplane implements IRealtimeBackplane {
       );
     }
     // Always the publisher: the subscriber connection would reject this.
-    await publisher.publish(this.#topic, JSON.stringify(frame));
+    try {
+      await publisher.publish(this.#topic, JSON.stringify(frame));
+    } catch (error) {
+      // M131a X88-5: a backend fault says whether the frame was applied.
+      const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
+      if (fault !== undefined) throw fault;
+      throw error;
+    }
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {
@@ -392,6 +427,11 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#subscriber = undefined;
     this.#publisher = undefined;
     this.#listener = undefined;
+    // Detached only after both connections are released (below): an ioredis
+    // client with no 'error' listener prints QUIT's EPIPE on an unreachable
+    // server to the console (M131a re-audit N-4).
+    const watches = this.#watches;
+    this.#watches = [];
     // Drop the memoized open, or a connect() after this close would await the
     // already-resolved attempt and return without reconnecting.
     this.#opening = undefined;
@@ -418,6 +458,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (publisher !== undefined && publisher !== subscriber) {
       await this.#release(publisher, failures);
     }
+    // A shared injected client must not report into this closed backplane.
+    for (const watch of watches) watch.detach();
     if (failures.length > 0) {
       throw failures[0];
     }

@@ -25,6 +25,7 @@ import {
   withQueueArgs,
 } from '../templates/broker.ts';
 import type { ResolvedHost } from '../templates/project-files.ts';
+import type { RedisClient } from '../workspace/transport.ts';
 import {
   DEFAULT_DEVTOOL_PORT,
   devtoolRuntimeRefusal,
@@ -483,9 +484,11 @@ async function planProject(
     }
   }
 
-  const broker = readArmFlag(args, 'broker');
+  const client: RedisClient =
+    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis';
+  const broker = readArmFlag(args, 'broker', 'messaging', client);
   if (!broker.ok) return { ok: false, message: broker.message };
-  const queue = readArmFlag(args, 'queue');
+  const queue = readArmFlag(args, 'queue', 'queue', client);
   if (!queue.ok) return { ok: false, message: queue.message };
 
   const choice = resolveTemplateChoice(args);

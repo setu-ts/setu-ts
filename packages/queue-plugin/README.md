@@ -33,8 +33,8 @@ app.register(
 
 Connection errors of the `ioredis` client the adapter builds go to the application logger — the
 first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead
-of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
-listener: it belongs to the caller.
+of `ioredis` printing every reconnect failure to `console.error`. Since 0.12.0 an injected client
+gets the same listener, removed again when the adapter stops.
 
 **node-redis.** To use node-redis instead of ioredis, pass
 `QueuePlugin({ adapter: 'redis', client: fromNodeRedis(createClient({ url })) })` (`fromNodeRedis`
@@ -132,6 +132,18 @@ await queue.add('send-email', { to: 'user@example.com' }, { delayMs: 5000 });
 // Job with retry limit
 await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
+
+When the backend fails, `add()` says whether the job was stored (M131a). A refusal before any send —
+a refused or unresolvable connection, a closed or offline client, ioredis with its offline queue
+switched off — means the job was not sent: `BackendUnavailableError` from `@setu-ts/common`, `503`
+with "The request was not applied.". A lost connection (`MaxRetriesPerRequestError`, "Connection is
+closed.", a reset) or an expired bound (`Command timed out`) answers `BackendOutcomeUnknownError`,
+`504`, in every case: the job may already be queued, because ioredis rejects commands already sent
+with these errors and both drivers write a command queued while disconnected as soon as a socket
+opens. A stopped Redis therefore answers `504` once the retry budget or the bound runs out, except
+node-redis's first refused connect, which is a `503`. A client that retries a `504` should send an
+idempotency key. Both keep the driver error as `cause` for the log. Any other adapter error is
+rethrown unchanged.
 
 ### Processing Jobs
 
@@ -520,8 +532,13 @@ AMQP channel on the connection, so a paused broker can no longer report `reachab
 round trip answers `false`. For every queue adapter, a check that does not answer within the 2 s
 bound now reports `up` with `reachable: 'unknown'` and no depth counts, instead of `down`: a hung
 probe is not evidence the backend is down. A check that answers `false` — a stopped broker — still
-reads `down` at once. The indicator counts toward readiness by default; the health plugin's
-`readiness` option overrides it by name.
+reads `down` at once. The Redis adapter answers `false` without I/O when the client's own `status`
+says it lost its connection (`reconnecting`, `close`, `end`; M131a, V11-10): ioredis parks a stopped
+server's commands in its offline queue, so a ping there would hang like a paused server's and read
+`unknown`. A paused Redis keeps its TCP connection, so it still reads `up` with
+`reachable: 'unknown'`. A client that has not connected yet (`wait`, `connecting`, such as an
+injected lazy client) still pings, which connects it. The indicator counts toward readiness by
+default; the health plugin's `readiness` option overrides it by name.
 
 ## Exports
 

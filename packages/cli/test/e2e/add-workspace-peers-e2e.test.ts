@@ -98,9 +98,21 @@ describe('setu add workspace peers through the packed registry overlay (M119f)',
             path.endsWith(`node_modules/${peer}`),
           );
           expect(copies.filter((path) => path === `node_modules/${peer}`)).toHaveLength(1);
-          // Only the deliberately incompatible API stays nested; no redundant
-          // copies of the console SDK peers are needed in either member.
-          expect(copies).toHaveLength(peer === '@opentelemetry/api' ? 2 : 1);
+          // The OTLP exporter `setu add telemetry` installs since M131a pins its
+          // own SDK line exactly (0.220.x → resources/core 2.9.0), so npm nests
+          // copies inside the exporter's dependency tree; the console peers above
+          // still resolve from the root. Outside that tree, only the
+          // deliberately incompatible API stays nested, in the conflicting
+          // member; no member needs a redundant copy.
+          const outsideExporter = copies.filter(
+            (path) =>
+              !/^node_modules\/@opentelemetry\/(?!api\/|resources\/|context-async-hooks\/|sdk-trace-base\/)[^/]+\/node_modules\//.test(
+                path,
+              ),
+          );
+          expect(outsideExporter, JSON.stringify(copies)).toHaveLength(
+            peer === '@opentelemetry/api' ? 2 : 1,
+          );
         }
         expect(lock.packages['apps/conflict/node_modules/@opentelemetry/api']?.version).toBe(
           '1.10.0',

@@ -1,8 +1,9 @@
 # @setu-ts/telemetry-plugin — trace requests and application work
 
-**Add it:** `setu add telemetry` adds it and prints the registration for `setu.config.ts`.
-`TelemetryPlugin` provides `CAPABILITIES.TELEMETRY` (`ITelemetryService`); without an exporter it
-registers a no-op service.
+**Add it:** `setu add telemetry` adds it with the OTLP exporter and, on Node, the loader hook and
+the instrumentation for the project's Redis client, and prints the registration for
+`setu.config.ts`. `TelemetryPlugin` provides `CAPABILITIES.TELEMETRY` (`ITelemetryService`); without
+an exporter it registers a no-op service.
 
 ## Export sampled request traces
 
@@ -52,7 +53,9 @@ export function registerOrderRoutes(router: IRouterApi): void {
 ## Other options
 
 - `exporter: 'console'` writes spans locally; `middleware: false` disables request spans.
-- `instrumentations` enables `http`, `fetch`, `ioredis`, `amqplib` or `kafkajs` on Node only.
+- `instrumentations` enables `http`, `fetch`, `ioredis`, `redis` (node-redis), `amqplib` or
+  `kafkajs` on Node only. An ES-module app records those spans only when `instrumentation.mjs` runs
+  first (`node --import ./instrumentation.mjs`); generated Node projects already do.
 - `parentContext` or `root: true` controls span ancestry; `contextPropagation: false` disables
   activation.
 - `diagnostics` retains minimized observations only for explicitly approved operations.

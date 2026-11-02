@@ -82,6 +82,10 @@ export const VALUE_FLAGS: ReadonlySet<string> = new Set([
   'redis-client',
   'broker',
   'queue',
+  // Redis arm flags (M131a X88-1), named after each plugin's own option.
+  'store',
+  'lock',
+  'backplane',
   'logger',
   'env-file',
   'depends-on',

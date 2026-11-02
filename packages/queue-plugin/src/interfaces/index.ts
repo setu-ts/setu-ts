@@ -75,6 +75,18 @@ export interface IRedisQueueClient {
    * fake still type-checks; a client that omits it is *unknown*, not `false`.
    */
   ping?(): Promise<unknown>;
+  /**
+   * The driver's connection state (ioredis `status`; node-redis through
+   * `fromNodeRedis` answers the same field). When it says the connection was
+   * lost (`reconnecting`, `close`, `end`) the health probe answers `false`
+   * without I/O: a stopped server's commands sit in ioredis's offline queue
+   * and a ping would hang like a hung one, reading `up`/unknown (M131a V11-10).
+   * `QueueService.add` also reads it before enqueueing, to decide a
+   * lost-connection failure (X88-5). Absent, the probe pings as before.
+   *
+   * @since 0.12.0
+   */
+  readonly status?: string;
   /** Close the connection. */
   quit(): Promise<void>;
 }
@@ -519,10 +531,10 @@ export interface RedisQueueOptions {
    */
   deadLetterTtlMs?: number;
   /**
-   * Receives the connection errors (`ioredis` `'error'` events) of the client
-   * the adapter BUILDS, instead of `ioredis` printing each reconnect failure
-   * to the console. Never attached to an injected `client`, which belongs to
-   * the caller. `QueuePlugin` supplies one backed by its logger.
+   * Receives the connection errors (`'error'` events) of the client the
+   * adapter uses, instead of `ioredis` printing each reconnect failure to the
+   * console. Since 0.12.0 it is attached to an injected `client` too, and
+   * detached again on disconnect. `QueuePlugin` supplies one backed by its logger.
    *
    * @since 0.8.0
    */

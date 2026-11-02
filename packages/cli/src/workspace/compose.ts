@@ -34,6 +34,7 @@
  * @module
  */
 
+import { TELEMETRY_PRELOAD_PATH } from '../templates/telemetry-preload.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { hostVariable } from './discovery-module.ts';
 import { LIBS_DIR } from './library.ts';
@@ -370,10 +371,10 @@ ${manifests}
 ARG NPM_CONFIG_REGISTRY=
 RUN ${NPMRC_MOUNT} ${guard} && ${install}${bun ? ' --production' : ` --omit=dev${workspace ? ' --workspace apps/${MEMBER} --workspace libs' : ''}`}
 ${bun ? `COPY ${member} ${workspace ? `./${member}` : '.'}\n` : ''}WORKDIR /srv${workspace ? '/apps/${MEMBER}' : ''}
-${bun ? '' : `COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/dist ./dist\n`}COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/buil[d] ./build/
+${bun ? '' : `COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/dist ./dist\nCOPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/${TELEMETRY_PRELOAD_PATH} ./\n`}COPY --from=build /srv${workspace ? '/apps/${MEMBER}' : ''}/buil[d] ./build/
 # NUMERIC, not a name: Kubernetes can verify this user is non-root.
 USER ${uid}:${uid}
-CMD ${bun ? '["bun", "run", "main.ts"]' : '["node", "--enable-source-maps", "dist/main.js"]'}
+CMD ${bun ? '["bun", "run", "main.ts"]' : `["node", "--import", "./${TELEMETRY_PRELOAD_PATH}", "--enable-source-maps", "dist/main.js"]`}
 `;
 }
 

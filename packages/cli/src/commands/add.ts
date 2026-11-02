@@ -87,7 +87,12 @@ import {
 import { renderPluginCall } from '../utils/render-call.ts';
 import { installSearchDirs, unknownWorkspaceRedisClient } from '../app-loader.ts';
 import { MEMBERS_DIR, readWorkspaceManifest, type WorkspaceMember } from '../workspace/manifest.ts';
-import { transportSpec, renderConnection, type TransportSpec } from '../workspace/transport.ts';
+import {
+  transportSpec,
+  renderConnection,
+  type RedisClient,
+  type TransportSpec,
+} from '../workspace/transport.ts';
 import { workspaceProfile } from '../workspace/runtime-profile.ts';
 import { CLIENT_RANGES } from '../templates/client-dependencies.ts';
 import {
@@ -445,6 +450,36 @@ function importsNodeRedisHelper(source: string): boolean {
 }
 
 /**
+ * Whether the project already depends on ioredis: an `ioredis` entry in its
+ * `package.json` dependencies or its `deno.json` import map.
+ *
+ * @param fs - The file system
+ * @param dir - The project directory
+ * @returns Whether either manifest names `ioredis`
+ */
+async function declaresIoredis(fs: IFileSystem, dir: string): Promise<boolean> {
+  for (const [file, keys] of [
+    ['package.json', ['dependencies', 'devDependencies']],
+    ['deno.json', ['imports']],
+  ] as const) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(await fs.readFile(joinPath(dir, file))));
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== 'object') continue;
+    for (const key of keys) {
+      const section = (parsed as Record<string, unknown>)[key];
+      if (section !== null && typeof section === 'object' && Object.hasOwn(section, 'ioredis')) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Names the node-redis helper's import when the configuration does not have it.
  *
  * Every guidance line for the node-redis arm calls `nodeRedisClient(...)`; a
@@ -710,6 +745,44 @@ export function withDependency(
       : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
+}
+
+/** The OpenTelemetry instrumentation for each Redis client, and its option. */
+const REDIS_INSTRUMENTATION: Readonly<
+  Record<RedisClient, { readonly pkg: string; readonly option: string }>
+> = {
+  ioredis: { pkg: '@opentelemetry/instrumentation-ioredis', option: 'ioredis' },
+  'node-redis': { pkg: '@opentelemetry/instrumentation-redis', option: 'redis' },
+};
+
+/**
+ * What `setu add telemetry` installs beyond the plugin's own peers (M131a
+ * X88-10): the OTLP exporter on every socket runtime, and on Node the loader
+ * hook the generated `instrumentation.mjs` registers plus the instrumentation
+ * for the Redis client the project already uses. Deno and Bun get no hook or
+ * instrumentation: OpenTelemetry's auto-instrumentation does not run there.
+ *
+ * @param bare - Bare package name being added
+ * @param runtime - The detected target runtime
+ * @param client - The project's Redis client, when it has one
+ * @returns Each package and the range to record for it
+ */
+function telemetryPackagesFor(
+  bare: string,
+  runtime: TargetRuntime,
+  client: RedisClient | undefined,
+): readonly { readonly name: string; readonly range: string }[] {
+  if (bare !== 'telemetry-plugin' || runtime === 'cloudflare-workers') return [];
+  const names = [
+    '@opentelemetry/exporter-trace-otlp-http',
+    ...(runtime === 'node'
+      ? [
+          '@opentelemetry/instrumentation',
+          ...(client === undefined ? [] : [REDIS_INSTRUMENTATION[client].pkg]),
+        ]
+      : []),
+  ];
+  return names.map((name) => ({ name, range: CLIENT_RANGES[name]! }));
 }
 
 /**
@@ -1235,12 +1308,39 @@ async function workspaceAddArgs(
   bare: string,
   runtime: TargetRuntime,
   starter: boolean,
+  arm?: ArmSelector,
 ): Promise<{ readonly args: string; readonly clients: readonly string[] } | undefined> {
   if (dirs.length === 1) return undefined;
   const read = await readWorkspaceManifest(deps.fs, dirs[dirs.length - 1]!);
   if (!read.ok) return undefined;
   const transport = transportSpec(read.manifest.transport, read.manifest.redisClient);
-  return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl);
+  return transportAddArgs(transport, bare, runtime, starter, read.manifest.transportUrl, arm);
+}
+
+/** The transport-spec arm a plugin's Redis arm flag selects. */
+type ArmSelector =
+  | 'messagingArgs'
+  | 'queueArgs'
+  | 'cacheArgs'
+  | 'idempotencyArgs'
+  | 'schedulerArgs'
+  | 'backplaneArgs';
+
+/** The arm a plugin's default (flag-less) Redis wiring selects. */
+function defaultArm(bare: string): ArmSelector | undefined {
+  return bare === 'cache-plugin'
+    ? 'cacheArgs'
+    : bare === 'scheduler-plugin'
+      ? 'schedulerArgs'
+      : bare === 'realtime-backplane-plugin'
+        ? 'backplaneArgs'
+        : bare === 'messaging-plugin'
+          ? 'messagingArgs'
+          : bare === 'queue-plugin'
+            ? 'queueArgs'
+            : bare === 'idempotency-plugin'
+              ? 'idempotencyArgs'
+              : undefined;
 }
 
 /** Shares arm selection and literal rendering between workspace and standalone adds. */
@@ -1250,28 +1350,19 @@ function transportAddArgs(
   runtime: TargetRuntime,
   starter: boolean,
   override?: string,
+  arm?: ArmSelector,
 ): { readonly args: string; readonly clients: readonly string[] } | undefined {
-  const builder =
-    bare === 'cache-plugin'
-      ? transport.cacheArgs
-      : bare === 'scheduler-plugin'
-        ? transport.schedulerArgs
-        : bare === 'realtime-backplane-plugin'
-          ? transport.backplaneArgs
-          : bare === 'messaging-plugin'
-            ? transport.messagingArgs
-            : bare === 'queue-plugin'
-              ? transport.queueArgs
-              : undefined;
+  const selector = arm ?? defaultArm(bare);
+  const builder = selector === undefined ? undefined : transport[selector];
   if (builder === undefined || transport.connection === undefined) return undefined;
   return {
     args: starter
       ? starterOptionLiteral(builder, transport, override)
       : builder(renderConnection(transport.connection, workspaceProfile(runtime), override)),
     clients:
-      bare === 'messaging-plugin'
+      selector === 'messagingArgs'
         ? (transport.messagingClients ?? [])
-        : bare === 'queue-plugin'
+        : selector === 'queueArgs'
           ? (transport.queueClients ?? [])
           : [transport.redisClient === 'node-redis' ? 'redis' : 'ioredis'],
   };
@@ -1453,28 +1544,64 @@ export async function runAddCommand(
     return EXIT_ERROR;
   }
   let selected: TransportSpec | undefined;
+  let selectedArm: ArmSelector | undefined;
   if (args.flags['redis-client'] !== undefined && searchDirs.length > 1) {
     deps.error(
       '--redis-client cannot apply inside a workspace member: members share the workspace --transport and redisClient.',
     );
     return EXIT_USAGE;
   }
-  const redisRefusal = redisClientRefusal(
-    args,
-    runtime,
-    args.flags['broker'] === 'redis' || args.flags['queue'] === 'redis',
-  );
+  const redisRefusal = redisClientRefusal(args, runtime);
   if (redisRefusal !== undefined) {
     deps.error(redisRefusal);
     return EXIT_USAGE;
   }
-  for (const flag of ['broker', 'queue'] as const) {
+  // M131a X88-1: a standalone project's Redis client is inferred from what it
+  // already uses — importing the generated nodeRedisClient helper means
+  // node-redis, an `ioredis` dependency means ioredis. A project with neither
+  // has not chosen yet: `--redis-client` chooses, and ioredis is the default.
+  // An explicit `--redis-client` that disagrees with a choice already made is
+  // refused, so a project never drifts to a second Redis driver.
+  const inferredClient: RedisClient | undefined =
+    initialConfig !== undefined && importsNodeRedisHelper(initialConfig)
+      ? 'node-redis'
+      : (await declaresIoredis(deps.fs, dir))
+        ? 'ioredis'
+        : undefined;
+  const explicitClient = args.flags['redis-client'];
+  if (
+    explicitClient !== undefined &&
+    inferredClient !== undefined &&
+    explicitClient !== inferredClient
+  ) {
+    deps.error(
+      `--redis-client ${String(explicitClient)} disagrees with the project's ${inferredClient} client.`,
+    );
+    return EXIT_USAGE;
+  }
+  const client: RedisClient =
+    inferredClient ?? (explicitClient === 'node-redis' ? 'node-redis' : 'ioredis');
+  const pluginFor: Readonly<Record<string, string>> = {
+    'messaging-plugin': 'messaging',
+    'queue-plugin': 'queue',
+    'cache-plugin': 'cache',
+    'idempotency-plugin': 'idempotency',
+    'scheduler-plugin': 'scheduler',
+    'realtime-backplane-plugin': 'realtime-backplane',
+  };
+  const flagPlugins: Readonly<Record<string, readonly string[]>> = {
+    broker: ['messaging'],
+    queue: ['queue'],
+    store: ['cache', 'idempotency'],
+    lock: ['scheduler'],
+    backplane: ['realtime-backplane'],
+  };
+  for (const flag of ['broker', 'queue', 'store', 'lock', 'backplane'] as const) {
     if (args.flags[flag] === undefined) continue;
-    const expected = flag === 'broker' ? 'messaging-plugin' : 'queue-plugin';
-    if (bare !== expected) {
-      deps.error(
-        `--${flag} applies only to setu add ${flag === 'broker' ? 'messaging' : 'queue'}.`,
-      );
+    const plugin = pluginFor[bare];
+    const applicable = flagPlugins[flag];
+    if (plugin === undefined || !applicable.includes(plugin)) {
+      deps.error(`--${flag} applies only to setu add ${applicable.join(' or ')}.`);
       return EXIT_USAGE;
     }
     if (searchDirs.length > 1) {
@@ -1484,26 +1611,43 @@ export async function runAddCommand(
       return EXIT_USAGE;
     }
     if (runtime === 'cloudflare-workers') {
-      deps.error(standaloneOverlayRefusal(flag, runtime, resolveHost(MINIMAL_HOST, runtime))!);
+      deps.error(
+        flag === 'broker' || flag === 'queue'
+          ? standaloneOverlayRefusal(flag, runtime, resolveHost(MINIMAL_HOST, runtime))!
+          : `--${flag} cannot apply on Cloudflare Workers: the Workers build has no Redis wiring for ${plugin}. Scaffold for deno, node or bun to select one.`,
+      );
       return EXIT_USAGE;
     }
-    const arm = readArmFlag(args, flag);
+    const arm = readArmFlag(args, flag, plugin, client);
     if (!arm.ok) {
       deps.error(arm.message);
       return EXIT_USAGE;
     }
     selected = arm.spec;
+    selectedArm =
+      plugin === 'messaging'
+        ? 'messagingArgs'
+        : plugin === 'queue'
+          ? 'queueArgs'
+          : plugin === 'cache'
+            ? 'cacheArgs'
+            : plugin === 'idempotency'
+              ? 'idempotencyArgs'
+              : plugin === 'scheduler'
+                ? 'schedulerArgs'
+                : 'backplaneArgs';
   }
   const starter =
     initialConfig !== undefined &&
     composingStarter(initialConfig)?.symbol === 'createFullStackAppFromConfig';
   const transport =
     selected === undefined
-      ? await workspaceAddArgs(deps, searchDirs, bare, runtime, starter)
-      : transportAddArgs(selected, bare, runtime, starter);
+      ? await workspaceAddArgs(deps, searchDirs, bare, runtime, starter, selectedArm)
+      : transportAddArgs(selected, bare, runtime, starter, undefined, selectedArm);
   const transportArgs = transport?.args;
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
+    ...telemetryPackagesFor(bare, runtime, inferredClient),
     ...(transport?.clients ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
   ];
   const addedPeers: string[] = [];
@@ -2033,6 +2177,15 @@ export async function runAddCommand(
   if (!transportWritten && wiredArm === undefined)
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
+  if (bare === 'telemetry-plugin' && runtime === 'node' && inferredClient !== undefined) {
+    deps.log(
+      `  To trace ${inferredClient}, pass instrumentations: { ${REDIS_INSTRUMENTATION[inferredClient].option}: true }` +
+        " with exporter: 'otlp' and the collector's endpoint.",
+    );
+    deps.log(
+      '  The start scripts run ./instrumentation.mjs first, which is what lets those spans record.',
+    );
+  }
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass
@@ -2231,7 +2384,11 @@ function printAddHelp(log: (message: string) => void): void {
   log("that added it — so a project's framework packages stay on one version.");
   log('');
   log('Standalone: add messaging --broker <name> or add queue --queue <name>.');
-  log('Redis arms: --redis-client <ioredis|node-redis> (default ioredis).');
+  log('Redis arms: add cache --store redis, add idempotency --store redis,');
+  log('add scheduler --lock redis, add realtime-backplane --backplane redis.');
+  log('The client is inferred from the project (node-redis when it imports the');
+  log('generated helper, otherwise ioredis); --redis-client <ioredis|node-redis> is');
+  log('accepted only with a Redis arm and must agree with the inference.');
   log('Workspace members use their workspace transport; existing configuration is preserved.');
   log('add view writes its page controller to src/controllers/, or with --module <name> into');
   log('that module; a project with modules requires --module.');

@@ -183,11 +183,12 @@ interface ErrorEventSource {
 /**
  * Attaches a reporter to a client's `'error'` and `'ready'` events.
  *
- * Call it ONLY on a client the package built itself. An injected client
- * belongs to the caller, and adding an `'error'` listener to it would silence
- * the caller's own handling (`ioredis` falls back to the console only when no
- * listener exists). The client is checked structurally at runtime, so the
- * package's injection facade need not declare `on`.
+ * The listeners stay for the client's lifetime, so this suits a client the
+ * package built and closes itself. For an injected client, which outlives the
+ * application, use {@linkcode watchConnection} and detach it on stop. An
+ * `'error'` listener replaces ioredis's console fallback for that client. The
+ * client is checked structurally at runtime, so the package's injection facade
+ * need not declare `on`.
  *
  * With no `reporter`, the listeners are still attached and drop every event —
  * the same outcome as a reporter whose logger returns `undefined`. A built
@@ -216,4 +217,69 @@ export function attachConnectionErrorReporter(
   source.on('error', (error) => reporter.report(error));
   source.on('ready', () => reporter.recovered());
   return true;
+}
+
+/**
+ * A reporter attached to one client, which its owner detaches on stop.
+ *
+ * @since 0.12.0
+ */
+export interface ConnectionWatch {
+  /** Whether listeners were attached (the client exposes `on`). */
+  readonly attached: boolean;
+  /** Removes the listeners; later events reach nobody. Idempotent. */
+  detach(): void;
+}
+
+/**
+ * Attaches a reporter to a client's `'error'` and `'ready'` events and can
+ * detach both listeners again.
+ *
+ * For a client the application injected, which outlives the plugin: the owner
+ * calls `detach()` when it stops, after its own `quit()`, so a later error on a
+ * shared client does not log through a stopped application (M131a). Removal
+ * uses `off` or `removeListener`, whichever the client has; a client with
+ * neither keeps the listeners, which then drop every event.
+ *
+ * @param client - The client; an object exposing an `on` method
+ * @param reporter - The reporter to route events to; omitted, events are dropped
+ * @returns The watch
+ * @since 0.12.0
+ */
+export function watchConnection(
+  client: unknown,
+  reporter: ConnectionErrorReporter = DROPPING_REPORTER,
+): ConnectionWatch {
+  let detached = false;
+  const onError = (error: unknown): void => {
+    if (!detached) reporter.report(error);
+  };
+  const onReady = (): void => {
+    if (!detached) reporter.recovered();
+  };
+  const attached =
+    (typeof client === 'object' || typeof client === 'function') &&
+    client !== null &&
+    typeof (client as { on?: unknown }).on === 'function';
+  if (attached) {
+    const source = client as ErrorEventSource;
+    source.on('error', onError);
+    source.on('ready', onReady);
+  }
+  return {
+    attached,
+    detach(): void {
+      if (detached) return;
+      detached = true;
+      if (!attached) return;
+      const target = client as {
+        off?: (event: string, listener: (value: unknown) => void) => unknown;
+        removeListener?: (event: string, listener: (value: unknown) => void) => unknown;
+      };
+      const remove = typeof target.off === 'function' ? target.off : target.removeListener;
+      if (typeof remove !== 'function') return;
+      remove.call(client, 'error', onError);
+      remove.call(client, 'ready', onReady);
+    },
+  };
 }

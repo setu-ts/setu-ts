@@ -65,6 +65,7 @@ describe('workspaceContainerFiles', () => {
     const copied = runtimeStage.split('\n').filter((line) => line.startsWith('COPY --from=build'));
     expect(copied).toEqual([
       'COPY --from=build /srv/apps/${MEMBER}/dist ./dist',
+      'COPY --from=build /srv/apps/${MEMBER}/instrumentation.mjs ./',
       'COPY --from=build /srv/apps/${MEMBER}/buil[d] ./build/',
     ]);
     expect(runtimeStage).not.toContain('diagnostics-plugin');
@@ -438,7 +439,9 @@ describe('workspaceContainerFiles', () => {
       expect(contents).toContain('USER 1000:1000');
       expect(contents).not.toMatch(/^USER deno/m);
       // The start command runs the member's entry via tsx.
-      expect(contents).toContain('CMD ["node", "--enable-source-maps", "dist/main.js"]');
+      expect(contents).toContain(
+        'CMD ["node", "--import", "./instrumentation.mjs", "--enable-source-maps", "dist/main.js"]',
+      );
     });
 
     it('builds a Bun member into the pinned Bun image', () => {
