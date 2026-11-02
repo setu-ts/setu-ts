@@ -26,6 +26,7 @@
 // Plugin factory
 export { AuthPlugin } from './plugin/auth-plugin.ts';
 export type { AuthMiddlewareOption, AuthPluginOptions } from './interfaces/index.ts';
+export type { ResourceServerOptions } from './interfaces/index.ts';
 export { AuthPluginConfigurationError, SamlRuntimeLoadError } from './errors.ts';
 
 // Option types
@@ -72,6 +73,7 @@ export type { RateLimitOptions } from './middleware/rate-limit-middleware.ts';
 export { requireAuth } from './guards/index.ts';
 export type { RequireAuthOptions } from './interfaces/index.ts';
 export { safeReturnTo } from './sign-in/return-to.ts';
+export { requireScopes } from './guards/index.ts';
 export { requireRole } from './guards/index.ts';
 export { requirePermission } from './guards/index.ts';
 export { requireAnyRole } from './guards/index.ts';

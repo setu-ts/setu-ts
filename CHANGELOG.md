@@ -40,6 +40,28 @@ All notable changes to this project are documented here. The format follows
   README documents the preload for hand-written projects (X88-4, X88-10).
 - **`maskUrlUserinfo` (M131a, `@setu-ts/common`).** Masks URL userinfo in a string; the default
   redaction rule below, exported for text that never passes through a redaction service (X88-8).
+
+- **Resource-server authentication (M132, #541, `@setu-ts/auth-plugin`, `@setu-ts/common`,
+  `@setu-ts/openapi-plugin`).** `IPrincipal` gains `scopes` (from the OAuth 2.0 `scope`/`scp`
+  claims, `scope` winning when both are present) and `actor` (an `IPrincipalActor`,
+  `{ id, claims }`, from the outermost RFC 8693 `act`), and `RouteSecurityMetadata` gains `scopes`.
+  `requireScopes(first, ...rest)` is an ALL-of guard: `401` anonymous, `403`
+  `insufficient-privileges` when any scope is missing, with the required list in the challenge; each
+  scope is a build-time-validated RFC 6749 `scope-token` and a duplicate is refused.
+  `requireAuth({ delegation })` refuses (`'forbid'`) or requires (`'require'`) a delegated token,
+  and `RefreshTokenService` writes a delegated principal's actor into the `act` claim, and its OAuth
+  scopes into the `scope` claim, of the tokens it mints, so the exchange keeps both. A bearer
+  strategy (`jwt` or `issuers`) or `resourceServer` makes every `401` answer
+  `WWW-Authenticate: Bearer` (with `error="invalid_token"` for a Bearer-carrying request) and every
+  scope `403` answer `Bearer error="insufficient_scope", scope="…"`; nothing from the request is
+  echoed. `resourceServer` (`ResourceServerOptions`) serves an RFC 9728 protected-resource document
+  derived from configuration at `/.well-known/oauth-protected-resource` plus the resource's path,
+  and adds its `resource_metadata` URL to both challenges. `TrustedIssuer.audience` accepts a list
+  (any match) and `requireAccessTokenType` opts into the RFC 9068 `at+jwt` header type
+  (`typ-mismatch`). Derived OpenAPI security requirements now carry the sorted, unique scopes of a
+  route's `requireScopes` guards; a declared `security` still wins. These are OAuth scopes, not
+  M110b's scoped grants.
+
 - **Optimistic locking (M128, #540, `@setu-ts/database-plugin`, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`).** `updateVersioned(repo, id, expectedVersion, data, options?)`
   and `deleteVersioned(repo, id, expectedVersion, options?)` write only while the record still
@@ -92,6 +114,19 @@ All notable changes to this project are documented here. The format follows
 - **Queue loop failures report once per state change (M131a, `@setu-ts/queue-plugin`).** A
   recurring-scheduling or depth-probe failure logs one `warn` when it starts and one `info` on
   recovery instead of an `error` on every poll (X88-9).
+
+- **Breaking: a token with a malformed `act` claim is refused (M132, #541,
+  `@setu-ts/auth-plugin`).** A JWT-strategy or trusted-issuer token whose `act` is present but is
+  not an object with a non-empty `sub` or `client_id` was accepted before and is now refused (`401`;
+  the issuer reason is `act-malformed`). An absent `act` is unaffected. The migration steps are in
+  `docs/upgrading.md`, Unreleased, "Resource-server authentication (M132, `@setu-ts/auth-plugin`,
+  `@setu-ts/common`)".
+
+- **Bearer challenges on 401s and scope 403s (M132, #541, `@setu-ts/auth-plugin`).** An application
+  with a bearer strategy (`jwt` or `issuers`) or `resourceServer` now sends
+  `WWW-Authenticate: Bearer …` on a `401` and on a scope `403`. The header is additive, but a test
+  that asserted its absence must be updated.
+
 - **Breaking: the rate limiter emits draft-11 header fields and refuses options it used to accept
   (#539, `@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`).** Each item below is
   breaking, and none has an option that restores the old behaviour. The migration steps are in
@@ -132,6 +167,10 @@ All notable changes to this project are documented here. The format follows
 - **messaging-plugin docs:** `publishTimeoutMs: 0` removes only the plugin's bound; an injected
   node-redis client still applies `fromNodeRedis`'s `commandTimeoutMs` (default 15 s), and the
   README says how to raise it (X88-6, M131a).
+
+- **auth-plugin:** a `jwt.scheme` configured with capitals (for example `'Token'`) no longer refuses
+  every token: the JWT strategy compared the lowercased request scheme with the configured value as
+  written. The scheme is now matched case-insensitively (M132; #541).
 - **database-plugin:** a connection lost while a Drizzle × PostgreSQL transaction was open no longer
   exits the process. pg-pool leaves a checked-out client without an `'error'` listener, so a
   terminated backend raised an unhandled `'error'` event; every checked-out client now gets one

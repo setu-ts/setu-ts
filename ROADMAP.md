@@ -16451,10 +16451,12 @@ user cannot be told apart from the user, because nothing reads the RFC 8693 `act
 2. **RFC 9728 protected-resource metadata** served at `/.well-known/oauth-protected-resource` (and
    the path-suffixed form for a resource below the root), built from configuration: the resource
    identifier, the authorization servers, the supported scopes. Not an authorization server.
-3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and the plan
-   decides whether the configured resource identifier is required among them by default. A token
-   minted for another resource is refused; Setu never forwards an inbound token to an upstream
-   service (the MCP authorization page: servers "MUST NOT accept or transit any other tokens").
+3. **Audience binding (RFC 8707):** a trusted issuer accepts a list of audiences, and configuring
+   `resourceServer` does NOT require the resource identifier among them. The audience list is what
+   the issuer stamps for this resource — Entra an `api://<guid>` or app id, Auth0 an API identifier
+   — so forcing the resource URL would refuse valid deployments. A token minted for another resource
+   is refused; Setu never forwards an inbound token to an upstream service (the MCP authorization
+   page: servers "MUST NOT accept or transit any other tokens").
 4. **Delegation:** the `act` claim exposed as an optional `actor` on the principal, its nesting
    bounded, and a guard option that refuses or requires delegated tokens per route.
 5. **What is NOT built:** an authorization server, Dynamic Client Registration, Client ID Metadata
@@ -16983,7 +16985,7 @@ patch by construction and gains nothing new here.
 | 131b      | ⬜     | runtime + kernel + di + decorator + resilience + auth + messaging + openapi + diagnostics — kernel, runtime and plugin contracts (fix branches)                                                                                                                                           |
 | 131c      | ⬜     | cli — gates, generators and workspace deploy (fix branches)                                                                                                                                                                                                                               |
 | 131d      | ⬜     | docs — documentation, examples and the website                                                                                                                                                                                                                                            |
-| 132       | ⬜     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
+| 132       | ✅     | auth-plugin + common — resource-server authentication for agents and tools: scopes, `insufficient_scope` challenges, RFC 9728 metadata, audience binding, the `act` claim                                                                                                                 |
 | 133       | ⬜     | mcp-plugin (new) + common + kernel + cli — routes as MCP tools, dispatched in-process through the route's own pipeline                                                                                                                                                                    |
 | 134       | ⬜     | ai-plugin (new) + common + telemetry + testing + cli — model calls with reserve/settle budgets, usage records, GenAI telemetry and redaction                                                                                                                                              |
 | 135       | ⬜     | vector-store-plugin (new) + common + cloudflare + cli — tenant-scoped retrieval with refused-not-ignored filters                                                                                                                                                                          |

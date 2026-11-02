@@ -266,12 +266,14 @@ app.router.get('/todos/:id', { middleware: [requireAuth()], handler }); // → r
 app.router.post('/login', { middleware: [publicRoute()], handler }); // → public
 ```
 
-A declared `schema.security` always wins, so this changes no document that already declares. Three
-limits: only route-level middleware is inspected (`app.middleware.add()` is invisible to a route,
-which is correct for `authMiddleware()` — it populates rather than enforces); roles and permissions
-cannot be expressed, since a requirement names a scheme and none can be inferred from `'admin'`; and
-the scheme name is configured rather than inferred, because a guard cannot know what your document
-calls it.
+A declared `schema.security` always wins, so this changes no document that already declares. Scopes
+from `requireScopes` guards are merged, sorted and de-duplicated into the derived requirement's
+scope list; an authenticated route with no scope guard keeps the empty list. Three limits: only
+route-level middleware is inspected (`app.middleware.add()` is invisible to a route, which is
+correct for `authMiddleware()` — it populates rather than enforces); roles and permissions cannot be
+expressed, since a requirement names a scheme and none can be inferred from `'admin'`; and the
+scheme name is configured rather than inferred, because a guard cannot know what your document calls
+it.
 
 On a decorated controller, `@Public` produces the same empty `security` array, so the opt-out is
 available without writing a schema:

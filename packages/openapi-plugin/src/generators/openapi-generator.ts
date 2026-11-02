@@ -870,15 +870,21 @@ export class OpenApiGenerator {
 
     let sawBrand = false;
     let authenticated = false;
+    const scopes = new Set<string>();
     for (const middleware of route.definition.middleware ?? []) {
       const metadata = securityMetadataOf(middleware);
       if (metadata === undefined) continue;
       sawBrand = true;
-      if (metadata.authenticated) authenticated = true;
+      if (metadata.authenticated) {
+        authenticated = true;
+        for (const scope of metadata.scopes ?? []) scopes.add(scope);
+      }
     }
 
     if (!sawBrand) return {};
-    return { security: authenticated ? [{ [derive.scheme]: [] }] : [] };
+    // Sorted and unique so the document does not depend on guard order; an
+    // authenticated route with no scope guard keeps the empty list.
+    return { security: authenticated ? [{ [derive.scheme]: [...scopes].sort() }] : [] };
   }
 
   /**

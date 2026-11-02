@@ -501,6 +501,7 @@ package fits the plugin architecture.
 | `IPlugin`                             | interface |
 | `IPluginContext`                      | interface |
 | `IPrincipal`                          | interface |
+| `IPrincipalActor`                     | interface |
 | `IQueryBus`                           | interface |
 | `IQueryHandler`                       | interface |
 | `IQueue`                              | interface |
