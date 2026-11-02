@@ -145,7 +145,10 @@ it('keeps adversarial path values on the bound route through the real kernel rou
   const app = createApplication({
     plugins: [RuntimePlugin(), McpPlugin({ tools: [declaration] })],
   });
-  app.router.get('/items/:id', (ctx) => ctx.response.json({ id: ctx.params.id }));
+  app.router.get('/items/:id', {
+    schema: { security: [] },
+    handler: (ctx) => ctx.response.json({ id: ctx.params.id }),
+  });
   app.router.get('/private', (ctx) => {
     privateCalls++;
     return ctx.response.json({ secret: true });

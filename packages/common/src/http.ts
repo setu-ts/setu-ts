@@ -1201,3 +1201,62 @@ export function idempotencyMetadataOf(
     ? (value as RouteIdempotencyMetadata)
     : undefined;
 }
+
+/** Route tool marker shared by functional and decorated routes.
+ * @since 0.13.0
+ */
+export const MCP_TOOL_METADATA: unique symbol = Symbol.for('setu.mcp-tool.metadata');
+
+/** Describes an explicitly exposed MCP tool; missing identity comes from the route schema.
+ * @since 0.13.0
+ */
+export interface RouteMcpToolMetadata {
+  /** Case-sensitive tool name (1–64 ASCII letters, digits, underscores, dots or hyphens). */
+  readonly name?: string;
+  /** Model-facing description. */
+  readonly description?: string;
+  /** Optional display title. */
+  readonly title?: string;
+  /** Declares the operation safe to repeat without idempotency middleware. */
+  readonly repeatable?: true;
+}
+
+/** Brands a middleware in place, preserving its behavior and identity.
+ * @param middleware - Middleware to brand
+ * @param metadata - Tool description
+ * @returns The same middleware
+ * @since 0.13.0
+ */
+export function withMcpToolMetadata<T extends MiddlewareFunction>(
+  middleware: T,
+  metadata: RouteMcpToolMetadata,
+): T {
+  Object.defineProperty(middleware, MCP_TOOL_METADATA, {
+    value: metadata,
+    enumerable: false,
+    configurable: true,
+    writable: false,
+  });
+  return middleware;
+}
+
+/** Reads a valid tool brand; foreign or ill-typed values are treated as absent.
+ * @param middleware - Middleware to inspect
+ * @returns Its metadata, when valid
+ * @since 0.13.0
+ */
+export function mcpToolMetadataOf(
+  middleware: MiddlewareFunction,
+): RouteMcpToolMetadata | undefined {
+  const value: unknown = (
+    middleware as MiddlewareFunction & { readonly [MCP_TOOL_METADATA]?: unknown }
+  )[MCP_TOOL_METADATA];
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const meta = value as Record<string, unknown>;
+  return (meta.name === undefined || typeof meta.name === 'string') &&
+    (meta.description === undefined || typeof meta.description === 'string') &&
+    (meta.title === undefined || typeof meta.title === 'string') &&
+    (meta.repeatable === undefined || meta.repeatable === true)
+    ? (value as RouteMcpToolMetadata)
+    : undefined;
+}

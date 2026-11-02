@@ -81,21 +81,28 @@ async function build() {
       });
     },
   });
-  app.router.get('/fail', () => {
-    throw new Error('INTERNAL SECRET');
+  app.router.get('/fail', {
+    schema: { security: [] },
+    handler: () => {
+      throw new Error('INTERNAL SECRET');
+    },
   });
   app.router.get('/limited', {
+    schema: { security: [] },
     middleware: [rateLimitMiddleware({ windowMs: 60000, max: 1 })],
     handler: (c) => c.response.json({ ok: true }),
   });
-  app.router.get('/waiting', async (c) => {
-    notify();
-    await new Promise<void>((resolve) => {
-      if (c.signal.aborted) resolve();
-      else c.signal.addEventListener('abort', () => resolve(), { once: true });
-    });
-    aborted = c.signal.aborted;
-    return c.response.json({ aborted });
+  app.router.get('/waiting', {
+    schema: { security: [] },
+    handler: async (c) => {
+      notify();
+      await new Promise<void>((resolve) => {
+        if (c.signal.aborted) resolve();
+        else c.signal.addEventListener('abort', () => resolve(), { once: true });
+      });
+      aborted = c.signal.aborted;
+      return c.response.json({ aborted });
+    },
   });
   app.router.get('/tenants/:id', {
     middleware: [
@@ -305,16 +312,19 @@ it('times out a tool call and aborts the route context signal', async () => {
       }),
     ],
   });
-  app.router.get('/deadline', async (ctx) => {
-    await Promise.race([
-      release.promise,
-      new Promise<void>((resolve) => {
-        if (ctx.signal.aborted) resolve();
-        else ctx.signal.addEventListener('abort', () => resolve(), { once: true });
-      }),
-    ]);
-    aborted = ctx.signal.aborted;
-    return ctx.response.json({ aborted });
+  app.router.get('/deadline', {
+    schema: { security: [] },
+    handler: async (ctx) => {
+      await Promise.race([
+        release.promise,
+        new Promise<void>((resolve) => {
+          if (ctx.signal.aborted) resolve();
+          else ctx.signal.addEventListener('abort', () => resolve(), { once: true });
+        }),
+      ]);
+      aborted = ctx.signal.aborted;
+      return ctx.response.json({ aborted });
+    },
   });
   await app.start();
   const { client } = await clientFor(app);

@@ -1,7 +1,7 @@
 {
   "name": "@setu-ts/mcp-plugin",
   "version": "0.11.0",
-  "description": "Expose declared routes as Model Context Protocol tools through the kernel pipeline",
+  "description": "MCP route tools",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/setu-ts/setu-ts.git",
@@ -51,6 +51,8 @@
     "@modelcontextprotocol/client": "^2.4.0",
     "@modelcontextprotocol/server": "^2.4.0",
     "@setu-ts/auth-plugin": "workspace:^",
+    "@setu-ts/decorator-plugin": "workspace:^",
+    "@setu-ts/di-plugin": "workspace:^",
     "@setu-ts/exceptions": "workspace:^",
     "@setu-ts/idempotency-plugin": "workspace:^",
     "@setu-ts/kernel": "workspace:^",

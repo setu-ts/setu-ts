@@ -103,7 +103,7 @@ const READMES: Readonly<Record<string, number>> = {
   // previously documented nowhere).
   // M110a: +1 for the Authorization policies (@Policy/@RequirePolicy) example.
   // M110b: +1 for the Scoped roles (@ScopedRoles/@ScopedPermissions) example.
-  'packages/decorator-plugin/README.md': 8,
+  'packages/decorator-plugin/README.md': 9,
   // M92: the new package's README is born gated — usage, functional renderView,
   // the @Render decorator and the raw() opt-out.
   'packages/view-plugin/README.md': 6,
@@ -140,7 +140,7 @@ const READMES: Readonly<Record<string, number>> = {
   // M109a: the new package's README is born gated — the usage example and the
   // derived-key forwarding example.
   'packages/idempotency-plugin/README.md': 3,
-  'packages/mcp-plugin/README.md': 1,
+  'packages/mcp-plugin/README.md': 2,
   // M98a: +1 for the kernel-diagnostics polling example.
   'packages/kernel/README.md': 3,
   'packages/logger-plugin/README.md': 4,

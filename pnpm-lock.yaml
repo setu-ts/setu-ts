@@ -1658,6 +1658,12 @@ importers:
       '@setu-ts/auth-plugin':
         specifier: workspace:^
         version: link:../auth-plugin
+      '@setu-ts/decorator-plugin':
+        specifier: workspace:^
+        version: link:../decorator-plugin
+      '@setu-ts/di-plugin':
+        specifier: workspace:^
+        version: link:../di-plugin
       '@setu-ts/exceptions':
         specifier: workspace:^
         version: link:../exceptions

@@ -14,11 +14,18 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ### MCP route tools (M133, `@setu-ts/mcp-plugin`)
 
-Existing applications require no migration. To opt in, run `setu add mcp`, declare the exact routes
-in `McpPlugin({ tools: [...] })`, and rate-limit those routes. POST/PUT/PATCH tools require a Zod v4
-body validation brand. POST/PATCH also requires `idempotent()` or an explicit `repeatable: true`.
-Object response schemas supply structured output. The SDK peer is `@modelcontextprotocol/server`
-`^2.4.0`; it is loaded only at bootstrap.
+Existing applications require no migration. To opt in, run `setu add mcp`, register `McpPlugin({})`
+and mark chosen routes with `mcpTool()` or controller methods with `@McpTool()`. The optional
+`tools` list supplies exact method/path bindings as an alternative. Every tool route needs a
+security brand or defined `schema.security`; `publicRoute()` and `@Public()` declare public intent.
+Names must be unique and match `^[A-Za-z0-9_.-]{1,64}$`. Rate-limit tool routes. POST/PUT/PATCH
+tools require a Zod v4 body validation brand. POST/PATCH also requires `idempotent()` or an explicit
+`repeatable: true`. Object response schemas supply structured output. The SDK peer is
+`@modelcontextprotocol/server` `^2.4.0`; it is loaded only at bootstrap.
+
+`timeoutMs` defaults to 30000 ms (safe integer 1–600000). Its runtime deadline aborts the inner
+request and bounds dispatch and result reading, answering `The tool timed out.` even when the route
+ignores cancellation. A client abort still answers `The tool failed.`.
 
 Calls forward credentials and tenant headers and authenticate again through the kernel's new
 `dispatch` entry. Third-party `IApplication` implementations keep compiling because `dispatch` is

@@ -172,7 +172,10 @@ try {
       }),
     ],
   });
-  mcpApp.router.get('/mcp-value', (ctx) => ctx.response.json({ ok: true }));
+  mcpApp.router.get('/mcp-value', {
+    schema: { security: [] },
+    handler: (ctx) => ctx.response.json({ ok: true }),
+  });
   await mcpApp.start();
   try {
     const response = await mcpApp.fetch(

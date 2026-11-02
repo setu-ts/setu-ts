@@ -62,14 +62,6 @@
       "net": [
         "127.0.0.1"
       ]
-    },
-    "mcp-plugin": {
-      "read": true,
-      "env": true,
-      "sys": [
-        "hostname",
-        "osRelease"
-      ]
     }
   },
   "imports": {

@@ -31,7 +31,12 @@ import type {
   ValidationMiddlewareOptions,
   ValidationTarget,
 } from '@setu-ts/common';
-import { CAPABILITIES, PLUGIN_PRIORITY, withResponseMetadata } from '@setu-ts/common';
+import {
+  CAPABILITIES,
+  PLUGIN_PRIORITY,
+  withMcpToolMetadata,
+  withResponseMetadata,
+} from '@setu-ts/common';
 import type { IIdempotencyService } from '@setu-ts/common';
 
 import { createPermissionsMiddleware, createRolesMiddleware } from './authorization-middleware.ts';
@@ -1025,6 +1030,14 @@ function registerController(
     // Appended AFTER the validation band whether or not `enforceSchemas` is on,
     // so a `@ValidateBody` route always runs idempotency last (M109a §3.9).
     appendIdempotencyMiddleware(target, route, fullPath, middleware, idempotency);
+    if (route.mcpTool !== undefined) {
+      middleware.push(
+        withMcpToolMetadata((_ctx, next) => next(), {
+          ...route.mcpTool,
+          name: route.mcpTool.name ?? route.openapi?.operationId ?? route.handler,
+        }),
+      );
+    }
     const schema = buildRouteSchema(
       ctrlMeta,
       route,

@@ -41,7 +41,6 @@ describe('MCP options', () => {
     { legacy: null },
     { maxResultBytes: null },
     { allowedOrigins: null },
-    { tools: [] },
     { path: 'mcp' },
     { path: '//evil' },
     { path: '/mcp?x' },
@@ -65,6 +64,11 @@ describe('MCP options', () => {
       McpPluginConfigurationError,
     );
   });
+});
+
+it('allows omitted and empty declarations so markers can supply tools at bootstrap', () => {
+  expect(resolveOptions({}).tools).toEqual([]);
+  expect(resolveOptions({ tools: [] }).tools).toEqual([]);
 });
 
 it('preserves the declared string server identity without imposing an extra name/version grammar', () => {

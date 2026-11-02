@@ -3,12 +3,15 @@ import { resolveOptions } from '../../src/options.ts';
 import type { McpToolDeclaration } from '../../src/options.ts';
 import { declaration } from '../fixtures.ts';
 describe('MCP declaration', () => {
-  it.each(['a', 'a'.repeat(128), 'A-_.09'])('accepts name %s', (name) => {
+  it.each(['a', 'a'.repeat(64), 'A-_.09'])('accepts name %s', (name) => {
     expect(resolveOptions({ tools: [{ ...declaration, name }] }).tools[0]?.name).toBe(name);
   });
-  it.each(['', 'a'.repeat(129), 'has space', 'has/slash', '💥'])('refuses name %s', (name) => {
-    expect(() => resolveOptions({ tools: [{ ...declaration, name }] })).toThrow();
-  });
+  it.each(['', 'a'.repeat(65), 'a'.repeat(128), 'has space', 'has/slash', '💥'])(
+    'refuses name %s',
+    (name) => {
+      expect(() => resolveOptions({ tools: [{ ...declaration, name }] })).toThrow();
+    },
+  );
   it.each([
     null,
     { name: 1 },

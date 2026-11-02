@@ -6,7 +6,7 @@ import { VERSION } from './version.ts';
  * @since 0.13.0
  */
 export interface McpToolDeclaration {
-  /** Case-sensitive tool name (1–128 ASCII letters, digits, underscores, dots or hyphens). */
+  /** Case-sensitive tool name (1–64 ASCII letters, digits, underscores, dots or hyphens). */
   readonly name: string;
   /** Model-facing description. */
   readonly description: string;
@@ -25,8 +25,8 @@ export interface McpToolDeclaration {
  * @since 0.13.0
  */
 export interface McpPluginOptions {
-  /** Non-empty, explicit tool declarations. */
-  readonly tools: readonly McpToolDeclaration[];
+  /** Optional explicit declarations, merged with route markers at bootstrap. */
+  readonly tools?: readonly McpToolDeclaration[];
   /** Endpoint path, default `/mcp`. */
   readonly path?: string;
   /** Server identity, default `setu-mcp` and the package version. */
@@ -68,30 +68,36 @@ export function resolveOptions(options: McpPluginOptions): ResolvedOptions {
     !/[?#\s]/.test(value) &&
     !value.startsWith('//');
   if (!validPath(path)) fail('MCP path must be an absolute route path.');
-  if (!Array.isArray(options.tools) || options.tools.length === 0)
-    fail('MCP tools must be non-empty.');
+  const declarations = options.tools === undefined ? [] : options.tools;
+  if (!Array.isArray(declarations)) fail('MCP tools must be an array.');
   const names = new Set<string>();
-  const tools = options.tools.map((tool) => {
+  const tools = declarations.map((tool) => {
+    const refuse = (message: string): never =>
+      fail(
+        isRecord(tool) && isRecord(tool.route)
+          ? `${tool.route.method} ${tool.route.path}: ${message}`
+          : message,
+      );
     if (
       !isRecord(tool) ||
       typeof tool.name !== 'string' ||
-      !/^[A-Za-z0-9_.-]{1,128}$/.test(tool.name)
+      !/^[A-Za-z0-9_.-]{1,64}$/.test(tool.name)
     )
-      fail('Invalid MCP tool name.');
-    if (names.has(tool.name)) fail(`Duplicate MCP tool: ${tool.name}`);
-    names.add(tool.name);
+      refuse('Invalid MCP tool name.');
     if (typeof tool.description !== 'string' || tool.description.trim().length === 0)
-      fail('MCP description must be non-empty.');
-    if (tool.title !== undefined && typeof tool.title !== 'string') fail('Invalid MCP title.');
+      refuse('MCP description must be non-empty.');
+    if (tool.title !== undefined && typeof tool.title !== 'string') refuse('Invalid MCP title.');
     if (
       !isRecord(tool.route) ||
       !['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].includes(tool.route.method) ||
       !validPath(tool.route.path)
     )
-      fail('Invalid MCP route.');
-    if (tool.route.path === path) fail('An MCP tool cannot bind to its own endpoint.');
+      refuse('Invalid MCP route.');
+    if (names.has(tool.name)) refuse(`Duplicate MCP tool: ${tool.name}`);
+    names.add(tool.name);
+    if (tool.route.path === path) refuse('An MCP tool cannot bind to its own endpoint.');
     if (tool.repeatable !== undefined && tool.repeatable !== true)
-      fail('MCP repeatable must be true when present.');
+      refuse('MCP repeatable must be true when present.');
     return Object.freeze({ ...tool, route: Object.freeze({ ...tool.route }) });
   });
   const serverInfo =

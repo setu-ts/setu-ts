@@ -159,8 +159,7 @@ export const PACKAGE_METADATA: Readonly<Record<string, PackageMetadata>> = {
     runtimeCompat: NO_EDGE,
   },
   'mcp-plugin': {
-    description:
-      'Expose declared routes as Model Context Protocol tools through the kernel pipeline',
+    description: 'MCP route tools',
     runtimeCompat: PORTABLE,
   },
   'idempotency-plugin': {

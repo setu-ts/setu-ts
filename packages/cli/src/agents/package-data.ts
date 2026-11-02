@@ -19,8 +19,7 @@ export const PACKAGE_DATA: ReadonlyMap<string, IPackageData> = new Map<string, I
   [
     'mcp-plugin',
     {
-      description:
-        'Expose declared routes as Model Context Protocol tools through the kernel pipeline',
+      description: 'MCP route tools',
       tokens: [],
     },
   ],

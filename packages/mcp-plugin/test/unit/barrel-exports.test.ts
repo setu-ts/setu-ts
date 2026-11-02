@@ -7,6 +7,7 @@ it('exports exactly the approved runtime surface and declaration types', () => {
     'McpPlugin',
     'McpPluginConfigurationError',
     'VERSION',
+    'mcpTool',
   ]);
   const tool: McpToolDeclaration = declaration;
   const options: McpPluginOptions = { tools: [tool] };

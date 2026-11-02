@@ -17,6 +17,7 @@ export async function appFor(
   app.router.get('/items/:id', {
     handler: (ctx) => ctx.response.json({ id: ctx.params.id }),
     ...definition,
+    schema: { security: [], ...definition.schema },
   });
   await app.start();
   return app;

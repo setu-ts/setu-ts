@@ -28,7 +28,7 @@ import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuthPlugin, requireAuth, rateLimitMiddleware } from '@setu-ts/auth-plugin';
 import { IdempotencyPlugin, idempotent } from '@setu-ts/idempotency-plugin';
 import { ValidationPlugin, validateBody } from '@setu-ts/validation-plugin';
-import { McpPlugin } from '@setu-ts/mcp-plugin';
+import { McpPlugin, mcpTool } from '@setu-ts/mcp-plugin';
 import { z } from 'zod';
 
 const item = z.object({ id: z.string(), name: z.string() });
@@ -40,16 +40,12 @@ const app = createApplication({
     AuthPlugin({ jwt: { secret: 'replace-with-your-application-secret-at-least-32-characters' } }),
     ValidationPlugin({ errorFormat: 'rfc9457' }),
     IdempotencyPlugin(),
-    McpPlugin({
-      tools: [
-        { name: 'read_item', description: 'Read an item', route: { method: 'GET', path: '/items/:id' } },
-        { name: 'create_item', description: 'Create an item', route: { method: 'POST', path: '/items' } },
-      ],
-    }),
+    McpPlugin({}),
   ],
 });
 app.router.get('/items/:id', {
-  middleware: [requireAuth(), rateLimitMiddleware({ windowMs: 60_000, max: 60 })],
+  middleware: [requireAuth(), rateLimitMiddleware({ windowMs: 60_000, max: 60 }),
+    mcpTool({ name: 'read_item', description: 'Read an item' })],
   schema: { response: { 200: item } },
   handler: (ctx) => {
     const found = items.get(ctx.params.id!);
@@ -59,7 +55,8 @@ app.router.get('/items/:id', {
   },
 });
 app.router.post('/items', {
-  middleware: [requireAuth(), rateLimitMiddleware({ windowMs: 60_000, max: 20 }), body, idempotent()],
+  middleware: [requireAuth(), rateLimitMiddleware({ windowMs: 60_000, max: 20 }), body, idempotent(),
+    mcpTool({ name: 'create_item', description: 'Create an item' })],
   schema: { response: { 200: item } },
   handler: (ctx) => {
     const value = body.value(ctx);
@@ -79,11 +76,43 @@ MCP servers **must rate-limit tool invocations**. The plugin uses the applicatio
 per-route middleware above counts that tool alone. A global limiter counts inner tool calls and the
 outer MCP request, so one tool invocation consumes both budgets.
 
+## Declaring tools
+
+Place `mcpTool(meta?)` in the route's middleware. Its optional metadata is
+`{ name?, description?, title?, repeatable?: true }`. The name defaults to `schema.operationId`;
+description defaults to `schema.description`, then `schema.summary`. Names are never derived from
+paths.
+
+For class controllers, decorator-plugin supplies method-only `@McpTool(meta?)`. Its name defaults to
+`@ApiOperation`'s `operationId`, then the method name. Description uses the same schema fallbacks.
+Constructor injection and route guards run normally on each tool call.
+
+As an alternative to markers, declare exact method/path bindings in the plugin options:
+
+```typescript
+import { McpPlugin } from '@setu-ts/mcp-plugin';
+
+export const mcp = McpPlugin({
+  tools: [
+    { name: 'read_item', description: 'Read an item', route: { method: 'GET', path: '/items/:id' } },
+  ],
+});
+```
+
+A route must have declared security intent: a security-branded guard (including `publicRoute()`) or
+defined `schema.security`. Decorator `@Public()` supplies `security: []`. Applications using global
+authentication declare `schema.security` on each tool route. This declaration does not replace
+enforcing guards.
+
+Startup refuses missing names/descriptions, invalid or duplicate names, two markers on one route, a
+route both marked and listed, HEAD/OPTIONS markers, missing security intent, and a combined tool set
+that is empty. Both sources pass through the same schema, binding and retry checks.
+
 ## Configuration
 
 | Option           | Default                                  | Behavior                                                                                                    |
 | ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `tools`          | required                                 | Non-empty declarations binding exact method and registered path pattern                                     |
+| `tools`          | `[]`                                     | Optional declarations merged with route markers; together they must yield at least one tool                 |
 | `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                                                 |
 | `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                                         |
 | `instructions`   | absent                                   | Server instructions                                                                                         |
@@ -97,7 +126,7 @@ ignores its signal. A client abort still returns `The tool failed.`; the first a
 
 A declaration contains `name`, `description`, optional `title`, `route: { method, path }` and
 optional `repeatable: true`. Methods are GET, POST, PUT, PATCH and DELETE. Names are unique,
-case-sensitive, 1–128 ASCII letters, digits, underscores, dots or hyphens. A declaration cannot bind
+case-sensitive, 1–64 ASCII letters, digits, underscores, dots or hyphens. A declaration cannot bind
 to the MCP endpoint. `readOnlyHint` and `idempotentHint` are derived, never application options.
 POST/PATCH requires the idempotency brand or `repeatable: true`; POST/PUT/PATCH requires a body
 validation brand. An app without `IApplication.dispatch` refuses startup.
@@ -148,6 +177,7 @@ bundle-resolution proof; a live Workers run is a follow-on. Bun compatibility is
 | Export                        | Kind      |
 | ----------------------------- | --------- |
 | `McpPlugin`                   | function  |
+| `mcpTool`                     | function  |
 | `McpPluginConfigurationError` | class     |
 | `VERSION`                     | const     |
 | `McpPluginOptions`            | interface |

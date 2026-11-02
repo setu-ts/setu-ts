@@ -1,42 +1,39 @@
-# @setu-ts/mcp-plugin — expose declared routes as MCP tools
+# @setu-ts/mcp-plugin — route tools for agents
 
-**Add it:** `setu add mcp` installs the package and optional `@modelcontextprotocol/server` peer.
-Declare tools explicitly in `setu.config.ts`; there is no zero-config registration or capability
-token.
+**Add it:** `setu add mcp` installs this package and the optional server SDK peer. Register
+`McpPlugin({})` in `setu.config.ts`; no capability token is provided.
 
-## Register the endpoint
+## Mark a route
 
 ```ts
-import { McpPlugin } from '@setu-ts/mcp-plugin';
+import { McpPlugin, mcpTool } from '@setu-ts/mcp-plugin';
 
-export const mcp = McpPlugin({
-  tools: [{ name: 'read_item', description: 'Read an item', route: { method: 'GET', path: '/items/:id' } }],
-});
+export const mcp = McpPlugin({});
+export const read = mcpTool({ name: 'read_item', description: 'Read an item' });
 ```
 
-Register `/items/:id` on the application router before bootstrap. POST `/mcp` serves the tools; GET
-and DELETE answer 405. The default legacy posture serves 2025 clients as well as modern clients.
+Place `read` in the route's middleware. For controllers use @setu-ts/decorator-plugin's method-only
+`@McpTool(meta?)`. Metadata accepts `name?`, `description?`, `title?`, `repeatable?: true`.
+Functional names fall back to `schema.operationId`; decorated names to operationId, then method.
+Description falls back to route description, then summary. Names are unique, 1–64 ASCII letters,
+digits, underscores, dots or hyphens.
 
 ## Behavior the types do not show
 
-- Calls re-enter the kernel pipeline with forwarded credential and tenant headers. Guards,
-  validation, rate limiting, idempotency and audit run again. Principal/state are never copied.
-- The application must rate-limit tool invocations; place `rateLimitMiddleware` on each tool route.
-- Input merges path/query/body properties from validation brands (Zod v4). Collisions refuse
-  startup.
-- POST/PUT/PATCH needs body validation. POST/PATCH also needs idempotency middleware or
-  `repeatable: true`.
-- Branded retries derive a stable argument-based key. Identical intentional calls within the TTL
-  replay; vary a client-reference argument when another operation is intended.
-- Lists filter authentication and required scopes, with private cache hints. Role/policy guards
-  remain on the route. Hidden single calls answer 401/403; unknown names are JSON-RPC -32602.
-- Only object success schemas produce structured content. Validation refusals are tool errors; 5xx
-  and thrown messages are generic. `maxResultBytes` defaults to 1 MiB.
-- `timeoutMs` defaults to 30000 ms (safe integer 1–600000). The deadline bounds dispatch and result
-  reading even when the route ignores its signal; it aborts the inner request and returns
-  `The tool timed out.`. A client abort still returns `The tool failed.`.
-- A present Origin must match the endpoint origin or `allowedOrigins`. Accepted Origin is forwarded
-  so inner CSRF checks run. Disconnects abort the inner handler.
+- Every tool needs a security brand or defined `schema.security`; @setu-ts/auth-plugin's
+  `publicRoute()` and `@Public()` declare public intent. Missing intent refuses startup.
+- Calls re-enter guards, validation, tenancy, rate limits, idempotency and audit using forwarded
+  credentials. Principal/state are never copied. The application must rate-limit tool routes.
+- Path/query/body inputs merge from validation brands. Collisions refuse startup. POST/PUT/PATCH
+  needs body validation; POST/PATCH also needs idempotency or `repeatable: true`.
+- Branded identical retries replay within the TTL. Vary an argument for intentional repetition.
+- Lists filter authentication/scopes with private cache hints; roles/policies enforce on calls.
+- `maxResultBytes` defaults to 1 MiB (cap 64 MiB). `timeoutMs` defaults to 30000 ms, safe integer
+  1–600000: it aborts the inner request and bounds dispatch/result reading even if cancellation is
+  ignored. Deadline: `The tool timed out.`; client abort: `The tool failed.`.
+- Cross-origin requests need `allowedOrigins`. Accepted Origin reaches inner CSRF checks.
 
-`path`, `serverInfo`, `instructions`, `allowedOrigins`, `legacy`, `maxResultBytes` and `timeoutMs`
-configure the endpoint. See the package README for the runnable application and output mapping.
+Alternatively `tools?` lists exact method/path bindings. A route cannot be both marked and listed,
+or carry two markers; HEAD/OPTIONS markers and an empty combined set refuse startup. Options:
+`tools`, `path`, `serverInfo`, `instructions`, `allowedOrigins`, `legacy`, `maxResultBytes`,
+`timeoutMs`. See README for schemas, result mapping and examples.

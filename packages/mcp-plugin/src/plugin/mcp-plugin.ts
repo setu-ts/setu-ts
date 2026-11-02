@@ -6,6 +6,7 @@ import type { McpPluginOptions } from '../options.ts';
 import { resolveOptions } from '../options.ts';
 import { McpPluginConfigurationError } from '../errors.ts';
 import { compileTools } from '../compile/compile-tools.ts';
+import { discoverTools } from '../compile/discovery.ts';
 import type { CompiledTool } from '../compile/compile-tools.ts';
 import { innerRequest } from '../call/inner-request.ts';
 import { originAllowed } from '../serve/origin.ts';
@@ -44,7 +45,8 @@ export function McpPlugin(options: McpPluginOptions): IPlugin {
       ctx.lifecycle.onBootstrap(async () => {
         if (ctx.app.dispatch === undefined)
           throw new McpPluginConfigurationError('MCP requires IApplication.dispatch.');
-        tools = compileTools(resolved.tools, ctx.router.listRoutes());
+        const routes = ctx.router.listRoutes();
+        tools = compileTools(discoverTools(routes, resolved), routes);
         handler = await createServerFactory(ctx, tools, resolved, {
           innerRequest: (tool, args, call, signal) =>
             innerRequest(tool, args, call, signal, ctx.runtime),

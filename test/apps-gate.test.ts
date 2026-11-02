@@ -1092,9 +1092,12 @@ describe('M111c declared artifact coverage', () => {
         async (dir: string) => JSON.parse(await readFile(`${dir}/package.json`, 'utf8')).name,
       ),
     );
-    expect(Object.keys(compat.dependencies).sort()).toEqual(expected.sort());
-    expect(expected).toHaveLength(52);
-    expect(Object.values(compat.dependencies).every((range) => range === 'latest')).toBe(true);
+    expect(Object.keys(compat.dependencies).sort()).toEqual(
+      [...expected, '@modelcontextprotocol/server'].sort(),
+    );
+    expect(expected).toHaveLength(53);
+    expect(expected.every((name) => compat.dependencies[name] === 'latest')).toBe(true);
+    expect(compat.dependencies['@modelcontextprotocol/server']).toBe('^2.4.0');
     expect(workspace.scripts['release:publish']).toBe('node scripts/npm-publish.ts');
     expect(workspace.scripts['release:placeholders']).toBe(
       'node scripts/write-npm-placeholders.ts',

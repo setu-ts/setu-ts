@@ -243,6 +243,7 @@ package fits the plugin architecture.
 | `isWorkerTaskReply`                   | function  |
 | `isWorkerTaskRequest`                 | function  |
 | `keysetPredicate`                     | function  |
+| `mcpToolMetadataOf`                   | function  |
 | `mintNextCursor`                      | function  |
 | `none`                                | function  |
 | `ok`                                  | function  |
@@ -287,6 +288,7 @@ package fits the plugin architecture.
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
 | `withIdempotencyMetadata`             | function  |
+| `withMcpToolMetadata`                 | function  |
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
@@ -316,6 +318,7 @@ package fits the plugin architecture.
 | `MAX_PUBLISH_HEADERS`                 | const     |
 | `MAX_PUBLISH_ID_BYTES`                | const     |
 | `MAX_SCOPE_ID_LENGTH`                 | const     |
+| `MCP_TOOL_METADATA`                   | const     |
 | `ORDERING_KEY_HEADER`                 | const     |
 | `OUTBOX_RECORD_KIND`                  | const     |
 | `PLUGIN_PRIORITY`                     | const     |
@@ -584,6 +587,7 @@ package fits the plugin architecture.
 | `RouteDefinition`                     | interface |
 | `RouteIdempotencyMetadata`            | interface |
 | `RouteInfo`                           | interface |
+| `RouteMcpToolMetadata`                | interface |
 | `RouteResponseMetadata`               | interface |
 | `RouteSchema`                         | interface |
 | `RouteSecurityMetadata`               | interface |

@@ -9,18 +9,23 @@ All notable changes to this project are documented here. The format follows
 ### Added
 
 - **MCP route tools (M133, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
-  `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/cli`).** `McpPlugin`,
-  `McpPluginOptions`, `McpToolDeclaration`, `McpPluginConfigurationError` and `VERSION` expose
-  explicitly declared routes through a stateless SDK endpoint. Caller-filtered lists use private
-  cache hints; calls re-enter guards, validation, tenancy, rate limits, idempotency and audit.
-  `timeoutMs` bounds each call (default 30000 ms, safe integer 1–600000): the runtime deadline
-  aborts the inner request and races dispatch/result reading, returning `The tool timed out.`.
-  Common adds optional `IApplication.dispatch` and `DispatchOptions`, implemented by the kernel with
-  IP, abort and streaming support. `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`,
-  `withIdempotencyMetadata` and `idempotencyMetadataOf` describe both HTTP idempotency entry points.
-  `REQUIRED_SCOPES_STATE_KEY` moves to common without changing its value. `setu add mcp` installs
-  the optional `@modelcontextprotocol/server@^2.4.0` peer. Existing applications need no changes;
-  see `docs/upgrading.md` for opt-in tool safety and replay behavior.
+  `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
+  `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
+  `McpPluginConfigurationError` and `VERSION` expose explicitly declared routes through a stateless
+  SDK endpoint. Caller-filtered lists use private cache hints; calls re-enter guards, validation,
+  tenancy, rate limits, idempotency and audit. `timeoutMs` bounds each call (default 30000 ms, safe
+  integer 1–600000): the runtime deadline aborts the inner request and races dispatch/result
+  reading, returning `The tool timed out.`. Functional `mcpTool()` and method-only `@McpTool()` mark
+  routes for discovery; `tools` is now optional. Common's `MCP_TOOL_METADATA`,
+  `RouteMcpToolMetadata`, `withMcpToolMetadata` and `mcpToolMetadataOf` share the marker across both
+  styles. Names are 1–64 characters; every marked or listed route must declare security intent, and
+  ambiguous or empty tool sets refuse startup. Common adds optional `IApplication.dispatch` and
+  `DispatchOptions`, implemented by the kernel with IP, abort and streaming support.
+  `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and
+  `idempotencyMetadataOf` describe both HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY`
+  moves to common without changing its value. `setu add mcp` installs the optional
+  `@modelcontextprotocol/server@^2.4.0` peer. Existing applications need no changes; see
+  `docs/upgrading.md` for opt-in tool safety and replay behavior.
 
 - **Resource-server authentication (M132, #541, `@setu-ts/auth-plugin`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `IPrincipal` gains `scopes` (from the OAuth 2.0 `scope`/`scp`

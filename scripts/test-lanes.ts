@@ -1,7 +1,6 @@
 /** Single source of truth for the Node and Deno package-test lanes (M111b). */
 /** Converted suites that still prove Deno runtime behavior. */
 export const DENO_LANE_TESTS = [
-  'packages/mcp-plugin/test/integration/mcp-deno.test.ts',
   // Diagnostics connector proofs run on both supported listener runtimes.
   'test/inspect-local-diagnostics.test.ts',
   'packages/diagnostics-plugin/test/unit/cache-observations.test.ts',
@@ -9,6 +8,7 @@ export const DENO_LANE_TESTS = [
   'packages/diagnostics-plugin/test/unit/realtime-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/scheduler-observations.test.ts',
   'packages/diagnostics-plugin/test/unit/storage-observations.test.ts',
+  'packages/mcp-plugin/test/integration/mcp-deno.test.ts',
 
   'packages/websocket-plugin/test/integration/guarded-upgrade.test.ts',
   'packages/websocket-plugin/test/integration/upgrade-body-cap-slot.test.ts',
@@ -50,6 +50,12 @@ export const DENO_LANE_TESTS = [
   'packages/runtime/test/integration/signal-real.test.ts',
   'packages/realtime-backplane-plugin/test/integration/realtime-observations-redis.test.ts',
 ] as const;
+
+/** The permission group owning a native proof; MCP needs only diagnostics' read/env grants. */
+export function denoLaneGroup(path: string): string {
+  const member = path.startsWith('packages/') ? path.split('/')[1]! : 'root';
+  return member === 'mcp-plugin' ? 'diagnostics-plugin' : member;
+}
 
 /** Suites whose subject needs the real Deno host. */
 export const NODE_EXCLUDED_TESTS = [

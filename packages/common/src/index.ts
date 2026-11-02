@@ -160,6 +160,7 @@ export type {
   RouteSecurityMetadata,
   RouteValidationMetadata,
   RouteIdempotencyMetadata,
+  RouteMcpToolMetadata,
   SecurityRequirement,
   WebSocketUpgradeIntent,
 } from './http.ts';
@@ -177,6 +178,9 @@ export {
   IDEMPOTENCY_METADATA,
   withIdempotencyMetadata,
   idempotencyMetadataOf,
+  MCP_TOOL_METADATA,
+  withMcpToolMetadata,
+  mcpToolMetadataOf,
   VALIDATION_METADATA,
   validationMetadataOf,
   withResponseMetadata,
