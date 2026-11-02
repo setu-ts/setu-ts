@@ -721,8 +721,11 @@ here.
   OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
   `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
   #541).
-- **Next milestone** — M131a (holds the `0.11.0` regression V11-10); M127, M129, M130 and M131b–d
-  are open for `0.12.0`.
+- **Milestone 131a** (`common` + the Redis-backed plugins + `notification-plugin` + `cli` — Redis,
+  node-redis and readiness: the V11-10 queue probe, notification out of readiness, `503`/`504`
+  backend faults, `setu add` Redis arms, an OpenTelemetry preload, `.env` start scripts, URL
+  userinfo masking; V11-10, V11-11, X88-1…X88-10) — complete (PR pending).
+- **Next milestone** — M127, M129, M130 and M131b–d are open for `0.12.0`.
 
 ## Verification (run before declaring any work done)
 
