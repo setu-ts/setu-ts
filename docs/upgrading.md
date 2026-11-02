@@ -12,6 +12,16 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### A registry of real tenants (M127, `@setu-ts/multi-tenancy-plugin`, `@setu-ts/common`, `@setu-ts/database-plugin`)
+
+Nothing changes until you set `tenants`: without it any resolved id is still the tenant. To refuse
+invented tenants, add `tenants: ['acme', 'globex']` (or `createDatabaseTenantRegistry()` from
+`@setu-ts/database-plugin`); an unknown id then answers `404 Unknown Tenant` — set
+`unknownTenantStatus` for `400` or `403`. Replace a custom resolver that only filtered ids against a
+list with the plain resolver plus `tenants`. In a queue or message handler, call
+`tenancy.lookupTenant(payload.tenantId)` before `getRepositoryFor`. If you implement
+`IMultiTenancyService` yourself, add `lookupTenant` or delegate to `MultiTenancyService`.
+
 ### Redis, readiness and outage statuses (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/notification-plugin`, `@setu-ts/cli`)
 
 A `notification` outage no longer fails `/ready`. If your replicas must leave the load balancer when

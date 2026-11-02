@@ -19,23 +19,44 @@ describe('multi-tenant example', () => {
     const created = await app.inject({
       method: 'POST',
       url: '/notes',
-      headers: { [TENANT_HEADER]: 'tenant-a' },
-      body: { text: 'only A can read this' },
+      headers: { [TENANT_HEADER]: 'acme' },
+      body: { text: 'only Acme can read this' },
     });
     assert.equal(created.statusCode, 201);
 
-    const tenantA = await app.inject({
+    const acme = await app.inject({
       method: 'GET',
       url: '/notes',
-      headers: { [TENANT_HEADER]: 'tenant-a' },
+      headers: { [TENANT_HEADER]: 'acme' },
     });
-    const tenantB = await app.inject({
+    const globex = await app.inject({
       method: 'GET',
       url: '/notes',
-      headers: { [TENANT_HEADER]: 'tenant-b' },
+      headers: { [TENANT_HEADER]: 'globex' },
     });
 
-    assert.equal(tenantA.json<unknown[]>().length, 1);
-    assert.equal(tenantB.json<unknown[]>().length, 0);
+    assert.equal(acme.json<unknown[]>().length, 1);
+    assert.equal(globex.json<unknown[]>().length, 0);
+  });
+
+  it('refuses a tenant that is not listed, and creates nothing for it', async () => {
+    const refused = await app.inject({
+      method: 'POST',
+      url: '/notes',
+      headers: { [TENANT_HEADER]: 'initech' },
+      body: { text: 'this tenant does not exist' },
+    });
+    assert.equal(refused.statusCode, 404);
+    assert.deepEqual(refused.json(), {
+      error: 'Unknown Tenant',
+      detail: 'The request names a tenant that does not exist',
+    });
+
+    const read = await app.inject({
+      method: 'GET',
+      url: '/notes',
+      headers: { [TENANT_HEADER]: 'initech' },
+    });
+    assert.equal(read.statusCode, 404);
   });
 });

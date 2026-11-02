@@ -136,22 +136,66 @@ A **`register()` warning** fires when a non-`'column-per-tenant'` strategy is se
 `dataStore` is injected: the default memory store cannot deliver physical isolation, so the
 selection is flagged rather than silently logical-only.
 
+## Which tenants exist
+
+Without `tenants`, any id a resolver returns is the tenant — a typo looks like an empty site and
+anyone can mint tenants. With it, the middleware checks the first resolved id before the request
+carries it:
+
+```typescript
+MultiTenancyPlugin({ resolver: 'subdomain', required: true, tenants: ['acme', 'globex'] });
+```
+
+| Check                                    | Response                                                          |
+| ---------------------------------------- | ----------------------------------------------------------------- |
+| listed                                   | the registry's tenant (canonical `id`, `name`, `metadata`) is set |
+| not listed, or longer than 256 chars     | `unknownTenantStatus` (default `404`) `Unknown Tenant`            |
+| the registry threw or answered malformed | `503` `Tenant Registry Unavailable`                               |
+
+Neither refusal runs the handler, and neither body nor log line names the requested id. A miss does
+not fall through to the next resolver. The session binding compare and the cache prefix use the
+registry's id, so `ACME` and `acme` cannot split a tenant when the registry answers `acme`.
+
+`tenants` also takes an `ITenantRegistry` (`lookup(id)` returning `some(tenant)` or `none()`) or a
+factory resolved at `onInit`, such as `createDatabaseTenantRegistry()` from
+`@setu-ts/database-plugin`. A registry must answer `none()` for "not found" — a throw means "could
+not check" and answers `503` — and must bound its own I/O. Instance and factory registries are
+cached (`tenantCache`): hits only, for `ttlMs` (default 30 s), so a suspended tenant stays admitted
+for up to that long (`ttlMs: 0` or `tenantCache: false` removes the window). Misses are never
+cached, so each request naming an unknown tenant runs one lookup: rate-limit a public resolver.
+Tenants are handed out as frozen copies with frozen top-level `metadata`; deeper objects in
+`metadata` are shared between requests, so do not mutate them.
+
+A queue job or message handler checks a payload's tenant the same way:
+
+```typescript
+const tenant = await tenancy.lookupTenant(payload.tenantId);
+if (!tenant.present) return; // unknown tenant
+await tenancy.getRepositoryFor<Order>(tenant.value.id, 'Order').create(order);
+```
+
+`lookupTenant` throws `TenantRegistryUnavailableError` on a registry fault — let the job retry.
+Without `tenants` it answers `some({ id })` for any id, so it is not validation without a registry.
+
 ## Options
 
-| Option               | Type                                                    | Default                 | Description                                                                                                                                                                            |
-| -------------------- | ------------------------------------------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `resolver`           | `ResolverConfig`                                        | **required**            | Resolver or ordered chain.                                                                                                                                                             |
-| `subdomain`          | `SubdomainResolverOptions`                              | —                       | Options forwarded to `SubdomainResolver` when the chain contains one.                                                                                                                  |
-| `header`             | `HeaderResolverOptions`                                 | —                       | Options forwarded to `HeaderResolver`.                                                                                                                                                 |
-| `path`               | `PathResolverOptions`                                   | —                       | Options forwarded to `PathResolver`.                                                                                                                                                   |
-| `jwt`                | `JwtResolverOptions`                                    | —                       | Options forwarded to `JwtResolver`. The tenant claim is **unverified** — require authentication middleware alongside it.                                                               |
-| `database`           | `DatabaseStrategyKind \| ITenantIsolationStrategy`      | `'column-per-tenant'`   | Isolation strategy.                                                                                                                                                                    |
-| `dataStore`          | `ITenantDataStore \| RegistryFactory<ITenantDataStore>` | `MemoryTenantDataStore` | Backing store for tenant records. A factory (for example `createDatabaseTenantDataStore()`) is resolved once at `onInit`, so it may read a capability such as `CAPABILITIES.DATABASE`. |
-| `cache`              | `TenantCacheOptions`                                    | —                       | Cache-prefix behaviour.                                                                                                                                                                |
-| `required`           | `boolean`                                               | `false`                 | Short-circuit when no tenant resolves.                                                                                                                                                 |
-| `rejectionStatus`    | `number`                                                | `400`                   | Status used when short-circuiting.                                                                                                                                                     |
-| `middlewarePriority` | `number`                                                | `40`                    | Priority passed to `ctx.middleware.add`.                                                                                                                                               |
-| `exclude`            | `readonly PathPattern[]`                                | six operational paths   | Paths skipped entirely; a match goes straight to `next()`. `[]` exempts nothing.                                                                                                       |
+| Option                | Type                                                                                    | Default                                                     | Description                                                                                                                                                                            |
+| --------------------- | --------------------------------------------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `resolver`            | `ResolverConfig`                                                                        | **required**                                                | Resolver or ordered chain.                                                                                                                                                             |
+| `subdomain`           | `SubdomainResolverOptions`                                                              | —                                                           | Options forwarded to `SubdomainResolver` when the chain contains one.                                                                                                                  |
+| `header`              | `HeaderResolverOptions`                                                                 | —                                                           | Options forwarded to `HeaderResolver`.                                                                                                                                                 |
+| `path`                | `PathResolverOptions`                                                                   | —                                                           | Options forwarded to `PathResolver`.                                                                                                                                                   |
+| `jwt`                 | `JwtResolverOptions`                                                                    | —                                                           | Options forwarded to `JwtResolver`. The tenant claim is **unverified** — require authentication middleware alongside it.                                                               |
+| `database`            | `DatabaseStrategyKind \| ITenantIsolationStrategy`                                      | `'column-per-tenant'`                                       | Isolation strategy.                                                                                                                                                                    |
+| `dataStore`           | `ITenantDataStore \| RegistryFactory<ITenantDataStore>`                                 | `MemoryTenantDataStore`                                     | Backing store for tenant records. A factory (for example `createDatabaseTenantDataStore()`) is resolved once at `onInit`, so it may read a capability such as `CAPABILITIES.DATABASE`. |
+| `cache`               | `TenantCacheOptions`                                                                    | —                                                           | Cache-prefix behaviour.                                                                                                                                                                |
+| `required`            | `boolean`                                                                               | `false`                                                     | Short-circuit when no tenant resolves.                                                                                                                                                 |
+| `rejectionStatus`     | `number`                                                                                | `400`                                                       | Status used when short-circuiting.                                                                                                                                                     |
+| `middlewarePriority`  | `number`                                                                                | `40`                                                        | Priority passed to `ctx.middleware.add`.                                                                                                                                               |
+| `exclude`             | `readonly PathPattern[]`                                                                | six operational paths                                       | Paths skipped entirely; a match goes straight to `next()`. `[]` exempts nothing.                                                                                                       |
+| `tenants`             | `readonly (string \| ITenant)[] \| ITenantRegistry \| RegistryFactory<ITenantRegistry>` | —                                                           | Which tenants exist; see above. A list is validated at `register()`.                                                                                                                   |
+| `unknownTenantStatus` | `number`                                                                                | `404`                                                       | Status of `Unknown Tenant`, 400–499; 400, 403 or 404 recommended (a 401 may prompt a browser for credentials).                                                                         |
+| `tenantCache`         | `false \| TenantRegistryCacheOptions`                                                   | `{ ttlMs: 30_000, maxEntries: 1_000, maxBytes: 1_048_576 }` | Cache around an instance or factory registry; refused with a list.                                                                                                                     |
 
 An **empty resolver chain** and a **malformed injected `dataStore`** both fail at `register()`, not
 per request.
@@ -196,38 +240,41 @@ middleware publishes the active prefix under `TENANT_CACHE_PREFIX_STATE_KEY`, re
 
 ## Exports
 
-| Export                          | Kind      |
-| ------------------------------- | --------- |
-| `getTenantCachePrefix`          | function  |
-| `MultiTenancyPlugin`            | function  |
-| `tenantMiddleware`              | function  |
-| `ColumnPerTenant`               | class     |
-| `DatabasePerTenant`             | class     |
-| `HeaderResolver`                | class     |
-| `JwtResolver`                   | class     |
-| `MemoryTenantDataStore`         | class     |
-| `PathResolver`                  | class     |
-| `SchemaPerTenant`               | class     |
-| `SubdomainResolver`             | class     |
-| `TenantDataStoreNotReadyError`  | class     |
-| `TenantNotResolvedError`        | class     |
-| `CAPABILITIES`                  | const     |
-| `TENANT_CACHE_PREFIX_STATE_KEY` | const     |
-| `HeaderResolverOptions`         | interface |
-| `IMultiTenancyService`          | interface |
-| `ITenant`                       | interface |
-| `ITenantDataStore`              | interface |
-| `ITenantRepository`             | interface |
-| `ITenantResolver`               | interface |
-| `JwtResolverOptions`            | interface |
-| `MemoryTenantDataStoreOptions`  | interface |
-| `MultiTenancyPluginOptions`     | interface |
-| `PathResolverOptions`           | interface |
-| `SubdomainResolverOptions`      | interface |
-| `TenantCacheOptions`            | interface |
-| `DatabaseStrategyKind`          | type      |
-| `ITenantIsolationStrategy`      | type      |
-| `ResolverConfig`                | type      |
+| Export                           | Kind      |
+| -------------------------------- | --------- |
+| `getTenantCachePrefix`           | function  |
+| `MultiTenancyPlugin`             | function  |
+| `tenantMiddleware`               | function  |
+| `ColumnPerTenant`                | class     |
+| `DatabasePerTenant`              | class     |
+| `HeaderResolver`                 | class     |
+| `JwtResolver`                    | class     |
+| `MemoryTenantDataStore`          | class     |
+| `PathResolver`                   | class     |
+| `SchemaPerTenant`                | class     |
+| `SubdomainResolver`              | class     |
+| `TenantDataStoreNotReadyError`   | class     |
+| `TenantNotResolvedError`         | class     |
+| `TenantRegistryUnavailableError` | class     |
+| `CAPABILITIES`                   | const     |
+| `TENANT_CACHE_PREFIX_STATE_KEY`  | const     |
+| `HeaderResolverOptions`          | interface |
+| `IMultiTenancyService`           | interface |
+| `ITenant`                        | interface |
+| `ITenantDataStore`               | interface |
+| `ITenantRegistry`                | interface |
+| `ITenantRepository`              | interface |
+| `ITenantResolver`                | interface |
+| `JwtResolverOptions`             | interface |
+| `MemoryTenantDataStoreOptions`   | interface |
+| `MultiTenancyPluginOptions`      | interface |
+| `PathResolverOptions`            | interface |
+| `SubdomainResolverOptions`       | interface |
+| `TenantCacheOptions`             | interface |
+| `TenantRegistryCacheOptions`     | interface |
+| `DatabaseStrategyKind`           | type      |
+| `ITenantIsolationStrategy`       | type      |
+| `ResolverConfig`                 | type      |
 
 Generated from the package barrel by `pnpm run docs:exports`; `pnpm run check:docs` fails when it
 drifts.

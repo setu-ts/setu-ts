@@ -60,4 +60,7 @@ await db.transaction(async (uow) => {
 - `type` also selects `'prisma'`, `'drizzle'`, `'mongodb'`, `'dynamodb'`, `'cosmos'`, `'bigtable'`
   or `'custom'`.
 - `name` selects a named database token; `readiness` configures migration readiness checks.
+- `createDatabaseTenantRegistry()` is the multi-tenancy `tenants` option over a `Tenant` entity
+  (`idField`, `nameField`, `activeField`, `toMetadata`); only `id`, `name` and metadata reach the
+  request.
 - `findAll` supports filtering and ordering; `findPage` supplies cursor pagination where supported.
