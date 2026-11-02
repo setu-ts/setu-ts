@@ -720,7 +720,7 @@ here.
 - **Milestone 132** (`auth-plugin` + `common` + `openapi-plugin` — resource-server authentication:
   OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
   `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
-  pending).
+  #541).
 - **Next milestone** — M131a (holds the `0.11.0` regression V11-10); M127, M129, M130 and M131b–d
   are open for `0.12.0`.
 

@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **Resource-server authentication (M132, `@setu-ts/auth-plugin`, `@setu-ts/common`,
+- **Resource-server authentication (M132, #541, `@setu-ts/auth-plugin`, `@setu-ts/common`,
   `@setu-ts/openapi-plugin`).** `IPrincipal` gains `scopes` (from the OAuth 2.0 `scope`/`scp`
   claims, `scope` winning when both are present) and `actor` (an `IPrincipalActor`,
   `{ id, claims }`, from the outermost RFC 8693 `act`), and `RouteSecurityMetadata` gains `scopes`.
@@ -44,16 +44,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- **Breaking: a token with a malformed `act` claim is refused (M132, `@setu-ts/auth-plugin`).** A
-  JWT-strategy or trusted-issuer token whose `act` is present but is not an object with a non-empty
-  `sub` or `client_id` was accepted before and is now refused (`401`; the issuer reason is
-  `act-malformed`). An absent `act` is unaffected. The migration steps are in `docs/upgrading.md`,
-  Unreleased, "Resource-server authentication (M132, `@setu-ts/auth-plugin`, `@setu-ts/common`)".
+- **Breaking: a token with a malformed `act` claim is refused (M132, #541,
+  `@setu-ts/auth-plugin`).** A JWT-strategy or trusted-issuer token whose `act` is present but is
+  not an object with a non-empty `sub` or `client_id` was accepted before and is now refused (`401`;
+  the issuer reason is `act-malformed`). An absent `act` is unaffected. The migration steps are in
+  `docs/upgrading.md`, Unreleased, "Resource-server authentication (M132, `@setu-ts/auth-plugin`,
+  `@setu-ts/common`)".
 
-- **Bearer challenges on 401s and scope 403s (M132, `@setu-ts/auth-plugin`).** An application with a
-  bearer strategy (`jwt` or `issuers`) or `resourceServer` now sends `WWW-Authenticate: Bearer …` on
-  a `401` and on a scope `403`. The header is additive, but a test that asserted its absence must be
-  updated.
+- **Bearer challenges on 401s and scope 403s (M132, #541, `@setu-ts/auth-plugin`).** An application
+  with a bearer strategy (`jwt` or `issuers`) or `resourceServer` now sends
+  `WWW-Authenticate: Bearer …` on a `401` and on a scope `403`. The header is additive, but a test
+  that asserted its absence must be updated.
 
 - **Breaking: the rate limiter emits draft-11 header fields and refuses options it used to accept
   (#539, `@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`).** Each item below is
