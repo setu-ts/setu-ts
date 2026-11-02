@@ -37,9 +37,12 @@ export interface McpPluginOptions {
   readonly allowedOrigins?: readonly string[];
   /** Legacy client posture, default `stateless`. */
   readonly legacy?: 'stateless' | 'reject';
-  /** Maximum inner response bytes, default 1 MiB. */
+  /** Maximum inner response bytes: a positive integer up to 64 MiB, default 1 MiB. */
   readonly maxResultBytes?: number;
 }
+
+/** Upper bound on `maxResultBytes` (64 MiB). */
+const MAX_RESULT_BYTES_LIMIT = 64 * 1024 * 1024;
 
 /** Internal defaults resolved once at construction. */
 export type ResolvedOptions = Required<Omit<McpPluginOptions, 'instructions'>> &
@@ -103,7 +106,12 @@ export function resolveOptions(options: McpPluginOptions): ResolvedOptions {
   if (legacy !== 'stateless' && legacy !== 'reject') fail('Invalid MCP legacy mode.');
   const maxResultBytes =
     options.maxResultBytes === undefined ? 1024 * 1024 : options.maxResultBytes;
-  if (!Number.isSafeInteger(maxResultBytes) || maxResultBytes <= 0)
+  // Capped so a large value cannot quietly make the read unbounded (§8a.6).
+  if (
+    !Number.isSafeInteger(maxResultBytes) ||
+    maxResultBytes <= 0 ||
+    maxResultBytes > MAX_RESULT_BYTES_LIMIT
+  )
     fail('Invalid MCP maxResultBytes.');
   const allowedOrigins = options.allowedOrigins === undefined ? [] : options.allowedOrigins;
   if (!Array.isArray(allowedOrigins)) fail('Invalid MCP allowedOrigins.');

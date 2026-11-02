@@ -52,6 +52,8 @@ describe('MCP options', () => {
     { maxResultBytes: -1 },
     { maxResultBytes: 1.1 },
     { maxResultBytes: Infinity },
+    { maxResultBytes: NaN },
+    { maxResultBytes: 64 * 1024 * 1024 + 1 },
     { legacy: 'auto' },
     { serverInfo: {} },
     { instructions: 1 },
@@ -67,4 +69,9 @@ it('preserves the declared string server identity without imposing an extra name
   expect(
     resolveOptions({ tools: [declaration], serverInfo: { name: '', version: '' } }).serverInfo,
   ).toEqual({ name: '', version: '' });
+});
+
+it('accepts maxResultBytes exactly at the 64 MiB cap', () => {
+  const cap = 64 * 1024 * 1024;
+  expect(resolveOptions({ tools: [declaration], maxResultBytes: cap }).maxResultBytes).toBe(cap);
 });

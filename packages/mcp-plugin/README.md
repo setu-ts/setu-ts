@@ -81,15 +81,15 @@ outer MCP request, so one tool invocation consumes both budgets.
 
 ## Configuration
 
-| Option           | Default                                  | Behavior                                                                |
-| ---------------- | ---------------------------------------- | ----------------------------------------------------------------------- |
-| `tools`          | required                                 | Non-empty declarations binding exact method and registered path pattern |
-| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`             |
-| `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                     |
-| `instructions`   | absent                                   | Server instructions                                                     |
-| `allowedOrigins` | `[]`                                     | Additional absolute HTTP(S) origins, without a trailing slash or path   |
-| `legacy`         | `'stateless'`                            | Serves 2025 clients; `'reject'` accepts only the modern protocol        |
-| `maxResultBytes` | `1048576`                                | Maximum bytes read from an inner response; excess cancels the stream    |
+| Option           | Default                                  | Behavior                                                                              |
+| ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| `tools`          | required                                 | Non-empty declarations binding exact method and registered path pattern               |
+| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                           |
+| `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                   |
+| `instructions`   | absent                                   | Server instructions                                                                   |
+| `allowedOrigins` | `[]`                                     | Additional absolute HTTP(S) origins, without a trailing slash or path                 |
+| `legacy`         | `'stateless'`                            | Serves 2025 clients; `'reject'` accepts only the modern protocol                      |
+| `maxResultBytes` | `1048576`                                | Maximum bytes read from an inner response (at most 64 MiB); excess cancels the stream |
 
 A declaration contains `name`, `description`, optional `title`, `route: { method, path }` and
 optional `repeatable: true`. Methods are GET, POST, PUT, PATCH and DELETE. Names are unique,

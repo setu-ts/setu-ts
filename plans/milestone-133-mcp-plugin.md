@@ -398,33 +398,130 @@ Per-file coverage ≥ 90% (branch/function/line) on every changed `src` file, re
 
 ## 8a. Design security review
 
-- **Reviewed flows:** F1 `POST /mcp` with and without credentials (Origin check, body read, gate,
-  SDK); F2 `tools/list` filtered per caller; F3 a tool call dispatched in-process (inner request,
-  identity by forwarded headers, result mapping); F4 a hidden-tool call answered 401/403; F5 a
-  retried call through the idempotency brand; F6 `IApplication.dispatch` as a public entry.
-- **Assets:** route access and tenant isolation (the inner call must be exactly the caller's); the
-  route table (a call must reach only its bound route); error internals; the idempotency store.
-- **Attackers:** a remote client (anonymous or authenticated with few scopes) sending arbitrary MCP
-  JSON-RPC, headers and arguments; a web page attempting DNS rebinding against a local server; a
-  model fed hostile tool output.
-- **Obligations the audit probes (each with a positive control):** O1 the inner request carries no
-  outer `mcp-*`, `idempotency-key` or body headers (an accepted `origin` is forwarded, §3.4), and
-  reaches a principal only through the forwarded credential (a stripped credential → anonymous inner
-  call); O2 `tools/list` is never sent with `cacheScope: 'public'`; O3 a hidden tool's route never
-  runs (401/403 at the HTTP level); O4 a present, unlisted, cross-origin `Origin` is refused before
-  the SDK; O5 no 5xx body, stack or thrown message reaches a tool result; O6 a path argument cannot
-  move the call to another route (`..`, `%2F`, `/`, encoded dot segments); O7 a tool cannot bind to
-  the MCP endpoint itself; O8 a POST/PATCH tool is refused at startup without the idempotency brand
-  or `repeatable`, and a retry through the brand runs the handler once; O9 the inner response read
-  is bounded by `maxResultBytes`; O10 `tools/call` for a declared-but-hidden tool and for an unknown
-  tool are answered without dispatching, including a hidden tool inside a 2025-era JSON-RPC batch;
-  O11 a client disconnect aborts the inner call (`ctx.signal` aborted in the handler); O12 a path
-  parameter the route uses for tenancy is chosen by the caller exactly as over HTTP — the probe
-  confirms the route's own tenant and membership checks refuse another tenant's id, and that the
-  plugin adds no path the HTTP route lacks.
-- **Committed-tree audit:** yes — the change crosses the authentication boundary and adds a public
-  dispatch entry. Run by a fresh agent per `.roo/skills/security-audit/SKILL.md` on the PR's head
-  commit; record in the PR.
+Completed 2026-11-02, before the committed-tree audit. It records the flows, trust boundaries,
+assets, attackers, approved budgets, the threats considered with their resolutions, and the
+obligations the audit must probe. The audit checks the code against this section; it does not
+re-derive the threat model.
+
+### 8a.1 Reviewed flows
+
+- **F1 — `POST /mcp`.** Global middleware runs first: tenant resolution, authentication, rate
+  limiting, `bearer-challenge`. Then the plugin runs, in this order:
+  1. Origin check (§3.7).
+  2. Bounded body read and JSON parse.
+  3. Pre-SDK access gate (§3.5).
+  4. The SDK: protocol validation, then `tools/list` or `tools/call`.
+  5. The response is copied as a stream.
+- **F2 — `tools/list`.** The per-request `McpServer` registers only the tools visible to the caller,
+  with cache hint `{ttlMs: 0, cacheScope: 'private'}` and `listChanged: false`.
+- **F3 — `tools/call` of a visible tool.**
+  1. The arguments are split into path, query and body (§3.4).
+  2. An inner `Request` is built with the forwarded headers and, for an idempotency-branded route, a
+     derived `Idempotency-Key`.
+  3. `IApplication.dispatch` runs the whole pipeline again: authentication and tenancy from the
+     forwarded headers, route guards, validation, idempotency, the handler.
+  4. A bounded read and the §3.6 mapping produce the tool result.
+- **F4 — `tools/call` of a hidden tool.** The pre-SDK gate answers 401, or 403 with the required
+  scopes recorded. `bearer-challenge` writes `WWW-Authenticate`. Nothing is dispatched.
+- **F5 — a retried call.** The same tool and arguments produce the same key, so the idempotency
+  plugin replays the stored result within the caller's tenant and principal scope.
+- **F6 — `IApplication.dispatch`.** A public in-process entry. Any plugin can build a `Request` and
+  run it through the pipeline with an `ip` it chooses.
+
+### 8a.2 Trust boundaries
+
+- **B1 — network → `POST /mcp`.** Headers, body, the JSON-RPC envelope and tool arguments are all
+  attacker-controlled.
+- **B2 — tool arguments → inner URL and body.** Values chosen by the caller, or by a model driving
+  the caller, become path segments, query parameters and JSON fields of a second request.
+- **B3 — outer identity → inner identity.** Credential and tenant headers cross into a second
+  pipeline run. No identity object crosses.
+- **B4 — inner response → client and model.** The route's output becomes a tool result a model
+  reads.
+- **B5 — in-process code → `dispatch`.** Plugin code is trusted. `dispatch` grants it nothing a
+  local HTTP request could not do, except choosing the `ip` it reports (accepted: §8a.5 T16).
+
+### 8a.3 Assets
+
+- **A1 — route authorization.** A tool call reaches exactly its bound route, as exactly the caller.
+- **A2 — tenant isolation.** The inner call resolves the caller's tenant and no other.
+- **A3 — the route table.** No argument can steer a call to another route.
+- **A4 — error internals.** No 5xx body, stack or thrown message reaches a client.
+- **A5 — the idempotency store.** No caller can read or replay another caller's stored result.
+- **A6 — per-caller tool lists.** A filtered list is never shared across authorization contexts.
+- **A7 — availability.** One request cannot cost unboundedly more than one HTTP call to the same
+  routes.
+
+### 8a.4 Attackers
+
+- **X1 — remote, no credentials.** Sends arbitrary JSON-RPC, headers and arguments.
+- **X2 — remote, valid credentials with few scopes, or the wrong tenant.**
+- **X3 — a web page in a victim's browser.** Attempts DNS rebinding, or a cross-origin POST that
+  rides the victim's cookies.
+- **X4 — a model under prompt injection.** Chooses hostile arguments for an authorized caller:
+  traversal values, other tenants' ids, oversized inputs.
+- **X5 — a hostile or buggy route.** Returns a huge, streaming, redirecting or malformed response.
+
+### 8a.5 Threats and resolutions
+
+| #   | Threat                                                                                                                  | Resolution (a claim about the code)                                                                                                                                 | Obligation |
+| --- | ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
+| T1  | Confused deputy: the inner call gets authority the caller lacks                                                         | Identity crosses only as the caller's own forwarded headers. No principal object, token or marker is passed in-process. `authInfo` is not passed to the SDK         | O1         |
+| T2  | Caller-chosen `Idempotency-Key` replays a stored result or forces a collision                                           | The outer `idempotency-key` is stripped. The key is derived from the tool name and canonical arguments. The idempotency plugin scopes it per tenant and principal   | O1, O8     |
+| T3  | Route steering through path arguments (`..`, `.`, `/`, `%2F`, `%2E%2E`, empty)                                          | Each value is `encodeURIComponent`-ed. Empty, `.` and `..` are refused before the URL is built. The bound pattern is fixed at bootstrap                             | O6         |
+| T4  | Argument smuggling: an argument with no destination, or one shadowing another source                                    | Collisions across path, query and body are refused at bootstrap. An argument with no destination is a tool error                                                    | O6         |
+| T5  | A hidden tool's route runs for a caller who may not see it                                                              | The pre-SDK gate answers before dispatch. Only visible tools are registered, so a hidden name inside a batch is `-32602`                                            | O3, O10    |
+| T6  | Tool existence disclosed by 401/403 vs `-32602`                                                                         | **Accepted** (maintainer decision 2026-11-02): the step-up challenge must name the scopes. Undeclared names stay `-32602`                                           | O10        |
+| T7  | A filtered list cached and served to another caller                                                                     | `cacheScope: 'private'` and `ttlMs: 0` are set explicitly                                                                                                           | O2         |
+| T8  | DNS rebinding or cross-origin POST with cookies                                                                         | A present Origin must be the endpoint's own or listed, else 403 before parsing. A browser always sends Origin on such a POST                                        | O4         |
+| T9  | Error disclosure through a tool result                                                                                  | The callback never throws. 5xx, abort and dispatch failures map to fixed text. 4xx shows only what the same caller gets over HTTP                                   | O5         |
+| T10 | Self-recursion: a tool bound to `POST /mcp`                                                                             | Refused at construction                                                                                                                                             | O7         |
+| T11 | A repeated non-idempotent call duplicates a side effect                                                                 | POST/PATCH are refused at bootstrap without the brand or `repeatable`. A branded retry replays                                                                      | O8         |
+| T12 | A huge or never-ending route response exhausts memory                                                                   | The read stops at `maxResultBytes` and cancels the stream. The option has an upper bound (budget below)                                                             | O9         |
+| T13 | A disconnected client keeps an inner handler running                                                                    | The outer `ctx.signal` is passed to the SDK `Request`. The SDK signal is passed to the inner `Request`. Abort is checked before dispatch and before mapping         | O11        |
+| T14 | Cross-tenant access through a path-parameter tenant id                                                                  | Not prevented by the plugin, by design: the route's own tenant and membership checks decide, exactly as over HTTP. The plugin adds no path the HTTP route lacks     | O12        |
+| T15 | Batch amplification: one 2025-era HTTP body carrying many `tools/call` entries                                          | **Accepted with a probe:** each batched call is its own inner request through the app's global limiters. The body itself is bounded by the runtime's `maxBodyBytes` | O13        |
+| T16 | In-process code calls `dispatch` with a forged `ip`                                                                     | **Accepted:** in-process code is trusted (B5). `dispatch` is documented as adding no privilege beyond a local request                                               | —          |
+| T17 | Prompt injection through route output                                                                                   | **Out of scope:** the lethal-trifecta registry is a named follow-on (ROADMAP M133 decision 8). The README says tool output is untrusted model input                 | —          |
+| T18 | Brands treated as authorization: a forged security brand hides a tool, or a forged idempotency brand admits a POST tool | Brands only shape the list and the startup refusal. The route's guards still enforce every call (class 10). Forging needs application code, which is trusted        | O3         |
+| T19 | A non-array `principal.scopes` substring-matches                                                                        | Visibility treats a non-array `scopes` as holding none (fixed in review, M132 F-2 class)                                                                            | O14        |
+
+### 8a.6 Approved budgets
+
+- **`maxResultBytes`.** Default 1 MiB. Must be a safe positive integer, at most 64 MiB. A value
+  outside that range refuses construction. The 64 MiB cap is a design requirement added by this
+  review: the code currently accepts any safe positive integer and must be fixed.
+- **Outer body.** Bounded by the runtime's `maxBodyBytes` on the adapter path. The plugin adds no
+  bound of its own.
+- **Tool names.** 1–128 characters of `[A-Za-z0-9_.-]`, unique. No limit on the number of tools:
+  they are declared by the application.
+- **Per call.** One inner dispatch per `tools/call`. No retries inside the plugin.
+
+### 8a.7 Obligations the audit probes (each with a positive control)
+
+| #   | Obligation                                                                                                                                                                                                                   | Probe and positive control                                                                                                                                                                                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| O1  | The inner request carries no outer `mcp-*`, `idempotency-key`, `content-*`, `accept*` or `transfer-encoding` headers; an accepted `origin` is forwarded (§3.4); a principal is reached only through the forwarded credential | Canary values in every stripped header, read back by a recording route. Control: a forwarded custom header arrives. A credential the inner auth refuses yields an anonymous inner call (401 `isError`), while the same credential over HTTP gets the same 401 |
+| O2  | `tools/list` never carries `cacheScope: 'public'`                                                                                                                                                                            | Read the raw 2026-era result. Control: an SDK server built with `public` shows the field, proving the probe reads it                                                                                                                                          |
+| O3  | A hidden tool's route never runs                                                                                                                                                                                             | Call counters on hidden routes; 401 and 403 with `WWW-Authenticate` listing the required scopes. Control: the same call with the scopes runs the route once                                                                                                   |
+| O4  | A present, unlisted, cross-origin `Origin` is refused before parsing                                                                                                                                                         | Hostile Origin with a malformed body gets 403, not a parse error. Controls: own origin and a listed origin pass; no Origin passes                                                                                                                             |
+| O5  | No 5xx body, stack or thrown message reaches a result                                                                                                                                                                        | Canaries in a 500 body, a thrown error message and a rejected dispatch; search the whole response. Control: a 422 detail canary DOES arrive                                                                                                                   |
+| O6  | No argument moves the call to another route                                                                                                                                                                                  | `..`, `.`, empty, `/`, `%2F`, `%2E%2E`, `..%2F` against a pattern with a sibling route; the sibling's counter stays 0. Control: a plain value reaches the bound route                                                                                         |
+| O7  | A tool cannot bind to the MCP endpoint                                                                                                                                                                                       | Construction refusal, including a trailing-slash variant. Control: a different path is accepted                                                                                                                                                               |
+| O8  | POST/PATCH without the brand or `repeatable` refuse startup; a branded retry runs the handler once; a caller's `Idempotency-Key` is ignored                                                                                  | Retry the same call twice: counter 1. A caller-supplied key equal to another call's derived key does not replay that call. Control: different arguments run twice                                                                                             |
+| O9  | The inner read is bounded                                                                                                                                                                                                    | An endless streaming route is cancelled at `maxResultBytes`. `maxResultBytes` above 64 MiB, `Infinity`, `NaN` and 0 refuse construction. Control: a body exactly at the bound succeeds                                                                        |
+| O10 | Hidden and unknown calls never dispatch, including inside a 2025-era batch                                                                                                                                                   | Route counters stay 0. Control: a visible tool in the same batch runs                                                                                                                                                                                         |
+| O11 | A client disconnect aborts the inner handler                                                                                                                                                                                 | Abort the outer request mid-call and observe `ctx.signal.aborted` in the handler. Control: an uninterrupted call completes                                                                                                                                    |
+| O12 | A tenant path parameter is decided by the route, as over HTTP                                                                                                                                                                | Another tenant's id via MCP and via HTTP: same refusal. Control: the caller's own tenant id succeeds                                                                                                                                                          |
+| O13 | Each batched call passes the app's global limiter                                                                                                                                                                            | A global `rateLimitMiddleware` with `max: 2`; a batch of 3 calls yields at most 2 successes. Control: `max: 10` gives 3                                                                                                                                       |
+| O14 | Non-array `principal.scopes` holds none                                                                                                                                                                                      | A mapper returning the raw `scope` string `'xreadx'`: the `read` tool is hidden and its call answers 403. Control: `['read']` shows it                                                                                                                        |
+
+### 8a.8 Committed-tree audit
+
+Required: the change crosses the authentication boundary (B1, B3), turns network input into routing
+(B2), and adds a public dispatch entry (B5). Run by a freshly spawned Claude agent — not Codex, not
+the implementing context — per `.roo/skills/security-audit/SKILL.md`, on the PR's head commit, after
+`ci:local` and both publish gates. The audit record goes in the PR.
 
 ## 8. Risks & mitigations
 
