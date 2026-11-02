@@ -16,18 +16,18 @@ All notable changes to this project are documented here. The format follows
   `insufficient-privileges` when any scope is missing, with the required list in the challenge; each
   scope is a build-time-validated RFC 6749 `scope-token` and a duplicate is refused.
   `requireAuth({ delegation })` refuses (`'forbid'`) or requires (`'require'`) a delegated token,
-  and `RefreshTokenService` writes a delegated principal's actor into the `act` claim of the tokens
-  it mints, so the exchange keeps it delegated. A bearer strategy (`jwt` or `issuers`) or
-  `resourceServer` makes every `401` answer `WWW-Authenticate: Bearer` (with `error="invalid_token"`
-  for a Bearer-carrying request) and every scope `403` answer
-  `Bearer error="insufficient_scope", scope="…"`; nothing from the request is echoed.
-  `resourceServer` (`ResourceServerOptions`) serves an RFC 9728 protected-resource document derived
-  from configuration at `/.well-known/oauth-protected-resource` plus the resource's path, and adds
-  its `resource_metadata` URL to both challenges. `TrustedIssuer.audience` accepts a list (any
-  match) and `requireAccessTokenType` opts into the RFC 9068 `at+jwt` header type (`typ-mismatch`).
-  Derived OpenAPI security requirements now carry the sorted, unique scopes of a route's
-  `requireScopes` guards; a declared `security` still wins. These are OAuth scopes, not M110b's
-  scoped grants.
+  and `RefreshTokenService` writes a delegated principal's actor into the `act` claim, and its OAuth
+  scopes into the `scope` claim, of the tokens it mints, so the exchange keeps both. A bearer
+  strategy (`jwt` or `issuers`) or `resourceServer` makes every `401` answer
+  `WWW-Authenticate: Bearer` (with `error="invalid_token"` for a Bearer-carrying request) and every
+  scope `403` answer `Bearer error="insufficient_scope", scope="…"`; nothing from the request is
+  echoed. `resourceServer` (`ResourceServerOptions`) serves an RFC 9728 protected-resource document
+  derived from configuration at `/.well-known/oauth-protected-resource` plus the resource's path,
+  and adds its `resource_metadata` URL to both challenges. `TrustedIssuer.audience` accepts a list
+  (any match) and `requireAccessTokenType` opts into the RFC 9068 `at+jwt` header type
+  (`typ-mismatch`). Derived OpenAPI security requirements now carry the sorted, unique scopes of a
+  route's `requireScopes` guards; a declared `security` still wins. These are OAuth scopes, not
+  M110b's scoped grants.
 
 - **Optimistic locking (M128, #540, `@setu-ts/database-plugin`, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`).** `updateVersioned(repo, id, expectedVersion, data, options?)`

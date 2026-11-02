@@ -198,6 +198,40 @@ describe('RefreshTokenService', () => {
       expect(payload.act).toEqual({ client_id: 'svc', sub: 'svc' });
     });
 
+    it('keeps OAuth scopes on the minted token and on every rotation', async () => {
+      const { jwt, service } = makeService();
+      const strategy = new JwtStrategy({ jwtService: jwt });
+      const pair = await service.issue({ id: 'user-1', scopes: ['tools:read', 'tools:write'] });
+      const minted = await strategy.authenticate(bearer(pair.accessToken));
+      expect(minted?.scopes).toEqual(['tools:read', 'tools:write']);
+
+      const rotated = await service.refresh(pair.refreshToken);
+      const again = await strategy.authenticate(bearer(rotated!.accessToken));
+      expect(again?.scopes).toEqual(['tools:read', 'tools:write']);
+    });
+
+    it('drops a scope that is not a scope token instead of splitting it', async () => {
+      const { jwt, service } = makeService();
+      const strategy = new JwtStrategy({ jwtService: jwt });
+      const pair = await service.issue({ id: 'user-1', scopes: ['read', 'a b', ''] });
+      expect((await strategy.authenticate(bearer(pair.accessToken)))?.scopes).toEqual(['read']);
+    });
+
+    it('writes no scope claim for absent, empty, all-invalid or non-array scopes', async () => {
+      const { jwt, service } = makeService();
+      const principals: IPrincipal[] = [
+        { id: 'u' },
+        { id: 'u', scopes: [] },
+        { id: 'u', scopes: ['a b'] },
+        { id: 'u', scopes: 'read write' as unknown as readonly string[] },
+      ];
+      for (const principal of principals) {
+        const pair = await service.issue(principal);
+        const payload = await jwt.verify<Record<string, unknown>>(pair.accessToken);
+        expect('scope' in payload).toBe(false);
+      }
+    });
+
     it('mints no act for a direct principal', async () => {
       const { jwt, service } = makeService();
       const pair = await service.issue({ id: 'user-1' });

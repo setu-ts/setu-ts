@@ -660,7 +660,9 @@ but malformed `act` — not an object, or an object with no usable `sub`/`client
 token itself (`401`), so an unidentifiable delegation cannot pass as a direct user.
 `RefreshTokenService` keeps a delegated principal delegated: the access token it mints, and every
 rotation, carries the actor back as the `act` claim, so exchanging a delegated token for a
-self-issued one does not turn the agent into the user.
+self-issued one does not turn the agent into the user. The principal's OAuth scopes travel the same
+way, as the `scope` claim, so `requireScopes` still admits the exchanged token; a value that is not
+a scope token is dropped rather than split.
 
 ## Signing a user in
 

@@ -9,6 +9,24 @@ import { decodeBase64Url, encodeBase64Url } from '../utils/base64url.ts';
 import { parseDuration } from '../utils/duration.ts';
 import type { RefreshTokenRecord, RefreshTokenStore } from '../stores/refresh-token-store.ts';
 import type { IAccessTokenRevocationStore } from '../stores/access-token-revocation-store.ts';
+import { isScopeToken } from '../resource-server/claims.ts';
+
+/**
+ * The `scope` claim a minted access token carries for a principal's OAuth
+ * scopes. Only valid RFC 6749 scope tokens are written: a value with a space
+ * would split into several scopes when parsed back, granting more than the
+ * principal held, so it is dropped (failing closed). A non-array or empty
+ * `scopes` writes no claim.
+ */
+function scopeClaimOf(principal: IPrincipal): { readonly scope?: string } {
+  if (!Array.isArray(principal.scopes)) {
+    return {};
+  }
+  const scopes = principal.scopes.filter(
+    (scope): scope is string => typeof scope === 'string' && isScopeToken(scope),
+  );
+  return scopes.length === 0 ? {} : { scope: scopes.join(' ') };
+}
 
 /**
  * Options for constructing a RefreshTokenService.
@@ -128,6 +146,9 @@ export class RefreshTokenService {
         ...(principal.actor === undefined
           ? {}
           : { act: { ...principal.actor.claims, sub: principal.actor.id } }),
+        // OAuth scopes survive the same way, as the space-delimited `scope`
+        // claim the JWT strategy parses back into `principal.scopes`.
+        ...scopeClaimOf(principal),
         type: 'access',
         jti: accessTokenJti,
       },
