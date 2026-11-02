@@ -249,7 +249,13 @@ describe('REAL RabbitMqQueue outage (§3.7)', () => {
       const queue = new RabbitMqQueue(makeRuntime(), { url: toIpv4(url) });
 
       try {
-        await queue.connect();
+        // The broker may still be coming back from an earlier test's restart:
+        // M131a's V11-10 fix made the Redis outage tests in between finish in
+        // ~2 s instead of ~50 s, and RabbitMQ accepts TCP before its AMQP
+        // handshake is ready. Wait for it as the restart step below does,
+        // rather than depend on test order and timing.
+        await waitForPort(port, 30_000);
+        await reconnectWithRetry(queue);
         const probe = queue.isHealthy;
         expect(typeof probe).toBe('function');
         if (typeof probe !== 'function') return;
