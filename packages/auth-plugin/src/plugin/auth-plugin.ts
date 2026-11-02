@@ -557,11 +557,15 @@ export function AuthPlugin(options: AuthPluginOptions): IPlugin {
         compiledResourceServer !== null
       ) {
         ctx.middleware.add(
-          bearerChallenge(
-            compiledResourceServer === null
+          bearerChallenge({
+            // Read the credential where the bearer strategies read it, so a
+            // custom `jwt.header`/`jwt.scheme` still reports `invalid_token`.
+            ...(options.jwt?.header !== undefined ? { header: options.jwt.header } : {}),
+            ...(options.jwt?.scheme !== undefined ? { scheme: options.jwt.scheme } : {}),
+            ...(compiledResourceServer === null
               ? {}
-              : { resourceMetadata: compiledResourceServer.metadataUrl },
-          ),
+              : { resourceMetadata: compiledResourceServer.metadataUrl }),
+          }),
           { name: 'bearer-challenge', priority: AUTH_MIDDLEWARE_PRIORITY },
         );
       }

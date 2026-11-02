@@ -69,13 +69,17 @@ export function formatBearerChallenge(options: BearerChallengeOptions = {}): str
   return parameters.length === 0 ? 'Bearer' : `Bearer ${parameters.join(', ')}`;
 }
 
-/** Whether the request carried an `Authorization` header with the Bearer scheme. */
-function carriesBearer(ctx: IRequestContext): boolean {
-  const value = ctx.request.headers.get('authorization');
+/**
+ * Whether the request carried a credential in the header and scheme the bearer
+ * strategies read (`jwt.header`/`jwt.scheme`, `Authorization: Bearer` by
+ * default), so a refusal means the token was invalid rather than absent.
+ */
+function carriesBearer(ctx: IRequestContext, header: string, scheme: string): boolean {
+  const value = ctx.request.headers.get(header);
   if (value === null) {
     return false;
   }
-  return value.split(' ')[0]?.toLowerCase() === 'bearer';
+  return value.split(' ')[0]?.toLowerCase() === scheme;
 }
 
 /** Reads the required-scope list a `requireScopes` refusal recorded, if valid. */
@@ -98,6 +102,10 @@ function requiredScopesOf(ctx: IRequestContext): readonly string[] | undefined {
 export interface BearerChallengeDeps {
   /** The RFC 9728 metadata URL, when `resourceServer` is configured. */
   readonly resourceMetadata?: string;
+  /** The header the bearer strategies read (`jwt.header`); default `authorization`. */
+  readonly header?: string;
+  /** The scheme the bearer strategies read (`jwt.scheme`); default `bearer`. */
+  readonly scheme?: string;
 }
 
 /**
@@ -109,11 +117,13 @@ export interface BearerChallengeDeps {
  * thrown error whose status hint is `401` (before rethrowing). Every other
  * status, including a sign-in redirect, is left untouched.
  *
- * @param deps - The configured metadata URL
+ * @param deps - The configured metadata URL and the bearer header and scheme
  * @returns The middleware function
  */
 export function bearerChallenge(deps: BearerChallengeDeps = {}): MiddlewareFunction {
   const resourceMetadata = deps.resourceMetadata;
+  const header = deps.header ?? 'authorization';
+  const scheme = (deps.scheme ?? 'bearer').toLowerCase();
   const withMetadata = (options: BearerChallengeOptions): BearerChallengeOptions =>
     resourceMetadata === undefined ? options : { ...options, resourceMetadata };
   return async (ctx: IRequestContext, next: () => Promise<void>): Promise<void> => {
@@ -124,7 +134,9 @@ export function bearerChallenge(deps: BearerChallengeDeps = {}): MiddlewareFunct
       if (httpStatusHintOf(error)?.status === 401 && !snapshot.headers.has('www-authenticate')) {
         ctx.response.header(
           'WWW-Authenticate',
-          formatBearerChallenge(withMetadata(carriesBearer(ctx) ? { error: 'invalid_token' } : {})),
+          formatBearerChallenge(
+            withMetadata(carriesBearer(ctx, header, scheme) ? { error: 'invalid_token' } : {}),
+          ),
         );
       }
       throw error;
@@ -135,7 +147,9 @@ export function bearerChallenge(deps: BearerChallengeDeps = {}): MiddlewareFunct
       return;
     }
     if (snapshot.status === 401) {
-      const options: BearerChallengeOptions = carriesBearer(ctx) ? { error: 'invalid_token' } : {};
+      const options: BearerChallengeOptions = carriesBearer(ctx, header, scheme)
+        ? { error: 'invalid_token' }
+        : {};
       ctx.response.header('WWW-Authenticate', formatBearerChallenge(withMetadata(options)));
       return;
     }

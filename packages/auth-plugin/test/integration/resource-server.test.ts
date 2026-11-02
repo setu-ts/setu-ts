@@ -252,6 +252,34 @@ describe('resource-server compositions without a Bearer strategy', () => {
     }
   });
 
+  it('reports invalid_token through a configured jwt header and scheme', async () => {
+    const app = createApplication({
+      plugins: [
+        RuntimePlugin(),
+        AuthPlugin({ jwt: { secret: JWT_SECRET, header: 'x-access-token', scheme: 'Token' } }),
+      ],
+    });
+    app.router.get('/me', {
+      middleware: [requireAuth()],
+      handler: () => ctxOk(),
+    });
+    await app.start();
+    try {
+      const invalid = await app.inject({
+        method: 'GET',
+        url: 'http://localhost/me',
+        headers: { 'x-access-token': 'Token not-a-token' },
+      });
+      expect(invalid.statusCode).toBe(401);
+      expect(invalid.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+
+      const absent = await app.inject({ method: 'GET', url: 'http://localhost/me' });
+      expect(absent.headers.get('www-authenticate')).toBe('Bearer');
+    } finally {
+      await app.stop();
+    }
+  });
+
   it('still challenges when the global auth middleware is disabled', async () => {
     const app = createApplication({
       plugins: [

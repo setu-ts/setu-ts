@@ -16,6 +16,8 @@ import {
 /** A response whose status and headers are live, as the kernel's builder is. */
 function createContext(options: {
   authorization?: string;
+  /** Further request headers, e.g. a custom `jwt.header`. */
+  extraHeaders?: Readonly<Record<string, string>>;
   status?: number;
   state?: Map<string, unknown>;
 }): { ctx: IRequestContext; headers: Headers; state: Map<string, unknown> } {
@@ -46,6 +48,9 @@ function createContext(options: {
   const requestHeaders = new Headers();
   if (options.authorization !== undefined) {
     requestHeaders.set('authorization', options.authorization);
+  }
+  for (const [name, value] of Object.entries(options.extraHeaders ?? {})) {
+    requestHeaders.set(name, value);
   }
   const request = {
     method: 'GET',
@@ -141,6 +146,32 @@ describe('bearer-challenge middleware', () => {
     await run(ctx, 401);
     expect(headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
     expect(headers.get('www-authenticate')).not.toContain('script');
+  });
+
+  it('reads the configured jwt header and scheme for invalid_token', async () => {
+    const custom = { header: 'x-access-token', scheme: 'Token' };
+    const hit = createContext({ extraHeaders: { 'x-access-token': 'token a-token' } });
+    await run(hit.ctx, 401, custom);
+    expect(hit.headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
+
+    // The default header and scheme no longer count once a custom pair is set.
+    const miss = createContext({ authorization: 'Bearer a-token' });
+    await run(miss.ctx, 401, custom);
+    expect(miss.headers.get('www-authenticate')).toBe('Bearer');
+  });
+
+  it('reads the configured header and scheme on a thrown 401 too', async () => {
+    const { ctx, headers } = createContext({ extraHeaders: { 'x-access-token': 'Token a-token' } });
+    const error = withHttpStatusHint(
+      new Error('denied'),
+      authorizationFailureInit('authentication-required'),
+    );
+    const next = (): Promise<void> => {
+      throw error;
+    };
+    const middleware = bearerChallenge({ header: 'x-access-token', scheme: 'token' });
+    await expect(middleware(ctx, next)).rejects.toBe(error);
+    expect(headers.get('www-authenticate')).toBe('Bearer error="invalid_token"');
   });
 
   it('leaves a non-Bearer 401 bare', async () => {

@@ -606,11 +606,12 @@ client has a token.
 
 With a bearer strategy (`jwt` or `issuers`) or `resourceServer` configured, the plugin adds a
 `WWW-Authenticate` header to a refused request: a `401` gets `Bearer` — with `error="invalid_token"`
-when a Bearer credential was sent, bare otherwise — and a scope `403` gets
-`Bearer error="insufficient_scope", scope="<required scopes>"`. `resource_metadata="<url>"` is
-appended to both when `resourceServer` is configured. An application-set header is left alone, an
-unrelated status (including the sign-in redirect) is untouched, and nothing from the request is
-echoed into the header.
+when a credential was sent in the header and scheme the bearer strategies read
+(`Authorization: Bearer`, or the configured `jwt.header`/`jwt.scheme`), bare otherwise — and a scope
+`403` gets `Bearer error="insufficient_scope", scope="<required scopes>"`.
+`resource_metadata="<url>"` is appended to both when `resourceServer` is configured. An
+application-set header is left alone, an unrelated status (including the sign-in redirect) is
+untouched, and nothing from the request is echoed into the header.
 
 ### Requiring OAuth scopes
 

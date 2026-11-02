@@ -3204,13 +3204,14 @@ what changed is that the refusal is legible.
 > `bearer-challenge` middleware at the authentication priority — before `auth`, and even with
 > `middleware: false`. It runs the rest of the chain and, only when the response has no
 > `WWW-Authenticate` header yet, adds `Bearer` on a `401` — with `error="invalid_token"` when the
-> request carried an `Authorization` header whose scheme is `Bearer` (case-insensitive), bare
-> otherwise — and `Bearer error="insufficient_scope", scope="<required>"` on a `403` that recorded
-> required scopes; `resource_metadata="<url>"` is appended to both when `resourceServer` is
-> configured. Every other status, including the sign-in redirect, is untouched, and a thrown error
-> whose status hint is `401` gets the header before it is rethrown. No `error_description`, `realm`
-> or `error_uri` is sent, and nothing the request supplied is echoed: every value comes from
-> configuration, from a fixed error code, or from a build-time-validated scope token.
+> request carried the header and scheme the bearer strategies read — `Authorization: Bearer` by
+> default, or the configured `jwt.header`/`jwt.scheme` (scheme case-insensitive) — bare otherwise —
+> and `Bearer error="insufficient_scope", scope="<required>"` on a `403` that recorded required
+> scopes; `resource_metadata="<url>"` is appended to both when `resourceServer` is configured. Every
+> other status, including the sign-in redirect, is untouched, and a thrown error whose status hint
+> is `401` gets the header before it is rethrown. No `error_description`, `realm` or `error_uri` is
+> sent, and nothing the request supplied is echoed: every value comes from configuration, from a
+> fixed error code, or from a build-time-validated scope token.
 
 ### Exports
 
