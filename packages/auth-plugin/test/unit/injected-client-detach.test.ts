@@ -18,6 +18,15 @@ function eventClient(methods: readonly string[]): EventEmitter & Record<string, 
   return client;
 }
 
+/** A client whose QUIT emits an error first, as ioredis does on an unreachable server. */
+function quitEmitsError<T extends EventEmitter & Record<string, unknown>>(client: T): T {
+  (client as Record<string, unknown>)['quit'] = () => {
+    client.emit('error', new Error('write EPIPE'));
+    return Promise.resolve('OK');
+  };
+  return client;
+}
+
 describe('RedisRateLimitStore injected client', () => {
   it('reports its errors while in use and detaches on disconnect', async () => {
     const client = eventClient(['incr', 'pexpire', 'pttl', 'del', 'quit']);
@@ -30,6 +39,32 @@ describe('RedisRateLimitStore injected client', () => {
     await store.increment('k', 1000);
     client.emit('error', new Error('down'));
     expect(reporter.report).toHaveBeenCalledTimes(1);
+    await store.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('keeps its error listener through QUIT, then detaches (N-4)', async () => {
+    const client = quitEmitsError(eventClient(['incr', 'pexpire', 'pttl', 'del', 'quit']));
+    const reporter = { report: vi.fn(), recovered: vi.fn() };
+    const store = new RedisRateLimitStore({
+      runtime: createFakeRuntime(),
+      client: client as never,
+      connectionErrorReporter: reporter,
+    });
+    await store.increment('k', 1000);
+    await store.disconnect();
+    expect(reporter.report).toHaveBeenCalledTimes(1);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('fifty concurrent first requests attach one listener pair (N-3)', async () => {
+    const client = eventClient(['incr', 'pexpire', 'pttl', 'del', 'quit']);
+    const store = new RedisRateLimitStore({
+      runtime: createFakeRuntime(),
+      client: client as never,
+    });
+    await Promise.all(Array.from({ length: 50 }, () => store.increment('k', 1000)));
+    expect(client.listenerCount('error')).toBe(1);
     await store.disconnect();
     expect(client.listenerCount('error')).toBe(0);
   });

@@ -53,7 +53,7 @@ const LOST_CONNECTION_CASES = [
 /** Between dispatch and failure: an optional reconnect, then the final state. */
 function during(reconnect: boolean, after: string) {
   return (client: { status?: string; emit(event: string): boolean }): void => {
-    if (reconnect) client.emit('ready');
+    if (reconnect) client.emit('connect');
     client.status = after;
   };
 }
@@ -90,6 +90,37 @@ describe('RedisStreamsBroker.publish backend-fault wrapping (M131a X88-5)', () =
       }
     },
   );
+
+  it('keeps its error listener through QUIT, then detaches (N-4)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'ready');
+    client.quit = (): Promise<void> => {
+      client.emit('error', new Error('write EPIPE'));
+      return Promise.resolve();
+    };
+    const errors: unknown[] = [];
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), {
+      client,
+      connectionErrorReporter: { report: (e) => errors.push(e), recovered: () => {} },
+    });
+    await broker.connect();
+    await broker.disconnect();
+    expect(errors).toHaveLength(1);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a failed connect and its retry leave one listener pair (N-3)', async () => {
+    const client = failingPublishClient(new Error('unused'), 'wait');
+    let attempts = 0;
+    client.connect = (): Promise<void> =>
+      ++attempts === 1 ? Promise.reject(new Error('refused')) : Promise.resolve();
+    const broker = new RedisStreamsBroker(createFakeRuntime(), new JsonSerializer(), { client });
+    await expect(broker.connect()).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(0);
+    await broker.connect();
+    expect(client.listenerCount('error')).toBe(1);
+    await broker.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
     const runtime = createFakeRuntime();

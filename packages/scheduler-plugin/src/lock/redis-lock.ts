@@ -210,6 +210,9 @@ export class RedisLock implements IDistributedLock {
       this.#options.connectionErrorReporter,
       this.#commandTimeoutMs,
       (watch) => {
+        // A watch left by an earlier or concurrent attempt is replaced, not
+        // stacked: each attempt would otherwise add a listener pair (N-3).
+        this.#watch?.detach();
         this.#watch = watch;
       },
     );
@@ -220,13 +223,18 @@ export class RedisLock implements IDistributedLock {
    * Disconnect from the Redis backend.
    */
   async disconnect(): Promise<void> {
-    this.#watch?.detach();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
     this.#watch = undefined;
     try {
       if (this.#client !== null) {
         await this.#client.quit();
       }
     } finally {
+      watch?.detach();
       // N4 FIX: Always reset client and connected state, even if quit() rejects
       this.#client = null;
       this.#connected = false;

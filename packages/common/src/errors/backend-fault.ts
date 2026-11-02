@@ -17,14 +17,18 @@
  *
  * - stopped, ioredis: `MaxRetriesPerRequestError` / "Reached the max retries per
  *   request limit (which is 1). Refer to \"maxRetriesPerRequest\" option for
- *   details." — refused before sending → 503.
+ *   details.", or "Command timed out" when the command bound is shorter than
+ *   the retry budget.
  * - stopped, node-redis: first command `Error` / "Redis connection failed:
- *   connect ECONNREFUSED 127.0.0.1:<port>" (cause.code `ECONNREFUSED`), later
- *   commands `Error` / "Command timed out" — the first is refused before sending
- *   → 503; the second is a command whose answer never came back → 504.
- * - paused, both: `Error` / "Command timed out" — the command was dispatched to
- *   a server that will answer only when unpaused, so it MAY HAVE BEEN applied →
- *   504.
+ *   connect ECONNREFUSED 127.0.0.1:<port>" (cause.code `ECONNREFUSED`) →
+ *   503; later commands `Error` / "Command timed out" (node-redis has no retry
+ *   budget, so a queued command waits for the bound).
+ * - paused, both: `Error` / "Command timed out" — the command was dispatched on
+ *   an open socket to a server that answers only when unpaused, so it MAY HAVE
+ *   BEEN applied → 504.
+ *
+ * The retry and timeout shapes on a stopped server are decided by the caller's
+ * `unsent` (below): no socket opened between dispatch and failure → 503.
  *
  * Only those measured shapes enter the table; anything unrecognised passes
  * through unchanged (the masked `500`), because an unrecognised fault is not
@@ -172,11 +176,10 @@ export interface BackendFaultContext {
 /**
  * Classifies one object in a thrown error's cause chain.
  *
- * A command-level timeout (`Command timed out`) is outcome-unknown: the command
- * was dispatched and its answer never came back, so it may have been applied.
- * A lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`,
- * `MaxRetriesPerRequestError`, "Connection is closed.", "Socket closed
- * unexpectedly") is decided by the dispatch state. A refusal before sending
+ * A command timeout (`Command timed out`) and a lost connection (`ECONNRESET`,
+ * `EPIPE`, `ETIMEDOUT`, `MaxRetriesPerRequestError`, "Connection is closed.",
+ * "Socket closed unexpectedly") are decided by the caller's `unsent`: each can
+ * follow a command already written, or one queued that never left. A refusal before sending
  * (the other connection-fault codes, ioredis's disabled offline queue, or a
  * client that is closed / offline / never connected) is unavailable.
  *
@@ -186,10 +189,12 @@ export interface BackendFaultContext {
 function classify(entry: Record<string, unknown>): BackendFaultKind | undefined {
   const name = entry.name;
   const message = typeof entry.message === 'string' ? entry.message : '';
-  // 504: a command was sent and the bound expired with no answer. A command
-  // queued offline can still be sent after a reconnect and then time out, so
-  // the dispatch state cannot clear this one.
-  if (message === 'Command timed out') return 'outcome-unknown';
+  // The bound expired with no answer. On an open socket (a paused server) the
+  // command was sent and may have run; a command queued while disconnected is
+  // written on the next socket. So, like a lost connection, it is decided by
+  // whether any socket opened between dispatch and failure: node-redis has no
+  // retry budget, so this is how a STOPPED server fails on it (M131a re-audit).
+  if (message === 'Command timed out') return 'connection-lost';
   // Lost connection: a command may already have been on the socket.
   const code = typeof entry.code === 'string' ? entry.code : entry.errno;
   if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'connection-lost';

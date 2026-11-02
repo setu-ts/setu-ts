@@ -91,9 +91,9 @@ const TABLE: ReadonlyArray<
     U,
     O,
   ],
-  // Sent with no answer — 504 whatever the state: a command queued offline can
-  // be sent after a reconnect and then time out.
-  ['ioredis / node-redis paused: command timed out', err('Error', 'Command timed out'), O, O, O],
+  // No answer within the bound: a paused server (open socket, sent) or a stopped
+  // one (queued, never written) — decided like a lost connection.
+  ['command timed out', err('Error', 'Command timed out'), O, U, O],
   // Pass-through — unrecognised.
   [
     'a programming error',

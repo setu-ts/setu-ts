@@ -186,7 +186,7 @@ const LOST_CONNECTION_CASES = [
 /** Between dispatch and failure: an optional reconnect, then the final state. */
 function during(reconnect: boolean, after: string) {
   return (client: { status?: string; emit(event: string): boolean }): void => {
-    if (reconnect) client.emit('ready');
+    if (reconnect) client.emit('connect');
     client.status = after;
   };
 }
@@ -228,6 +228,42 @@ describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
       }
     },
   );
+
+  it('keeps its error listeners through QUIT, then detaches (N-4)', async () => {
+    const client = failingPublisher(new Error('unused'), 'ready');
+    client.quit = (): Promise<unknown> => {
+      client.emit('error', new Error('write EPIPE'));
+      return Promise.resolve();
+    };
+    const errors: unknown[] = [];
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        client,
+        subscriber: new FakeRedisClient(),
+        connectionErrorReporter: { report: (e) => errors.push(e), recovered: () => {} },
+      },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    await backplane.close();
+    expect(errors).toHaveLength(1);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a failed injected connect detaches its listeners (N-3)', async () => {
+    const client = failingPublisher(new Error('unused'), 'wait');
+    (client as unknown as { connect: () => Promise<void> }).connect = () =>
+      Promise.reject(new Error('refused'));
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await expect(backplane.connect()).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(0);
+  });
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
     const timedOut = new Error('Command timed out');

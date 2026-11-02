@@ -484,6 +484,9 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     }
     const resolved = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
     this.#client = resolved.client;
+    // A watch left by an earlier or concurrent attempt is replaced, not
+    // stacked: each attempt would otherwise add a listener pair (N-3).
+    this.#watch?.detach();
     this.#watch = resolved.watch;
     if (typeof this.#client.connect === 'function') {
       try {
@@ -538,12 +541,18 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       [...this.#activeSubscriptions.values()].map((subscription) => subscription.unsubscribe()),
     );
 
-    // Detached before QUIT: a shared injected client must not report into
-    // this broker's logger once it has stopped.
-    this.#watch?.detach();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
     this.#watch = undefined;
-    if (this.#client) {
-      await this.#client.quit();
+    try {
+      if (this.#client) {
+        await this.#client.quit();
+      }
+    } finally {
+      watch?.detach();
     }
     this.#client = null;
     this.#ready = false;

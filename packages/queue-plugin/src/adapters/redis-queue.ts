@@ -308,9 +308,18 @@ export class RedisQueue implements QueueAdapter {
       this.#commandTimeoutMs,
     );
     this.#client = resolved.client;
+    // A watch left by an earlier or concurrent attempt is replaced, not
+    // stacked: each attempt would otherwise add a listener pair (N-3).
+    this.#watch?.detach();
     this.#watch = resolved.watch;
     if (typeof this.#client.connect === 'function') {
-      await this.#client.connect();
+      try {
+        await this.#client.connect();
+      } catch (error) {
+        this.#watch.detach();
+        this.#watch = undefined;
+        throw error;
+      }
     }
     this.#ready = true;
     this.#installProbe();
@@ -373,12 +382,18 @@ export class RedisQueue implements QueueAdapter {
   }
 
   async disconnect(): Promise<void> {
-    // Detached first: a shared injected client must not report into this
-    // adapter's logger once it has stopped.
-    this.#watch?.detach();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
     this.#watch = undefined;
-    if (this.#client) {
-      await this.#client.quit();
+    try {
+      if (this.#client) {
+        await this.#client.quit();
+      }
+    } finally {
+      watch?.detach();
     }
     this.#client = null;
     this.#ready = false;

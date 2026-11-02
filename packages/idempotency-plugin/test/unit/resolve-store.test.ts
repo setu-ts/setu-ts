@@ -68,8 +68,8 @@ describe('resolveStore (M109a §3.14)', () => {
     };
     await resolveStore({ type: 'redis', namespace: 'shop', client }, noopReporter, () => undefined);
     // An injected node-redis client's outages must be as visible as a built
-    // ioredis client's (M131a §3.5): one listener for errors, one for recovery.
-    expect(events).toEqual(['error', 'ready']);
+    // ioredis client's (M131a §3.5): errors, recovery, and socket connects.
+    expect(events).toEqual(['error', 'ready', 'connect']);
   });
 
   it('detaches the injected client listeners on disconnect (M131a audit)', async () => {

@@ -131,6 +131,8 @@ export class RedisRateLimitStore implements RateLimitStore {
   #client: IRateLimitRedisClient | null = null;
   /** The reporter on an injected client; detached on disconnect. */
   #watch: ConnectionWatch | undefined;
+  /** The in-flight first resolution, shared by concurrent first requests. */
+  #resolving: Promise<IRateLimitRedisClient> | undefined;
   #url: string;
   #injectedClient: IRateLimitRedisClient | undefined;
   #runtime: IRuntimeServices;
@@ -200,15 +202,21 @@ export class RedisRateLimitStore implements RateLimitStore {
     if (this.#client !== null) {
       return this.#client;
     }
-    this.#client = await resolveClient(
+    // Concurrent first requests share one resolution: each would otherwise
+    // build a client, or attach one more listener pair to an injected one (N-3).
+    this.#resolving ??= resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
       (watch) => {
+        this.#watch?.detach();
         this.#watch = watch;
       },
-    );
+    ).finally(() => {
+      this.#resolving = undefined;
+    });
+    this.#client = await this.#resolving;
     return this.#client;
   }
 
@@ -258,11 +266,19 @@ export class RedisRateLimitStore implements RateLimitStore {
    * Close the Redis connection (calls QUIT).
    */
   async disconnect(): Promise<void> {
-    this.#watch?.detach();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
     this.#watch = undefined;
-    if (this.#client !== null) {
-      await this.#client.quit();
-      this.#client = null;
+    try {
+      if (this.#client !== null) {
+        await this.#client.quit();
+        this.#client = null;
+      }
+    } finally {
+      watch?.detach();
     }
   }
 }

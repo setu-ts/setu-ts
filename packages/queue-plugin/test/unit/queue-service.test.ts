@@ -65,8 +65,8 @@ class FailingRedisClient extends EventEmitter {
 /**
  * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
  * when the job provably never left the process: disconnected at dispatch, no
- * reconnect since, still disconnected at the failure. A job queued offline and
- * written after a reconnect may have been stored (the M131a audit's case).
+ * socket connect since, still disconnected at the failure. A job queued offline
+ * is written on the next socket, before 'ready', and may have been stored (the M131a audit's case).
  */
 const LOST_CONNECTION_CASES = [
   ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
@@ -94,7 +94,7 @@ describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
       const runtime = new FakeRuntimeServices();
       const lost = maxRetries();
       const client = new FailingRedisClient(before, lost, (c) => {
-        if (reconnect) c.emit('ready');
+        if (reconnect) c.emit('connect');
         c.status = after;
       });
       const service = new QueueService(new RedisQueue({ client }), runtime, {
@@ -114,6 +114,43 @@ describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
       expect(client.listenerCount('error')).toBe(0);
     },
   );
+
+  it('RedisQueue keeps its error listener through QUIT, then detaches (N-4)', async () => {
+    const client = new FailingRedisClient('ready', new Error('unused'), () => {});
+    client.quit = (): Promise<void> => {
+      client.emit('error', new Error('write EPIPE'));
+      return Promise.resolve();
+    };
+    const report = vi.fn();
+    const queue = new RedisQueue({
+      client,
+      connectionErrorReporter: { report, recovered: vi.fn() },
+    });
+    await queue.connect();
+    await queue.disconnect();
+    // QUIT's EPIPE reached the reporter (the other report is the adapter's own
+    // inactive-lease notice for a client without eval).
+    expect(report.mock.calls.some(([error]) => (error as Error).message === 'write EPIPE')).toBe(
+      true,
+    );
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('RedisQueue: a failed connect and its retry leave one listener pair (N-3)', async () => {
+    const client = Object.assign(new FailingRedisClient('wait', new Error('unused'), () => {}), {
+      attempts: 0,
+      connect(this: { attempts: number }): Promise<void> {
+        return ++this.attempts === 1 ? Promise.reject(new Error('refused')) : Promise.resolve();
+      },
+    });
+    const queue = new RedisQueue({ client });
+    await expect(queue.connect()).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(0);
+    await queue.connect();
+    expect(client.listenerCount('error')).toBe(1);
+    await queue.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
 
   it('answers 504 for a lost connection on an adapter that reports no state', async () => {
     const runtime = new FakeRuntimeServices();

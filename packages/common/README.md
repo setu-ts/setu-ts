@@ -153,9 +153,11 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
 `redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
 (M131a). The userinfo runs to the URL's last `@`, so a malformed URL whose password holds an
-unencoded `@`, `/`, `#`, `?`, `://` or whitespace is masked whole. A URL with no userinfo, an email
-address and an `@` in a path are left alone, except a path `@` after a port, which is masked. The
-scan is linear and applies to strings of any length.
+unencoded `@`, `/`, `#`, `?`, `://` or whitespace (or whose username holds whitespace) is masked
+whole. A URL with no userinfo, an email address and an `@` in a path are left alone; a path `@`
+after a port, and plain words after a credentialed URL whose host has no `.`, `:` or `/`, are masked
+too, erring toward hiding. A URL never spans lines, so a password holding a line break is masked
+only up to it. The scan is linear and applies to strings of any length.
 
 The rule applies where a redaction service runs: the logger's metadata by default, and trace
 attributes and audit records only when those plugins are given a policy. A log message string is not

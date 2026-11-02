@@ -161,21 +161,24 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   `BackendOutcomeUnknownError` (504, "The backend did not answer; the request may have been
   applied.") plus `toBackendFault(error, source)`, which returns one of them, or `undefined`. Rule
   (the M128 rule, shared): refused before sending (a closed, offline or offline-queue-disabled
-  client, `ECONNREFUSED`-class codes) → unavailable; sent with no answer ("Command timed out") →
-  outcome unknown; a lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`,
-  `MaxRetriesPerRequestError`, "Connection is closed.", "Socket closed unexpectedly") → unavailable
-  only when the caller's `context.unsent` is `true`, otherwise outcome unknown. ioredis's
-  `flushQueue` rejects commands already written to the socket with `MaxRetriesPerRequestError` and
-  "Connection is closed." (read in `event_handler.js` `closeHandler`), and a command made while
-  disconnected is written after the next reconnect (the security audit reproduced a node-redis job
-  stored in Redis behind a `503`), so neither the shape nor the state at dispatch alone proves "not
-  applied". Each call site uses `watchConnection` (common), which counts `'ready'` events: `unsent`
-  is true only when the client was disconnected at dispatch, has not reconnected since, and is still
-  disconnected at the failure (user decision and audit, 2026-11-02). "Command timed out" stays
-  outcome unknown in every state. `watchConnection` also detaches the reporter when the plugin
-  stops. `QueueService.add`, the backplane `publish` and the messaging `publish` wrap thrown driver
-  errors through it, keeping the original as `cause`. `PublishTimeoutError` is not rewrapped: it
-  keeps its name and gains the 504 hint itself.
+  client, `ECONNREFUSED`-class codes) → unavailable; no answer within the bound ("Command timed
+  out") and a lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`, `MaxRetriesPerRequestError`,
+  "Connection is closed.", "Socket closed unexpectedly") → unavailable only when the caller's
+  `context.unsent` is `true`, otherwise outcome unknown. ioredis's `flushQueue` rejects commands
+  already written to the socket with `MaxRetriesPerRequestError` and "Connection is closed." (read
+  in `event_handler.js` `closeHandler`), and a command made while disconnected is written on the
+  next socket (the security audit reproduced a node-redis job stored in Redis behind a `503`), so
+  neither the shape nor the state at dispatch alone proves "not applied". Each call site uses
+  `watchConnection` (common), which counts socket `'connect'` events — not `'ready'`: the re-audit
+  measured node-redis 6.3 writing its queued commands together with the reconnect handshake, before
+  `'ready'`. `unsent` is true only when the client was disconnected at dispatch, no socket has
+  connected since, and it is still disconnected at the failure (user decision and audits,
+  2026-11-02). On a stopped server a "Command timed out" (node-redis has no retry budget) is a
+  queued command that never left, so it follows the same rule; on a paused server the socket is open
+  and the answer is outcome unknown. `watchConnection` also detaches the reporter after `quit()`
+  when the plugin stops. `QueueService.add`, the backplane `publish` and the messaging `publish`
+  wrap thrown driver errors through it, keeping the original as `cause`. `PublishTimeoutError` is
+  not rewrapped: it keeps its name and gains the 504 hint itself.
 - **Why:** a masked 500 tells a client nothing, and the X88-5 runs showed every 500'd job was
   applied; a 504 with that wording tells a retrying client to use an idempotency key.
 - **Measurement gate (implementation step 1):** before the table is fixed, record the thrown
@@ -399,7 +402,7 @@ clients). The audit runs against this section, on the commit the PR merges.
      from the driver error), under both error formats.
   5. Prove a `503` is answered only where the request cannot have been applied: every
      lost-connection shape with the client connected at dispatch, or with no status, answers `504`;
-     `Command timed out` answers `504` whatever the state.
+     `Command timed out` follows the same rule (a paused server, socket open, answers `504`).
   6. Prove CR/LF or ANSI text in a driver error cannot split or forge a `warn` line or the stderr
      start line.
   7. Prove the reporter attached to an injected client does not keep the stopped application alive

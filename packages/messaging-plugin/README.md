@@ -209,8 +209,8 @@ above is stated per broker rather than left implied.
 
 With `'redis-streams'`, connection errors of the `ioredis` client the broker builds go to the
 application logger — the first error of an outage at `warn`, identical repeats at `debug`, the
-recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
-injected client gets no listener: it belongs to the caller.
+recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. Since
+0.12.0 an injected client gets the same listener, removed again when the broker stops.
 
 **node-redis.** To use node-redis instead of ioredis, pass
 `{ broker: 'redis-streams', client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
@@ -524,17 +524,18 @@ For a longer or unbounded wait on node-redis, raise that bound too:
 
 **What the client receives (M131a).** `PublishTimeoutError` answers `504 Gateway Timeout` with the
 detail "The backend did not answer; the request may have been applied." On Redis Streams a driver
-failure is classified the same way: a publish refused before it was sent (a refused connection, a
-client that is closed or offline) throws `BackendUnavailableError` and answers `503` with "The
-request was not applied."; a command sent with no answer (`Command timed out`) throws
-`BackendOutcomeUnknownError` and answers `504`. A lost connection (`MaxRetriesPerRequestError`,
-"Connection is closed.", a reset) answers `503` only when the command provably never left the
-process — the client was disconnected at the call, has not reconnected since, and is still
-disconnected — and `504` otherwise: ioredis rejects commands already sent with the same error, and a
-command queued while disconnected is written after the next reconnect. Both are exported by
-`@setu-ts/common` and keep the driver error as `cause` for the log; it is never served. Any other
-driver error is rethrown unchanged and answers a masked `500`. A client that retries a `504` should
-send an idempotency key.
+failure is classified the same way. A refused connection or a closed or offline client means the
+message was not sent: `BackendUnavailableError` from `@setu-ts/common`, `503` with "The request was
+not applied.". A command timeout (`Command timed out`) or a lost connection
+(`MaxRetriesPerRequestError`, "Connection is closed.", a reset) answers `503` only when the command
+provably never left the process — the client was disconnected at the call, no socket has connected
+since, and it is still disconnected — and `BackendOutcomeUnknownError`, `504`, otherwise: the
+message may already be stored, because ioredis rejects commands already sent with the same errors
+and both drivers write a command queued while disconnected as soon as the next socket opens. A
+stopped Redis therefore answers `503`; a paused one, whose socket stays open, answers `504`. A
+client that retries a `504` should send an idempotency key. Both are exported by `@setu-ts/common`
+and keep the driver error as `cause` for the log; it is never served. Any other driver error is
+rethrown unchanged and answers a masked `500`.
 
 ### Kafka consumer groups
 

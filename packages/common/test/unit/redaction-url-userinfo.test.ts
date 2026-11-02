@@ -66,6 +66,19 @@ const MASK_TABLE: ReadonlyArray<readonly [input: string, expected: string]> = [
   ['http://x.com/r?u=https://y@z', 'http://x.com/r?u=https://***@z'],
   // A URL never spans lines.
   ['redis://:pw\nx@host', 'redis://:pw\nx@host'],
+  // Re-audit N-1: `@` then whitespace in the password; whitespace in the username.
+  ['redis://:p@SECRET wd@host:6379', 'redis://***@host:6379'],
+  ['redis://us er:SECRET@host', 'redis://***@host'],
+  // A digits-only password straight after `://` is not a port.
+  ['redis://:123456 SECRET@host', 'redis://***@host'],
+  ['redis://:p@ss SECRET@host:6379', 'redis://***@host:6379'],
+  ['redis://:p/SECRET wd@host', 'redis://***@host'],
+  ['redis://:p://SECRET wd@host', 'redis://***@host'],
+  // Controls: a credentialed URL whose host has a dot or port, then prose.
+  ['redis://u:p@cache.local then a@b.c', 'redis://***@cache.local then a@b.c'],
+  ['redis://u:p@host:6379 then a@b.c', 'redis://***@host:6379 then a@b.c'],
+  ['see https://host/path then mail a@b.c', 'see https://host/path then mail a@b.c'],
+  ['a https://x.y/z b http://p.q/r', 'a https://x.y/z b http://p.q/r'],
 ];
 
 describe('maskUrlUserinfo (M131a X88-8)', () => {
@@ -139,5 +152,23 @@ describe('describeError masks before its 8192-character bound (M131a audit)', ()
     expect(describeError(new Error('plain failure at 10:00'))).toBe(
       'Error: plain failure at 10:00',
     );
+  });
+});
+
+describe('serializeError masks a classifier before its 512-character cut (re-audit N-2)', () => {
+  it('never keeps part of a password, wherever the cut lands', async () => {
+    const { describeError, serializeError } = await import('../../src/index.ts');
+    const secret = 'Canary7LongSecret';
+    for (let pad = 512 - 60; pad <= 512; pad++) {
+      const error = Object.assign(new Error('failed'), {
+        code: `${'x'.repeat(pad)} redis://:${secret}@host:6379`,
+      });
+      const record = JSON.stringify(serializeError(error));
+      const line = describeError(error);
+      for (let length = 4; length <= secret.length; length++) {
+        expect(record, `pad ${pad}`).not.toContain(secret.slice(0, length));
+        expect(line, `pad ${pad}`).not.toContain(secret.slice(0, length));
+      }
+    }
   });
 });

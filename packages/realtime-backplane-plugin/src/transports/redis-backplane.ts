@@ -212,10 +212,16 @@ export class RedisBackplane implements IRealtimeBackplane {
       // built one's; the attach is structural, so a client without `on` is
       // left alone.
       watches.push(watchConnection(publisher, reporter), watchConnection(subscriber, reporter));
-      for (const client of [publisher, subscriber]) {
-        if (client.status === 'wait' && typeof client.connect === 'function') {
-          await client.connect();
+      try {
+        for (const client of [publisher, subscriber]) {
+          if (client.status === 'wait' && typeof client.connect === 'function') {
+            await client.connect();
+          }
         }
+      } catch (error) {
+        // The injected pair stays the caller's; only our listeners come off (N-3).
+        detachAll();
+        throw error;
       }
     } else {
       const module = this.#options.module ?? (await loadRedisModule());
@@ -423,9 +429,10 @@ export class RedisBackplane implements IRealtimeBackplane {
     this.#subscriber = undefined;
     this.#publisher = undefined;
     this.#listener = undefined;
-    // Detached first: a shared injected client must not report into this
-    // backplane's logger once it has closed.
-    for (const watch of this.#watches) watch.detach();
+    // Detached only after both connections are released (below): an ioredis
+    // client with no 'error' listener prints QUIT's EPIPE on an unreachable
+    // server to the console (M131a re-audit N-4).
+    const watches = this.#watches;
     this.#watches = [];
     // Drop the memoized open, or a connect() after this close would await the
     // already-resolved attempt and return without reconnecting.
@@ -453,6 +460,8 @@ export class RedisBackplane implements IRealtimeBackplane {
     if (publisher !== undefined && publisher !== subscriber) {
       await this.#release(publisher, failures);
     }
+    // A shared injected client must not report into this closed backplane.
+    for (const watch of watches) watch.detach();
     if (failures.length > 0) {
       throw failures[0];
     }

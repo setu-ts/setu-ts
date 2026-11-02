@@ -16,6 +16,8 @@
  * @module
  */
 
+import { maskUrlUserinfo } from '../redaction/redaction-service.ts';
+
 /**
  * A plain, serializable representation of a thrown value.
  *
@@ -240,7 +242,9 @@ function serializeClassifiers(
   for (const key of CLASSIFIER_KEYS) {
     const value = readMember(error, key);
     if (typeof value === 'string') {
-      classifiers[key] = truncateClassifier(value);
+      // Masked WHOLE before the 512-character cut: a URL whose `@` fell past
+      // the cut would no longer read as a URL (M131a re-audit N-2).
+      classifiers[key] = truncateClassifier(maskUrlUserinfo(value));
     } else if (typeof value === 'number' && Number.isFinite(value)) {
       classifiers[key] = value;
     } else if (typeof value === 'boolean') {

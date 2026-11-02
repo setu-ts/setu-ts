@@ -229,21 +229,38 @@ export class RedisStore implements CacheStore {
       this.#reporter,
       this.#commandTimeoutMs,
       (watch) => {
+        // A watch left by an earlier or concurrent attempt is replaced, not
+        // stacked: each attempt would otherwise add a listener pair (N-3).
+        this.#watch?.detach();
         this.#watch = watch;
       },
     );
     // Only call connect() if the client exposes it (lazy ioredis clients do).
     if (typeof this.#client.connect === 'function') {
-      await this.#client.connect();
+      try {
+        await this.#client.connect();
+      } catch (error) {
+        this.#watch?.detach();
+        this.#watch = undefined;
+        throw error;
+      }
     }
     this.#ready = true;
   }
 
   async disconnect(): Promise<void> {
-    this.#watch?.detach();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
     this.#watch = undefined;
-    if (this.#client) {
-      await this.#client.quit();
+    try {
+      if (this.#client) {
+        await this.#client.quit();
+      }
+    } finally {
+      watch?.detach();
     }
     this.#client = null;
     this.#ready = false;

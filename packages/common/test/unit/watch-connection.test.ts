@@ -27,6 +27,17 @@ describe('watchConnection', () => {
     watch.detach();
     expect(client.listenerCount('error')).toBe(0);
     expect(client.listenerCount('ready')).toBe(0);
+    expect(client.listenerCount('connect')).toBe(0);
+  });
+
+  it('a ready without a connect does not count: only an opened socket can carry a write', () => {
+    const client = new EventEmitter();
+    const watch = watchConnection(client);
+    const mark = watch.mark('reconnecting');
+    client.emit('ready');
+    expect(watch.unsent(mark, 'reconnecting')).toBe(true);
+    client.emit('connect');
+    expect(watch.unsent(mark, 'reconnecting')).toBe(false);
   });
 
   it('does not accumulate listeners across many applications sharing one client', () => {
@@ -58,12 +69,12 @@ describe('watchConnection', () => {
     expect(sink.recovered).not.toHaveBeenCalled();
   });
 
-  /** status at dispatch, reconnect in between, status at failure → unsent? */
+  /** status at dispatch, a socket connect in between, status at failure → unsent? */
   const UNSENT: ReadonlyArray<readonly [string | undefined, boolean, string | undefined, boolean]> =
     [
       ['reconnecting', false, 'reconnecting', true],
       ['end', false, 'end', true],
-      // Queued offline and written after the reconnect (the audit's case).
+      // Queued offline and written on the new socket, before 'ready' (the audit's case).
       ['reconnecting', true, 'reconnecting', false],
       // Connected at the failure: it may have been flushed on that connection.
       ['reconnecting', false, 'ready', false],
@@ -76,7 +87,7 @@ describe('watchConnection', () => {
       const client = new EventEmitter();
       const watch = watchConnection(client);
       const mark = watch.mark(before);
-      if (reconnect) client.emit('ready');
+      if (reconnect) client.emit('connect');
       expect(watch.unsent(mark, after)).toBe(expected);
     },
   );

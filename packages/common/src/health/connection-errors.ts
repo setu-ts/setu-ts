@@ -219,12 +219,12 @@ export function attachConnectionErrorReporter(
   return true;
 }
 
-/** The status and reconnect count read just before a command was dispatched. */
+/** The status and socket-connect count read just before a command was dispatched. */
 export interface DispatchMark {
   /** The client's `status` at dispatch, when it reports one. */
   readonly status: string | undefined;
-  /** `'ready'` events seen before dispatch. */
-  readonly readies: number;
+  /** `'connect'` events seen before dispatch. */
+  readonly connects: number;
 }
 
 /**
@@ -244,10 +244,14 @@ export interface ConnectionWatch {
   mark(status: string | undefined): DispatchMark;
   /**
    * Whether a command dispatched at `mark` cannot have been written: the client
-   * was not connected then, has not connected since, and is not connected now.
-   * A driver queues a command made while it is disconnected and writes it after
-   * the next `'ready'`, so only a failure with no reconnect in between proves
-   * the command never left the process. Without listeners it answers `false`.
+   * was not connected then, no socket has connected since, and it is not
+   * connected now. A driver queues a command made while it is disconnected and
+   * writes it on the next socket — node-redis together with its reconnect
+   * handshake, before `'ready'` (measured, node-redis 6.3, M131a re-audit) — so
+   * the count is of `'connect'`, which both ioredis and node-redis emit when the
+   * socket opens and before anything is written on it. A socket that opens and
+   * drops counts too, which errs toward "may have been sent". Without
+   * listeners it answers `false`.
    *
    * @param mark - The mark recorded at dispatch
    * @param status - The client's `status` at the failure
@@ -259,8 +263,8 @@ export interface ConnectionWatch {
 }
 
 /**
- * Attaches a reporter to a client's `'error'` and `'ready'` events, counts the
- * `'ready'` events, and can detach both listeners.
+ * Attaches a reporter to a client's `'error'` and `'ready'` events, counts its
+ * `'connect'` events, and can detach all three listeners.
  *
  * For a client the application injected, which outlives the plugin: the owner
  * calls `detach()` when it stops, so a later error on a shared client does not
@@ -277,14 +281,16 @@ export function watchConnection(
   client: unknown,
   reporter: ConnectionErrorReporter = DROPPING_REPORTER,
 ): ConnectionWatch {
-  let readies = 0;
+  let connects = 0;
   let detached = false;
   const onError = (error: unknown): void => {
     if (!detached) reporter.report(error);
   };
   const onReady = (): void => {
-    readies++;
     if (!detached) reporter.recovered();
+  };
+  const onConnect = (): void => {
+    connects++;
   };
   const attached =
     (typeof client === 'object' || typeof client === 'function') &&
@@ -294,16 +300,17 @@ export function watchConnection(
     const source = client as ErrorEventSource;
     source.on('error', onError);
     source.on('ready', onReady);
+    source.on('connect', onConnect);
   }
   return {
     attached,
-    mark: (status) => ({ status, readies }),
+    mark: (status) => ({ status, connects }),
     unsent: (mark, status) =>
       attached &&
       mark.status !== undefined &&
       mark.status !== 'ready' &&
       status !== 'ready' &&
-      readies === mark.readies,
+      connects === mark.connects,
     detach(): void {
       if (detached) return;
       detached = true;
@@ -316,6 +323,7 @@ export function watchConnection(
       if (typeof remove !== 'function') return;
       remove.call(client, 'error', onError);
       remove.call(client, 'ready', onReady);
+      remove.call(client, 'connect', onConnect);
     },
   };
 }

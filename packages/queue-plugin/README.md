@@ -33,8 +33,8 @@ app.register(
 
 Connection errors of the `ioredis` client the adapter builds go to the application logger — the
 first error of an outage at `warn`, identical repeats at `debug`, the recovery at `info` — instead
-of `ioredis` printing every reconnect failure to `console.error`. An injected client gets no
-listener: it belongs to the caller.
+of `ioredis` printing every reconnect failure to `console.error`. Since 0.12.0 an injected client
+gets the same listener, removed again when the adapter stops.
 
 **node-redis.** To use node-redis instead of ioredis, pass
 `QueuePlugin({ adapter: 'redis', client: fromNodeRedis(createClient({ url })) })` (`fromNodeRedis`
@@ -134,15 +134,17 @@ await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
 
 When the backend fails, `add()` says whether the job was stored (M131a). A refused connection or a
-closed or offline client throws `BackendUnavailableError` from `@setu-ts/common`, which answers
-`503` with "The request was not applied."; a Redis command sent with no answer (`Command timed out`)
-throws `BackendOutcomeUnknownError`, which answers `504`: the job may already be queued, so a client
-that retries should send an idempotency key. A lost connection (`MaxRetriesPerRequestError`,
-"Connection is closed.", a reset) answers `503` only when the command provably never left the
-process — the client was disconnected at the call, has not reconnected since, and is still
-disconnected — and `504` otherwise: ioredis rejects commands already sent with the same error, and a
-command queued while disconnected is written after the next reconnect. Both keep the driver error as
-`cause` for the log. Any other adapter error is rethrown unchanged.
+closed or offline client means the job was not sent: `BackendUnavailableError` from
+`@setu-ts/common`, `503` with "The request was not applied.". A command timeout
+(`Command timed out`) or a lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a
+reset) answers `503` only when the command provably never left the process — the client was
+disconnected at the call, no socket has connected since, and it is still disconnected — and
+`BackendOutcomeUnknownError`, `504`, otherwise: the job may already be queued, because ioredis
+rejects commands already sent with the same errors and both drivers write a command queued while
+disconnected as soon as the next socket opens. A stopped Redis therefore answers `503`; a paused
+one, whose socket stays open, answers `504`. A client that retries a `504` should send an
+idempotency key. Both keep the driver error as `cause` for the log. Any other adapter error is
+rethrown unchanged.
 
 ### Processing Jobs
 

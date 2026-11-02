@@ -71,22 +71,41 @@ export function maskUrlUserinfo(value: string): string {
   let colonPortLike = false;
   let firstAuthorityEnd = -1;
   let digitsToTokenEnd = true;
+  // Rightmost `.`, `:` or `/` in the token: none after its last `@` means the
+  // text after that `@` does not look like a host.
+  let rightmostHostMark = -1;
   // The first `@` after the current token, on the same line.
   let nextAtAfterToken = -1;
+  // The word right after the current token: its first `@`, and whether a `:`
+  // comes before that `@` (a `user:password@` shape).
+  let nextWordFirstAt = -1;
+  let nextWordUserinfo = false;
   // Masked ranges [start, end), found right to left.
   const ranges: [number, number][] = [];
   for (let index = value.length - 1; index >= 0; index--) {
     const char = value[index]!;
     if (WHITESPACE.test(char)) {
-      if (LINE_BREAK.test(char)) nextAtAfterToken = -1;
-      else if (firstAt !== -1) nextAtAfterToken = firstAt;
+      if (LINE_BREAK.test(char)) {
+        nextAtAfterToken = nextWordFirstAt = -1;
+        nextWordUserinfo = false;
+      } else if (index + 1 < tokenEnd) {
+        // Crossing from a non-empty word into whitespace: that word is now
+        // "the next word" for the text to its left.
+        if (firstAt !== -1) nextAtAfterToken = firstAt;
+        nextWordFirstAt = firstAt;
+        nextWordUserinfo = firstColon !== -1 && firstAt !== -1 && firstColon < firstAt;
+      }
       tokenEnd = index;
+      rightmostHostMark = -1;
       firstAt = lastAt = firstColon = firstAuthorityEnd = -1;
       colonPortLike = false;
       digitsToTokenEnd = true;
     } else {
       const digitsAfter = digitsToTokenEnd;
       digitsToTokenEnd = DIGIT.test(char) && digitsToTokenEnd;
+      if (rightmostHostMark === -1 && (char === '.' || char === ':' || char === '/')) {
+        rightmostHostMark = index;
+      }
       if (char === '@') {
         firstAt = index;
         if (lastAt === -1) lastAt = index;
@@ -105,19 +124,29 @@ export function maskUrlUserinfo(value: string): string {
     while (schemeStart < separator && !SCHEME_START.test(value[schemeStart]!)) schemeStart++;
     if (schemeStart === separator) continue;
     let end = -1;
+    const colonBeforeLastAt = firstColon !== -1 && firstColon < lastAt;
     if (
       lastAt > index &&
-      (firstAuthorityEnd === -1 ||
-        firstAt < firstAuthorityEnd ||
-        (firstColon !== -1 && firstColon < lastAt))
+      (firstAuthorityEnd === -1 || firstAt < firstAuthorityEnd || colonBeforeLastAt)
     ) {
       end = lastAt;
+      // `redis://:p@SECRET wd@host`: a password holding `@` then whitespace.
+      // The text after the token's last `@` has no `.`, `:` or `/`, so it may
+      // be the rest of the password rather than a host; when the next word has
+      // an `@`, the userinfo runs to it.
+      if (colonBeforeLastAt && rightmostHostMark < lastAt && nextWordFirstAt !== -1) {
+        end = nextWordFirstAt;
+      }
     } else if (
       lastAt === -1 &&
-      firstColon !== -1 &&
-      !colonPortLike &&
-      (firstAuthorityEnd === -1 || firstColon < firstAuthorityEnd) &&
-      nextAtAfterToken !== -1
+      nextAtAfterToken !== -1 &&
+      // `redis://:pw x@host`: a non-port `:` before the whitespace, or
+      // `redis://us er:pw@host`: the next word is `name:password@host`.
+      // A `:` straight after `://` has no host before it, so it is never a port.
+      ((firstColon !== -1 &&
+        (!colonPortLike || firstColon === index) &&
+        (firstAuthorityEnd === -1 || firstColon < firstAuthorityEnd)) ||
+        nextWordUserinfo)
     ) {
       end = nextAtAfterToken;
     }
