@@ -621,6 +621,9 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
     const client = this.#client;
+    // Read before the call: a lost connection is decided by whether the client
+    // was connected when the XADD was dispatched (M131a X88-5).
+    const status = client.status;
     try {
       await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
         timeoutMs: this.#publishTimeoutMs,
@@ -636,7 +639,11 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       // `PublishTimeoutError` is NOT rewrapped — it keeps its name and carries
       // the 504 hint itself. An unrecognised shape passes through unchanged.
       if (error instanceof PublishTimeoutError) throw error;
-      const fault = toBackendFault(error, 'messaging-plugin: redis-streams broker');
+      const fault = toBackendFault(
+        error,
+        'messaging-plugin: redis-streams broker',
+        status === undefined ? undefined : { connectedAtDispatch: status === 'ready' },
+      );
       if (fault !== undefined) throw fault;
       throw error;
     }

@@ -527,9 +527,12 @@ detail "The backend did not answer; the request may have been applied." On Redis
 failure is classified the same way: a publish refused before it was sent (a refused connection, a
 client that is closed or offline) throws `BackendUnavailableError` and answers `503` with "The
 request was not applied."; a command sent with no answer (`Command timed out`) throws
-`BackendOutcomeUnknownError` and answers `504`. Both are exported by `@setu-ts/common` and keep the
-driver error as `cause` for the log; it is never served. Any other driver error is rethrown
-unchanged and answers a masked `500`. A client that retries a `504` should send an idempotency key.
+`BackendOutcomeUnknownError` and answers `504`. A lost connection (`MaxRetriesPerRequestError`,
+"Connection is closed.", a reset) answers `503` only when the client was not connected at the moment
+of the call, and `504` otherwise: ioredis rejects commands already sent with the same error. Both
+are exported by `@setu-ts/common` and keep the driver error as `cause` for the log; it is never
+served. Any other driver error is rethrown unchanged and answers a masked `500`. A client that
+retries a `504` should send an idempotency key.
 
 ### Kafka consumer groups
 

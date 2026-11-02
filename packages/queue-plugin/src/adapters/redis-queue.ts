@@ -385,6 +385,10 @@ export class RedisQueue implements QueueAdapter {
     return this.#ready;
   }
 
+  connectionStatus(): string | undefined {
+    return this.#client?.status;
+  }
+
   async enqueue<T>(job: StoredJob<T>): Promise<void> {
     if (!this.#client) {
       throw new Error('RedisQueue is not connected');

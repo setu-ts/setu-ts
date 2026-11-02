@@ -731,7 +731,7 @@ export {
   BackendUnavailableError,
   toBackendFault,
 } from './errors/backend-fault.ts';
-export type { BackendFault } from './errors/backend-fault.ts';
+export type { BackendFault, BackendFaultContext } from './errors/backend-fault.ts';
 
 export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
 export type {

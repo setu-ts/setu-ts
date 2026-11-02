@@ -348,6 +348,7 @@ package fits the plugin architecture.
 | `AuthorizationDecisionObservation`    | interface |
 | `AuthorizationDecisionStep`           | interface |
 | `AuthorizationDiagnosticsBatch`       | interface |
+| `BackendFaultContext`                 | interface |
 | `BehaviorLike`                        | interface |
 | `BulkheadPolicy`                      | interface |
 | `CacheDiagnosticsRecord`              | interface |

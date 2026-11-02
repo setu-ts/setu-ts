@@ -22,35 +22,64 @@ class FailingAckQueue extends MemoryQueue {
  * in for a transport that loses its backend while a job is being enqueued.
  */
 class FailingEnqueueQueue extends MemoryQueue {
-  constructor(private readonly failure: unknown) {
+  constructor(
+    private readonly failure: unknown,
+    private readonly status?: string,
+  ) {
     super();
   }
   override enqueue(_job: unknown): Promise<void> {
     return Promise.reject(this.failure);
   }
+  connectionStatus(): string | undefined {
+    return this.status;
+  }
+}
+/**
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) is decided by the
+ * client's status read just before the call: not connected → 503, connected
+ * or unknown → 504, because ioredis flushes commands already on the socket
+ * with the same error.
+ */
+const LOST_CONNECTION_CASES = [
+  ['reconnecting', 'BackendUnavailableError'],
+  ['ready', 'BackendOutcomeUnknownError'],
+  [undefined, 'BackendOutcomeUnknownError'],
+] as const;
+
+function maxRetries(): Error {
+  const e = new Error(
+    'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+  );
+  e.name = 'MaxRetriesPerRequestError';
+  return e;
+}
+
+function classOf(name: (typeof LOST_CONNECTION_CASES)[number][1]) {
+  return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
 }
 
 describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
-  it('wraps a refused-before-sending fault as BackendUnavailableError (503)', async () => {
-    const runtime = new FakeRuntimeServices();
-    const refused = new Error(
-      'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
-    );
-    refused.name = 'MaxRetriesPerRequestError';
-    const service = new QueueService(new FailingEnqueueQueue(refused), runtime, {
-      defaultMaxAttempts: 3,
-      pollIntervalMs: 100,
-    });
-    await service.connect();
-    try {
-      await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
-        const e = thrown as Error;
-        return e instanceof BackendUnavailableError && e.cause === refused;
+  it.each(LOST_CONNECTION_CASES)(
+    'decides a lost connection by the status at dispatch (%s → %s)',
+    async (status, expected) => {
+      const runtime = new FakeRuntimeServices();
+      const lost = maxRetries();
+      const service = new QueueService(new FailingEnqueueQueue(lost, status), runtime, {
+        defaultMaxAttempts: 3,
+        pollIntervalMs: 100,
       });
-    } finally {
-      await service.disconnect();
-    }
-  });
+      await service.connect();
+      try {
+        await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+          const e = thrown as Error;
+          return e instanceof classOf(expected) && e.cause === lost;
+        });
+      } finally {
+        await service.disconnect();
+      }
+    },
+  );
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
     const runtime = new FakeRuntimeServices();

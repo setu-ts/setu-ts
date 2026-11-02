@@ -12,10 +12,13 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
   `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`
   (`504`, "The backend did not answer; the request may have been applied."), the `BackendFault`
-  union and `toBackendFault(error, source)`. `QueueService.add`, the Redis Streams `publish` and the
-  realtime backplane's Redis `publish` wrap a recognised driver failure in one of them, keeping the
-  driver error as `cause`; it is never served. `PublishTimeoutError` keeps its name and gains the
-  `504` hint itself (X88-5).
+  union, `BackendFaultContext` and `toBackendFault(error, source, context?)`. A lost connection
+  (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) answers `503` only when the client
+  was not connected when the call was made, read from its `status` just before it, because ioredis
+  rejects commands already sent with the same errors. `QueueService.add`, the Redis Streams
+  `publish` and the realtime backplane's Redis `publish` wrap a recognised driver failure in one of
+  them, keeping the driver error as `cause`; it is never served. `PublishTimeoutError` keeps its
+  name and gains the `504` hint itself (X88-5).
 - **`setu add` Redis arms for every Redis-backed plugin (M131a, `@setu-ts/cli`).**
   `setu add cache --store redis`, `setu add idempotency --store redis`,
   `setu add scheduler --lock redis` and `setu add realtime-backplane --backplane redis` wire the

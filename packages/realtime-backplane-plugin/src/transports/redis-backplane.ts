@@ -373,11 +373,17 @@ export class RedisBackplane implements IRealtimeBackplane {
       );
     }
     // Always the publisher: the subscriber connection would reject this.
+    // The state is read before the call: it decides a lost connection.
+    const status = publisher.status;
     try {
       await publisher.publish(this.#topic, JSON.stringify(frame));
     } catch (error) {
       // M131a X88-5: a backend fault says whether the frame was applied.
-      const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
+      const fault = toBackendFault(
+        error,
+        'realtime-backplane-plugin: redis transport',
+        status === undefined ? undefined : { connectedAtDispatch: status === 'ready' },
+      );
       if (fault !== undefined) throw fault;
       throw error;
     }

@@ -69,6 +69,17 @@ export interface QueueAdapter {
   disconnect(): Promise<void>;
 
   /**
+   * The driver's connection state (ioredis `status` vocabulary), when the
+   * backend client reports one. `QueueService.add` reads it just before
+   * enqueueing, so a lost-connection failure can say whether the job could
+   * have been sent (M131a X88-5). Optional: an adapter without a status omits
+   * it, and such a failure is answered as possibly applied.
+   *
+   * @returns The status string, or `undefined`
+   */
+  connectionStatus?(): string | undefined;
+
+  /**
    * Checks if the adapter is ready/connected.
    *
    * @returns `true` if connected

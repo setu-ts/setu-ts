@@ -267,6 +267,9 @@ export class QueueService implements IQueue {
       ...(options?.headers === undefined ? {} : { headers: options.headers }),
     };
 
+    // Read before the call: a lost connection is decided by whether the client
+    // was connected when the job was dispatched (M131a X88-5).
+    const status = this.#adapter.connectionStatus?.();
     try {
       await this.#adapter.enqueue(job);
     } catch (error) {
@@ -274,7 +277,11 @@ export class QueueService implements IQueue {
       // refused-before-sending fault (503) means the job was NOT applied; a
       // sent-with-no-answer fault (504) means it MAY HAVE BEEN. An
       // unrecognised shape passes through unchanged (the masked 500).
-      const fault = toBackendFault(error, 'queue-plugin: enqueue');
+      const fault = toBackendFault(
+        error,
+        'queue-plugin: enqueue',
+        status === undefined ? undefined : { connectedAtDispatch: status === 'ready' },
+      );
       if (fault !== undefined) throw fault;
       throw error;
     }

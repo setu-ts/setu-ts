@@ -11,7 +11,7 @@ import { PublishTimeoutError, RequestTimeoutError } from '../../src/errors.ts';
  * A minimal injected client whose xadd rejects with a caller-supplied error,
  * standing in for a transport that loses its backend mid-publish.
  */
-function failingPublishClient(failure: unknown): IRedisStreamsClient {
+function failingPublishClient(failure: unknown, status?: string): IRedisStreamsClient {
   const reject = (): Promise<never> => Promise.reject(failure);
   const ok = (): Promise<void> => Promise.resolve();
   return {
@@ -24,29 +24,53 @@ function failingPublishClient(failure: unknown): IRedisStreamsClient {
     xack: reject,
     quit: ok,
     connect: ok,
+    ...(status === undefined ? {} : { status }),
   };
+}
+/**
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) is decided by the
+ * client's status read just before the call: not connected → 503, connected
+ * or unknown → 504, because ioredis flushes commands already on the socket
+ * with the same error.
+ */
+const LOST_CONNECTION_CASES = [
+  ['reconnecting', 'BackendUnavailableError'],
+  ['ready', 'BackendOutcomeUnknownError'],
+  [undefined, 'BackendOutcomeUnknownError'],
+] as const;
+
+function maxRetries(): Error {
+  const e = new Error(
+    'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+  );
+  e.name = 'MaxRetriesPerRequestError';
+  return e;
+}
+
+function classOf(name: (typeof LOST_CONNECTION_CASES)[number][1]) {
+  return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
 }
 
 describe('RedisStreamsBroker.publish backend-fault wrapping (M131a X88-5)', () => {
-  it('wraps a refused-before-sending fault as BackendUnavailableError (503)', async () => {
-    const runtime = createFakeRuntime();
-    const refused = new Error(
-      'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
-    );
-    refused.name = 'MaxRetriesPerRequestError';
-    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
-      client: failingPublishClient(refused),
-    });
-    await broker.connect();
-    try {
-      await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
-        const e = thrown as Error;
-        return e instanceof BackendUnavailableError && e.cause === refused;
+  it.each(LOST_CONNECTION_CASES)(
+    'decides a lost connection by the status at dispatch (%s → %s)',
+    async (status, expected) => {
+      const runtime = createFakeRuntime();
+      const lost = maxRetries();
+      const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+        client: failingPublishClient(lost, status),
       });
-    } finally {
-      await broker.disconnect();
-    }
-  });
+      await broker.connect();
+      try {
+        await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+          const e = thrown as Error;
+          return e instanceof classOf(expected) && e.cause === lost;
+        });
+      } finally {
+        await broker.disconnect();
+      }
+    },
+  );
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
     const runtime = createFakeRuntime();

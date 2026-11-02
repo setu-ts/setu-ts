@@ -30,6 +30,17 @@
  * through unchanged (the masked `500`), because an unrecognised fault is not
  * proven to be either safe.
  *
+ * Some shapes do not say on their own whether the command left the process.
+ * ioredis rejects every queued command with `MaxRetriesPerRequestError` or
+ * "Connection is closed." when it gives up on a connection — including
+ * commands already written to the socket before it dropped (its `flushQueue`
+ * empties the sent-command queue too), and a reset or broken pipe can arrive
+ * after the server ran the command. For those the caller says whether the
+ * client was connected when it dispatched the call (`connectedAtDispatch`): a
+ * client that was not connected only queued it offline, so the request was not
+ * applied (503); a connected one may have sent it (504), and an unknown state
+ * is treated as connected.
+ *
  * @module
  */
 import { isConnectionFaultCode } from './connection-fault.ts';
@@ -57,7 +68,7 @@ export type BackendFault = BackendUnavailableError | BackendOutcomeUnknownError;
  * try {
  *   await queue.add('jobs', payload);
  * } catch (error) {
- *   const fault = toBackendFault(error, 'queue-plugin: redis adapter');
+ *   const fault = toBackendFault(error, 'queue-plugin: enqueue');
  *   if (fault instanceof BackendUnavailableError) {
  *     // The job was not applied; retry is safe.
  *   }
@@ -71,7 +82,7 @@ export class BackendUnavailableError extends Error {
   override readonly name = 'BackendUnavailableError';
 
   /**
-   * The source label the producer named (e.g. `queue-plugin: redis adapter`),
+   * The source label the producer named (e.g. `queue-plugin: enqueue`),
    * for the log.
    */
   readonly source: string;
@@ -133,17 +144,39 @@ export class BackendOutcomeUnknownError extends Error {
 /** Maximum number of objects inspected, including the original error. */
 const MAX_CAUSE_DEPTH = 5;
 
-/** The two classifications `toBackendFault` can produce. */
-type BackendFaultKind = 'unavailable' | 'outcome-unknown';
+/**
+ * What one object in the cause chain says: refused before sending, sent with no
+ * answer, or a lost connection whose outcome depends on the state at dispatch.
+ */
+type BackendFaultKind = 'unavailable' | 'outcome-unknown' | 'connection-lost';
+
+/** Network codes a command already on the socket can also fail with. */
+const IN_FLIGHT_CODES: ReadonlySet<string> = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
+
+/**
+ * What the caller knew when it dispatched the failed call.
+ *
+ * @since 0.12.0
+ */
+export interface BackendFaultContext {
+  /**
+   * Whether the client was connected (`status === 'ready'`) when the call was
+   * dispatched. Decides a lost-connection fault: `false` → not applied (503);
+   * `true` or omitted → may have been applied (504).
+   */
+  readonly connectedAtDispatch?: boolean;
+}
 
 /**
  * Classifies one object in a thrown error's cause chain.
  *
  * A command-level timeout (`Command timed out`) is outcome-unknown: the command
  * was dispatched and its answer never came back, so it may have been applied.
- * A connection-level failure (the eight net codes, ioredis's offline-queue
- * rejection, or a client that is closed / offline / timed out) is unavailable:
- * the request was refused before it could be applied.
+ * A lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`,
+ * `MaxRetriesPerRequestError`, "Connection is closed.", "Socket closed
+ * unexpectedly") is decided by the dispatch state. A refusal before sending
+ * (the other connection-fault codes, ioredis's disabled offline queue, or a
+ * client that is closed / offline / never connected) is unavailable.
  *
  * @param entry - One object in the cause chain
  * @returns The classification, or `undefined` when the object is unrecognised
@@ -151,18 +184,27 @@ type BackendFaultKind = 'unavailable' | 'outcome-unknown';
 function classify(entry: Record<string, unknown>): BackendFaultKind | undefined {
   const name = entry.name;
   const message = typeof entry.message === 'string' ? entry.message : '';
-  // 504: a command was sent and the bound expired with no answer.
+  // 504: a command was sent and the bound expired with no answer. A command
+  // queued offline can still be sent after a reconnect and then time out, so
+  // the dispatch state cannot clear this one.
   if (message === 'Command timed out') return 'outcome-unknown';
-  // 503: refused before sending — the connection never reached the backend.
-  if (isConnectionFaultCode(entry.code) || isConnectionFaultCode(entry.errno)) return 'unavailable';
-  if (name === 'MaxRetriesPerRequestError') return 'unavailable';
+  // Lost connection: a command may already have been on the socket.
+  const code = typeof entry.code === 'string' ? entry.code : entry.errno;
+  if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'connection-lost';
+  if (name === 'MaxRetriesPerRequestError') return 'connection-lost';
   if (
     name === 'Error' &&
-    (message === 'Connection is closed.' ||
-      message === "Stream isn't writeable and enableOfflineQueue options is false" ||
+    (message === 'Connection is closed.' || message === 'Socket closed unexpectedly')
+  ) {
+    return 'connection-lost';
+  }
+  // 503: refused before sending — the connection never reached the backend.
+  if (isConnectionFaultCode(entry.code) || isConnectionFaultCode(entry.errno)) return 'unavailable';
+  if (
+    name === 'Error' &&
+    (message === "Stream isn't writeable and enableOfflineQueue options is false" ||
       message === 'The client is closed' ||
       message === 'The client is offline' ||
-      message === 'Socket closed unexpectedly' ||
       message === 'Connection timeout')
   ) {
     return 'unavailable';
@@ -207,16 +249,26 @@ function classifyChain(error: unknown): BackendFaultKind | undefined {
  * (M131a §3.6); the messaging `publish` site checks for it before calling this.
  *
  * @param error - The thrown driver error
- * @param source - The source label for the log (e.g. `queue-plugin: redis adapter`)
+ * @param source - The source label for the log (e.g. `queue-plugin: enqueue`)
+ * @param context - What the caller knew at dispatch; decides a lost connection
  * @returns The wrapped fault, or `undefined` when the shape is unrecognised
  * @since 0.12.0
  */
-export function toBackendFault(error: unknown, source: string): BackendFault | undefined {
+export function toBackendFault(
+  error: unknown,
+  source: string,
+  context?: BackendFaultContext,
+): BackendFault | undefined {
   if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError) {
     return error;
   }
   const kind = classifyChain(error);
-  if (kind === 'unavailable') return new BackendUnavailableError(source, { cause: error });
-  if (kind === 'outcome-unknown') return new BackendOutcomeUnknownError(source, { cause: error });
+  if (
+    kind === 'unavailable' ||
+    (kind === 'connection-lost' && context?.connectedAtDispatch === false)
+  ) {
+    return new BackendUnavailableError(source, { cause: error });
+  }
+  if (kind !== undefined) return new BackendOutcomeUnknownError(source, { cause: error });
   return undefined;
 }

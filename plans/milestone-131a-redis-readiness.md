@@ -160,11 +160,19 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 - **Decision:** `common` gains `BackendUnavailableError` (503, "The request was not applied.") and
   `BackendOutcomeUnknownError` (504, "The backend did not answer; the request may have been
   applied.") plus `toBackendFault(error, source)`, which returns one of them, or `undefined`. Rule
-  (the M128 rule, shared): refused before sending (client not ready, offline-queue rejection, the
-  eight net codes) → unavailable; sent with no answer ("Command timed out", a driver timeout) →
-  outcome unknown. `QueueService.add`, the backplane `publish` and the messaging `publish` wrap
-  thrown driver errors through it, keeping the original as `cause`. `PublishTimeoutError` is not
-  rewrapped: it keeps its name and gains the 504 hint itself.
+  (the M128 rule, shared): refused before sending (a closed, offline or offline-queue-disabled
+  client, `ECONNREFUSED`-class codes) → unavailable; sent with no answer ("Command timed out") →
+  outcome unknown; a lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`,
+  `MaxRetriesPerRequestError`, "Connection is closed.", "Socket closed unexpectedly") → unavailable
+  only when the caller's `context.connectedAtDispatch` is `false`, otherwise outcome unknown.
+  ioredis's `flushQueue` rejects commands already written to the socket with
+  `MaxRetriesPerRequestError` and "Connection is closed." (read in `event_handler.js`
+  `closeHandler`), so those shapes alone cannot prove "not applied"; each call site reads its
+  client's `status` just before dispatching (user decision 2026-11-02). "Command timed out" stays
+  outcome unknown even offline: a queued command can be sent after a reconnect. `QueueService.add`,
+  the backplane `publish` and the messaging `publish` wrap thrown driver errors through it, keeping
+  the original as `cause`. `PublishTimeoutError` is not rewrapped: it keeps its name and gains the
+  504 hint itself.
 - **Why:** a masked 500 tells a client nothing, and the X88-5 runs showed every 500'd job was
   applied; a 504 with that wording tells a retrying client to use an idempotency key.
 - **Measurement gate (implementation step 1):** before the table is fixed, record the thrown
