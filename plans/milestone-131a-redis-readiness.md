@@ -356,27 +356,65 @@ hand-off note.
 
 ## 8a. Design security review
 
-- **Reviewed flows:** F1 a Redis URL from the environment or `.env` reaching a client constructor, a
-  thrown `TypeError`, a log line, a trace or stderr; F2 a driver error reaching `toBackendFault` and
-  a served Problem Details body; F3 a node-redis connection error reaching a plugin's `warn` line.
-- **Assets:** credentials inside Redis/AMQP/Kafka URLs; driver error text (hosts, ports, commands);
-  log integrity and volume.
-- **Attackers:** a misconfigured or hostile environment value; a client that sends requests during
-  an outage; a Redis server returning hostile error text.
-- **Budgets:** one `warn` per plugin per connection-state change; one stderr line on a failed start.
-- **Audit obligations:** plant a canary password in a malformed and a valid credentialed URL and
-  prove its absence from stderr, every log line, trace attributes and audit records, with a positive
-  control that a no-credential URL is logged unchanged; prove the 503/504 bodies carry only the
-  fixed detail (no host, port, command or canary from the driver error); prove CR/LF in driver error
-  text cannot split a `warn` line; prove the URL-userinfo rule does not mask an email address or an
-  `@` in a path (no over-redaction that hides diagnostics).
+Revised 2026-11-02 for what was built (the original review predated §3.7's preload in every Node
+project, the last-`@` masking rule, the dispatch-state rule in §3.6 and the reporter on injected
+clients). The audit runs against this section, on the commit the PR merges.
 
-| Threat                                          | Resolution                                       |
-| ----------------------------------------------- | ------------------------------------------------ |
-| Password echoed by Node's default error printer | §3.10b catch in `main.ts`, masked single line    |
-| Password inside a logged or traced string       | §3.10a URL-userinfo rule in the default policy   |
-| Driver text served to clients                   | §3.6 fixed details; driver error only as `cause` |
-| Log flood during an outage                      | §3.5, §3.11 once per state change                |
+- **Reviewed flows:**
+  - F1 a Redis URL from the environment or `.env` reaching a client constructor, a thrown error, a
+    log line, a trace, an audit record or stderr;
+  - F2 a driver error reaching `toBackendFault` and a served Problem Details body;
+  - F3 a node-redis or ioredis connection error reaching a plugin's `warn` line, including a client
+    the application injected;
+  - F4 the generated `instrumentation.mjs`, run by `node --import` before the application in every
+    Node start script and the image `CMD`;
+  - F5 the local start scripts reading `.env` (`--env-file-if-exists`, Deno `--env-file`) while
+    images and Compose keep the platform environment.
+- **Assets:** credentials inside Redis/AMQP/Kafka URLs; driver error text (hosts, ports, commands,
+  keys); the truth of a `503` "not applied" claim, which tells a client a retry cannot duplicate
+  work; log integrity and volume; what code runs before the application.
+- **Attackers:** a misconfigured or hostile environment value (a malformed URL whose password holds
+  unencoded `@`, `/`, `#`, `?`, `:` or whitespace); a log field an attacker controls, sized to
+  defeat a scan (megabytes, many `://`); a client that sends requests during an outage and retries
+  on `503`; a Redis server returning hostile error text (CR/LF, a forged URL); a file planted at
+  `./instrumentation.mjs` or `.env` in the working directory.
+- **Budgets:** one `warn` per plugin per connection-state change; one stderr line on a failed start;
+  `maskUrlUserinfo` linear in its input with no length cut-off.
+- **Audit obligations** (each with a positive and a negative control):
+  1. Plant a canary password in a valid and in a malformed credentialed URL (unencoded `@`, `/`,
+     `#`, `?`) and prove its absence from stderr of a failed boot, every log line (metadata and
+     nested records), trace attributes and audit records; positive control: a no-credential URL, an
+     email and a path `@` are logged unchanged. Record the over-mask of a path `@` after a port as
+     deliberate.
+  2. Prove the mask has no length cut-off and stays linear on hostile input (a credential after 200
+     KB; 500 KB of scheme characters and 100 000 `://`).
+  3. State the masking's scope honestly and test its edges: the log MESSAGE string is not masked
+     (only metadata values); `describeError` truncates at 8192 code points before the mask runs —
+     prove whether a URL cut by that bound can leak part of a password.
+  4. Prove the 503/504 bodies carry only the fixed `detail` (no host, port, command, key or canary
+     from the driver error), under both error formats.
+  5. Prove a `503` is answered only where the request cannot have been applied: every
+     lost-connection shape with the client connected at dispatch, or with no status, answers `504`;
+     `Command timed out` answers `504` whatever the state.
+  6. Prove CR/LF or ANSI text in a driver error cannot split or forge a `warn` line or the stderr
+     start line.
+  7. Prove the reporter attached to an injected client does not keep the stopped application alive
+     or route a later client error into a stopped application's logger in a way that leaks or
+     throws; record the listener lifetime.
+  8. Prove the preload loads only `@opentelemetry/instrumentation/hook.mjs`, resolved from the
+     project root, swallows only its own failure, and that the image copies the generated file and
+     no `.env` (the Dockerfile ignores `.env`; images pass no env-file flag).
+
+| Threat                                             | Resolution                                                           |
+| -------------------------------------------------- | -------------------------------------------------------------------- |
+| Password echoed by Node's default error printer    | §3.10b catch in `main.ts` and `dev.ts`, masked single line           |
+| Password inside a logged or traced string          | §3.10a URL-userinfo rule in the default policy, last-`@`, no cut-off |
+| Masking defeated by a long or crafted value        | Linear scan, no length bound (obligation 2)                          |
+| Driver text served to clients                      | §3.6 fixed details; driver error only as `cause`                     |
+| A false `503` invites a duplicating retry          | §3.6 dispatch-state rule; unknown state answers `504`                |
+| Log flood during an outage                         | §3.5, §3.11 once per state change                                    |
+| Code run before the app from the working directory | §3.7 generated preload, fixed specifier, image copies the file       |
+| `.env` secrets reaching an image                   | §3.4 no flag in images; `.dockerignore` excludes dotenv files        |
 
 ## 9. Out of scope
 
