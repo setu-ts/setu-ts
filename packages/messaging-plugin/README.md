@@ -209,8 +209,8 @@ above is stated per broker rather than left implied.
 
 With `'redis-streams'`, connection errors of the `ioredis` client the broker builds go to the
 application logger — the first error of an outage at `warn`, identical repeats at `debug`, the
-recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. An
-injected client gets no listener: it belongs to the caller.
+recovery at `info` — instead of `ioredis` printing every reconnect failure to `console.error`. Since
+0.12.0 an injected client gets the same listener, removed again when the broker stops.
 
 **node-redis.** To use node-redis instead of ioredis, pass
 `{ broker: 'redis-streams', client: fromNodeRedis(createClient({ url })) }` (`fromNodeRedis` from
@@ -515,6 +515,26 @@ so a caller matching on the text keeps working. On Redis Streams the bound cover
 `timeout` and held by the framework's deadline as well; before 0.11.0 the NATS bound was the
 client's fixed 5 s. Configure a longer bound for slow brokers, or `0` for an unbounded wait (the
 previous behaviour on Redis Streams).
+
+`publishTimeoutMs: 0` removes only this plugin's bound. An injected node-redis client wrapped in
+`fromNodeRedis` (the generated `nodeRedisClient(url)`) still applies the adapter's own
+`commandTimeoutMs`, 15000 ms by default, so its `XADD` rejects with `Command timed out` after 15 s.
+For a longer or unbounded wait on node-redis, raise that bound too:
+`fromNodeRedis(factory, { commandTimeoutMs: 0 })`.
+
+**What the client receives (M131a).** `PublishTimeoutError` answers `504 Gateway Timeout` with the
+detail "The backend did not answer; the request may have been applied." On Redis Streams a driver
+failure is classified the same way. A refusal before any send — a refused or unresolvable
+connection, a closed or offline client, ioredis with its offline queue switched off — means the
+message was not sent: `BackendUnavailableError` from `@setu-ts/common`, `503` with "The request was
+not applied.". A lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) or
+an expired bound (`Command timed out`) answers `BackendOutcomeUnknownError`, `504`, in every case:
+the message may already be stored, because ioredis rejects commands already sent with these errors
+and both drivers write a command queued while disconnected as soon as a socket opens. A stopped
+Redis therefore answers `504` once the retry budget or the bound runs out, except node-redis's first
+refused connect, which is a `503`. A client that retries a `504` should send an idempotency key.
+Both are exported by `@setu-ts/common` and keep the driver error as `cause` for the log; it is never
+served. Any other driver error is rethrown unchanged and answers a masked `500`.
 
 ### Kafka consumer groups
 

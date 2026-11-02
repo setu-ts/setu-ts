@@ -49,6 +49,8 @@ await scheduler.delay('warmup', 5000, () => { console.log('Warmup due'); });
 ## Other options
 
 - `every` schedules a fixed interval; `pause`, `resume`, `remove` and `getNextRun` use the job name.
-- `distributedLock: { enabled: true, storage: 'redis', url }` enables cross-process locking.
+- `distributedLock: { enabled: true, storage: 'redis', url }` enables cross-process locking;
+  `client: nodeRedisClient(url)` in place of `url` uses node-redis.
+  `setu add scheduler --lock redis` wires it on the Redis URL through the project's Redis client.
 - The scheduling methods' fourth argument accepts `data` and `retry: { limit, delay, backoff }`;
   `behaviors` wraps all handlers and `diagnostics` observes an explicit job allowlist.

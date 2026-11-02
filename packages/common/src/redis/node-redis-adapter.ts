@@ -108,6 +108,11 @@ class RedisAdapter {
   #connecting: Promise<void> | undefined;
   #quitting: Promise<void> | undefined;
   #ended = false;
+  /** True once `client.connect()` has resolved: first-connect rejection stops applying. */
+  #everReady = false;
+  /** Settle signal for the first `'error'` emitted before the client is ready. */
+  #firstConnectError: Promise<unknown> | undefined;
+  #firstConnectErrorResolve: ((error: unknown) => void) | undefined;
   /**
    * ONE dispatcher for every subscription: node-redis keeps a channel's
    * listeners in a Set, so re-subscribing a channel with the same function is a
@@ -135,7 +140,13 @@ class RedisAdapter {
     this.#client = client;
     // node-redis rethrows an unlistened 'error' event, so a listener is always
     // attached; a throwing onError must not throw out of the client's emit.
+    // (M131a X88-3) a first-connect error also rejects the pending connect()
+    // at once, naming the cause, as ioredis's first connect does; once the
+    // client has been ready, errors are reconnection reporting only.
     client.on('error', (error: unknown) => {
+      if (!this.#everReady && this.#firstConnectErrorResolve !== undefined) {
+        this.#firstConnectErrorResolve(error);
+      }
       try {
         this.#onError?.(error);
       } catch {
@@ -162,10 +173,19 @@ class RedisAdapter {
     return this.#creating;
   }
 
+  /**
+   * The connection state in ioredis's vocabulary. A client that was ready once
+   * and is not now reads `reconnecting` (M131a V11-10): the queue's health
+   * probe treats that as an outage, and a client still making its first
+   * connection (`connecting`) as not yet known.
+   */
   get status(): string {
     if (this.#ended) return 'end';
     if (this.#client?.isReady === true) return 'ready';
-    return this.#client?.isOpen === true || this.#connecting !== undefined ? 'connecting' : 'wait';
+    if (this.#client?.isOpen === true || this.#connecting !== undefined) {
+      return this.#everReady ? 'reconnecting' : 'connecting';
+    }
+    return this.#everReady ? 'reconnecting' : 'wait';
   }
 
   #bound<T>(run: () => Promise<T>): Promise<T> {
@@ -179,13 +199,40 @@ class RedisAdapter {
     if (this.#ended) return Promise.reject(new Error('The client is closed'));
     if (this.#connecting !== undefined) return this.#connecting;
     if (this.#client?.isOpen === true) return Promise.resolve();
+    // (M131a X88-3) a first-connect error event settles the connect at once,
+    // naming the cause, instead of waiting for the 15 s command bound to
+    // read "Command timed out". The listener is attached in #adopt, before
+    // client.connect() runs, so no error is missed.
+    this.#firstConnectError = new Promise((resolve) => {
+      this.#firstConnectErrorResolve = resolve;
+    });
+    const firstError = this.#firstConnectError;
     this.#connecting = this.#bound(async () => {
       // `run` starts a microtask later, and a factory awaits its import: a quit()
       // in between must not open a socket.
       if (this.#ended) throw new Error('The client is closed');
       const client = await this.#obtain();
       if (this.#ended) throw new Error('The client is closed');
-      await client.connect();
+      const inner = client.connect();
+      // If the error event wins the race, node-redis keeps reconnecting and
+      // inner can still resolve once Redis comes up: record readiness then, or
+      // a later outage would read `connecting` instead of `reconnecting` and the
+      // queue probe would ping it (CodeRabbit #543). A late rejection is
+      // swallowed; the race still sees it when the event never fires.
+      inner.then(
+        () => {
+          this.#everReady = true;
+        },
+        () => {},
+      );
+      await Promise.race([
+        inner,
+        firstError.then((error: unknown) => {
+          const cause = error instanceof Error ? error : new Error(String(error));
+          throw new Error(`Redis connection failed: ${cause.message}`, { cause });
+        }),
+      ]);
+      this.#everReady = true;
     }).finally(() => {
       this.#connecting = undefined;
     });

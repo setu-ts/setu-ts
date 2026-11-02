@@ -594,7 +594,7 @@ describe('the connection variable in the dotenv pair (X91-9)', () => {
 
 describe('safe-default additions (M119c)', () => {
   for (const runtime of ['node', 'bun', 'deno']) {
-    it(`installs only the four console telemetry peers on ${runtime}`, async () => {
+    it(`installs the console telemetry peers and the OTLP exporter on ${runtime}`, async () => {
       const h = harness();
       expect(
         await runNewCommand(parseArgs(['api', '--runtime', runtime]), {
@@ -612,9 +612,14 @@ describe('safe-default additions (M119c)', () => {
       >;
       const deps = manifest[runtime === 'deno' ? 'imports' : 'dependencies']!;
       const peers = Object.keys(deps).filter((name) => name.startsWith('@opentelemetry/'));
+      // M131a X88-10: plus the OTLP exporter, and on Node the loader hook the
+      // generated preload registers. This project has no Redis client, so no
+      // Redis instrumentation is added.
       expect(peers.sort()).toEqual([
         '@opentelemetry/api',
         '@opentelemetry/context-async-hooks',
+        '@opentelemetry/exporter-trace-otlp-http',
+        ...(runtime === 'node' ? ['@opentelemetry/instrumentation'] : []),
         '@opentelemetry/resources',
         '@opentelemetry/sdk-trace-base',
       ]);

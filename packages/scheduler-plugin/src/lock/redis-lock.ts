@@ -7,7 +7,8 @@
  *
  * @module
  */
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, watchConnection } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { IDistributedLock, IRedisLockClient, RedisLockOptions } from '../interfaces/index.ts';
@@ -128,8 +129,11 @@ export function validateClient(client: unknown): client is IRedisLockClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
+ * @param onWatch - Receives the watch on an injected client, to detach on disconnect
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -138,6 +142,7 @@ async function resolveClient(
   injectedClient: IRedisLockClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRedisLockClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -146,6 +151,8 @@ async function resolveClient(
           '(needs: set, quit, eval)',
       );
     }
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -171,6 +178,8 @@ async function resolveClient(
  */
 export class RedisLock implements IDistributedLock {
   #client: IRedisLockClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #options: RedisLockOptions;
   #connected = false;
   #commandTimeoutMs: number;
@@ -200,6 +209,12 @@ export class RedisLock implements IDistributedLock {
       this.#options.client,
       this.#options.connectionErrorReporter,
       this.#commandTimeoutMs,
+      (watch) => {
+        // A watch left by an earlier or concurrent attempt is replaced, not
+        // stacked: each attempt would otherwise add a listener pair (N-3).
+        this.#watch?.detach();
+        this.#watch = watch;
+      },
     );
     this.#connected = true;
   }
@@ -208,11 +223,18 @@ export class RedisLock implements IDistributedLock {
    * Disconnect from the Redis backend.
    */
   async disconnect(): Promise<void> {
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
+    this.#watch = undefined;
     try {
       if (this.#client !== null) {
         await this.#client.quit();
       }
     } finally {
+      watch?.detach();
       // N4 FIX: Always reset client and connected state, even if quit() rejects
       this.#client = null;
       this.#connected = false;

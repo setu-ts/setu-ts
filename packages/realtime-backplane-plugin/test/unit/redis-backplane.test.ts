@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 /**
  * Tests for the Redis pub/sub backplane transport.
  *
@@ -7,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setImmediate } from 'node:timers/promises';
 import type { ConnectionErrorReporter, RealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../../src/interfaces/index.ts';
@@ -144,6 +146,159 @@ class FakeRedisClient implements IRedisBackplaneClient {
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
 
+/**
+ * A publisher whose `publish` rejects with a caller-supplied error, standing in
+ * for a transport that loses its backend mid-publish.
+ */
+function failingPublisher(
+  failure: unknown,
+  status?: string,
+  onWrite?: (client: { status?: string; emit(event: string): boolean }) => void,
+): IRedisBackplaneClient & EventEmitter {
+  const ok = (): Promise<unknown> => Promise.resolve();
+  const client = Object.assign(new EventEmitter(), {
+    publish: (): Promise<never> => {
+      onWrite?.(client);
+      return Promise.reject(failure);
+    },
+    subscribe: ok,
+    unsubscribe: ok,
+    quit: ok,
+    disconnect: () => {},
+    ...(status === undefined ? {} : { status }),
+  });
+  return client as unknown as IRedisBackplaneClient & EventEmitter;
+}
+/**
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 504 in
+ * every client state: ioredis rejects commands already sent with the same
+ * error, and a driver writes a queued command as soon as a socket opens, so no
+ * state the framework can observe proves the command was never written (M131a
+ * security audits).
+ */
+const LOST_CONNECTION_CASES = [
+  ['reconnecting', false, 'reconnecting'],
+  ['reconnecting', true, 'reconnecting'],
+  ['reconnecting', false, 'ready'],
+  ['ready', false, 'ready'],
+] as const;
+
+/** Between dispatch and failure: an optional reconnect, then the final state. */
+function during(reconnect: boolean, after: string) {
+  return (client: { status?: string; emit(event: string): boolean }): void => {
+    if (reconnect) client.emit('connect');
+    client.status = after;
+  };
+}
+
+function maxRetries(): Error {
+  const e = new Error(
+    'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+  );
+  e.name = 'MaxRetriesPerRequestError';
+  return e;
+}
+
+describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
+  it.each(LOST_CONNECTION_CASES)(
+    'dispatch %s, reconnect %s, failure %s → 504',
+    async (before, reconnect, after) => {
+      const lost = maxRetries();
+      const backplane = new RedisBackplane(
+        {
+          transport: 'redis',
+          client: failingPublisher(lost, before, during(reconnect, after)),
+          subscriber: new FakeRedisClient(),
+        },
+        'a',
+        'topic',
+      );
+      await backplane.connect();
+      try {
+        await expect(backplane.publish(FRAME)).rejects.toSatisfy((thrown: unknown) => {
+          const e = thrown as Error;
+          return e instanceof BackendOutcomeUnknownError && e.cause === lost;
+        });
+      } finally {
+        await backplane.close();
+      }
+    },
+  );
+
+  it('keeps its error listeners through QUIT, then detaches (N-4)', async () => {
+    const client = failingPublisher(new Error('unused'), 'ready');
+    client.quit = (): Promise<unknown> => {
+      client.emit('error', new Error('write EPIPE'));
+      return Promise.resolve();
+    };
+    const errors: unknown[] = [];
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        client,
+        subscriber: new FakeRedisClient(),
+        connectionErrorReporter: { report: (e) => errors.push(e), recovered: () => {} },
+      },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    await backplane.close();
+    expect(errors).toHaveLength(1);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('a failed injected connect detaches its listeners (N-3)', async () => {
+    const client = failingPublisher(new Error('unused'), 'wait');
+    (client as unknown as { connect: () => Promise<void> }).connect = () =>
+      Promise.reject(new Error('refused'));
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client, subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await expect(backplane.connect()).rejects.toThrow('refused');
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('wraps a refusal before any send as BackendUnavailableError (503)', async () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+      code: 'ECONNREFUSED',
+    });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: failingPublisher(refused), subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    try {
+      await expect(backplane.publish(FRAME)).rejects.toSatisfy(
+        (thrown: unknown) => thrown instanceof BackendUnavailableError && thrown.cause === refused,
+      );
+    } finally {
+      await backplane.close();
+    }
+  });
+
+  it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
+    const timedOut = new Error('Command timed out');
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: failingPublisher(timedOut), subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    try {
+      await expect(backplane.publish(FRAME)).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendOutcomeUnknownError && e.cause === timedOut;
+      });
+    } finally {
+      await backplane.close();
+    }
+  });
+});
+
 describe('RedisBackplane injected lazy startup', () => {
   function lazyClient(status = 'wait') {
     const client = Object.assign(new FakeRedisClient(), {
@@ -216,6 +371,39 @@ describe('RedisBackplane injected lazy startup', () => {
     expect(client.connect).not.toHaveBeenCalled();
     expect(subscriber.connect).not.toHaveBeenCalled();
     await backplane.close();
+  });
+
+  it('detaches only after discarding owned connections on a failed subscribe (CodeRabbit #543)', async () => {
+    const built = () =>
+      Object.assign(new EventEmitter(), {
+        status: 'ready',
+        publish: () => Promise.resolve(1),
+        subscribe: () => Promise.reject(new Error('subscribe refused')),
+        unsubscribe: () => Promise.resolve(),
+        disconnect: () => {},
+        quit(this: EventEmitter): Promise<string> {
+          // QUIT on an unreachable server: the EPIPE must still reach a listener.
+          this.emit('error', new Error('write EPIPE'));
+          return Promise.resolve('OK');
+        },
+      });
+    const clients = [built(), built()];
+    let next = 0;
+    const module = { create: () => clients[next++] } as unknown as IRedisModule;
+    const reported: unknown[] = [];
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        url: 'redis://test',
+        module,
+        connectionErrorReporter: { report: (e) => reported.push(e), recovered: () => {} },
+      },
+      'a',
+      'topic',
+    );
+    await expect(backplane.connect()).rejects.toThrow('subscribe refused');
+    expect(reported.some((e) => (e as Error).message === 'write EPIPE')).toBe(true);
+    for (const client of clients) expect(client.listenerCount('error')).toBe(0);
   });
 
   it('does not connect clients the backplane builds even if they report wait', async () => {
@@ -1208,7 +1396,7 @@ describe('RedisBackplane connection-error reporting', () => {
     await backplane.close();
   });
 
-  it('never attaches to an injected pair, even with a reporter configured', async () => {
+  it('attaches to an injected pair when a reporter is configured (M131a X88-3)', async () => {
     const client = new FakeRedisClient();
     const subscriber = new FakeRedisClient();
     const backplane = new RedisBackplane(
@@ -1219,8 +1407,10 @@ describe('RedisBackplane connection-error reporting', () => {
 
     await backplane.connect();
 
-    expect(client.eventListeners.has('error')).toBe(false);
-    expect(subscriber.eventListeners.has('error')).toBe(false);
+    // One reporter for both: an injected client's outages must be as visible as
+    // a built one's, so the error/ready listeners are attached to the pair.
+    expect(client.eventListeners.has('error')).toBe(true);
+    expect(subscriber.eventListeners.has('error')).toBe(true);
     await backplane.close();
   });
 });

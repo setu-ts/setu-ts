@@ -218,19 +218,22 @@ templates registering no messaging at all (`rest`, no template) — use `--templ
 nothing, because stating the default is not a mistake.
 
 Existing standalone projects can use `setu add messaging --broker redis` or
-`setu add queue --queue redis`. These flags apply only to their named package; Workers and workspace
-members refuse them. Members instead read the workspace transport. `add` records the selected client
-in the manifest (run the install command it prints), writes only an absent inline call or generated
-full-stack option, and prints the exact configuration when it already exists or cannot safely be
-edited. An absent `docker/compose.yaml` is created for a standalone selection; an existing one is
-preserved. The connection variable is appended to the project's dotenv file (with its local default)
-and to that file's `.example` (empty) — the rows `setu new --broker` writes — only where the file
-exists and does not already assign it; a file the project does not have is named, not created. The
-file is the `envFilePath` that `setu.config.ts` declares (the last entry of an array, which
-ConfigPlugin overrides with the earlier ones). When the configuration declares none, or names it in
-a form the CLI cannot read (a variable, a template literal), nothing is written and the command says
-where to set the variable instead. Without a selection the full-stack starter uses memory. Changing
-an existing value is a manual edit.
+`setu add queue --queue redis`, and the other Redis-backed plugins take a flag named after their own
+option: `setu add cache --store redis`, `setu add idempotency --store redis`,
+`setu add scheduler --lock redis` and `setu add realtime-backplane --backplane redis`. Each wires
+the plugin's Redis arm on `REDIS_URL` through the project's Redis client (below). These flags apply
+only to their named package; Workers and workspace members refuse them. Members instead read the
+workspace transport. `add` records the selected client in the manifest (run the install command it
+prints), writes only an absent inline call or generated full-stack option, and prints the exact
+configuration when it already exists or cannot safely be edited. An absent `docker/compose.yaml` is
+created for a standalone selection; an existing one is preserved. The connection variable is
+appended to the project's dotenv file (with its local default) and to that file's `.example` (empty)
+— the rows `setu new --broker` writes — only where the file exists and does not already assign it; a
+file the project does not have is named, not created. The file is the `envFilePath` that
+`setu.config.ts` declares (the last entry of an array, which ConfigPlugin overrides with the earlier
+ones). When the configuration declares none, or names it in a form the CLI cannot read (a variable,
+a template literal), nothing is written and the command says where to set the variable instead.
+Without a selection the full-stack starter uses memory. Changing an existing value is a manual edit.
 
 #### Choosing the Redis client
 
@@ -247,6 +250,19 @@ than `redis` itself, so `setu check` and later `setu add` runs keep reading the 
 ```bash
 setu new svc --template microservice --broker redis --queue redis --redis-client node-redis
 setu new acme --workspace --transport redis --redis-client node-redis
+```
+
+A standalone project keeps one Redis client. `setu add` reads it from what the project already uses:
+a configuration importing the generated `nodeRedisClient` helper is on node-redis, a project
+depending on `ioredis` is on ioredis. A project with neither has not chosen yet, so its first Redis
+`setu add` takes `--redis-client` (ioredis when omitted). A `--redis-client` that disagrees with a
+client already in use is refused (exit 2, naming both), so a project never ends up with two Redis
+drivers.
+
+```bash
+setu add cache --store redis
+setu add scheduler --lock redis
+setu add realtime-backplane --backplane redis
 ```
 
 A workspace records the choice as `redisClient: 'node-redis'` in its manifest (no key means

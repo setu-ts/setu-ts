@@ -10,6 +10,7 @@
 import {
   type AddJobOptions,
   createCachedProbe,
+  toBackendFault,
   type HealthCheckResult,
   type HealthIndicatorFn,
   type IJob,
@@ -48,6 +49,10 @@ const PROBE_TIMEOUT_MS = 2000;
 export interface QueueLogger {
   /** Logs at `error` severity. */
   error(message: string, metadata?: Record<string, unknown>): void;
+  /** Logs at `warn` severity (M131a X88-9: a loop failure starts). */
+  warn?(message: string, metadata?: Record<string, unknown>): void;
+  /** Logs at `info` severity (M131a X88-9: a loop failure recovers). */
+  info?(message: string, metadata?: Record<string, unknown>): void;
 }
 
 /**
@@ -92,6 +97,11 @@ export class QueueService implements IQueue {
   #renewalHandles = new Set<TimerHandle>();
   #connected = false;
   #logger: QueueLogger | undefined;
+  /**
+   * Per-loop failure state (M131a X88-9): the set of loop names currently in a
+   * failure run, so a loop reports once per state change rather than per poll.
+   */
+  #loopFailing = new Set<string>();
   /**
    * Present only when the application registered `CAPABILITIES.METRICS`. Every
    * call site is optional-chained, so an application without the metrics plugin
@@ -164,6 +174,49 @@ export class QueueService implements IQueue {
     }
   }
 
+  /**
+   * Reports a looping failure once per state change (M131a X88-9): one `warn`
+   * when the failure starts, nothing per poll in between.
+   */
+  #loopFailed(name: string, error: unknown, meta?: Record<string, unknown>): void {
+    const logger = this.#logger;
+    if (logger === undefined) {
+      return;
+    }
+    const starting = !this.#loopFailing.has(name);
+    this.#loopFailing.add(name);
+    if (!starting) {
+      return;
+    }
+    try {
+      const err = toReportableError(error);
+      // `warn` is optional on a queue logger; one with only `error` still hears
+      // about the failure, as it did before X88-9.
+      const report = logger.warn ?? logger.error;
+      report.call(logger, `queue ${name} failed`, { error: err.message, ...meta });
+    } catch {
+      // A broken logger must not take the loop down.
+    }
+  }
+
+  /**
+   * Reports a looping recovery once (M131a X88-9): one `info` on recovery, so
+   * the next failure warns again. A no-op when the loop was not failing.
+   */
+  #loopRecovered(name: string): void {
+    const logger = this.#logger;
+    // The state clears first, whether or not the logger can say so: otherwise
+    // a logger without `info` would never hear the loop's next failure.
+    if (logger === undefined || !this.#loopFailing.delete(name) || logger.info === undefined) {
+      return;
+    }
+    try {
+      logger.info(`queue ${name} recovered`);
+    } catch {
+      // A broken logger must not take the loop down.
+    }
+  }
+
   async connect(): Promise<void> {
     if (this.#connected) {
       return;
@@ -218,7 +271,17 @@ export class QueueService implements IQueue {
       ...(options?.headers === undefined ? {} : { headers: options.headers }),
     };
 
-    await this.#adapter.enqueue(job);
+    try {
+      await this.#adapter.enqueue(job);
+    } catch (error) {
+      // M131a X88-5: a backend fault says whether the job was applied. A
+      // refusal before any send (503) means the job was NOT applied; a lost
+      // connection or an expired bound (504) means it MAY HAVE BEEN. An
+      // unrecognised shape passes through unchanged (the masked 500).
+      const fault = toBackendFault(error, 'queue-plugin: enqueue');
+      if (fault !== undefined) throw fault;
+      throw error;
+    }
     return id;
   }
 
@@ -389,14 +452,20 @@ export class QueueService implements IQueue {
     // otherwise make an attended dead-letter queue read as "backlog". A
     // partial read sums what it could read — facts, not a threshold.
     let backlog = 0;
+    let failed = false;
     for (const name of this.#processors.keys()) {
       try {
         const depth = await readDepths.call(this.#adapter, name);
         queues[name] = depth;
         backlog += depth.ready + depth.processing;
       } catch (error) {
-        this.#report('queue depth probe failed', error, { name });
+        // M131a X88-9: one warn when the failure starts, nothing per poll.
+        failed = true;
+        this.#loopFailed('depth-probe', error, { name });
       }
+    }
+    if (!failed) {
+      this.#loopRecovered('depth-probe');
     }
     if (Object.keys(queues).length === 0) {
       return {};
@@ -425,9 +494,14 @@ export class QueueService implements IQueue {
 
   #startRecurringLoop(): void {
     this.#recurringHandle = this.#runtime.setInterval(() => {
-      this.#processRecurring().catch((error: unknown) => {
-        this.#report('queue recurring scheduling failed', error);
-      });
+      this.#processRecurring()
+        .then(() => {
+          this.#loopRecovered('recurring');
+        })
+        .catch((error: unknown) => {
+          // M131a X88-9: one warn when the failure starts, nothing per poll.
+          this.#loopFailed('recurring', error);
+        });
     }, this.#pollIntervalMs);
   }
 

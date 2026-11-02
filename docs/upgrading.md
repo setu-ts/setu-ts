@@ -40,6 +40,35 @@ replay even when the caller intended a second operation; vary an argument such a
 when that is intended. Origin checks apply to the MCP endpoint, and accepted Origin is preserved for
 inner CSRF checks. Lists filter scopes/authentication; roles and policies still run on the route.
 
+### Redis, readiness and outage statuses (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/notification-plugin`, `@setu-ts/cli`)
+
+A `notification` outage no longer fails `/ready`. If your replicas must leave the load balancer when
+notifications cannot be sent, add `HealthPlugin({ readiness: { include: ['notification'] } })`.
+
+`queue.add()`, a Redis Streams publish and a Redis backplane publish that fail on the backend now
+answer `503` (`BackendUnavailableError`, not applied) or `504` (`BackendOutcomeUnknownError` or
+`PublishTimeoutError`, may have been applied) instead of a masked `500`. A client that retried only
+on `503` should retry a `504` only with an idempotency key. Code that caught the raw driver error
+from `add()` or `publish()` should read it from the new error's `cause`.
+
+Log metadata now masks URL userinfo in every unmatched string value, and so do trace attributes and
+audit records when their plugin is given a redaction policy; `describeError` masks it in every error
+line. A dashboard or test that matched a logged connection URL with its credentials must match
+`scheme://***@host`. Log message strings are not redacted: keep credentials out of the text you pass
+as the message.
+
+A plugin that stops now removes the listeners it added to an injected Redis client, so one client
+shared by several applications no longer reports into a stopped one's logger.
+
+An injected Redis client now gets the plugin's connection-error listener, so its outages are logged;
+if you attached your own `'error'` listener only to stop an unhandled-error crash, it can stay.
+
+A project generated from now on runs `instrumentation.mjs` with `node --import`; keep the file and
+the flag when you edit the start scripts or the Dockerfile, or lazily imported drivers record no
+spans. A project generated earlier can add both by hand, as the telemetry README shows. The Redis
+Streams poll and reclaim timers now start at `connect()`: a test that counted timers created by
+`subscribe()` should count them after `connect()` instead.
+
 ### Resource-server authentication (M132, `@setu-ts/auth-plugin`, `@setu-ts/common`)
 
 Two behaviour changes, and one new capability.

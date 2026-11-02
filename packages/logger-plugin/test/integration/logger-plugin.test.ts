@@ -178,6 +178,30 @@ describe('LoggerPlugin (integration)', () => {
     expect(JSON.parse(lines[1]!).password).toBe('secret');
   });
 
+  it('masks a credentialed URL in a metadata string (M131a X88-8)', async () => {
+    const lines: string[] = [];
+    // eslint-disable-next-line no-console -- capture the ConsoleLogger's real egress.
+    const originalLog = console.log;
+    // eslint-disable-next-line no-console -- capture the ConsoleLogger's real egress.
+    console.log = (...values: unknown[]): void => {
+      lines.push(String(values[0]));
+    };
+    try {
+      const context = createFakeContext(runtime);
+      await LoggerPlugin().register(context.ctx);
+      getLogger(context.registeredServices).info('connecting', {
+        url: 'redis://user:password@host:6379',
+      });
+    } finally {
+      // eslint-disable-next-line no-console -- restore the process-wide console after capture.
+      console.log = originalLog;
+    }
+    // The default policy's value-based rule masks the userinfo even though the
+    // field is not in the secret list: a URL that carries credentials is a
+    // secret wherever it appears.
+    expect(JSON.parse(lines[0]!).url).toBe('redis://***@host:6379');
+  });
+
   it('passes level option to the logger', async () => {
     const plugin = LoggerPlugin({ transport: 'noop', level: 'error' });
     const { ctx, registeredServices } = createFakeContext(runtime);

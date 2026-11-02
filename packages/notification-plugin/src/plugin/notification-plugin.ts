@@ -102,43 +102,55 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
       // which is the whole point of carrying it instead of assuming `true`.
       const probes = buildChannelProbes(channelMap, ctx);
 
-      ctx.health.register('notification', async (): Promise<HealthCheckResult> => {
-        const reachability: Record<string, boolean | 'unknown'> = {};
-        let anyUnreachable = false;
+      // M131a V11-11: out of readiness by default. Every notification channel
+      // addresses a dependency every replica shares (the mail server, the SMS
+      // provider, the push gateway), so draining all replicas cannot fix an
+      // outage — the M119b rule that puts `mail` out of readiness (M119b)
+      // applies to the whole indicator, not only the mail channel. An
+      // application that wants a channel to gate traffic opts in through the
+      // health plugin's per-indicator override:
+      // `HealthPlugin({ readiness: { include: ['notification'] } })`.
+      ctx.health.register(
+        'notification',
+        async (): Promise<HealthCheckResult> => {
+          const reachability: Record<string, boolean | 'unknown'> = {};
+          let anyUnreachable = false;
 
-        // CONCURRENTLY, and that is a correctness requirement rather than a
-        // speed one. Each probe may consume its full `PROBE_TIMEOUT_MS`, and
-        // `HealthPluginOptions.indicatorTimeoutMs` defaults to 5000 (M90b),
-        // so awaiting them one after another means three stalled channels —
-        // an ordinary configuration, since channel names are arbitrary and
-        // several may address the same transport — blow the indicator's own
-        // deadline. The whole indicator would then be replaced by a generic
-        // `{ reason: 'timeout' }`, discarding the per-channel evidence this
-        // payload exists to carry. Started together, total latency is bounded
-        // by ONE probe timeout however many channels there are.
-        const names = Array.from(channelMap.keys());
-        const outcomes = await Promise.all(
-          names.map((name) => {
-            const probe = probes.get(name);
-            return probe === undefined ? Promise.resolve(undefined) : probe();
-          }),
-        );
+          // CONCURRENTLY, and that is a correctness requirement rather than a
+          // speed one. Each probe may consume its full `PROBE_TIMEOUT_MS`, and
+          // `HealthPluginOptions.indicatorTimeoutMs` defaults to 5000 (M90b),
+          // so awaiting them one after another means three stalled channels —
+          // an ordinary configuration, since channel names are arbitrary and
+          // several may address the same transport — blow the indicator's own
+          // deadline. The whole indicator would then be replaced by a generic
+          // `{ reason: 'timeout' }`, discarding the per-channel evidence this
+          // payload exists to carry. Started together, total latency is bounded
+          // by ONE probe timeout however many channels there are.
+          const names = Array.from(channelMap.keys());
+          const outcomes = await Promise.all(
+            names.map((name) => {
+              const probe = probes.get(name);
+              return probe === undefined ? Promise.resolve(undefined) : probe();
+            }),
+          );
 
-        // Assembled in channel-map order, so the payload's key order does not
-        // depend on which probe settled first.
-        names.forEach((name, index) => {
-          const reachable = outcomes[index];
-          reachability[name] = reachable ?? 'unknown';
-          if (reachable === false) {
-            anyUnreachable = true;
-          }
-        });
+          // Assembled in channel-map order, so the payload's key order does not
+          // depend on which probe settled first.
+          names.forEach((name, index) => {
+            const reachable = outcomes[index];
+            reachability[name] = reachable ?? 'unknown';
+            if (reachable === false) {
+              anyUnreachable = true;
+            }
+          });
 
-        return {
-          status: anyUnreachable ? 'down' : 'up',
-          data: { channels: Array.from(channelMap.keys()), reachable: reachability },
-        };
-      });
+          return {
+            status: anyUnreachable ? 'down' : 'up',
+            data: { channels: Array.from(channelMap.keys()), reachable: reachability },
+          };
+        },
+        { readiness: false },
+      );
     },
   };
 }

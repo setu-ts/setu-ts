@@ -7,10 +7,10 @@
  * @module
  */
 
-import { attachConnectionErrorReporter, deadlineRangeError } from '@setu-ts/common';
+import { deadlineRangeError, watchConnection } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { StaleClaimError } from '../errors.ts';
-import type { ConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter, ConnectionWatch } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import {
   ACK_SCRIPT,
@@ -195,11 +195,13 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @param commandTimeoutMs - Bound applied to the BUILT client only; an
  *   injected client is the caller's and keeps its own configuration
- * @returns The resolved client instance
+ * @returns The resolved client and the watch on its connection events
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
@@ -207,7 +209,7 @@ async function resolveClient(
   injectedClient: IRedisQueueClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
-): Promise<IRedisQueueClient> {
+): Promise<{ readonly client: IRedisQueueClient; readonly watch: ConnectionWatch }> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
       throw new Error(
@@ -215,12 +217,36 @@ async function resolveClient(
           '(needs: zadd, zrangebyscore, zrem, hset, hget, hdel, del, quit)',
       );
     }
-    return injectedClient;
+    return { client: injectedClient, watch: watchConnection(injectedClient, reporter) };
   }
   const RedisCtor = await loadIoredis();
   const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
-  attachConnectionErrorReporter(client, reporter);
-  return client;
+  return { client, watch: watchConnection(client, reporter) };
+}
+
+/**
+ * The client states that mean the connection was lost (ioredis's vocabulary,
+ * which `fromNodeRedis` reports too). `wait` and `connecting` are absent on
+ * purpose: a client that has not connected yet is not evidence of an outage.
+ */
+const DISCONNECTED_STATUSES: ReadonlySet<string> = new Set(['reconnecting', 'close', 'end']);
+
+/**
+ * QUIT, and when it rejects (an unreachable server), a forced `disconnect()`:
+ * a built ioredis client whose QUIT failed keeps reconnecting, and once its
+ * listener is detached each failure reaches the console (M131a audit R3-3).
+ *
+ * @param client - The client to close
+ * @throws The QUIT failure, after the forced disconnect
+ */
+async function quitOrForce(client: { quit(): Promise<unknown> }): Promise<void> {
+  try {
+    await client.quit();
+  } catch (error) {
+    const force = (client as { disconnect?: unknown }).disconnect;
+    if (typeof force === 'function') (force as () => void).call(client);
+    throw error;
+  }
 }
 
 /**
@@ -247,6 +273,8 @@ async function resolveClient(
  */
 export class RedisQueue implements QueueAdapter {
   #client: IRedisQueueClient | null = null;
+  /** The reporter and reconnect counter on `#client`; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #url: string;
   #injectedClient: IRedisQueueClient | undefined;
   /** Retention for a dead-lettered job's payload; unbounded when undefined. */
@@ -291,14 +319,35 @@ export class RedisQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(
+    const resolved = await resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
     );
-    if (typeof this.#client.connect === 'function') {
-      await this.#client.connect();
+    const { client, watch } = resolved;
+    this.#client = client;
+    // A watch left by an earlier or concurrent attempt is replaced, not
+    // stacked: each attempt would otherwise add a listener pair (N-3).
+    this.#watch?.detach();
+    this.#watch = watch;
+    if (typeof client.connect === 'function') {
+      try {
+        await client.connect();
+      } catch (error) {
+        // A client this component built keeps reconnecting after a failed
+        // connect; stop it before its listener comes off, or every retry prints
+        // to the console. An injected client stays the caller's (CodeRabbit #543).
+        if (this.#injectedClient === undefined) {
+          const force = (client as { disconnect?: unknown }).disconnect;
+          if (typeof force === 'function') (force as () => void).call(client);
+        }
+        // Only this attempt's watch: a concurrent attempt may have replaced it
+        // with its own, which must stay attached (audit R3-2).
+        watch.detach();
+        if (this.#watch === watch) this.#watch = undefined;
+        throw error;
+      }
     }
     this.#ready = true;
     this.#installProbe();
@@ -327,12 +376,24 @@ export class RedisQueue implements QueueAdapter {
   /**
    * M70c: installs `isHealthy` from the client's `ping()` when present; leaves
    * it absent (unknown) otherwise.
+   *
+   * M131a V11-10: a client whose `status` says it LOST its connection
+   * (`reconnecting`, `close`, `end`) answers `false` without I/O. ioredis parks
+   * a stopped server's commands in its offline queue, so a ping there hangs
+   * like a hung one and the indicator read `up`/unknown. A client that has not
+   * connected yet (`wait`, `connecting` — an injected lazy client, such as the
+   * generated node-redis helper's) still pings, which connects it. A PAUSED
+   * server keeps `'ready'` (the TCP connection is open), so a pause still reads
+   * `up`/unknown, the intended M119b rule.
    */
   #installProbe(): void {
     const client = this.#client;
     if (client !== null && typeof client.ping === 'function') {
       const ping = client.ping;
       this.isHealthy = async (): Promise<boolean> => {
+        if (client.status !== undefined && DISCONNECTED_STATUSES.has(client.status)) {
+          return false;
+        }
         try {
           // ioredis `ping` reads `this.options` — an unbound call throws
           // `TypeError: Cannot read properties of undefined (reading 'options')`
@@ -349,8 +410,18 @@ export class RedisQueue implements QueueAdapter {
   }
 
   async disconnect(): Promise<void> {
-    if (this.#client) {
-      await this.#client.quit();
+    // Detached only after QUIT, in a finally: an ioredis client with no
+    // 'error' listener prints QUIT's EPIPE on an unreachable server to the
+    // console (M131a re-audit N-4), and a shared injected client must not report
+    // into this stopped component afterwards.
+    const watch = this.#watch;
+    this.#watch = undefined;
+    try {
+      if (this.#client) {
+        await quitOrForce(this.#client);
+      }
+    } finally {
+      watch?.detach();
     }
     this.#client = null;
     this.#ready = false;

@@ -19,6 +19,153 @@ export interface IRedactionService {
 
 const MAX_REDACTION_DEPTH = 32;
 
+const SCHEME_CHAR = /[a-z0-9+.-]/i;
+const SCHEME_START = /[a-z]/i;
+const WHITESPACE = /\s/;
+const LINE_BREAK = /[\n\r\u2028\u2029]/;
+const AUTHORITY_END = /[/?#]/;
+const DIGIT = /[0-9]/;
+
+/**
+ * Masks a URL's userinfo in a string: `scheme://user:password@host` becomes
+ * `scheme://***@host`. This is the default policy's one value-based rule — it
+ * runs on every string value the redaction seam sees, and `describeError`
+ * applies it to every message — so a malformed `REDIS_URL` (which often holds
+ * a password) is not echoed into a log line or stderr.
+ *
+ * A URL is malformed precisely when its password carries a character it should
+ * have encoded, so the rule leans toward hiding. It is a best-effort rule for
+ * credentials pasted into text, not a URL parser; the common README lists the
+ * shapes it masks and its known limits, and the test table holds each case:
+ *
+ * - The userinfo runs to the LAST `@` of the URL's word, so an unencoded `@`,
+ *   `/`, `#`, `?` or `://` in the password is masked with it.
+ * - A password holding whitespace is masked to the next `@` on the line when the
+ *   text before the whitespace has a non-port `:`; a username holding
+ *   whitespace when the next word is `name:password@host`; a password holding
+ *   `@` then whitespace when the text after that `@` has no `.`, `:` or `/`.
+ * - Untouched: a URL with no `@`, an email (no `://`), an `@` in a path or
+ *   query with no `:` before it. Over-masked, on purpose: a path `@` after a
+ *   port. Not masked: anything across a line break.
+ *
+ * Every string is inspected, whatever its length, in one linear pass from the
+ * right: each position's next whitespace, next `@`, first `:` and so on are
+ * known when its `://` is reached, and a scheme's walk back stops at the
+ * previous non-scheme character.
+ *
+ * @param value - The string to inspect
+ * @returns The string with any URL userinfo masked, or unchanged
+ * @since 0.12.0
+ */
+export function maskUrlUserinfo(value: string): string {
+  if (!value.includes('://')) return value;
+  // Facts about the token (whitespace-free run) starting at the current index.
+  let tokenEnd = value.length;
+  let firstAt = -1;
+  let lastAt = -1;
+  let firstColon = -1;
+  let colonPortLike = false;
+  let firstAuthorityEnd = -1;
+  let digitsToTokenEnd = true;
+  // Rightmost `.`, `:` or `/` in the token: none after its last `@` means the
+  // text after that `@` does not look like a host.
+  let rightmostHostMark = -1;
+  // The first `@` after the current token, on the same line.
+  let nextAtAfterToken = -1;
+  // The word right after the current token: its first `@`, and whether a `:`
+  // comes before that `@` (a `user:password@` shape).
+  let nextWordFirstAt = -1;
+  let nextWordUserinfo = false;
+  // Masked ranges [start, end), found right to left.
+  const ranges: [number, number][] = [];
+  for (let index = value.length - 1; index >= 0; index--) {
+    const char = value[index]!;
+    if (WHITESPACE.test(char)) {
+      if (LINE_BREAK.test(char)) {
+        nextAtAfterToken = nextWordFirstAt = -1;
+        nextWordUserinfo = false;
+      } else if (index + 1 < tokenEnd) {
+        // Crossing from a non-empty word into whitespace: that word is now
+        // "the next word" for the text to its left.
+        if (firstAt !== -1) nextAtAfterToken = firstAt;
+        nextWordFirstAt = firstAt;
+        nextWordUserinfo = firstColon !== -1 && firstAt !== -1 && firstColon < firstAt;
+      }
+      tokenEnd = index;
+      rightmostHostMark = -1;
+      firstAt = lastAt = firstColon = firstAuthorityEnd = -1;
+      colonPortLike = false;
+      digitsToTokenEnd = true;
+    } else {
+      const digitsAfter = digitsToTokenEnd;
+      digitsToTokenEnd = DIGIT.test(char) && digitsToTokenEnd;
+      if (rightmostHostMark === -1 && (char === '.' || char === ':' || char === '/')) {
+        rightmostHostMark = index;
+      }
+      if (char === '@') {
+        firstAt = index;
+        if (lastAt === -1) lastAt = index;
+      } else if (char === ':' && !value.startsWith('//', index + 1)) {
+        firstColon = index;
+        colonPortLike = index + 1 < tokenEnd && digitsAfter;
+      } else if (AUTHORITY_END.test(char)) {
+        firstAuthorityEnd = index;
+      }
+    }
+    if (index < 3 || !value.startsWith('://', index - 3)) continue;
+    // `index` is the first character after a `://`; the facts describe it.
+    const separator = index - 3;
+    let schemeStart = separator;
+    while (schemeStart > 0 && SCHEME_CHAR.test(value[schemeStart - 1]!)) schemeStart--;
+    while (schemeStart < separator && !SCHEME_START.test(value[schemeStart]!)) schemeStart++;
+    if (schemeStart === separator) continue;
+    let end = -1;
+    const colonBeforeLastAt = firstColon !== -1 && firstColon < lastAt;
+    if (
+      lastAt > index &&
+      (firstAuthorityEnd === -1 || firstAt < firstAuthorityEnd || colonBeforeLastAt)
+    ) {
+      end = lastAt;
+      // `redis://:p@SECRET wd@host`: a password holding `@` then whitespace.
+      // The text after the token's last `@` has no `.`, `:` or `/`, so it may
+      // be the rest of the password rather than a host; when the next word has
+      // an `@`, the userinfo runs to it.
+      if (colonBeforeLastAt && rightmostHostMark < lastAt && nextWordFirstAt !== -1) {
+        end = nextWordFirstAt;
+      }
+    } else if (
+      lastAt === -1 &&
+      nextAtAfterToken !== -1 &&
+      // `redis://:pw x@host`: a non-port `:` before the whitespace, or
+      // `redis://us er:pw@host`: the next word is `name:password@host`.
+      // A `:` straight after `://` has no host before it, so it is never a port.
+      ((firstColon !== -1 &&
+        (!colonPortLike || firstColon === index) &&
+        (firstAuthorityEnd === -1 || firstColon < firstAuthorityEnd)) ||
+        nextWordUserinfo)
+    ) {
+      end = nextAtAfterToken;
+    }
+    if (end !== -1) ranges.push([index, end]);
+  }
+  if (ranges.length === 0) return value;
+  ranges.reverse();
+  let out = '';
+  let copied = 0;
+  let current = ranges[0]!;
+  for (let at = 1; at <= ranges.length; at++) {
+    const next = ranges[at];
+    if (next !== undefined && next[0] <= current[1]) {
+      current = [current[0], Math.max(current[1], next[1])];
+      continue;
+    }
+    out += value.slice(copied, current[0]) + '***';
+    copied = current[1];
+    if (next !== undefined) current = next;
+  }
+  return out + value.slice(copied);
+}
+
 /**
  * Compiles a policy into a synchronous redaction service.
  *
@@ -33,7 +180,7 @@ export function createRedactionService(
   const defaultRedactor = policy.defaultRedactor ?? eraseRedactor;
   const redactValue = (path: string, value: unknown): unknown => {
     const matched = match(path);
-    if (matched === undefined) return value;
+    if (matched === undefined) return typeof value === 'string' ? maskUrlUserinfo(value) : value;
     const classification = matched.classification;
     const context: RedactionContext = { path, classification };
     // Precedence: the field pattern's own redactor, then the redactor keyed by
@@ -123,7 +270,10 @@ function descend(
       // The child's own path decides first, once. A match or a primitive is
       // final; any other object is handed to `descend`, which alone decides
       // whether it can be walked.
-      const decided = redactValue(childPath, child);
+      let decided = redactValue(childPath, child);
+      // The default URL-userinfo mask runs on every string value, classified or
+      // not: a URL that carries credentials is a secret wherever it appears.
+      if (typeof decided === 'string') decided = maskUrlUserinfo(decided);
       let redacted: unknown;
       if (decided !== child || typeof child !== 'object' || child === null) {
         redacted = decided;

@@ -150,6 +150,33 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 `PCI` (`'pci'`) and `SECRET` (`'secret'`) — and accepts any other string, which reaches
 `redactors[<string>]`.
 
+Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
+`redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
+(M131a). It is a best-effort rule for credentials pasted into text, not a parser; the cases it
+handles are tested as a table:
+
+- the userinfo runs to the URL's last `@` on its word, so an unencoded `@`, `/`, `#`, `?` or `://`
+  in the password is masked with it;
+- a password holding one run of whitespace is masked to the next `@` on the line when the text
+  before the whitespace has a `user:password` colon (`redis://:pw x@host`), and a username holding
+  whitespace when the next word is `name:password@host` (`redis://us er:pw@host`);
+- a password holding `@` then whitespace (`redis://:p@ab cd@host`) is masked to the next word's `@`
+  only when the text after the first `@` has no `.`, `:` or `/`.
+
+Left unmasked, as known limits: a password holding a line break (a URL never spans lines), more than
+one run of whitespace after an `@` in the password, or `@` then whitespace where the text after the
+`@` looks like a host (`redis://:p@s.ec ret@host`). Over-masked, erring toward hiding: a path `@`
+after a port, and plain words after a credentialed URL whose host has no `.`, `:` or `/`. Untouched:
+a URL with no userinfo, an email address, and an `@` in a path. The scan is linear and applies to
+strings of any length.
+
+The rule applies where a redaction service runs: the logger's metadata by default, and trace
+attributes and audit records only when those plugins are given a policy. A log message string is not
+redacted. `describeError` therefore masks every name, message and classifier value itself, before
+its 8192-character bound, so the framework's connection-error lines and the line a generated
+`main.ts` prints on a failed start cannot carry a password even when the bound cuts the URL. The
+rule is also exported as `maskUrlUserinfo(value)`.
+
 ```typescript
 import { createMaskRedactor, createRedactionService, DATA_CLASSIFICATIONS } from '@setu-ts/common';
 
@@ -243,6 +270,7 @@ package fits the plugin architecture.
 | `isWorkerTaskReply`                   | function  |
 | `isWorkerTaskRequest`                 | function  |
 | `keysetPredicate`                     | function  |
+| `maskUrlUserinfo`                     | function  |
 | `mcpToolMetadataOf`                   | function  |
 | `mintNextCursor`                      | function  |
 | `none`                                | function  |
@@ -281,10 +309,12 @@ package fits the plugin architecture.
 | `sortFingerprint`                     | function  |
 | `splitWorkerEnv`                      | function  |
 | `tenantBindingMismatch`               | function  |
+| `toBackendFault`                      | function  |
 | `unwrap`                              | function  |
 | `upgradeIntentOf`                     | function  |
 | `validatedStateKey`                   | function  |
 | `validationMetadataOf`                | function  |
+| `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
 | `withIdempotencyMetadata`             | function  |
@@ -292,6 +322,8 @@ package fits the plugin architecture.
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
+| `BackendOutcomeUnknownError`          | class     |
+| `BackendUnavailableError`             | class     |
 | `DuplicateKeyError`                   | class     |
 | `InvalidCursorError`                  | class     |
 | `InvalidFieldValueError`              | class     |
@@ -354,6 +386,7 @@ package fits the plugin architecture.
 | `ConfigProvenanceEntry`               | interface |
 | `ConnectionErrorReporter`             | interface |
 | `ConnectionErrorReporterOptions`      | interface |
+| `ConnectionWatch`                     | interface |
 | `CookieAttributes`                    | interface |
 | `CqrsCommand`                         | interface |
 | `CqrsQuery`                           | interface |
@@ -651,6 +684,7 @@ package fits the plugin architecture.
 | `AuthorizationDecisionReason`         | type      |
 | `AuthorizationFailure`                | type      |
 | `AuthorizationSourceState`            | type      |
+| `BackendFault`                        | type      |
 | `BackoffStrategy`                     | type      |
 | `CacheDiagnosticsOperation`           | type      |
 | `CapabilityToken`                     | type      |

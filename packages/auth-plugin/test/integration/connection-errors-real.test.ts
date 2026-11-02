@@ -68,7 +68,7 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
     );
 
     it(
-      'attaches no listener to an injected client',
+      'attaches the reporter to an injected client (M131a X88-3)',
       {
         skip: REDIS_URL === undefined,
       },
@@ -88,7 +88,7 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
         try {
           expect((await store.increment('probe', 60_000)).count).toBe(1);
           expect((await store.increment('probe', 60_000)).count).toBe(2);
-          expect(handle.listenerCount()).toBe(before);
+          expect(handle.listenerCount()).toBe(before + 1);
         } finally {
           await store.disconnect();
         }

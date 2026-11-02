@@ -49,8 +49,41 @@ function createTimerRecordingRuntime(): {
   return { runtime, started, cleared };
 }
 
-describe('RedisStreamsBroker timer-handle round trip', () => {
-  it('clears the poll interval with the identical handle setInterval returned', async () => {
+describe('RedisStreamsBroker timer-handle round trip (M131a X88-7)', () => {
+  it('creates ONE poll and ONE reclaim timer at connect(), none at subscribe()', async () => {
+    const { runtime, started } = createTimerRecordingRuntime();
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: new FakeRedisStreamsClient(),
+      pollIntervalMs: 10,
+    });
+
+    await broker.connect();
+    expect(started.length).toBe(2);
+
+    // subscribe() only registers the subscription; it must not start a timer,
+    // or a lazily-subscribing handler would parent poll spans to its request.
+    await broker.subscribe('timer.topic', () => Promise.resolve());
+    await broker.subscribe('timer.topic-2', () => Promise.resolve());
+    expect(started.length).toBe(2);
+
+    await broker.disconnect();
+  });
+
+  it('two concurrent connect() calls start one pair of timers (CodeRabbit #543)', async () => {
+    const { runtime, started, cleared } = createTimerRecordingRuntime();
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: new FakeRedisStreamsClient(),
+      pollIntervalMs: 10,
+    });
+
+    await Promise.all([broker.connect(), broker.connect()]);
+    expect(started.length).toBe(2);
+    await broker.disconnect();
+    // Every timer started was cleared: none outlives disconnect().
+    expect(cleared).toEqual(started);
+  });
+
+  it('clears both shared timers at disconnect() with the identical handle', async () => {
     const { runtime, started, cleared } = createTimerRecordingRuntime();
     const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
       client: new FakeRedisStreamsClient(),
@@ -59,7 +92,6 @@ describe('RedisStreamsBroker timer-handle round trip', () => {
 
     await broker.connect();
     await broker.subscribe('timer.topic', () => Promise.resolve());
-    expect(started.length).toBe(2);
 
     await broker.disconnect();
 
@@ -70,8 +102,8 @@ describe('RedisStreamsBroker timer-handle round trip', () => {
     expect(cleared[1]).toBe(started[1]);
   });
 
-  it('stops the poll loop on unsubscribe, so no command runs afterwards', async () => {
-    const { runtime, started, cleared } = createTimerRecordingRuntime();
+  it('stops a subscription on unsubscribe without clearing the shared timers', async () => {
+    const { runtime, cleared } = createTimerRecordingRuntime();
     const client = new FakeRedisStreamsClient();
     const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
       client,
@@ -84,13 +116,16 @@ describe('RedisStreamsBroker timer-handle round trip', () => {
     // Let the loop run, then stop it and record how much work had been done.
     await new Promise((resolve) => setTimeout(resolve, 50));
     await subscription.unsubscribe();
-    expect(cleared[0]).toBe(started[0]);
-    expect(cleared[1]).toBe(started[1]);
+
+    // The shared timers are NOT cleared on unsubscribe: one subscription
+    // stopping must not stop the timers serving its siblings.
+    expect(cleared.length).toBe(0);
 
     const callsAfterUnsubscribe = client.calls.length;
     await new Promise((resolve) => setTimeout(resolve, 60));
 
-    // A leaked interval would keep polling and grow this count.
+    // The stopped subscription's loop no longer polls, so no command runs for
+    // it. (A leaked per-subscription interval would keep polling and grow this.)
     expect(client.calls.length).toBe(callsAfterUnsubscribe);
 
     await broker.disconnect();

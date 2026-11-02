@@ -1,7 +1,8 @@
 # @setu-ts/cache-plugin — response and value caching
 
 **Add it:** `setu add cache` adds it and inserts `CachePlugin()` (in-memory store) into
-`setu.config.ts`. It provides `CAPABILITIES.CACHE` (`ICacheStore`) and a health indicator.
+`setu.config.ts`; `setu add cache --store redis` wires the Redis store on the Redis URL through the
+project's Redis client. It provides `CAPABILITIES.CACHE` (`ICacheStore`) and a health indicator.
 
 ## Cache a route's response
 
@@ -43,8 +44,10 @@ const rates = await cache.get<{ eur: number }>('rates');
 
 ## Other options
 
-- `CachePlugin({ store: 'redis', options: { url } })` uses Redis (install `ioredis`); `'noop'`
-  disables caching. `options`: `prefix`, `defaultTtl`, `maxSize`, `commandTimeoutMs`.
+- `CachePlugin({ store: 'redis', options: { url } })` uses Redis (install `ioredis`);
+  `options: { client: nodeRedisClient(url) }` uses node-redis through the generated
+  `src/node-redis.ts` helper instead. `'noop'` disables caching. `options`: `prefix`, `defaultTtl`,
+  `maxSize`, `commandTimeoutMs`.
 - `cacheMiddleware` also takes `key(ctx)`, `vary(ctx)`, `bypass(ctx)` and `store` (a named instance:
   `CachePlugin({ name: 'pages' })` registers `cache.pages`).
 - `CacheService.getOrSet(key, factory, ttl)` coalesces concurrent cold reads of one key.
