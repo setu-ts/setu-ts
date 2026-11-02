@@ -92,7 +92,10 @@ describe('Keycloak issuer (real)', { skip: BASE === undefined }, () => {
         await clientToken('setu-api-client', 'setu-api-client-secret'),
       );
       expect(response.statusCode).toBe(200);
-      expect(response.json()).toEqual({ id: 'setu-api-client' });
+      const body = response.json() as { id: string; scopes?: unknown };
+      expect(body.id).toBe('setu-api-client');
+      // M132: the issuer strategy fills OAuth scopes from Keycloak's real `scope` claim.
+      expect(Array.isArray(body.scopes)).toBe(true);
     } finally {
       await app.stop();
     }

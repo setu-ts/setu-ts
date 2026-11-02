@@ -359,7 +359,7 @@ async function verifyIdToken(
     algorithms: issuer.algorithms,
     // The audience IS the client id: compileSignIn put it there deliberately, so
     // an ID token minted for another client fails here rather than at the app.
-    audience: issuer.audience,
+    audience: issuer.audiences,
     clockToleranceSec: issuer.clockToleranceSec,
   });
   const outcome = await verifier.verify(idToken);

@@ -7,6 +7,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import type { IPrincipal, IRequest } from '@setu-ts/common';
+import { JwtStrategy } from '../../src/strategies/jwt-strategy.ts';
 import { RefreshTokenService } from '../../src/services/refresh-token-service.ts';
 import { MemoryRefreshTokenStore } from '../../src/stores/refresh-token-store.ts';
 import { MemoryAccessTokenRevocationStore } from '../../src/stores/access-token-revocation-store.ts';
@@ -149,6 +151,92 @@ describe('RefreshTokenService', () => {
 
       runtime.setNow(runtime.now() + 7 * 24 * 60 * 60 * 1000 + 1);
       expect(await store.get(refreshPayload.jti)).toBeNull();
+    });
+  });
+
+  describe('delegated principals (M132)', () => {
+    function bearer(token: string): IRequest {
+      const headers = new Headers({ authorization: `Bearer ${token}` });
+      return {
+        method: 'GET',
+        url: 'http://localhost/',
+        path: '/',
+        headers,
+        json: <T>() => Promise.resolve({} as T),
+        text: () => Promise.resolve(''),
+        bytes: () => Promise.resolve(new Uint8Array()),
+      };
+    }
+
+    it('keeps the actor on the minted token and on every rotation', async () => {
+      const { jwt, service } = makeService();
+      const strategy = new JwtStrategy({ jwtService: jwt });
+      const delegated: IPrincipal = {
+        id: 'user-1',
+        actor: { id: 'agent-7', claims: { sub: 'agent-7', client_id: 'tools' } },
+      };
+
+      const pair = await service.issue(delegated);
+      const minted = await strategy.authenticate(bearer(pair.accessToken));
+      expect(minted?.actor).toEqual({
+        id: 'agent-7',
+        claims: { sub: 'agent-7', client_id: 'tools' },
+      });
+
+      const rotated = await service.refresh(pair.refreshToken);
+      const again = await strategy.authenticate(bearer(rotated!.accessToken));
+      expect(again?.actor?.id).toBe('agent-7');
+    });
+
+    it('writes the actor id as act.sub when its claims carry only client_id', async () => {
+      const { jwt, service } = makeService();
+      const pair = await service.issue({
+        id: 'user-1',
+        actor: { id: 'svc', claims: { client_id: 'svc' } },
+      });
+      const payload = await jwt.verify<{ act?: unknown }>(pair.accessToken);
+      expect(payload.act).toEqual({ client_id: 'svc', sub: 'svc' });
+    });
+
+    it('keeps OAuth scopes on the minted token and on every rotation', async () => {
+      const { jwt, service } = makeService();
+      const strategy = new JwtStrategy({ jwtService: jwt });
+      const pair = await service.issue({ id: 'user-1', scopes: ['tools:read', 'tools:write'] });
+      const minted = await strategy.authenticate(bearer(pair.accessToken));
+      expect(minted?.scopes).toEqual(['tools:read', 'tools:write']);
+
+      const rotated = await service.refresh(pair.refreshToken);
+      const again = await strategy.authenticate(bearer(rotated!.accessToken));
+      expect(again?.scopes).toEqual(['tools:read', 'tools:write']);
+    });
+
+    it('drops a scope that is not a scope token instead of splitting it', async () => {
+      const { jwt, service } = makeService();
+      const strategy = new JwtStrategy({ jwtService: jwt });
+      const pair = await service.issue({ id: 'user-1', scopes: ['read', 'a b', ''] });
+      expect((await strategy.authenticate(bearer(pair.accessToken)))?.scopes).toEqual(['read']);
+    });
+
+    it('writes no scope claim for absent, empty, all-invalid or non-array scopes', async () => {
+      const { jwt, service } = makeService();
+      const principals: IPrincipal[] = [
+        { id: 'u' },
+        { id: 'u', scopes: [] },
+        { id: 'u', scopes: ['a b'] },
+        { id: 'u', scopes: 'read write' as unknown as readonly string[] },
+      ];
+      for (const principal of principals) {
+        const pair = await service.issue(principal);
+        const payload = await jwt.verify<Record<string, unknown>>(pair.accessToken);
+        expect('scope' in payload).toBe(false);
+      }
+    });
+
+    it('mints no act for a direct principal', async () => {
+      const { jwt, service } = makeService();
+      const pair = await service.issue({ id: 'user-1' });
+      const payload = await jwt.verify<Record<string, unknown>>(pair.accessToken);
+      expect('act' in payload).toBe(false);
     });
   });
 

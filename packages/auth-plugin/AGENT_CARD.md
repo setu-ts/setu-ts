@@ -49,6 +49,7 @@ if (principal === null) {
 ## Other options
 
 - `apiKey`, `session`, `issuers` and `strategies` supply other passive authentication paths.
+- `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
 - `definePolicy` and `requirePolicy` evaluate application policies; scoped guards use `scopedRbac`.
 - `signIn.mfa` and `signIn.passkeys` add factors; `RefreshTokenService` and `rateLimitMiddleware`
   are standalone helpers.

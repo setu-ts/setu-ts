@@ -840,6 +840,34 @@ describe('OpenApiGenerator', () => {
       expect('security' in (result.paths['/todos']?.get as object)).toBe(false);
     });
 
+    it('should merge, sort and deduplicate scopes from every authenticated brand', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+      const scoped = (scopes: readonly string[]) =>
+        withSecurityMetadata(passthrough(), { authenticated: true, scopes });
+
+      const result = generator.generate([
+        route('GET', '/tools', undefined, [scoped(['b', 'a']), scoped(['c', 'a'])]),
+      ]);
+
+      expect(result.paths['/tools']?.get?.security).toEqual([{ bearerAuth: ['a', 'b', 'c'] }]);
+    });
+
+    it('should emit an empty scope list when an authenticated guard declares none', () => {
+      const generator = new OpenApiGenerator({
+        title: 'T',
+        version: '1',
+        deriveSecurity: { scheme: 'bearerAuth' },
+      });
+
+      const result = generator.generate([route('GET', '/todos', undefined, [guard()])]);
+
+      expect(result.paths['/todos']?.get?.security).toEqual([{ bearerAuth: [] }]);
+    });
+
     it('should use the configured scheme name verbatim', () => {
       const generator = new OpenApiGenerator({
         title: 'T',

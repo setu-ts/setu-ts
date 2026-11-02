@@ -717,6 +717,10 @@ here.
 - **Milestone 128** (`database-plugin` + `common` + `multi-tenancy-plugin` — `updateVersioned` /
   `deleteVersioned` with `VersionConflictError` and `EntityNotFoundError`, optional tenant-path
   conditional writes, and the fault group: X94-1, X94-2, V11-5, X94-3) — complete (PR #540).
+- **Milestone 132** (`auth-plugin` + `common` + `openapi-plugin` — resource-server authentication:
+  OAuth scopes and `requireScopes`, Bearer challenges, RFC 9728 metadata, audience lists, opt-in
+  `at+jwt`, the `act` actor with `requireAuth({ delegation })`; ships in `0.13.0`) — complete (PR
+  #541).
 - **Next milestone** — M131a (holds the `0.11.0` regression V11-10); M127, M129, M130 and M131b–d
   are open for `0.12.0`.
 
