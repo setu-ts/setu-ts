@@ -357,6 +357,8 @@ export async function bootAndSignal(
     stdout: 'piped',
     stderr: 'piped',
   });
+  const stdout = drainText(child.stdout);
+  const stderr = drainText(child.stderr);
 
   let served = false;
   for (let attempt = 0; attempt < 100; attempt++) {
@@ -370,8 +372,6 @@ export async function bootAndSignal(
     }
   }
 
-  const stdout = new Response(child.stdout);
-  const stderr = new Response(child.stderr);
   if (!served) {
     try {
       child.kill('SIGKILL');
@@ -379,7 +379,7 @@ export async function bootAndSignal(
       // The child may already have exited; preserve its useful stderr below.
     }
     await child.status;
-    throw new Error(`The project never served a request:\n${await stderr.text()}`);
+    throw new Error(`The project never served a request:\n${await stderr}`);
   }
 
   // Guarded for the same reason the `!served` branch above is: a project that
@@ -392,9 +392,24 @@ export async function bootAndSignal(
     // Already gone; its status and output are still collected below.
   }
   const status = await child.status;
-  const output = `${await stdout.text()}${await stderr.text()}`;
+  const output = `${await stdout}${await stderr}`;
 
   return { code: status.code, killedBySignal: status.signal ?? null, output };
+}
+
+/**
+ * Reads a piped stream to its end, starting at once.
+ *
+ * `spawnProcess` settles `status` on Node's 'close', which waits for EOF on
+ * every pipe, and an unread stream stops pulling at its high-water mark. A
+ * boot helper that awaited `status` before reading would never settle once the
+ * child wrote more than that — a cold Deno cache's download lines are enough.
+ *
+ * @param stream - A child's piped stdout or stderr
+ * @returns Everything the stream carried
+ */
+export async function drainText(stream: ReadableStream<Uint8Array> | null): Promise<string> {
+  return stream ? await new Response(stream).text() : '';
 }
 
 /** Prefix a probe puts its one-line JSON result behind. */
@@ -525,6 +540,8 @@ export async function withGeneratedServer<T>(
     stdout: 'piped',
     stderr: 'piped',
   });
+  const stdout = drainText(child.stdout);
+  const stderr = drainText(child.stderr);
 
   const origin = `http://127.0.0.1:${port}`;
   let served = false;
@@ -557,9 +574,7 @@ export async function withGeneratedServer<T>(
   }
 
   const status = await child.status;
-  const output = `${await new Response(child.stdout).text()}${await new Response(
-    child.stderr,
-  ).text()}`;
+  const output = `${await stdout}${await stderr}`;
   if (!served) {
     throw new Error(`The project never served a request (exit ${status.code}):\n${output}`);
   }

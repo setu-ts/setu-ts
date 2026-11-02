@@ -29,6 +29,7 @@ import type {
 } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
+  drainText,
   unusedPort,
   useWorkspacePackages,
   workspaceEntrypoint,
@@ -385,14 +386,17 @@ async function bootDev(
     stdout: 'piped',
     stderr: 'piped',
   });
+  // Drained from the start: a cold Deno cache's download lines otherwise left
+  // `stop()` awaiting a child that had already exited (see `drainText`).
+  const stdout = drainText(child.stdout);
+  const stderr = drainText(child.stderr);
   let exited = false;
   const exiting = child.status.then(() => {
     exited = true;
   });
   const outputOf = async (): Promise<string> => {
-    const { stdout, stderr } = await child.output();
-    const decoder = new TextDecoder();
-    return `${decoder.decode(stderr)}${decoder.decode(stdout)}`;
+    const [out, err] = await Promise.all([stdout, stderr, child.status]);
+    return `${err}${out}`;
   };
   const deadline = performance.now() + 30_000;
   while (performance.now() < deadline) {
