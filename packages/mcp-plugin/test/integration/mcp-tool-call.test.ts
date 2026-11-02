@@ -1,7 +1,7 @@
 import { it, expect } from 'vitest';
 import { z } from 'zod-v4';
 import { CAPABILITIES, respondWithError } from '@setu-ts/common';
-import type { IJwtService, IPlugin, MiddlewareFunction } from '@setu-ts/common';
+import type { IJwtService, IPlugin, IRuntimeServices, MiddlewareFunction } from '@setu-ts/common';
 import { createApplication } from '@setu-ts/kernel';
 import { RuntimePlugin } from '@setu-ts/runtime';
 import { AuthPlugin, requireAuth, requireRole, rateLimitMiddleware } from '@setu-ts/auth-plugin';
@@ -284,5 +284,52 @@ it('propagates the client request abort to the inner route signal', async () => 
     expect(h.aborted()).toBe(true);
   } finally {
     await h.app.stop();
+  }
+});
+
+it('times out a tool call and aborts the route context signal', async () => {
+  const release = Promise.withResolvers<void>();
+  let aborted = false;
+  const app = createApplication({
+    plugins: [
+      RuntimePlugin(),
+      McpPlugin({
+        timeoutMs: 20,
+        tools: [
+          {
+            name: 'deadline',
+            description: 'Wait for the per-call deadline',
+            route: { method: 'GET', path: '/deadline' },
+          },
+        ],
+      }),
+    ],
+  });
+  app.router.get('/deadline', async (ctx) => {
+    await Promise.race([
+      release.promise,
+      new Promise<void>((resolve) => {
+        if (ctx.signal.aborted) resolve();
+        else ctx.signal.addEventListener('abort', () => resolve(), { once: true });
+      }),
+    ]);
+    aborted = ctx.signal.aborted;
+    return ctx.response.json({ aborted });
+  });
+  await app.start();
+  const { client } = await clientFor(app);
+  const runtime = app.services.get<IRuntimeServices>(CAPABILITIES.RUNTIME);
+  // A bounded negative control: without the plugin deadline, release the route so the failing test can stop its app.
+  const safety = runtime.setTimeout(() => release.resolve(), 1000);
+  try {
+    const result = await client.callTool({ name: 'deadline', arguments: {} });
+    expect(result.isError).toBe(true);
+    expect(result.content).toEqual([{ type: 'text', text: 'The tool timed out.' }]);
+    expect(aborted).toBe(true);
+  } finally {
+    runtime.clearTimeout(safety);
+    release.resolve();
+    await client.close();
+    await app.stop();
   }
 });

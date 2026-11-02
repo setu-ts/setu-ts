@@ -32,8 +32,11 @@ and DELETE answer 405. The default legacy posture serves 2025 clients as well as
   remain on the route. Hidden single calls answer 401/403; unknown names are JSON-RPC -32602.
 - Only object success schemas produce structured content. Validation refusals are tool errors; 5xx
   and thrown messages are generic. `maxResultBytes` defaults to 1 MiB.
+- `timeoutMs` defaults to 30000 ms (safe integer 1–600000). The deadline bounds dispatch and result
+  reading even when the route ignores its signal; it aborts the inner request and returns
+  `The tool timed out.`. A client abort still returns `The tool failed.`.
 - A present Origin must match the endpoint origin or `allowedOrigins`. Accepted Origin is forwarded
   so inner CSRF checks run. Disconnects abort the inner handler.
 
-`path`, `serverInfo`, `instructions`, `allowedOrigins`, `legacy` and `maxResultBytes` configure the
-endpoint. See the package README for the runnable application and output mapping.
+`path`, `serverInfo`, `instructions`, `allowedOrigins`, `legacy`, `maxResultBytes` and `timeoutMs`
+configure the endpoint. See the package README for the runnable application and output mapping.

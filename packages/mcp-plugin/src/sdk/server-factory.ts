@@ -4,7 +4,7 @@ import type {
   McpHttpHandler,
   StandardSchemaWithJSON,
 } from '@modelcontextprotocol/server';
-import type { IPluginContext, IRequestContext } from '@setu-ts/common';
+import type { IPluginContext, IRequestContext, TimerHandle } from '@setu-ts/common';
 import type { CompiledTool } from '../compile/compile-tools.ts';
 import type { JsonSchema } from '../compile/json-schema.ts';
 import type { ResolvedOptions } from '../options.ts';
@@ -76,20 +76,61 @@ export async function createServerFactory(
             annotations: tool.annotations,
           },
           async (args, sdkCtx): Promise<CallToolResult> => {
+            let abortedResult: CallToolResult | undefined;
             try {
-              const request = await deps.innerRequest(tool, args, call, sdkCtx.mcpReq.signal);
-              sdkCtx.mcpReq.signal.throwIfAborted();
-              const ip = call.outer.request.ip;
-              const response = await ctx.app.dispatch!(request, ip === undefined ? {} : { ip });
-              const result = await mapResult(response, tool, options.maxResultBytes);
-              sdkCtx.mcpReq.signal.throwIfAborted();
-              return result;
+              const controller = new AbortController();
+              const clientSignal = sdkCtx.mcpReq.signal;
+              const expired = Promise.withResolvers<CallToolResult>();
+              const abort = (message: string): void => {
+                if (controller.signal.aborted) return;
+                abortedResult = toolError(message);
+                // Settle the race before a cooperative route responds to abort.
+                expired.resolve(abortedResult);
+                controller.abort();
+              };
+              const onClientAbort = (): void => abort('The tool failed.');
+              let timer: TimerHandle | undefined;
+              try {
+                clientSignal.addEventListener('abort', onClientAbort, { once: true });
+                if (clientSignal.aborted) onClientAbort();
+                if (abortedResult !== undefined) return abortedResult;
+                timer = ctx.runtime.setTimeout(
+                  () => abort('The tool timed out.'),
+                  options.timeoutMs,
+                );
+                // Race all work, including the body read: cancellation alone cannot
+                // bound a route or response stream that ignores its signal.
+                return await Promise.race([
+                  (async (): Promise<CallToolResult> => {
+                    const request = await deps.innerRequest(tool, args, call, controller.signal);
+                    controller.signal.throwIfAborted();
+                    const ip = call.outer.request.ip;
+                    const response = await ctx.app.dispatch!(
+                      request,
+                      ip === undefined ? {} : { ip },
+                    );
+                    const result = await mapResult(response, tool, options.maxResultBytes);
+                    controller.signal.throwIfAborted();
+                    return result;
+                  })(),
+                  expired.promise,
+                ]);
+              } finally {
+                try {
+                  if (timer !== undefined) ctx.runtime.clearTimeout(timer);
+                } finally {
+                  clientSignal.removeEventListener('abort', onClientAbort);
+                }
+              }
             } catch (error) {
-              // Only our own argument refusal is shown; thrown messages from dispatch never leave.
-              return toolError(
-                error instanceof UnusableArgumentError
-                  ? 'The tool received an argument it cannot use.'
-                  : 'The tool failed.',
+              // Cleanup failures are contained too: nothing may throw into the SDK.
+              return (
+                abortedResult ??
+                toolError(
+                  error instanceof UnusableArgumentError
+                    ? 'The tool received an argument it cannot use.'
+                    : 'The tool failed.',
+                )
               );
             }
           },

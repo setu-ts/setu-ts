@@ -16050,20 +16050,21 @@ routes. It provides no capability token. The optional SDK peer is
 `@modelcontextprotocol/server@^2.4.0`; schemas support Zod `>=4.6.6 <5` through its public
 `toJSONSchema` (tested with 4.6.6).
 
-| Export                        | Kind      | Purpose                                                                                           |
-| ----------------------------- | --------- | ------------------------------------------------------------------------------------------------- |
-| `McpPlugin`                   | function  | Registers the endpoint and compiles explicit route bindings at bootstrap                          |
-| `McpPluginOptions`            | interface | `tools`, `path?`, `serverInfo?`, `instructions?`, `allowedOrigins?`, `legacy?`, `maxResultBytes?` |
-| `McpToolDeclaration`          | interface | `name`, `description`, `title?`, `route: { method, path }`, `repeatable?: true`                   |
-| `McpPluginConfigurationError` | class     | Construction and bootstrap refusals                                                               |
-| `VERSION`                     | const     | Package version and default server version                                                        |
+| Export                        | Kind      | Purpose                                                                                                         |
+| ----------------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `McpPlugin`                   | function  | Registers the endpoint and compiles explicit route bindings at bootstrap                                        |
+| `McpPluginOptions`            | interface | `tools`, `path?`, `serverInfo?`, `instructions?`, `allowedOrigins?`, `legacy?`, `maxResultBytes?`, `timeoutMs?` |
+| `McpToolDeclaration`          | interface | `name`, `description`, `title?`, `route: { method, path }`, `repeatable?: true`                                 |
+| `McpPluginConfigurationError` | class     | Construction and bootstrap refusals                                                                             |
+| `VERSION`                     | const     | Package version and default server version                                                                      |
 
 `tools` is required and non-empty. Defaults are `/mcp`, `{ name: 'setu-mcp', version: VERSION }`, no
-instructions, no extra allowed origins, `legacy: 'stateless'`, and `maxResultBytes: 1048576`.
-`legacy: 'reject'` refuses 2025 clients. Names are unique, case-sensitive and match
-`^[A-Za-z0-9_.-]{1,128}$`. Methods are GET/POST/PUT/PATCH/DELETE; method and registered pattern must
-match exactly. No tool may target the MCP endpoint. POST/PUT/PATCH requires body validation;
-POST/PATCH also requires an idempotency brand or `repeatable: true`.
+instructions, no extra allowed origins, `legacy: 'stateless'`, `maxResultBytes: 1048576`, and
+`timeoutMs: 30000` (a safe integer from 1 to 600000). `legacy: 'reject'` refuses 2025 clients. Names
+are unique, case-sensitive and match `^[A-Za-z0-9_.-]{1,128}$`. Methods are
+GET/POST/PUT/PATCH/DELETE; method and registered pattern must match exactly. No tool may target the
+MCP endpoint. POST/PUT/PATCH requires body validation; POST/PATCH also requires an idempotency brand
+or `repeatable: true`.
 
 Path parameters and branded query/body properties form one flat input object. Collisions, non-object
 body/query roots, non-scalar query properties other than scalar arrays, and `$defs` in both
@@ -16074,13 +16075,16 @@ return text, and 4xx Problem Details/default errors return caller-visible titles
 lines. Redirects, unsupported media, oversized results, invalid output, 5xx and thrown failures
 become generic `isError` results. The executor never throws into the SDK.
 
-Calls use `IApplication.dispatch` with the SDK abort signal and outer IP. Credentials/tenant headers
-are forwarded and controls run again; principal/tenant/state are not copied. Accepted Origin is kept
-for CSRF. Authentication and required scopes filter lists with private, zero-TTL cache hints;
-roles/policies are checked on the inner route. Hidden single calls answer 401/403 through
-auth-plugin's existing Bearer challenge writer, and unknown tools answer JSON-RPC -32602.
-Applications must rate-limit tool routes. Branded retries use stable canonical argument hashes;
-intentional identical calls within the idempotency TTL also replay.
+Calls use `IApplication.dispatch` with the outer IP and a signal combining the runtime deadline with
+the SDK abort signal. The deadline races dispatch and result reading, so a route that ignores its
+signal cannot hold the call open. A deadline hit returns `isError` with `The tool timed out.`; a
+client abort still returns `The tool failed.`. Credentials/tenant headers are forwarded and controls
+run again; principal/tenant/state are not copied. Accepted Origin is kept for CSRF. Authentication
+and required scopes filter lists with private, zero-TTL cache hints; roles/policies are checked on
+the inner route. Hidden single calls answer 401/403 through auth-plugin's existing Bearer challenge
+writer, and unknown tools answer JSON-RPC -32602. Applications must rate-limit tool routes. Branded
+retries use stable canonical argument hashes; intentional identical calls within the idempotency TTL
+also replay.
 
 See [the package README](packages/mcp-plugin/README.md) for the full walkthrough, defaults and
 schema refusals. Live Workers and published Bun proofs remain follow-ons.

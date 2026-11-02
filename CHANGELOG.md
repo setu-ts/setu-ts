@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
   `McpPluginOptions`, `McpToolDeclaration`, `McpPluginConfigurationError` and `VERSION` expose
   explicitly declared routes through a stateless SDK endpoint. Caller-filtered lists use private
   cache hints; calls re-enter guards, validation, tenancy, rate limits, idempotency and audit.
+  `timeoutMs` bounds each call (default 30000 ms, safe integer 1–600000): the runtime deadline
+  aborts the inner request and races dispatch/result reading, returning `The tool timed out.`.
   Common adds optional `IApplication.dispatch` and `DispatchOptions`, implemented by the kernel with
   IP, abort and streaming support. `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`,
   `withIdempotencyMetadata` and `idempotencyMetadataOf` describe both HTTP idempotency entry points.

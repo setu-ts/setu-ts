@@ -39,6 +39,8 @@ export interface McpPluginOptions {
   readonly legacy?: 'stateless' | 'reject';
   /** Maximum inner response bytes: a positive integer up to 64 MiB, default 1 MiB. */
   readonly maxResultBytes?: number;
+  /** Per-call deadline in milliseconds: 1–600000, default 30000. */
+  readonly timeoutMs?: number;
 }
 
 /** Upper bound on `maxResultBytes` (64 MiB). */
@@ -113,6 +115,9 @@ export function resolveOptions(options: McpPluginOptions): ResolvedOptions {
     maxResultBytes > MAX_RESULT_BYTES_LIMIT
   )
     fail('Invalid MCP maxResultBytes.');
+  const timeoutMs = options.timeoutMs === undefined ? 30000 : options.timeoutMs;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 600000)
+    fail('Invalid MCP timeoutMs.');
   const allowedOrigins = options.allowedOrigins === undefined ? [] : options.allowedOrigins;
   if (!Array.isArray(allowedOrigins)) fail('Invalid MCP allowedOrigins.');
   for (const origin of allowedOrigins) {
@@ -134,6 +139,7 @@ export function resolveOptions(options: McpPluginOptions): ResolvedOptions {
     serverInfo: Object.freeze({ ...serverInfo }),
     legacy,
     maxResultBytes,
+    timeoutMs,
     allowedOrigins: Object.freeze([...allowedOrigins]),
     ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
   });

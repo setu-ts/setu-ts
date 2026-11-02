@@ -15,6 +15,7 @@ describe('MCP options', () => {
       serverInfo: { name: 'setu-mcp', version: VERSION },
       allowedOrigins: [],
       maxResultBytes: 1048576,
+      timeoutMs: 30000,
     });
     expect(Object.isFrozen(options)).toBe(true);
     expect(options.tools).not.toBe(input.tools);
@@ -28,6 +29,7 @@ describe('MCP options', () => {
       instructions: 'Use safely',
       allowedOrigins: ['https://client.test'],
       maxResultBytes: 50,
+      timeoutMs: 40000,
     };
     expect(resolveOptions(options)).toEqual(options);
   });
@@ -74,4 +76,13 @@ it('preserves the declared string server identity without imposing an extra name
 it('accepts maxResultBytes exactly at the 64 MiB cap', () => {
   const cap = 64 * 1024 * 1024;
   expect(resolveOptions({ tools: [declaration], maxResultBytes: cap }).maxResultBytes).toBe(cap);
+});
+
+it.each([0, -1, 1.5, 600001, NaN, Infinity, null, '30000'])('refuses timeoutMs %s', (timeoutMs) => {
+  expect(() =>
+    resolveOptions({ tools: [declaration], timeoutMs } as unknown as McpPluginOptions),
+  ).toThrow(McpPluginConfigurationError);
+});
+it.each([1, 600000])('accepts timeoutMs at the boundary %i', (timeoutMs) => {
+  expect(resolveOptions({ tools: [declaration], timeoutMs }).timeoutMs).toBe(timeoutMs);
 });

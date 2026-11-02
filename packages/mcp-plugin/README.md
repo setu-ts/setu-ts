@@ -81,15 +81,19 @@ outer MCP request, so one tool invocation consumes both budgets.
 
 ## Configuration
 
-| Option           | Default                                  | Behavior                                                                              |
-| ---------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| `tools`          | required                                 | Non-empty declarations binding exact method and registered path pattern               |
-| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                           |
-| `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                   |
-| `instructions`   | absent                                   | Server instructions                                                                   |
-| `allowedOrigins` | `[]`                                     | Additional absolute HTTP(S) origins, without a trailing slash or path                 |
-| `legacy`         | `'stateless'`                            | Serves 2025 clients; `'reject'` accepts only the modern protocol                      |
-| `maxResultBytes` | `1048576`                                | Maximum bytes read from an inner response (at most 64 MiB); excess cancels the stream |
+| Option           | Default                                  | Behavior                                                                                                    |
+| ---------------- | ---------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `tools`          | required                                 | Non-empty declarations binding exact method and registered path pattern                                     |
+| `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                                                 |
+| `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                                         |
+| `instructions`   | absent                                   | Server instructions                                                                                         |
+| `allowedOrigins` | `[]`                                     | Additional absolute HTTP(S) origins, without a trailing slash or path                                       |
+| `legacy`         | `'stateless'`                            | Serves 2025 clients; `'reject'` accepts only the modern protocol                                            |
+| `maxResultBytes` | `1048576`                                | Maximum bytes read from an inner response (at most 64 MiB); excess cancels the stream                       |
+| `timeoutMs`      | `30000`                                  | Per-call deadline in ms (safe integer 1–600000); aborts the inner request and returns `The tool timed out.` |
+
+The deadline bounds both dispatch and reading the result, even when a route or response stream
+ignores its signal. A client abort still returns `The tool failed.`; the first abort wins.
 
 A declaration contains `name`, `description`, optional `title`, `route: { method, path }` and
 optional `repeatable: true`. Methods are GET, POST, PUT, PATCH and DELETE. Names are unique,
