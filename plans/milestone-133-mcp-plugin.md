@@ -75,18 +75,19 @@ over M132's required-scopes state key so a second writer can use it.
   `tools: readonly McpToolDeclaration[]` (required, non-empty), `path?` (default `/mcp`),
   `serverInfo?: {name, version}` (default `{name: 'setu-mcp', version: VERSION}`), `instructions?`,
   `allowedOrigins?: readonly string[]`, `legacy?: 'stateless' | 'reject'` (default `'stateless'`,
-  passed to `createMcpHandler`), `maxResultBytes?` (default 1 MiB). Every option is validated at
-  construction (`McpPluginConfigurationError`). In `register()` the plugin registers `POST <path>`
-  as an ordinary route, and `GET`/`DELETE <path>` answering `405` with `Allow: POST`. In
-  `onBootstrap` it compiles the tool table (§3.2) and lazily loads the SDK (§3.8). The POST handler:
-  (1) Origin check (§3.7); (2) reads the body once with `ctx.request.text()` (bounded by the
-  runtime's `maxBodyBytes` on the adapter path) and parses it with `JSON.parse`; (3) the pre-SDK
-  access gate (§3.5) on the parsed value; (4) builds the SDK `Request` — the outer URL, method and
-  headers, `signal: ctx.signal` so a client disconnect aborts the call — records the per-request
-  call context (§3.4) in a module-level `WeakMap<Request, CallContext>` keyed by that object, and
-  calls the SDK handler's `fetch(request, {parsedBody})`; a body that does not parse is passed as
-  the raw text instead of `parsedBody`, so the SDK answers its own JSON-RPC parse error (-32700);
-  (5) copies the SDK `Response` status and headers onto `ctx.response` and its body as a stream
+  passed to `createMcpHandler`), `maxResultBytes?` (default 1 MiB), `timeoutMs?` (default 30 000,
+  §3.11). Every option is validated at construction (`McpPluginConfigurationError`). In `register()`
+  the plugin registers `POST <path>` as an ordinary route, and `GET`/`DELETE <path>` answering `405`
+  with `Allow: POST`. In `onBootstrap` it compiles the tool table (§3.2) and lazily loads the SDK
+  (§3.8). The POST handler: (1) Origin check (§3.7); (2) reads the body once with
+  `ctx.request.text()` (bounded by the runtime's `maxBodyBytes` on the adapter path) and parses it
+  with `JSON.parse`; (3) the pre-SDK access gate (§3.5) on the parsed value; (4) builds the SDK
+  `Request` — the outer URL, method and headers, `signal: ctx.signal` so a client disconnect aborts
+  the call — records the per-request call context (§3.4) in a module-level
+  `WeakMap<Request, CallContext>` keyed by that object, and calls the SDK handler's
+  `fetch(request, {parsedBody})`; a body that does not parse is passed as the raw text instead of
+  `parsedBody`, so the SDK answers its own JSON-RPC parse error (-32700); (5) copies the SDK
+  `Response` status and headers onto `ctx.response` and its body as a stream
   (`ctx.response.stream`), never buffered: `responseMode: 'json'` keeps 2026-era answers to one JSON
   body, but the 2025-era stateless leg may answer with an event stream.
 - **Why:** an ordinary route means global middleware (tenant resolution, request logging, rate
@@ -238,6 +239,7 @@ over M132's required-scopes state key so a second writer can use it.
   | 5xx, any body                                                  | `isError`, text `The tool failed.`                                                                                       |
   | body over `maxResultBytes`                                     | `isError`, text `The tool result is too large.` (read stopped, stream cancelled)                                         |
   | argument with no destination, or a `.`/`..`/empty path value   | `isError`, text `The tool received an argument it cannot use.`                                                           |
+  | the call exceeded `timeoutMs` (§3.11)                          | `isError`, text `The tool timed out.`                                                                                    |
   | dispatch rejected, or the call aborted                         | `isError`, text `The tool failed.`                                                                                       |
 
   The tool's input and output `StandardSchemaWithJSON` objects are pass-throughs (`validate` returns
@@ -294,6 +296,25 @@ over M132's required-scopes state key so a second writer can use it.
 - **Test home:** existing `packages/cli/test/unit/commands/add.test.ts` rows;
   `test/agent-card-gate.test.ts`.
 
+### 3.11 Per-call timeout
+
+- **Decision:** option `timeoutMs?` (default 30 000; a safe integer from 1 to 600 000, else
+  `McpPluginConfigurationError`). Each tool call gets an `AbortController` aborted by
+  `runtime.setTimeout(timeoutMs)` or by the SDK's `ctx.mcpReq.signal`, whichever fires first; the
+  inner `Request` carries the controller's signal, so the route's `ctx.signal` aborts. The dispatch
+  and the result read are raced against the deadline, as auth-plugin's sign-in `attempt` does, so a
+  route that ignores its signal cannot hold the call open; the timer is cleared on every path. A
+  deadline hit answers `isError` `The tool timed out.`; a client abort keeps `The tool failed.`
+- **Why:** the MCP spec asks clients to time out tool calls, and FastMCP (per-tool `timeout`) and
+  fastapi_mcp (10 s) bound them server-side; without one a hung route holds the outer request and
+  the shutdown drain open (maintainer decision 2026-11-02, after the framework survey). The runtime
+  timer, not `AbortSignal.timeout`, so a test's fake clock controls it.
+- **Test home:** `test/unit/options.test.ts` (refusal and default rows),
+  `test/unit/server-factory.test.ts` (fake clock: a hung dispatch answers `The tool timed out.` and
+  the inner signal is aborted; a dispatch that ignores its signal still answers; the timer is
+  cleared after a fast call; a client abort still answers `The tool failed.`),
+  `test/integration/mcp-tool-call.test.ts` (a route that waits on its signal sees it aborted).
+
 ## 4. Exported surface — every symbol names its consumer
 
 **Breaking for implementors:** none — `IApplication.dispatch` is optional, the new brand and state
@@ -312,17 +333,18 @@ M132.
 
 ### 4.1 Options — every option names its consumer
 
-| Option               | Consumer                                | Behavior (per implementation)                                             |
-| -------------------- | --------------------------------------- | ------------------------------------------------------------------------- |
-| `tools`              | `compileTools` (bootstrap)              | the tool table; refusals per §3.2                                         |
-| `path`               | `register()` route registration         | endpoint path; a tool may not bind to it                                  |
-| `serverInfo`         | per-request `McpServer`                 | `serverInfo` in `initialize` / `server/discover`                          |
-| `instructions`       | per-request `McpServer`                 | server instructions                                                       |
-| `allowedOrigins`     | Origin check (§3.7)                     | extra accepted origins                                                    |
-| `legacy`             | `createMcpHandler`                      | 2025-era serving posture                                                  |
-| `maxResultBytes`     | result reader (§3.6)                    | bound on the inner response body read                                     |
-| tool `repeatable`    | `compileTools` retry check, annotations | admits a POST/PATCH route without the idempotency brand; `idempotentHint` |
-| `DispatchOptions.ip` | kernel `DispatchedRequest`              | `ctx.request.ip` of the inner request                                     |
+| Option               | Consumer                                | Behavior (per implementation)                                                 |
+| -------------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| `tools`              | `compileTools` (bootstrap)              | the tool table; refusals per §3.2                                             |
+| `path`               | `register()` route registration         | endpoint path; a tool may not bind to it                                      |
+| `serverInfo`         | per-request `McpServer`                 | `serverInfo` in `initialize` / `server/discover`                              |
+| `instructions`       | per-request `McpServer`                 | server instructions                                                           |
+| `allowedOrigins`     | Origin check (§3.7)                     | extra accepted origins                                                        |
+| `legacy`             | `createMcpHandler`                      | 2025-era serving posture                                                      |
+| `maxResultBytes`     | result reader (§3.6)                    | bound on the inner response body read                                         |
+| `timeoutMs`          | tool callback (§3.11)                   | per-call deadline; aborts the inner request and answers `The tool timed out.` |
+| tool `repeatable`    | `compileTools` retry check, annotations | admits a POST/PATCH route without the idempotency brand; `idempotentHint`     |
+| `DispatchOptions.ip` | kernel `DispatchedRequest`              | `ctx.request.ip` of the inner request                                         |
 
 ## 5. Implementation files
 
@@ -485,6 +507,7 @@ re-derive the threat model.
 | T17 | Prompt injection through route output                                                                                   | **Out of scope:** the lethal-trifecta registry is a named follow-on (ROADMAP M133 decision 8). The README says tool output is untrusted model input                 | —          |
 | T18 | Brands treated as authorization: a forged security brand hides a tool, or a forged idempotency brand admits a POST tool | Brands only shape the list and the startup refusal. The route's guards still enforce every call (class 10). Forging needs application code, which is trusted        | O3         |
 | T19 | A non-array `principal.scopes` substring-matches                                                                        | Visibility treats a non-array `scopes` as holding none (fixed in review, M132 F-2 class)                                                                            | O14        |
+| T20 | A hung route holds the call, the outer request and the shutdown drain open                                              | A per-call deadline (§3.11) aborts the inner request and races the result                                                                                           | O15        |
 
 ### 8a.6 Approved budgets
 
@@ -495,7 +518,8 @@ re-derive the threat model.
   bound of its own.
 - **Tool names.** 1–128 characters of `[A-Za-z0-9_.-]`, unique. No limit on the number of tools:
   they are declared by the application.
-- **Per call.** One inner dispatch per `tools/call`. No retries inside the plugin.
+- **Per call.** One inner dispatch per `tools/call`. No retries inside the plugin. Deadline
+  `timeoutMs`: default 30 s, at most 10 minutes.
 
 ### 8a.7 Obligations the audit probes (each with a positive control)
 
@@ -515,6 +539,7 @@ re-derive the threat model.
 | O12 | A tenant path parameter is decided by the route, as over HTTP                                                                                                                                                                | Another tenant's id via MCP and via HTTP: same refusal. Control: the caller's own tenant id succeeds                                                                                                                                                          |
 | O13 | Each batched call passes the app's global limiter                                                                                                                                                                            | A global `rateLimitMiddleware` with `max: 2`; a batch of 3 calls yields at most 2 successes. Control: `max: 10` gives 3                                                                                                                                       |
 | O14 | Non-array `principal.scopes` holds none                                                                                                                                                                                      | A mapper returning the raw `scope` string `'xreadx'`: the `read` tool is hidden and its call answers 403. Control: `['read']` shows it                                                                                                                        |
+| O15 | A call is bounded by `timeoutMs` even when the route ignores its signal                                                                                                                                                      | A route that never settles and ignores `ctx.signal`: the result is `The tool timed out.` within the deadline. Control: a route that answers before the deadline succeeds                                                                                      |
 
 ### 8a.8 Committed-tree audit
 
