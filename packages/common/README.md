@@ -152,12 +152,23 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 
 Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
 `redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
-(M131a). The userinfo runs to the URL's last `@`, so a malformed URL whose password holds an
-unencoded `@`, `/`, `#`, `?`, `://` or whitespace (or whose username holds whitespace) is masked
-whole. A URL with no userinfo, an email address and an `@` in a path are left alone; a path `@`
-after a port, and plain words after a credentialed URL whose host has no `.`, `:` or `/`, are masked
-too, erring toward hiding. A URL never spans lines, so a password holding a line break is masked
-only up to it. The scan is linear and applies to strings of any length.
+(M131a). It is a best-effort rule for credentials pasted into text, not a parser; the cases it
+handles are tested as a table:
+
+- the userinfo runs to the URL's last `@` on its word, so an unencoded `@`, `/`, `#`, `?` or `://`
+  in the password is masked with it;
+- a password holding one run of whitespace is masked to the next `@` on the line when the text
+  before the whitespace has a `user:password` colon (`redis://:pw x@host`), and a username holding
+  whitespace when the next word is `name:password@host` (`redis://us er:pw@host`);
+- a password holding `@` then whitespace (`redis://:p@ab cd@host`) is masked to the next word's `@`
+  only when the text after the first `@` has no `.`, `:` or `/`.
+
+Left unmasked, as known limits: a password holding a line break (a URL never spans lines), more than
+one run of whitespace after an `@` in the password, or `@` then whitespace where the text after the
+`@` looks like a host (`redis://:p@s.ec ret@host`). Over-masked, erring toward hiding: a path `@`
+after a port, and plain words after a credentialed URL whose host has no `.`, `:` or `/`. Untouched:
+a URL with no userinfo, an email address, and an `@` in a path. The scan is linear and applies to
+strings of any length.
 
 The rule applies where a redaction service runs: the logger's metadata by default, and trace
 attributes and audit records only when those plugins are given a policy. A log message string is not
@@ -356,7 +367,6 @@ package fits the plugin architecture.
 | `AuthorizationDecisionObservation`    | interface |
 | `AuthorizationDecisionStep`           | interface |
 | `AuthorizationDiagnosticsBatch`       | interface |
-| `BackendFaultContext`                 | interface |
 | `BehaviorLike`                        | interface |
 | `BulkheadPolicy`                      | interface |
 | `CacheDiagnosticsRecord`              | interface |
@@ -381,7 +391,6 @@ package fits the plugin architecture.
 | `DiagnosticsEvent`                    | interface |
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
-| `DispatchMark`                        | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |

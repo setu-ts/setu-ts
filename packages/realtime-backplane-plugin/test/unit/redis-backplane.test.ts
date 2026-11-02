@@ -170,17 +170,17 @@ function failingPublisher(
   return client as unknown as IRedisBackplaneClient & EventEmitter;
 }
 /**
- * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
- * when the command provably never left the process: disconnected at dispatch,
- * no reconnect since, still disconnected at the failure. A command queued
- * offline and written after a reconnect may have been applied (the M131a
- * audit's case).
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 504 in
+ * every client state: ioredis rejects commands already sent with the same
+ * error, and a driver writes a queued command as soon as a socket opens, so no
+ * state the framework can observe proves the command was never written (M131a
+ * security audits).
  */
 const LOST_CONNECTION_CASES = [
-  ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
-  ['reconnecting', true, 'reconnecting', 'BackendOutcomeUnknownError'],
-  ['reconnecting', false, 'ready', 'BackendOutcomeUnknownError'],
-  ['ready', false, 'ready', 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'reconnecting'],
+  ['reconnecting', true, 'reconnecting'],
+  ['reconnecting', false, 'ready'],
+  ['ready', false, 'ready'],
 ] as const;
 
 /** Between dispatch and failure: an optional reconnect, then the final state. */
@@ -199,14 +199,10 @@ function maxRetries(): Error {
   return e;
 }
 
-function classOf(name: (typeof LOST_CONNECTION_CASES)[number][3]) {
-  return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
-}
-
 describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
   it.each(LOST_CONNECTION_CASES)(
-    'dispatch %s, reconnect %s, failure %s → %s',
-    async (before, reconnect, after, expected) => {
+    'dispatch %s, reconnect %s, failure %s → 504',
+    async (before, reconnect, after) => {
       const lost = maxRetries();
       const backplane = new RedisBackplane(
         {
@@ -221,7 +217,7 @@ describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
       try {
         await expect(backplane.publish(FRAME)).rejects.toSatisfy((thrown: unknown) => {
           const e = thrown as Error;
-          return e instanceof classOf(expected) && e.cause === lost;
+          return e instanceof BackendOutcomeUnknownError && e.cause === lost;
         });
       } finally {
         await backplane.close();
@@ -263,6 +259,25 @@ describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
     );
     await expect(backplane.connect()).rejects.toThrow('refused');
     expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('wraps a refusal before any send as BackendUnavailableError (503)', async () => {
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+      code: 'ECONNREFUSED',
+    });
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: failingPublisher(refused), subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    try {
+      await expect(backplane.publish(FRAME)).rejects.toSatisfy(
+        (thrown: unknown) => thrown instanceof BackendUnavailableError && thrown.cause === refused,
+      );
+    } finally {
+      await backplane.close();
+    }
   });
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {

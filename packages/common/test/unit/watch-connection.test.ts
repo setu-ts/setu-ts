@@ -1,7 +1,7 @@
 /**
- * `watchConnection` (M131a audit): the reporter on an injected client counts
- * reconnects, decides whether a command provably never left the process, and
- * detaches so a stopped application no longer receives the client's events.
+ * `watchConnection` (M131a audit): the reporter on an injected client detaches,
+ * so a stopped application no longer receives the client's events and a
+ * shared client does not collect one listener pair per application.
  *
  * @module
  */
@@ -27,17 +27,6 @@ describe('watchConnection', () => {
     watch.detach();
     expect(client.listenerCount('error')).toBe(0);
     expect(client.listenerCount('ready')).toBe(0);
-    expect(client.listenerCount('connect')).toBe(0);
-  });
-
-  it('a ready without a connect does not count: only an opened socket can carry a write', () => {
-    const client = new EventEmitter();
-    const watch = watchConnection(client);
-    const mark = watch.mark('reconnecting');
-    client.emit('ready');
-    expect(watch.unsent(mark, 'reconnecting')).toBe(true);
-    client.emit('connect');
-    expect(watch.unsent(mark, 'reconnecting')).toBe(false);
   });
 
   it('does not accumulate listeners across many applications sharing one client', () => {
@@ -67,35 +56,5 @@ describe('watchConnection', () => {
     for (const handler of handlers) handler(new Error('late'));
     expect(sink.report).not.toHaveBeenCalled();
     expect(sink.recovered).not.toHaveBeenCalled();
-  });
-
-  /** status at dispatch, a socket connect in between, status at failure → unsent? */
-  const UNSENT: ReadonlyArray<readonly [string | undefined, boolean, string | undefined, boolean]> =
-    [
-      ['reconnecting', false, 'reconnecting', true],
-      ['end', false, 'end', true],
-      // Queued offline and written on the new socket, before 'ready' (the audit's case).
-      ['reconnecting', true, 'reconnecting', false],
-      // Connected at the failure: it may have been flushed on that connection.
-      ['reconnecting', false, 'ready', false],
-      ['ready', false, 'reconnecting', false],
-      [undefined, false, undefined, false],
-    ];
-  it.each(UNSENT)(
-    'dispatch %s, reconnect %s, failure %s → unsent %s',
-    (before, reconnect, after, expected) => {
-      const client = new EventEmitter();
-      const watch = watchConnection(client);
-      const mark = watch.mark(before);
-      if (reconnect) client.emit('connect');
-      expect(watch.unsent(mark, after)).toBe(expected);
-    },
-  );
-
-  it('never claims unsent for a client without listeners', () => {
-    const watch = watchConnection({});
-    expect(watch.attached).toBe(false);
-    expect(watch.unsent(watch.mark('reconnecting'), 'reconnecting')).toBe(false);
-    watch.detach();
   });
 });

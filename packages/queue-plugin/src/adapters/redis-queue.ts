@@ -10,7 +10,7 @@
 import { deadlineRangeError, watchConnection } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { StaleClaimError } from '../errors.ts';
-import type { ConnectionErrorReporter, ConnectionWatch, DispatchMark } from '@setu-ts/common';
+import type { ConnectionErrorReporter, ConnectionWatch } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import {
   ACK_SCRIPT,
@@ -232,6 +232,24 @@ async function resolveClient(
 const DISCONNECTED_STATUSES: ReadonlySet<string> = new Set(['reconnecting', 'close', 'end']);
 
 /**
+ * QUIT, and when it rejects (an unreachable server), a forced `disconnect()`:
+ * a built ioredis client whose QUIT failed keeps reconnecting, and once its
+ * listener is detached each failure reaches the console (M131a audit R3-3).
+ *
+ * @param client - The client to close
+ * @throws The QUIT failure, after the forced disconnect
+ */
+async function quitOrForce(client: { quit(): Promise<unknown> }): Promise<void> {
+  try {
+    await client.quit();
+  } catch (error) {
+    const force = (client as { disconnect?: unknown }).disconnect;
+    if (typeof force === 'function') (force as () => void).call(client);
+    throw error;
+  }
+}
+
+/**
  * Redis queue adapter implementation.
  *
  * Uses Redis sorted sets (ZSET) for ready/processing/dead sets and
@@ -307,17 +325,20 @@ export class RedisQueue implements QueueAdapter {
       this.#reporter,
       this.#commandTimeoutMs,
     );
-    this.#client = resolved.client;
+    const { client, watch } = resolved;
+    this.#client = client;
     // A watch left by an earlier or concurrent attempt is replaced, not
     // stacked: each attempt would otherwise add a listener pair (N-3).
     this.#watch?.detach();
-    this.#watch = resolved.watch;
-    if (typeof this.#client.connect === 'function') {
+    this.#watch = watch;
+    if (typeof client.connect === 'function') {
       try {
-        await this.#client.connect();
+        await client.connect();
       } catch (error) {
-        this.#watch.detach();
-        this.#watch = undefined;
+        // Only this attempt's watch: a concurrent attempt may have replaced it
+        // with its own, which must stay attached (audit R3-2).
+        watch.detach();
+        if (this.#watch === watch) this.#watch = undefined;
         throw error;
       }
     }
@@ -390,7 +411,7 @@ export class RedisQueue implements QueueAdapter {
     this.#watch = undefined;
     try {
       if (this.#client) {
-        await this.#client.quit();
+        await quitOrForce(this.#client);
       }
     } finally {
       watch?.detach();
@@ -404,14 +425,6 @@ export class RedisQueue implements QueueAdapter {
 
   isReady(): boolean {
     return this.#ready;
-  }
-
-  dispatchMark(): DispatchMark | undefined {
-    return this.#watch?.mark(this.#client?.status);
-  }
-
-  unsent(mark: DispatchMark): boolean {
-    return this.#watch?.unsent(mark, this.#client?.status) === true;
   }
 
   async enqueue<T>(job: StoredJob<T>): Promise<void> {

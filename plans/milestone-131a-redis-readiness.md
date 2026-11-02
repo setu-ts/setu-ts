@@ -160,25 +160,22 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 - **Decision:** `common` gains `BackendUnavailableError` (503, "The request was not applied.") and
   `BackendOutcomeUnknownError` (504, "The backend did not answer; the request may have been
   applied.") plus `toBackendFault(error, source)`, which returns one of them, or `undefined`. Rule
-  (the M128 rule, shared): refused before sending (a closed, offline or offline-queue-disabled
-  client, `ECONNREFUSED`-class codes) → unavailable; no answer within the bound ("Command timed
-  out") and a lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`, `MaxRetriesPerRequestError`,
-  "Connection is closed.", "Socket closed unexpectedly") → unavailable only when the caller's
-  `context.unsent` is `true`, otherwise outcome unknown. ioredis's `flushQueue` rejects commands
-  already written to the socket with `MaxRetriesPerRequestError` and "Connection is closed." (read
-  in `event_handler.js` `closeHandler`), and a command made while disconnected is written on the
-  next socket (the security audit reproduced a node-redis job stored in Redis behind a `503`), so
-  neither the shape nor the state at dispatch alone proves "not applied". Each call site uses
-  `watchConnection` (common), which counts socket `'connect'` events — not `'ready'`: the re-audit
-  measured node-redis 6.3 writing its queued commands together with the reconnect handshake, before
-  `'ready'`. `unsent` is true only when the client was disconnected at dispatch, no socket has
-  connected since, and it is still disconnected at the failure (user decision and audits,
-  2026-11-02). On a stopped server a "Command timed out" (node-redis has no retry budget) is a
-  queued command that never left, so it follows the same rule; on a paused server the socket is open
-  and the answer is outcome unknown. `watchConnection` also detaches the reporter after `quit()`
-  when the plugin stops. `QueueService.add`, the backplane `publish` and the messaging `publish`
-  wrap thrown driver errors through it, keeping the original as `cause`. `PublishTimeoutError` is
-  not rewrapped: it keeps its name and gains the 504 hint itself.
+  (the M128 rule, shared): a refusal before any send (a closed, offline or offline-queue-disabled
+  client, `ECONNREFUSED`-class codes, node-redis's first refused connect) → unavailable; a lost
+  connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`, `MaxRetriesPerRequestError`, "Connection is
+  closed.", "Socket closed unexpectedly") and an expired bound ("Command timed out") → outcome
+  unknown, always. ioredis's `flushQueue` rejects commands already written to the socket with
+  `MaxRetriesPerRequestError` and "Connection is closed." (read in `event_handler.js`
+  `closeHandler`), and both drivers write a command queued while disconnected as soon as a socket
+  opens. Three attempts to prove "not sent" from driver state — the status at dispatch, then a
+  `'ready'` count, then a socket `'connect'` count — each failed a security-audit round (a
+  node-redis job written with the reconnect handshake; a command sent while a socket was still
+  handshaking), so the user decided on 2026-11-02 that a lost connection or an expired bound is
+  never claimed to be "not applied". A stopped Redis therefore answers `504` once the retry budget
+  or the bound runs out. `watchConnection` (common) attaches the connection-error reporter and
+  detaches it after `quit()` when the plugin stops. `QueueService.add`, the backplane `publish` and
+  the messaging `publish` wrap thrown driver errors through it, keeping the original as `cause`.
+  `PublishTimeoutError` is not rewrapped: it keeps its name and gains the 504 hint itself.
 - **Why:** a masked 500 tells a client nothing, and the X88-5 runs showed every 500'd job was
   applied; a 504 with that wording tells a retrying client to use an idempotency key.
 - **Measurement gate (implementation step 1):** before the table is fixed, record the thrown
@@ -401,8 +398,8 @@ clients). The audit runs against this section, on the commit the PR merges.
   4. Prove the 503/504 bodies carry only the fixed `detail` (no host, port, command, key or canary
      from the driver error), under both error formats.
   5. Prove a `503` is answered only where the request cannot have been applied: every
-     lost-connection shape with the client connected at dispatch, or with no status, answers `504`;
-     `Command timed out` follows the same rule (a paused server, socket open, answers `504`).
+     lost-connection shape and `Command timed out` answer `504` in every client state, and a `503`
+     never coexists with a stored job (guarded real-Redis proxy test, both clients).
   6. Prove CR/LF or ANSI text in a driver error cannot split or forge a `warn` line or the stderr
      start line.
   7. Prove the reporter attached to an injected client does not keep the stopped application alive
@@ -412,16 +409,16 @@ clients). The audit runs against this section, on the commit the PR merges.
      project root, swallows only its own failure, and that the image copies the generated file and
      no `.env` (the Dockerfile ignores `.env`; images pass no env-file flag).
 
-| Threat                                             | Resolution                                                           |
-| -------------------------------------------------- | -------------------------------------------------------------------- |
-| Password echoed by Node's default error printer    | §3.10b catch in `main.ts` and `dev.ts`, masked single line           |
-| Password inside a logged or traced string          | §3.10a URL-userinfo rule in the default policy, last-`@`, no cut-off |
-| Masking defeated by a long or crafted value        | Linear scan, no length bound (obligation 2)                          |
-| Driver text served to clients                      | §3.6 fixed details; driver error only as `cause`                     |
-| A false `503` invites a duplicating retry          | §3.6 dispatch-state rule; unknown state answers `504`                |
-| Log flood during an outage                         | §3.5, §3.11 once per state change                                    |
-| Code run before the app from the working directory | §3.7 generated preload, fixed specifier, image copies the file       |
-| `.env` secrets reaching an image                   | §3.4 no flag in images; `.dockerignore` excludes dotenv files        |
+| Threat                                             | Resolution                                                             |
+| -------------------------------------------------- | ---------------------------------------------------------------------- |
+| Password echoed by Node's default error printer    | §3.10b catch in `main.ts` and `dev.ts`, masked single line             |
+| Password inside a logged or traced string          | §3.10a URL-userinfo rule in the default policy, last-`@`, no cut-off   |
+| Masking defeated by a long or crafted value        | Linear scan, no length bound (obligation 2)                            |
+| Driver text served to clients                      | §3.6 fixed details; driver error only as `cause`                       |
+| A false `503` invites a duplicating retry          | §3.6: only a refusal before any send is a `503`; everything else `504` |
+| Log flood during an outage                         | §3.5, §3.11 once per state change                                      |
+| Code run before the app from the working directory | §3.7 generated preload, fixed specifier, image copies the file         |
+| `.env` secrets reaching an image                   | §3.4 no flag in images; `.dockerignore` excludes dotenv files          |
 
 ## 9. Out of scope
 

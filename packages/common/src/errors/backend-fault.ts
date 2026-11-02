@@ -18,34 +18,28 @@
  * - stopped, ioredis: `MaxRetriesPerRequestError` / "Reached the max retries per
  *   request limit (which is 1). Refer to \"maxRetriesPerRequest\" option for
  *   details.", or "Command timed out" when the command bound is shorter than
- *   the retry budget.
+ *   the retry budget → 504 (the same shapes reject commands already sent).
  * - stopped, node-redis: first command `Error` / "Redis connection failed:
- *   connect ECONNREFUSED 127.0.0.1:<port>" (cause.code `ECONNREFUSED`) →
- *   503; later commands `Error` / "Command timed out" (node-redis has no retry
- *   budget, so a queued command waits for the bound).
- * - paused, both: `Error` / "Command timed out" — the command was dispatched on
- *   an open socket to a server that answers only when unpaused, so it MAY HAVE
- *   BEEN applied → 504.
+ *   connect ECONNREFUSED 127.0.0.1:<port>" (cause.code `ECONNREFUSED`) → 503;
+ *   later commands `Error` / "Command timed out" (node-redis has no retry
+ *   budget, so a queued command waits for the bound) → 504.
+ * - paused, both: `Error` / "Command timed out" → 504.
  *
- * The retry and timeout shapes on a stopped server are decided by the caller's
- * `unsent` (below): no socket opened between dispatch and failure → 503.
+ * Only a refusal that comes BEFORE any send answers 503: a refused or
+ * unresolvable connection, a client that is closed or offline, ioredis with its
+ * offline queue switched off, and node-redis's first-connect failure. Every
+ * other recognised shape answers 504, a stopped server's retry and timeout
+ * shapes included. ioredis rejects commands already written to the socket with
+ * `MaxRetriesPerRequestError` and "Connection is closed." (its `flushQueue`
+ * empties the sent-command queue too), and both drivers write a command queued
+ * while disconnected as soon as a socket opens — during the handshake, after a
+ * pause, after a reconnect. Three security-audit rounds each found another
+ * window where a "not sent" decision built on driver events was false (M131a),
+ * so a lost connection or an expired bound is never claimed to be "not applied".
  *
  * Only those measured shapes enter the table; anything unrecognised passes
  * through unchanged (the masked `500`), because an unrecognised fault is not
  * proven to be either safe.
- *
- * Some shapes do not say on their own whether the command left the process.
- * ioredis rejects every queued command with `MaxRetriesPerRequestError` or
- * "Connection is closed." when it gives up on a connection — including
- * commands already written to the socket before it dropped (its `flushQueue`
- * empties the sent-command queue too), and a reset or broken pipe can arrive
- * after the server ran the command. A command made while the client is
- * disconnected is not safe either: the driver queues it and writes it after the
- * next reconnect, and the connection can drop again with the command applied
- * (audit finding, M131a). So the caller says whether the command provably was
- * never written (`unsent`, from {@linkcode watchConnection}: disconnected at
- * dispatch, no reconnect since, still disconnected at the failure) — then the
- * request was not applied (503); otherwise it may have been (504).
  *
  * @module
  */
@@ -150,36 +144,19 @@ export class BackendOutcomeUnknownError extends Error {
 /** Maximum number of objects inspected, including the original error. */
 const MAX_CAUSE_DEPTH = 5;
 
-/**
- * What one object in the cause chain says: refused before sending, sent with no
- * answer, or a lost connection whose outcome depends on the state at dispatch.
- */
-type BackendFaultKind = 'unavailable' | 'outcome-unknown' | 'connection-lost';
+/** What one object in the cause chain says: refused before any send, or not. */
+type BackendFaultKind = 'unavailable' | 'outcome-unknown';
 
 /** Network codes a command already on the socket can also fail with. */
 const IN_FLIGHT_CODES: ReadonlySet<string> = new Set(['ECONNRESET', 'EPIPE', 'ETIMEDOUT']);
-
-/**
- * What the caller knew when it dispatched the failed call.
- *
- * @since 0.12.0
- */
-export interface BackendFaultContext {
-  /**
-   * Whether the failed command provably was never written to the backend.
-   * Decides a lost-connection fault: `true` → not applied (503); `false` or
-   * omitted → may have been applied (504).
-   */
-  readonly unsent?: boolean;
-}
 
 /**
  * Classifies one object in a thrown error's cause chain.
  *
  * A command timeout (`Command timed out`) and a lost connection (`ECONNRESET`,
  * `EPIPE`, `ETIMEDOUT`, `MaxRetriesPerRequestError`, "Connection is closed.",
- * "Socket closed unexpectedly") are decided by the caller's `unsent`: each can
- * follow a command already written, or one queued that never left. A refusal before sending
+ * "Socket closed unexpectedly") are outcome-unknown: each can follow a command
+ * already written, or one a driver will still write. A refusal before sending
  * (the other connection-fault codes, ioredis's disabled offline queue, or a
  * client that is closed / offline / never connected) is unavailable.
  *
@@ -189,21 +166,17 @@ export interface BackendFaultContext {
 function classify(entry: Record<string, unknown>): BackendFaultKind | undefined {
   const name = entry.name;
   const message = typeof entry.message === 'string' ? entry.message : '';
-  // The bound expired with no answer. On an open socket (a paused server) the
-  // command was sent and may have run; a command queued while disconnected is
-  // written on the next socket. So, like a lost connection, it is decided by
-  // whether any socket opened between dispatch and failure: node-redis has no
-  // retry budget, so this is how a STOPPED server fails on it (M131a re-audit).
-  if (message === 'Command timed out') return 'connection-lost';
-  // Lost connection: a command may already have been on the socket.
+  // 504: the bound expired, or the connection was lost. The command may
+  // already have been written, or a driver may still write it.
+  if (message === 'Command timed out') return 'outcome-unknown';
   const code = typeof entry.code === 'string' ? entry.code : entry.errno;
-  if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'connection-lost';
-  if (name === 'MaxRetriesPerRequestError') return 'connection-lost';
+  if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'outcome-unknown';
+  if (name === 'MaxRetriesPerRequestError') return 'outcome-unknown';
   if (
     name === 'Error' &&
     (message === 'Connection is closed.' || message === 'Socket closed unexpectedly')
   ) {
-    return 'connection-lost';
+    return 'outcome-unknown';
   }
   // 503: refused before sending — the connection never reached the backend.
   if (isConnectionFaultCode(entry.code) || isConnectionFaultCode(entry.errno)) return 'unavailable';
@@ -257,22 +230,15 @@ function classifyChain(error: unknown): BackendFaultKind | undefined {
  *
  * @param error - The thrown driver error
  * @param source - The source label for the log (e.g. `queue-plugin: enqueue`)
- * @param context - What the caller knew at dispatch; decides a lost connection
  * @returns The wrapped fault, or `undefined` when the shape is unrecognised
  * @since 0.12.0
  */
-export function toBackendFault(
-  error: unknown,
-  source: string,
-  context?: BackendFaultContext,
-): BackendFault | undefined {
+export function toBackendFault(error: unknown, source: string): BackendFault | undefined {
   if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError) {
     return error;
   }
   const kind = classifyChain(error);
-  if (kind === 'unavailable' || (kind === 'connection-lost' && context?.unsent === true)) {
-    return new BackendUnavailableError(source, { cause: error });
-  }
-  if (kind !== undefined) return new BackendOutcomeUnknownError(source, { cause: error });
+  if (kind === 'unavailable') return new BackendUnavailableError(source, { cause: error });
+  if (kind === 'outcome-unknown') return new BackendOutcomeUnknownError(source, { cause: error });
   return undefined;
 }

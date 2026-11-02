@@ -1,5 +1,3 @@
-import type { DispatchMark } from '@setu-ts/common';
-
 /**
  * Internal queue adapter interface.
  *
@@ -69,25 +67,6 @@ export interface QueueAdapter {
    * @since 0.1.0
    */
   disconnect(): Promise<void>;
-
-  /**
-   * Records the client's connection state just before an enqueue, so a
-   * lost-connection failure can be decided by {@linkcode QueueAdapter.unsent}
-   * (M131a X88-5). Optional: an adapter without it answers every such failure
-   * as possibly applied.
-   *
-   * @returns The mark, or `undefined` when the client reports no state
-   */
-  dispatchMark?(): DispatchMark | undefined;
-
-  /**
-   * Whether the enqueue dispatched at `mark` provably never reached the backend:
-   * disconnected then, no reconnect since, still disconnected now.
-   *
-   * @param mark - The mark from {@linkcode QueueAdapter.dispatchMark}
-   * @returns `true` only when the job cannot have been stored
-   */
-  unsent?(mark: DispatchMark): boolean;
 
   /**
    * Checks if the adapter is ready/connected.

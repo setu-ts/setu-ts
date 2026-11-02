@@ -358,6 +358,24 @@ interface ActiveSubscription {
 }
 
 /**
+ * QUIT, and when it rejects (an unreachable server), a forced `disconnect()`:
+ * a built ioredis client whose QUIT failed keeps reconnecting, and once its
+ * listener is detached each failure reaches the console (M131a audit R3-3).
+ *
+ * @param client - The client to close
+ * @throws The QUIT failure, after the forced disconnect
+ */
+async function quitOrForce(client: { quit(): Promise<unknown> }): Promise<void> {
+  try {
+    await client.quit();
+  } catch (error) {
+    const force = (client as { disconnect?: unknown }).disconnect;
+    if (typeof force === 'function') (force as () => void).call(client);
+    throw error;
+  }
+}
+
+/**
  * Redis Streams message broker implementation.
  *
  * Uses Redis Streams for persistent message delivery with consumer groups
@@ -483,19 +501,20 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       return;
     }
     const resolved = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
-    this.#client = resolved.client;
+    const { client, watch } = resolved;
+    this.#client = client;
     // A watch left by an earlier or concurrent attempt is replaced, not
     // stacked: each attempt would otherwise add a listener pair (N-3).
     this.#watch?.detach();
-    this.#watch = resolved.watch;
-    if (typeof this.#client.connect === 'function') {
+    this.#watch = watch;
+    if (typeof client.connect === 'function') {
       try {
-        await this.#client.connect();
+        await client.connect();
       } catch (error) {
-        // A retried connect() resolves the client again; without this each
-        // attempt would leave one more listener pair on an injected client.
-        this.#watch.detach();
-        this.#watch = undefined;
+        // Only this attempt's watch: a concurrent attempt may have replaced it
+        // with its own, which must stay attached (audit R3-2).
+        watch.detach();
+        if (this.#watch === watch) this.#watch = undefined;
         throw error;
       }
     }
@@ -549,7 +568,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     this.#watch = undefined;
     try {
       if (this.#client) {
-        await this.#client.quit();
+        await quitOrForce(this.#client);
       }
     } finally {
       watch?.detach();
@@ -645,10 +664,6 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
     const client = this.#client;
-    // Marked before the call: a lost connection is decided by whether the XADD
-    // provably never left the process (M131a X88-5).
-    const watch = this.#watch;
-    const mark = watch?.mark(client.status);
     try {
       await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
         timeoutMs: this.#publishTimeoutMs,
@@ -664,9 +679,7 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       // `PublishTimeoutError` is NOT rewrapped — it keeps its name and carries
       // the 504 hint itself. An unrecognised shape passes through unchanged.
       if (error instanceof PublishTimeoutError) throw error;
-      const fault = toBackendFault(error, 'messaging-plugin: redis-streams broker', {
-        unsent: mark !== undefined && watch!.unsent(mark, client.status),
-      });
+      const fault = toBackendFault(error, 'messaging-plugin: redis-streams broker');
       if (fault !== undefined) throw fault;
       throw error;
     }

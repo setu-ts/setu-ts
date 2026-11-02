@@ -133,16 +133,15 @@ await queue.add('send-email', { to: 'user@example.com' }, { delayMs: 5000 });
 await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
 
-When the backend fails, `add()` says whether the job was stored (M131a). A refused connection or a
-closed or offline client means the job was not sent: `BackendUnavailableError` from
-`@setu-ts/common`, `503` with "The request was not applied.". A command timeout
-(`Command timed out`) or a lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a
-reset) answers `503` only when the command provably never left the process — the client was
-disconnected at the call, no socket has connected since, and it is still disconnected — and
-`BackendOutcomeUnknownError`, `504`, otherwise: the job may already be queued, because ioredis
-rejects commands already sent with the same errors and both drivers write a command queued while
-disconnected as soon as the next socket opens. A stopped Redis therefore answers `503`; a paused
-one, whose socket stays open, answers `504`. A client that retries a `504` should send an
+When the backend fails, `add()` says whether the job was stored (M131a). A refusal before any send —
+a refused or unresolvable connection, a closed or offline client, ioredis with its offline queue
+switched off — means the job was not sent: `BackendUnavailableError` from `@setu-ts/common`, `503`
+with "The request was not applied.". A lost connection (`MaxRetriesPerRequestError`, "Connection is
+closed.", a reset) or an expired bound (`Command timed out`) answers `BackendOutcomeUnknownError`,
+`504`, in every case: the job may already be queued, because ioredis rejects commands already sent
+with these errors and both drivers write a command queued while disconnected as soon as a socket
+opens. A stopped Redis therefore answers `504` once the retry budget or the bound runs out, except
+node-redis's first refused connect, which is a `503`. A client that retries a `504` should send an
 idempotency key. Both keep the driver error as `cause` for the log. Any other adapter error is
 rethrown unchanged.
 

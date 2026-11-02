@@ -12,18 +12,17 @@ All notable changes to this project are documented here. The format follows
   `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
   `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`
   (`504`, "The backend did not answer; the request may have been applied."), the `BackendFault`
-  union, `BackendFaultContext` and `toBackendFault(error, source, context?)`. A command timeout or a
-  lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) answers `503` only
-  when the command provably never left the process: the client was disconnected at the call, no
-  socket has connected since, and it is still disconnected. ioredis rejects commands already sent
-  with the same errors, and both drivers write a command queued while disconnected as soon as the
-  next socket opens (node-redis with its handshake, before `'ready'`), so the decision uses the new
-  `watchConnection`, which counts socket `'connect'` events (returning a `ConnectionWatch` that
-  records a `DispatchMark` before each call). A stopped Redis answers `503`, a paused one `504`
-  (M131a security audit and re-audit). `QueueService.add`, the Redis Streams `publish` and the
-  realtime backplane's Redis `publish` wrap a recognised driver failure in one of them, keeping the
-  driver error as `cause`; it is never served. `PublishTimeoutError` keeps its name and gains the
-  `504` hint itself (X88-5).
+  union and `toBackendFault(error, source)`. Only a refusal before any send (a refused or
+  unresolvable connection, a closed or offline client, ioredis with its offline queue off) answers
+  `503`; a lost connection (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) or an
+  expired bound (`Command timed out`) always answers `504`, because ioredis rejects commands already
+  sent with these errors and both drivers write a queued command as soon as a socket opens. Three
+  security-audit rounds each found a window where a "not sent" decision built on driver events was
+  false, so none is attempted. `watchConnection` attaches the connection-error reporter and detaches
+  it on stop (returning a `ConnectionWatch`). `QueueService.add`, the Redis Streams `publish` and
+  the realtime backplane's Redis `publish` wrap a recognised driver failure in one of them, keeping
+  the driver error as `cause`; it is never served. `PublishTimeoutError` keeps its name and gains
+  the `504` hint itself (X88-5).
 - **`setu add` Redis arms for every Redis-backed plugin (M131a, `@setu-ts/cli`).**
   `setu add cache --store redis`, `setu add idempotency --store redis`,
   `setu add scheduler --lock redis` and `setu add realtime-backplane --backplane redis` wire the

@@ -223,7 +223,8 @@ export class RedisStore implements CacheStore {
   }
 
   async connect(): Promise<void> {
-    this.#client = await resolveClient(
+    let own: ConnectionWatch | undefined;
+    const client = await resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
@@ -232,16 +233,19 @@ export class RedisStore implements CacheStore {
         // A watch left by an earlier or concurrent attempt is replaced, not
         // stacked: each attempt would otherwise add a listener pair (N-3).
         this.#watch?.detach();
-        this.#watch = watch;
+        this.#watch = own = watch;
       },
     );
+    this.#client = client;
     // Only call connect() if the client exposes it (lazy ioredis clients do).
-    if (typeof this.#client.connect === 'function') {
+    if (typeof client.connect === 'function') {
       try {
-        await this.#client.connect();
+        await client.connect();
       } catch (error) {
-        this.#watch?.detach();
-        this.#watch = undefined;
+        // Only this attempt's watch: a concurrent attempt may have replaced it
+        // with its own, which must stay attached (audit R3-2).
+        own?.detach();
+        if (own !== undefined && this.#watch === own) this.#watch = undefined;
         throw error;
       }
     }

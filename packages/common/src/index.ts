@@ -77,7 +77,6 @@ export type {
   ConnectionErrorReporter,
   ConnectionErrorReporterOptions,
   ConnectionWatch,
-  DispatchMark,
 } from './health/connection-errors.ts';
 
 // Capability tokens
@@ -734,7 +733,7 @@ export {
   BackendUnavailableError,
   toBackendFault,
 } from './errors/backend-fault.ts';
-export type { BackendFault, BackendFaultContext } from './errors/backend-fault.ts';
+export type { BackendFault } from './errors/backend-fault.ts';
 
 export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
 export type {

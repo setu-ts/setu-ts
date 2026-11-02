@@ -219,58 +219,27 @@ export function attachConnectionErrorReporter(
   return true;
 }
 
-/** The status and socket-connect count read just before a command was dispatched. */
-export interface DispatchMark {
-  /** The client's `status` at dispatch, when it reports one. */
-  readonly status: string | undefined;
-  /** `'connect'` events seen before dispatch. */
-  readonly connects: number;
-}
-
 /**
- * A reporter attached to one client, which also counts its reconnects.
+ * A reporter attached to one client, which its owner detaches on stop.
  *
  * @since 0.12.0
  */
 export interface ConnectionWatch {
   /** Whether listeners were attached (the client exposes `on`). */
   readonly attached: boolean;
-  /**
-   * Records the state just before a command is dispatched.
-   *
-   * @param status - The client's `status` now
-   * @returns The mark to pass to {@linkcode ConnectionWatch.unsent}
-   */
-  mark(status: string | undefined): DispatchMark;
-  /**
-   * Whether a command dispatched at `mark` cannot have been written: the client
-   * was not connected then, no socket has connected since, and it is not
-   * connected now. A driver queues a command made while it is disconnected and
-   * writes it on the next socket — node-redis together with its reconnect
-   * handshake, before `'ready'` (measured, node-redis 6.3, M131a re-audit) — so
-   * the count is of `'connect'`, which both ioredis and node-redis emit when the
-   * socket opens and before anything is written on it. A socket that opens and
-   * drops counts too, which errs toward "may have been sent". Without
-   * listeners it answers `false`.
-   *
-   * @param mark - The mark recorded at dispatch
-   * @param status - The client's `status` at the failure
-   * @returns `true` only when the command provably was not written
-   */
-  unsent(mark: DispatchMark, status: string | undefined): boolean;
   /** Removes the listeners; later events reach nobody. Idempotent. */
   detach(): void;
 }
 
 /**
- * Attaches a reporter to a client's `'error'` and `'ready'` events, counts its
- * `'connect'` events, and can detach all three listeners.
+ * Attaches a reporter to a client's `'error'` and `'ready'` events and can
+ * detach both listeners again.
  *
  * For a client the application injected, which outlives the plugin: the owner
- * calls `detach()` when it stops, so a later error on a shared client does not
- * log through a stopped application (M131a). Removal uses `off` or
- * `removeListener`, whichever the client has; a client with neither keeps the
- * listeners, which then drop every event.
+ * calls `detach()` when it stops, after its own `quit()`, so a later error on a
+ * shared client does not log through a stopped application (M131a). Removal
+ * uses `off` or `removeListener`, whichever the client has; a client with
+ * neither keeps the listeners, which then drop every event.
  *
  * @param client - The client; an object exposing an `on` method
  * @param reporter - The reporter to route events to; omitted, events are dropped
@@ -281,16 +250,12 @@ export function watchConnection(
   client: unknown,
   reporter: ConnectionErrorReporter = DROPPING_REPORTER,
 ): ConnectionWatch {
-  let connects = 0;
   let detached = false;
   const onError = (error: unknown): void => {
     if (!detached) reporter.report(error);
   };
   const onReady = (): void => {
     if (!detached) reporter.recovered();
-  };
-  const onConnect = (): void => {
-    connects++;
   };
   const attached =
     (typeof client === 'object' || typeof client === 'function') &&
@@ -300,17 +265,9 @@ export function watchConnection(
     const source = client as ErrorEventSource;
     source.on('error', onError);
     source.on('ready', onReady);
-    source.on('connect', onConnect);
   }
   return {
     attached,
-    mark: (status) => ({ status, connects }),
-    unsent: (mark, status) =>
-      attached &&
-      mark.status !== undefined &&
-      mark.status !== 'ready' &&
-      status !== 'ready' &&
-      connects === mark.connects,
     detach(): void {
       if (detached) return;
       detached = true;
@@ -323,7 +280,6 @@ export function watchConnection(
       if (typeof remove !== 'function') return;
       remove.call(client, 'error', onError);
       remove.call(client, 'ready', onReady);
-      remove.call(client, 'connect', onConnect);
     },
   };
 }

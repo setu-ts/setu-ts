@@ -27,48 +27,37 @@ function err(name: string, message: string, extra: Record<string, unknown> = {})
   return e;
 }
 
-/** What `toBackendFault` must answer, by dispatch state. */
+/** What `toBackendFault` must answer. */
 type Outcome = typeof BackendUnavailableError | typeof BackendOutcomeUnknownError | 'pass';
 const U = BackendUnavailableError;
 const O = BackendOutcomeUnknownError;
 
-/**
- * The classification table: measured shape → the answer with no context,
- * with the command provably unsent, and possibly sent. A
- * lost-connection shape is the only kind the dispatch state changes.
- */
-const TABLE: ReadonlyArray<
-  readonly [label: string, shape: unknown, unknown: Outcome, offline: Outcome, connected: Outcome]
-> = [
-  // Refused before sending — 503 whatever the state.
+/** The classification table: measured shape → the class it must produce, or pass-through. */
+const TABLE: ReadonlyArray<readonly [label: string, shape: unknown, expected: Outcome]> = [
+  // Refused before any send — 503.
   [
     'node-redis stopped: first-connect ECONNREFUSED (cause code)',
     err('Error', 'Redis connection failed: connect ECONNREFUSED 127.0.0.1:63799', {
       cause: err('Error', 'connect ECONNREFUSED 127.0.0.1:63799', { code: 'ECONNREFUSED' }),
     }),
     U,
-    U,
-    U,
   ],
-  ['node-redis: client closed', err('Error', 'The client is closed'), U, U, U],
-  ['node-redis: client offline', err('Error', 'The client is offline'), U, U, U],
-  ['node-redis: connection timeout', err('Error', 'Connection timeout'), U, U, U],
+  ['node-redis: client closed', err('Error', 'The client is closed'), U],
+  ['node-redis: client offline', err('Error', 'The client is offline'), U],
+  ['node-redis: connection timeout', err('Error', 'Connection timeout'), U],
   [
     'ioredis: offline queue disabled',
     err('Error', "Stream isn't writeable and enableOfflineQueue options is false"),
-    U,
-    U,
     U,
   ],
   [
     'a host that does not resolve',
     err('Error', 'getaddrinfo ENOTFOUND r', { code: 'ENOTFOUND' }),
     U,
-    U,
-    U,
   ],
-  // Lost connection — ioredis flushes sent commands with the same errors, so
-  // only a command provably never written proves "not applied".
+  // Lost connection or expired bound — 504: ioredis rejects commands already
+  // sent with these errors, and a driver writes a queued command as soon as a
+  // socket opens.
   [
     'ioredis: MaxRetriesPerRequestError',
     err(
@@ -76,65 +65,42 @@ const TABLE: ReadonlyArray<
       'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
     ),
     O,
-    U,
-    O,
   ],
-  ['ioredis: connection closed', err('Error', 'Connection is closed.'), O, U, O],
-  ['node-redis: socket closed unexpectedly', err('Error', 'Socket closed unexpectedly'), O, U, O],
-  ['a reset', err('Error', 'read ECONNRESET', { code: 'ECONNRESET' }), O, U, O],
-  ['a broken pipe', err('Error', 'write EPIPE', { code: 'EPIPE' }), O, U, O],
-  ['a socket timeout', err('Error', 'read ETIMEDOUT', { code: 'ETIMEDOUT' }), O, U, O],
+  ['ioredis: connection closed', err('Error', 'Connection is closed.'), O],
+  ['node-redis: socket closed unexpectedly', err('Error', 'Socket closed unexpectedly'), O],
+  ['a reset', err('Error', 'read ECONNRESET', { code: 'ECONNRESET' }), O],
+  ['a broken pipe', err('Error', 'write EPIPE', { code: 'EPIPE' }), O],
+  ['a socket timeout', err('Error', 'read ETIMEDOUT', { code: 'ETIMEDOUT' }), O],
   [
     'a reset as a string errno in the cause chain',
     err('Error', 'wrapped', { cause: err('Error', 'reset', { errno: 'ECONNRESET' }) }),
     O,
-    U,
-    O,
   ],
-  // No answer within the bound: a paused server (open socket, sent) or a stopped
-  // one (queued, never written) — decided like a lost connection.
-  ['command timed out', err('Error', 'Command timed out'), O, U, O],
+  ['command timed out', err('Error', 'Command timed out'), O],
   // Pass-through — unrecognised.
-  [
-    'a programming error',
-    err('Error', 'Cannot read properties of undefined'),
-    'pass',
-    'pass',
-    'pass',
-  ],
+  ['a programming error', err('Error', 'Cannot read properties of undefined'), 'pass'],
   [
     'a Redis WRONGTYPE',
     err('Error', 'WRONGTYPE Operation against a key holding the wrong kind of value'),
     'pass',
-    'pass',
-    'pass',
   ],
-  ['a plain value', 'not an error', 'pass', 'pass', 'pass'],
+  ['a plain value', 'not an error', 'pass'],
 ];
 
 describe('toBackendFault (M131a §3.6)', () => {
-  const contexts = [
-    ['no dispatch state', undefined, 2],
-    ['provably unsent', { unsent: true }, 3],
-    ['possibly sent', { unsent: false }, 4],
-  ] as const;
-  for (const [contextLabel, context, column] of contexts) {
-    it(`classifies every measured shape with ${contextLabel}`, () => {
-      for (const row of TABLE) {
-        const [label, shape] = row;
-        const expected = row[column];
-        const fault = toBackendFault(shape, SOURCE, context);
-        if (expected === 'pass') {
-          expect(fault, `pass-through: ${label}`).toBeUndefined();
-          continue;
-        }
-        expect(fault, `classified: ${label}`).toBeInstanceOf(expected);
-        expect(fault?.source, `source: ${label}`).toBe(SOURCE);
-        // The original is kept as cause for the log, never served.
-        expect((fault as { cause: unknown }).cause, `cause: ${label}`).toBe(shape);
+  it('classifies every measured shape in the table', () => {
+    for (const [label, shape, expected] of TABLE) {
+      const fault = toBackendFault(shape, SOURCE);
+      if (expected === 'pass') {
+        expect(fault, `pass-through: ${label}`).toBeUndefined();
+        continue;
       }
-    });
-  }
+      expect(fault, `classified: ${label}`).toBeInstanceOf(expected);
+      expect(fault?.source, `source: ${label}`).toBe(SOURCE);
+      // The original is kept as cause for the log, never served.
+      expect((fault as { cause: unknown }).cause, `cause: ${label}`).toBe(shape);
+    }
+  });
 
   it('brands 503 with the "not applied" detail', () => {
     const fault = toBackendFault(err('Error', 'The client is closed'), SOURCE);

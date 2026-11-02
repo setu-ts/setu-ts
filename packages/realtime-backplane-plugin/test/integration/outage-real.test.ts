@@ -283,11 +283,11 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           const before = publishRecord(source!)!;
           await docker(['stop', containerId]);
           const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          // Queued, never sent: the client was disconnected at the call, no
-          // socket opened before the bound expired (the server refuses every
-          // redial), so the fault is provably "not applied" (503, M131a re-audit).
+          // Queued while disconnected and rejected by the bound: a driver would
+          // have written it as soon as a socket opened, so the outcome is
+          // unknown (504; M131a audits).
           expect(dropped).toBe(
-            'rejected: realtime-backplane-plugin: redis transport: the backend refused the request before it could be applied',
+            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
           );
           expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
 

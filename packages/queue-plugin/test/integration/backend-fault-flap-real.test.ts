@@ -1,21 +1,21 @@
 /**
- * A `503` ("not applied") is answered only when the job cannot have been stored
- * (M131a X88-5, security audit F-1). REAL Redis behind a test-owned TCP proxy,
- * for both clients, guarded on `REDIS_URL`.
+ * A `503` ("not applied") is never answered for a job that was stored (M131a
+ * X88-5, security audit F-1). REAL Redis behind a test-owned TCP proxy, for
+ * both clients, guarded on `REDIS_URL`.
  *
- * The proxy lets the test cut a connection AFTER the enqueue reached Redis and
- * before its reply came back, which no fake can reproduce: node-redis writes the
- * commands it queued while disconnected together with its reconnect handshake,
- * BEFORE `'ready'`, so an earlier rule that counted `'ready'` answered `503`
- * with the job stored. The rule now counts socket `'connect'` events.
+ * The proxy cuts a connection AFTER the enqueue reached Redis and before its
+ * reply came back, which no fake can reproduce: node-redis writes commands it
+ * queued while disconnected together with its reconnect handshake, before
+ * `'ready'`, and three audit rounds found a window in every rule that tried to
+ * prove "not sent" from driver events. A lost connection and an expired bound
+ * therefore answer `504` in every state; only a refusal before any send is a
+ * `503`.
  *
  * - `flap`: dispatch while reconnecting, let the next socket carry the job,
- *   cut before the reply. The job IS stored, so the answer must be `504`.
+ *   cut before the reply → `504`, job stored.
  * - `ready`: dispatch while connected, cut after the job reached Redis → `504`.
- * - `down`: the proxy stops listening, as a stopped Redis does, so every redial
- *   is refused → `503`, nothing stored. (A server that accepts the TCP
- *   connection and then drops it counts as a socket connect and answers `504`:
- *   the rule errs toward "may have been sent".)
+ * - `down`: the proxy stops listening, as a stopped Redis does → `504` (the
+ *   bound or the retry budget expires), nothing stored.
  *
  * The invariant every run checks: a `503` never coexists with a stored job.
  *
@@ -160,6 +160,10 @@ async function run(clientKind: Client, scenario: Scenario) {
   } finally {
     await direct.quit();
   }
+  // The invariant: a 503 never comes with a stored job.
+  if (thrown instanceof BackendUnavailableError && stored > 0) {
+    throw new Error(`503 "not applied" with ${stored} job(s) stored`);
+  }
   return { thrown, stored, forwarded };
 }
 
@@ -185,12 +189,12 @@ describe('REAL: a 503 is answered only when the job cannot have been stored (F-1
       },
     );
     it(
-      `${clientKind}: down → 503 with nothing stored`,
+      `${clientKind}: down → 504 with nothing stored`,
       { skip: redisUrl === undefined, timeout: 30_000 },
       async () => {
         const { thrown, stored } = await run(clientKind, 'down');
         expect(stored).toBe(0);
-        expect(thrown).toBeInstanceOf(BackendUnavailableError);
+        expect(thrown).toBeInstanceOf(BackendOutcomeUnknownError);
       },
     );
   }

@@ -34,23 +34,19 @@ const DIGIT = /[0-9]/;
  * a password) is not echoed into a log line or stderr.
  *
  * A URL is malformed precisely when its password carries a character it should
- * have encoded, so the rule leans toward hiding:
+ * have encoded, so the rule leans toward hiding. It is a best-effort rule for
+ * credentials pasted into text, not a URL parser; the common README lists the
+ * shapes it masks and its known limits, and the test table holds each case:
  *
- * - The userinfo runs to the LAST `@` of the URL's text, so an unencoded `@`,
- *   `/`, `#`, `?` or `://` in the password is masked whole:
- *   `redis://:p@ss/w://d@host` → `redis://***@host`.
- * - The URL has userinfo when an `@` comes before the first `/`, `?` or `#`,
- *   or when a `:` (not one of a `://`) comes before its last `@`.
- * - A password holding whitespace (`redis://:pw x@host`) is masked to the
- *   first `@` after it on the same line, when the text before the whitespace
- *   has a `:` that is not a port (digits only, as in `host:8080`).
- *
- * Left untouched: a URL with no `@` (`https://host/…`), an email (`user@host`,
- * no `://`), an `@` in a path or query with no `:` before it
- * (`https://host/@handle`), and a URL followed on its line by prose with an
- * `@` when nothing in the URL looks like `user:password`. Over-masked, on
- * purpose: a path `@` after a port (`https://host:8080/@handle`). A URL never
- * spans lines.
+ * - The userinfo runs to the LAST `@` of the URL's word, so an unencoded `@`,
+ *   `/`, `#`, `?` or `://` in the password is masked with it.
+ * - A password holding whitespace is masked to the next `@` on the line when the
+ *   text before the whitespace has a non-port `:`; a username holding
+ *   whitespace when the next word is `name:password@host`; a password holding
+ *   `@` then whitespace when the text after that `@` has no `.`, `:` or `/`.
+ * - Untouched: a URL with no `@`, an email (no `://`), an `@` in a path or
+ *   query with no `:` before it. Over-masked, on purpose: a path `@` after a
+ *   port. Not masked: anything across a line break.
  *
  * Every string is inspected, whatever its length, in one linear pass from the
  * right: each position's next whitespace, next `@`, first `:` and so on are

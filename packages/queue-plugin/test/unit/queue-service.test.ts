@@ -63,16 +63,17 @@ class FailingRedisClient extends EventEmitter {
 }
 
 /**
- * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
- * when the job provably never left the process: disconnected at dispatch, no
- * socket connect since, still disconnected at the failure. A job queued offline
- * is written on the next socket, before 'ready', and may have been stored (the M131a audit's case).
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 504 in
+ * every client state: ioredis rejects commands already sent with the same
+ * error, and a driver writes a queued command as soon as a socket opens, so no
+ * state the framework can observe proves the command was never written (M131a
+ * security audits).
  */
 const LOST_CONNECTION_CASES = [
-  ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
-  ['reconnecting', true, 'reconnecting', 'BackendOutcomeUnknownError'],
-  ['reconnecting', false, 'ready', 'BackendOutcomeUnknownError'],
-  ['ready', false, 'ready', 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'reconnecting'],
+  ['reconnecting', true, 'reconnecting'],
+  ['reconnecting', false, 'ready'],
+  ['ready', false, 'ready'],
 ] as const;
 
 function maxRetries(): Error {
@@ -83,14 +84,10 @@ function maxRetries(): Error {
   return e;
 }
 
-function classOf(name: (typeof LOST_CONNECTION_CASES)[number][3]) {
-  return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
-}
-
 describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
   it.each(LOST_CONNECTION_CASES)(
-    'dispatch %s, reconnect %s, failure %s → %s',
-    async (before, reconnect, after, expected) => {
+    'dispatch %s, reconnect %s, failure %s → 504',
+    async (before, reconnect, after) => {
       const runtime = new FakeRuntimeServices();
       const lost = maxRetries();
       const client = new FailingRedisClient(before, lost, (c) => {
@@ -105,7 +102,7 @@ describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
       try {
         await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
           const e = thrown as Error;
-          return e instanceof classOf(expected) && e.cause === lost;
+          return e instanceof BackendOutcomeUnknownError && e.cause === lost;
         });
       } finally {
         await service.disconnect();
@@ -150,6 +147,70 @@ describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
     expect(client.listenerCount('error')).toBe(1);
     await queue.disconnect();
     expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('RedisQueue: a failed connect does not detach a concurrent attempt’s listeners (R3-2)', async () => {
+    let release: (() => void) | undefined;
+    const client = Object.assign(new FailingRedisClient('wait', new Error('unused'), () => {}), {
+      attempts: 0,
+      connect(this: { attempts: number }): Promise<void> {
+        this.attempts++;
+        if (this.attempts === 1) {
+          return new Promise<void>((_resolve, reject) => {
+            release = () => reject(new Error('refused'));
+          });
+        }
+        return Promise.resolve();
+      },
+    });
+    const queue = new RedisQueue({ client });
+    const first = queue.connect();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await queue.connect();
+    release!();
+    await expect(first).rejects.toThrow('refused');
+    // The second attempt's listeners survive the first attempt's failure.
+    expect(client.listenerCount('error')).toBe(1);
+    await queue.disconnect();
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('RedisQueue: a rejected QUIT forces a disconnect before detaching (R3-3)', async () => {
+    const client = new FailingRedisClient('ready', new Error('unused'), () => {});
+    const order: string[] = [];
+    client.quit = (): Promise<void> => {
+      order.push('quit');
+      return Promise.reject(new Error('Command timed out'));
+    };
+    Object.assign(client, {
+      disconnect: () => {
+        order.push(`disconnect (error listeners ${client.listenerCount('error')})`);
+      },
+    });
+    const queue = new RedisQueue({ client });
+    await queue.connect();
+    await expect(queue.disconnect()).rejects.toThrow('Command timed out');
+    expect(order).toEqual(['quit', 'disconnect (error listeners 1)']);
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
+  it('wraps a refusal before any send as BackendUnavailableError (503)', async () => {
+    const runtime = new FakeRuntimeServices();
+    const refused = Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:6379'), {
+      code: 'ECONNREFUSED',
+    });
+    const service = new QueueService(new FailingEnqueueQueue(refused), runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    await service.connect();
+    try {
+      await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy(
+        (thrown: unknown) => thrown instanceof BackendUnavailableError && thrown.cause === refused,
+      );
+    } finally {
+      await service.disconnect();
+    }
   });
 
   it('answers 504 for a lost connection on an adapter that reports no state', async () => {

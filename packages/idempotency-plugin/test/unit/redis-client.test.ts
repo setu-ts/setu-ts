@@ -127,8 +127,7 @@ describe('resolveStore — an injected client (M131a X88-3)', () => {
       { report: (error) => void reported.push(error), recovered: () => {} },
       () => undefined,
     );
-    // 'connect' counts sockets, for the dispatch rule (M131a re-audit).
-    expect(handlers.map((entry) => entry.event)).toEqual(['error', 'ready', 'connect']);
+    expect(handlers.map((entry) => entry.event)).toEqual(['error', 'ready']);
     const boom = new Error('connect ECONNREFUSED 127.0.0.1:6379');
     handlers.find((entry) => entry.event === 'error')?.handler(boom);
     expect(reported).toEqual([boom]);
