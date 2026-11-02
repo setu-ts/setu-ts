@@ -29,6 +29,7 @@ import type {
 } from '@setu-ts/common';
 import { runCli } from '../../src/cli.ts';
 import {
+  drainText,
   unusedPort,
   useWorkspacePackages,
   workspaceEntrypoint,
@@ -385,14 +386,10 @@ async function bootDev(
     stdout: 'piped',
     stderr: 'piped',
   });
-  // Drain both pipes from the start. `status` settles on Node's 'close', which
-  // waits for EOF on stdout and stderr; an unread stream stops pulling at its
-  // high-water mark, so a cold Deno cache's download lines left `stop()`
-  // awaiting a child that had already exited.
-  const drain = async (stream: ReadableStream<Uint8Array> | null): Promise<string> =>
-    stream ? await new Response(stream).text() : '';
-  const stdout = drain(child.stdout);
-  const stderr = drain(child.stderr);
+  // Drained from the start: a cold Deno cache's download lines otherwise left
+  // `stop()` awaiting a child that had already exited (see `drainText`).
+  const stdout = drainText(child.stdout);
+  const stderr = drainText(child.stderr);
   let exited = false;
   const exiting = child.status.then(() => {
     exited = true;
