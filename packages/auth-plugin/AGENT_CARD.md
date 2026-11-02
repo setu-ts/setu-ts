@@ -44,17 +44,12 @@ if (principal === null) {
 - Missing principal: 401; denied role/permission: 403; no `rbac`: those guards return 501.
 - `requireAuth({ signInPage })` redirects unauthenticated browser navigations there with `returnTo`
   (except that page itself); APIs keep 401.
-- `requireScopes(...scopes)` is ALL-of over OAuth scopes (`principal.scopes`): 401 anonymous, 403
-  when one is missing, with `WWW-Authenticate: Bearer error="insufficient_scope"`.
-  `requireAuth({ delegation: 'forbid' })` refuses a delegated token with 403, and `'require'`
-  refuses a direct one.
 - Tokens expire at `exp`, with no tolerance. `local` needs a passive strategy for later requests.
 
 ## Other options
 
 - `apiKey`, `session`, `issuers` and `strategies` supply other passive authentication paths.
-- `resourceServer` publishes RFC 9728 protected-resource metadata and adds `resource_metadata` to
-  challenges; each `issuers[].audience` may be a string or a list (any match).
+- `requireScopes` (ALL-of OAuth scopes) and `resourceServer` (RFC 9728) serve token APIs.
 - `definePolicy` and `requirePolicy` evaluate application policies; scoped guards use `scopedRbac`.
 - `signIn.mfa` and `signIn.passkeys` add factors; `RefreshTokenService` and `rateLimitMiddleware`
   are standalone helpers.

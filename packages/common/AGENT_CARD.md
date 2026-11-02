@@ -63,5 +63,4 @@ export function registerStatusRoutes(router: IRouterApi): void {
   `redirect` and `send`.
 - `RouteDefinition.schema` carries documentation metadata; enforcing validation requires middleware.
 - `IPrincipal` may also carry `scopes` (OAuth 2.0 scopes, not tenant grants) and `actor` (the
-  outermost RFC 8693 `act`); `RouteSecurityMetadata.scopes` carries the scopes a guard requires on a
-  `withSecurityMetadata` brand.
+  outermost RFC 8693 `act`); `RouteSecurityMetadata.scopes` holds a guard's required scopes.
