@@ -345,7 +345,23 @@ describe('node-redis CLI', () => {
     'adds standalone %s with the existing manifest writer',
     async (plugin) => {
       const h = harness();
-      await h.run(['new', 'svc', '--template', 'rest']);
+      // M131a X88-1: the client is inferred from the configuration. Scaffold the
+      // node-redis helper at `new` time (microservice registers the messaging and
+      // queue wiring) so the inference agrees with the add's explicit
+      // `--redis-client node-redis` (a fresh ioredis project would now refuse
+      // the disagreement).
+      await h.run([
+        'new',
+        'svc',
+        '--template',
+        'microservice',
+        '--broker',
+        'redis',
+        '--queue',
+        'redis',
+        '--redis-client',
+        'node-redis',
+      ]);
       expect(
         await h.run([
           'add',

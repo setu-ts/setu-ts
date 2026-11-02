@@ -19,6 +19,7 @@ import {
   listQueues,
   renderConfigConnection,
   renderConnection,
+  type RedisClient,
   type TransportSpec,
 } from '../workspace/transport.ts';
 import type { ParsedArgs } from '../args.ts';
@@ -360,9 +361,87 @@ export function standaloneOverlayRefusal(
  * @param flag - Which flag is being read
  * @returns The selected spec (undefined when the flag is absent), or the refusal
  */
+/**
+ * The Redis arm flags `setu add` accepts, mapped to the plugin they wire.
+ * Named after each plugin's own option so the generated call reads like the
+ * flag (M131a X88-1). `--store` is shared by `cache` and `idempotency`, so the
+ * plugin names the arm.
+ */
+export const REDIS_ARM_FLAGS: ReadonlyArray<
+  readonly [flag: string, plugin: string, arm: 'messagingArgs' | 'queueArgs' | 'cacheArgs' | 'idempotencyArgs' | 'schedulerArgs' | 'backplaneArgs']
+> = [
+  ['broker', 'messaging', 'messagingArgs'],
+  ['queue', 'queue', 'queueArgs'],
+  ['store', 'cache', 'cacheArgs'],
+  ['store', 'idempotency', 'idempotencyArgs'],
+  ['lock', 'scheduler', 'schedulerArgs'],
+  ['backplane', 'realtime-backplane', 'backplaneArgs'],
+];
+
+/**
+ * The plugin a Redis arm flag wires, for the plugin being added.
+ *
+ * `--store` is shared by `cache` and `idempotency`, so the flag alone does not
+ * name the arm; the plugin does.
+ *
+ * @param flag - The arm flag
+ * @param plugin - The plugin the flag wires
+ * @returns `true` when the spec declares the arm the flag selects
+ */
+function armFor(plugin: string): 'messagingArgs' | 'queueArgs' | 'cacheArgs' | 'idempotencyArgs' | 'schedulerArgs' | 'backplaneArgs' {
+  return plugin === 'messaging'
+    ? 'messagingArgs'
+    : plugin === 'queue'
+      ? 'queueArgs'
+      : plugin === 'cache'
+        ? 'cacheArgs'
+        : plugin === 'idempotency'
+          ? 'idempotencyArgs'
+          : plugin === 'scheduler'
+            ? 'schedulerArgs'
+            : 'backplaneArgs';
+}
+
+/**
+ * The accepted set for a Redis arm flag, derived from the registry so help text,
+ * refusal text and validation cannot drift from the arms that exist.
+ */
+function acceptedFor(flag: string): readonly string[] {
+  if (flag === 'broker') return listBrokers();
+  if (flag === 'queue') return listQueues();
+  // The store/lock/backplane arms exist only on the Redis transport (and memory,
+  // which states the default and rewrites nothing).
+  return ['memory', 'redis'];
+}
+
+/**
+ * The arm a Redis arm flag selects on a transport spec.
+ *
+ * @param plugin - The plugin the flag wires
+ * @param spec - The transport spec
+ * @returns `true` when the spec declares the arm the flag selects
+ */
+function specHasArm(plugin: string, spec: TransportSpec): boolean {
+  return spec[armFor(plugin)] !== undefined;
+}
+
+/**
+ * Reads and validates one standalone transport-backend flag.
+ *
+ * The accepted set is DERIVED from the registry, so help text, refusal text and
+ * validation cannot drift from the arms that exist. `memory` is always accepted:
+ * it states the default the plugin already takes and rewrites nothing.
+ *
+ * @param args - The parsed arguments
+ * @param flag - Which flag is being read
+ * @param plugin - The plugin the flag wires (for `--store`, cache or idempotency)
+ * @returns The selected spec (undefined when the flag is absent), or the refusal
+ */
 export function readArmFlag(
   args: ParsedArgs,
-  flag: 'broker' | 'queue',
+  flag: string,
+  plugin: string,
+  client: RedisClient,
 ):
   | { readonly ok: true; readonly spec?: TransportSpec }
   | {
@@ -372,18 +451,13 @@ export function readArmFlag(
   const raw = args.flags[flag];
   if (raw === undefined) return { ok: true };
 
-  const accepted = flag === 'broker' ? listBrokers() : listQueues();
+  const accepted = acceptedFor(flag);
   if (typeof raw !== 'string') {
     return { ok: false, message: `--${flag} needs a value: ${accepted.join(' | ')}.` };
   }
 
-  const spec = getTransport(
-    raw,
-    args.flags['redis-client'] === 'node-redis' ? 'node-redis' : 'ioredis',
-  );
-  const hasArm =
-    spec !== undefined &&
-    (flag === 'broker' ? spec.messagingArgs !== undefined : spec.queueArgs !== undefined);
+  const spec = getTransport(raw, client);
+  const hasArm = spec !== undefined && specHasArm(plugin, spec);
   if (spec === undefined || (raw !== 'memory' && !hasArm)) {
     // The two failures are told apart, because "no such transport" and "this
     // transport has no arm for this flag" are different mistakes.
@@ -392,7 +466,9 @@ export function readArmFlag(
         ? `Unknown ${flag} "${escapeName(raw)}".`
         : flag === 'broker'
           ? `"${raw}" declares no message-broker wiring.`
-          : `"${raw}" declares no queue wiring.`;
+          : flag === 'queue'
+            ? `"${raw}" declares no queue wiring.`
+            : `"${raw}" declares no ${plugin} wiring.`;
     return {
       ok: false,
       message: `${prefix} --${flag} accepts: ${accepted.join(', ')}.`,
@@ -401,11 +477,19 @@ export function readArmFlag(
   return { ok: true, spec };
 }
 
-/** Validates an explicit Redis client choice before rendering any files. @since 0.11.0 */
+/**
+ * Validates an explicit Redis client choice before rendering any files.
+ *
+ * `redisSelected` names whether a Redis arm was chosen. For `setu add` it is
+ * computed from the arm flags (M131a X88-1); `setu new` passes its own check
+ * because `--transport redis` is also a Redis arm there.
+ *
+ * @since 0.11.0
+ */
 export function redisClientRefusal(
   args: ParsedArgs,
   runtime: TargetRuntime,
-  redisSelected: boolean,
+  redisSelected?: boolean,
 ): string | undefined {
   const raw = args.flags['redis-client'];
   if (raw === undefined) return undefined;
@@ -413,7 +497,14 @@ export function redisClientRefusal(
     return `Unknown --redis-client "${escapeName(String(raw))}". Expected ioredis | node-redis.`;
   if (runtime === 'cloudflare-workers')
     return '--redis-client cannot apply on Cloudflare Workers; select deno, node or bun.';
-  if (!redisSelected)
-    return '--redis-client requires a Redis arm: --broker redis, --queue redis or --transport redis.';
+  const selected =
+    redisSelected ??
+    (args.flags['broker'] === 'redis' ||
+      args.flags['queue'] === 'redis' ||
+      args.flags['store'] === 'redis' ||
+      args.flags['lock'] === 'redis' ||
+      args.flags['backplane'] === 'redis');
+  if (!selected)
+    return '--redis-client requires a Redis arm: --broker redis, --queue redis, --store redis, --lock redis or --backplane redis.';
   return undefined;
 }

@@ -184,6 +184,8 @@ export interface TransportSpec {
   readonly queueArgs?: (connection: string) => string;
   /** Redis cache options for a later setu add cache in a workspace member. */
   readonly cacheArgs?: (connection: string) => string;
+  /** Redis idempotency-store options for a later setu add idempotency. */
+  readonly idempotencyArgs?: (connection: string) => string;
   /** Redis distributed-lock options merged with any generated artifact options. */
   readonly schedulerArgs?: (connection: string) => string;
   /** Redis backplane options for a later setu add realtime-backplane. */
@@ -352,6 +354,8 @@ const TRANSPORT_SPECS: Readonly<Record<TransportName, TransportSpec>> = {
     messagingArgs: (connection) => `{ broker: 'redis-streams', url: ${connection} }`,
     queueArgs: (connection) => `{ adapter: 'redis', url: ${connection} }`,
     cacheArgs: (connection) => `{ store: 'redis', options: { url: ${connection} } }`,
+    idempotencyArgs: (connection) =>
+      `{ store: { type: 'redis', namespace: 'setu', url: ${connection} } }`,
     schedulerArgs: (connection) =>
       `{ distributedLock: { enabled: true, storage: 'redis', url: ${connection} } }`,
     backplaneArgs: (connection) => `{ transport: 'redis', url: ${connection} }`,
@@ -740,6 +744,8 @@ export function transportSpec(
     messagingArgs: (connection) => `{ broker: 'redis-streams', client: ${client(connection)} }`,
     queueArgs: (connection) => `{ adapter: 'redis', client: ${client(connection)} }`,
     cacheArgs: (connection) => `{ store: 'redis', options: { client: ${client(connection)} } }`,
+    idempotencyArgs: (connection) =>
+      `{ store: { type: 'redis', namespace: 'setu', client: ${client(connection)} } }`,
     schedulerArgs: (connection) =>
       `{ distributedLock: { enabled: true, storage: 'redis', client: ${client(connection)} } }`,
     backplaneArgs: (connection) =>

@@ -209,6 +209,9 @@ const ADD: ICommandFlagSpec = spec('add', [
   'dry-run',
   'broker',
   'queue',
+  'store',
+  'lock',
+  'backplane',
   'redis-client',
   'module',
 ]);
