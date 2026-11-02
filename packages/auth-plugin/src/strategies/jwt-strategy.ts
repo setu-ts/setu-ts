@@ -32,7 +32,9 @@ export class JwtStrategy implements IAuthStrategy {
   constructor(options: JwtStrategyOptions) {
     this.jwtService = options.jwtService;
     this.header = options.header ?? 'authorization';
-    this.scheme = options.scheme ?? 'bearer';
+    // Lowercased once: the request's scheme is compared lowercased, so a
+    // configured `'Token'` would otherwise refuse every token sent with it.
+    this.scheme = (options.scheme ?? 'bearer').toLowerCase();
     this.accessTokenRevocationStore = options.accessTokenRevocationStore;
   }
 

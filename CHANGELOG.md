@@ -85,6 +85,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **auth-plugin:** a `jwt.scheme` configured with capitals (for example `'Token'`) no longer refuses
+  every token: the JWT strategy compared the lowercased request scheme with the configured value as
+  written. The scheme is now matched case-insensitively (M132; #541).
 - **database-plugin:** a connection lost while a Drizzle × PostgreSQL transaction was open no longer
   exits the process. pg-pool leaves a checked-out client without an `'error'` listener, so a
   terminated backend raised an unhandled `'error'` event; every checked-out client now gets one

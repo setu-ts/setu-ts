@@ -261,7 +261,7 @@ describe('resource-server compositions without a Bearer strategy', () => {
     });
     app.router.get('/me', {
       middleware: [requireAuth()],
-      handler: () => ctxOk(),
+      handler: (ctx) => ctx.response.json({ ok: true }),
     });
     await app.start();
     try {
@@ -275,6 +275,15 @@ describe('resource-server compositions without a Bearer strategy', () => {
 
       const absent = await app.inject({ method: 'GET', url: 'http://localhost/me' });
       expect(absent.headers.get('www-authenticate')).toBe('Bearer');
+
+      // A valid token in the configured mixed-case scheme is admitted.
+      const jwt = app.services.get<IJwtService>(CAPABILITIES.JWT);
+      const valid = await app.inject({
+        method: 'GET',
+        url: 'http://localhost/me',
+        headers: { 'x-access-token': `Token ${await jwt.sign({ sub: 'user-1' })}` },
+      });
+      expect(valid.statusCode).toBe(200);
     } finally {
       await app.stop();
     }
