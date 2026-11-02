@@ -335,6 +335,13 @@ export class RedisQueue implements QueueAdapter {
       try {
         await client.connect();
       } catch (error) {
+        // A client this component built keeps reconnecting after a failed
+        // connect; stop it before its listener comes off, or every retry prints
+        // to the console. An injected client stays the caller's (CodeRabbit #543).
+        if (this.#injectedClient === undefined) {
+          const force = (client as { disconnect?: unknown }).disconnect;
+          if (typeof force === 'function') (force as () => void).call(client);
+        }
         // Only this attempt's watch: a concurrent attempt may have replaced it
         // with its own, which must stay attached (audit R3-2).
         watch.detach();

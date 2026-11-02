@@ -128,6 +128,30 @@ describe('fromNodeRedis', () => {
     });
   });
 
+  it('records a first connect that succeeds after its error event won (CodeRabbit #543)', async () => {
+    const raw = nodeRedisFake();
+    let resolveInner: (() => void) | undefined;
+    raw.connect.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveInner = resolve;
+        }),
+    );
+    const adapter = fromNodeRedis(raw);
+    const pending = adapter.connect();
+    const errorListener = raw.on.mock.calls.find(([event]) => event === 'error')?.[1];
+    (errorListener as (value: unknown) => void)(new Error('connect ECONNREFUSED 127.0.0.1:6379'));
+    await expect(pending).rejects.toThrow('ECONNREFUSED');
+    // node-redis reconnects in the background; Redis comes up and the inner
+    // connect resolves.
+    resolveInner!();
+    await Promise.resolve();
+    raw.isOpen = true;
+    raw.isReady = false;
+    // A later outage reads as a lost connection, not a first connect.
+    expect(adapter.status).toBe('reconnecting');
+  });
+
   it('leaves a post-ready error to the reconnection reporter (M131a X88-3)', async () => {
     const raw = nodeRedisFake();
     const adapter = fromNodeRedis(raw);

@@ -237,6 +237,7 @@ export class RedisBackplane implements IRealtimeBackplane {
         // The publisher is already live and no field references it yet, so this
         // is the only chance to close it.
         await this.#discard([publisher]);
+        detachAll();
         throw error;
       }
       // One reporter for both: the pair fails together, so an outage's
@@ -256,10 +257,13 @@ export class RedisBackplane implements IRealtimeBackplane {
       await subscriber.subscribe(this.#topic);
     } catch (error) {
       subscriber.off('message', listener);
-      detachAll();
+      // Detached only after the owned connections are discarded, as close()
+      // does: their QUIT can emit an error that must still reach a listener
+      // (CodeRabbit #543).
       if (owned) {
         await this.#discard([subscriber, publisher]);
       }
+      detachAll();
       throw error;
     }
 
@@ -268,11 +272,11 @@ export class RedisBackplane implements IRealtimeBackplane {
       // hand two live connections to a closed backplane, where nothing holds a
       // reference to shut them down — so retire them here instead.
       subscriber.off('message', listener);
-      detachAll();
       await this.#unsubscribeQuietly(subscriber);
       if (owned) {
         await this.#discard([subscriber, publisher]);
       }
+      detachAll();
       return;
     }
 

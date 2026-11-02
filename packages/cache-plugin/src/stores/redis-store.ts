@@ -197,9 +197,10 @@ export class RedisStore implements CacheStore {
    * @param options.url - Redis connection URL (default `redis://localhost:6379`)
    * @param options.client - Injected ioredis-compatible client (bypasses lazy import)
    * @param options.connectionErrorReporter - Receives the connection errors
-   *   (`ioredis` `'error'` events) of the client this store BUILDS, instead of
-   *   `ioredis` printing each one to the console. Never attached to an
-   *   injected `client`. `CachePlugin` supplies one backed by its logger.
+   *   (`'error'` events) of the client this store uses, instead of `ioredis`
+   *   printing each one to the console. Since 0.12.0 it is attached to an
+   *   injected `client` too, and detached again on `disconnect()`.
+   *   `CachePlugin` supplies one backed by its logger.
    * @param options.commandTimeoutMs - Bound on one Redis command of the client
    *   this store BUILDS (default {@link DEFAULT_REDIS_COMMAND_TIMEOUT_MS};
    *   `0` disables it). Never applied to an injected `client`.

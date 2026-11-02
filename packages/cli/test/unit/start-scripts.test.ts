@@ -97,4 +97,31 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
     expect(FULL_STACK_DEV_ENTRY.contents).toContain('await viteServer.close();');
     expect(FULL_STACK_DEV_ENTRY.contents).toContain('return runtime.exit(1);');
   });
+
+  it.each([
+    ['node', '--env-file-if-exists=local.env'],
+    ['bun', '--env-file=local.env'],
+  ] as const)(
+    '%s scripts load a configured --env-file path (CodeRabbit #543)',
+    async (runtime, flag) => {
+      const h = harness();
+      expect(
+        await h.run([
+          'new',
+          'svc',
+          '--template',
+          'rest',
+          '--runtime',
+          runtime,
+          '--env-file',
+          'local.env',
+        ]),
+      ).toBe(0);
+      const scripts = readScripts(h, '/work/svc/package.json');
+      for (const name of ['start', 'start:dev', 'start:debug']) {
+        expect(scripts[name], name).toContain(flag);
+        expect(scripts[name], name).not.toContain('=.env ');
+      }
+    },
+  );
 });

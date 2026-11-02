@@ -69,6 +69,20 @@ describe('RedisStreamsBroker timer-handle round trip (M131a X88-7)', () => {
     await broker.disconnect();
   });
 
+  it('two concurrent connect() calls start one pair of timers (CodeRabbit #543)', async () => {
+    const { runtime, started, cleared } = createTimerRecordingRuntime();
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: new FakeRedisStreamsClient(),
+      pollIntervalMs: 10,
+    });
+
+    await Promise.all([broker.connect(), broker.connect()]);
+    expect(started.length).toBe(2);
+    await broker.disconnect();
+    // Every timer started was cleared: none outlives disconnect().
+    expect(cleared).toEqual(started);
+  });
+
   it('clears both shared timers at disconnect() with the identical handle', async () => {
     const { runtime, started, cleared } = createTimerRecordingRuntime();
     const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {

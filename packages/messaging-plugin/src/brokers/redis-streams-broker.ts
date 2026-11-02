@@ -511,6 +511,13 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       try {
         await client.connect();
       } catch (error) {
+        // A client this component built keeps reconnecting after a failed
+        // connect; stop it before its listener comes off, or every retry prints
+        // to the console. An injected client stays the caller's (CodeRabbit #543).
+        if (this.#injectedClient === undefined) {
+          const force = (client as { disconnect?: unknown }).disconnect;
+          if (typeof force === 'function') (force as () => void).call(client);
+        }
         // Only this attempt's watch: a concurrent attempt may have replaced it
         // with its own, which must stay attached (audit R3-2).
         watch.detach();
@@ -522,12 +529,14 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     // connect() (startup, no active span), serve every subscription. Creating
     // them in subscribe() would parent each poll's span to the caller's
     // request context.
-    this.#pollTimer = this.#runtime.setInterval(() => {
+    // `??=`: two concurrent connect() calls both reach here, and the second must
+    // not orphan the first's intervals past disconnect() (CodeRabbit #543).
+    this.#pollTimer ??= this.#runtime.setInterval(() => {
       for (const subscription of this.#activeSubscriptions.values()) {
         subscription.pollTick();
       }
     }, this.#pollIntervalMs);
-    this.#reclaimTimer = this.#runtime.setInterval(() => {
+    this.#reclaimTimer ??= this.#runtime.setInterval(() => {
       for (const subscription of this.#activeSubscriptions.values()) {
         subscription.reclaimTick();
       }

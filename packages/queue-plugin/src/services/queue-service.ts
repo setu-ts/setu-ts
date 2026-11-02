@@ -185,12 +185,15 @@ export class QueueService implements IQueue {
     }
     const starting = !this.#loopFailing.has(name);
     this.#loopFailing.add(name);
-    if (!starting || logger.warn === undefined) {
+    if (!starting) {
       return;
     }
     try {
       const err = toReportableError(error);
-      logger.warn(`queue ${name} failed`, { error: err.message, ...meta });
+      // `warn` is optional on a queue logger; one with only `error` still hears
+      // about the failure, as it did before X88-9.
+      const report = logger.warn ?? logger.error;
+      report.call(logger, `queue ${name} failed`, { error: err.message, ...meta });
     } catch {
       // A broken logger must not take the loop down.
     }
@@ -202,10 +205,11 @@ export class QueueService implements IQueue {
    */
   #loopRecovered(name: string): void {
     const logger = this.#logger;
-    if (logger === undefined || !this.#loopFailing.has(name) || logger.info === undefined) {
+    // The state clears first, whether or not the logger can say so: otherwise
+    // a logger without `info` would never hear the loop's next failure.
+    if (logger === undefined || !this.#loopFailing.delete(name) || logger.info === undefined) {
       return;
     }
-    this.#loopFailing.delete(name);
     try {
       logger.info(`queue ${name} recovered`);
     } catch {

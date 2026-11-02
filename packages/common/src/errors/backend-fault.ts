@@ -169,6 +169,14 @@ function classify(entry: Record<string, unknown>): BackendFaultKind | undefined 
   // 504: the bound expired, or the connection was lost. The command may
   // already have been written, or a driver may still write it.
   if (message === 'Command timed out') return 'outcome-unknown';
+  // node-redis with `socketTimeout` against a paused server (the measured shape
+  // `isConnectionFault` also recognises): an expired bound, like the above.
+  if (
+    name === 'Error' &&
+    /^Socket timeout timeout\. Expecting data, but didn't receive any in \d+ms\.$/.test(message)
+  ) {
+    return 'outcome-unknown';
+  }
   const code = typeof entry.code === 'string' ? entry.code : entry.errno;
   if (typeof code === 'string' && IN_FLIGHT_CODES.has(code)) return 'outcome-unknown';
   if (name === 'MaxRetriesPerRequestError') return 'outcome-unknown';

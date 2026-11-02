@@ -68,4 +68,42 @@ describe('QueueService loop-failure reporting (M131a X88-9)', () => {
 
     await service.disconnect();
   });
+
+  it('reports through error when the logger has no warn (CodeRabbit #543)', async () => {
+    const runtime = new FakeRuntimeServices();
+    const errors: string[] = [];
+    const adapter = new MemoryQueue();
+    const service = new QueueService(adapter, runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+      logger: { error: (message: string): void => void errors.push(message) },
+    });
+    await service.connect();
+    vi.spyOn(adapter, 'fetchRecurringDue').mockRejectedValue(new Error('backend down'));
+    await runtime.advanceMs(100 * 10);
+    expect(errors.filter((m) => m.includes('recurring'))).toHaveLength(1);
+    await service.disconnect();
+  });
+
+  it('warns again after a recovery when the logger has no info (CodeRabbit #543)', async () => {
+    const runtime = new FakeRuntimeServices();
+    const warns: string[] = [];
+    const adapter = new MemoryQueue();
+    const service = new QueueService(adapter, runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+      logger: { error: (): void => {}, warn: (message: string): void => void warns.push(message) },
+    });
+    await service.connect();
+    const fetchDue = vi
+      .spyOn(adapter, 'fetchRecurringDue')
+      .mockRejectedValue(new Error('backend down'));
+    await runtime.advanceMs(100 * 5);
+    fetchDue.mockResolvedValue([]);
+    await runtime.advanceMs(100);
+    fetchDue.mockRejectedValue(new Error('backend down again'));
+    await runtime.advanceMs(100);
+    expect(warns.filter((m) => m.includes('recurring'))).toHaveLength(2);
+    await service.disconnect();
+  });
 });

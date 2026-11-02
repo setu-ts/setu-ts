@@ -77,6 +77,11 @@ const TABLE: ReadonlyArray<readonly [label: string, shape: unknown, expected: Ou
     O,
   ],
   ['command timed out', err('Error', 'Command timed out'), O],
+  [
+    'node-redis socket timeout (paused server)',
+    err('Error', "Socket timeout timeout. Expecting data, but didn't receive any in 300ms."),
+    O,
+  ],
   // Pass-through — unrecognised.
   ['a programming error', err('Error', 'Cannot read properties of undefined'), 'pass'],
   [

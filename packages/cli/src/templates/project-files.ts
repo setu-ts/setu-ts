@@ -1665,14 +1665,22 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
   const frontend = manifest?.npmBuild?.script;
   const entry = devEntry?.path ?? 'main.ts';
   const bun = runtime === 'bun';
-  // M131a X88-2: a local start script loads `.env` into the environment before
-  // the process starts (the plugin options are evaluated in createApp(), before
-  // any plugin runs, so only the process environment is available there). Node
-  // uses `--env-file-if-exists` (safe when `.env` is absent); Bun loads `.env`
-  // itself, so it gets no flag. Production images and Compose keep the platform
+  // M131a X88-2: a local start script loads the project's dotenv file into the
+  // environment before the process starts (the plugin options are evaluated in
+  // createApp(), before any plugin runs, so only the process environment is
+  // available there). The file is the one the project declares (`--env-file
+  // local.env` included; CodeRabbit #543), `.env` by default. Node uses
+  // `--env-file-if-exists` (safe when the file is absent); Bun loads `.env`
+  // itself and takes `--env-file=` for any other name (measured, Bun 1.4: a
+  // missing file is tolerated). Production images and Compose keep the platform
   // environment and pass no flag (the image CMD runs the entry directly, never
   // `npm start`), so this flag cannot reach a container.
-  const envFile = bun ? '' : '--env-file-if-exists=.env ';
+  const dotenv = manifest?.envFilePath ?? '.env';
+  const envFile = bun
+    ? dotenv === '.env'
+      ? ''
+      : `--env-file=${dotenv} `
+    : `--env-file-if-exists=${dotenv} `;
   // M131a X88-4: Node runs the OpenTelemetry preload first, so the hook is in
   // place before any driver loads. Bun gets none (see telemetry-preload.ts).
   const preload = bun ? '' : `${TELEMETRY_PRELOAD_FLAG} `;
@@ -1683,19 +1691,19 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
         ? {}
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
-    start: bun ? 'bun run main.ts' : `node ${nodeFlags}--enable-source-maps dist/main.js`,
+    start: bun ? `bun ${envFile}run main.ts` : `node ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
-          ? 'bun --watch main.ts'
+          ? `bun ${envFile}--watch main.ts`
           : // tsx reads its subcommand from the first argument: a flag before
             // `watch` makes tsx run a file named `watch`.
             `${NODE_RUNNER} watch ${nodeFlags}main.ts`
         : bun
-          ? `bun run ${entry}`
+          ? `bun ${envFile}run ${entry}`
           : `${NODE_RUNNER} ${nodeFlags}${entry}`,
     'start:debug': bun
-      ? `bun --inspect ${entry}`
+      ? `bun ${envFile}--inspect ${entry}`
       : `node ${nodeFlags}--inspect --import tsx ${entry}`,
     ...generatedTestScripts(runtime, manifest),
     ...(frontend === undefined ? {} : { check: `${frontend} && tsc --noEmit && setu check` }),

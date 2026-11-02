@@ -373,6 +373,39 @@ describe('RedisBackplane injected lazy startup', () => {
     await backplane.close();
   });
 
+  it('detaches only after discarding owned connections on a failed subscribe (CodeRabbit #543)', async () => {
+    const built = () =>
+      Object.assign(new EventEmitter(), {
+        status: 'ready',
+        publish: () => Promise.resolve(1),
+        subscribe: () => Promise.reject(new Error('subscribe refused')),
+        unsubscribe: () => Promise.resolve(),
+        disconnect: () => {},
+        quit(this: EventEmitter): Promise<string> {
+          // QUIT on an unreachable server: the EPIPE must still reach a listener.
+          this.emit('error', new Error('write EPIPE'));
+          return Promise.resolve('OK');
+        },
+      });
+    const clients = [built(), built()];
+    let next = 0;
+    const module = { create: () => clients[next++] } as unknown as IRedisModule;
+    const reported: unknown[] = [];
+    const backplane = new RedisBackplane(
+      {
+        transport: 'redis',
+        url: 'redis://test',
+        module,
+        connectionErrorReporter: { report: (e) => reported.push(e), recovered: () => {} },
+      },
+      'a',
+      'topic',
+    );
+    await expect(backplane.connect()).rejects.toThrow('subscribe refused');
+    expect(reported.some((e) => (e as Error).message === 'write EPIPE')).toBe(true);
+    for (const client of clients) expect(client.listenerCount('error')).toBe(0);
+  });
+
   it('does not connect clients the backplane builds even if they report wait', async () => {
     const clients = [lazyClient(), lazyClient()];
     let next = 0;

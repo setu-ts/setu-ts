@@ -381,37 +381,43 @@ await viteServer.listen();
 const loadServerBuild = async (): Promise<ServerBuild> =>
   (await viteServer.ssrLoadModule('virtual:react-router/server-build')) as ServerBuild;
 
-const app = await createApp(undefined, undefined, {
-  mode: 'development',
-  loadRequestHandler: (_path, mode) => {
-    const handler = createRequestHandler(loadServerBuild, mode);
-    return Promise.resolve({
-      handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
-      // From the same react-router module as the handler: React Router checks
-      // the context with instanceof.
-      createLoadContext: () => new RouterContextProvider(),
-    });
-  },
-});
-
-app.router.get(\`\${BASE}*\`, async (ctx) => {
-  const url = new URL(ctx.request.url);
-  const upstream = await fetch(\`http://localhost:\${vitePort}\${url.pathname}\${url.search}\`, {
-    headers: ctx.request.headers,
+// Creation, route registration and start share one failure path: one masked
+// line, Vite closed, exit 1 — as main.ts does. The default printer would dump a
+// malformed REDIS_URL, password included, and leave Vite running.
+async function boot() {
+  const app = await createApp(undefined, undefined, {
+    mode: 'development',
+    loadRequestHandler: (_path, mode) => {
+      const handler = createRequestHandler(loadServerBuild, mode);
+      return Promise.resolve({
+        handler: (request, loadContext) => handler(request, loadContext as RouterContextProvider),
+        // From the same react-router module as the handler: React Router checks
+        // the context with instanceof.
+        createLoadContext: () => new RouterContextProvider(),
+      });
+    },
   });
-  ctx.response.status(upstream.status);
-  for (const [key, value] of upstream.headers.entries()) {
-    const lower = key.toLowerCase();
-    if (lower !== 'content-encoding' && lower !== 'content-length') {
-      ctx.response.appendHeader(key, value);
-    }
-  }
-  return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
-});
 
-// One masked line and exit 1, as main.ts does: the default printer would dump
-// a malformed REDIS_URL, password included.
-await app.start({ port }).catch(async (error: unknown) => {
+  app.router.get(\`\${BASE}*\`, async (ctx) => {
+    const url = new URL(ctx.request.url);
+    const upstream = await fetch(\`http://localhost:\${vitePort}\${url.pathname}\${url.search}\`, {
+      headers: ctx.request.headers,
+    });
+    ctx.response.status(upstream.status);
+    for (const [key, value] of upstream.headers.entries()) {
+      const lower = key.toLowerCase();
+      if (lower !== 'content-encoding' && lower !== 'content-length') {
+        ctx.response.appendHeader(key, value);
+      }
+    }
+    return upstream.body === null ? ctx.response.text('') : ctx.response.stream(upstream.body);
+  });
+
+  await app.start({ port });
+  return app;
+}
+
+const app = await boot().catch(async (error: unknown) => {
   console.error(\`Startup failed: \${describeError(error)}\`);
   await viteServer.close();
   return runtime.exit(1);

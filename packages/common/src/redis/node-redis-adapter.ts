@@ -214,10 +214,17 @@ class RedisAdapter {
       const client = await this.#obtain();
       if (this.#ended) throw new Error('The client is closed');
       const inner = client.connect();
-      // If the error event wins the race, inner's later rejection would be
-      // unhandled; swallow it. The race still sees inner's rejection when the
-      // event never fires.
-      inner.catch(() => {});
+      // If the error event wins the race, node-redis keeps reconnecting and
+      // inner can still resolve once Redis comes up: record readiness then, or
+      // a later outage would read `connecting` instead of `reconnecting` and the
+      // queue probe would ping it (CodeRabbit #543). A late rejection is
+      // swallowed; the race still sees it when the event never fires.
+      inner.then(
+        () => {
+          this.#everReady = true;
+        },
+        () => {},
+      );
       await Promise.race([
         inner,
         firstError.then((error: unknown) => {
