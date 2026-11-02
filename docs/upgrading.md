@@ -24,8 +24,14 @@ tools require a Zod v4 body validation brand. POST/PATCH also requires `idempote
 `@modelcontextprotocol/server` `^2.4.0`; it is loaded only at bootstrap.
 
 `timeoutMs` defaults to 30000 ms (safe integer 1–600000). Its runtime deadline aborts the inner
-request and bounds dispatch and result reading, answering `The tool timed out.` even when the route
-ignores cancellation. A client abort still answers `The tool failed.`.
+request and races dispatch and result reading, answering `The tool timed out.` even when the route
+ignores cancellation. Deadline or client abort cancels the response reader. A hung route remains in
+flight until it settles or the kernel's shutdown drain cap. A client abort still answers
+`The tool failed.`.
+
+List every browser UI origin in `allowedOrigins`, including same-origin UIs. Idempotency-branded
+tools need an authenticating security brand; anonymous side effects use `repeatable: true` without
+an idempotency brand or derived key. Tool dispatch pins the bound route pattern.
 
 Calls forward credentials and tenant headers and authenticate again through the kernel's new
 `dispatch` entry. Third-party `IApplication` implementations keep compiling because `dispatch` is

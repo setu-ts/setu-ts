@@ -60,13 +60,7 @@ export function McpPlugin(options: McpPluginOptions): IPlugin {
       ctx.router.get(resolved.path, methodNotAllowed);
       ctx.router.delete(resolved.path, methodNotAllowed);
       ctx.router.post(resolved.path, async (request) => {
-        if (
-          !originAllowed(
-            request.request.url,
-            request.request.headers.get('origin'),
-            resolved.allowedOrigins,
-          )
-        ) {
+        if (!originAllowed(request.request.headers.get('origin'), resolved.allowedOrigins)) {
           respondWithError(request, { status: 403, title: 'Forbidden' });
           return completedResponse(request);
         }

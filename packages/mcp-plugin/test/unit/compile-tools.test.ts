@@ -151,6 +151,7 @@ describe('tool compiler', () => {
         {
           middleware: [
             ...middleware,
+            withSecurityMetadata<MiddlewareFunction>(() => {}, { authenticated: true }),
             withIdempotencyMetadata<MiddlewareFunction>(() => {}, { idempotent: true }),
           ],
         },
@@ -175,6 +176,19 @@ describe('tool compiler', () => {
     expect(c.authenticated).toBe(true);
     expect(c.requiredScopes).toEqual(['a', 'b']);
   });
+  it.each([false, undefined])(
+    'refuses idempotency without an authenticating brand, even with schema security: %s',
+    (authenticated) => {
+      const middleware: MiddlewareFunction[] = [
+        withIdempotencyMetadata(() => {}, { idempotent: true }),
+      ];
+      if (authenticated !== undefined)
+        middleware.push(withSecurityMetadata(() => {}, { authenticated }));
+      expect(() => tool({ middleware, schema: { security: [{ bearerAuth: [] }] } })).toThrow(
+        'authenticating security brand',
+      );
+    },
+  );
   it('derives object output at the declared success status, bare or wrapped', () => {
     for (const wrap of [false, true]) {
       const output = z.object({ ok: z.boolean() });

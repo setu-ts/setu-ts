@@ -13,14 +13,23 @@ export async function mapResult(
   response: Response,
   tool: CompiledTool,
   maxResultBytes: number,
+  signal: AbortSignal,
 ): Promise<CallToolResult> {
   const reader = response.body?.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   if (reader !== undefined) {
+    const cancel = (): void => {
+      // Cancellation must not throw from the signal listener or expose a source error.
+      void reader.cancel().catch(() => {});
+    };
+    signal.addEventListener('abort', cancel, { once: true });
     try {
+      if (signal.aborted) cancel();
+      signal.throwIfAborted();
       while (true) {
         const chunk = await reader.read();
+        signal.throwIfAborted();
         if (chunk.done) break;
         size += chunk.value.byteLength;
         if (size > maxResultBytes) {
@@ -30,9 +39,11 @@ export async function mapResult(
         chunks.push(chunk.value);
       }
     } finally {
+      signal.removeEventListener('abort', cancel);
       reader.releaseLock();
     }
   }
+  signal.throwIfAborted();
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {

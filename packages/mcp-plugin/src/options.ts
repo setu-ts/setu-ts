@@ -33,7 +33,7 @@ export interface McpPluginOptions {
   readonly serverInfo?: { readonly name: string; readonly version: string };
   /** Instructions exposed to clients. */
   readonly instructions?: string;
-  /** Extra permitted absolute HTTP(S) origins. */
+  /** Permitted absolute HTTP(S) browser origins, including same-origin UIs. */
   readonly allowedOrigins?: readonly string[];
   /** Legacy client posture, default `stateless`. */
   readonly legacy?: 'stateless' | 'reject';

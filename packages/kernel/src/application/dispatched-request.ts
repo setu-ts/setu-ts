@@ -16,6 +16,8 @@ export class DispatchedRequest implements IRequest {
   readonly headers: Headers;
   readonly signal: AbortSignal;
   readonly raw: Request;
+  /** Internal route pin, checked after matching and before the route's middleware. */
+  readonly expectedRoute: string | undefined;
   declare readonly ip?: string;
   declare user?: IPrincipal;
   declare tenant?: ITenant;
@@ -24,11 +26,12 @@ export class DispatchedRequest implements IRequest {
   #form: Promise<FormBody> | undefined;
 
   /** @param request - Native request to adapt
-   * @param options - Socket peer supplied by the caller
+   * @param options - Reported peer and expected route supplied by the caller
    */
   constructor(request: Request, options?: DispatchOptions) {
     installRequestIdentityGuard(DispatchedRequest.prototype);
     this.raw = request;
+    this.expectedRoute = options?.route;
     this.method = request.method as HttpMethod;
     this.url = request.url;
     this.headers = new Headers(request.headers);

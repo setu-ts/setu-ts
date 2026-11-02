@@ -27,6 +27,8 @@ const call = {
         accept: 'text/event-stream',
         'accept-encoding': 'gzip',
         connection: 'keep-alive',
+        'accept-language': 'en-IN',
+        'x-custom': 'forwarded',
       }),
     },
   }),
@@ -53,14 +55,17 @@ it('splits URL/query/body, encodes path values and filters the full transport he
   expect(await r.json()).toEqual({ name: 'Ada' });
   expect(Object.fromEntries(r.headers)).toEqual({
     accept: 'application/json',
+    'accept-language': 'en-IN',
     authorization: 'Bearer caller',
     'content-type': 'application/json',
     origin: 'https://app.test',
     'x-tenant-id': 'tenant',
+    'x-custom': 'forwarded',
   });
   controller.abort();
   expect(r.signal.aborted).toBe(true);
   expect(call.outer.request.headers.get('idempotency-key')).toBe('outer');
+  expect(r.headers.has('idempotency-key')).toBe(false);
 });
 it.each(['', '.', '..'])('refuses path %s', async (id) => {
   await expect(

@@ -61,6 +61,10 @@ export function compileTools(
         for (const scope of security?.scopes ?? []) scopes.add(scope);
       }
       const method = declaration.route.method;
+      if (idempotent && !authenticated)
+        throw new McpPluginConfigurationError(
+          `MCP idempotency requires an authenticating security brand: ${route.method} ${route.path}`,
+        );
       if (['POST', 'PUT', 'PATCH'].includes(method) && !brands.has('body'))
         throw new McpPluginConfigurationError(`MCP body validation required: ${declaration.name}`);
       if (['POST', 'PATCH'].includes(method) && !idempotent && declaration.repeatable !== true)

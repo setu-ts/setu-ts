@@ -430,8 +430,10 @@ export interface StartOptions {
  * @since 0.13.0
  */
 export interface DispatchOptions {
-  /** Socket peer carried into the dispatched request. */
+  /** Caller-reported peer for in-process code; this is not a verified socket address. */
   readonly ip?: string;
+  /** Required registered route pattern; a different match answers 404 before route middleware. */
+  readonly route?: string;
 }
 
 /**
@@ -480,8 +482,9 @@ export interface IApplication {
    * Runs a web request through the full pipeline without an HTTP adapter.
    * A fresh request context is created; identity comes from normal authentication.
    * Streaming responses retain deferred cleanup until completion or cancellation.
+   * Grants nothing a local HTTP request could not do; the optional IP is caller-reported.
    * @param request - Request whose signal and body are preserved
-   * @param options - Optional socket peer
+   * @param options - Optional reported peer and required registered route pattern
    * @returns The pipeline's web response
    * @since 0.13.0
    */

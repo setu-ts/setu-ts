@@ -108,7 +108,10 @@ it('builds per-request visible servers with private cache hints and consumes the
     expect((await result(request('tools/call', {}, undefined, '192.0.2.1'))).result).toMatchObject({
       structuredContent: { ok: true },
     });
-    expect(dispatch).toHaveBeenLastCalledWith(expect.any(Request), { ip: '192.0.2.1' });
+    expect(dispatch).toHaveBeenLastCalledWith(expect.any(Request), {
+      ip: '192.0.2.1',
+      route: '/items/:id',
+    });
     expect(innerRequest.mock.calls).toHaveLength(1);
     dispatch.mockRejectedValueOnce(new Error('SECRET'));
     expect((await result(request('tools/call', {}))).result).toEqual({
@@ -255,6 +258,7 @@ it('answers at the deadline when dispatch ignores its signal, and absorbs its la
 
 it('also races an unfinished result read against the same deadline', async () => {
   let stream: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let cancelled = false;
   const started = Promise.withResolvers<void>();
   const h = await timedCall(() => {
     started.resolve();
@@ -263,6 +267,9 @@ it('also races an unfinished result read against the same deadline', async () =>
         new ReadableStream<Uint8Array>({
           start(controller) {
             stream = controller;
+          },
+          cancel() {
+            cancelled = true;
           },
         }),
         { headers: { 'content-type': 'text/plain' } },
@@ -279,8 +286,9 @@ it('also races an unfinished result read against the same deadline', async () =>
     expect(result).toEqual(TIMED_OUT);
     expect(h.signal()!.aborted).toBe(true);
     expect(vi.getTimerCount()).toBe(0);
+    expect(cancelled).toBe(true);
   } finally {
-    stream?.close();
+    if (!cancelled) stream?.close();
     await h.close();
   }
 });
@@ -303,6 +311,41 @@ it('clears its timer and client listener after a fast call', async () => {
     await h.close();
   }
 });
+
+it.each([false, true])(
+  'cancels a client-aborted response read without leaking a cancel failure: %s',
+  async (rejectCancel) => {
+    const started = Promise.withResolvers<void>();
+    const cancel = vi.fn(() =>
+      rejectCancel ? Promise.reject(new Error('CANCEL SECRET')) : Promise.resolve(),
+    );
+    const h = await timedCall(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull() {
+              started.resolve();
+            },
+            cancel,
+          }),
+        ),
+      ),
+    );
+    const client = new AbortController();
+    try {
+      const pending = h.invoke(client.signal);
+      await started.promise;
+      await vi.advanceTimersByTimeAsync(0);
+      client.abort();
+      expect(await pending).toEqual(CLIENT_ABORTED);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(0);
+    } finally {
+      await h.close();
+    }
+  },
+);
 
 it('answers a client abort as failed even when dispatch ignores the signal', async () => {
   const started = Promise.withResolvers<void>();

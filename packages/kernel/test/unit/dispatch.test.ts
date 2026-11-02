@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { CAPABILITIES } from '@setu-ts/common';
+import type { MiddlewareFunction, RouteHandler } from '@setu-ts/common';
 import { createApplication } from '../../src/index.ts';
 import { DispatchedRequest } from '../../src/application/dispatched-request.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
@@ -31,6 +32,46 @@ function appWithRuntime(events: string[] = []) {
 }
 
 describe('dispatch', () => {
+  it.each([
+    ['/files/:name', 404, false],
+    ['/files/export', 200, true],
+    [undefined, 200, true],
+  ] as const)(
+    'pins the registered pattern %s after global middleware, before route middleware',
+    async (route, status, runs) => {
+      const events: string[] = [];
+      const app = appWithRuntime(events);
+      const middleware = vi.fn<MiddlewareFunction>(async (_ctx, next) => {
+        await next();
+      });
+      const sibling = vi.fn<RouteHandler>((ctx) => ctx.response.json({ exported: true }));
+      const dynamic = vi.fn<RouteHandler>((ctx) => ctx.response.json({ name: ctx.params.name }));
+      app.router.get('/files/:name', dynamic);
+      app.router.get('/files/export', { middleware: [middleware], handler: sibling });
+      await app.start();
+      try {
+        const response = await app.dispatch!(
+          new Request('http://test/files/export'),
+          route === undefined ? {} : { route },
+        );
+        expect(response.status).toBe(status);
+        if (runs) expect(await response.json()).toEqual({ exported: true });
+        else expect(await response.json()).toEqual({ error: 'Not Found' });
+        expect(middleware).toHaveBeenCalledTimes(runs ? 1 : 0);
+        expect(sibling).toHaveBeenCalledTimes(runs ? 1 : 0);
+        expect(dynamic).not.toHaveBeenCalled();
+        expect(events).toEqual(['request', 'global', 'response']);
+        if (route === '/files/:name') {
+          const matched = await app.dispatch!(new Request('http://test/files/plain'), { route });
+          expect(matched.status).toBe(200);
+          expect(await matched.json()).toEqual({ name: 'plain' });
+          expect(dynamic).toHaveBeenCalledOnce();
+        }
+      } finally {
+        await app.stop();
+      }
+    },
+  );
   it('runs fresh contexts, hooks and middleware without an adapter and carries ip, raw and signal', async () => {
     const events: string[] = [];
     const app = appWithRuntime(events);

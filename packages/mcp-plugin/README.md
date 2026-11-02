@@ -116,20 +116,25 @@ that is empty. Both sources pass through the same schema, binding and retry chec
 | `path`           | `/mcp`                                   | POST endpoint; GET and DELETE answer 405 with `Allow: POST`                                                 |
 | `serverInfo`     | `{ name: 'setu-mcp', version: VERSION }` | MCP server identity                                                                                         |
 | `instructions`   | absent                                   | Server instructions                                                                                         |
-| `allowedOrigins` | `[]`                                     | Additional absolute HTTP(S) origins, without a trailing slash or path                                       |
+| `allowedOrigins` | `[]`                                     | Allowed HTTP(S) origins, including same-origin browser UIs, without a trailing slash or path                |
 | `legacy`         | `'stateless'`                            | Serves 2025 clients; `'reject'` accepts only the modern protocol                                            |
 | `maxResultBytes` | `1048576`                                | Maximum bytes read from an inner response (at most 64 MiB); excess cancels the stream                       |
 | `timeoutMs`      | `30000`                                  | Per-call deadline in ms (safe integer 1–600000); aborts the inner request and returns `The tool timed out.` |
 
-The deadline bounds both dispatch and reading the result, even when a route or response stream
-ignores its signal. A client abort still returns `The tool failed.`; the first abort wins.
+The deadline releases the tool result even when a route ignores its signal. On deadline or client
+abort, the response reader is cancelled. A hung inner route remains in the kernel's in-flight count
+until it settles or the shutdown drain cap, just like a hung HTTP request. A client abort still
+returns `The tool failed.`; the first abort wins.
 
 A declaration contains `name`, `description`, optional `title`, `route: { method, path }` and
 optional `repeatable: true`. Methods are GET, POST, PUT, PATCH and DELETE. Names are unique,
 case-sensitive, 1–64 ASCII letters, digits, underscores, dots or hyphens. A declaration cannot bind
 to the MCP endpoint. `readOnlyHint` and `idempotentHint` are derived, never application options.
 POST/PATCH requires the idempotency brand or `repeatable: true`; POST/PUT/PATCH requires a body
-validation brand. An app without `IApplication.dispatch` refuses startup.
+validation brand. An idempotency-branded tool must also carry an authenticating security brand;
+startup refuses anonymous idempotency scopes. An anonymous side-effecting tool uses
+`repeatable: true` without an idempotency brand and receives no derived key. An app without
+`IApplication.dispatch` refuses startup.
 
 ## Schemas and arguments
 
@@ -152,8 +157,14 @@ Only caller-visible 4xx Problem Details/default errors carry titles, details and
 Credentials and tenant headers are forwarded to the inner request, and authentication and tenancy
 run again. No verified principal, tenant or state map is copied. The socket peer and abort signal
 are preserved. MCP, outer body and client idempotency headers are stripped; `Origin` is preserved
-for inner CSRF checks after the outer Origin check. A present cross-origin Origin must be listed; a
-missing Origin is accepted for non-browser clients.
+for inner CSRF checks after the outer Origin check. Every present Origin must be explicitly listed
+in `allowedOrigins`, including same-origin browser UIs. The request's Host-derived origin supplies
+no trust. A missing Origin is accepted for non-browser clients.
+
+Dispatch pins the tool's registered pattern: a path argument cannot select a static sibling or
+re-enter the MCP endpoint.
+
+Tool output is untrusted model input; prompt-injection defence belongs to the agent host.
 
 Lists vary only by authentication and required OAuth scopes and have explicit private, zero-TTL
 cache hints. Roles, permissions and policy checks remain on the route; such a tool can be visible

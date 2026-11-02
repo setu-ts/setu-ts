@@ -59,6 +59,7 @@ import { createRequestContext } from '../context/request-context.ts';
 import { runDeferred, wrapDeferredStream } from '../context/deferred.ts';
 import type { RequestContextHandle } from '../context/request-context.ts';
 import { DispatchedRequest } from './dispatched-request.ts';
+import { guardEmptyChunks } from '../context/stream-guard.ts';
 import { coerceInjectBody, InjectedRequest } from './inject-body.ts';
 import { ResponseBuilder } from '../context/response.ts';
 import { DiagnosticsCollector } from '../diagnostics/collector.ts';
@@ -1465,6 +1466,15 @@ class Application implements IKernelApplication {
       return undefined;
     }
 
+    if (
+      request instanceof DispatchedRequest &&
+      request.expectedRoute !== undefined &&
+      routeResult.entry.pattern !== request.expectedRoute
+    ) {
+      respondWithError(ctx, { status: 404, title: 'Not Found' });
+      return undefined;
+    }
+
     // Install matched params via the internal setter (no readonly cast)
     const { definition, params, entry } = routeResult;
     handle.setParams(params);
@@ -1711,6 +1721,15 @@ class Application implements IKernelApplication {
     outcome: DiagnosticsEventOutcome,
   ): ResponseBuilder | Promise<ResponseBuilder> {
     const response = ctx.response as ResponseBuilder;
+    const streamed = response.streamingBody;
+    if (streamed !== undefined) {
+      // Every streamed body leaves through here (adapters and dispatch alike), so
+      // this is the one place an empty-chunk source can be stopped from starving
+      // the event loop.
+      response.stream(
+        guardEmptyChunks(streamed, this.#registry.get<IRuntimeServices>(CAPABILITIES.RUNTIME)),
+      );
+    }
     const cleanups = handle.takeDeferred();
     if (cleanups === undefined) {
       this.#inFlight--;

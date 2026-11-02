@@ -105,11 +105,16 @@ export async function createServerFactory(
                     const request = await deps.innerRequest(tool, args, call, controller.signal);
                     controller.signal.throwIfAborted();
                     const ip = call.outer.request.ip;
-                    const response = await ctx.app.dispatch!(
-                      request,
-                      ip === undefined ? {} : { ip },
+                    const response = await ctx.app.dispatch!(request, {
+                      route: tool.declaration.route.path,
+                      ...(ip === undefined ? {} : { ip }),
+                    });
+                    const result = await mapResult(
+                      response,
+                      tool,
+                      options.maxResultBytes,
+                      controller.signal,
                     );
-                    const result = await mapResult(response, tool, options.maxResultBytes);
                     controller.signal.throwIfAborted();
                     return result;
                   })(),

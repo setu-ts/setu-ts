@@ -275,10 +275,14 @@ await app.start({ port: 3000 });
 
 `IApplication.dispatch?(request: Request, options?: DispatchOptions): Promise<Response>` is optional
 for third-party application implementors and implemented by the kernel. `DispatchOptions` has
-`readonly ip?: string`. No HTTP adapter is required. It preserves the request's signal, raw Request,
-headers and lazy body and creates a fresh request context through the full pipeline and lifecycle
-hooks. Response streams stay streams; deferred cleanups run when they end or are cancelled. A
-stopping application answers 503. This is the MCP tool-call entry.
+`readonly ip?: string` and `readonly route?: string`. Dispatch grants nothing a local HTTP request
+could not do; `ip` is caller-reported by in-process code, not a verified socket peer. If `route` is
+given, the matched registered pattern must equal it exactly; a mismatch answers 404 through
+`respondWithError` before route middleware or the handler runs. Global middleware still runs. No
+HTTP adapter is required. It preserves the request's signal, raw Request, headers and lazy body and
+creates a fresh request context through the full pipeline and lifecycle hooks. Response streams stay
+streams; deferred cleanups run when they end or are cancelled. A stopping application answers 503.
+This is the MCP tool-call entry.
 
 ### Startup logging
 
@@ -16093,16 +16097,20 @@ return text, and 4xx Problem Details/default errors return caller-visible titles
 lines. Redirects, unsupported media, oversized results, invalid output, 5xx and thrown failures
 become generic `isError` results. The executor never throws into the SDK.
 
-Calls use `IApplication.dispatch` with the outer IP and a signal combining the runtime deadline with
-the SDK abort signal. The deadline races dispatch and result reading, so a route that ignores its
-signal cannot hold the call open. A deadline hit returns `isError` with `The tool timed out.`; a
-client abort still returns `The tool failed.`. Credentials/tenant headers are forwarded and controls
-run again; principal/tenant/state are not copied. Accepted Origin is kept for CSRF. Authentication
-and required scopes filter lists with private, zero-TTL cache hints; roles/policies are checked on
-the inner route. Hidden single calls answer 401/403 through auth-plugin's existing Bearer challenge
-writer, and unknown tools answer JSON-RPC -32602. Applications must rate-limit tool routes. Branded
-retries use stable canonical argument hashes; intentional identical calls within the idempotency TTL
-also replay.
+Calls use `IApplication.dispatch` with the bound route pattern, outer IP and a signal combining the
+runtime deadline with the SDK abort signal. The deadline races dispatch and result reading, so a
+route that ignores its signal cannot hold the tool result open. Deadline and client abort cancel the
+response reader. A hung inner request stays in flight until it settles or the kernel drain cap, as
+for HTTP. Idempotency-branded tools require an authenticating security brand; anonymous repeatable
+tools get no derived key. Every present Origin, including a same-origin browser UI, must be in
+`allowedOrigins`. A deadline hit returns `isError` with `The tool timed out.`; a client abort still
+returns `The tool failed.`. Credentials/tenant headers are forwarded and controls run again;
+principal/tenant/state are not copied. Accepted Origin is kept for CSRF. Authentication and required
+scopes filter lists with private, zero-TTL cache hints; roles/policies are checked on the inner
+route. Hidden single calls answer 401/403 through auth-plugin's existing Bearer challenge writer,
+and unknown tools answer JSON-RPC -32602. Applications must rate-limit tool routes. Branded retries
+use stable canonical argument hashes; intentional identical calls within the idempotency TTL also
+replay.
 
 See [the package README](packages/mcp-plugin/README.md) for the full walkthrough, defaults and
 schema refusals. Live Workers and published Bun proofs remain follow-ons.

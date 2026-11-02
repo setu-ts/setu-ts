@@ -15,12 +15,15 @@ All notable changes to this project are documented here. The format follows
   SDK endpoint. Caller-filtered lists use private cache hints; calls re-enter guards, validation,
   tenancy, rate limits, idempotency and audit. `timeoutMs` bounds each call (default 30000 ms, safe
   integer 1–600000): the runtime deadline aborts the inner request and races dispatch/result
-  reading, returning `The tool timed out.`. Functional `mcpTool()` and method-only `@McpTool()` mark
-  routes for discovery; `tools` is now optional. Common's `MCP_TOOL_METADATA`,
-  `RouteMcpToolMetadata`, `withMcpToolMetadata` and `mcpToolMetadataOf` share the marker across both
-  styles. Names are 1–64 characters; every marked or listed route must declare security intent, and
-  ambiguous or empty tool sets refuse startup. Common adds optional `IApplication.dispatch` and
-  `DispatchOptions`, implemented by the kernel with IP, abort and streaming support.
+  reading, cancelling the response reader and returning `The tool timed out.`. Functional
+  `mcpTool()` and method-only `@McpTool()` mark routes for discovery; `tools` is now optional.
+  Common's `MCP_TOOL_METADATA`, `RouteMcpToolMetadata`, `withMcpToolMetadata` and
+  `mcpToolMetadataOf` share the marker across both styles. Names are 1–64 characters; every marked
+  or listed route must declare security intent, and ambiguous or empty tool sets refuse startup.
+  Idempotency-branded tools require an authenticating security brand. `allowedOrigins` must list
+  every browser UI origin, including same-origin UIs. Common adds optional `IApplication.dispatch`
+  and `DispatchOptions`, implemented by the kernel with IP, abort and streaming support.
+  `DispatchOptions.route` pins the registered route pattern before route middleware runs.
   `IDEMPOTENCY_METADATA`, `RouteIdempotencyMetadata`, `withIdempotencyMetadata` and
   `idempotencyMetadataOf` describe both HTTP idempotency entry points. `REQUIRED_SCOPES_STATE_KEY`
   moves to common without changing its value. `setu add mcp` installs the optional
@@ -104,6 +107,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **kernel:** a streamed response whose source emits zero-length chunks without pause no longer
+  exhausts the heap. The Node adapter's writer reads the next chunk as soon as a write reports no
+  backpressure, which an empty chunk always does, so such a source starved the event loop until the
+  process aborted (over plain HTTP as well as MCP). Every streamed body now drops empty chunks and
+  waits a runtime timer turn after each one (M133 audit; #PR).
 - **auth-plugin:** a `jwt.scheme` configured with capitals (for example `'Token'`) no longer refuses
   every token: the JWT strategy compared the lowercased request scheme with the configured value as
   written. The scheme is now matched case-insensitively (M132; #541).

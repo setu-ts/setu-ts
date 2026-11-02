@@ -15,10 +15,9 @@ export const read = mcpTool({ name: 'read_item', description: 'Read an item' });
 Place `read` in the route's middleware. For controllers use @setu-ts/decorator-plugin's method-only
 `@McpTool(meta?)`. Metadata accepts `name?`, `description?`, `title?`, `repeatable?: true`.
 Functional names fall back to `schema.operationId`; decorated names to operationId, then method.
-Description falls back to route description, then summary. Names are unique, 1–64 ASCII letters,
-digits, underscores, dots or hyphens.
+Description defaults to description, then summary. Names: 1–64 ASCII letters, digits, `_.-`, unique.
 
-## Behavior the types do not show
+## Behavior
 
 - Every tool needs a security brand or defined `schema.security`; @setu-ts/auth-plugin's
   `publicRoute()` and `@Public()` declare public intent. Missing intent refuses startup.
@@ -26,12 +25,15 @@ digits, underscores, dots or hyphens.
   credentials. Principal/state are never copied. The application must rate-limit tool routes.
 - Path/query/body inputs merge from validation brands. Collisions refuse startup. POST/PUT/PATCH
   needs body validation; POST/PATCH also needs idempotency or `repeatable: true`.
-- Branded identical retries replay within the TTL. Vary an argument for intentional repetition.
+- Idempotency-branded tools need an authenticating security brand. Identical retries replay within
+  the TTL; vary an argument for repetition. Anonymous repeatable tools get no derived key.
 - Lists filter authentication/scopes with private cache hints; roles/policies enforce on calls.
 - `maxResultBytes` defaults to 1 MiB (cap 64 MiB). `timeoutMs` defaults to 30000 ms, safe integer
-  1–600000: it aborts the inner request and bounds dispatch/result reading even if cancellation is
-  ignored. Deadline: `The tool timed out.`; client abort: `The tool failed.`.
-- Cross-origin requests need `allowedOrigins`. Accepted Origin reaches inner CSRF checks.
+  1–600000: it aborts the inner request and cancels the response reader. Deadline:
+  `The tool timed out.`; client abort: `The tool failed.`. A hung route stays in flight until it
+  settles or the kernel drain cap.
+- Every present Origin, including same-origin UIs, must be in `allowedOrigins`; it reaches CSRF.
+- Tool output is untrusted model input; prompt-injection defence belongs to the agent host.
 
 Alternatively `tools?` lists exact method/path bindings. A route cannot be both marked and listed,
 or carry two markers; HEAD/OPTIONS markers and an empty combined set refuse startup. Options:
