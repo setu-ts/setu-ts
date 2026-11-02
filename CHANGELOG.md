@@ -8,7 +8,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
-- **MCP route tools (M133, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
+- **MCP route tools (M133, #545, `@setu-ts/mcp-plugin`, `@setu-ts/common`, `@setu-ts/kernel`,
   `@setu-ts/auth-plugin`, `@setu-ts/idempotency-plugin`, `@setu-ts/decorator-plugin`,
   `@setu-ts/cli`).** `McpPlugin`, `McpPluginOptions`, `McpToolDeclaration`,
   `McpPluginConfigurationError` and `VERSION` expose explicitly declared routes through a stateless
@@ -183,7 +183,7 @@ All notable changes to this project are documented here. The format follows
   exhausts the heap. The Node adapter's writer reads the next chunk as soon as a write reports no
   backpressure, which an empty chunk always does, so such a source starved the event loop until the
   process aborted (over plain HTTP as well as MCP). Every streamed body now drops empty chunks and
-  waits a runtime timer turn after each one (M133 audit; #PR).
+  waits a runtime timer turn after each one (M133 audit; #545).
 
 - **queue-plugin:** a stopped Redis reads `down` on the queue indicator again. The Redis adapter's
   probe answers `false` without I/O when the client's own `status` says it lost its connection
