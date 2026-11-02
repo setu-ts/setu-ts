@@ -217,8 +217,8 @@ export function brokerEnvVariables(spec: TransportSpec): readonly EnvVariable[] 
     {
       name: connection.variable,
       description:
-        `Where the ${spec.name} transport connects. The default is this project's local ` +
-        `development value; deployments set the real endpoint here.`,
+        `Where the ${spec.name} transport connects. The local start scripts read this ` +
+        `value; a deployment sets ${connection.variable} in its own environment.`,
       develop: connection.localDefault,
     },
   ];
@@ -368,7 +368,17 @@ export function standaloneOverlayRefusal(
  * plugin names the arm.
  */
 export const REDIS_ARM_FLAGS: ReadonlyArray<
-  readonly [flag: string, plugin: string, arm: 'messagingArgs' | 'queueArgs' | 'cacheArgs' | 'idempotencyArgs' | 'schedulerArgs' | 'backplaneArgs']
+  readonly [
+    flag: string,
+    plugin: string,
+    arm:
+      | 'messagingArgs'
+      | 'queueArgs'
+      | 'cacheArgs'
+      | 'idempotencyArgs'
+      | 'schedulerArgs'
+      | 'backplaneArgs',
+  ]
 > = [
   ['broker', 'messaging', 'messagingArgs'],
   ['queue', 'queue', 'queueArgs'],
@@ -388,7 +398,15 @@ export const REDIS_ARM_FLAGS: ReadonlyArray<
  * @param plugin - The plugin the flag wires
  * @returns `true` when the spec declares the arm the flag selects
  */
-function armFor(plugin: string): 'messagingArgs' | 'queueArgs' | 'cacheArgs' | 'idempotencyArgs' | 'schedulerArgs' | 'backplaneArgs' {
+function armFor(
+  plugin: string,
+):
+  | 'messagingArgs'
+  | 'queueArgs'
+  | 'cacheArgs'
+  | 'idempotencyArgs'
+  | 'schedulerArgs'
+  | 'backplaneArgs' {
   return plugin === 'messaging'
     ? 'messagingArgs'
     : plugin === 'queue'

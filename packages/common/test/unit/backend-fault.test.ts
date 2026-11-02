@@ -38,19 +38,45 @@ const TABLE: ReadonlyArray<readonly [label: string, shape: unknown, expectClass:
     ),
     BackendUnavailableError,
   ],
-  ['node-redis stopped: first-connect ECONNREFUSED (cause code)', err('Error', 'Redis connection failed: connect ECONNREFUSED 127.0.0.1:63799', { cause: err('Error', 'connect ECONNREFUSED 127.0.0.1:63799', { code: 'ECONNREFUSED' }) }), BackendUnavailableError],
+  [
+    'node-redis stopped: first-connect ECONNREFUSED (cause code)',
+    err('Error', 'Redis connection failed: connect ECONNREFUSED 127.0.0.1:63799', {
+      cause: err('Error', 'connect ECONNREFUSED 127.0.0.1:63799', { code: 'ECONNREFUSED' }),
+    }),
+    BackendUnavailableError,
+  ],
   ['node-redis: client closed', err('Error', 'The client is closed'), BackendUnavailableError],
   ['node-redis: client offline', err('Error', 'The client is offline'), BackendUnavailableError],
-  ['node-redis: socket closed unexpectedly', err('Error', 'Socket closed unexpectedly'), BackendUnavailableError],
+  [
+    'node-redis: socket closed unexpectedly',
+    err('Error', 'Socket closed unexpectedly'),
+    BackendUnavailableError,
+  ],
   ['node-redis: connection timeout', err('Error', 'Connection timeout'), BackendUnavailableError],
   ['ioredis: connection closed', err('Error', 'Connection is closed.'), BackendUnavailableError],
-  ['ioredis: offline queue disabled', err('Error', "Stream isn't writeable and enableOfflineQueue options is false"), BackendUnavailableError],
-  ['net code on the error itself', err('Error', 'connect ECONNRESET 127.0.0.1:6379', { code: 'ECONNRESET' }), BackendUnavailableError],
+  [
+    'ioredis: offline queue disabled',
+    err('Error', "Stream isn't writeable and enableOfflineQueue options is false"),
+    BackendUnavailableError,
+  ],
+  [
+    'net code on the error itself',
+    err('Error', 'connect ECONNRESET 127.0.0.1:6379', { code: 'ECONNRESET' }),
+    BackendUnavailableError,
+  ],
   // 504 — sent with no answer.
-  ['ioredis / node-redis paused: command timed out', err('Error', 'Command timed out'), BackendOutcomeUnknownError],
+  [
+    'ioredis / node-redis paused: command timed out',
+    err('Error', 'Command timed out'),
+    BackendOutcomeUnknownError,
+  ],
   // Pass-through — unrecognised.
   ['a programming error', err('Error', 'Cannot read properties of undefined'), 'pass'],
-  ['a Redis WRONGTYPE', err('Error', 'WRONGTYPE Operation against a key holding the wrong kind of value'), 'pass'],
+  [
+    'a Redis WRONGTYPE',
+    err('Error', 'WRONGTYPE Operation against a key holding the wrong kind of value'),
+    'pass',
+  ],
   ['a plain value', 'not an error', 'pass'],
 ];
 
@@ -84,7 +110,9 @@ describe('toBackendFault (M131a §3.6)', () => {
   });
 
   it('returns an already-wrapped fault unchanged (no nesting)', () => {
-    const original = new BackendUnavailableError(SOURCE, { cause: err('Error', 'The client is closed') });
+    const original = new BackendUnavailableError(SOURCE, {
+      cause: err('Error', 'The client is closed'),
+    });
     expect(toBackendFault(original, 'other-source')).toBe(original);
   });
 

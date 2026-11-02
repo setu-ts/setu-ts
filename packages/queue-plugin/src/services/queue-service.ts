@@ -274,7 +274,7 @@ export class QueueService implements IQueue {
       // refused-before-sending fault (503) means the job was NOT applied; a
       // sent-with-no-answer fault (504) means it MAY HAVE BEEN. An
       // unrecognised shape passes through unchanged (the masked 500).
-      const fault = toBackendFault(error, 'queue-plugin: redis adapter');
+      const fault = toBackendFault(error, 'queue-plugin: enqueue');
       if (fault !== undefined) throw fault;
       throw error;
     }

@@ -129,7 +129,9 @@ describe.each(['default RESP3', 'RESP2'] as const)('real node-redis %s', (protoc
       const target = new URL(url!);
       const closedUrl = `redis://127.0.0.1:${Number(target.port) + 1}`;
       const raw =
-        protocol === 'RESP2' ? createClient({ url: closedUrl, RESP: 2 }) : createClient({ url: closedUrl });
+        protocol === 'RESP2'
+          ? createClient({ url: closedUrl, RESP: 2 })
+          : createClient({ url: closedUrl });
       const client = fromNodeRedis(raw);
       try {
         const started = performance.now();

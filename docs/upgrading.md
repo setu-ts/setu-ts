@@ -12,6 +12,29 @@ cutting a release renames that heading to the version and is a rename, not a rec
 
 ## Unreleased
 
+### Redis, readiness and outage statuses (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`, `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`, `@setu-ts/notification-plugin`, `@setu-ts/cli`)
+
+A `notification` outage no longer fails `/ready`. If your replicas must leave the load balancer when
+notifications cannot be sent, add `HealthPlugin({ readiness: { include: ['notification'] } })`.
+
+`queue.add()`, a Redis Streams publish and a Redis backplane publish that fail on the backend now
+answer `503` (`BackendUnavailableError`, not applied) or `504` (`BackendOutcomeUnknownError` or
+`PublishTimeoutError`, may have been applied) instead of a masked `500`. A client that retried only
+on `503` should retry a `504` only with an idempotency key. Code that caught the raw driver error
+from `add()` or `publish()` should read it from the new error's `cause`.
+
+Log, trace and audit metadata now mask URL userinfo in every unmatched string value. A dashboard or
+test that matched a logged connection URL with its credentials must match `scheme://***@host`.
+
+An injected Redis client now gets the plugin's connection-error listener, so its outages are logged;
+if you attached your own `'error'` listener only to stop an unhandled-error crash, it can stay.
+
+A project generated from now on runs `instrumentation.mjs` with `node --import`; keep the file and
+the flag when you edit the start scripts or the Dockerfile, or lazily imported drivers record no
+spans. A project generated earlier can add both by hand, as the telemetry README shows. The Redis
+Streams poll and reclaim timers now start at `connect()`: a test that counted timers created by
+`subscribe()` should count them after `connect()` instead.
+
 ### Optimistic locking and outage statuses (M128, `@setu-ts/database-plugin`, `@setu-ts/common`, `@setu-ts/multi-tenancy-plugin`)
 
 Replace a hand-written read-version / `updateWhere` / re-read sequence with

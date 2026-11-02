@@ -173,10 +173,19 @@ class RedisAdapter {
     return this.#creating;
   }
 
+  /**
+   * The connection state in ioredis's vocabulary. A client that was ready once
+   * and is not now reads `reconnecting` (M131a V11-10): the queue's health
+   * probe treats that as an outage, and a client still making its first
+   * connection (`connecting`) as not yet known.
+   */
   get status(): string {
     if (this.#ended) return 'end';
     if (this.#client?.isReady === true) return 'ready';
-    return this.#client?.isOpen === true || this.#connecting !== undefined ? 'connecting' : 'wait';
+    if (this.#client?.isOpen === true || this.#connecting !== undefined) {
+      return this.#everReady ? 'reconnecting' : 'connecting';
+    }
+    return this.#everReady ? 'reconnecting' : 'wait';
   }
 
   #bound<T>(run: () => Promise<T>): Promise<T> {

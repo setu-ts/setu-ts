@@ -450,6 +450,36 @@ function importsNodeRedisHelper(source: string): boolean {
 }
 
 /**
+ * Whether the project already depends on ioredis: an `ioredis` entry in its
+ * `package.json` dependencies or its `deno.json` import map.
+ *
+ * @param fs - The file system
+ * @param dir - The project directory
+ * @returns Whether either manifest names `ioredis`
+ */
+async function declaresIoredis(fs: IFileSystem, dir: string): Promise<boolean> {
+  for (const [file, keys] of [
+    ['package.json', ['dependencies', 'devDependencies']],
+    ['deno.json', ['imports']],
+  ] as const) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(new TextDecoder().decode(await fs.readFile(joinPath(dir, file))));
+    } catch {
+      continue;
+    }
+    if (parsed === null || typeof parsed !== 'object') continue;
+    for (const key of keys) {
+      const section = (parsed as Record<string, unknown>)[key];
+      if (section !== null && typeof section === 'object' && Object.hasOwn(section, 'ioredis')) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Names the node-redis helper's import when the configuration does not have it.
  *
  * Every guidance line for the node-redis arm calls `nodeRedisClient(...)`; a
@@ -715,6 +745,44 @@ export function withDependency(
       : afterScope + 1;
   entries.splice(insertion, 0, [specifier, range]);
   return `${JSON.stringify({ ...parsed, [section]: Object.fromEntries(entries) }, null, 2)}\n`;
+}
+
+/** The OpenTelemetry instrumentation for each Redis client, and its option. */
+const REDIS_INSTRUMENTATION: Readonly<
+  Record<RedisClient, { readonly pkg: string; readonly option: string }>
+> = {
+  ioredis: { pkg: '@opentelemetry/instrumentation-ioredis', option: 'ioredis' },
+  'node-redis': { pkg: '@opentelemetry/instrumentation-redis', option: 'redis' },
+};
+
+/**
+ * What `setu add telemetry` installs beyond the plugin's own peers (M131a
+ * X88-10): the OTLP exporter on every socket runtime, and on Node the loader
+ * hook the generated `instrumentation.mjs` registers plus the instrumentation
+ * for the Redis client the project already uses. Deno and Bun get no hook or
+ * instrumentation: OpenTelemetry's auto-instrumentation does not run there.
+ *
+ * @param bare - Bare package name being added
+ * @param runtime - The detected target runtime
+ * @param client - The project's Redis client, when it has one
+ * @returns Each package and the range to record for it
+ */
+function telemetryPackagesFor(
+  bare: string,
+  runtime: TargetRuntime,
+  client: RedisClient | undefined,
+): readonly { readonly name: string; readonly range: string }[] {
+  if (bare !== 'telemetry-plugin' || runtime === 'cloudflare-workers') return [];
+  const names = [
+    '@opentelemetry/exporter-trace-otlp-http',
+    ...(runtime === 'node'
+      ? [
+          '@opentelemetry/instrumentation',
+          ...(client === undefined ? [] : [REDIS_INSTRUMENTATION[client].pkg]),
+        ]
+      : []),
+  ];
+  return names.map((name) => ({ name, range: CLIENT_RANGES[name]! }));
 }
 
 /**
@@ -1483,26 +1551,36 @@ export async function runAddCommand(
     );
     return EXIT_USAGE;
   }
-  // M131a X88-1: a standalone project's Redis client is inferred from its
-  // configuration — importing the generated nodeRedisClient helper means
-  // node-redis, otherwise ioredis. `--redis-client` is an explicit override
-  // that must AGREE with the inference; a disagreement is refused.
-  const client: RedisClient =
-    initialConfig !== undefined && importsNodeRedisHelper(initialConfig)
-      ? 'node-redis'
-      : 'ioredis';
   const redisRefusal = redisClientRefusal(args, runtime);
   if (redisRefusal !== undefined) {
     deps.error(redisRefusal);
     return EXIT_USAGE;
   }
+  // M131a X88-1: a standalone project's Redis client is inferred from what it
+  // already uses — importing the generated nodeRedisClient helper means
+  // node-redis, an `ioredis` dependency means ioredis. A project with neither
+  // has not chosen yet: `--redis-client` chooses, and ioredis is the default.
+  // An explicit `--redis-client` that disagrees with a choice already made is
+  // refused, so a project never drifts to a second Redis driver.
+  const inferredClient: RedisClient | undefined =
+    initialConfig !== undefined && importsNodeRedisHelper(initialConfig)
+      ? 'node-redis'
+      : (await declaresIoredis(deps.fs, dir))
+        ? 'ioredis'
+        : undefined;
   const explicitClient = args.flags['redis-client'];
-  if (explicitClient !== undefined && explicitClient !== client) {
+  if (
+    explicitClient !== undefined &&
+    inferredClient !== undefined &&
+    explicitClient !== inferredClient
+  ) {
     deps.error(
-      `--redis-client ${String(explicitClient)} disagrees with the project's ${client} client.`,
+      `--redis-client ${String(explicitClient)} disagrees with the project's ${inferredClient} client.`,
     );
     return EXIT_USAGE;
   }
+  const client: RedisClient =
+    inferredClient ?? (explicitClient === 'node-redis' ? 'node-redis' : 'ioredis');
   const pluginFor: Readonly<Record<string, string>> = {
     'messaging-plugin': 'messaging',
     'queue-plugin': 'queue',
@@ -1523,9 +1601,7 @@ export async function runAddCommand(
     const plugin = pluginFor[bare];
     const applicable = flagPlugins[flag];
     if (plugin === undefined || !applicable.includes(plugin)) {
-      deps.error(
-        `--${flag} applies only to setu add ${applicable.join(' or ')}.`,
-      );
+      deps.error(`--${flag} applies only to setu add ${applicable.join(' or ')}.`);
       return EXIT_USAGE;
     }
     if (searchDirs.length > 1) {
@@ -1571,6 +1647,7 @@ export async function runAddCommand(
   const transportArgs = transport?.args;
   const peerPackages = [
     ...peerPackagesFor(bare, runtime),
+    ...telemetryPackagesFor(bare, runtime, inferredClient),
     ...(transport?.clients ?? []).map((name) => ({ name, range: CLIENT_RANGES[name]! })),
   ];
   const addedPeers: string[] = [];
@@ -2100,6 +2177,15 @@ export async function runAddCommand(
   if (!transportWritten && wiredArm === undefined)
     printWiringNote(configSource, bare, deps.log, seam, transportArgs);
   printNodeRedisImportNote(configSource, transport?.clients ?? [], deps.log);
+  if (bare === 'telemetry-plugin' && runtime === 'node' && inferredClient !== undefined) {
+    deps.log(
+      `  To trace ${inferredClient}, pass instrumentations: { ${REDIS_INSTRUMENTATION[inferredClient].option}: true }` +
+        " with exporter: 'otlp' and the collector's endpoint.",
+    );
+    deps.log(
+      '  The start scripts run ./instrumentation.mjs first, which is what lets those spans record.',
+    );
+  }
   if (bare === 'cloudflare-plugin') {
     // M113d §3.8: the generated factory names its second parameter `_waitUntil`
     // while nothing reads it (a read-free parameter must be underscored to pass

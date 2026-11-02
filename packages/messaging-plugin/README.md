@@ -516,6 +516,21 @@ so a caller matching on the text keeps working. On Redis Streams the bound cover
 client's fixed 5 s. Configure a longer bound for slow brokers, or `0` for an unbounded wait (the
 previous behaviour on Redis Streams).
 
+`publishTimeoutMs: 0` removes only this plugin's bound. An injected node-redis client wrapped in
+`fromNodeRedis` (the generated `nodeRedisClient(url)`) still applies the adapter's own
+`commandTimeoutMs`, 15000 ms by default, so its `XADD` rejects with `Command timed out` after 15 s.
+For a longer or unbounded wait on node-redis, raise that bound too:
+`fromNodeRedis(factory, { commandTimeoutMs: 0 })`.
+
+**What the client receives (M131a).** `PublishTimeoutError` answers `504 Gateway Timeout` with the
+detail "The backend did not answer; the request may have been applied." On Redis Streams a driver
+failure is classified the same way: a publish refused before it was sent (a refused connection, a
+client that is closed or offline) throws `BackendUnavailableError` and answers `503` with "The
+request was not applied."; a command sent with no answer (`Command timed out`) throws
+`BackendOutcomeUnknownError` and answers `504`. Both are exported by `@setu-ts/common` and keep the
+driver error as `cause` for the log; it is never served. Any other driver error is rethrown
+unchanged and answers a masked `500`. A client that retries a `504` should send an idempotency key.
+
 ### Kafka consumer groups
 
 When `queue` is not supplied, each subscription's consumer group is derived per topic —

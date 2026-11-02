@@ -4,9 +4,11 @@ import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 
 /**
  * Builds a minimal structural client with a `ping` that records every call and
- * an optional `status`. The probe under test reads `status` first, so a
- * non-`'ready'` status must short-circuit to `false` with zero pings, while
- * `'ready'` or an absent status pings as before.
+ * an optional `status`. The probe under test reads `status` first, so a status
+ * that says the connection was lost (`reconnecting`, `close`, `end`) must
+ * short-circuit to `false` with zero pings, while `'ready'`, a client not
+ * connected yet (`wait`, `connecting` — an injected lazy client) or an absent
+ * status pings as before.
  */
 function makeStatusClient(
   status: string | undefined,
@@ -37,9 +39,10 @@ const STATUS_TABLE: ReadonlyArray<{
   readonly pings: number;
 }> = [
   { status: 'ready', expected: true, pings: 1 },
-  { status: 'connecting', expected: false, pings: 0 },
+  { status: 'connecting', expected: true, pings: 1 },
   { status: 'reconnecting', expected: false, pings: 0 },
-  { status: 'wait', expected: false, pings: 0 },
+  { status: 'wait', expected: true, pings: 1 },
+  { status: 'close', expected: false, pings: 0 },
   { status: 'end', expected: false, pings: 0 },
   { status: undefined, expected: true, pings: 1 },
 ];

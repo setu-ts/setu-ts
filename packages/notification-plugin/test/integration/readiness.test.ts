@@ -59,7 +59,7 @@ function notificationApp(
 
 describe('M131a V11-11 notification readiness membership', () => {
   it('a failing channel makes /health down but /ready 200 (out of readiness by default)', async () => {
-    const app = await notificationApp();
+    const app = await notificationApp({ details: true });
     await app.start();
     try {
       const health = await app.inject({ method: 'GET', url: '/health' });

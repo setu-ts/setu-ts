@@ -92,12 +92,13 @@ const EXPECTED_INVENTORY: Readonly<Record<string, FenceCounts>> = {
     // re-audit added the pinned CI invocation as a fourth shell fence. One more
     // since M117: the Redis-client section shows a shell fence. One fewer since the
     // controllers redesign: one module tree serves both styles. site/--example adds one.
-    total: 22,
+    // One more since M131a: the Redis-arm `setu add` shell fence.
+    total: 23,
     ts: 1,
     compile: 1,
     external: 0,
     pseudocode: 0,
-    skipped: 21,
+    skipped: 22,
   },
   'docs/plugin-architecture.md': {
     total: 17,
@@ -266,12 +267,14 @@ const EXPECTED_AGGREGATE: FenceCounts = {
   // M119i: setup, full-stack create and npm tsconfig add three non-TS fences.
   // site/--example adds two shell fences.
   // Controllers redesign: -1 skipped fence in docs/cli.md (one module tree).
-  total: 310,
+  // M131a: +1 skipped shell fence in docs/cli.md (Redis arms); the telemetry README
+  // preload fence is a package README, outside this corpus.
+  total: 311,
   ts: 229,
   compile: 196,
   external: 33,
   pseudocode: 0,
-  skipped: 81,
+  skipped: 82,
 };
 
 describe('actual-fence compiler — every curated guide (shared engine)', () => {

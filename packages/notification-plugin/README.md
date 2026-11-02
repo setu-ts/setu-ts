@@ -95,6 +95,13 @@ one, but reaching it needs a GET that the `INotificationHttp` seam does not expo
 
 Probes are cached for 5 s and bounded at 2 s on the runtime's own clock and timers.
 
+**Readiness (M131a, V11-11).** The indicator is registered **outside readiness** by default, as
+`mail` is: every channel addresses a dependency all replicas share (the mail server, the SMS
+provider, the push gateway), so taking every replica out of the load balancer cannot fix the outage.
+`/health` still reports it, and `/ready` no longer fails when a channel is down. An application
+whose traffic must stop when notifications cannot be sent opts back in:
+`HealthPlugin({ readiness: { include: ['notification'] } })`.
+
 ## Push (FCM HTTP v1)
 
 `FcmProvider` speaks **FCM HTTP v1**, authenticating with a short-lived OAuth2 token minted from a

@@ -98,9 +98,12 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 ### 3.3 X88-1 — `setu add` puts every Redis-backed plugin on the project's Redis client
 
 - **Decision:**
-  1. A standalone project's Redis client is inferred from its configuration: importing the generated
-     `nodeRedisClient` helper means node-redis, otherwise ioredis (the existing detection at
-     `add.ts:433-446`). Workspaces keep reading `redisClient` from the manifest.
+  1. A standalone project's Redis client is inferred from what it already uses: importing the
+     generated `nodeRedisClient` helper means node-redis (the existing detection at
+     `add.ts:433-446`), an `ioredis` dependency in `package.json` or `deno.json` means ioredis. A
+     project with neither has not chosen yet, so its first Redis `setu add` takes `--redis-client`
+     (ioredis when omitted) — the M117 path. Workspaces keep reading `redisClient` from the
+     manifest.
   2. New Redis arm flags, named after each plugin's own option: `setu add cache --store redis`,
      `setu add idempotency --store redis`, `setu add scheduler --lock redis`,
      `setu add realtime-backplane --backplane redis` (`--transport` keeps its workspace meaning).
@@ -110,7 +113,7 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   3. `setu add queue --queue redis` follows the inferred client: a node-redis project gets
      `client: nodeRedisClient(url)` and no `ioredis` dependency.
   4. `--redis-client` on `add` stays accepted only with a Redis arm flag, and is refused when it
-     disagrees with the inferred client (exit 2, naming both).
+     disagrees with a client the project already uses (exit 2, naming both).
 - **Why:** the docs promise one client per plugin; a project must not drift to a second Redis
   driver. Flags mirror the plugin options so the generated call reads like the flag. Compared before
   fixing them: `nest add`, `rails generate`, `artisan make:*` and `ng add` have no per-backend arm
@@ -176,16 +179,19 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 
 ### 3.7 X88-4 — ESM applications preload OpenTelemetry's hook
 
-- **Decision:** `setu add telemetry`, and every template that registers `TelemetryPlugin`, generate
+- **Decision:** every generated Node project (standalone or workspace member, any template) carries
   `instrumentation.mjs`, which calls
   `register('@opentelemetry/instrumentation/hook.mjs', import.meta.url)` inside a `try`/`catch` (a
-  project with no instrumentation package starts normally), and pass
-  `--import ./instrumentation.mjs` in the Node start scripts and the Node production image `CMD`.
-  `setu add telemetry` adds `@opentelemetry/instrumentation` as a direct dependency so the hook
-  resolves from the project root under any package manager. The telemetry README documents the
-  preload for hand-written projects. No plugin imports `node:module`. Node only: Deno and Bun
-  scripts are unchanged, since OpenTelemetry's auto-instrumentation records `unsupported platform`
-  there anyway.
+  project with no instrumentation package starts normally), and passes
+  `--import ./instrumentation.mjs` in the Node start scripts (after `tsx watch`, which reads its
+  subcommand from the first argument) and the Node production image `CMD`, which copies the file.
+  Generating it for every Node project rather than only telemetry templates means
+  `setu add telemetry` never has to rewrite scripts or the Dockerfile: the preload is inert until
+  `@opentelemetry/instrumentation` is installed. `setu add telemetry` adds
+  `@opentelemetry/instrumentation` as a direct dependency so the hook resolves from the project root
+  under any package manager. The telemetry README documents the preload for hand-written projects.
+  No plugin imports `node:module`. Node only: Deno and Bun scripts are unchanged, since
+  OpenTelemetry's auto-instrumentation records `unsupported platform` there anyway.
 - **Why:** measured (x88-io, 2026-11-02): with `--import` of that preload a bare
   `await import('ioredis')` is wrapped; without it, not; with the hook package missing, the app
   starts and nothing is wrapped. The hook registered before the driver import is what makes a bare
@@ -193,10 +199,13 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   `amqplib`, `kafkajs`) and keeps the literal guarded `await import()` the Workers bundling rule
   requires. The alternative (a `createRequire` after load inside the plugin) needs a
   runtime-specific API in a plugin and resolves from the wrong root under pnpm.
-- **Test home:** `cli/test/unit/telemetry-preload.test.ts` (file and flag generated per runtime);
-  guarded `telemetry-plugin/test/integration/esm-preload-real.test.ts`: a child Node process with
-  the preload, the ioredis instrumentation and a lazily imported ioredis records an ioredis span;
-  without the preload, none (negative control).
+- **Test home:** `cli/test/unit/telemetry-preload.test.ts` (file and flag generated per runtime; the
+  generated preload starts without the hook package); guarded
+  `cli/test/integration/telemetry-preload-real.test.ts`: a child Node process with the generated
+  preload, the ioredis instrumentation and a lazily imported ioredis records an ioredis span;
+  without the preload, none (negative control). It lives in `cli`, which owns the preload text. The
+  hook matches bare specifiers only: an `import()` of ioredis by absolute path is not patched even
+  with the preload (measured), which is why the child links the packages into a project.
 
 ### 3.8 X88-7 — the Redis Streams poll runs outside any request context
 
@@ -227,14 +236,18 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   covered by the one seam. The rule is one linear pattern with no backtracking, applied to string
   values only and within the redaction seam's existing size bounds, because it runs on every logged
   string; (b) the generated `main.ts` catches a failed `app.start()`, writes one line
-  (`describeError` passed through the same masking) to stderr and sets `process.exitCode = 1` (Deno:
-  `Deno.exitCode`), instead of Node's default printer dumping the error's `input`.
+  (`describeError` passed through the same masking) to stderr with `console.error` and exits through
+  `runtime.exit(1)`, instead of Node's default printer dumping the error's `input`. The entry keeps
+  no runtime-specific API: no logger exists before plugins register, and `IRuntimeServices` has no
+  stderr writer.
 - **Why:** the URL is configuration, often holding a password; a malformed one must fail loudly
   without echoing it.
 - **Test home:** `common/test/unit/redaction-url-userinfo.test.ts` (table: credentials masked;
-  no-credential URLs, emails and `@` in paths untouched); `logger-plugin` integration: a metadata
-  string with a credentialed URL is masked; scaffold e2e: a malformed `REDIS_URL` exits 1 and stderr
-  carries no password.
+  no-credential URLs, emails and `@` in paths untouched; a credential inside a 400 KB string is
+  masked, and a pathological string scans in linear time — the mask has no length cut-off, since one
+  would emit a long line's credential unmasked); `logger-plugin` integration: a metadata string with
+  a credentialed URL is masked; scaffold e2e: a malformed `REDIS_URL` exits 1 and stderr carries no
+  password.
 
 ### 3.11 X88-9 — queue loop failures report once per state change
 
@@ -291,19 +304,19 @@ Ships in minor `0.12.0`.
 
 ## 6. Test plan (every `src/` file mapped; per-file 90% bar)
 
-| Test file                                                                                                                              | src covered                            | Key assertions                                                  |
-| -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------- |
-| `queue-plugin/test/unit/redis-queue-health.test.ts` (new) + `…/integration/redis-queue-health-real.test.ts` (new, guarded `REDIS_URL`) | `redis-queue.ts`                       | §3.1 table; closed port → `down`; live → `up`.                  |
-| `queue-plugin/test/unit/queue-loop-reporting.test.ts` (new)                                                                            | `queue-service.ts`                     | §3.11 counts; §3.6 `add` wrapping.                              |
-| `notification-plugin/test/integration/readiness.test.ts` (new)                                                                         | `notification-plugin.ts`               | §3.2 membership and override.                                   |
-| `cli/test/unit/{add-redis-arms,start-scripts,telemetry-preload,add-telemetry}.test.ts` (new), scaffold e2e cases                       | `add.ts`, templates, `compose.ts`      | §3.3, §3.4, §3.7, §3.10b, §3.12.                                |
-| per-plugin reporter tests (existing files, new injected-client cases)                                                                  | client setup in each plugin            | §3.5 one `warn` per state change for an injected client.        |
-| `common/test/unit/node-redis-adapter.test.ts` (existing) + guarded real boot                                                           | `node-redis-adapter.ts`                | §3.5 first-connect rejection.                                   |
-| `common/test/unit/backend-fault.test.ts` (new) + `common/test/integration/backend-fault-status.test.ts` (new)                          | `backend-fault.ts`                     | §3.6 table; 503/504 Problem Details field by field.             |
-| messaging unit (existing broker tests)                                                                                                 | `redis-streams-broker.ts`, `errors.ts` | §3.6 publish wrapping, `PublishTimeoutError` hint; §3.8 timers. |
-| backplane unit (existing)                                                                                                              | `redis-backplane.ts`                   | §3.6 publish wrapping.                                          |
-| `common/test/unit/redaction-url-userinfo.test.ts` (new)                                                                                | `redactors.ts`, `policy.ts`            | §3.10a table.                                                   |
-| `telemetry-plugin/test/integration/esm-preload-real.test.ts` (new, guarded)                                                            | — (docs claim)                         | §3.7 span with preload, none without.                           |
+| Test file                                                                                                                                               | src covered                            | Key assertions                                                  |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- | --------------------------------------------------------------- |
+| `queue-plugin/test/unit/redis-queue-health.test.ts` (new) + `…/integration/redis-queue-health-real.test.ts` (new, guarded `REDIS_URL`)                  | `redis-queue.ts`                       | §3.1 table; closed port → `down`; live → `up`.                  |
+| `queue-plugin/test/unit/queue-loop-reporting.test.ts` (new)                                                                                             | `queue-service.ts`                     | §3.11 counts; §3.6 `add` wrapping.                              |
+| `notification-plugin/test/integration/readiness.test.ts` (new)                                                                                          | `notification-plugin.ts`               | §3.2 membership and override.                                   |
+| `cli/test/unit/{add-redis-arms,start-scripts,telemetry-preload,add-telemetry}.test.ts` (new), scaffold e2e cases                                        | `add.ts`, templates, `compose.ts`      | §3.3, §3.4, §3.7, §3.10b, §3.12.                                |
+| per-plugin reporter tests (existing files, new injected-client cases)                                                                                   | client setup in each plugin            | §3.5 one `warn` per state change for an injected client.        |
+| `common/test/unit/node-redis-adapter.test.ts` (existing) + guarded real boot                                                                            | `node-redis-adapter.ts`                | §3.5 first-connect rejection.                                   |
+| `common/test/unit/backend-fault.test.ts` (new) + `exceptions/test/integration/backend-fault-status.test.ts` (new; `errorHandler` lives in `exceptions`) | `backend-fault.ts`                     | §3.6 table; 503/504 Problem Details field by field.             |
+| messaging unit (existing broker tests)                                                                                                                  | `redis-streams-broker.ts`, `errors.ts` | §3.6 publish wrapping, `PublishTimeoutError` hint; §3.8 timers. |
+| backplane unit (existing)                                                                                                                               | `redis-backplane.ts`                   | §3.6 publish wrapping.                                          |
+| `common/test/unit/redaction-url-userinfo.test.ts` (new)                                                                                                 | `redactors.ts`, `policy.ts`            | §3.10a table.                                                   |
+| `cli/test/integration/telemetry-preload-real.test.ts` (new, guarded)                                                                                    | `telemetry-preload.ts` (docs claim)    | §3.7 span with preload, none without.                           |
 
 ## 7. Verification gates
 

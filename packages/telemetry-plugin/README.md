@@ -101,6 +101,39 @@ the application starts, so `redis` must not be loaded before then: build the cli
 factory, `fromNodeRedis(async () => (await import('redis')).createClient({ url }))`, as a
 `--redis-client node-redis` scaffold does. A `redis` imported at module load records no spans.
 
+### ESM applications: the preload
+
+An ES-module application on Node must register OpenTelemetry's loader hook **before** the
+application loads, or the drivers the plugins import lazily (`ioredis`, `redis`, `amqplib`,
+`kafkajs`) are loaded unpatched and record no spans. Measured on Node 24: with the hook registered
+by a preload, a lazily imported `ioredis` is instrumented; without it, it is not. The plugin cannot
+do this itself — by the time it registers, the loader is already running — so the preload is a file
+the process runs first:
+
+```js
+// instrumentation.mjs
+import { register } from 'node:module';
+
+try {
+  register('@opentelemetry/instrumentation/hook.mjs', import.meta.url);
+} catch {
+  // No instrumentation package: start without the hook.
+}
+```
+
+Run it with `node --import ./instrumentation.mjs`, ahead of every other flag that loads code (the
+`tsx` runner takes it after its `watch` subcommand: `tsx watch --import ./instrumentation.mjs`), and
+install `@opentelemetry/instrumentation` in the application, so the hook resolves from the project
+root under any package manager. Without that package the `catch` swallows the failed `register` and
+the application starts with nothing wrapped.
+
+A Node project from `setu new` or `setu generate app` already has this file, runs it from its
+`start`, `start:dev` and `start:debug` scripts, and copies it into the production image, whose `CMD`
+passes the same flag. `setu add telemetry` installs `@opentelemetry/instrumentation`, the OTLP
+exporter, and the instrumentation for the Redis client the project uses, and prints the
+`instrumentations` key that enables it. Deno and Bun need no preload: OpenTelemetry's
+auto-instrumentation does not run there.
+
 Each plugin instance calls `setTracerProvider` on itself; there is no global singleton.
 
 Outcomes are reported through the plugin's logger (`ctx.logger`, read at call time): an enabled

@@ -227,6 +227,13 @@ async function resolveClient(
 }
 
 /**
+ * The client states that mean the connection was lost (ioredis's vocabulary,
+ * which `fromNodeRedis` reports too). `wait` and `connecting` are absent on
+ * purpose: a client that has not connected yet is not evidence of an outage.
+ */
+const DISCONNECTED_STATUSES: ReadonlySet<string> = new Set(['reconnecting', 'close', 'end']);
+
+/**
  * Redis queue adapter implementation.
  *
  * Uses Redis sorted sets (ZSET) for ready/processing/dead sets and
@@ -331,19 +338,21 @@ export class RedisQueue implements QueueAdapter {
    * M70c: installs `isHealthy` from the client's `ping()` when present; leaves
    * it absent (unknown) otherwise.
    *
-   * M131a V11-10: a client that exposes a string `status` other than `'ready'`
-   * already knows it has no connection, so the probe answers `false` without
-   * I/O. ioredis parks a stopped server's commands in its offline queue, so a
-   * ping there hangs like a hung one and the indicator read `up`/unknown; a
-   * PAUSED server keeps `'ready'` (the TCP connection is open), so a pause
-   * still reads `up`/unknown, the intended M119b rule.
+   * M131a V11-10: a client whose `status` says it LOST its connection
+   * (`reconnecting`, `close`, `end`) answers `false` without I/O. ioredis parks
+   * a stopped server's commands in its offline queue, so a ping there hangs
+   * like a hung one and the indicator read `up`/unknown. A client that has not
+   * connected yet (`wait`, `connecting` — an injected lazy client, such as the
+   * generated node-redis helper's) still pings, which connects it. A PAUSED
+   * server keeps `'ready'` (the TCP connection is open), so a pause still reads
+   * `up`/unknown, the intended M119b rule.
    */
   #installProbe(): void {
     const client = this.#client;
     if (client !== null && typeof client.ping === 'function') {
       const ping = client.ping;
       this.isHealthy = async (): Promise<boolean> => {
-        if (client.status !== undefined && client.status !== 'ready') {
+        if (client.status !== undefined && DISCONNECTED_STATUSES.has(client.status)) {
           return false;
         }
         try {

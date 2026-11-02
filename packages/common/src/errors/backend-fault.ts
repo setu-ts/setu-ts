@@ -81,10 +81,9 @@ export class BackendUnavailableError extends Error {
    * @param options - The driver error as `cause`
    */
   constructor(source: string, options: { cause: unknown }) {
-    super(
-      `${source}: the backend refused the request before it could be applied`,
-      { cause: options.cause },
-    );
+    super(`${source}: the backend refused the request before it could be applied`, {
+      cause: options.cause,
+    });
     this.source = source;
     withHttpStatusHint(this, {
       status: 503,
@@ -119,10 +118,9 @@ export class BackendOutcomeUnknownError extends Error {
    * @param options - The driver error as `cause`
    */
   constructor(source: string, options: { cause: unknown }) {
-    super(
-      `${source}: the backend did not answer; the request may have been applied`,
-      { cause: options.cause },
-    );
+    super(`${source}: the backend did not answer; the request may have been applied`, {
+      cause: options.cause,
+    });
     this.source = source;
     withHttpStatusHint(this, {
       status: 504,
@@ -213,10 +211,7 @@ function classifyChain(error: unknown): BackendFaultKind | undefined {
  * @returns The wrapped fault, or `undefined` when the shape is unrecognised
  * @since 0.12.0
  */
-export function toBackendFault(
-  error: unknown,
-  source: string,
-): BackendFault | undefined {
+export function toBackendFault(error: unknown, source: string): BackendFault | undefined {
   if (error instanceof BackendUnavailableError || error instanceof BackendOutcomeUnknownError) {
     return error;
   }

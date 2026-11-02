@@ -133,6 +133,13 @@ await queue.add('send-email', { to: 'user@example.com' }, { delayMs: 5000 });
 await queue.add('process-data', { rows: 100 }, { maxAttempts: 5 });
 ```
 
+When the backend fails, `add()` says whether the job was stored (M131a). A refused connection or a
+closed or offline client throws `BackendUnavailableError` from `@setu-ts/common`, which answers
+`503` with "The request was not applied."; a Redis command sent with no answer (`Command timed out`)
+throws `BackendOutcomeUnknownError`, which answers `504`: the job may already be queued, so a client
+that retries should send an idempotency key. Both keep the driver error as `cause` for the log. Any
+other adapter error is rethrown unchanged.
+
 ### Processing Jobs
 
 ```typescript
@@ -520,8 +527,13 @@ AMQP channel on the connection, so a paused broker can no longer report `reachab
 round trip answers `false`. For every queue adapter, a check that does not answer within the 2 s
 bound now reports `up` with `reachable: 'unknown'` and no depth counts, instead of `down`: a hung
 probe is not evidence the backend is down. A check that answers `false` — a stopped broker — still
-reads `down` at once. The indicator counts toward readiness by default; the health plugin's
-`readiness` option overrides it by name.
+reads `down` at once. The Redis adapter answers `false` without I/O when the client's own `status`
+says it lost its connection (`reconnecting`, `close`, `end`; M131a, V11-10): ioredis parks a stopped
+server's commands in its offline queue, so a ping there would hang like a paused server's and read
+`unknown`. A paused Redis keeps its TCP connection, so it still reads `up` with
+`reachable: 'unknown'`. A client that has not connected yet (`wait`, `connecting`, such as an
+injected lazy client) still pings, which connects it. The indicator counts toward readiness by
+default; the health plugin's `readiness` option overrides it by name.
 
 ## Exports
 

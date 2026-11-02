@@ -22,7 +22,7 @@ import type {
   RealtimeDiagnosticsSnapshot,
   RealtimeFrame,
 } from '@setu-ts/common';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, BackendOutcomeUnknownError } from '@setu-ts/common';
 import { RealtimeBackplanePlugin } from '../../src/plugin/realtime-backplane-plugin.ts';
 import type {
   IRedisBackplaneClient,
@@ -384,7 +384,7 @@ describe('RealtimeBackplanePlugin realtime observations (M98l)', () => {
       expect(client.published).toHaveLength(1);
     });
 
-    it('a publish the connection rejects is failed and rejects with the ORIGINAL reason', async () => {
+    it('a publish the connection rejects is failed and rejects with the ORIGINAL reason as cause', async () => {
       const client = new FakeRedis();
       const harness = await setup({
         transport: 'redis',
@@ -397,7 +397,14 @@ describe('RealtimeBackplanePlugin realtime observations (M98l)', () => {
       const timedOut = new Error('Command timed out');
       client.fail = timedOut;
       const outcome = harness.backplane.publish(frame());
-      await expect(outcome).rejects.toBe(timedOut);
+      // M131a X88-5: classified as outcome-unknown (504), the original kept as
+      // `cause` for the log.
+      const rejection = await outcome.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(rejection).toBeInstanceOf(BackendOutcomeUnknownError);
+      expect((rejection as Error).cause).toBe(timedOut);
       const publish = record(harness.source.snapshot(), 'backplane-publish');
       expect(publish?.failed).toBe(1);
       expect(publish?.succeeded).toBe(0);

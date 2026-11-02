@@ -15,8 +15,10 @@ import * as nodeFs from 'node:fs/promises';
  * functional greeting example moved from `src/modules/greeting/` to `src/controllers/` and
  * `src/services/`; no `src/modules/index.ts`), and M131a's reviewed local start scripts
  * loading `.env` through the runtime (Node `--env-file-if-exists=.env`, Deno
- * `--env-file=.env`, the `.env` comment) — which changes exactly `package.json`,
- * `deno.json` and `.env` and nothing else:
+ * `--env-file=.env`, the `.env` comment), and its Node OpenTelemetry preload
+ * (`instrumentation.mjs`, `--import` in the Node scripts and image) and masked
+ * one-line start failure in `main.ts` — which change exactly `package.json`,
+ * `deno.json`, `.env`, `main.ts`, `Dockerfile` and the new `instrumentation.mjs`:
  *
  *   node packages/cli/test/fixtures/capture-template-baseline.ts
  *

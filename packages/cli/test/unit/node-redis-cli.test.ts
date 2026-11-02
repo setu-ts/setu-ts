@@ -230,8 +230,8 @@ describe('node-redis CLI', () => {
     // `setu add queue --queue redis` append the REDIS_URL row `setu new --broker`
     // writes — the local default in `.env`, empty in the tracked example.
     const description =
-      "# Where the redis transport connects. The default is this project's local " +
-      'development value; deployments set the real endpoint here.';
+      '# Where the redis transport connects. The local start scripts read this ' +
+      'value; a deployment sets REDIS_URL in its own environment.';
     for (const runtime of ['deno', 'node', 'bun']) {
       for (const command of ['add-messaging', 'add-queue']) {
         for (const [file, value] of [
@@ -345,23 +345,9 @@ describe('node-redis CLI', () => {
     'adds standalone %s with the existing manifest writer',
     async (plugin) => {
       const h = harness();
-      // M131a X88-1: the client is inferred from the configuration. Scaffold the
-      // node-redis helper at `new` time (microservice registers the messaging and
-      // queue wiring) so the inference agrees with the add's explicit
-      // `--redis-client node-redis` (a fresh ioredis project would now refuse
-      // the disagreement).
-      await h.run([
-        'new',
-        'svc',
-        '--template',
-        'microservice',
-        '--broker',
-        'redis',
-        '--queue',
-        'redis',
-        '--redis-client',
-        'node-redis',
-      ]);
+      // M131a X88-1: a project with no Redis client yet chooses one with
+      // --redis-client on its first Redis add (the M117 path).
+      await h.run(['new', 'svc', '--template', 'rest']);
       expect(
         await h.run([
           'add',

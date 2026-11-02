@@ -206,8 +206,12 @@ describe('the Workers target is deployable as documented', () => {
 
 describe('a template with a frontend build, on an npm target', () => {
   for (const [runtime, entry] of [
-    // M131a X88-2: local Node scripts load `.env` through the runtime; Bun does it itself.
-    ['node', 'node --env-file-if-exists=.env --enable-source-maps dist/main.js'],
+    // M131a: Node runs the OpenTelemetry preload and loads `.env` through the
+    // runtime; Bun loads `.env` itself and takes no preload.
+    [
+      'node',
+      'node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js',
+    ],
     ['bun', 'bun run main.ts'],
   ] as const) {
     it(`starts without rebuilding on ${runtime}; tests build the frontend only`, async () => {
@@ -231,7 +235,7 @@ describe('a template with a frontend build, on an npm target', () => {
       scripts: Record<string, string>;
     };
     expect(manifest.scripts['start']).toBe(
-      'node --env-file-if-exists=.env --enable-source-maps dist/main.js',
+      'node --import ./instrumentation.mjs --env-file-if-exists=.env --enable-source-maps dist/main.js',
     );
   });
 });
@@ -250,8 +254,11 @@ describe('the Node target can run decorated source', () => {
 
   it('runs Node through a transpiler, not through type stripping', async () => {
     const manifest = await manifestOf('node');
-    // M131a X88-2: the dev script loads `.env` through the runtime.
-    expect(manifest.scripts['start:dev']).toBe('tsx --env-file-if-exists=.env watch main.ts');
+    // M131a: the dev script runs the OpenTelemetry preload and loads `.env`
+    // through the runtime; both flags follow `watch`, tsx's subcommand.
+    expect(manifest.scripts['start:dev']).toBe(
+      'tsx watch --import ./instrumentation.mjs --env-file-if-exists=.env main.ts',
+    );
     expect(manifest.scripts['start']).not.toContain('experimental-strip-types');
     expect(manifest.scripts['start']).not.toContain('experimental-transform-types');
   });

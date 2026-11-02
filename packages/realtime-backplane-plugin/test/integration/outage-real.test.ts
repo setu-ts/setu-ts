@@ -257,7 +257,11 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           await docker(['pause', containerId]);
           paused = true;
           const silent = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          expect(silent).toBe('rejected: Command timed out');
+          // M131a X88-5: classified as outcome-unknown (504); the driver's
+          // `Command timed out` stays the `cause`.
+          expect(silent).toBe(
+            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
+          );
           expect(publishRecord(source!)).toMatchObject({
             succeeded: baseline.succeeded,
             failed: baseline.failed + 1,
@@ -279,7 +283,11 @@ describe.each(REDIS_CLIENTS)('%s', (redisVariant) => {
           const before = publishRecord(source!)!;
           await docker(['stop', containerId]);
           const dropped = await settleWithin(backplane.publish(frame), COMMAND_TIMEOUT_MS * 4);
-          expect(dropped).toBe('rejected: Command timed out');
+          // Queued, never sent, yet `Command timed out` cannot say so: the fault
+          // is classified outcome-unknown (504), the conservative answer.
+          expect(dropped).toBe(
+            'rejected: realtime-backplane-plugin: redis transport: the backend did not answer; the request may have been applied',
+          );
           expect(publishRecord(source!)).toMatchObject({ failed: before.failed + 1 });
 
           // Restarted, the same connections carry the next publish.

@@ -11,6 +11,11 @@
  * @module
  */
 
+import {
+  TELEMETRY_PRELOAD_CONTENTS,
+  TELEMETRY_PRELOAD_FLAG,
+  TELEMETRY_PRELOAD_PATH,
+} from './telemetry-preload.ts';
 import { CONFIG_EXPORT, CONFIG_MODULE, VERSION, type TargetRuntime } from '../constants.ts';
 import type { GeneratedFile } from '../utils/file-writer.ts';
 import { renderDockerfile, renderDockerignore } from '../workspace/compose.ts';
@@ -689,7 +694,7 @@ function serveEntry(runtime: TargetRuntime, port?: EntryPort, serverBuild = fals
 
   return `${serverBuild ? "import * as serverBuild from './build/server/index.js';\n" : ''}import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
 import { createRuntimeServices } from '@setu-ts/runtime';
-import { CAPABILITIES } from '@setu-ts/common';
+import { CAPABILITIES, describeError, maskUrlUserinfo } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 ${portImport}
 // Built before the application, because the port is needed at start() and
@@ -697,9 +702,19 @@ ${portImport}
 // own instance: runtime services are a stateless facade over platform globals.
 const runtime = createRuntimeServices();
 
-const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
+// A failed boot prints one line and exits 1. Left to the runtime's default
+// printer, the error is dumped with every property it carries, and a malformed
+// REDIS_URL's TypeError carries the URL, password included, as \`input\`.
+async function boot() {
+  const app = await ${CONFIG_EXPORT}(${serverBuild ? 'undefined, undefined, { serverBuild }' : ''});
+  await app.start({ port: ${portExpression} });
+  return app;
+}
 
-await app.start({ port: ${portExpression} });
+const app = await boot().catch((error: unknown) => {
+  console.error(\`Startup failed: \${maskUrlUserinfo(describeError(error))}\`);
+  return runtime.exit(1);
+});
 ${shutdownBlock(runtime)}`;
 }
 
@@ -1658,22 +1673,30 @@ function npmScripts(runtime: TargetRuntime, manifest?: TemplateManifest): Record
   // environment and pass no flag (the image CMD runs the entry directly, never
   // `npm start`), so this flag cannot reach a container.
   const envFile = bun ? '' : '--env-file-if-exists=.env ';
+  // M131a X88-4: Node runs the OpenTelemetry preload first, so the hook is in
+  // place before any driver loads. Bun gets none (see telemetry-preload.ts).
+  const preload = bun ? '' : `${TELEMETRY_PRELOAD_FLAG} `;
+  const nodeFlags = `${preload}${envFile}`;
   return {
     ...(bun
       ? frontend === undefined
         ? {}
         : { build: frontend }
       : { build: `${frontend === undefined ? '' : `${frontend} && `}tsc --noEmit && setu build` }),
-    start: bun ? 'bun run main.ts' : `node ${envFile}--enable-source-maps dist/main.js`,
+    start: bun ? 'bun run main.ts' : `node ${nodeFlags}--enable-source-maps dist/main.js`,
     'start:dev':
       devEntry === undefined
         ? bun
           ? 'bun --watch main.ts'
-          : `${NODE_RUNNER} ${envFile}watch main.ts`
+          : // tsx reads its subcommand from the first argument: a flag before
+            // `watch` makes tsx run a file named `watch`.
+            `${NODE_RUNNER} watch ${nodeFlags}main.ts`
         : bun
           ? `bun run ${entry}`
-          : `${NODE_RUNNER} ${envFile}${entry}`,
-    'start:debug': bun ? `bun --inspect ${entry}` : `node ${envFile}--inspect --import tsx ${entry}`,
+          : `${NODE_RUNNER} ${nodeFlags}${entry}`,
+    'start:debug': bun
+      ? `bun --inspect ${entry}`
+      : `node ${nodeFlags}--inspect --import tsx ${entry}`,
     ...generatedTestScripts(runtime, manifest),
     ...(frontend === undefined ? {} : { check: `${frontend} && tsc --noEmit && setu check` }),
   };
@@ -2251,6 +2274,9 @@ describe('application composition', () => {
       )}\n`,
     });
     for (const file of npmToolingFiles(generatedOutputDirs(manifest))) files.push(file);
+    if (runtime === 'node') {
+      files.push({ path: TELEMETRY_PRELOAD_PATH, contents: TELEMETRY_PRELOAD_CONTENTS });
+    }
   }
 
   files.push({

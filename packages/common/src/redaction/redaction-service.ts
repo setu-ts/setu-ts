@@ -19,38 +19,80 @@ export interface IRedactionService {
 
 const MAX_REDACTION_DEPTH = 32;
 
-/**
- * The longest string the default URL-userinfo mask inspects. The rule is one
- * linear pattern with no backtracking, but it runs on every logged string, so a
- * size bound keeps a hostile multi-megabyte value from paying a full scan.
- * Shorter strings are masked; longer ones are returned unchanged.
- */
-const MAX_REDACTION_STRING_LENGTH = 1024;
-
-/**
- * The one linear, non-backtracking pattern that recognises a URL's userinfo:
- * a scheme, `://`, the userinfo (URL-unsafe characters excluded, so the match
- * stops at `/` and cannot cross into the host), and the `@` that separates it
- * from the host. A URL with no userinfo (`https://host/…`), an email
- * (`user@host`, no `://`), and an `@` inside a path have no userinfo and are
- * left untouched.
- */
-const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^\s\/@]+@/gi;
+const SCHEME_CHAR = /[a-z0-9+.-]/i;
+const SCHEME_START = /[a-z]/i;
+const WHITESPACE = /\s/;
+const AUTHORITY_END = /[/?#]/;
 
 /**
  * Masks a URL's userinfo in a string: `scheme://user:password@host` becomes
  * `scheme://***@host`. This is the default policy's one value-based rule — it
  * runs on every string value the redaction seam sees, so a malformed `REDIS_URL`
  * (which often holds a password) is never echoed into a log, trace or audit
- * record. The pattern is a single linear pass with no backtracking.
+ * record.
+ *
+ * A URL is malformed precisely when its password carries a character it should
+ * have encoded, so the userinfo is taken to end at the LAST `@` of the URL
+ * (the text up to the next whitespace or the next `://`), not the first:
+ * `redis://:p@ss/word@host` masks to `redis://***@host`. The URL has userinfo
+ * when an `@` comes before the first `/`, `?` or `#`, or when the text before
+ * its last `@` holds a `:` (a `user:password` pair with a `/` in the password).
+ * A URL with no `@` (`https://host/…`), an email (`user@host`, no `://`) and an
+ * `@` in a path with no `:` before it (`https://host/@handle`) are untouched; a
+ * path `@` after a port (`https://host:8080/@handle`) is over-masked, which
+ * errs toward hiding.
+ *
+ * Every string is inspected, whatever its length: a size cut-off would emit a
+ * long message carrying a credentialed URL unmasked. The scan is linear: each
+ * URL's text ends at the next `://`, so the texts never overlap, and the walk
+ * back over a scheme cannot cross the previous `://`.
  *
  * @param value - The string to inspect
  * @returns The string with any URL userinfo masked, or unchanged
  * @since 0.12.0
  */
 export function maskUrlUserinfo(value: string): string {
-  if (value.length > MAX_REDACTION_STRING_LENGTH) return value;
-  return value.replace(URL_USERINFO_PATTERN, '$1***@');
+  let separator = value.indexOf('://');
+  if (separator === -1) return value;
+  let out = '';
+  let copied = 0;
+  while (separator !== -1) {
+    let schemeStart = separator;
+    while (schemeStart > copied && SCHEME_CHAR.test(value[schemeStart - 1]!)) schemeStart--;
+    while (schemeStart < separator && !SCHEME_START.test(value[schemeStart]!)) schemeStart++;
+    const infoStart = separator + 3;
+    let cursor = infoStart;
+    let firstAt = -1;
+    let lastAt = -1;
+    let authorityEnd = -1;
+    let colonBeforeLastAt = false;
+    let colonSeen = false;
+    while (
+      cursor < value.length &&
+      !WHITESPACE.test(value[cursor]!) &&
+      !value.startsWith('://', cursor)
+    ) {
+      const char = value[cursor]!;
+      if (char === '@') {
+        if (firstAt === -1) firstAt = cursor;
+        lastAt = cursor;
+        colonBeforeLastAt = colonSeen;
+      } else if (char === ':') {
+        colonSeen = true;
+      } else if (authorityEnd === -1 && AUTHORITY_END.test(char)) {
+        authorityEnd = cursor;
+      }
+      cursor++;
+    }
+    const hasUserinfo =
+      lastAt > infoStart && (authorityEnd === -1 || firstAt < authorityEnd || colonBeforeLastAt);
+    if (schemeStart < separator && hasUserinfo) {
+      out += value.slice(copied, infoStart) + '***@';
+      copied = lastAt + 1;
+    }
+    separator = value.indexOf('://', cursor);
+  }
+  return copied === 0 ? value : out + value.slice(copied);
 }
 
 /**

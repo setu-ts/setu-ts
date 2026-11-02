@@ -26,14 +26,15 @@ for (const host of [
       };
       const scripts = manifest.scripts ?? manifest.tasks!;
       if (runtime === 'node') {
-        // M131a X88-2: local Node scripts load `.env` through the runtime.
-        const envFile = '--env-file-if-exists=.env ';
+        // M131a: local Node scripts run the OpenTelemetry preload (X88-4) and
+        // load `.env` through the runtime (X88-2).
+        const envFile = '--import ./instrumentation.mjs --env-file-if-exists=.env ';
         expect(scripts['build']).toBe(
           `${full ? 'react-router build && ' : ''}tsc --noEmit && setu build`,
         );
         expect(scripts['start']).toBe(`node ${envFile}--enable-source-maps dist/main.js`);
         expect(scripts['start:dev']).toBe(
-          `tsx ${envFile}${full ? 'dev.ts' : 'watch main.ts'}`,
+          full ? `tsx ${envFile}dev.ts` : `tsx watch ${envFile}main.ts`,
         );
         expect(scripts['start:debug']).toBe(
           `node ${envFile}--inspect --import tsx ${full ? 'dev.ts' : 'main.ts'}`,

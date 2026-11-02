@@ -6,7 +6,7 @@
  * @module
  */
 import { withHttpStatusHint } from '@setu-ts/common';
- 
+
 /**
  * Thrown by {@link IMessageBroker.request} when no correlated reply arrives
  * within the configured `timeoutMs` window. The pending request is abandoned

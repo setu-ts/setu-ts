@@ -28,6 +28,12 @@ export const CLIENT_RANGES: Readonly<Record<string, string>> = {
   '@opentelemetry/sdk-trace-base': '^2.9.0',
   '@opentelemetry/resources': '^2.9.0',
   '@opentelemetry/context-async-hooks': '^2.0.0',
+  // `setu add telemetry` (M131a X88-10): the OTLP exporter, the ESM loader hook
+  // the generated preload registers, and the Redis client's instrumentation.
+  '@opentelemetry/exporter-trace-otlp-http': '^0.220.0',
+  '@opentelemetry/instrumentation': '^0.220.0',
+  '@opentelemetry/instrumentation-ioredis': '^0.68.0',
+  '@opentelemetry/instrumentation-redis': '^0.69.0',
   amqplib: '0.10.x',
   hono: '^4.12.30',
   ioredis: '5.x',

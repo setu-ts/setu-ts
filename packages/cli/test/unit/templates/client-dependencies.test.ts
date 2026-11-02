@@ -22,6 +22,9 @@ describe('CLIENT_RANGES', () => {
       '@opentelemetry/sdk-trace-base': '^2.9.0',
       '@opentelemetry/resources': '^2.9.0',
       '@opentelemetry/context-async-hooks': '^2.0.0',
+      // The ESM loader hook the generated preload registers (M131a X88-4). Not
+      // a framework dependency: on the line of the instrumentations' own.
+      '@opentelemetry/instrumentation': '^0.220.0',
     };
     for (const [name, range] of Object.entries(otel)) expect(CLIENT_RANGES[name]).toBe(range);
     for (const [name, range] of Object.entries(CLIENT_RANGES)) {

@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import {
-  BackendOutcomeUnknownError,
-  BackendUnavailableError,
-} from '@setu-ts/common';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';

@@ -150,6 +150,15 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 `PCI` (`'pci'`) and `SECRET` (`'secret'`) — and accepts any other string, which reaches
 `redactors[<string>]`.
 
+Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
+`redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
+(M131a). The userinfo runs to the URL's last `@`, so a malformed URL whose password holds an
+unencoded `@`, `/`, `#` or `?` is masked whole. A URL with no userinfo, an email address and an `@`
+in a path are left alone, except a path `@` after a port, which is masked. The scan is linear and
+applies to strings of any length. The same rule is exported as `maskUrlUserinfo(value)` for text
+that never passes through a redaction service, such as the one line a generated `main.ts` prints
+when the application fails to start.
+
 ```typescript
 import { createMaskRedactor, createRedactionService, DATA_CLASSIFICATIONS } from '@setu-ts/common';
 
@@ -242,6 +251,7 @@ package fits the plugin architecture.
 | `isWorkerTaskReply`                   | function  |
 | `isWorkerTaskRequest`                 | function  |
 | `keysetPredicate`                     | function  |
+| `maskUrlUserinfo`                     | function  |
 | `mintNextCursor`                      | function  |
 | `none`                                | function  |
 | `ok`                                  | function  |
@@ -279,6 +289,7 @@ package fits the plugin architecture.
 | `sortFingerprint`                     | function  |
 | `splitWorkerEnv`                      | function  |
 | `tenantBindingMismatch`               | function  |
+| `toBackendFault`                      | function  |
 | `unwrap`                              | function  |
 | `upgradeIntentOf`                     | function  |
 | `validatedStateKey`                   | function  |
@@ -288,6 +299,8 @@ package fits the plugin architecture.
 | `withResponseMetadata`                | function  |
 | `withSecurityMetadata`                | function  |
 | `withValidationMetadata`              | function  |
+| `BackendOutcomeUnknownError`          | class     |
+| `BackendUnavailableError`             | class     |
 | `DuplicateKeyError`                   | class     |
 | `InvalidCursorError`                  | class     |
 | `InvalidFieldValueError`              | class     |
@@ -640,6 +653,7 @@ package fits the plugin architecture.
 | `AuthorizationDecisionReason`         | type      |
 | `AuthorizationFailure`                | type      |
 | `AuthorizationSourceState`            | type      |
+| `BackendFault`                        | type      |
 | `BackoffStrategy`                     | type      |
 | `CacheDiagnosticsOperation`           | type      |
 | `CapabilityToken`                     | type      |

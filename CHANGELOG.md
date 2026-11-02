@@ -8,6 +8,31 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Backend faults answer `503` or `504` (M131a, `@setu-ts/common`, `@setu-ts/queue-plugin`,
+  `@setu-ts/messaging-plugin`, `@setu-ts/realtime-backplane-plugin`).** `common` exports
+  `BackendUnavailableError` (`503`, "The request was not applied."), `BackendOutcomeUnknownError`
+  (`504`, "The backend did not answer; the request may have been applied."), the `BackendFault`
+  union and `toBackendFault(error, source)`. `QueueService.add`, the Redis Streams `publish` and the
+  realtime backplane's Redis `publish` wrap a recognised driver failure in one of them, keeping the
+  driver error as `cause`; it is never served. `PublishTimeoutError` keeps its name and gains the
+  `504` hint itself (X88-5).
+- **`setu add` Redis arms for every Redis-backed plugin (M131a, `@setu-ts/cli`).**
+  `setu add cache --store redis`, `setu add idempotency --store redis`,
+  `setu add scheduler --lock redis` and `setu add realtime-backplane --backplane redis` wire the
+  plugin's Redis arm on `REDIS_URL` through the project's Redis client: node-redis when the
+  configuration imports the generated `nodeRedisClient` helper, ioredis when the project depends on
+  `ioredis`, otherwise the `--redis-client` given (ioredis by default). A `--redis-client` that
+  disagrees with the client already in use is refused (X88-1).
+- **An OpenTelemetry preload in every generated Node project (M131a, `@setu-ts/cli`).** Node
+  scaffolds carry `instrumentation.mjs`, which registers OpenTelemetry's ESM loader hook, and run it
+  with `--import ./instrumentation.mjs` from `start`, `start:dev`, `start:debug` and the production
+  image's `CMD`, so the drivers the plugins import lazily are instrumented. Without
+  `@opentelemetry/instrumentation` installed it does nothing. `setu add telemetry` now also installs
+  the OTLP exporter and, on Node, `@opentelemetry/instrumentation` and the instrumentation for the
+  project's Redis client, and prints the `instrumentations` key that enables it. The telemetry
+  README documents the preload for hand-written projects (X88-4, X88-10).
+- **`maskUrlUserinfo` (M131a, `@setu-ts/common`).** Masks URL userinfo in a string; the default
+  redaction rule below, exported for text that never passes through a redaction service (X88-8).
 - **Optimistic locking (M128, #540, `@setu-ts/database-plugin`, `@setu-ts/common`,
   `@setu-ts/multi-tenancy-plugin`).** `updateVersioned(repo, id, expectedVersion, data, options?)`
   and `deleteVersioned(repo, id, expectedVersion, options?)` write only while the record still
@@ -23,6 +48,35 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- **Notification is out of readiness by default (M131a, `@setu-ts/notification-plugin`).** The
+  `notification` indicator registers with `{ readiness: false }`, as `mail` already is (M119b):
+  every channel addresses a dependency all replicas share, so `/ready` no longer fails while a
+  channel is down; `/health` still reports it. Restore the old behaviour with
+  `HealthPlugin({ readiness: { include: ['notification'] } })` (V11-11).
+- **Enqueue and publish failures answer `503`/`504` instead of a masked `500` (M131a).** See Added;
+  a client that retried only on `503` should treat `504` as "outcome unknown" and retry only with an
+  idempotency key (X88-5).
+- **Redaction masks URL userinfo by default (M131a, `@setu-ts/common`).** Every string value no
+  redaction pattern matches has `scheme://user:password@host` rewritten to `scheme://***@host`, in
+  logs, traces and audit records alike (X88-8).
+- **Generated start scripts load `.env`, and a failed boot prints one masked line (M131a,
+  `@setu-ts/cli`).** Node local scripts pass `--env-file-if-exists=.env` (after `tsx watch`, which
+  reads its subcommand first) and Deno's pass `--env-file=.env` where the project writes one; Bun
+  loads `.env` itself; images keep the platform environment. The generated `main.ts` catches a
+  failed boot, prints `Startup failed: …` through `describeError` and `maskUrlUserinfo`, and exits
+  `1`, so a malformed `REDIS_URL` no longer reaches stderr with its password (X88-2, X88-8).
+- **Plugins report an injected client's connection errors (M131a).** The cache, idempotency, queue,
+  scheduler, realtime-backplane, messaging and auth rate-limit Redis stores now attach their
+  connection-error reporter to an injected client as well as a built one, so a node-redis outage
+  logs one `warn` per plugin per state change. `fromNodeRedis` rejects its first `connect()` at once
+  on the first connection error, naming the cause, instead of after the 15 s command bound (X88-3).
+- **Redis Streams polls outside any request (M131a, `@setu-ts/messaging-plugin`).** The broker
+  starts one poll timer and one reclaim timer at `connect()` for all subscriptions instead of one
+  pair per `subscribe()`, so a handler that subscribes lazily no longer parents every poll span to
+  that request (X88-7).
+- **Queue loop failures report once per state change (M131a, `@setu-ts/queue-plugin`).** A
+  recurring-scheduling or depth-probe failure logs one `warn` when it starts and one `info` on
+  recovery instead of an `error` on every poll (X88-9).
 - **Breaking: the rate limiter emits draft-11 header fields and refuses options it used to accept
   (#539, `@setu-ts/auth-plugin`, `@setu-ts/common`, `@setu-ts/exceptions`).** Each item below is
   breaking, and none has an option that restores the old behaviour. The migration steps are in
@@ -52,6 +106,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- **queue-plugin:** a stopped Redis reads `down` on the queue indicator again. The Redis adapter's
+  probe answers `false` without I/O when the client's own `status` says it lost its connection
+  (`reconnecting`, `close`, `end`), and `fromNodeRedis` reports `reconnecting` once a ready client
+  drops; before, ioredis parked the ping in its offline queue and the indicator read `up` with
+  `reachable: 'unknown'`, the `0.11.0` regression. A paused Redis still reads `up`/`unknown`
+  (V11-10, M131a).
+- **cli:** the `REDIS_URL` comment `setu new --broker`/`setu add` writes into `.env` says what reads
+  the value: the local start scripts, while a deployment sets the variable in its own environment.
+- **messaging-plugin docs:** `publishTimeoutMs: 0` removes only the plugin's bound; an injected
+  node-redis client still applies `fromNodeRedis`'s `commandTimeoutMs` (default 15 s), and the
+  README says how to raise it (X88-6, M131a).
 - **database-plugin:** a connection lost while a Drizzle × PostgreSQL transaction was open no longer
   exits the process. pg-pool leaves a checked-out client without an `'error'` listener, so a
   terminated backend raised an unhandled `'error'` event; every checked-out client now gets one

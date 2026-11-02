@@ -54,9 +54,14 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
     expect(scripts['start'] ?? '').toContain('--env-file-if-exists=.env');
     expect(scripts['start:dev'] ?? '').toContain('--env-file-if-exists=.env');
     expect(scripts['start:debug'] ?? '').toContain('--env-file-if-exists=.env');
+    // tsx reads its subcommand from the first argument, so the flags follow
+    // `watch`: `tsx --env-file-if-exists=.env watch main.ts` runs a file named
+    // `watch` (measured, tsx 4.23).
+    expect(scripts['start:dev']).toMatch(/^tsx watch --/);
     // The production image runs the entry directly, never `npm start`, so it
     // keeps the platform environment and passes no flag.
     const dockerfile = safeRead(h, '/work/svc/Dockerfile');
+    expect(dockerfile).toContain('CMD [');
     expect(dockerfile).not.toContain('--env-file');
   });
 
@@ -75,10 +80,21 @@ describe('generated local start scripts load .env (M131a X88-2)', () => {
     expect(deno).toContain('--env-file=.env');
   });
 
-  it('Compose commands carry no env-file flag', async () => {
+  it('a workspace member image carries no env-file flag', async () => {
     const h = harness();
-    await h.run(['new', 'svc', '--template', 'rest', '--runtime', 'node']);
-    const compose = safeRead(h, '/work/svc/docker/compose.yaml');
-    expect(compose).not.toContain('--env-file');
+    await h.run(['new', 'ws', '--workspace', '--runtime', 'node']);
+    expect(await h.run(['generate', 'app', 'svc', '--dir', '/work/ws'])).toBe(0);
+    const dockerfile = safeRead(h, '/work/ws/docker/Dockerfile');
+    expect(dockerfile).toContain('CMD [');
+    expect(dockerfile).not.toContain('--env-file');
+  });
+
+  it('the full-stack dev entry fails to start with one masked line (X88-8)', async () => {
+    const { FULL_STACK_DEV_ENTRY } = await import('../../src/templates/full-stack-build-files.ts');
+    expect(FULL_STACK_DEV_ENTRY.contents).toContain(
+      'console.error(`Startup failed: ${maskUrlUserinfo(describeError(error))}`);',
+    );
+    expect(FULL_STACK_DEV_ENTRY.contents).toContain('await viteServer.close();');
+    expect(FULL_STACK_DEV_ENTRY.contents).toContain('return runtime.exit(1);');
   });
 });

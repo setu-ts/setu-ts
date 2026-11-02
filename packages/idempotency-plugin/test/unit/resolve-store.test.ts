@@ -60,16 +60,16 @@ describe('resolveStore (M109a §3.14)', () => {
     await expect(store.connect(createClockRuntime())).resolves.toBeUndefined();
   });
 
-  it('does NOT attach the reporter to an injected client', async () => {
+  it('attaches the reporter to an injected client too (M131a X88-3)', async () => {
     const events: string[] = [];
     const client = {
       ...injectedClient(),
       on: (event: string): void => void events.push(event),
     };
     await resolveStore({ type: 'redis', namespace: 'shop', client }, noopReporter, () => undefined);
-    // The caller owns that client's event handling; adding a listener here
-    // would silence it (plan §3.5).
-    expect(events).toEqual([]);
+    // An injected node-redis client's outages must be as visible as a built
+    // ioredis client's (M131a §3.5): one listener for errors, one for recovery.
+    expect(events).toEqual(['error', 'ready']);
   });
 
   it('logs through the thunk when the injected client reports an evicting policy', async () => {

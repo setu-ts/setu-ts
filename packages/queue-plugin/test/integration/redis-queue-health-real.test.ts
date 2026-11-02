@@ -69,6 +69,7 @@ describe('M131a V11-10 REAL RedisQueue probe reads client status', () => {
         if (typeof probe === 'function') {
           expect(await probe()).toBe(true);
         }
+        // The probe's ping connected the lazy client (status was `wait`).
         expect(live.status).toBe('ready');
       } finally {
         await liveQueue.disconnect().catch(() => undefined);
@@ -79,10 +80,10 @@ describe('M131a V11-10 REAL RedisQueue probe reads client status', () => {
       // `ready` — the exact state the probe short-circuits on. We do not
       // await `connect()` (it would hang on the closed port, the V11-10 bug);
       // we assert the driver's own state instead.
-      const closed = new Redis(
-        `redis://127.0.0.1:${closedPort}`,
-        { lazyConnect: true, retryStrategy: () => null },
-      );
+      const closed = new Redis(`redis://127.0.0.1:${closedPort}`, {
+        lazyConnect: true,
+        retryStrategy: () => null,
+      });
       try {
         // Kick the connection so ioredis moves off `wait` and reports its real
         // state; `retryStrategy: () => null` makes it settle to `end` rather
@@ -93,6 +94,16 @@ describe('M131a V11-10 REAL RedisQueue probe reads client status', () => {
           await new Promise((r) => setTimeout(r, 50));
         }
         expect(closed.status).not.toBe('ready');
+        // The closed-port client has lost its only connection attempt, so the
+        // probe answers `false` at once rather than hanging on the ping.
+        const closedQueue = new RedisQueue({ client: toQueueClient(closed) });
+        await closedQueue.connect().catch(() => undefined);
+        const probe = closedQueue.isHealthy;
+        if (typeof probe === 'function') {
+          const started = performance.now();
+          expect(await probe()).toBe(false);
+          expect(performance.now() - started).toBeLessThan(500);
+        }
       } finally {
         closed.disconnect();
       }

@@ -4,10 +4,7 @@ import {
   withDeadline,
   resolveProbeTiming,
 } from '@setu-ts/common';
-import {
-  OptionalDependencyUnavailableError,
-  toBackendFault,
-} from '@setu-ts/common';
+import { OptionalDependencyUnavailableError, toBackendFault } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
   ISubscription,

@@ -39,15 +39,16 @@ export function registerDeployRoutes(router: IRouterApi): void {
 
 - The default `'memory'` transport shares frames only inside one process. Its default bus name is
   `default`; a bare registration does not connect replicas.
-- Redis needs two connections: injected `client` and `subscriber` must be supplied together.
-  Otherwise the transport lazily loads `ioredis` and builds both.
-- Instances must share `topic`, default `setu-ts.realtime`; `origin` defaults to a generated id and
-  prevents replaying an instance's own frames.
+- Redis needs two connections: injected `client` and `subscriber` must be supplied together
+  (node-redis: `client: nodeRedisClient(url)` and `subscriber`). Otherwise the transport loads
+  `ioredis` and builds both.
+- Instances must share `topic`, default `setu-ts.realtime`; a generated `origin` stops an instance
+  replaying its own frames.
 - The plugin orders before its WebSocket and SSE consumers. Their room/channel broadcasts fan out
   automatically; membership counts stay local and exclusions apply only on the sender.
 - Health remains up during a backend outage; inspect `data.reachable`. Local delivery continues.
 - Redis commands on built connections have a 15000 ms bound. A timed-out publication can still
-  arrive later, so do not treat failure as proof of non-delivery.
+  arrive later, so failure is not proof of non-delivery.
 
 ## Other options
 

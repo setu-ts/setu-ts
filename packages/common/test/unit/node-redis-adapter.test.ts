@@ -320,6 +320,23 @@ describe('fromNodeRedis', () => {
     expect(raw.destroy).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a client that lost its connection after being ready as reconnecting (V11-10)', async () => {
+    const raw = nodeRedisFake();
+    const adapter = fromNodeRedis(raw);
+    expect(adapter.status).toBe('wait');
+    await adapter.connect();
+    raw.isOpen = true;
+    raw.isReady = true;
+    expect(adapter.status).toBe('ready');
+    // node-redis keeps the socket open while it redials a dropped server.
+    raw.isReady = false;
+    expect(adapter.status).toBe('reconnecting');
+    raw.isOpen = false;
+    expect(adapter.status).toBe('reconnecting');
+    adapter.disconnect();
+    expect(adapter.status).toBe('end');
+  });
+
   it('always installs one error listener and forwards only when configured', () => {
     const silent = nodeRedisFake();
     fromNodeRedis(silent);

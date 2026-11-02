@@ -320,7 +320,13 @@ describe('the entry shutdown handler', () => {
       expect(main).not.toContain('Deno.exit');
       expect(main).not.toContain('process.on(');
       expect(main).not.toContain('process.exit');
-      expect(main).not.toContain('console.error');
+      // One console line, and only for a failed boot (M131a X88-8): no plugin
+      // has registered then, so there is no logger to report through. A failed
+      // shutdown still goes through the logger (next test).
+      expect(main.match(/console\.error/g)).toHaveLength(1);
+      expect(main).toContain(
+        'console.error(`Startup failed: ${maskUrlUserinfo(describeError(error))}`);',
+      );
     });
 
     // Shutdown failures used to bypass structured logging entirely. The logger
@@ -454,8 +460,9 @@ describe('a template with a frontend build, on a Deno target', () => {
   it('emits the same development entry on Node and Bun, run by a dev script', () => {
     const deno = contentsOf([...projectFiles('shop', 'deno', host)], 'dev.ts');
     for (const [runtime, dev] of [
-      // M131a X88-2: local Node scripts load `.env` through the runtime; Bun does it itself.
-      ['node', 'tsx --env-file-if-exists=.env dev.ts'],
+      // M131a: Node runs the OpenTelemetry preload and loads `.env` through the
+      // runtime; Bun loads `.env` itself and takes no preload.
+      ['node', 'tsx --import ./instrumentation.mjs --env-file-if-exists=.env dev.ts'],
       ['bun', 'bun run dev.ts'],
     ] as const) {
       const files = [
