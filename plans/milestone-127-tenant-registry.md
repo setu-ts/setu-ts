@@ -161,8 +161,8 @@ Read at `develop` `29be2e77b`.
   Neither `detail` contains the requested id. No tenant resolved: unchanged (`required` decides).
   Excluded paths: unchanged (skip everything, including the registry).
 
-- **Logging:** the shared check (§3.3) logs, so a fault seen by either entry point counts: on a
-  registry fault it logs `warn`
+- **Logging:** the shared check (§3.3) logs, so a fault seen through the middleware or
+  `lookupTenant` counts: on a registry fault it logs `warn`
   `'Tenant registry lookup failed; requests naming a tenant answer 503'` with
   `{ error: describeError(cause) }`, once per transition from healthy to failing, and `info`
   `'Tenant registry lookups recovered'` on the first success after a failure (the M119g pattern).
