@@ -4,6 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import { MultiTenancyService } from '../../src/services/multi-tenancy-service.ts';
 import { TenantDataStoreNotReadyError, TenantNotResolvedError } from '../../src/errors.ts';
+import { TenantCheck } from '../../src/registry/tenant-check.ts';
+import { none, some } from '@setu-ts/common';
 import { createFakeContext } from '../fixtures/fake-context.ts';
 import type { ITenantDataStore } from '../../src/interfaces/index.ts';
 
@@ -146,5 +148,29 @@ describe('multi tenancy service', () => {
     expect(() => service.getRepository<unknown, string>(ctx, 'User')).toThrow(
       TenantDataStoreNotReadyError,
     );
+  });
+
+  it('lookupTenant with no registry answers some({ id }) — what the HTTP path admits (M127 §3.9)', async () => {
+    const service = new MultiTenancyService({ store: {} as unknown as ITenantDataStore });
+    const result = await service.lookupTenant('anything');
+    expect(result.present && result.value).toEqual({ id: 'anything' });
+  });
+
+  it('lookupTenant delegates to the shared check', async () => {
+    const calls: string[] = [];
+    const check = new TenantCheck({
+      configured: true,
+      registry: {
+        lookup: (id) => {
+          calls.push(id);
+          return Promise.resolve(id === 'acme' ? some({ id, name: 'Acme' }) : none());
+        },
+      },
+    });
+    const service = new MultiTenancyService({ check });
+    const hit = await service.lookupTenant('acme');
+    expect(hit.present && hit.value).toEqual({ id: 'acme', name: 'Acme' });
+    expect((await service.lookupTenant('initech')).present).toBe(false);
+    expect(calls).toEqual(['acme', 'initech']);
   });
 });

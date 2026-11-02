@@ -65,6 +65,10 @@ class PerTenantMapTenancy implements IMultiTenancyService {
     return this.#repoFor<Entity, Id>(tenantId);
   }
 
+  lookupTenant(id: string): Promise<import('@setu-ts/common').Option<ITenant>> {
+    return Promise.resolve({ present: true, value: { id } });
+  }
+
   prefixCacheKey(tenantId: string, key: string): string {
     return `${tenantId}:${key}`;
   }

@@ -18,6 +18,7 @@ import {
   TenantDataStoreNotReadyError,
   tenantMiddleware,
   TenantNotResolvedError,
+  TenantRegistryUnavailableError,
 } from '../../src/index.ts';
 import { describe, expect, it } from 'vitest';
 
@@ -36,6 +37,7 @@ const EXPECTED_VALUES = [
   'TENANT_CACHE_PREFIX_STATE_KEY',
   'TenantDataStoreNotReadyError',
   'TenantNotResolvedError',
+  'TenantRegistryUnavailableError',
   'getTenantCachePrefix',
   'tenantMiddleware',
 ] as const;
@@ -64,6 +66,8 @@ describe('barrel exports', () => {
     expect(typeof MemoryTenantDataStore.prototype.create).toEqual('function');
     expect(TenantNotResolvedError.prototype instanceof Error).toEqual(true);
     expect(TenantDataStoreNotReadyError.prototype instanceof Error).toEqual(true);
+    expect(typeof TenantRegistryUnavailableError).toEqual('function');
+    expect(TenantRegistryUnavailableError.prototype instanceof Error).toEqual(true);
     expect(typeof CAPABILITIES.MULTI_TENANCY).toEqual('string');
     expect(CAPABILITIES.MULTI_TENANCY).toEqual('multi-tenancy');
   });
@@ -89,6 +93,7 @@ describe('barrel exports', () => {
         update: () => Promise.resolve(null),
         delete: () => Promise.resolve(false),
       }),
+      lookupTenant: (id) => Promise.resolve({ present: true, value: { id } }),
       prefixCacheKey: (tenantId, key) => `${tenantId}:${key}`,
     };
     expect(typeof service.getRepositoryFor).toBe('function');

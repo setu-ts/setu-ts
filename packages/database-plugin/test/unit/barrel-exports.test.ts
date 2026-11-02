@@ -551,6 +551,19 @@ describe('database-plugin barrel exports — M101c tenant store bridge', () => {
   });
 });
 
+describe('database-plugin barrel exports — M127 tenant registry', () => {
+  it('exports createDatabaseTenantRegistry and its options type', () => {
+    const options: database.DatabaseTenantRegistryOptions = { entity: 'Org', idField: 'slug' };
+    expect(typeof database.createDatabaseTenantRegistry).toBe('function');
+    const services = {
+      get: () => ({ getRepository: () => ({ findOne: () => Promise.resolve(null) }) }),
+    } as unknown as common.IServiceRegistry;
+    const registry: common.ITenantRegistry =
+      database.createDatabaseTenantRegistry(options)(services);
+    expect(typeof registry.lookup).toBe('function');
+  });
+});
+
 describe('database-plugin barrel exports — M107 outbox store bridge', () => {
   it('exports createDatabaseOutboxStore, its options type and OutboxStoreUnavailableError', () => {
     // Pinned against the BARREL: an application passes the factory to the

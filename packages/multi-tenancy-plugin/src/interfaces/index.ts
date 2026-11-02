@@ -8,8 +8,10 @@
  */
 
 import type {
+  ITenant,
   ITenantDataStore,
   ITenantIsolationStrategy,
+  ITenantRegistry,
   ITenantResolver,
   PathPattern,
   RegistryFactory,
@@ -62,6 +64,29 @@ export interface TenantCacheOptions {
   prefix?: boolean;
   /** Separator between tenant id and key (default `':'`). */
   separator?: string;
+}
+
+/**
+ * Bounds and TTL of the cache wrapped around an instance or factory `tenants`
+ * registry. Only hits are cached, keyed by the requested id.
+ *
+ * @since 0.12.0
+ */
+export interface TenantRegistryCacheOptions {
+  /**
+   * How long a hit is served from cache, in ms (default `30_000`). A suspended
+   * tenant stays admitted for up to this long. `0` disables caching. A
+   * finite integer `>= 0`.
+   */
+  ttlMs?: number;
+  /** Maximum cached tenants (default `1_000`). A finite integer `>= 1`. */
+  maxEntries?: number;
+  /**
+   * Maximum UTF-8 bytes over every cached key plus its tenant's JSON (default
+   * `1_048_576`). A tenant larger than this on its own is never cached. A
+   * finite integer `>= 1`.
+   */
+  maxBytes?: number;
 }
 
 /** Options passed to the `MemoryTenantDataStore` constructor. */
@@ -162,6 +187,38 @@ export interface MultiTenancyPluginOptions {
    * routes sit on those paths.
    */
   exclude?: readonly PathPattern[];
+  /**
+   * Which tenants exist. When set, every resolved tenant id is checked
+   * before the request carries it: an unknown id answers
+   * `unknownTenantStatus` (`Unknown Tenant`), a registry fault answers `503`
+   * (`Tenant Registry Unavailable`), and the registry's tenant — with its
+   * canonical `id`, `name` and `metadata` — replaces the resolved one. When
+   * omitted, any resolved id is the tenant (the behaviour before 0.12.0).
+   *
+   * - a list of ids or tenants — an in-memory registry, validated here;
+   * - an {@linkcode ITenantRegistry} instance;
+   * - a {@linkcode RegistryFactory} resolved in `onInit`, such as
+   *   `createDatabaseTenantRegistry()` from `@setu-ts/database-plugin`.
+   *
+   * @since 0.12.0
+   */
+  tenants?: readonly (string | ITenant)[] | ITenantRegistry | RegistryFactory<ITenantRegistry>;
+  /**
+   * Status of the `Unknown Tenant` refusal: an integer in 400–499, default
+   * `404`. 400, 403 and 404 are recommended; a 401 without a challenge may
+   * make a browser prompt for credentials. Refused without `tenants`.
+   *
+   * @since 0.12.0
+   */
+  unknownTenantStatus?: number;
+  /**
+   * The cache around an instance or factory `tenants` registry: `false`
+   * disables it; omitted uses the defaults. Refused with a `tenants` list or
+   * without `tenants`.
+   *
+   * @since 0.12.0
+   */
+  tenantCache?: false | TenantRegistryCacheOptions;
 }
 
 // The data-store port ({@linkcode ITenantDataStore}) and the isolation

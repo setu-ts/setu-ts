@@ -112,9 +112,66 @@ describe('multi-tenancy — real kernel app', () => {
 
     const result = await tenancy!.check();
     expect(result.status).toEqual('up');
-    expect(result.data).toEqual({ resolver: 'header', strategy: 'column', store: 'memory' });
+    expect(result.data).toEqual({
+      resolver: 'header',
+      strategy: 'column',
+      store: 'memory',
+      registry: 'none',
+    });
 
     await app.stop();
+  });
+
+  it('reports the health `registry` field for every tenants arm (M127 §3.11)', async () => {
+    const registryField = async (
+      tenants: Parameters<typeof MultiTenancyPlugin>[0]['tenants'],
+    ): Promise<unknown> => {
+      const app = createApplication({
+        plugins: [
+          RuntimePlugin(),
+          MultiTenancyPlugin({ resolver: 'header', ...(tenants !== undefined && { tenants }) }),
+        ],
+      });
+      const read = async (): Promise<unknown> => {
+        const indicator = app.services
+          .getAll<IHealthIndicator>(CAPABILITIES.HEALTH_INDICATOR)
+          .find((i) => i.name === 'multi-tenancy');
+        return (await indicator!.check()).data?.registry;
+      };
+      await app.start();
+      const value = await read();
+      await app.stop();
+      return value;
+    };
+    const instance = { lookup: () => Promise.resolve({ present: false as const }) };
+
+    expect(await registryField(undefined)).toBe('none');
+    expect(await registryField(['acme'])).toBe('static');
+    expect(await registryField(instance)).toBe('custom');
+    // A factory reports 'factory' until onInit binds it, then 'custom'.
+    expect(await registryField(() => instance)).toBe('custom');
+  });
+
+  it('a factory registry reports `factory` before onInit binds it', async () => {
+    const { MultiTenancyPlugin: Plugin } = await import('../../src/index.ts');
+    const registered: { check?: () => Promise<{ data?: Record<string, unknown> }> } = {};
+    const plugin = Plugin({
+      resolver: 'header',
+      tenants: () => ({ lookup: () => Promise.resolve({ present: false as const }) }),
+    });
+    const inits: (() => void)[] = [];
+    await plugin.register({
+      services: { has: () => false, register: () => undefined },
+      middleware: { add: () => undefined },
+      health: {
+        register: (_name: string, check: () => Promise<{ data?: Record<string, unknown> }>) => {
+          registered.check = check;
+        },
+      },
+      lifecycle: { onInit: (fn: () => void) => inits.push(fn), onClose: () => undefined },
+      runtime: { uuid: () => 'u', hrtime: () => 0 },
+    } as never);
+    expect((await registered.check!()).data?.registry).toBe('factory');
   });
 
   it('short-circuits a required-tenant request before the handler runs', async () => {

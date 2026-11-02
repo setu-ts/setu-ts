@@ -409,6 +409,7 @@ export type {
   ITenant,
   ITenantDataStore,
   ITenantIsolationStrategy,
+  ITenantRegistry,
   ITenantRepository,
   ITenantResolver,
 } from './services/tenancy.ts';
