@@ -1787,6 +1787,9 @@ importers:
         specifier: workspace:^
         version: link:../common
     devDependencies:
+      '@setu-ts/health-plugin':
+        specifier: workspace:^
+        version: link:../health-plugin
       '@setu-ts/kernel':
         specifier: workspace:^
         version: link:../kernel

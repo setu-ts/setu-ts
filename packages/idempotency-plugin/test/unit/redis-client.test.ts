@@ -11,6 +11,7 @@ import {
   validateInjectedClient,
 } from '../../src/stores/redis-client.ts';
 import type { RedisCtor } from '../../src/stores/redis-client.ts';
+import { resolveStore } from '../../src/stores/resolve-store.ts';
 
 /** A recording Redis constructor. */
 class RecordingRedis {
@@ -104,6 +105,32 @@ describe('validateInjectedClient (M109a §3.5)', () => {
       expect(error).toBeInstanceOf(IdempotencyConfigurationError);
       expect((error as IdempotencyConfigurationError).option).toBe('store.client');
     }
+  });
+});
+
+describe('resolveStore — an injected client (M131a X88-3)', () => {
+  it('attaches the reporter to an injected client, so its outages reach the logger', async () => {
+    const handlers: Array<{ event: string; handler: (value: unknown) => void }> = [];
+    const client = {
+      eval: () => Promise.resolve('settled'),
+      ping: () => Promise.resolve('PONG'),
+      quit: () => Promise.resolve('OK'),
+      call: () => Promise.resolve(['maxmemory-policy', 'noeviction']),
+      on(event: string, handler: (value: unknown) => void): unknown {
+        handlers.push({ event, handler });
+        return undefined;
+      },
+    };
+    const reported: unknown[] = [];
+    await resolveStore(
+      { type: 'redis', namespace: 'test', client },
+      { report: (error) => void reported.push(error), recovered: () => {} },
+      () => undefined,
+    );
+    expect(handlers.map((entry) => entry.event)).toEqual(['error', 'ready']);
+    const boom = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    handlers.find((entry) => entry.event === 'error')?.handler(boom);
+    expect(reported).toEqual([boom]);
   });
 });
 

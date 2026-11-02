@@ -322,7 +322,7 @@ export type { DataClassification } from './redaction/classification.ts';
 export { createMaskRedactor, eraseRedactor } from './redaction/redactors.ts';
 export type { MaskOptions, RedactionContext, Redactor } from './redaction/redactors.ts';
 export type { FieldRedaction, RedactionPolicy } from './redaction/policy.ts';
-export { createRedactionService } from './redaction/redaction-service.ts';
+export { createRedactionService, maskUrlUserinfo } from './redaction/redaction-service.ts';
 export type { IRedactionService } from './redaction/redaction-service.ts';
 export type {
   EntityKey,
@@ -721,6 +721,17 @@ export { checkWritePrecondition } from './services/write-precondition.ts';
 
 /** Shared connection-outage classifier and network errno vocabulary. */
 export { isConnectionFault, isConnectionFaultCode } from './errors/connection-fault.ts';
+
+/**
+ * Backend-fault classification: whether a thrown driver error means the request
+ * was not applied (503) or may have been applied (504).
+ */
+export {
+  BackendOutcomeUnknownError,
+  BackendUnavailableError,
+  toBackendFault,
+} from './errors/backend-fault.ts';
+export type { BackendFault } from './errors/backend-fault.ts';
 
 export { ReconnectSupervisor, fullJitterDelay } from './reconnect/reconnect-supervisor.ts';
 export type {

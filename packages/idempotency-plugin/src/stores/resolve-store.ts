@@ -4,6 +4,7 @@
  * @module
  */
 import type { ConnectionErrorReporter, IIdempotencyStore, ILogger } from '@setu-ts/common';
+import { attachConnectionErrorReporter } from '@setu-ts/common';
 import type { IdempotencyStoreConfig } from '../interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS, DEFAULT_REDIS_KEY_PREFIX } from '../constants.ts';
 import { createRedisIdempotencyClient, loadIoredis } from './redis-client.ts';
@@ -14,8 +15,10 @@ import { RedisIdempotencyStore } from './redis-store.ts';
  * Builds the store described by `config`.
  *
  * @param config - The store configuration (`{ type: 'memory' }` when omitted)
- * @param reporter - Routes a BUILT client's connection errors to the logger;
- *   never attached to an injected client
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @param logger - The logger thunk
  * @returns The store
  */
@@ -33,6 +36,7 @@ export async function resolveStore(
   }
   const keyPrefix = resolved.keyPrefix ?? DEFAULT_REDIS_KEY_PREFIX;
   if ('client' in resolved && resolved.client !== undefined) {
+    attachConnectionErrorReporter(resolved.client, reporter);
     return new RedisIdempotencyStore(resolved.client, {
       namespace: resolved.namespace,
       keyPrefix,

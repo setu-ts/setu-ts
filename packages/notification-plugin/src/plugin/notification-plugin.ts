@@ -102,7 +102,17 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
       // which is the whole point of carrying it instead of assuming `true`.
       const probes = buildChannelProbes(channelMap, ctx);
 
-      ctx.health.register('notification', async (): Promise<HealthCheckResult> => {
+      // M131a V11-11: out of readiness by default. Every notification channel
+      // addresses a dependency every replica shares (the mail server, the SMS
+      // provider, the push gateway), so draining all replicas cannot fix an
+      // outage — the M119b rule that puts `mail` out of readiness (M119b)
+      // applies to the whole indicator, not only the mail channel. An
+      // application that wants a channel to gate traffic opts in through the
+      // health plugin's per-indicator override:
+      // `HealthPlugin({ readiness: { include: ['notification'] } })`.
+      ctx.health.register(
+        'notification',
+        async (): Promise<HealthCheckResult> => {
         const reachability: Record<string, boolean | 'unknown'> = {};
         let anyUnreachable = false;
 
@@ -138,7 +148,9 @@ export function NotificationPlugin(options: NotificationPluginOptions): IPlugin 
           status: anyUnreachable ? 'down' : 'up',
           data: { channels: Array.from(channelMap.keys()), reachable: reachability },
         };
-      });
+      },
+        { readiness: false },
+      );
     },
   };
 }

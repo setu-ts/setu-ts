@@ -5,7 +5,11 @@
  * @since 0.2.0
  */
 
-import { attachConnectionErrorReporter, dispatchRealtimeFrame } from '@setu-ts/common';
+import {
+  attachConnectionErrorReporter,
+  dispatchRealtimeFrame,
+  toBackendFault,
+} from '@setu-ts/common';
 import type {
   IRealtimeBackplane,
   IRealtimeHandlerErrorReporter,
@@ -192,10 +196,18 @@ export class RedisBackplane implements IRealtimeBackplane {
     // Injected connections belong to the caller: on failure they are left as
     // they arrived, while connections built here are ours to clean up.
     let owned = false;
+    const reporter = this.#options.connectionErrorReporter;
 
     if (this.#options.client !== undefined && this.#options.subscriber !== undefined) {
       publisher = this.#options.client;
       subscriber = this.#options.subscriber;
+      // One reporter for both: the pair fails together, so an outage's
+      // identical errors from the two connections de-duplicate into one warn.
+      // (M131a X88-3) an injected client's outages must be as visible as a
+      // built one's; the attach is structural, so a client without `on` is
+      // left alone.
+      attachConnectionErrorReporter(publisher, reporter);
+      attachConnectionErrorReporter(subscriber, reporter);
       for (const client of [publisher, subscriber]) {
         if (client.status === 'wait' && typeof client.connect === 'function') {
           await client.connect();
@@ -207,7 +219,6 @@ export class RedisBackplane implements IRealtimeBackplane {
       owned = true;
       const clientOptions =
         this.#commandTimeoutMs === 0 ? {} : { commandTimeout: this.#commandTimeoutMs };
-      const reporter = this.#options.connectionErrorReporter;
       publisher = module.create(url, clientOptions);
       attachConnectionErrorReporter(publisher, reporter);
       try {
@@ -362,7 +373,14 @@ export class RedisBackplane implements IRealtimeBackplane {
       );
     }
     // Always the publisher: the subscriber connection would reject this.
-    await publisher.publish(this.#topic, JSON.stringify(frame));
+    try {
+      await publisher.publish(this.#topic, JSON.stringify(frame));
+    } catch (error) {
+      // M131a X88-5: a backend fault says whether the frame was applied.
+      const fault = toBackendFault(error, 'realtime-backplane-plugin: redis transport');
+      if (fault !== undefined) throw fault;
+      throw error;
+    }
   }
 
   subscribe(handler: RealtimeFrameHandler): Promise<() => void> {

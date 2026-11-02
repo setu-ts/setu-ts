@@ -195,8 +195,10 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @param commandTimeoutMs - Bound applied to the BUILT client only; an
  *   injected client is the caller's and keeps its own configuration
  * @returns The resolved client instance
@@ -215,6 +217,7 @@ async function resolveClient(
           '(needs: zadd, zrangebyscore, zrem, hset, hget, hdel, del, quit)',
       );
     }
+    attachConnectionErrorReporter(injectedClient, reporter);
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -327,12 +330,22 @@ export class RedisQueue implements QueueAdapter {
   /**
    * M70c: installs `isHealthy` from the client's `ping()` when present; leaves
    * it absent (unknown) otherwise.
+   *
+   * M131a V11-10: a client that exposes a string `status` other than `'ready'`
+   * already knows it has no connection, so the probe answers `false` without
+   * I/O. ioredis parks a stopped server's commands in its offline queue, so a
+   * ping there hangs like a hung one and the indicator read `up`/unknown; a
+   * PAUSED server keeps `'ready'` (the TCP connection is open), so a pause
+   * still reads `up`/unknown, the intended M119b rule.
    */
   #installProbe(): void {
     const client = this.#client;
     if (client !== null && typeof client.ping === 'function') {
       const ping = client.ping;
       this.isHealthy = async (): Promise<boolean> => {
+        if (client.status !== undefined && client.status !== 'ready') {
+          return false;
+        }
         try {
           // ioredis `ping` reads `this.options` — an unbound call throws
           // `TypeError: Cannot read properties of undefined (reading 'options')`

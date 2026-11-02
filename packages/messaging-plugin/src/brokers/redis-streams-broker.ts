@@ -4,7 +4,10 @@ import {
   withDeadline,
   resolveProbeTiming,
 } from '@setu-ts/common';
-import { OptionalDependencyUnavailableError } from '@setu-ts/common';
+import {
+  OptionalDependencyUnavailableError,
+  toBackendFault,
+} from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
   ISubscription,
@@ -114,8 +117,10 @@ export function validateClient(client: unknown): client is IRedisStreamsClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -131,6 +136,7 @@ async function resolveClient(
           '(needs: xadd, xgroup, xreadgroup, xack, quit, connect, xpending, xclaim, xinfo)',
       );
     }
+    attachConnectionErrorReporter(injectedClient, reporter);
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -140,10 +146,218 @@ async function resolveClient(
 }
 
 /**
- * Internal subscription entry for tracking poll loops.
+ * The per-subscription work of one shared poll or reclaim tick (M131a X88-7).
+ *
+ * The broker runs ONE poll timer and ONE reclaim timer, started in `connect()`
+ * (startup, no active span) and serving every subscription. Each subscription
+ * keeps its own in-flight guard, stop flag and drain, so a slow subscription
+ * still skips only its own tick, and a subscription added after start is served
+ * by the running timers.
+ */
+interface ConsumerLoop {
+  /** Runs this subscription's poll for one tick (driven by the shared poll timer). */
+  pollTick: () => void;
+  /** Runs this subscription's reclaim for one tick (driven by the shared reclaim timer). */
+  reclaimTick: () => void;
+  /** Stops and drains this subscription (the shared timers are cleared by `disconnect`). */
+  unsubscribe: () => Promise<void>;
+}
+
+interface ConsumerLoopDeps {
+  readonly runtime: IRuntimeServices;
+  readonly client: IRedisStreamsClient;
+  readonly topic: string;
+  readonly groupId: string;
+  readonly consumerId: string;
+  readonly deliverHandler: MessageHandler;
+  readonly blockSizeMs: number;
+  readonly maxAttempts: number;
+  readonly delaysMs: readonly number[];
+  readonly logger: { error: (msg: string) => void } | undefined;
+  readonly deliver: (
+    client: IRedisStreamsClient,
+    topic: string,
+    groupId: string,
+    handler: MessageHandler,
+    entry: [string, string[]],
+    deliveries: number,
+    active: () => boolean,
+  ) => Promise<void>;
+  readonly deadLetter: (
+    client: IRedisStreamsClient,
+    topic: string,
+    groupId: string,
+    entry: [string, string[]],
+    deliveries: number,
+    active: () => boolean,
+  ) => Promise<void>;
+  readonly cleanConsumers: (
+    client: IRedisStreamsClient,
+    topic: string,
+    groupId: string,
+    consumerId: string,
+    final: boolean,
+    active: () => boolean,
+  ) => Promise<void>;
+}
+
+/**
+ * Builds the per-subscription consumer loop (poll, reclaim, in-flight guards,
+ * stop flag and drain) that one shared timer tick drives.
+ */
+function createConsumerLoop(deps: ConsumerLoopDeps): ConsumerLoop {
+  const {
+    runtime,
+    client,
+    topic,
+    groupId,
+    consumerId,
+    deliverHandler,
+    blockSizeMs,
+    maxAttempts,
+    delaysMs,
+    logger,
+    deliver: deliverFn,
+    deadLetter: deadLetterFn,
+    cleanConsumers: cleanConsumersFn,
+  } = deps;
+  let stopped = false;
+  let abandoned = false;
+  const active = (): boolean => !abandoned;
+  let pollFlight: Promise<void> | undefined;
+  let reclaimFlight: Promise<void> | undefined;
+  const delivering = new Set<string>();
+  // Rotate through the PEL so a high-tier first batch cannot starve later entries.
+  let pendingStart = '-';
+  const deliver = async (entry: [string, string[]], deliveries: number): Promise<void> => {
+    delivering.add(entry[0]);
+    try {
+      await deliverFn(client, topic, groupId, deliverHandler, entry, deliveries, active);
+    } finally {
+      delivering.delete(entry[0]);
+    }
+  };
+  const poll = async (): Promise<void> => {
+    // Read ONE entry at a time and keep reading while entries arrive. A
+    // batched read leases every entry at read time, so an entry queued behind
+    // earlier handlers ages toward delaysMs[0] and another replica's reclaim
+    // could take it before this replica starts it. One-at-a-time keeps the
+    // lease equal to a single handler run, which is what the docs promise.
+    while (!stopped) {
+      const result = await client.xreadgroup(
+        'GROUP',
+        groupId,
+        consumerId,
+        'COUNT',
+        '1',
+        'BLOCK',
+        String(blockSizeMs),
+        'STREAMS',
+        topic,
+        '>',
+      );
+      if (!result) return;
+      const entries = result[0][1] as Array<[string, string[]]>;
+      if (entries.length === 0) return;
+      for (const entry of entries) {
+        if (stopped) return;
+        await deliver(entry, 1);
+      }
+    }
+  };
+  const reclaim = async (): Promise<void> => {
+    const pending = await client.xpending(
+      topic,
+      groupId,
+      'IDLE',
+      String(delaysMs[0]),
+      pendingStart,
+      '+',
+      '10',
+    );
+    pendingStart = pending.length === 10 ? `(${pending[pending.length - 1][0]}` : '-';
+    for (const [id, , idle, deliveries] of pending) {
+      if (stopped) break;
+      const delay = delaysMs[Math.min(deliveries - 1, delaysMs.length - 1)];
+      if (idle < delay || delivering.has(id)) continue;
+      // The server rechecks min-idle atomically. An empty reply can mean a
+      // lost race OR a trimmed entry: never ACK it (that could ACK the winner).
+      const entries = await client.xclaim(topic, groupId, consumerId, String(delay), id);
+      for (const entry of entries) {
+        if (stopped) break;
+        // Redis 6.2 claims a trimmed PEL entry and returns null; Redis 7
+        // drops it server-side and returns no entry. Only null proves a
+        // successful claim of missing data; an empty reply may be a race.
+        if (entry === null) {
+          await client.xack(topic, groupId, id);
+          continue;
+        }
+        if (deliveries >= maxAttempts) {
+          // Acquire fields/ownership, but never invoke the handler beyond its budget.
+          await deadLetterFn(client, topic, groupId, entry, deliveries, active);
+        } else {
+          await deliver(entry, deliveries + 1);
+        }
+      }
+    }
+    if (!stopped) await cleanConsumersFn(client, topic, groupId, consumerId, false, active);
+  };
+  const observe = (work: () => Promise<void>, label: string): Promise<void> =>
+    work().catch((error: unknown) => {
+      logger?.error(`${label} error: ${describeError(error)}`);
+    });
+  const pollTick = (): void => {
+    if (stopped || pollFlight !== undefined) return;
+    pollFlight = observe(poll, 'Poll').finally(() => {
+      pollFlight = undefined;
+    });
+  };
+  const reclaimTick = (): void => {
+    if (stopped || reclaimFlight !== undefined) return;
+    reclaimFlight = observe(reclaim, 'Reclaim').finally(() => {
+      reclaimFlight = undefined;
+    });
+  };
+  let closing: Promise<void> | undefined;
+  const unsubscribe = (): Promise<void> => {
+    closing ??= (async () => {
+      stopped = true;
+      // The shared poll/reclaim timers are cleared by `disconnect()`, not here:
+      // one subscription stopping must not stop the timers serving its siblings.
+      let timeoutHandle: TimerHandle;
+      const deadline = new Promise<void>((resolve) => {
+        timeoutHandle = runtime.setTimeout(() => {
+          abandoned = true;
+          logger?.error('Redis subscription shutdown drain timed out; pending work retained');
+          resolve();
+        }, SHUTDOWN_DRAIN_MS);
+      });
+      try {
+        await Promise.race([
+          observe(async () => {
+            await Promise.all([pollFlight, reclaimFlight]);
+            if (!abandoned) {
+              await cleanConsumersFn(client, topic, groupId, consumerId, true, active);
+            }
+          }, 'Consumer cleanup'),
+          deadline,
+        ]);
+      } finally {
+        runtime.clearTimeout(timeoutHandle);
+      }
+    })();
+    return closing;
+  };
+  return { pollTick, reclaimTick, unsubscribe };
+}
+
+/**
+ * Internal subscription entry: its id, the shared-timer ticks, and the drain.
  */
 interface ActiveSubscription {
   id: string;
+  pollTick: () => void;
+  reclaimTick: () => void;
   unsubscribe: () => Promise<void>;
 }
 
@@ -177,6 +391,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #consumerIdleSweepMs: number;
   #rr: RequestReplyCore;
   #probe: () => Promise<boolean>;
+  /** The one poll timer serving every subscription (M131a X88-7). */
+  #pollTimer: TimerHandle | undefined;
+  /** The one reclaim timer serving every subscription (M131a X88-7). */
+  #reclaimTimer: TimerHandle | undefined;
 
   /**
    * Creates a new Redis Streams broker.
@@ -270,6 +488,20 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }
+    // M131a X88-7: ONE poll timer and ONE reclaim timer, started here at
+    // connect() (startup, no active span), serve every subscription. Creating
+    // them in subscribe() would parent each poll's span to the caller's
+    // request context.
+    this.#pollTimer = this.#runtime.setInterval(() => {
+      for (const subscription of this.#activeSubscriptions.values()) {
+        subscription.pollTick();
+      }
+    }, this.#pollIntervalMs);
+    this.#reclaimTimer = this.#runtime.setInterval(() => {
+      for (const subscription of this.#activeSubscriptions.values()) {
+        subscription.reclaimTick();
+      }
+    }, this.#reclaimIntervalMs);
     this.#ready = true;
   }
 
@@ -280,6 +512,17 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
    * @since 0.1.0
    */
   async disconnect(): Promise<void> {
+    // Stop the shared timers first: a tick landing after a subscription has
+    // been removed would find nothing to serve, and a tick during the drain
+    // would race the in-flight guard.
+    if (this.#pollTimer !== undefined) {
+      this.#runtime.clearInterval(this.#pollTimer);
+      this.#pollTimer = undefined;
+    }
+    if (this.#reclaimTimer !== undefined) {
+      this.#runtime.clearInterval(this.#reclaimTimer);
+      this.#reclaimTimer = undefined;
+    }
     await this.#rr.close();
     // In parallel: each drain is bounded by SHUTDOWN_DRAIN_MS, and draining in
     // sequence would multiply that bound by the subscription count.
@@ -381,15 +624,25 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
     const client = this.#client;
-    await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
-      timeoutMs: this.#publishTimeoutMs,
-      onTimeout: () =>
-        new PublishTimeoutError(
-          `Redis did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
-          { topic, timeoutMs: this.#publishTimeoutMs },
-        ),
-      timing: resolveProbeTiming(this.#runtime),
-    });
+    try {
+      await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
+        timeoutMs: this.#publishTimeoutMs,
+        onTimeout: () =>
+          new PublishTimeoutError(
+            `Redis did not acknowledge the message published to ${JSON.stringify(topic)} within ${this.#publishTimeoutMs} ms (publishTimeoutMs); it may still be delivered`,
+            { topic, timeoutMs: this.#publishTimeoutMs },
+          ),
+        timing: resolveProbeTiming(this.#runtime),
+      });
+    } catch (error) {
+      // M131a X88-5: a backend fault says whether the message was applied.
+      // `PublishTimeoutError` is NOT rewrapped — it keeps its name and carries
+      // the 504 hint itself. An unrecognised shape passes through unchanged.
+      if (error instanceof PublishTimeoutError) throw error;
+      const fault = toBackendFault(error, 'messaging-plugin: redis-streams broker');
+      if (fault !== undefined) throw fault;
+      throw error;
+    }
   }
 
   /**
@@ -428,140 +681,42 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
 
     const client = this.#client;
     const deliverHandler: MessageHandler = (message, metadata) => handler(message as T, metadata);
-    let stopped = false;
-    let abandoned = false;
-    const active = (): boolean => !abandoned;
-    let pollFlight: Promise<void> | undefined;
-    let reclaimFlight: Promise<void> | undefined;
-    const delivering = new Set<string>();
-    // Rotate through the PEL so a high-tier first batch cannot starve later entries.
-    let pendingStart = '-';
-    const deliver = async (entry: [string, string[]], deliveries: number): Promise<void> => {
-      delivering.add(entry[0]);
-      try {
-        await this.#deliver(client, topic, groupId, deliverHandler, entry, deliveries, active);
-      } finally {
-        delivering.delete(entry[0]);
-      }
-    };
-    const poll = async (): Promise<void> => {
-      // Read ONE entry at a time and keep reading while entries arrive. A
-      // batched read leases every entry at read time, so an entry queued behind
-      // earlier handlers ages toward delaysMs[0] and another replica's reclaim
-      // could take it before this replica starts it. One-at-a-time keeps the
-      // lease equal to a single handler run, which is what the docs promise.
-      while (!stopped) {
-        const result = await client.xreadgroup(
-          'GROUP',
-          groupId,
-          consumerId,
-          'COUNT',
-          '1',
-          'BLOCK',
-          String(this.#blockSizeMs),
-          'STREAMS',
-          topic,
-          '>',
-        );
-        if (!result) return;
-        const entries = result[0][1] as Array<[string, string[]]>;
-        if (entries.length === 0) return;
-        for (const entry of entries) {
-          if (stopped) return;
-          await deliver(entry, 1);
-        }
-      }
-    };
-    const reclaim = async (): Promise<void> => {
-      const pending = await client.xpending(
-        topic,
-        groupId,
-        'IDLE',
-        String(this.#delaysMs[0]),
-        pendingStart,
-        '+',
-        '10',
-      );
-      pendingStart = pending.length === 10 ? `(${pending[pending.length - 1][0]}` : '-';
-      for (const [id, , idle, deliveries] of pending) {
-        if (stopped) break;
-        const delay = this.#delaysMs[Math.min(deliveries - 1, this.#delaysMs.length - 1)];
-        if (idle < delay || delivering.has(id)) continue;
-        // The server rechecks min-idle atomically. An empty reply can mean a
-        // lost race OR a trimmed entry: never ACK it (that could ACK the winner).
-        const entries = await client.xclaim(topic, groupId, consumerId, String(delay), id);
-        for (const entry of entries) {
-          if (stopped) break;
-          // Redis 6.2 claims a trimmed PEL entry and returns null; Redis 7
-          // drops it server-side and returns no entry. Only null proves a
-          // successful claim of missing data; an empty reply may be a race.
-          if (entry === null) {
-            await client.xack(topic, groupId, id);
-            continue;
-          }
-          if (deliveries >= this.#maxAttempts) {
-            // Acquire fields/ownership, but never invoke the handler beyond its budget.
-            await this.#deadLetter(client, topic, groupId, entry, deliveries, active);
-          } else {
-            await deliver(entry, deliveries + 1);
-          }
-        }
-      }
-      if (!stopped) await this.#cleanConsumers(client, topic, groupId, consumerId, false, active);
-    };
-    const observe = (work: () => Promise<void>, label: string): Promise<void> =>
-      work().catch((error: unknown) => {
-        this.#logger?.error(`${label} error: ${describeError(error)}`);
-      });
-    const intervalId = this.#runtime.setInterval(() => {
-      if (stopped || pollFlight !== undefined) return;
-      pollFlight = observe(poll, 'Poll').finally(() => {
-        pollFlight = undefined;
-      });
-    }, this.#pollIntervalMs);
-    const reclaimId = this.#runtime.setInterval(() => {
-      if (stopped || reclaimFlight !== undefined) return;
-      reclaimFlight = observe(reclaim, 'Reclaim').finally(() => {
-        reclaimFlight = undefined;
-      });
-    }, this.#reclaimIntervalMs);
-
-    let closing: Promise<void> | undefined;
+    // M131a X88-7: the per-subscription loop (poll, reclaim, in-flight guard,
+    // stop flag and drain) is built here, but its timers are the broker's ONE
+    // shared poll/reclaim timers, started in connect(). `subscribe()` no longer
+    // creates a timer, so a handler that subscribes lazily no longer parents
+    // poll spans to its request.
+    const loop = createConsumerLoop({
+      runtime: this.#runtime,
+      client,
+      topic,
+      groupId,
+      consumerId,
+      deliverHandler,
+      blockSizeMs: this.#blockSizeMs,
+      maxAttempts: this.#maxAttempts,
+      delaysMs: this.#delaysMs,
+      logger: this.#logger,
+      deliver: (client, topic, group, handler, entry, deliveries, active) =>
+        this.#deliver(client, topic, group, handler, entry, deliveries, active),
+      deadLetter: (client, topic, group, entry, deliveries, active) =>
+        this.#deadLetter(client, topic, group, entry, deliveries, active),
+      cleanConsumers: (client, topic, group, consumerId, final, active) =>
+        this.#cleanConsumers(client, topic, group, consumerId, final, active),
+    });
     const unsubscribe = (): Promise<void> => {
-      closing ??= (async () => {
-        stopped = true;
-        this.#runtime.clearInterval(intervalId);
-        this.#runtime.clearInterval(reclaimId);
-        let timeoutHandle: TimerHandle;
-        const deadline = new Promise<void>((resolve) => {
-          timeoutHandle = this.#runtime.setTimeout(() => {
-            abandoned = true;
-            this.#logger?.error(
-              'Redis subscription shutdown drain timed out; pending work retained',
-            );
-            resolve();
-          }, SHUTDOWN_DRAIN_MS);
-        });
-        try {
-          await Promise.race([
-            observe(async () => {
-              await Promise.all([pollFlight, reclaimFlight]);
-              if (!abandoned) {
-                await this.#cleanConsumers(client, topic, groupId, consumerId, true, active);
-              }
-            }, 'Consumer cleanup'),
-            deadline,
-          ]);
-        } finally {
-          this.#runtime.clearTimeout(timeoutHandle);
-        }
+      const done = loop.unsubscribe();
+      // The shared timers keep running; this subscription is removed so the
+      // next tick no longer serves it.
+      return done.finally(() => {
         this.#activeSubscriptions.delete(subscriptionId);
-      })();
-      return closing;
+      });
     };
 
     const subscription: ActiveSubscription = {
       id: subscriptionId,
+      pollTick: loop.pollTick,
+      reclaimTick: loop.reclaimTick,
       unsubscribe,
     };
     this.#activeSubscriptions.set(subscriptionId, subscription);

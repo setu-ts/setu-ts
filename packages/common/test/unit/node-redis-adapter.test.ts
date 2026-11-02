@@ -111,6 +111,34 @@ describe('fromNodeRedis', () => {
     await expect(adapter.ping()).rejects.toBe(error);
   });
 
+  it('rejects a first-connect error at once, naming the cause (M131a X88-3)', async () => {
+    const raw = nodeRedisFake();
+    // The inner connect stays pending: a real driver surfaces a refused boot as
+    // an 'error' event, not a connect() rejection, so the event must win.
+    raw.connect.mockImplementation(() => new Promise<void>(() => {}));
+    const adapter = fromNodeRedis(raw);
+    const pending = adapter.connect();
+    const error = new Error('connect ECONNREFUSED 127.0.0.1:6379');
+    const errorListener = raw.on.mock.calls.find(([event]) => event === 'error')?.[1];
+    expect(typeof errorListener).toBe('function');
+    (errorListener as (value: unknown) => void)(error);
+    await expect(pending).rejects.toSatisfy((thrown: unknown) => {
+      const e = thrown as Error;
+      return e.message.includes('ECONNREFUSED') && e.cause === error;
+    });
+  });
+
+  it('leaves a post-ready error to the reconnection reporter (M131a X88-3)', async () => {
+    const raw = nodeRedisFake();
+    const adapter = fromNodeRedis(raw);
+    await adapter.connect();
+    // The client has now been ready: a later error is reconnection reporting,
+    // not a first-connect failure, so a fresh connect() must not reject.
+    const errorListener = raw.on.mock.calls.find(([event]) => event === 'error')?.[1];
+    (errorListener as (value: unknown) => void)(new Error('connection lost'));
+    await expect(adapter.connect()).resolves.toBeUndefined();
+  });
+
   it('bounds a command already written and consumes its late rejection', async () => {
     vi.useFakeTimers();
     const raw = nodeRedisFake();

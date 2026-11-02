@@ -128,8 +128,10 @@ export function validateClient(client: unknown): client is IRedisLockClient {
  *
  * @param url - Redis connection URL
  * @param injectedClient - Optionally injected ioredis-compatible client
- * @param reporter - Receives the BUILT client's connection errors; never
- *   attached to an injected client, which belongs to the caller
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -146,6 +148,7 @@ async function resolveClient(
           '(needs: set, quit, eval)',
       );
     }
+    attachConnectionErrorReporter(injectedClient, reporter);
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();

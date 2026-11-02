@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { QueueService } from '../../src/services/queue-service.ts';
 import { MemoryQueue } from '../../src/adapters/memory-queue.ts';
 import { FakeRuntimeServices } from '../fixtures/fake-runtime.ts';
@@ -15,6 +16,75 @@ class FailingAckQueue extends MemoryQueue {
     return Promise.reject(new Error('backend unavailable during ack'));
   }
 }
+
+/**
+ * A MemoryQueue whose enqueue() rejects with a caller-supplied error, standing
+ * in for a transport that loses its backend while a job is being enqueued.
+ */
+class FailingEnqueueQueue extends MemoryQueue {
+  constructor(private readonly failure: unknown) {
+    super();
+  }
+  override enqueue(_job: unknown): Promise<void> {
+    return Promise.reject(this.failure);
+  }
+}
+
+describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
+  it('wraps a refused-before-sending fault as BackendUnavailableError (503)', async () => {
+    const runtime = new FakeRuntimeServices();
+    const refused = new Error(
+      'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+    );
+    refused.name = 'MaxRetriesPerRequestError';
+    const service = new QueueService(new FailingEnqueueQueue(refused), runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    await service.connect();
+    try {
+      await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendUnavailableError && e.cause === refused;
+      });
+    } finally {
+      await service.disconnect();
+    }
+  });
+
+  it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
+    const runtime = new FakeRuntimeServices();
+    const timedOut = new Error('Command timed out');
+    const service = new QueueService(new FailingEnqueueQueue(timedOut), runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    await service.connect();
+    try {
+      await expect(service.add('jobs', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendOutcomeUnknownError && e.cause === timedOut;
+      });
+    } finally {
+      await service.disconnect();
+    }
+  });
+
+  it('passes an unrecognised shape through unchanged', async () => {
+    const runtime = new FakeRuntimeServices();
+    const programming = new Error('Cannot read properties of undefined');
+    const service = new QueueService(new FailingEnqueueQueue(programming), runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    await service.connect();
+    try {
+      await expect(service.add('jobs', { n: 1 })).rejects.toBe(programming);
+    } finally {
+      await service.disconnect();
+    }
+  });
+});
 
 describe('QueueService', () => {
   it('an unanswered probe reports unknown and skips depth reads', async () => {

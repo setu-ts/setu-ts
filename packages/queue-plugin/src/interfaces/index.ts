@@ -75,6 +75,17 @@ export interface IRedisQueueClient {
    * fake still type-checks; a client that omits it is *unknown*, not `false`.
    */
   ping?(): Promise<unknown>;
+  /**
+   * The driver's connection state (ioredis `status`; node-redis through
+   * `fromNodeRedis` answers the same field). When present and not `'ready'`
+   * the client already knows it has no connection, so the health probe answers
+   * `false` without I/O: a stopped server's commands sit in ioredis's offline
+   * queue and a ping would hang like a hung one, reading `up`/unknown (M131a
+   * V11-10). Absent, the probe pings as before.
+   *
+   * @since 0.12.0
+   */
+  readonly status?: string;
   /** Close the connection. */
   quit(): Promise<void>;
 }

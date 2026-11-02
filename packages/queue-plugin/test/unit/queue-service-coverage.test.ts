@@ -530,19 +530,25 @@ describe('QueueService - coverage', () => {
       await svc.disconnect();
     });
 
-    it('reports a failing recurring fetch from the recurring loop', async () => {
-      const reported: string[] = [];
+    it('reports a failing recurring fetch once per state change', async () => {
+      const warned: string[] = [];
       const throwing = new RejectingAdapter();
       const ownRuntime = new FakeRuntimeServices();
       const svc = new QueueService(throwing, ownRuntime as unknown as never, {
         pollIntervalMs: 100,
-        logger: { error: (message) => reported.push(message) },
+        logger: {
+          error: (): void => {},
+          warn: (message: string): void => {
+            warned.push(message);
+          },
+        },
       });
       await svc.connect();
 
+      // Two ticks of a failing fetch: ONE warn, not one per poll (M131a X88-9).
       await ownRuntime.advanceMs(200);
 
-      expect(reported).toContain('queue recurring scheduling failed');
+      expect(warned.filter((m) => m.includes('recurring'))).toHaveLength(1);
       await svc.disconnect();
     });
   });
@@ -676,11 +682,12 @@ describe('health indicator — cached reachability and backlog (M90b)', () => {
       }
       return Promise.resolve({ ready: 3, processing: 1, dead: 0 });
     };
-    const errors: string[] = [];
+    const warned: string[] = [];
     const service = new QueueService(adapter, new FakeRuntimeServices(), {
       logger: {
-        error: (message: string) => {
-          errors.push(message);
+        error: (): void => {},
+        warn: (message: string): void => {
+          warned.push(message);
         },
       },
     });
@@ -694,7 +701,8 @@ describe('health indicator — cached reachability and backlog (M90b)', () => {
     // Only the successful name counts toward the aggregate.
     expect(result.data?.['backlog']).toBe(4);
     expect(result.data?.['queues']).toEqual({ ok: { ready: 3, processing: 1, dead: 0 } });
-    expect(errors).toContain('queue depth probe failed');
+    // The failing name is reported once, at warn, not per probe (M131a X88-9).
+    expect(warned.filter((m) => m.includes('depth-probe'))).toHaveLength(1);
   });
 
   it('reports reachable unknown and still reads depths when the adapter cannot probe', async () => {

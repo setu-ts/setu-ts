@@ -20,6 +20,40 @@ export interface IRedactionService {
 const MAX_REDACTION_DEPTH = 32;
 
 /**
+ * The longest string the default URL-userinfo mask inspects. The rule is one
+ * linear pattern with no backtracking, but it runs on every logged string, so a
+ * size bound keeps a hostile multi-megabyte value from paying a full scan.
+ * Shorter strings are masked; longer ones are returned unchanged.
+ */
+const MAX_REDACTION_STRING_LENGTH = 1024;
+
+/**
+ * The one linear, non-backtracking pattern that recognises a URL's userinfo:
+ * a scheme, `://`, the userinfo (URL-unsafe characters excluded, so the match
+ * stops at `/` and cannot cross into the host), and the `@` that separates it
+ * from the host. A URL with no userinfo (`https://host/…`), an email
+ * (`user@host`, no `://`), and an `@` inside a path have no userinfo and are
+ * left untouched.
+ */
+const URL_USERINFO_PATTERN = /([a-z][a-z0-9+.-]*:\/\/)[^\s\/@]+@/gi;
+
+/**
+ * Masks a URL's userinfo in a string: `scheme://user:password@host` becomes
+ * `scheme://***@host`. This is the default policy's one value-based rule — it
+ * runs on every string value the redaction seam sees, so a malformed `REDIS_URL`
+ * (which often holds a password) is never echoed into a log, trace or audit
+ * record. The pattern is a single linear pass with no backtracking.
+ *
+ * @param value - The string to inspect
+ * @returns The string with any URL userinfo masked, or unchanged
+ * @since 0.12.0
+ */
+export function maskUrlUserinfo(value: string): string {
+  if (value.length > MAX_REDACTION_STRING_LENGTH) return value;
+  return value.replace(URL_USERINFO_PATTERN, '$1***@');
+}
+
+/**
  * Compiles a policy into a synchronous redaction service.
  *
  * @param policy - Field classifications and redactor selection
@@ -33,7 +67,7 @@ export function createRedactionService(
   const defaultRedactor = policy.defaultRedactor ?? eraseRedactor;
   const redactValue = (path: string, value: unknown): unknown => {
     const matched = match(path);
-    if (matched === undefined) return value;
+    if (matched === undefined) return typeof value === 'string' ? maskUrlUserinfo(value) : value;
     const classification = matched.classification;
     const context: RedactionContext = { path, classification };
     // Precedence: the field pattern's own redactor, then the redactor keyed by
@@ -123,7 +157,10 @@ function descend(
       // The child's own path decides first, once. A match or a primitive is
       // final; any other object is handed to `descend`, which alone decides
       // whether it can be walked.
-      const decided = redactValue(childPath, child);
+      let decided = redactValue(childPath, child);
+      // The default URL-userinfo mask runs on every string value, classified or
+      // not: a URL that carries credentials is a secret wherever it appears.
+      if (typeof decided === 'string') decided = maskUrlUserinfo(decided);
       let redacted: unknown;
       if (decided !== child || typeof child !== 'object' || child === null) {
         redacted = decided;

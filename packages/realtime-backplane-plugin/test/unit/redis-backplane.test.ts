@@ -7,6 +7,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { setImmediate } from 'node:timers/promises';
 import type { ConnectionErrorReporter, RealtimeFrame } from '@setu-ts/common';
+import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { RedisBackplane } from '../../src/transports/redis-backplane.ts';
 import type { IRedisBackplaneClient, IRedisModule } from '../../src/interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS } from '../../src/interfaces/index.ts';
@@ -143,6 +144,65 @@ class FakeRedisClient implements IRedisBackplaneClient {
 }
 
 const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby', data: 'hi' };
+
+/**
+ * A publisher whose `publish` rejects with a caller-supplied error, standing in
+ * for a transport that loses its backend mid-publish.
+ */
+function failingPublisher(failure: unknown): IRedisBackplaneClient {
+  const reject = (): Promise<never> => Promise.reject(failure);
+  const ok = (): Promise<unknown> => Promise.resolve();
+  return {
+    publish: reject,
+    subscribe: ok,
+    unsubscribe: ok,
+    on: () => {},
+    off: () => {},
+    quit: ok,
+    disconnect: () => {},
+  };
+}
+
+describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
+  it('wraps a refused-before-sending fault as BackendUnavailableError (503)', async () => {
+    const refused = new Error(
+      'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+    );
+    refused.name = 'MaxRetriesPerRequestError';
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: failingPublisher(refused), subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    try {
+      await expect(backplane.publish(FRAME)).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendUnavailableError && e.cause === refused;
+      });
+    } finally {
+      await backplane.close();
+    }
+  });
+
+  it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
+    const timedOut = new Error('Command timed out');
+    const backplane = new RedisBackplane(
+      { transport: 'redis', client: failingPublisher(timedOut), subscriber: new FakeRedisClient() },
+      'a',
+      'topic',
+    );
+    await backplane.connect();
+    try {
+      await expect(backplane.publish(FRAME)).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendOutcomeUnknownError && e.cause === timedOut;
+      });
+    } finally {
+      await backplane.close();
+    }
+  });
+});
 
 describe('RedisBackplane injected lazy startup', () => {
   function lazyClient(status = 'wait') {
@@ -1208,7 +1268,7 @@ describe('RedisBackplane connection-error reporting', () => {
     await backplane.close();
   });
 
-  it('never attaches to an injected pair, even with a reporter configured', async () => {
+  it('attaches to an injected pair when a reporter is configured (M131a X88-3)', async () => {
     const client = new FakeRedisClient();
     const subscriber = new FakeRedisClient();
     const backplane = new RedisBackplane(
@@ -1219,8 +1279,10 @@ describe('RedisBackplane connection-error reporting', () => {
 
     await backplane.connect();
 
-    expect(client.eventListeners.has('error')).toBe(false);
-    expect(subscriber.eventListeners.has('error')).toBe(false);
+    // One reporter for both: an injected client's outages must be as visible as
+    // a built one's, so the error/ready listeners are attached to the pair.
+    expect(client.eventListeners.has('error')).toBe(true);
+    expect(subscriber.eventListeners.has('error')).toBe(true);
     await backplane.close();
   });
 });

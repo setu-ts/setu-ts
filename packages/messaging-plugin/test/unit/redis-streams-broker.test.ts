@@ -1,10 +1,87 @@
 import { describe, expect, it, vi } from 'vitest';
+import {
+  BackendOutcomeUnknownError,
+  BackendUnavailableError,
+} from '@setu-ts/common';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
 import { JsonSerializer } from '../../src/serializers/json-serializer.ts';
 import { createFakeRuntime } from '../fixtures/fake-runtime.ts';
 import { FakeRedisStreamsClient } from '../fixtures/fake-ioredis-client.ts';
 import type { IRedisStreamsClient } from '../../src/interfaces/index.ts';
-import { RequestTimeoutError } from '../../src/errors.ts';
+import { PublishTimeoutError, RequestTimeoutError } from '../../src/errors.ts';
+
+/**
+ * A minimal injected client whose xadd rejects with a caller-supplied error,
+ * standing in for a transport that loses its backend mid-publish.
+ */
+function failingPublishClient(failure: unknown): IRedisStreamsClient {
+  const reject = (): Promise<never> => Promise.reject(failure);
+  const ok = (): Promise<void> => Promise.resolve();
+  return {
+    xadd: reject,
+    xgroup: reject,
+    xreadgroup: reject,
+    xpending: reject,
+    xclaim: reject,
+    xinfo: reject,
+    xack: reject,
+    quit: ok,
+    connect: ok,
+  };
+}
+
+describe('RedisStreamsBroker.publish backend-fault wrapping (M131a X88-5)', () => {
+  it('wraps a refused-before-sending fault as BackendUnavailableError (503)', async () => {
+    const runtime = createFakeRuntime();
+    const refused = new Error(
+      'Reached the max retries per request limit (which is 1). Refer to "maxRetriesPerRequest" option for details.',
+    );
+    refused.name = 'MaxRetriesPerRequestError';
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: failingPublishClient(refused),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendUnavailableError && e.cause === refused;
+      });
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
+  it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
+    const runtime = createFakeRuntime();
+    const timedOut = new Error('Command timed out');
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: failingPublishClient(timedOut),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toSatisfy((thrown: unknown) => {
+        const e = thrown as Error;
+        return e instanceof BackendOutcomeUnknownError && e.cause === timedOut;
+      });
+    } finally {
+      await broker.disconnect();
+    }
+  });
+
+  it('does not rewrap a PublishTimeoutError (it keeps its name and 504 hint)', async () => {
+    const runtime = createFakeRuntime();
+    const pte = new PublishTimeoutError('timed out', { topic: 's', timeoutMs: 1 });
+    const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
+      client: failingPublishClient(pte),
+    });
+    await broker.connect();
+    try {
+      await expect(broker.publish('s', { n: 1 })).rejects.toBe(pte);
+    } finally {
+      await broker.disconnect();
+    }
+  });
+});
 
 /**
  * RedisStreamsBroker unit tests.

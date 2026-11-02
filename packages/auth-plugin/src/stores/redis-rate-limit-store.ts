@@ -68,8 +68,11 @@ export function validateClient(client: unknown): client is IRateLimitRedisClient
 
 /**
  * Resolve the Redis client: prefer injected client, then lazy-load ioredis.
- * The reporter is attached only to a client built here — an injected client
- * belongs to the caller.
+ *
+ * @param reporter - Receives the connection errors of BOTH the built and an
+ *   injected client (M131a X88-3): an injected node-redis client's outages must
+ *   be as visible as a built ioredis client's. The attach is structural, so a
+ *   client without `on` is left alone.
  */
 async function resolveClient(
   url: string,
@@ -84,6 +87,7 @@ async function resolveClient(
           '(needs: incr, pexpire, pttl, del, quit)',
       );
     }
+    attachConnectionErrorReporter(injectedClient, reporter);
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
