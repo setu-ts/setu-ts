@@ -531,10 +531,10 @@ export interface RedisQueueOptions {
    */
   deadLetterTtlMs?: number;
   /**
-   * Receives the connection errors (`ioredis` `'error'` events) of the client
-   * the adapter BUILDS, instead of `ioredis` printing each reconnect failure
-   * to the console. Never attached to an injected `client`, which belongs to
-   * the caller. `QueuePlugin` supplies one backed by its logger.
+   * Receives the connection errors (`'error'` events) of the client the
+   * adapter uses, instead of `ioredis` printing each reconnect failure to the
+   * console. Since 0.12.0 it is attached to an injected `client` too, and
+   * detached again on disconnect. `QueuePlugin` supplies one backed by its logger.
    *
    * @since 0.8.0
    */

@@ -69,12 +69,15 @@ export type { DeadlineOptions } from './health/deadline.ts';
 // logger, de-duplicated, instead of the driver's own console fallback
 export {
   attachConnectionErrorReporter,
+  watchConnection,
   createConnectionErrorReporter,
 } from './health/connection-errors.ts';
 export type {
   ConnectionErrorLogger,
   ConnectionErrorReporter,
   ConnectionErrorReporterOptions,
+  ConnectionWatch,
+  DispatchMark,
 } from './health/connection-errors.ts';
 
 // Capability tokens

@@ -33,8 +33,8 @@ const U = BackendUnavailableError;
 const O = BackendOutcomeUnknownError;
 
 /**
- * The classification table: measured shape → the answer with no dispatch state,
- * with the client NOT connected at dispatch, and with it connected. A
+ * The classification table: measured shape → the answer with no context,
+ * with the command provably unsent, and possibly sent. A
  * lost-connection shape is the only kind the dispatch state changes.
  */
 const TABLE: ReadonlyArray<
@@ -68,7 +68,7 @@ const TABLE: ReadonlyArray<
     U,
   ],
   // Lost connection — ioredis flushes sent commands with the same errors, so
-  // only a client that was not connected at dispatch proves "not applied".
+  // only a command provably never written proves "not applied".
   [
     'ioredis: MaxRetriesPerRequestError',
     err(
@@ -115,8 +115,8 @@ const TABLE: ReadonlyArray<
 describe('toBackendFault (M131a §3.6)', () => {
   const contexts = [
     ['no dispatch state', undefined, 2],
-    ['not connected at dispatch', { connectedAtDispatch: false }, 3],
-    ['connected at dispatch', { connectedAtDispatch: true }, 4],
+    ['provably unsent', { unsent: true }, 3],
+    ['possibly sent', { unsent: false }, 4],
   ] as const;
   for (const [contextLabel, context, column] of contexts) {
     it(`classifies every measured shape with ${contextLabel}`, () => {

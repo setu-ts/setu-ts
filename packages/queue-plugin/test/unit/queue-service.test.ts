@@ -1,3 +1,5 @@
+import { EventEmitter } from 'node:events';
+import { RedisQueue } from '../../src/adapters/redis-queue.ts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { QueueService } from '../../src/services/queue-service.ts';
@@ -22,29 +24,55 @@ class FailingAckQueue extends MemoryQueue {
  * in for a transport that loses its backend while a job is being enqueued.
  */
 class FailingEnqueueQueue extends MemoryQueue {
-  constructor(
-    private readonly failure: unknown,
-    private readonly status?: string,
-  ) {
+  constructor(private readonly failure: unknown) {
     super();
   }
   override enqueue(_job: unknown): Promise<void> {
     return Promise.reject(this.failure);
   }
-  connectionStatus(): string | undefined {
-    return this.status;
-  }
 }
+
 /**
- * A lost connection (ioredis \`MaxRetriesPerRequestError\`) is decided by the
- * client's status read just before the call: not connected → 503, connected
- * or unknown → 504, because ioredis flushes commands already on the socket
- * with the same error.
+ * An event-emitting Redis client whose writes fail. `status` is what the queue
+ * reads at dispatch; `onWrite` runs inside the failing write, standing in for
+ * what the driver does between dispatch and failure (a reconnect, a state
+ * change).
+ */
+class FailingRedisClient extends EventEmitter {
+  status: string;
+  constructor(
+    status: string,
+    private readonly failure: Error,
+    private readonly onWrite: (client: FailingRedisClient) => void,
+  ) {
+    super();
+    this.status = status;
+  }
+  #fail(): Promise<never> {
+    this.onWrite(this);
+    return Promise.reject(this.failure);
+  }
+  zadd = (): Promise<never> => this.#fail();
+  hset = (): Promise<never> => this.#fail();
+  zrangebyscore = (): Promise<string[]> => Promise.resolve([]);
+  zrem = (): Promise<number> => Promise.resolve(0);
+  hget = (): Promise<null> => Promise.resolve(null);
+  hdel = (): Promise<number> => Promise.resolve(0);
+  del = (): Promise<number> => Promise.resolve(0);
+  quit = (): Promise<void> => Promise.resolve();
+}
+
+/**
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
+ * when the job provably never left the process: disconnected at dispatch, no
+ * reconnect since, still disconnected at the failure. A job queued offline and
+ * written after a reconnect may have been stored (the M131a audit's case).
  */
 const LOST_CONNECTION_CASES = [
-  ['reconnecting', 'BackendUnavailableError'],
-  ['ready', 'BackendOutcomeUnknownError'],
-  [undefined, 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
+  ['reconnecting', true, 'reconnecting', 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'ready', 'BackendOutcomeUnknownError'],
+  ['ready', false, 'ready', 'BackendOutcomeUnknownError'],
 ] as const;
 
 function maxRetries(): Error {
@@ -55,17 +83,21 @@ function maxRetries(): Error {
   return e;
 }
 
-function classOf(name: (typeof LOST_CONNECTION_CASES)[number][1]) {
+function classOf(name: (typeof LOST_CONNECTION_CASES)[number][3]) {
   return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
 }
 
 describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
   it.each(LOST_CONNECTION_CASES)(
-    'decides a lost connection by the status at dispatch (%s → %s)',
-    async (status, expected) => {
+    'dispatch %s, reconnect %s, failure %s → %s',
+    async (before, reconnect, after, expected) => {
       const runtime = new FakeRuntimeServices();
       const lost = maxRetries();
-      const service = new QueueService(new FailingEnqueueQueue(lost, status), runtime, {
+      const client = new FailingRedisClient(before, lost, (c) => {
+        if (reconnect) c.emit('ready');
+        c.status = after;
+      });
+      const service = new QueueService(new RedisQueue({ client }), runtime, {
         defaultMaxAttempts: 3,
         pollIntervalMs: 100,
       });
@@ -78,8 +110,27 @@ describe('QueueService.add backend-fault wrapping (M131a X88-5)', () => {
       } finally {
         await service.disconnect();
       }
+      // The watch is detached on disconnect: the shared client keeps no listener.
+      expect(client.listenerCount('error')).toBe(0);
     },
   );
+
+  it('answers 504 for a lost connection on an adapter that reports no state', async () => {
+    const runtime = new FakeRuntimeServices();
+    const lost = maxRetries();
+    const service = new QueueService(new FailingEnqueueQueue(lost), runtime, {
+      defaultMaxAttempts: 3,
+      pollIntervalMs: 100,
+    });
+    await service.connect();
+    try {
+      await expect(service.add('jobs', { n: 1 })).rejects.toBeInstanceOf(
+        BackendOutcomeUnknownError,
+      );
+    } finally {
+      await service.disconnect();
+    }
+  });
 
   it('wraps a sent-with-no-answer fault as BackendOutcomeUnknownError (504)', async () => {
     const runtime = new FakeRuntimeServices();

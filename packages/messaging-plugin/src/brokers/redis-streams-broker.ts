@@ -1,9 +1,10 @@
 import {
-  attachConnectionErrorReporter,
   createCachedProbe,
   withDeadline,
   resolveProbeTiming,
+  watchConnection,
 } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError, toBackendFault } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type {
@@ -118,14 +119,14 @@ export function validateClient(client: unknown): client is IRedisStreamsClient {
  *   injected client (M131a X88-3): an injected node-redis client's outages must
  *   be as visible as a built ioredis client's. The attach is structural, so a
  *   client without `on` is left alone.
- * @returns The resolved client instance
+ * @returns The resolved client and the watch on its connection events
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
   url: string,
   injectedClient: IRedisStreamsClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
-): Promise<IRedisStreamsClient> {
+): Promise<{ readonly client: IRedisStreamsClient; readonly watch: ConnectionWatch }> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
       throw new Error(
@@ -133,13 +134,11 @@ async function resolveClient(
           '(needs: xadd, xgroup, xreadgroup, xack, quit, connect, xpending, xclaim, xinfo)',
       );
     }
-    attachConnectionErrorReporter(injectedClient, reporter);
-    return injectedClient;
+    return { client: injectedClient, watch: watchConnection(injectedClient, reporter) };
   }
   const RedisCtor = await loadIoredis();
   const client = createLazyRedisClient(RedisCtor, url);
-  attachConnectionErrorReporter(client, reporter);
-  return client;
+  return { client, watch: watchConnection(client, reporter) };
 }
 
 /**
@@ -378,6 +377,8 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
   #logger?: { error: (msg: string) => void };
   #reporter: ConnectionErrorReporter | undefined;
   #client: IRedisStreamsClient | null = null;
+  /** The reporter and reconnect counter on `#client`; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #ready = false;
   #activeSubscriptions: Map<string, ActiveSubscription>;
   #maxAttempts: number;
@@ -481,9 +482,19 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
+    const resolved = await resolveClient(this.#url, this.#injectedClient, this.#reporter);
+    this.#client = resolved.client;
+    this.#watch = resolved.watch;
     if (typeof this.#client.connect === 'function') {
-      await this.#client.connect();
+      try {
+        await this.#client.connect();
+      } catch (error) {
+        // A retried connect() resolves the client again; without this each
+        // attempt would leave one more listener pair on an injected client.
+        this.#watch.detach();
+        this.#watch = undefined;
+        throw error;
+      }
     }
     // M131a X88-7: ONE poll timer and ONE reclaim timer, started here at
     // connect() (startup, no active span), serve every subscription. Creating
@@ -527,6 +538,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       [...this.#activeSubscriptions.values()].map((subscription) => subscription.unsubscribe()),
     );
 
+    // Detached before QUIT: a shared injected client must not report into
+    // this broker's logger once it has stopped.
+    this.#watch?.detach();
+    this.#watch = undefined;
     if (this.#client) {
       await this.#client.quit();
     }
@@ -621,9 +636,10 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       .filter(([key]) => key !== PAYLOAD_FIELD)
       .flatMap(([key, value]) => [key, value]);
     const client = this.#client;
-    // Read before the call: a lost connection is decided by whether the client
-    // was connected when the XADD was dispatched (M131a X88-5).
-    const status = client.status;
+    // Marked before the call: a lost connection is decided by whether the XADD
+    // provably never left the process (M131a X88-5).
+    const watch = this.#watch;
+    const mark = watch?.mark(client.status);
     try {
       await withDeadline(() => client.xadd(topic, '*', PAYLOAD_FIELD, serialized, ...fields), {
         timeoutMs: this.#publishTimeoutMs,
@@ -639,11 +655,9 @@ export class RedisStreamsBroker implements MessageBrokerAdapter {
       // `PublishTimeoutError` is NOT rewrapped — it keeps its name and carries
       // the 504 hint itself. An unrecognised shape passes through unchanged.
       if (error instanceof PublishTimeoutError) throw error;
-      const fault = toBackendFault(
-        error,
-        'messaging-plugin: redis-streams broker',
-        status === undefined ? undefined : { connectedAtDispatch: status === 'ready' },
-      );
+      const fault = toBackendFault(error, 'messaging-plugin: redis-streams broker', {
+        unsent: mark !== undefined && watch!.unsent(mark, client.status),
+      });
       if (fault !== undefined) throw fault;
       throw error;
     }

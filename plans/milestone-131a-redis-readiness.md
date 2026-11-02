@@ -164,15 +164,18 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
   client, `ECONNREFUSED`-class codes) → unavailable; sent with no answer ("Command timed out") →
   outcome unknown; a lost connection (`ECONNRESET`, `EPIPE`, `ETIMEDOUT`,
   `MaxRetriesPerRequestError`, "Connection is closed.", "Socket closed unexpectedly") → unavailable
-  only when the caller's `context.connectedAtDispatch` is `false`, otherwise outcome unknown.
-  ioredis's `flushQueue` rejects commands already written to the socket with
-  `MaxRetriesPerRequestError` and "Connection is closed." (read in `event_handler.js`
-  `closeHandler`), so those shapes alone cannot prove "not applied"; each call site reads its
-  client's `status` just before dispatching (user decision 2026-11-02). "Command timed out" stays
-  outcome unknown even offline: a queued command can be sent after a reconnect. `QueueService.add`,
-  the backplane `publish` and the messaging `publish` wrap thrown driver errors through it, keeping
-  the original as `cause`. `PublishTimeoutError` is not rewrapped: it keeps its name and gains the
-  504 hint itself.
+  only when the caller's `context.unsent` is `true`, otherwise outcome unknown. ioredis's
+  `flushQueue` rejects commands already written to the socket with `MaxRetriesPerRequestError` and
+  "Connection is closed." (read in `event_handler.js` `closeHandler`), and a command made while
+  disconnected is written after the next reconnect (the security audit reproduced a node-redis job
+  stored in Redis behind a `503`), so neither the shape nor the state at dispatch alone proves "not
+  applied". Each call site uses `watchConnection` (common), which counts `'ready'` events: `unsent`
+  is true only when the client was disconnected at dispatch, has not reconnected since, and is still
+  disconnected at the failure (user decision and audit, 2026-11-02). "Command timed out" stays
+  outcome unknown in every state. `watchConnection` also detaches the reporter when the plugin
+  stops. `QueueService.add`, the backplane `publish` and the messaging `publish` wrap thrown driver
+  errors through it, keeping the original as `cause`. `PublishTimeoutError` is not rewrapped: it
+  keeps its name and gains the 504 hint itself.
 - **Why:** a masked 500 tells a client nothing, and the X88-5 runs showed every 500'd job was
   applied; a 504 with that wording tells a retrying client to use an idempotency key.
 - **Measurement gate (implementation step 1):** before the table is fixed, record the thrown
@@ -240,14 +243,15 @@ Read on `develop` at `d2946685` (2026-11-02). Evidence:
 ### 3.10 X88-8 — a bad Redis URL never reaches stderr with its password
 
 - **Decision:** (a) the default redaction policy in `common` masks URL userinfo in every string
-  value (`scheme://user:password@host` → `scheme://***@host`), so logs, traces and audit records are
-  covered by the one seam. The rule is one linear pattern with no backtracking, applied to string
-  values only and within the redaction seam's existing size bounds, because it runs on every logged
-  string; (b) the generated `main.ts` catches a failed `app.start()`, writes one line
-  (`describeError` passed through the same masking) to stderr with `console.error` and exits through
-  `runtime.exit(1)`, instead of Node's default printer dumping the error's `input`. The entry keeps
-  no runtime-specific API: no logger exists before plugins register, and `IRuntimeServices` has no
-  stderr writer.
+  value (`scheme://user:password@host` → `scheme://***@host`). That covers log metadata by default
+  and traces and audit records when their plugin is given a policy; a log message string is not
+  redacted, so `describeError` masks its own output before its 8192-character bound (audit finding).
+  The rule is one linear pattern with no backtracking, applied to string values only and within the
+  redaction seam's existing size bounds, because it runs on every logged string; (b) the generated
+  `main.ts` catches a failed `app.start()`, writes one line (`describeError` passed through the same
+  masking) to stderr with `console.error` and exits through `runtime.exit(1)`, instead of Node's
+  default printer dumping the error's `input`. The entry keeps no runtime-specific API: no logger
+  exists before plugins register, and `IRuntimeServices` has no stderr writer.
 - **Why:** the URL is configuration, often holding a password; a malformed one must fail loudly
   without echoing it.
 - **Test home:** `common/test/unit/redaction-url-userinfo.test.ts` (table: credentials masked;

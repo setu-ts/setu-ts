@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 /**
  * Tests for the Redis pub/sub backplane transport.
  *
@@ -149,31 +150,46 @@ const FRAME: RealtimeFrame = { kind: 'ws-room', origin: 'node-b', name: 'lobby',
  * A publisher whose `publish` rejects with a caller-supplied error, standing in
  * for a transport that loses its backend mid-publish.
  */
-function failingPublisher(failure: unknown, status?: string): IRedisBackplaneClient {
-  const reject = (): Promise<never> => Promise.reject(failure);
+function failingPublisher(
+  failure: unknown,
+  status?: string,
+  onWrite?: (client: { status?: string; emit(event: string): boolean }) => void,
+): IRedisBackplaneClient & EventEmitter {
   const ok = (): Promise<unknown> => Promise.resolve();
-  return {
-    publish: reject,
+  const client = Object.assign(new EventEmitter(), {
+    publish: (): Promise<never> => {
+      onWrite?.(client);
+      return Promise.reject(failure);
+    },
     subscribe: ok,
     unsubscribe: ok,
-    on: () => {},
-    off: () => {},
     quit: ok,
     disconnect: () => {},
     ...(status === undefined ? {} : { status }),
-  };
+  });
+  return client as unknown as IRedisBackplaneClient & EventEmitter;
 }
 /**
- * A lost connection (ioredis \`MaxRetriesPerRequestError\`) is decided by the
- * client's status read just before the call: not connected → 503, connected
- * or unknown → 504, because ioredis flushes commands already on the socket
- * with the same error.
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
+ * when the command provably never left the process: disconnected at dispatch,
+ * no reconnect since, still disconnected at the failure. A command queued
+ * offline and written after a reconnect may have been applied (the M131a
+ * audit's case).
  */
 const LOST_CONNECTION_CASES = [
-  ['reconnecting', 'BackendUnavailableError'],
-  ['ready', 'BackendOutcomeUnknownError'],
-  [undefined, 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
+  ['reconnecting', true, 'reconnecting', 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'ready', 'BackendOutcomeUnknownError'],
+  ['ready', false, 'ready', 'BackendOutcomeUnknownError'],
 ] as const;
+
+/** Between dispatch and failure: an optional reconnect, then the final state. */
+function during(reconnect: boolean, after: string) {
+  return (client: { status?: string; emit(event: string): boolean }): void => {
+    if (reconnect) client.emit('ready');
+    client.status = after;
+  };
+}
 
 function maxRetries(): Error {
   const e = new Error(
@@ -183,19 +199,19 @@ function maxRetries(): Error {
   return e;
 }
 
-function classOf(name: (typeof LOST_CONNECTION_CASES)[number][1]) {
+function classOf(name: (typeof LOST_CONNECTION_CASES)[number][3]) {
   return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
 }
 
 describe('RedisBackplane.publish backend-fault wrapping (M131a X88-5)', () => {
   it.each(LOST_CONNECTION_CASES)(
-    'decides a lost connection by the status at dispatch (%s → %s)',
-    async (status, expected) => {
+    'dispatch %s, reconnect %s, failure %s → %s',
+    async (before, reconnect, after, expected) => {
       const lost = maxRetries();
       const backplane = new RedisBackplane(
         {
           transport: 'redis',
-          client: failingPublisher(lost, status),
+          client: failingPublisher(lost, before, during(reconnect, after)),
           subscriber: new FakeRedisClient(),
         },
         'a',

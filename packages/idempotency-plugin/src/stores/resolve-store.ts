@@ -4,7 +4,7 @@
  * @module
  */
 import type { ConnectionErrorReporter, IIdempotencyStore, ILogger } from '@setu-ts/common';
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { watchConnection } from '@setu-ts/common';
 import type { IdempotencyStoreConfig } from '../interfaces/index.ts';
 import { DEFAULT_REDIS_COMMAND_TIMEOUT_MS, DEFAULT_REDIS_KEY_PREFIX } from '../constants.ts';
 import { createRedisIdempotencyClient, loadIoredis } from './redis-client.ts';
@@ -36,12 +36,14 @@ export async function resolveStore(
   }
   const keyPrefix = resolved.keyPrefix ?? DEFAULT_REDIS_KEY_PREFIX;
   if ('client' in resolved && resolved.client !== undefined) {
-    attachConnectionErrorReporter(resolved.client, reporter);
+    // Detached on disconnect: the injected client outlives this store.
+    const watch = watchConnection(resolved.client, reporter);
     return new RedisIdempotencyStore(resolved.client, {
       namespace: resolved.namespace,
       keyPrefix,
       logger,
       ownsClient: false,
+      onDisconnect: () => watch.detach(),
     });
   }
   const built = resolved as Extract<IdempotencyStoreConfig, { type: 'redis'; url: string }>;

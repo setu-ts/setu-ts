@@ -324,9 +324,7 @@ describe('the entry shutdown handler', () => {
       // has registered then, so there is no logger to report through. A failed
       // shutdown still goes through the logger (next test).
       expect(main.match(/console\.error/g)).toHaveLength(1);
-      expect(main).toContain(
-        'console.error(`Startup failed: ${maskUrlUserinfo(describeError(error))}`);',
-      );
+      expect(main).toContain('console.error(`Startup failed: ${describeError(error)}`);');
     });
 
     // Shutdown failures used to bypass structured logging entirely. The logger

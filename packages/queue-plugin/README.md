@@ -138,9 +138,11 @@ closed or offline client throws `BackendUnavailableError` from `@setu-ts/common`
 `503` with "The request was not applied."; a Redis command sent with no answer (`Command timed out`)
 throws `BackendOutcomeUnknownError`, which answers `504`: the job may already be queued, so a client
 that retries should send an idempotency key. A lost connection (`MaxRetriesPerRequestError`,
-"Connection is closed.", a reset) answers `503` only when the client was not connected at the moment
-of the call, and `504` otherwise: ioredis rejects commands already sent with the same error. Both
-keep the driver error as `cause` for the log. Any other adapter error is rethrown unchanged.
+"Connection is closed.", a reset) answers `503` only when the command provably never left the
+process — the client was disconnected at the call, has not reconnected since, and is still
+disconnected — and `504` otherwise: ioredis rejects commands already sent with the same error, and a
+command queued while disconnected is written after the next reconnect. Both keep the driver error as
+`cause` for the log. Any other adapter error is rethrown unchanged.
 
 ### Processing Jobs
 

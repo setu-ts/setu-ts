@@ -7,10 +7,10 @@
  * @module
  */
 
-import { attachConnectionErrorReporter, deadlineRangeError } from '@setu-ts/common';
+import { deadlineRangeError, watchConnection } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import { StaleClaimError } from '../errors.ts';
-import type { ConnectionErrorReporter } from '@setu-ts/common';
+import type { ConnectionErrorReporter, ConnectionWatch, DispatchMark } from '@setu-ts/common';
 import type { QueueAdapter, QueueDepths } from './queue-adapter.ts';
 import {
   ACK_SCRIPT,
@@ -201,7 +201,7 @@ export function validateClient(client: unknown): client is IRedisQueueClient {
  *   client without `on` is left alone.
  * @param commandTimeoutMs - Bound applied to the BUILT client only; an
  *   injected client is the caller's and keeps its own configuration
- * @returns The resolved client instance
+ * @returns The resolved client and the watch on its connection events
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
 async function resolveClient(
@@ -209,7 +209,7 @@ async function resolveClient(
   injectedClient: IRedisQueueClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
-): Promise<IRedisQueueClient> {
+): Promise<{ readonly client: IRedisQueueClient; readonly watch: ConnectionWatch }> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
       throw new Error(
@@ -217,13 +217,11 @@ async function resolveClient(
           '(needs: zadd, zrangebyscore, zrem, hset, hget, hdel, del, quit)',
       );
     }
-    attachConnectionErrorReporter(injectedClient, reporter);
-    return injectedClient;
+    return { client: injectedClient, watch: watchConnection(injectedClient, reporter) };
   }
   const RedisCtor = await loadIoredis();
   const client = createLazyRedisClient(RedisCtor, url, commandTimeoutMs);
-  attachConnectionErrorReporter(client, reporter);
-  return client;
+  return { client, watch: watchConnection(client, reporter) };
 }
 
 /**
@@ -257,6 +255,8 @@ const DISCONNECTED_STATUSES: ReadonlySet<string> = new Set(['reconnecting', 'clo
  */
 export class RedisQueue implements QueueAdapter {
   #client: IRedisQueueClient | null = null;
+  /** The reporter and reconnect counter on `#client`; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #url: string;
   #injectedClient: IRedisQueueClient | undefined;
   /** Retention for a dead-lettered job's payload; unbounded when undefined. */
@@ -301,12 +301,14 @@ export class RedisQueue implements QueueAdapter {
     if (this.#ready) {
       return;
     }
-    this.#client = await resolveClient(
+    const resolved = await resolveClient(
       this.#url,
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
     );
+    this.#client = resolved.client;
+    this.#watch = resolved.watch;
     if (typeof this.#client.connect === 'function') {
       await this.#client.connect();
     }
@@ -371,6 +373,10 @@ export class RedisQueue implements QueueAdapter {
   }
 
   async disconnect(): Promise<void> {
+    // Detached first: a shared injected client must not report into this
+    // adapter's logger once it has stopped.
+    this.#watch?.detach();
+    this.#watch = undefined;
     if (this.#client) {
       await this.#client.quit();
     }
@@ -385,8 +391,12 @@ export class RedisQueue implements QueueAdapter {
     return this.#ready;
   }
 
-  connectionStatus(): string | undefined {
-    return this.#client?.status;
+  dispatchMark(): DispatchMark | undefined {
+    return this.#watch?.mark(this.#client?.status);
+  }
+
+  unsent(mark: DispatchMark): boolean {
+    return this.#watch?.unsent(mark, this.#client?.status) === true;
   }
 
   async enqueue<T>(job: StoredJob<T>): Promise<void> {

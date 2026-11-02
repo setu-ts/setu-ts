@@ -7,7 +7,8 @@
  *
  * @module
  */
-import { attachConnectionErrorReporter } from '@setu-ts/common';
+import { attachConnectionErrorReporter, watchConnection } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import { OptionalDependencyUnavailableError } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import type { IDistributedLock, IRedisLockClient, RedisLockOptions } from '../interfaces/index.ts';
@@ -132,6 +133,7 @@ export function validateClient(client: unknown): client is IRedisLockClient {
  *   injected client (M131a X88-3): an injected node-redis client's outages must
  *   be as visible as a built ioredis client's. The attach is structural, so a
  *   client without `on` is left alone.
+ * @param onWatch - Receives the watch on an injected client, to detach on disconnect
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -140,6 +142,7 @@ async function resolveClient(
   injectedClient: IRedisLockClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRedisLockClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -148,7 +151,8 @@ async function resolveClient(
           '(needs: set, quit, eval)',
       );
     }
-    attachConnectionErrorReporter(injectedClient, reporter);
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -174,6 +178,8 @@ async function resolveClient(
  */
 export class RedisLock implements IDistributedLock {
   #client: IRedisLockClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #options: RedisLockOptions;
   #connected = false;
   #commandTimeoutMs: number;
@@ -203,6 +209,9 @@ export class RedisLock implements IDistributedLock {
       this.#options.client,
       this.#options.connectionErrorReporter,
       this.#commandTimeoutMs,
+      (watch) => {
+        this.#watch = watch;
+      },
     );
     this.#connected = true;
   }
@@ -211,6 +220,8 @@ export class RedisLock implements IDistributedLock {
    * Disconnect from the Redis backend.
    */
   async disconnect(): Promise<void> {
+    this.#watch?.detach();
+    this.#watch = undefined;
     try {
       if (this.#client !== null) {
         await this.#client.quit();

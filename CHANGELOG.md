@@ -15,10 +15,13 @@ All notable changes to this project are documented here. The format follows
   union, `BackendFaultContext` and `toBackendFault(error, source, context?)`. A lost connection
   (`MaxRetriesPerRequestError`, "Connection is closed.", a reset) answers `503` only when the client
   was not connected when the call was made, read from its `status` just before it, because ioredis
-  rejects commands already sent with the same errors. `QueueService.add`, the Redis Streams
-  `publish` and the realtime backplane's Redis `publish` wrap a recognised driver failure in one of
-  them, keeping the driver error as `cause`; it is never served. `PublishTimeoutError` keeps its
-  name and gains the `504` hint itself (X88-5).
+  rejects commands already sent with the same errors, and a command made while the client is
+  disconnected is written after the next reconnect: the decision uses the new `watchConnection`
+  (returning a `ConnectionWatch` that records a `DispatchMark` before each call), which counts
+  reconnects (M131a security audit). `QueueService.add`, the Redis Streams `publish` and the
+  realtime backplane's Redis `publish` wrap a recognised driver failure in one of them, keeping the
+  driver error as `cause`; it is never served. `PublishTimeoutError` keeps its name and gains the
+  `504` hint itself (X88-5).
 - **`setu add` Redis arms for every Redis-backed plugin (M131a, `@setu-ts/cli`).**
   `setu add cache --store redis`, `setu add idempotency --store redis`,
   `setu add scheduler --lock redis` and `setu add realtime-backplane --backplane redis` wire the
@@ -61,18 +64,26 @@ All notable changes to this project are documented here. The format follows
   idempotency key (X88-5).
 - **Redaction masks URL userinfo by default (M131a, `@setu-ts/common`).** Every string value no
   redaction pattern matches has `scheme://user:password@host` rewritten to `scheme://***@host`, in
-  logs, traces and audit records alike (X88-8).
+  what a redaction service sees: log metadata by default (the logger builds one with its secure
+  default paths), and trace attributes and audit records only when the telemetry or audit plugin is
+  given a redaction policy, since neither redacts without one. A log MESSAGE string is not redacted;
+  `describeError`, which renders the error text in the framework's own connection-error lines and
+  the generated start line, masks URL userinfo itself before its 8192-character bound (X88-8).
 - **Generated start scripts load `.env`, and a failed boot prints one masked line (M131a,
   `@setu-ts/cli`).** Node local scripts pass `--env-file-if-exists=.env` (after `tsx watch`, which
   reads its subcommand first) and Deno's pass `--env-file=.env` where the project writes one; Bun
   loads `.env` itself; images keep the platform environment. The generated `main.ts` catches a
   failed boot, prints `Startup failed: …` through `describeError` and `maskUrlUserinfo`, and exits
   `1`, so a malformed `REDIS_URL` no longer reaches stderr with its password (X88-2, X88-8).
+- **`describeError` masks URL userinfo (M131a, `@setu-ts/common`).** Every name, message and
+  classifier value is masked before the 8192-character bound, so a cut cannot expose part of a
+  password (security audit).
 - **Plugins report an injected client's connection errors (M131a).** The cache, idempotency, queue,
   scheduler, realtime-backplane, messaging and auth rate-limit Redis stores now attach their
   connection-error reporter to an injected client as well as a built one, so a node-redis outage
-  logs one `warn` per plugin per state change. `fromNodeRedis` rejects its first `connect()` at once
-  on the first connection error, naming the cause, instead of after the 15 s command bound (X88-3).
+  logs one `warn` per plugin per state change; the listeners are removed again when the plugin stops
+  (`watchConnection`). `fromNodeRedis` rejects its first `connect()` at once on the first connection
+  error, naming the cause, instead of after the 15 s command bound (X88-3).
 - **Redis Streams polls outside any request (M131a, `@setu-ts/messaging-plugin`).** The broker
   starts one poll timer and one reclaim timer at `connect()` for all subscriptions instead of one
   pair per `subscribe()`, so a handler that subscribes lazily no longer parents every poll span to

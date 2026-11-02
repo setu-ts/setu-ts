@@ -153,11 +153,16 @@ The framework knows four classifications — `DATA_CLASSIFICATIONS.PII` (`'pii'`
 Every string value no pattern matches still passes one value-based rule: URL userinfo is masked, so
 `redis://user:password@host:6379` becomes `redis://***@host:6379` wherever it sits in the record
 (M131a). The userinfo runs to the URL's last `@`, so a malformed URL whose password holds an
-unencoded `@`, `/`, `#` or `?` is masked whole. A URL with no userinfo, an email address and an `@`
-in a path are left alone, except a path `@` after a port, which is masked. The scan is linear and
-applies to strings of any length. The same rule is exported as `maskUrlUserinfo(value)` for text
-that never passes through a redaction service, such as the one line a generated `main.ts` prints
-when the application fails to start.
+unencoded `@`, `/`, `#`, `?`, `://` or whitespace is masked whole. A URL with no userinfo, an email
+address and an `@` in a path are left alone, except a path `@` after a port, which is masked. The
+scan is linear and applies to strings of any length.
+
+The rule applies where a redaction service runs: the logger's metadata by default, and trace
+attributes and audit records only when those plugins are given a policy. A log message string is not
+redacted. `describeError` therefore masks every name, message and classifier value itself, before
+its 8192-character bound, so the framework's connection-error lines and the line a generated
+`main.ts` prints on a failed start cannot carry a password even when the bound cuts the URL. The
+rule is also exported as `maskUrlUserinfo(value)`.
 
 ```typescript
 import { createMaskRedactor, createRedactionService, DATA_CLASSIFICATIONS } from '@setu-ts/common';
@@ -294,6 +299,7 @@ package fits the plugin architecture.
 | `upgradeIntentOf`                     | function  |
 | `validatedStateKey`                   | function  |
 | `validationMetadataOf`                | function  |
+| `watchConnection`                     | function  |
 | `withDeadline`                        | function  |
 | `withHttpStatusHint`                  | function  |
 | `withResponseMetadata`                | function  |
@@ -361,6 +367,7 @@ package fits the plugin architecture.
 | `ConfigProvenanceEntry`               | interface |
 | `ConnectionErrorReporter`             | interface |
 | `ConnectionErrorReporterOptions`      | interface |
+| `ConnectionWatch`                     | interface |
 | `CookieAttributes`                    | interface |
 | `CqrsCommand`                         | interface |
 | `CqrsQuery`                           | interface |
@@ -372,6 +379,7 @@ package fits the plugin architecture.
 | `DiagnosticsEvent`                    | interface |
 | `DiagnosticsNode`                     | interface |
 | `DiagnosticsSnapshot`                 | interface |
+| `DispatchMark`                        | interface |
 | `EncodedPayload`                      | interface |
 | `EnvVarSpec`                          | interface |
 | `Err`                                 | interface |

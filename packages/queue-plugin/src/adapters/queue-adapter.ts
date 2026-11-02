@@ -1,3 +1,5 @@
+import type { DispatchMark } from '@setu-ts/common';
+
 /**
  * Internal queue adapter interface.
  *
@@ -69,15 +71,23 @@ export interface QueueAdapter {
   disconnect(): Promise<void>;
 
   /**
-   * The driver's connection state (ioredis `status` vocabulary), when the
-   * backend client reports one. `QueueService.add` reads it just before
-   * enqueueing, so a lost-connection failure can say whether the job could
-   * have been sent (M131a X88-5). Optional: an adapter without a status omits
-   * it, and such a failure is answered as possibly applied.
+   * Records the client's connection state just before an enqueue, so a
+   * lost-connection failure can be decided by {@linkcode QueueAdapter.unsent}
+   * (M131a X88-5). Optional: an adapter without it answers every such failure
+   * as possibly applied.
    *
-   * @returns The status string, or `undefined`
+   * @returns The mark, or `undefined` when the client reports no state
    */
-  connectionStatus?(): string | undefined;
+  dispatchMark?(): DispatchMark | undefined;
+
+  /**
+   * Whether the enqueue dispatched at `mark` provably never reached the backend:
+   * disconnected then, no reconnect since, still disconnected now.
+   *
+   * @param mark - The mark from {@linkcode QueueAdapter.dispatchMark}
+   * @returns `true` only when the job cannot have been stored
+   */
+  unsent?(mark: DispatchMark): boolean;
 
   /**
    * Checks if the adapter is ready/connected.

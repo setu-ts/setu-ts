@@ -10,7 +10,9 @@ import {
   attachConnectionErrorReporter,
   isConnectionFault,
   OptionalDependencyUnavailableError,
+  watchConnection,
 } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import type { ConnectionErrorReporter } from '@setu-ts/common';
 import { CacheStoreUnavailableError } from '../errors.ts';
 import type { CacheStore } from './cache-store.ts';
@@ -139,6 +141,7 @@ export function validateClient(client: unknown): client is IRedisClient {
  *   client without `on` is left alone.
  * @param commandTimeoutMs - Bound applied to the BUILT client only; an
  *   injected client is the caller's and keeps its own configuration
+ * @param onWatch - Receives the watch on an injected client, to detach on disconnect
  * @returns The resolved client instance
  * @throws {Error} If no client injected and ioredis cannot be loaded
  */
@@ -147,6 +150,7 @@ async function resolveClient(
   injectedClient: IRedisClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -155,7 +159,8 @@ async function resolveClient(
           '(needs: get, set, del, exists, scan, quit, ping)',
       );
     }
-    attachConnectionErrorReporter(injectedClient, reporter);
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -175,6 +180,8 @@ async function resolveClient(
  */
 export class RedisStore implements CacheStore {
   #client: IRedisClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #url: string;
   #injectedClient: IRedisClient | undefined;
   #prefix: string;
@@ -221,6 +228,9 @@ export class RedisStore implements CacheStore {
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
+      (watch) => {
+        this.#watch = watch;
+      },
     );
     // Only call connect() if the client exposes it (lazy ioredis clients do).
     if (typeof this.#client.connect === 'function') {
@@ -230,6 +240,8 @@ export class RedisStore implements CacheStore {
   }
 
   async disconnect(): Promise<void> {
+    this.#watch?.detach();
+    this.#watch = undefined;
     if (this.#client) {
       await this.#client.quit();
     }

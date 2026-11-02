@@ -37,7 +37,7 @@ const MASK_TABLE: ReadonlyArray<readonly [input: string, expected: string]> = [
   // A leading non-letter is not part of the scheme.
   ['9redis://u:p@host', '9redis://***@host'],
   // Back-to-back separators: the userinfo stops at the next `/`.
-  ['a://b://u:p@h', 'a://b://***@h'],
+  ['a://b://u:p@h', 'a://***@h'],
   // A space ends the URL.
   ['redis://user pw@host', 'redis://user pw@host'],
   // Malformed URLs: an unencoded `@`, `/`, `#` or `?` in the password is masked
@@ -53,6 +53,19 @@ const MASK_TABLE: ReadonlyArray<readonly [input: string, expected: string]> = [
   ['https://host:8080/@handle', 'https://***@handle'],
   // A query `@` with no colon is untouched.
   ['https://host/?to=a@b', 'https://host/?to=a@b'],
+  // Audit (M131a): whitespace or `://` inside a password.
+  ['redis://:pw x@host', 'redis://***@host'],
+  ['redis://:pw\tx@host:6379', 'redis://***@host:6379'],
+  ['redis://user:p w@host', 'redis://***@host'],
+  ['redis://:pa://ss@host', 'redis://***@host'],
+  ['redis://:p@ss/w://d@host', 'redis://***@host'],
+  // A URL then prose with an `@` is untouched when the URL has no password.
+  ['see https://example.com and mail me@x.org', 'see https://example.com and mail me@x.org'],
+  ['https://example.com:8080 and me@x.org', 'https://example.com:8080 and me@x.org'],
+  // A redirect URL's `://` colon is not a password colon.
+  ['http://x.com/r?u=https://y@z', 'http://x.com/r?u=https://***@z'],
+  // A URL never spans lines.
+  ['redis://:pw\nx@host', 'redis://:pw\nx@host'],
 ];
 
 describe('maskUrlUserinfo (M131a X88-8)', () => {
@@ -95,5 +108,36 @@ describe('maskUrlUserinfo (M131a X88-8)', () => {
     const service = createRedactionService({ fields: {} });
     const record = service.redactRecord({ url: 'redis://user:password@host' });
     expect(record.url).toBe('redis://***@host');
+  });
+});
+
+describe('describeError masks before its 8192-character bound (M131a audit)', () => {
+  it('never prints part of a password, wherever the bound cuts the URL', async () => {
+    const { describeError } = await import('../../src/index.ts');
+    const secret = 'Canary7Secret';
+    const url = `redis://user:${secret}@cache.internal:6379`;
+    // Every offset that puts the bound inside the URL, before and after its `@`.
+    for (let pad = 8192 - 80; pad <= 8192; pad++) {
+      const line = describeError(new Error(`${'x'.repeat(pad)} ${url}`));
+      for (let length = 4; length <= secret.length; length++) {
+        expect(line, `pad ${pad}`).not.toContain(secret.slice(0, length));
+      }
+    }
+  });
+
+  it('masks a URL in a classifier value and a cause, and leaves plain text alone', async () => {
+    const { describeError } = await import('../../src/index.ts');
+    const error = Object.assign(
+      new Error('connect failed', {
+        cause: new Error('dial redis://:hunter2@h:6379'),
+      }),
+      { code: 'redis://a:hunter2@h' },
+    );
+    const line = describeError(error);
+    expect(line).not.toContain('hunter2');
+    expect(line).toContain('redis://***@h:6379');
+    expect(describeError(new Error('plain failure at 10:00'))).toBe(
+      'Error: plain failure at 10:00',
+    );
   });
 });

@@ -23,8 +23,14 @@ answer `503` (`BackendUnavailableError`, not applied) or `504` (`BackendOutcomeU
 on `503` should retry a `504` only with an idempotency key. Code that caught the raw driver error
 from `add()` or `publish()` should read it from the new error's `cause`.
 
-Log, trace and audit metadata now mask URL userinfo in every unmatched string value. A dashboard or
-test that matched a logged connection URL with its credentials must match `scheme://***@host`.
+Log metadata now masks URL userinfo in every unmatched string value, and so do trace attributes and
+audit records when their plugin is given a redaction policy; `describeError` masks it in every error
+line. A dashboard or test that matched a logged connection URL with its credentials must match
+`scheme://***@host`. Log message strings are not redacted: keep credentials out of the text you pass
+as the message.
+
+A plugin that stops now removes the listeners it added to an injected Redis client, so one client
+shared by several applications no longer reports into a stopped one's logger.
 
 An injected Redis client now gets the plugin's connection-error listener, so its outages are logged;
 if you attached your own `'error'` listener only to stop an unhandled-error crash, it can stay.

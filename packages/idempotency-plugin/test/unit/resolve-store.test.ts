@@ -72,6 +72,19 @@ describe('resolveStore (M109a §3.14)', () => {
     expect(events).toEqual(['error', 'ready']);
   });
 
+  it('detaches the injected client listeners on disconnect (M131a audit)', async () => {
+    const { EventEmitter } = await import('node:events');
+    const client = Object.assign(new EventEmitter(), injectedClient());
+    const store = await resolveStore(
+      { type: 'redis', namespace: 'shop', client: client as never },
+      noopReporter,
+      () => undefined,
+    );
+    expect(client.listenerCount('error')).toBe(1);
+    await store.disconnect?.();
+    expect(client.listenerCount('error')).toBe(0);
+  });
+
   it('logs through the thunk when the injected client reports an evicting policy', async () => {
     const warnings: string[] = [];
     const logger = {

@@ -22,77 +22,123 @@ const MAX_REDACTION_DEPTH = 32;
 const SCHEME_CHAR = /[a-z0-9+.-]/i;
 const SCHEME_START = /[a-z]/i;
 const WHITESPACE = /\s/;
+const LINE_BREAK = /[\n\r\u2028\u2029]/;
 const AUTHORITY_END = /[/?#]/;
+const DIGIT = /[0-9]/;
 
 /**
  * Masks a URL's userinfo in a string: `scheme://user:password@host` becomes
  * `scheme://***@host`. This is the default policy's one value-based rule — it
- * runs on every string value the redaction seam sees, so a malformed `REDIS_URL`
- * (which often holds a password) is never echoed into a log, trace or audit
- * record.
+ * runs on every string value the redaction seam sees, and `describeError`
+ * applies it to every message — so a malformed `REDIS_URL` (which often holds
+ * a password) is not echoed into a log line or stderr.
  *
  * A URL is malformed precisely when its password carries a character it should
- * have encoded, so the userinfo is taken to end at the LAST `@` of the URL
- * (the text up to the next whitespace or the next `://`), not the first:
- * `redis://:p@ss/word@host` masks to `redis://***@host`. The URL has userinfo
- * when an `@` comes before the first `/`, `?` or `#`, or when the text before
- * its last `@` holds a `:` (a `user:password` pair with a `/` in the password).
- * A URL with no `@` (`https://host/…`), an email (`user@host`, no `://`) and an
- * `@` in a path with no `:` before it (`https://host/@handle`) are untouched; a
- * path `@` after a port (`https://host:8080/@handle`) is over-masked, which
- * errs toward hiding.
+ * have encoded, so the rule leans toward hiding:
  *
- * Every string is inspected, whatever its length: a size cut-off would emit a
- * long message carrying a credentialed URL unmasked. The scan is linear: each
- * URL's text ends at the next `://`, so the texts never overlap, and the walk
- * back over a scheme cannot cross the previous `://`.
+ * - The userinfo runs to the LAST `@` of the URL's text, so an unencoded `@`,
+ *   `/`, `#`, `?` or `://` in the password is masked whole:
+ *   `redis://:p@ss/w://d@host` → `redis://***@host`.
+ * - The URL has userinfo when an `@` comes before the first `/`, `?` or `#`,
+ *   or when a `:` (not one of a `://`) comes before its last `@`.
+ * - A password holding whitespace (`redis://:pw x@host`) is masked to the
+ *   first `@` after it on the same line, when the text before the whitespace
+ *   has a `:` that is not a port (digits only, as in `host:8080`).
+ *
+ * Left untouched: a URL with no `@` (`https://host/…`), an email (`user@host`,
+ * no `://`), an `@` in a path or query with no `:` before it
+ * (`https://host/@handle`), and a URL followed on its line by prose with an
+ * `@` when nothing in the URL looks like `user:password`. Over-masked, on
+ * purpose: a path `@` after a port (`https://host:8080/@handle`). A URL never
+ * spans lines.
+ *
+ * Every string is inspected, whatever its length, in one linear pass from the
+ * right: each position's next whitespace, next `@`, first `:` and so on are
+ * known when its `://` is reached, and a scheme's walk back stops at the
+ * previous non-scheme character.
  *
  * @param value - The string to inspect
  * @returns The string with any URL userinfo masked, or unchanged
  * @since 0.12.0
  */
 export function maskUrlUserinfo(value: string): string {
-  let separator = value.indexOf('://');
-  if (separator === -1) return value;
+  if (!value.includes('://')) return value;
+  // Facts about the token (whitespace-free run) starting at the current index.
+  let tokenEnd = value.length;
+  let firstAt = -1;
+  let lastAt = -1;
+  let firstColon = -1;
+  let colonPortLike = false;
+  let firstAuthorityEnd = -1;
+  let digitsToTokenEnd = true;
+  // The first `@` after the current token, on the same line.
+  let nextAtAfterToken = -1;
+  // Masked ranges [start, end), found right to left.
+  const ranges: [number, number][] = [];
+  for (let index = value.length - 1; index >= 0; index--) {
+    const char = value[index]!;
+    if (WHITESPACE.test(char)) {
+      if (LINE_BREAK.test(char)) nextAtAfterToken = -1;
+      else if (firstAt !== -1) nextAtAfterToken = firstAt;
+      tokenEnd = index;
+      firstAt = lastAt = firstColon = firstAuthorityEnd = -1;
+      colonPortLike = false;
+      digitsToTokenEnd = true;
+    } else {
+      const digitsAfter = digitsToTokenEnd;
+      digitsToTokenEnd = DIGIT.test(char) && digitsToTokenEnd;
+      if (char === '@') {
+        firstAt = index;
+        if (lastAt === -1) lastAt = index;
+      } else if (char === ':' && !value.startsWith('//', index + 1)) {
+        firstColon = index;
+        colonPortLike = index + 1 < tokenEnd && digitsAfter;
+      } else if (AUTHORITY_END.test(char)) {
+        firstAuthorityEnd = index;
+      }
+    }
+    if (index < 3 || !value.startsWith('://', index - 3)) continue;
+    // `index` is the first character after a `://`; the facts describe it.
+    const separator = index - 3;
+    let schemeStart = separator;
+    while (schemeStart > 0 && SCHEME_CHAR.test(value[schemeStart - 1]!)) schemeStart--;
+    while (schemeStart < separator && !SCHEME_START.test(value[schemeStart]!)) schemeStart++;
+    if (schemeStart === separator) continue;
+    let end = -1;
+    if (
+      lastAt > index &&
+      (firstAuthorityEnd === -1 ||
+        firstAt < firstAuthorityEnd ||
+        (firstColon !== -1 && firstColon < lastAt))
+    ) {
+      end = lastAt;
+    } else if (
+      lastAt === -1 &&
+      firstColon !== -1 &&
+      !colonPortLike &&
+      (firstAuthorityEnd === -1 || firstColon < firstAuthorityEnd) &&
+      nextAtAfterToken !== -1
+    ) {
+      end = nextAtAfterToken;
+    }
+    if (end !== -1) ranges.push([index, end]);
+  }
+  if (ranges.length === 0) return value;
+  ranges.reverse();
   let out = '';
   let copied = 0;
-  while (separator !== -1) {
-    let schemeStart = separator;
-    while (schemeStart > copied && SCHEME_CHAR.test(value[schemeStart - 1]!)) schemeStart--;
-    while (schemeStart < separator && !SCHEME_START.test(value[schemeStart]!)) schemeStart++;
-    const infoStart = separator + 3;
-    let cursor = infoStart;
-    let firstAt = -1;
-    let lastAt = -1;
-    let authorityEnd = -1;
-    let colonBeforeLastAt = false;
-    let colonSeen = false;
-    while (
-      cursor < value.length &&
-      !WHITESPACE.test(value[cursor]!) &&
-      !value.startsWith('://', cursor)
-    ) {
-      const char = value[cursor]!;
-      if (char === '@') {
-        if (firstAt === -1) firstAt = cursor;
-        lastAt = cursor;
-        colonBeforeLastAt = colonSeen;
-      } else if (char === ':') {
-        colonSeen = true;
-      } else if (authorityEnd === -1 && AUTHORITY_END.test(char)) {
-        authorityEnd = cursor;
-      }
-      cursor++;
+  let current = ranges[0]!;
+  for (let at = 1; at <= ranges.length; at++) {
+    const next = ranges[at];
+    if (next !== undefined && next[0] <= current[1]) {
+      current = [current[0], Math.max(current[1], next[1])];
+      continue;
     }
-    const hasUserinfo =
-      lastAt > infoStart && (authorityEnd === -1 || firstAt < authorityEnd || colonBeforeLastAt);
-    if (schemeStart < separator && hasUserinfo) {
-      out += value.slice(copied, infoStart) + '***@';
-      copied = lastAt + 1;
-    }
-    separator = value.indexOf('://', cursor);
+    out += value.slice(copied, current[0]) + '***';
+    copied = current[1];
+    if (next !== undefined) current = next;
   }
-  return copied === 0 ? value : out + value.slice(copied);
+  return out + value.slice(copied);
 }
 
 /**

@@ -694,7 +694,7 @@ function serveEntry(runtime: TargetRuntime, port?: EntryPort, serverBuild = fals
 
   return `${serverBuild ? "import * as serverBuild from './build/server/index.js';\n" : ''}import { ${CONFIG_EXPORT} } from './${CONFIG_MODULE}';
 import { createRuntimeServices } from '@setu-ts/runtime';
-import { CAPABILITIES, describeError, maskUrlUserinfo } from '@setu-ts/common';
+import { CAPABILITIES, describeError } from '@setu-ts/common';
 import type { ILogger } from '@setu-ts/common';
 ${portImport}
 // Built before the application, because the port is needed at start() and
@@ -712,7 +712,7 @@ async function boot() {
 }
 
 const app = await boot().catch((error: unknown) => {
-  console.error(\`Startup failed: \${maskUrlUserinfo(describeError(error))}\`);
+  console.error(\`Startup failed: \${describeError(error)}\`);
   return runtime.exit(1);
 });
 ${shutdownBlock(runtime)}`;

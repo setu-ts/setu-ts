@@ -183,11 +183,12 @@ interface ErrorEventSource {
 /**
  * Attaches a reporter to a client's `'error'` and `'ready'` events.
  *
- * Call it ONLY on a client the package built itself. An injected client
- * belongs to the caller, and adding an `'error'` listener to it would silence
- * the caller's own handling (`ioredis` falls back to the console only when no
- * listener exists). The client is checked structurally at runtime, so the
- * package's injection facade need not declare `on`.
+ * The listeners stay for the client's lifetime, so this suits a client the
+ * package built and closes itself. For an injected client, which outlives the
+ * application, use {@linkcode watchConnection} and detach it on stop. An
+ * `'error'` listener replaces ioredis's console fallback for that client. The
+ * client is checked structurally at runtime, so the package's injection facade
+ * need not declare `on`.
  *
  * With no `reporter`, the listeners are still attached and drop every event —
  * the same outcome as a reporter whose logger returns `undefined`. A built
@@ -216,4 +217,105 @@ export function attachConnectionErrorReporter(
   source.on('error', (error) => reporter.report(error));
   source.on('ready', () => reporter.recovered());
   return true;
+}
+
+/** The status and reconnect count read just before a command was dispatched. */
+export interface DispatchMark {
+  /** The client's `status` at dispatch, when it reports one. */
+  readonly status: string | undefined;
+  /** `'ready'` events seen before dispatch. */
+  readonly readies: number;
+}
+
+/**
+ * A reporter attached to one client, which also counts its reconnects.
+ *
+ * @since 0.12.0
+ */
+export interface ConnectionWatch {
+  /** Whether listeners were attached (the client exposes `on`). */
+  readonly attached: boolean;
+  /**
+   * Records the state just before a command is dispatched.
+   *
+   * @param status - The client's `status` now
+   * @returns The mark to pass to {@linkcode ConnectionWatch.unsent}
+   */
+  mark(status: string | undefined): DispatchMark;
+  /**
+   * Whether a command dispatched at `mark` cannot have been written: the client
+   * was not connected then, has not connected since, and is not connected now.
+   * A driver queues a command made while it is disconnected and writes it after
+   * the next `'ready'`, so only a failure with no reconnect in between proves
+   * the command never left the process. Without listeners it answers `false`.
+   *
+   * @param mark - The mark recorded at dispatch
+   * @param status - The client's `status` at the failure
+   * @returns `true` only when the command provably was not written
+   */
+  unsent(mark: DispatchMark, status: string | undefined): boolean;
+  /** Removes the listeners; later events reach nobody. Idempotent. */
+  detach(): void;
+}
+
+/**
+ * Attaches a reporter to a client's `'error'` and `'ready'` events, counts the
+ * `'ready'` events, and can detach both listeners.
+ *
+ * For a client the application injected, which outlives the plugin: the owner
+ * calls `detach()` when it stops, so a later error on a shared client does not
+ * log through a stopped application (M131a). Removal uses `off` or
+ * `removeListener`, whichever the client has; a client with neither keeps the
+ * listeners, which then drop every event.
+ *
+ * @param client - The client; an object exposing an `on` method
+ * @param reporter - The reporter to route events to; omitted, events are dropped
+ * @returns The watch
+ * @since 0.12.0
+ */
+export function watchConnection(
+  client: unknown,
+  reporter: ConnectionErrorReporter = DROPPING_REPORTER,
+): ConnectionWatch {
+  let readies = 0;
+  let detached = false;
+  const onError = (error: unknown): void => {
+    if (!detached) reporter.report(error);
+  };
+  const onReady = (): void => {
+    readies++;
+    if (!detached) reporter.recovered();
+  };
+  const attached =
+    (typeof client === 'object' || typeof client === 'function') &&
+    client !== null &&
+    typeof (client as { on?: unknown }).on === 'function';
+  if (attached) {
+    const source = client as ErrorEventSource;
+    source.on('error', onError);
+    source.on('ready', onReady);
+  }
+  return {
+    attached,
+    mark: (status) => ({ status, readies }),
+    unsent: (mark, status) =>
+      attached &&
+      mark.status !== undefined &&
+      mark.status !== 'ready' &&
+      status !== 'ready' &&
+      readies === mark.readies,
+    detach(): void {
+      if (detached) return;
+      detached = true;
+      if (!attached) return;
+      const target = client as {
+        off?: (event: string, listener: (value: unknown) => void) => unknown;
+        removeListener?: (event: string, listener: (value: unknown) => void) => unknown;
+      };
+      const remove = typeof target.off === 'function' ? target.off : target.removeListener;
+      if (typeof remove !== 'function') return;
+      remove.call(client, 'error', onError);
+      remove.call(client, 'ready', onReady);
+    },
+  };
 }

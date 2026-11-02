@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { describe, expect, it, vi } from 'vitest';
 import { BackendOutcomeUnknownError, BackendUnavailableError } from '@setu-ts/common';
 import { RedisStreamsBroker, validateClient } from '../../src/brokers/redis-streams-broker.ts';
@@ -11,11 +12,18 @@ import { PublishTimeoutError, RequestTimeoutError } from '../../src/errors.ts';
  * A minimal injected client whose xadd rejects with a caller-supplied error,
  * standing in for a transport that loses its backend mid-publish.
  */
-function failingPublishClient(failure: unknown, status?: string): IRedisStreamsClient {
+function failingPublishClient(
+  failure: unknown,
+  status?: string,
+  onWrite?: (client: { status?: string; emit(event: string): boolean }) => void,
+): IRedisStreamsClient & EventEmitter {
   const reject = (): Promise<never> => Promise.reject(failure);
   const ok = (): Promise<void> => Promise.resolve();
-  return {
-    xadd: reject,
+  const client = Object.assign(new EventEmitter(), {
+    xadd: (): Promise<never> => {
+      onWrite?.(client);
+      return Promise.reject(failure);
+    },
     xgroup: reject,
     xreadgroup: reject,
     xpending: reject,
@@ -25,19 +33,30 @@ function failingPublishClient(failure: unknown, status?: string): IRedisStreamsC
     quit: ok,
     connect: ok,
     ...(status === undefined ? {} : { status }),
-  };
+  });
+  return client as IRedisStreamsClient & EventEmitter;
 }
 /**
- * A lost connection (ioredis \`MaxRetriesPerRequestError\`) is decided by the
- * client's status read just before the call: not connected → 503, connected
- * or unknown → 504, because ioredis flushes commands already on the socket
- * with the same error.
+ * A lost connection (ioredis \`MaxRetriesPerRequestError\`) answers 503 only
+ * when the command provably never left the process: disconnected at dispatch,
+ * no reconnect since, still disconnected at the failure. A command queued
+ * offline and written after a reconnect may have been applied (the M131a
+ * audit's case).
  */
 const LOST_CONNECTION_CASES = [
-  ['reconnecting', 'BackendUnavailableError'],
-  ['ready', 'BackendOutcomeUnknownError'],
-  [undefined, 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'reconnecting', 'BackendUnavailableError'],
+  ['reconnecting', true, 'reconnecting', 'BackendOutcomeUnknownError'],
+  ['reconnecting', false, 'ready', 'BackendOutcomeUnknownError'],
+  ['ready', false, 'ready', 'BackendOutcomeUnknownError'],
 ] as const;
+
+/** Between dispatch and failure: an optional reconnect, then the final state. */
+function during(reconnect: boolean, after: string) {
+  return (client: { status?: string; emit(event: string): boolean }): void => {
+    if (reconnect) client.emit('ready');
+    client.status = after;
+  };
+}
 
 function maxRetries(): Error {
   const e = new Error(
@@ -47,18 +66,18 @@ function maxRetries(): Error {
   return e;
 }
 
-function classOf(name: (typeof LOST_CONNECTION_CASES)[number][1]) {
+function classOf(name: (typeof LOST_CONNECTION_CASES)[number][3]) {
   return name === 'BackendUnavailableError' ? BackendUnavailableError : BackendOutcomeUnknownError;
 }
 
 describe('RedisStreamsBroker.publish backend-fault wrapping (M131a X88-5)', () => {
   it.each(LOST_CONNECTION_CASES)(
-    'decides a lost connection by the status at dispatch (%s → %s)',
-    async (status, expected) => {
+    'dispatch %s, reconnect %s, failure %s → %s',
+    async (before, reconnect, after, expected) => {
       const runtime = createFakeRuntime();
       const lost = maxRetries();
       const broker = new RedisStreamsBroker(runtime, new JsonSerializer(), {
-        client: failingPublishClient(lost, status),
+        client: failingPublishClient(lost, before, during(reconnect, after)),
       });
       await broker.connect();
       try {

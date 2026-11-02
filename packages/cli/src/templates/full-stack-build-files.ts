@@ -341,7 +341,7 @@ export const FULL_STACK_DEV_ENTRY: { readonly path: string; readonly contents: s
   path: 'dev.ts',
   contents: `import * as vite from 'vite';
 import { createRequestHandler, RouterContextProvider, type ServerBuild } from 'react-router';
-import { CAPABILITIES, describeError, type ILogger, maskUrlUserinfo } from '@setu-ts/common';
+import { CAPABILITIES, describeError, type ILogger } from '@setu-ts/common';
 import { viteDevExternals } from '@setu-ts/react-router-plugin';
 import { createRuntimeServices } from '@setu-ts/runtime';
 import { createApp } from './setu.config.ts';
@@ -412,7 +412,7 @@ app.router.get(\`\${BASE}*\`, async (ctx) => {
 // One masked line and exit 1, as main.ts does: the default printer would dump
 // a malformed REDIS_URL, password included.
 await app.start({ port }).catch(async (error: unknown) => {
-  console.error(\`Startup failed: \${maskUrlUserinfo(describeError(error))}\`);
+  console.error(\`Startup failed: \${describeError(error)}\`);
   await viteServer.close();
   return runtime.exit(1);
 });

@@ -35,11 +35,13 @@
  * "Connection is closed." when it gives up on a connection — including
  * commands already written to the socket before it dropped (its `flushQueue`
  * empties the sent-command queue too), and a reset or broken pipe can arrive
- * after the server ran the command. For those the caller says whether the
- * client was connected when it dispatched the call (`connectedAtDispatch`): a
- * client that was not connected only queued it offline, so the request was not
- * applied (503); a connected one may have sent it (504), and an unknown state
- * is treated as connected.
+ * after the server ran the command. A command made while the client is
+ * disconnected is not safe either: the driver queues it and writes it after the
+ * next reconnect, and the connection can drop again with the command applied
+ * (audit finding, M131a). So the caller says whether the command provably was
+ * never written (`unsent`, from {@linkcode watchConnection}: disconnected at
+ * dispatch, no reconnect since, still disconnected at the failure) — then the
+ * request was not applied (503); otherwise it may have been (504).
  *
  * @module
  */
@@ -160,11 +162,11 @@ const IN_FLIGHT_CODES: ReadonlySet<string> = new Set(['ECONNRESET', 'EPIPE', 'ET
  */
 export interface BackendFaultContext {
   /**
-   * Whether the client was connected (`status === 'ready'`) when the call was
-   * dispatched. Decides a lost-connection fault: `false` → not applied (503);
-   * `true` or omitted → may have been applied (504).
+   * Whether the failed command provably was never written to the backend.
+   * Decides a lost-connection fault: `true` → not applied (503); `false` or
+   * omitted → may have been applied (504).
    */
-  readonly connectedAtDispatch?: boolean;
+  readonly unsent?: boolean;
 }
 
 /**
@@ -263,10 +265,7 @@ export function toBackendFault(
     return error;
   }
   const kind = classifyChain(error);
-  if (
-    kind === 'unavailable' ||
-    (kind === 'connection-lost' && context?.connectedAtDispatch === false)
-  ) {
+  if (kind === 'unavailable' || (kind === 'connection-lost' && context?.unsent === true)) {
     return new BackendUnavailableError(source, { cause: error });
   }
   if (kind !== undefined) return new BackendOutcomeUnknownError(source, { cause: error });

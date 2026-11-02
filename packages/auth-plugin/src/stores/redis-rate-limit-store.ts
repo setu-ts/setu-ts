@@ -12,7 +12,9 @@ import {
   deadlineRangeError,
   isConnectionFault,
   OptionalDependencyUnavailableError,
+  watchConnection,
 } from '@setu-ts/common';
+import type { ConnectionWatch } from '@setu-ts/common';
 import type { ConnectionErrorReporter, IRuntimeServices } from '@setu-ts/common';
 import { RateLimitStoreUnavailableError } from '../errors.ts';
 import type { RateLimitResult, RateLimitStore } from './rate-limit-store.ts';
@@ -79,6 +81,7 @@ async function resolveClient(
   injectedClient: IRateLimitRedisClient | undefined,
   reporter: ConnectionErrorReporter | undefined,
   commandTimeoutMs: number,
+  onWatch: (watch: ConnectionWatch) => void,
 ): Promise<IRateLimitRedisClient> {
   if (injectedClient !== undefined) {
     if (!validateClient(injectedClient)) {
@@ -87,7 +90,8 @@ async function resolveClient(
           '(needs: incr, pexpire, pttl, del, quit)',
       );
     }
-    attachConnectionErrorReporter(injectedClient, reporter);
+    // Detached on disconnect: an injected client outlives this plugin.
+    onWatch(watchConnection(injectedClient, reporter));
     return injectedClient;
   }
   const RedisCtor = await loadIoredis();
@@ -125,6 +129,8 @@ export const DEFAULT_RATE_LIMIT_KEY_PREFIX = 'setu:ratelimit:';
  */
 export class RedisRateLimitStore implements RateLimitStore {
   #client: IRateLimitRedisClient | null = null;
+  /** The reporter on an injected client; detached on disconnect. */
+  #watch: ConnectionWatch | undefined;
   #url: string;
   #injectedClient: IRateLimitRedisClient | undefined;
   #runtime: IRuntimeServices;
@@ -156,10 +162,10 @@ export class RedisRateLimitStore implements RateLimitStore {
      */
     keyPrefix?: string | undefined;
     /**
-     * Receives the connection errors (`ioredis` `'error'` events) of the
-     * client this store BUILDS, instead of `ioredis` printing each reconnect
-     * failure to the console. Never attached to an injected `client`, which
-     * belongs to the caller. This store is constructed by the application,
+     * Receives the connection errors (`'error'` events) of the client this
+     * store uses, instead of `ioredis` printing each reconnect failure to the
+     * console. Since 0.12.0 it is attached to an injected `client` too, and
+     * detached again on `disconnect()`. This store is constructed by the application,
      * so no plugin supplies one: build it with `createConnectionErrorReporter`
      * from `@setu-ts/common` over your logger. Absent, the built client's
      * connection errors are dropped: nothing reaches the console or a log.
@@ -199,6 +205,9 @@ export class RedisRateLimitStore implements RateLimitStore {
       this.#injectedClient,
       this.#reporter,
       this.#commandTimeoutMs,
+      (watch) => {
+        this.#watch = watch;
+      },
     );
     return this.#client;
   }
@@ -249,6 +258,8 @@ export class RedisRateLimitStore implements RateLimitStore {
    * Close the Redis connection (calls QUIT).
    */
   async disconnect(): Promise<void> {
+    this.#watch?.detach();
+    this.#watch = undefined;
     if (this.#client !== null) {
       await this.#client.quit();
       this.#client = null;
